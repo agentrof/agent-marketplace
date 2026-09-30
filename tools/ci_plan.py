@@ -55,6 +55,10 @@ def release_delta(event: dict, head: str, directory: Path) -> bool:
 def choose_mode(event: dict, event_name: str, supplied_candidate: str,
                 repository: str, head: str, directory: Path) -> tuple[str, str]:
     base = ""
+    if event_name == "merge_group" and not supplied_candidate:
+        # The queue commit becomes main unchanged, so it is selected the way a
+        # PR merge is: over the complete diff from the queue's base.
+        return "impact", event["merge_group"]["base_sha"]
     if event_name == "pull_request" and not supplied_candidate:
         base = event["pull_request"]["base"]["sha"]
         if not release_request(event, repository):

@@ -3,9 +3,10 @@
 The required `check` aggregate proves the selected test inventory completed.
 The aggregate depends directly on the shard results, so it does not wait for
 compatibility summary runners. Those unchanged required contexts independently
-check the same shard outcomes. Every PR also emits compatibility, CodeQL and two-host lifecycle
-contexts. Branch protection names remain stable. The compatibility context
-label `Python 3.x` represents the current interpreter pinned in the CI policy.
+check the same shard outcomes. Every PR and every merge queue group also emits
+compatibility, CodeQL and two-host lifecycle contexts. Branch protection names
+remain stable. The compatibility context label `Python 3.x` represents the
+current interpreter pinned in the CI policy.
 
 ## Test scope and execution
 
@@ -42,7 +43,7 @@ under test, including concurrent ref and lease observations, remain real.
 | Profile | Selection |
 | --- | --- |
 | `full` | All tests on the primary Linux and macOS lanes, plus the complete native compatibility policy on macOS minimum Python and both Windows interpreters |
-| `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff |
+| `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff of a PR or merge queue group |
 | `release` | Release, packaging, setup, upgrade and CI contracts after trusted source evidence, deterministic replay and runtime-equivalence proof |
 | `reuse` | Prior successful validation of identical input, with fresh static and transition checks |
 
@@ -157,8 +158,8 @@ reusable evidence. The reader checks the latest relevant run and attempt,
 artifact provenance and digest, safe archive shape, age (at most 24 hours),
 repository identity, exact tree and plan legitimacy. A failed, running or
 rerun successor invalidates an older result. Missing or unusable evidence
-selects fresh full validation. Fork and scheduled runs still verify all their
-reports but do not emit reusable receipts.
+selects fresh full validation. Fork, scheduled and merge queue runs still verify
+all their reports but do not emit reusable receipts.
 
 The merge path additionally verifies that the receipt tested the selected
 same-repository PR's merge tree and that GitHub identifies the resulting
@@ -180,8 +181,9 @@ real Claude Code and Codex installs to the tested tree, smoke harness, pinned
 CLI versions and host runtime policy in `tools/data/ci-host-policy.json`.
 The host reader verifies the trusted source workflow, merged PR, latest run and
 attempt, age, artifact provenance and digest. Only the explicitly supplied
-prepare/publish candidate may reuse it. PR, standalone manual and scheduled
-host checks remain fresh; fork and scheduled runs do not emit reusable proof.
+prepare/publish candidate may reuse it. PR, merge queue, standalone manual and
+scheduled host checks remain fresh; fork, merge queue and scheduled runs do not
+emit reusable proof.
 The required host aggregate rechecks the exact source before accepting reuse,
 and rejects changed or expired proof. Missing proof at planning runs fresh
 host installs. Failed-job retries retain the logical planning artifact while
@@ -193,9 +195,14 @@ The read-only validation workflows never publish refs or releases.
 
 ## Release transitions
 
-1. A feature PR runs its selected tests and both real host lifecycles.
+1. A feature PR runs its selected tests and both real host lifecycles. When
+   `main` requires the merge queue, each queued group repeats the required
+   checks on the exact commit `main` moves to, selecting impact coverage over
+   the group's complete diff, and the queue release gate keeps a release PR on
+   its attested `main_source`.
 2. After merge, main runs fresh static gates and either verifies equivalent
-   PR evidence or executes full tests. CodeQL continues to run on main.
+   PR evidence or executes full tests. A queued commit reuses PR evidence only
+   when its tree equals the PR's tested merge. CodeQL continues to run on main.
 3. Explicit release preparation consumes exact-main validation (or runs full
    validation), verifies matching checkout-host evidence or exercises both
    hosts, builds the release on Linux and checks all static contracts before

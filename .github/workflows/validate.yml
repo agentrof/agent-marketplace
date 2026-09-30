@@ -11,6 +11,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+    types: [checks_requested]
   schedule:
     - cron: "17 4 * * 1"
 
@@ -81,6 +83,38 @@ jobs:
             --base-sha "$BASE_SHA" \
             --head-sha "$HEAD_SHA" \
             --stable-sha "$(git rev-parse refs/remotes/origin/stable)"
+
+  release-queue-policy:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.merge_group.base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.9"
+      - name: Keep a queued release PR on the merge publication verifies
+        env:
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            "+${HEAD_REF}:refs/remotes/origin/merge-group" \
+            "+refs/heads/stable:refs/remotes/origin/stable"
+          test "$(git rev-parse refs/remotes/origin/merge-group)" = "$HEAD_SHA"
+          release_sha="$(git ls-remote --heads origin refs/heads/release/stable | awk '{print $1}')"
+          args=(--base-sha "$BASE_SHA" --head-sha "$HEAD_SHA")
+          args+=(--stable-sha "$(git rev-parse refs/remotes/origin/stable)")
+          if [ -n "$release_sha" ]; then
+            args+=(--release-sha "$release_sha")
+          fi
+          python3 tools/release.py verify-merge-group "${args[@]}"
 
   plan:
     runs-on: ubuntu-latest
@@ -224,6 +258,7 @@ jobs:
     needs:
       - changeset
       - release-pr-policy
+      - release-queue-policy
       - plan
       - test-shards
       - deterministic-check
@@ -239,6 +274,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           CHANGESET_RESULT: ${{ needs.changeset.result }}
           RELEASE_POLICY_RESULT: ${{ needs.release-pr-policy.result }}
+          RELEASE_QUEUE_RESULT: ${{ needs.release-queue-policy.result }}
           PLAN_RESULT: ${{ needs.plan.result }}
           HAS_TESTS: ${{ needs.plan.outputs.has_tests }}
           TEST_RESULT: ${{ needs.test-shards.result }}
@@ -255,6 +291,7 @@ jobs:
           fi
           expected_changeset=skipped
           expected_release_policy=skipped
+          expected_release_queue=skipped
           if [ "$EVENT_NAME" = pull_request ]; then
             if [ "$BASE_REF" = main ] &&
                [ "$HEAD_REF" = release/stable ] &&
@@ -263,9 +300,12 @@ jobs:
             else
               expected_changeset=success
             fi
+          elif [ "$EVENT_NAME" = merge_group ]; then
+            expected_release_queue=success
           fi
           test "$CHANGESET_RESULT" = "$expected_changeset"
           test "$RELEASE_POLICY_RESULT" = "$expected_release_policy"
+          test "$RELEASE_QUEUE_RESULT" = "$expected_release_queue"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ inputs.candidate_sha || github.sha }}
@@ -316,7 +356,7 @@ jobs:
           retention-days: 7
       - name: Record reusable validation evidence
         if: >-
-          github.event_name != 'schedule' &&
+          github.event_name != 'schedule' && github.event_name != 'merge_group' &&
           (github.event_name != 'pull_request' ||
            (github.event.pull_request.base.ref == 'main' &&
             github.event.pull_request.head.repo.full_name == github.repository))
@@ -337,7 +377,7 @@ jobs:
             --output "$RUNNER_TEMP/ci-evidence.json" "${args[@]}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: >-
-          github.event_name != 'schedule' &&
+          github.event_name != 'schedule' && github.event_name != 'merge_group' &&
           (github.event_name != 'pull_request' ||
            (github.event.pull_request.base.ref == 'main' &&
             github.event.pull_request.head.repo.full_name == github.repository))

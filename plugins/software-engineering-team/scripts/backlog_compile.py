@@ -976,6 +976,17 @@ def required_section_findings(body: str, required: list[str], path: str) -> list
     return errors
 
 
+def navigation_only_sections(body: str, required: list[str]) -> list[str]:
+    """Return the required sections whose only text is the navigation block.
+
+    Navigation has no heading of its own, so section() reads it as the body of
+    the last section, and required_section_findings never sees that section as
+    empty.
+    """
+    return [title for title in required
+            if (content := section(body, title)) and not content.split(NAV_MARKER, 1)[0].strip()]
+
+
 def meaningful_text(value: str) -> bool:
     normalized = re.sub(r"\s+", " ", value).strip().casefold()
     if (not normalized or normalized in REVIEW_PLACEHOLDERS
@@ -1676,14 +1687,18 @@ def collect(docs: Path, *, historical_inputs: bool = False,
 
     ``record["scaffold_findings"]`` names the returned errors that exist only
     because a placeholder the stub verbs write is still untouched.
+    ``record["advisory_findings"]`` names what is reported but never returned
+    as an error: the empty last section of a story approved before the
+    compiler read that section above the navigation.
     """
     contract = backlog_contract()
     root = docs / "backlog"
     errors: list[str] = []
     scaffolds: list[str] = []
+    advisories: list[str] = []
     record = {"backlog": None, "backlog_reviews": [], "epics": [],
               "stories": [], "test_plans": [], "epic_reviews": [],
-              "scaffold_findings": []}
+              "scaffold_findings": [], "advisory_findings": []}
     root_note = root / "backlog.md"
     if not root_note.is_file():
         return record, ["backlog/backlog.md is missing"]
@@ -1818,6 +1833,15 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                     errors.append(f"{story_rel} needs {key}")
             errors.extend(required_section_findings(
                 story_body, contract["required_story_sections"], story_rel))
+            for title in navigation_only_sections(
+                    story_body, contract["required_story_sections"]):
+                finding = f"{story_rel} required section is empty: {title}"
+                # A story approved before this check keeps its approval: its
+                # empty section is advisory until the story is revised.
+                if approval_stamp_findings(story_path, docs):
+                    errors.append(finding)
+                else:
+                    advisories.append(f"{finding}; advisory until the approved story is revised")
             # Navigation has no heading and extends the last section, which
             # is Delivery Notes in a stubbed story.
             authored_body = story_body.split(NAV_MARKER, 1)[0]
@@ -2036,6 +2060,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
     if historical_inputs and {"input_contract", "absent_input_stages"}.intersection(record["backlog"]["props"]):
         errors.extend(backlog_input_policy.historical_absence_findings(docs, record))
     record["scaffold_findings"] = sorted(set(scaffolds))
+    record["advisory_findings"] = sorted(set(advisories))
     return record, sorted(set(errors) | set(scaffolds))
 
 
@@ -2819,6 +2844,10 @@ def check(args) -> int:
     }
     if story_size is not None:
         result["story_size"] = story_size
+    # Only a backlog that has one gains the key, so every other output is unchanged.
+    advisories = record.get("advisory_findings", [])
+    if advisories:
+        result["advisories"] = advisories
     if args.render and not errors:
         try:
             render(record, docs)
@@ -2839,6 +2868,8 @@ def check(args) -> int:
     else:
         for error in errors:
             print(f"ERROR [backlog] {error}")
+        for advisory in advisories:
+            print(f"ADVISORY [backlog] {advisory}")
         if not errors:
             print("backlog ok")
     return 1 if errors else 0

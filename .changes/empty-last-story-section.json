@@ -1,0 +1,6 @@
+{
+  "summary": "`backlog_compile.py` now reports a story whose last section, usually `Delivery Notes`, is empty. The navigation links written under the last section, which has no heading of its own, read as its text, so an empty last section passed the backlog checks while an empty section anywhere else failed them. A story created or revised from now on fails the check with `required section is empty`. A story approved before, whose approval stamp still matches, keeps its approval: its empty last section is listed under `advisories` in `check --json`, and as an `ADVISORY` line in text mode, until the story is next revised. No story file changes, and a backlog without such a section checks exactly as before.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

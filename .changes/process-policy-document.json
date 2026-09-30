@@ -1,0 +1,6 @@
+{
+  "summary": "A new governed project document, `workspace/docs/delivery/process-policy.md`, records a project's explicit process switch choices, one table row per switch. `scripts/process_policy.py` owns its lifecycle the way the Delivery compiler owns the Definition of Done's: `init`, `begin-revision`, `set`, `check` and `approve`, plus the readers `value` and `switches`. Values change only in a draft revision, and a switch set to its package default loses its row, so a later promoted default applies to it. A missing document or a switch without a row means the package default; a draft or invalid policy is refused, never read. A revision can drop the row of a switch that the installed package no longer declares. The vault policy and the Obsidian seeds register the `process-policy` type, the Delivery map lists the policy under Project Rules when it exists, and setup's project refresh carries the new graph color.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

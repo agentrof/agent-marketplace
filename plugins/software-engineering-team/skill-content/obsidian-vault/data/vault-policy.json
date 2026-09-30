@@ -208,6 +208,11 @@
       "id": "delivery-governance",
       "query": "tag:#doc/delivery-governance",
       "rgb": 2388387
+    },
+    {
+      "id": "process-policy",
+      "query": "tag:#doc/process-policy",
+      "rgb": 2388387
     }
   ],
   "hubs": [],
@@ -520,7 +525,8 @@
     "verification": ["item_plan_hash", "verified_commit", "test_plan_source_hash", "verification_candidate_hash", "verification_mode", "verification_result_hash", "source_hash"],
     "delivery_review": ["plan_hash", "reviewed_commit", "reviewed_integration_commit", "approved_at_utc", "approval_hash", "source_hash"],
     "operation": ["revision", "constrained_by", "source_hash", "approved_at_utc", "test_command", "test_workdir", "diagnostic_test_command", "diagnostic_test_workdir", "mutation_include_paths", "mutation_disposition", "mutation_command", "mutation_workdir", "mutation_rationale", "dependency_audit_disposition", "dependency_audit_command", "dependency_audit_workdir", "dependency_audit_rationale", "pull_request_check_source", "pull_request_check_provider", "env_command", "env_workdir", "scenarios", "tolerated_warnings", "service_catalog"],
-    "delivery_governance": ["revision", "max_parallel", "governance_hash", "source_hash", "approved_at_utc"]
+    "delivery_governance": ["revision", "max_parallel", "governance_hash", "source_hash", "approved_at_utc"],
+    "process_policy": ["revision", "approved_at_utc", "source_hash"]
   },
   "fragment_graph_groups": {
     "base": ["navigation"],
@@ -531,7 +537,7 @@
     "experience_design": ["experience"],
     "backlog": ["backlog", "backlog-review", "epic", "epic-review", "story", "test-plan"],
     "requirements": ["requirement"],
-    "delivery": ["definition-of-done", "delivery", "execution-plan", "delivery-item", "code-review", "verification", "delivery-review", "delivery-governance"],
+    "delivery": ["definition-of-done", "delivery", "execution-plan", "delivery-item", "code-review", "verification", "delivery-review", "delivery-governance", "process-policy"],
     "operation": ["operation"]
   },
   "extra_doc_types": [
@@ -575,7 +581,8 @@
     "delivery-review",
     "verification-contract",
     "environment-contract",
-    "delivery-governance"
+    "delivery-governance",
+    "process-policy"
   ],
   "type_path_patterns": {
     "home": ["^home\\.md$"],
@@ -619,7 +626,8 @@
     "delivery_review": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/delivery-review\\.md$"],
     "verification_contract": ["^operation/verification-contract\\.md$"],
     "environment_contract": ["^operation/environment-contract\\.md$"],
-    "delivery_governance": ["^delivery/governance/governance\\.md$"]
+    "delivery_governance": ["^delivery/governance/governance\\.md$"],
+    "process_policy": ["^delivery/process-policy\\.md$"]
   },
   "status_values": {
     "decision": ["draft", "in_review", "proposed", "accepted", "rejected", "approved", "superseded"],
@@ -644,7 +652,8 @@
     "delivery_review": ["draft", "changes_requested", "approved"],
     "verification_contract": ["draft", "approved"],
     "environment_contract": ["draft", "approved"],
-    "delivery_governance": ["draft", "approved"]
+    "delivery_governance": ["draft", "approved"],
+    "process_policy": ["draft", "approved"]
   },
   "backlog_contract": {
     "applicable_inputs": {

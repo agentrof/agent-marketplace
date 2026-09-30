@@ -23,6 +23,7 @@ from ba_compile import (
 import backlog_compile
 import delivery_result
 import operation_compile
+import process_policy
 import requirement_compile
 import requirement_route
 import stage_package
@@ -432,7 +433,8 @@ def render_map(docs: Path) -> None:
     rows = ["---", "type: moc", "title: Delivery", "tags:", "  - doc/moc", "---", "",
             "# Delivery", "", "Target-resident Delivery packages and their current semantic outcomes.", ""]
     rules = [(governance_path(docs), "Governance"),
-             (delivery_root(docs) / "definition-of-done.md", "Definition of Done")]
+             (delivery_root(docs) / "definition-of-done.md", "Definition of Done"),
+             (process_policy.path_for(docs), "Process Policy")]
     existing = [(path, title) for path, title in rules if path.is_file()]
     if existing:
         rows.extend(["## Project Rules", ""])

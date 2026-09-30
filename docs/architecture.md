@@ -185,7 +185,8 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     package data only that value reads. Project values live in
     `workspace/docs/delivery/process-policy.md`, never in
     `workspace/config.json`, and each Delivery pins the policy revision it ran
-    under.
+    under. Outside a Delivery, a backlog approval records the same pin in the
+    root backlog and in each review it approves.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

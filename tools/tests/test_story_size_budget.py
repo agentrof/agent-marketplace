@@ -161,7 +161,8 @@ class RegistryAndInstructionTests(unittest.TestCase):
                 "The compiler validates every row and rejects a repeated story and measure",
                 "The review manifest's `check.story_size` block carries the measures",
                 "never raises a finding for a count alone",
-                "names the Process Policy revision and the limits its review ran under",
+                "Slicing evidence names the limits its review ran under; the backlog approval"
+                " records the Process Policy's path, revision and source hash in that note",
                 "the budget never changes the selection or the scope decision"):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)

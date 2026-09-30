@@ -278,6 +278,25 @@ no Git writes except intent-to-add, and the coordinator alone commits the
 combined change before the freeze. A schedule change follows normal execution
 revision, approval and publication.
 
+Process switch `execution_planning` decides how the facts a plan needs are
+written and reviewed. At `per_document`, the default, each Operation contract
+the plan needs is revised and reviewed through the Operation flow on its own.
+At `single_source_bundle`, each fact is written once, in the section that
+`skill-content/execution-plan/data/fact-ownership.json` names, every other
+document links it, and each owner ruling gets one stable `User Decisions` id.
+`delivery_compile.py bundle-manifest --delivery DLV-###` lists every contract
+the plan revises or pins, every Item record with its Story and Test Plan and
+the fact ownership data, each with the hash of its bytes, and names the
+counterpart of every revised contract as a reader; it refuses a Delivery that
+runs `per_document`. The readers start together, the manifest is recomputed
+with `--expected-hash` before any finding is accepted, and the bundle replaces
+each revised contract's separate counterpart review. Its one verdict is
+approved only when no reader holds an open critical or major finding and the
+Operation and Delivery checks are green. A revised contract that no Item pins
+is recorded on the target branch and brought in with `refresh-target` before
+publication, because publication still carries only pinned contracts. The
+Delivery's pinned Process Policy names the value it ran under.
+
 Execution approval pins the approved Verification Contract on every Item. An
 Item marked `runtime_required: true` additionally pins the approved
 Environment Contract. Contract hash drift blocks Item start, resume, reopen and

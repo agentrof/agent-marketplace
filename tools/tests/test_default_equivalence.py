@@ -116,6 +116,16 @@ MANIFEST_GOLDEN = {
         "sha256:73d21f2c1c38e51cde995c0d6640e71687f4b9c48bdf13c1d633db9166fb4b22",
 }
 
+# Taken at program tip 5cb9217: the read, conditional and instruction paths
+# and the write scopes of all 72 shipped tasks without a project. 60497bf gave
+# sha256:8548a338c2b26281e6647b3b45f2c61de681a5bf12946d95fda69e7dfcf48db7; the
+# one difference is d64c4b7's product-planning/data/story-size-measures.json,
+# which six tasks that select product-planning hash but never read: the backlog
+# compiler's contract covers it under every story_size_budget value.
+SHIPPED_GOLDEN = {
+    "tasks": "sha256:60f38c168597a290e5ca5030a304561998be0e211731009c35b7f619a254498d",
+}
+
 
 def digest(value) -> str:
     data = value if isinstance(value, bytes) else value.encode("utf-8")
@@ -164,6 +174,11 @@ class DefaultEquivalenceTests(unittest.TestCase):
         self.assertEqual({name.replace(":with_", ":without_"): value
                           for name, value in actual.items()
                           if name.endswith(":with_switch_files")}, MANIFEST_GOLDEN)
+
+    def test_shipped_tasks_bind_the_base_paths_without_a_policy(self):
+        # Switch references and switch value data stay out of every default task.
+        self.assertEqual(run_harness("shipped"), SHIPPED_GOLDEN,
+                         "run this file with --harness shipped --raw to read the tasks")
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +385,8 @@ FIXTURE_SWITCHES = {"schema_version": 1, "switches": {"fixture_mode": {
     "promotion": {"unit": "3 Deliveries", "threshold": "Half the baseline minutes."}}}}
 SWITCH_FILES = ("skill-content/fixture-entry/references/switch-fixture_mode-fast.md",
                 "skill-content/fixture-method/references/switch-fixture_mode-fast.md")
+# Data only the `fast` instructions read; the registry declares it as the value's data.
+SWITCH_DATA = "skill-content/fixture-method/data/fast-table.json"
 TASKS = {
     "entry": {"entry": "fixture-entry", "role": None, "mode": "review"},
     "writer": {"entry": "fixture-entry", "role": "fixture-writer", "mode": "create",
@@ -429,6 +446,11 @@ def build_task_package(package: Path, *, switch_files: bool, resolver: str = "un
     }
     if switch_files:
         files.update({path: "# Fast fixture step\n" for path in SWITCH_FILES})
+        registry = json.loads(json.dumps(FIXTURE_SWITCHES))
+        registry["switches"]["fixture_mode"]["value_data"] = {"fast": [SWITCH_DATA]}
+        files["skill-content/configure/data/process-switches.json"] = \
+            json.dumps(registry, indent=2) + "\n"
+        files[SWITCH_DATA] = "{\"fast\": true}\n"
     for relative, text in files.items():
         path = package / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -486,9 +508,35 @@ def _manifest_harness(root: Path, raw_output: bool = False) -> dict:
     return result
 
 
+def _shipped_harness(root: Path, raw_output: bool = False) -> dict:
+    """Bind every shipped task of ``root``'s package without a project.
+
+    Only paths and write scopes are sealed: a release changes the bytes of the
+    scripts, flows and contracts a task binds, never which files it reads or
+    hashes on the default path.
+    """
+    sys.path[:0] = [str(root / PLUGIN / "scripts")]
+    import task_inputs
+
+    package = root / PLUGIN
+    tasks = {}
+    for entry, route in sorted(task_inputs.catalog(package)["entries"].items()):
+        for role in route["roles"] or [None]:
+            for mode in ("create", "review"):
+                manifest = task_inputs.manifest(entry=entry, role=role, mode=mode,
+                                                package=package)
+                tasks[f"{entry}:{role}:{mode}"] = {
+                    "required_reads": manifest["required_reads"],
+                    "conditional_reads": [item["path"] for item in manifest["conditional_reads"]],
+                    "instructions": [item["path"] for item in manifest["instructions"]],
+                    "write_scope": manifest["write_scope"]}
+    text = json.dumps(tasks, indent=2, sort_keys=True)
+    return {"tasks": text if raw_output else digest(text)}
+
+
 HARNESSES = {"backlog": _backlog_harness, "delivery": _delivery_harness,
              "inputs": _input_harness, "manifests": _manifest_harness,
-             "operation": _operation_harness}
+             "operation": _operation_harness, "shipped": _shipped_harness}
 
 
 if __name__ == "__main__":

@@ -32,6 +32,12 @@ Requirement stage and it does not alter product-stage package hashes.
    defines.
    Switch `review_loop`: at `blocking_delta`, this review loop follows
    `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+   Switch `execution_planning`: at `single_source_bundle`, a contract that a
+   Delivery's execution plan revises is written against the fact ownership of
+   `skill-content/execution-plan/data/fact-ownership.json`, and that plan's
+   bundle review replaces this step, as
+   `skill-content/configure/references/switch-execution_planning-single_source_bundle.md`
+   defines.
 4. Approve with `operation_compile.py approve --kind <kind>`. Return the exact
    contract receipt. Do not run a downstream product stage automatically.
 

@@ -4360,6 +4360,61 @@ class DeliveryGitTests(unittest.TestCase):
         carried = delivery_git.published_plan_blobs(project, published["integration"], [contract])[contract]
         self.assertEqual(operation_compile.check_contract(docs, "environment", carried), (receipt, []))
 
+    def test_a_bundle_records_its_unpinned_revision_on_the_target_before_publication(self):
+        """At single_source_bundle the plan's own step carries a revision no Item pins (#324, #321)."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs)
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        for argv in (["init"], ["set", "--switch", "execution_planning", "--value", "single_source_bundle"],
+                     ["approve"]):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "approved backlog, DoD and Process Policy")
+        delivery_git.run_git(project, "push", "-q")
+        init = type("Args", (), {"docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication",
+                                 "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_scope(scope), 0)
+        delivery_git.run_git(project, "add", "workspace/docs")
+        delivery_git.run_git(project, "commit", "-qm", "scope")
+        delivery_git.run_git(project, "push", "-q")
+        delivery_git.reserve_delivery(project, "DLV-001")
+        self.author_execution_topology(docs)
+        # The bundle drafts an Environment Contract revision that the non-runtime Item never pins.
+        args = type("Args", (), {"docs": str(docs), "kind": "environment",
+                                 "constrained_by": ["[[solution-design/decisions/fixture-api|Fixture API]]"]})
+        self.assertEqual(operation_compile.init(args), 0)
+        path = operation_compile.contract_path(docs, "environment")
+        props, body = operation_compile.parse(path)
+        props["env_command"] = "make env"
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        manifest = delivery_compile.bundle_manifest(docs, "DLV-001")
+        contract = "workspace/docs/operation/environment-contract.md"
+        self.assertEqual(manifest["unpinned_revisions"], ["operation/environment-contract.md"])
+        self.assertEqual(manifest["readers"], ["qa_engineer"])
+        self.assertEqual(operation_compile.approve(args), 0)
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        # Skipping the step still refuses, as #321 records.
+        with self.assertRaisesRegex(RuntimeError, "^DELIVERY_OPERATION_UNCARRIED: "):
+            delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.run_git(project, "add", "--", contract)
+        delivery_git.run_git(project, "commit", "-qm", "Record the approved Environment Contract")
+        delivery_git.run_git(project, "push", "-q", "origin", "main")
+        self.assertIn(contract, delivery_git.refresh_target(project, "DLV-001")["paths"])
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(published["operation_not_carried"], [])
+        carried = delivery_git.published_plan_blobs(project, published["integration"], [contract])[contract]
+        receipt, errors = operation_compile.check_contract(docs, "environment")
+        self.assertEqual(errors, [])
+        self.assertEqual(operation_compile.check_contract(docs, "environment", carried), (receipt, []))
+
     def test_execution_publication_reports_an_operation_contract_it_cannot_carry(self):
         """A differing local copy that is not approved and current is left out and named, not refused."""
         contract = "workspace/docs/operation/environment-contract.md"

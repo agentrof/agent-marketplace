@@ -172,8 +172,9 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     every task binds the same instructions; only script and contract hashes
     change, and golden all-default runs prove it. A non-default value's
     instructions live in switch references that `task_inputs.py` binds only
-    when the project's Process Policy selects that value. Project values live
-    in `workspace/docs/delivery/process-policy.md`, never in
+    when the project's Process Policy selects that value, together with the
+    package data only that value reads. Project values live in
+    `workspace/docs/delivery/process-policy.md`, never in
     `workspace/config.json`, and each Delivery pins the policy revision it ran
     under.
 

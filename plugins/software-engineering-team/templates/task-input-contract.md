@@ -20,9 +20,12 @@ one value of a process switch declared in
 a required read only when the project's approved Process Policy,
 `workspace/docs/delivery/process-policy.md`, sets that switch to that value;
 otherwise the file is neither read nor hashed. A switch at its default binds
-nothing, so the default path keeps its instructions. When the policy exists it
-is a project input, and a draft or invalid policy fails the derivation. Before
-the flow step that names switch `<id>`, the entry reads its value with
+nothing, so the default path keeps its instructions. Package data that only one
+value reads, which the registry lists as that value's `value_data`, is bound as
+a required read together with that value's switch references and is never read
+or hashed on another path. When the policy exists it is a project input, and a
+draft or invalid policy fails the derivation. Before the flow step that names
+switch `<id>`, the entry reads its value with
 `process_policy.py value --switch <id>`, adding `--delivery DLV-###` inside a
 Delivery.
 

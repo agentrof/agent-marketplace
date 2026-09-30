@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "documents": {
+    "verification_contract": {
+      "type": "verification_contract",
+      "title": "Verification Contract",
+      "flow": "operation"
+    },
+    "environment_contract": {
+      "type": "environment_contract",
+      "title": "Environment Contract",
+      "flow": "operation"
+    },
+    "architecture_decision": {
+      "type": "decision",
+      "title": "architecture decision record",
+      "flow": "execution-planning"
+    },
+    "item_topology": {
+      "type": "delivery_item",
+      "title": "Item topology",
+      "flow": "execution-planning"
+    },
+    "user_decisions": {
+      "type": "delivery",
+      "title": "User Decisions",
+      "flow": "execution-planning"
+    }
+  },
+  "fact_classes": {
+    "verification_semantics": {
+      "facts": "How Delivery verification resolves an Item's context, the test suites and what each declares, the evidence and coverage rules, the cache locations and the diagnostic test adapter.",
+      "owner": {
+        "document": "verification_contract",
+        "section": "Contract",
+        "writer": "qa_engineer"
+      }
+    },
+    "runtime_topology": {
+      "facts": "The live environment's runtime topology, instance naming, resource ownership and teardown.",
+      "owner": {
+        "document": "environment_contract",
+        "section": "Contract",
+        "writer": "devops_engineer"
+      }
+    },
+    "structural_decisions": {
+      "facts": "Each structural decision with the alternatives weighed and its rationale, recorded inside the active Item.",
+      "owner": {
+        "document": "architecture_decision",
+        "section": "Decision",
+        "writer": "software_architect"
+      }
+    },
+    "item_topology": {
+      "facts": "An Item's execution order, path and contract claims, role sequence, Operation pins and its one-paragraph architecture_reason.",
+      "owner": {
+        "document": "item_topology",
+        "section": "front matter",
+        "writer": "software_architect"
+      }
+    },
+    "owner_rulings": {
+      "facts": "Every owner ruling, once, under one stable id.",
+      "owner": {
+        "document": "user_decisions",
+        "section": "User Decisions",
+        "writer": "delivery_coordinator"
+      }
+    }
+  }
+}

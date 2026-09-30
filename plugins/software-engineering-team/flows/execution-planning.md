@@ -51,6 +51,23 @@ as the Integration holds them, and keeps its Item record unless the approval
 started from that sealed record, so take the sealed records from the
 Integration before approving a change to a sealed Item.
 
+Switch `execution_planning`: at `single_source_bundle`, every execution-planning
+fact is written once, in the section that
+`skill-content/execution-plan/data/fact-ownership.json` names, and every other
+document links that section; `software-architect` is the only Item topology
+writer and the only architecture decision record writer, and
+`delivery-coordinator` is the only User Decisions writer, beside the Operation
+contract writers. The revised contracts and the Item topology take one bundle
+review, and a revised contract that no Item pins is recorded on the target
+branch and brought in with `refresh-target` before publication, as
+`skill-content/execution-plan/references/switch-execution_planning-single_source_bundle.md`
+defines; the Software Architect follows
+`skill-content/software-architecture/references/switch-execution_planning-single_source_bundle.md`.
+Switch `review_panels`: at `lens_panel`, review panel `execution_bundle` replaces
+the bundle's counterpart readers, as
+`skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
+defines.
+
 Approval, and every re-approval, also refuses until a committed workflow will
 run on the Delivery PR, because the final merge needs a green provider check.
 When none exists, offer the one that `operation_compile.py render-ci`

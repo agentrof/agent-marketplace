@@ -1,6 +1,30 @@
 {
   "schema_version": 1,
   "switches": {
+    "execution_planning": {
+      "summary": "How execution planning writes and reviews the facts an execution plan needs: each Operation contract written and reviewed on its own, or every fact written once in the document that owns it and the revised contracts reviewed together with the Item topology in one pass.",
+      "issue": 324,
+      "flows": ["delivery-execution", "execution-planning", "operation"],
+      "values": [
+        {
+          "id": "per_document",
+          "tradeoffs": "Each Operation contract the plan needs is revised and reviewed on its own through the Operation flow, and a planning definition may be restated in every document that uses it. Today's behaviour and the baseline the bundle is measured against: in one measured project, a Delivery took 342 min from plan start to publication, with two separate contract review loops and 24% of its planning text restated in a contract."
+        },
+        {
+          "id": "single_source_bundle",
+          "tradeoffs": "Each execution-planning fact is written once, in the section fact-ownership.json names, and linked from every other document; the revised contracts, the Item records and their Stories and Test Plans take one review layer, read by each revised contract's counterpart. Fewer serial passes and no copies to reconcile, while one bundle is larger than one contract and may lower a single reader's recall, and a revised contract that no Item pins still needs a target commit and refresh-target before publication."
+        }
+      ],
+      "default": "per_document",
+      "value_data": {
+        "single_source_bundle": ["skill-content/execution-plan/data/fact-ownership.json"]
+      },
+      "metric": "Per Delivery that revises at least one Operation contract or declares architecture impact: execution-planning wall time from plan start to publication; serial model passes on that path; review layers and review-loop minutes; the restated share, the distinct 8-word sequences of any planning document found in another one; and owner rulings recorded once with an id. Guards: valid critical or major findings against the contracts or the topology found after approval, plan revisions caused by contract errors and DELIVERY_OPERATION_UNCARRIED refusals.",
+      "promotion": {
+        "unit": "At least 3 Deliveries that revise at least one Operation contract or declare architecture impact, run with single_source_bundle.",
+        "threshold": "One review layer per plan, at most 5 serial model passes, a restated share under 5%, a median execution-planning wall time at most 60% of the 342 min measured baseline and zero escaped valid critical or major findings, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "implementation_schedule": {
       "summary": "How the implementation roles of one Delivery Item write: one after another in their approved order, or at the same time in lanes whose approved write scopes are disjoint.",
       "issue": 327,
@@ -23,9 +47,9 @@
       }
     },
     "review_panels": {
-      "summary": "How backlog epic and root, Solution Design, Design System and Operation contract reviews read the reviewed document.",
+      "summary": "How backlog epic and root, Solution Design, Design System, Operation contract and execution-plan bundle reviews read the reviewed documents.",
       "issue": 312,
-      "flows": ["backlog-planning", "design-system", "operation", "solution-design"],
+      "flows": ["backlog-planning", "design-system", "execution-planning", "operation", "solution-design"],
       "values": [
         {
           "id": "single_reader",

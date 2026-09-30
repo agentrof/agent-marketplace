@@ -38,6 +38,9 @@
   overlap only when their approved lane scopes intersect. Start every lane of
   an Item phase before waiting on any of them, then wait for all of them
   before the next phase.
+- Under switch `execution_planning` at `single_source_bundle`, start every
+  reader of an execution-plan bundle before waiting on any of them, then wait
+  for all of them before triage.
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.

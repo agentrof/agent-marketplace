@@ -129,6 +129,78 @@ def command_lock(root: Path):
         os.close(fd)
 
 
+def environment_lock_paths(root: Path) -> tuple[Path, Path]:
+    """The Item's environment lock and the owner record beside it, in the Item's runtime state."""
+    directory = session_path(root).parent
+    return (safe_runtime_path(root, directory / "environment.lock", file_only=True),
+            safe_runtime_path(root, directory / "environment-owner.json", file_only=True))
+
+
+def environment_owner(path: Path) -> dict | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def environment_holder(root: Path) -> dict | None:
+    """The owner record of the process holding the Item's environment lock, or None when none does."""
+    lock, owner = environment_lock_paths(root)
+    if not lock.exists():
+        return None
+    descriptor = os.open(lock, os.O_RDWR)
+    try:
+        if file_lock.try_lock(descriptor):
+            file_lock.unlock(descriptor)
+            return None
+    finally:
+        os.close(descriptor)
+    return environment_owner(owner) or {}
+
+
+def describe_environment_holder(owner: dict) -> str:
+    if not all(isinstance(owner.get(key), str) for key in ("holder", "command", "started_at")) \
+            or type(owner.get("pid")) is not int:
+        return "a process that has not recorded its owner yet"
+    return (f"{owner['holder']}, running `{owner['command']}` in process {owner['pid']}"
+            f" since {owner['started_at']}")
+
+
+@contextlib.contextmanager
+def environment_lock(root: Path, holder: str, command: str):
+    """Hold the Item's environment lock while one environment verb or verification command runs.
+
+    The lock refuses at once while another process holds it and names that
+    holder from its owner record. As with every package lock, the operating
+    system ends the lock with the process holding it, so a holder that died
+    leaves only its owner record: the next holder replaces that record and
+    yields it as the interrupted holder. Neither a record's age nor its process
+    id frees a lock.
+    """
+    lock, owner = environment_lock_paths(root)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        if not file_lock.try_lock(descriptor):
+            raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
+                               + describe_environment_holder(environment_owner(owner) or {})
+                               + "; run this after it finishes")
+        try:
+            interrupted = environment_owner(owner)
+            atomic_file.replace_text(owner, json.dumps(
+                {"holder": holder, "command": command, "pid": os.getpid(),
+                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                indent=2, sort_keys=True) + "\n")
+            yield interrupted
+        finally:
+            with contextlib.suppress(OSError):
+                owner.unlink()
+            file_lock.unlock(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def read_session(root: Path, *, required: bool = True) -> dict | None:
     path = safe_runtime(root)
     if not path.exists():
@@ -412,7 +484,7 @@ def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
 def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None) -> dict:
     root = root.resolve()
     read_session(root)
-    with command_lock(root):
+    with environment_lock(root, "qa_engineer", "run --kind " + kind), command_lock(root):
         return _run_check(root, kind, fresh=fresh, selection_file=selection_file)
 
 
@@ -850,7 +922,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
     root = root.resolve()
     if verb not in {"down", "up", "seed", "logs", "url"}:
         raise RuntimeError("unsupported environment verb")
-    with command_lock(root):
+    with environment_lock(root, "qa_engineer", "environment --verb " + verb), command_lock(root):
         with locked(root):
             session = read_session(root)
             current = session["candidate"] if verb == "down" else require_current(root, session, allow_evidence=True)
@@ -947,6 +1019,72 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             session["metrics"]["command_seconds"] += event["duration_seconds"]
             write_session(root, session)
             return {**event, "output": completed.stdout.decode("utf-8", errors="replace")}
+
+
+def lane_run(root: Path, delivery_id: str, story: str, role: str, kind: str,
+             verb: str | None = None, value: str | None = None) -> dict:
+    """Run the approved full test command or an approved environment verb for one lane.
+
+    Parallel lanes share the Item worktree and its one environment, so the
+    coordinator runs these commands here, in that worktree and before the
+    candidate freeze, and each takes the Item's environment lock.
+    """
+    root = root.resolve()
+    item = item_record(root, delivery_id, story)
+    if item.get("status") != "active" or not item.get("item_plan_hash"):
+        raise RuntimeError("lane commands require an active, approved Item")
+    if delivery.implementation_schedule(item) != "parallel_lanes_v1":
+        raise RuntimeError("lane commands serve only an Item whose approved plan runs parallel_lanes_v1")
+    if role not in delivery.lane_roles(item):
+        raise RuntimeError(f"{role} is not a lane of {story}")
+    guard_write(root)
+    kinds = {"test": ("verification", "test_command", "test_workdir"),
+             "environment": ("environment", "env_command", "env_workdir")}
+    if kind not in kinds:
+        raise RuntimeError("unsupported lane command kind")
+    contract_kind, command_key, workdir_key = kinds[kind]
+    relative = f"workspace/docs/operation/{contract_kind}-contract.md"
+    try:
+        contract, _, error = delivery.parse_frontmatter(git(root, "show", "HEAD:" + relative))
+    except RuntimeError as exc:
+        raise RuntimeError(f"the Item worktree's HEAD holds no {relative}") from exc
+    if error:
+        raise RuntimeError(f"{relative} cannot be parsed")
+    command = contract.get(command_key)
+    if not isinstance(command, str) or not command.strip() or "{{" in command or "}}" in command:
+        raise RuntimeError("approved command is missing or contains unresolved parameters")
+    if kind == "test":
+        if verb is not None or value is not None:
+            raise RuntimeError("the test command takes no verb or value")
+        label = "test"
+    else:
+        if verb not in {"down", "up", "seed", "logs", "url"}:
+            raise RuntimeError("unsupported environment verb")
+        if verb in {"seed", "url"}:
+            allowed = contract.get("scenarios" if verb == "seed" else "service_catalog", [])
+            if (not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", value)
+                    or value not in allowed):
+                raise RuntimeError("environment argument must be an exact approved scenario or service identifier")
+        elif value is not None:
+            raise RuntimeError("this environment verb does not accept a value")
+        label = "environment --verb " + verb + (" " + value if value else "")
+        # Only fixed verbs and approved identifiers join the approved command bytes.
+        command = command + " " + verb + (" " + value if value else "")
+    directory = (root / str(contract.get(workdir_key, "."))).resolve()
+    if directory != root and root not in directory.parents:
+        raise RuntimeError("lane command workdir must remain inside the Item worktree")
+    output = safe_runtime_path(root, session_path(root).parent / "lanes" / f"{role}-{uuid.uuid4().hex}.log",
+                               file_only=True)
+    with environment_lock(root, role, label) as interrupted:
+        output.parent.mkdir(exist_ok=True)
+        started = time.monotonic()
+        completed = subprocess.run(command, cwd=directory, shell=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        duration = time.monotonic() - started
+        atomic_file.replace_bytes(output, completed.stdout)
+    return {"delivery": delivery_id, "story": story, "holder": role, "kind": kind, "command": command,
+            "exit_code": completed.returncode, "output_file": str(output), "duration_seconds": duration,
+            "interrupted_holder": interrupted}
 
 
 def require_runtime_evidence(root: Path, session: dict, evidence: dict) -> None:
@@ -1103,6 +1241,13 @@ def main(argv=None) -> int:
     environment = subs.add_parser("environment")
     environment.add_argument("--verb", required=True, choices=("down", "up", "seed", "logs", "url"))
     environment.add_argument("--value")
+    lane = subs.add_parser("lane-run")
+    lane.add_argument("--delivery", required=True)
+    lane.add_argument("--story", required=True)
+    lane.add_argument("--role", required=True)
+    lane.add_argument("--kind", choices=("test", "environment"), required=True)
+    lane.add_argument("--verb", choices=("down", "up", "seed", "logs", "url"))
+    lane.add_argument("--value")
     inspect = subs.add_parser("inspect")
     selection = inspect.add_mutually_exclusive_group(required=True)
     selection.add_argument("--path")
@@ -1123,6 +1268,8 @@ def main(argv=None) -> int:
             value = validate(root, args.delivery, args.story)
         elif args.command == "environment":
             value = run_environment(root, args.verb, args.value)
+        elif args.command == "lane-run":
+            value = lane_run(root, args.delivery, args.story, args.role, args.kind, args.verb, args.value)
         elif args.command == "inspect":
             value = inspect_instruction(root, args.instruction) if args.instruction else inspect_candidate(root, args.path, base=args.base)
         elif args.command == "diff":
@@ -1136,7 +1283,7 @@ def main(argv=None) -> int:
         else:
             value = read_session(root)
         print(json.dumps({"ok": True, **value}, indent=2))
-        return 0 if args.command not in {"run", "environment"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
+        return 0 if args.command not in {"run", "environment", "lane-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2))
         return 2

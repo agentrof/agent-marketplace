@@ -71,8 +71,17 @@ gets an explicit environment:
 
 Environment verbs that start, seed or stop the approved Environment Contract's
 services, the approved full test command, and every vault or compiler write run
-one at a time: a lane asks the coordinator, which runs them serially, and a
-lane that needs the environment waits for it.
+one at a time. A lane asks the coordinator, which runs the command in the Item
+worktree with `scripts/delivery_verification.py --worktree <item-root> lane-run
+--delivery DLV-### --story <story> --role <lane-role> --kind test`, or with
+`--kind environment --verb down|up|seed|logs|url [--value
+<approved-identifier>]`, and hands the lane the output file the result names.
+Each such command holds the Item's environment lock, which the readers' `run`
+and `environment` take as well. While another command holds it, the command
+refuses with `DELIVERY_ENVIRONMENT_BUSY` and names the holder: run it again
+once the holder finishes. A holder that died loses the lock with its process;
+the next command reports it as `interrupted_holder`, and after an interrupted
+environment verb the environment goes down before anything trusts it again.
 
 ## Commit and freeze
 

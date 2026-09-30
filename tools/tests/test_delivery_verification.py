@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -607,6 +608,177 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
                     history = verification.read_session(self.root)["runtime"]["interrupted_commands"]
                     self.assertEqual(history[-1]["verb"], "up")
         verification.register_result(self.root, cancelled)
+
+    # Parallel lanes share one Item environment, so its lock serializes their commands (#327).
+    HOLDING_ENVIRONMENT = """import pathlib, sys, time
+here = pathlib.Path(__file__).resolve().parent
+if sys.argv[1] == "up":
+    (here / "holding").write_text("up")
+    deadline = time.monotonic() + 60
+    while not (here / "release").exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+(here / ("done-" + sys.argv[1])).write_text("done")
+print(sys.argv[1])
+"""
+
+    def lane_fixture(self):
+        """Give the Item two lanes and an approved environment whose `up` holds until released."""
+        markers = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, markers)
+        self.markers = Path(markers.name).resolve()
+        script = self.markers / "environment.py"
+        script.write_text(self.HOLDING_ENVIRONMENT, encoding="utf-8")
+        arguments = [sys.executable, str(script)]
+        command = subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
+        item, body = delivery.split_note(self.root / self.item_path)
+        item.update(runtime_required=True, environment_contract_ref="operation/environment-contract",
+                    implementation_schedule="parallel_lanes_v1",
+                    role_sequence=["backend_developer", "devops_engineer", "code_reviewer", "qa_engineer"],
+                    lane_scopes=["backend_developer:src", "devops_engineer:deploy"], lane_seams=[])
+        self.write(self.item_path, delivery.frontmatter(item, body))
+        self.note("workspace/docs/operation/environment-contract.md",
+                  {"status": "approved", "env_command": command, "env_workdir": ".",
+                   "scenarios": ["baseline"], "service_catalog": ["api"]})
+        self.commit()
+
+    def start_lane_holder(self) -> subprocess.Popen:
+        """Run devops_engineer's `environment --verb up` in another process until the test releases it."""
+        process = subprocess.Popen(
+            [sys.executable, str(ROOT / "plugins/software-engineering-team/scripts/delivery_verification.py"),
+             "--worktree", str(self.root), "lane-run", "--delivery", "DLV-001", "--story", "AUTH-01",
+             "--role", "devops_engineer", "--kind", "environment", "--verb", "up"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        def finish():
+            (self.markers / "release").write_text("go", encoding="utf-8")
+            try:
+                process.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+            # A killed holder's environment command outlives it; let it leave the worktree.
+            deadline = time.monotonic() + 10
+            while not (self.markers / "done-up").exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+
+        self.addCleanup(finish)
+        deadline = time.monotonic() + 60
+        while not (self.markers / "holding").exists():
+            if process.poll() is not None or time.monotonic() > deadline:
+                self.fail("the lane holder never took the Item environment")
+            time.sleep(0.02)
+        return process
+
+    def lane(self, role: str, kind: str, verb: str | None = None, value: str | None = None) -> dict:
+        return verification.lane_run(self.root, "DLV-001", "AUTH-01", role, kind, verb, value)
+
+    def assert_environment_free(self) -> None:
+        self.assertIsNone(verification.environment_holder(self.root))
+        self.assertFalse(verification.environment_lock_paths(self.root)[1].exists())
+
+    def test_parallel_lanes_run_environment_verbs_and_verification_commands_one_at_a_time(self):
+        """While one lane runs an environment verb, every other environment verb and verification
+        command of the Item is refused with its holder named (rv-accept-ideas-24)."""
+        self.lane_fixture()
+        holder = self.start_lane_holder()
+        busy = (r"^DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by devops_engineer, running"
+                rf" `environment --verb up` in process {holder.pid} since \S+; run this after it finishes$")
+        with self.assertRaisesRegex(RuntimeError, busy):
+            self.lane("backend_developer", "test")
+        with self.assertRaisesRegex(RuntimeError, busy):
+            self.lane("backend_developer", "environment", "seed", "baseline")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = verification.main(["--worktree", str(self.root), "lane-run", "--delivery", "DLV-001",
+                                      "--story", "AUTH-01", "--role", "backend_developer", "--kind", "test"])
+        self.assertEqual(code, 2)
+        self.assertRegex(json.loads(output.getvalue())["errors"][0], busy)
+        self.assertEqual(verification.environment_holder(self.root)["holder"], "devops_engineer")
+        (self.markers / "release").write_text("go", encoding="utf-8")
+        finished, _ = holder.communicate(timeout=60)
+        self.assertEqual(holder.returncode, 0, finished)
+        self.assertEqual(json.loads(finished)["exit_code"], 0)
+        # The holder released the lock as it finished, so the next lane runs.
+        self.assert_environment_free()
+        result = self.lane("backend_developer", "test")
+        self.assertEqual((result["exit_code"], result["interrupted_holder"]), (0, None))
+        self.assertEqual(Path(result["output_file"]).read_text(encoding="utf-8").strip(), "123")
+        # After the freeze the reader's verification commands and environment verbs take the same lock.
+        self.freeze()
+        with verification.environment_lock(self.root, "devops_engineer", "environment --verb down"):
+            held = (r"^DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by devops_engineer,"
+                    rf" running `environment --verb down` in process {os.getpid()} since ")
+            with self.assertRaisesRegex(RuntimeError, held):
+                verification.run_check(self.root, "test")
+            with self.assertRaisesRegex(RuntimeError, held):
+                verification.run_environment(self.root, "down")
+        self.assertNotIn("test", verification.read_session(self.root)["raw_evidence"])
+        self.assertNotIn("runtime", verification.read_session(self.root))
+
+    def test_the_environment_lock_is_released_on_every_exit_path(self):
+        self.lane_fixture()
+        original = subprocess.run
+
+        def command_ends(outcome):
+            def run(command, *args, **kwargs):
+                if not kwargs.get("shell"):
+                    return original(command, *args, **kwargs)
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                return subprocess.CompletedProcess(command, outcome, b"failed\n")
+            return mock.patch.object(verification.subprocess, "run", side_effect=run)
+
+        self.assertEqual(self.lane("backend_developer", "test")["exit_code"], 0)
+        self.assert_environment_free()
+        with command_ends(3):
+            self.assertEqual(self.lane("devops_engineer", "environment", "down")["exit_code"], 3)
+        self.assert_environment_free()
+        for failure in (OSError("command could not start"), KeyboardInterrupt()):
+            with self.subTest(failure=type(failure).__name__):
+                with command_ends(failure), self.assertRaises(type(failure)):
+                    self.lane("devops_engineer", "environment", "up")
+                self.assert_environment_free()
+        for refused in (("backend_developer", "environment", "seed", "unknown"),
+                        ("qa_engineer", "test"), ("backend_developer", "test", "up")):
+            with self.subTest(refused=refused), self.assertRaises(RuntimeError):
+                self.lane(*refused)
+            self.assert_environment_free()
+        self.freeze()
+        self.assertEqual(verification.run_check(self.root, "test")["exit_code"], 0)
+        self.assert_environment_free()
+        with self.assertRaisesRegex(RuntimeError, "down before up"):
+            verification.run_environment(self.root, "up")
+        self.assert_environment_free()
+        self.assertEqual(verification.run_environment(self.root, "down")["exit_code"], 0)
+        self.assert_environment_free()
+        with self.assertRaisesRegex(RuntimeError, "READERS_ACTIVE"):
+            self.lane("backend_developer", "test")
+        self.assert_environment_free()
+
+    def test_only_the_operating_system_frees_a_dead_holders_lock(self):
+        """A holder that dies loses the lock with its process; its owner record never holds it."""
+        self.lane_fixture()
+        holder = self.start_lane_holder()
+        with self.assertRaisesRegex(RuntimeError, "^DELIVERY_ENVIRONMENT_BUSY: "):
+            self.lane("backend_developer", "test")
+        holder.kill()
+        holder.communicate()
+        owner = verification.environment_lock_paths(self.root)[1]
+        self.assertEqual(json.loads(owner.read_text(encoding="utf-8"))["pid"], holder.pid)
+        self.assertIsNone(verification.environment_holder(self.root))
+        (self.markers / "release").write_text("go", encoding="utf-8")
+        result = self.lane("backend_developer", "test")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual({key: result["interrupted_holder"][key] for key in ("holder", "command", "pid")},
+                         {"holder": "devops_engineer", "command": "environment --verb up", "pid": holder.pid})
+        self.assert_environment_free()
+        # A record naming a live process holds nothing without its process's lock.
+        record = {"holder": "devops_engineer", "command": "environment --verb up", "pid": os.getpid(),
+                  "started_at": "2026-01-01T00:00:00Z"}
+        owner.write_text(json.dumps(record), encoding="utf-8")
+        self.assertIsNone(verification.environment_holder(self.root))
+        self.assertEqual(self.lane("backend_developer", "test")["interrupted_holder"], record)
+        self.assert_environment_free()
 
     def test_runtime_evidence_requires_unchanged_environment_and_fresh_events(self):
         item, body = delivery.split_note(self.root / self.item_path)

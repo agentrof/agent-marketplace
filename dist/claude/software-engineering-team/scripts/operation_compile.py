@@ -47,6 +47,10 @@ WORKDIR_FIELDS = {
     ),
     "environment": ("env_workdir",),
 }
+WRITER_ROLES = {"verification": "qa_engineer", "environment": "devops_engineer"}
+# An accepted minor review finding is followed up by one of the contract writers.
+MINOR_FINDING_OWNER_ROLES = tuple(WRITER_ROLES.values())
+ACCEPTED_MINOR_FINDINGS = "Accepted Minor Findings"
 DISPOSITIONS = {"required", "not_applicable"}
 # Where the checks that merge-pr requires on a Delivery PR come from. The first
 # is the default, so a contract approved before the field existed keeps it.
@@ -158,6 +162,19 @@ def accepted_solution_ref(docs: Path, value: object) -> bool:
     return props.get("status") == "accepted" and not package_errors
 
 
+def accepted_minor_findings(docs: Path, kind: str, body: str) -> list[str]:
+    """Validate the optional record of minor review findings accepted as written."""
+    authored = without_generated_relations(body)
+    if not re.search(rf"(?m)^##\s+{ACCEPTED_MINOR_FINDINGS}\s*$", authored):
+        return []
+    # The backlog review note records accepted minor findings in the same table.
+    import backlog_compile
+
+    return backlog_compile.accepted_minor_findings(
+        docs, authored, f"operation/{FILE_FOR[kind]}",
+        {"minor_finding_owner_roles": MINOR_FINDING_OWNER_ROLES})
+
+
 def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict, list[str]]:
     """Check the contract file, or ``text`` as its content before it is written."""
     path = contract_path(docs, kind)
@@ -238,6 +255,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         for name in ("tolerated_warnings", "service_catalog"):
             if not isinstance(props.get(name), list):
                 errors.append(f"{name} must be a list")
+    errors.extend(accepted_minor_findings(docs, kind, body))
     digest = receipt_hash(props, body)
     if props.get("status") == "approved":
         if props.get("source_hash") != digest:

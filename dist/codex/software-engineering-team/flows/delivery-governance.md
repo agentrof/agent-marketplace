@@ -13,6 +13,11 @@ coordination truth, not a project config field and not a Requirement stage.
    integer hard safety guard, not a product sizing or quality limit.
 2. Run `delivery_governance.py check --json` and obtain the owner decision.
    A reduction is admissible only when all remote Slot references are free.
+   Switch `owner_gates`: at `two_fixed_gates`, a change that a Delivery's
+   execution plan needs is decided in that Delivery's gate A and applied before
+   any of its Items starts, as
+   `skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
+   defines.
 3. Approve with `delivery_governance.py approve`, then run
    `delivery_git.py apply-governance --project-root <project>`. The latter
    reads the approved document and computes the hash itself; callers never

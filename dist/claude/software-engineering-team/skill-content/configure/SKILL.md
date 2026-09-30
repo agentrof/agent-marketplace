@@ -12,16 +12,17 @@ Use the owning compiler's exact scope and source bindings.
 
 ## When to Use
 
-- Changing language, an Operation Contract, Delivery Governance, or Definition
-  of Done.
+- Changing language, an Operation Contract, Delivery Governance, the
+  Definition of Done, or a process switch (`process`).
 - Repairing a local workspace contract after an intentional user change.
 
 ## Procedure
 
 1. Read `workspace/config.json`. If missing, route to setup. Never hand-edit
    machine-managed keys.
-   Read `flows/operation.md` for either Operation target and
-   `flows/delivery-governance.md` for Governance before durable changes.
+   Read `flows/operation.md` for either Operation target,
+   `flows/delivery-governance.md` for Governance and
+   `references/process-policy.md` for `process` before durable changes.
 2. Read `references/config-contract.md`. Identify the owning document or
    compiler before proposing a change. Stack, database and component method
    choices belong to accepted Solution Design decisions, never config.
@@ -34,7 +35,8 @@ Use the owning compiler's exact scope and source bindings.
    `operation verification`, dispatch `operation_compile.py`; for
    `operation environment`, dispatch the same compiler with `--kind
    environment`; for `governance`, use `delivery_governance.py`; for DOD, use
-   its Delivery compiler. Never hand-edit their lifecycle fields.
+   its Delivery compiler; for `process`, use `process_policy.py`. Never
+   hand-edit their lifecycle fields.
 4. For a language change, run `project_config.py set --dry-run --json` and
    present only the config delta. Existing authored titles are not translated
    or rewritten by a config change.

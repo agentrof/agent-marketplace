@@ -85,26 +85,53 @@ def rewrite(path: Path, updates: dict, remove: set[str] = set()) -> None:
     atomic(path, frontmatter(props, body))
 
 
-def item_context(docs: Path, item_ref: str) -> tuple[Path, dict]:
-    candidates: list[tuple[Path, dict]] = []
-    for path in (docs / "delivery" / "deliveries").glob("*/items/*/item.md"):
+def delivery_id(package: Path) -> str:
+    """Return delivery.md's id, else the folder's dlv-### prefix, else its name."""
+    try:
+        props, _line, error = parse_frontmatter(
+            (package / "delivery.md").read_text(encoding="utf-8"))
+    except OSError:
+        props, error = {}, "unreadable"
+    identifier = "" if error else str(props.get("id", "")).strip()
+    if identifier:
+        return identifier
+    prefix = re.match(r"dlv-[0-9]+(?=-|$)", package.name)
+    return (prefix.group(0) if prefix else package.name).upper()
+
+
+def item_context(docs: Path, item_ref: str) -> tuple[Path, dict, str]:
+    """Resolve an Item by story id, Item id or ``<Delivery id>:<story id>``.
+
+    Return its path, properties and the identity its architecture records
+    and delta carry: the story id, which push-item reads, whichever form
+    selected the Item.
+    """
+    if not item_ref:
+        # An Item without an id property would otherwise match the empty ref.
+        raise ValueError("item_ref is required")
+    candidates: list[tuple[Path, dict, str]] = []
+    deliveries: dict[Path, str] = {}
+    for path in sorted((docs / "delivery" / "deliveries").glob("*/items/*/item.md")):
         try:
             props, _line, error = parse_frontmatter(path.read_text(encoding="utf-8"))
         except OSError:
             continue
         if error:
             continue
-        values = {str(props.get("story_id", "")), str(props.get("id", ""))}
-        delivery = path.parents[2].name.upper()
-        values.add(f"{delivery}:{props.get('story_id', '')}")
-        if item_ref in values:
-            candidates.append((path, props))
+        if path.parents[2] not in deliveries:
+            deliveries[path.parents[2]] = delivery_id(path.parents[2])
+        story = str(props.get("story_id", ""))
+        qualified = f"{deliveries[path.parents[2]]}:{story}"
+        if item_ref in {story, str(props.get("id", "")), qualified}:
+            candidates.append((path, props, qualified))
     if len(candidates) != 1:
-        raise ValueError(f"item_ref must resolve to exactly one Delivery Item: {item_ref}")
-    path, props = candidates[0]
+        holders = sorted({qualified for _path, _props, qualified in candidates})
+        choice = f"; name one of {', '.join(holders)}" if len(holders) > 1 else ""
+        raise ValueError(f"item_ref must resolve to exactly one Delivery Item: {item_ref}{choice}")
+    path, props, _qualified = candidates[0]
     if props.get("status") not in {"claimed", "active"}:
         raise ValueError("System Architecture changes require a claimed or active Delivery Item")
-    return path, props
+    return path, props, str(props.get("story_id", "")) or item_ref
 
 
 def solution_components(docs: Path) -> dict[str, dict]:
@@ -417,7 +444,7 @@ def current_item_delta(root: Path, item_ref: str) -> dict:
 
 
 def init_root(docs: Path, item_ref: str) -> int:
-    item_context(docs, item_ref)
+    item_ref = item_context(docs, item_ref)[2]
     root = root_for(docs)
     if (root / "architecture.md").exists():
         print("architecture_compile: architecture root already exists")
@@ -429,7 +456,7 @@ def init_root(docs: Path, item_ref: str) -> int:
 
 
 def init_component(docs: Path, component_ref: str, item_ref: str) -> int:
-    item_context(docs, item_ref)
+    item_ref = item_context(docs, item_ref)[2]
     components = solution_components(docs)
     if component_ref not in components:
         print(f"architecture_compile: unknown Solution component: {component_ref}")
@@ -470,7 +497,7 @@ def module_scope(root: Path, component: str, module_path: str) -> Path:
 def stub(docs: Path, kind: str, component: str, record_id: str, slug: str,
          item_ref: str, module_path: str = "", connects: list[str] | None = None,
          affected_scopes: list[str] | None = None) -> int:
-    item_context(docs, item_ref)
+    item_ref = item_context(docs, item_ref)[2]
     if kind not in KIND or not RECORD.fullmatch(record_id) or not SLUG.fullmatch(slug):
         print("architecture_compile: invalid kind, stable record id, or slug")
         return 2
@@ -546,7 +573,7 @@ def stub(docs: Path, kind: str, component: str, record_id: str, slug: str,
 
 
 def begin_revision(docs: Path, ref: str, item_ref: str) -> int:
-    item_context(docs, item_ref)
+    item_ref = item_context(docs, item_ref)[2]
     root = root_for(docs)
     _result, findings = check(root)
     if findings:
@@ -588,7 +615,7 @@ def retire(docs: Path, ref: str, item_ref: str) -> int:
 
 
 def stamp_item(docs: Path, item_ref: str) -> int:
-    item_path, item_props = item_context(docs, item_ref)
+    item_path, item_props, item_ref = item_context(docs, item_ref)
     root = root_for(docs)
     rendered, findings = render(root)
     if findings:

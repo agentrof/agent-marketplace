@@ -23,6 +23,7 @@ from ba_compile import (
 import backlog_compile
 import delivery_result
 import operation_compile
+import process_policy
 import requirement_compile
 import requirement_route
 import stage_package
@@ -76,9 +77,51 @@ DOD_SOURCE_FIELDS = (
     "definition_of_done_path", "definition_of_done_revision",
     "definition_of_done_source_hash",
 )
+PROCESS_POLICY_SOURCE_FIELDS = process_policy.PIN_FIELDS
 GIT_OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
 # The record of the "Record PR" commit that delivery_git writes as the PR head.
 PR_RECORDED = "pr-url-recorded-v1"
+REVIEW_LOOP = "review_loop"
+FOLLOW_UP_COLUMNS = ("finding", "severity", "file", "description", "owner_role", "revisit_trigger")
+# Each compiler-owned block starts at its marker line, after any authored text.
+ITEM_FOLLOW_UPS = "Open code review follow-ups, copied by approve-item-evidence:"
+DELIVERY_FOLLOW_UPS = "Open code review follow-ups of the integrated Items, listed by approve-review:"
+CALIBRATION_COLUMNS = ("finding", "claimed_severity", "calibrated_severity", "reason")
+ITEM_CALIBRATION = ("Severity calibration of the open critical and major claims,"
+                    " recorded by approve-item-evidence:")
+OWNER_GATES = "owner_gates"
+TWO_FIXED_GATES = "two_fixed_gates"
+USER_DECISION_COLUMNS = ("id", "class", "question", "options", "recommendation", "status",
+                         "answer", "blocks", "wait_minutes")
+USER_DECISION_STATUSES = ("pending", "answered")
+USER_DECISION_ID_RE = re.compile(r"^D-[0-9]{2,}$")
+QUEUED_DECISION_CLASS = "queued"
+# The owner's questions are logged from the scope proposal through gate B.
+DECISION_LOG_STATUSES = ("scope_proposed", "scope_approved", "execution_approved", "active", "review")
+DELIVERY_PATH_SWITCH = "delivery_path"
+LIGHT_WHEN_ELIGIBLE = "light_when_eligible"
+# What a Delivery meets to plan its scope and its execution in one step with one
+# owner gate. topology_unchanged applies once scope approval recorded the light path.
+LIGHT_PATH_CONDITIONS = ("single_story", "no_architect_role", "architecture_not_applicable",
+                         "operation_contracts_unchanged", "dependencies_met",
+                         "within_story_size_budget", "topology_unchanged")
+# The light path runs from the proposal until its Items are claimed.
+LIGHT_PATH_STATUSES = ("scope_proposed", "scope_approved", "execution_approved")
+# Execution approval stamps a plan on an approved scope. A gate that shows the
+# plan runs before it, in gate A and on the light path even before scope approval.
+EXECUTION_APPROVAL_STATUSES = ("scope_approved", "execution_approved")
+PLAN_GATE_STATUSES = ("scope_proposed", *EXECUTION_APPROVAL_STATUSES)
+# init writes this before any Software Architect has stated a reason.
+NO_ARCHITECTURE_REASON = "No architecture delta is currently required."
+# What a topology pass authors on an Item; the light path's record binds them with its body.
+LIGHT_TOPOLOGY_FIELDS = ("execution_after", "waits_for", "path_claims", "contract_claims",
+                         "runtime_required", "architecture_impact", "architecture_components",
+                         "architecture_record_kinds", "architecture_reason", "role_sequence",
+                         "verification_schedule", "implementation_schedule", "lane_scopes",
+                         "lane_seams")
+DELIVERY_PATH_LINE_RE = re.compile(r"^Delivery path: (light|standard)\b")
+PATH_RECEIPT_RE = re.compile(r"\b(verification|environment) revision ([1-9][0-9]*) (sha256:[0-9a-f]{64})\b")
+PATH_TOPOLOGY_RE = re.compile(r"\btopology (sha256:[0-9a-f]{64})\b")
 
 
 atomic_text = atomic_file.replace_text
@@ -208,13 +251,15 @@ def approved_backlog_sources(
     story_ids: list[str],
     *,
     historical_inputs: bool = False,
+    story_size: dict | None = None,
 ) -> tuple[dict[str, dict], dict, list[str]]:
     """Resolve the exact approved Story/Test Plan snapshots a Delivery may use.
 
     Delivery is deliberately a consumer of the canonical backlog.  It must not
     accept caller-provided hashes or treat a generated registry as a source of
     truth, so this resolver checks the authored package and its approval stamps
-    before exposing one selected Story.
+    before exposing one selected Story. With a story size budget, each selected
+    Story also carries its measures under ``story_size`` for display only.
     """
     errors: list[str] = []
     if not story_ids:
@@ -280,6 +325,10 @@ def approved_backlog_sources(
         }
     if errors:
         return {}, {}, sorted(set(errors))
+    if story_size is not None:
+        entries = backlog_compile.story_size_entries(record, docs, story_size, set(selected))
+        for story_id, entry in entries.items():
+            selected[story_id]["story_size"] = entry
     backlog_props = record["backlog"]["props"]
     snapshot = {
         "backlog_path": str(record["backlog"]["path"]),
@@ -308,6 +357,111 @@ def approved_dod_source(docs: Path) -> tuple[dict, list[str]]:
         "definition_of_done_revision": revision,
         "definition_of_done_source_hash": source_hash,
     }, []
+
+
+def with_process_policy_pin(props: dict, policy: dict) -> dict:
+    """Return the Delivery front matter pinned to the Process Policy snapshot.
+
+    Without a policy the front matter keeps its bytes: no key is added. The
+    pin sits before the aliases and tags, beside the other source pins.
+    """
+    pinned = {key: value for key, value in props.items() if key not in PROCESS_POLICY_SOURCE_FIELDS}
+    if not policy:
+        return pinned
+    anchor = next((key for key in ("aliases", "tags") if key in pinned), None)
+    result: dict = {}
+    for key, value in pinned.items():
+        if key == anchor:
+            result.update(policy)
+        result[key] = value
+    if anchor is None:
+        result.update(policy)
+    return result
+
+
+def delivery_switch_value(docs: Path, delivery_id: str, switch: str) -> str:
+    """Return the value of a process switch that a Delivery runs under.
+
+    Without a Process Policy the switch is at its package default. A draft or
+    invalid policy, or a pin that drifted while the pin is enforced, raises
+    ValueError, as process_policy.py value --delivery refuses it.
+    """
+    values, snapshot = process_policy.effective_values(docs)
+    errors = process_policy.delivery_pin_findings(docs, delivery_id, snapshot)
+    if errors:
+        raise ValueError("; ".join(errors))
+    return values[switch]["value"]
+
+
+def policy_owner_gates(docs: Path) -> str | None:
+    """Return the owner_gates value the Process Policy selects, or None when it cannot be read."""
+    try:
+        values, _snapshot = process_policy.effective_values(docs)
+    except ValueError:
+        return None
+    return values.get(OWNER_GATES, {}).get("value")
+
+
+def delivery_owner_gates(docs: Path, props: dict) -> str | None:
+    """Return the owner_gates value a Delivery keeps its decision log under.
+
+    Before scope approval the current policy decides. Later only a pin that
+    still names the approved policy does: a policy revised or drafted since
+    decides nothing here, and the pin checks report that drift where it
+    blocks. Outside the gate window there is no open log to check.
+    """
+    status = props.get("status")
+    if status not in DECISION_LOG_STATUSES:
+        return None
+    try:
+        values, snapshot = process_policy.effective_values(docs)
+    except ValueError:
+        return None
+    if status != "scope_proposed" and process_policy.pin_findings(props, snapshot):
+        return None
+    return values.get(OWNER_GATES, {}).get("value")
+
+
+def owner_decision_classes() -> set[str]:
+    path = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/owner-decision-classes.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {entry["id"] for entry in (*data["agent_clauses"], *data["classes"])}
+
+
+def user_decision_findings(body: str) -> list[str]:
+    """Validate the User Decisions table a Delivery keeps under two fixed owner gates."""
+    rows, errors = backlog_compile.structured_table(
+        section_bodies(body).get("User Decisions", ""), USER_DECISION_COLUMNS,
+        "delivery.md", "User Decisions")
+    classes = {QUEUED_DECISION_CLASS, *owner_decision_classes()}
+    seen: set[str] = set()
+    for number, row in enumerate(rows, 1):
+        label = f"delivery.md User Decisions row {number}"
+        if not USER_DECISION_ID_RE.fullmatch(row["id"]):
+            errors.append(f"{label} id must be D- and at least two digits")
+        elif row["id"] in seen:
+            errors.append(f"{label} repeats id {row['id']}; every id is unique")
+        seen.add(row["id"])
+        if row["class"] not in classes:
+            errors.append(f"{label} class must be {QUEUED_DECISION_CLASS} or an at-once class:"
+                          f" {', '.join(sorted(classes - {QUEUED_DECISION_CLASS}))}")
+        if not row["question"]:
+            errors.append(f"{label} states no question")
+        options = [option.strip() for option in row["options"].split(";") if option.strip()]
+        if len(options) < 2:
+            errors.append(f"{label} needs at least two options separated by semicolons")
+        if row["recommendation"] not in options:
+            errors.append(f"{label} recommendation must be one of its options")
+        if row["status"] not in USER_DECISION_STATUSES:
+            errors.append(f"{label} status must be {' or '.join(USER_DECISION_STATUSES)}")
+        elif row["status"] == "answered" and not row["answer"]:
+            errors.append(f"{label} is answered but records no answer")
+        elif row["status"] == "pending" and row["answer"]:
+            errors.append(f"{label} is pending but records an answer; only the owner's answer"
+                          " closes a question")
+        if row["wait_minutes"] and not re.fullmatch(r"[0-9]+", row["wait_minutes"]):
+            errors.append(f"{label} wait_minutes must be a whole number of minutes")
+    return errors
 
 
 def operation_contract_snapshot(docs: Path, kind: str) -> tuple[dict, list[str]]:
@@ -409,6 +563,14 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
     for key in DOD_SOURCE_FIELDS:
         if delivery_props.get(key) != dod[key]:
             errors.append(f"Delivery {key} is stale against the approved Definition of Done")
+    # Scope approval writes the pin, and only a new execution approval can
+    # re-pin it; outside those phases the pin is the Delivery's record.
+    status = delivery_props.get("status")
+    if status == "scope_proposed" or status in process_policy.PIN_ENFORCED_STATUSES:
+        policy, policy_errors = process_policy.approved_snapshot(docs)
+        errors.extend(policy_errors)
+        if not policy_errors and status in process_policy.PIN_ENFORCED_STATUSES:
+            errors.extend(process_policy.pin_findings(delivery_props, policy))
 
     for item_path, item_props in item_records:
         story_id = str(item_props["story_id"])
@@ -432,7 +594,8 @@ def render_map(docs: Path) -> None:
     rows = ["---", "type: moc", "title: Delivery", "tags:", "  - doc/moc", "---", "",
             "# Delivery", "", "Target-resident Delivery packages and their current semantic outcomes.", ""]
     rules = [(governance_path(docs), "Governance"),
-             (delivery_root(docs) / "definition-of-done.md", "Definition of Done")]
+             (delivery_root(docs) / "definition-of-done.md", "Definition of Done"),
+             (process_policy.path_for(docs), "Process Policy")]
     existing = [(path, title) for path, title in rules if path.is_file()]
     if existing:
         rows.extend(["## Project Rules", ""])
@@ -564,13 +727,25 @@ def init_delivery(args) -> int:
     stories = list(args.story or [])
     # One read-only candidate snapshot serves the strict read and the handoff check.
     with stage_package.candidate_session():
-        sources, backlog_snapshot, source_errors = approved_backlog_sources(docs, stories)
+        # The proposal shows story sizes under story_size_budget; never a scope rule.
+        try:
+            budget, budget_errors = backlog_compile.story_size_budget(docs), []
+        except ValueError as exc:
+            budget, budget_errors = None, [str(exc)]
+        sources, backlog_snapshot, source_errors = approved_backlog_sources(
+            docs, stories, story_size=budget)
         dod_snapshot, dod_errors = approved_dod_source(docs)
-        errors = sorted(set(source_errors + dod_errors))
+        # New Items declare the implementation schedule the Process Policy selects.
+        schedule, policy_errors = policy_implementation_schedule(docs)
+        owner_gates = policy_owner_gates(docs)
+        errors = sorted(set(source_errors + dod_errors + policy_errors + budget_errors))
         # The proposal refuses a selection that scope approval, the handoff, would refuse.
         if not errors:
             errors = handoff_binding_findings(
                 docs, {story: sources[story]["story_path"] for story in stories})
+        # Under switch delivery_path, the proposal reports whether it may take the light path.
+        light = (light_path_state(docs, {story: sources[story] for story in stories}, None, budget)
+                 if not errors and policy_delivery_path(docs) == LIGHT_WHEN_ELIGIBLE else None)
     if errors:
         delivery_result.write_line(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
         return 2
@@ -589,7 +764,10 @@ def init_delivery(args) -> int:
         "Scope Rationale": "Selected stories are the exact executable scope.",
         "Exclusions": "No release management or unrelated work.",
         "Definition of Done Baseline": dod_link,
-        "User Decisions": "Local scope proposal; awaiting scope approval.",
+        "User Decisions": ("\n".join(["| " + " | ".join(USER_DECISION_COLUMNS) + " |",
+                                       "|" + "---|" * len(USER_DECISION_COLUMNS)])
+                           if owner_gates == TWO_FIXED_GATES
+                           else "Local scope proposal; awaiting scope approval."),
         "Navigation": "\n".join([link("maps/delivery", "Delivery map"), *item_links]),
     })
     atomic_text(root / "delivery.md", frontmatter(props, body))
@@ -607,15 +785,24 @@ def init_delivery(args) -> int:
                       "path_claims": [], "contract_claims": [],
                       "runtime_required": False,
                       "architecture_impact": "not_applicable", "architecture_components": [],
-                      "architecture_record_kinds": [], "architecture_reason": "No architecture delta is currently required.",
+                      "architecture_record_kinds": [], "architecture_reason": NO_ARCHITECTURE_REASON,
                       "role_sequence": execution_roles(source),
                       "verification_schedule": verification_policy()["new_schedule"],
+                      **new_item_lane_fields(source, schedule),
                       "tags": ["doc/delivery-item", "status/in-scope"]}
         atomic_text(item, frontmatter(item_props, body_for("item", item_props["title"], {
             "Delivery Scope": identifier, "Navigation": link(f"delivery/deliveries/{root.name}/delivery", identifier),
         })))
     render_map(docs)
-    print(json.dumps({"ok": True, "id": identifier, "slug": slug, "path": str(root), "stories": stories}, indent=2))
+    result = {"ok": True, "id": identifier, "slug": slug, "path": str(root), "stories": stories}
+    if budget is not None:
+        result["story_size"] = backlog_compile.story_size_block(
+            budget, {story: sources[story]["story_size"] for story in stories})
+    if light is not None:
+        result["delivery_path"] = {"value": LIGHT_WHEN_ELIGIBLE, "eligible": light["eligible"],
+                                   "failed": light["failed"], "pending": light["pending"],
+                                   "receipts": light["receipts"]}
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -760,11 +947,14 @@ def delivery_findings(docs: Path, identifier: str, *,
         item_props, item_body = split_note(item_path)
         if item_props.get("type") != "delivery-item": errors.append(f"{item_path} type must be delivery-item")
         if item_props.get("status") not in ITEM_STATUSES: errors.append(f"{item_path} invalid Item status")
-        try:
-            verification_schedule(item_props)
-        except ValueError as exc:
-            errors.append(f"{item_path}: {exc}")
+        for read_schedule in (verification_schedule, implementation_schedule):
+            try:
+                read_schedule(item_props)
+            except ValueError as exc:
+                errors.append(f"{item_path}: {exc}")
         errors.extend(f"{item_path} missing section: {name}" for name in sorted(set(SECTIONS["item"]) - sections(item_body)))
+    if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
+        errors.extend(user_decision_findings(body))
     plan = root / "execution-plan.md"
     if plan.exists():
         plan_props, plan_body = split_note(plan)
@@ -976,6 +1166,12 @@ def approve_scope(args) -> int:
             docs, {str(item["story_id"]): str(item["story_path"]) for item in items}))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
+    # delivery_findings above already refused a draft or invalid policy.
+    props = with_process_policy_pin(props, process_policy.approved_snapshot(docs)[0])
+    # Under switch delivery_path, the scope hash binds the path the Delivery takes.
+    path_record = delivery_path_record(docs, root, body, "approve-scope")
+    if path_record is not None:
+        body = path_record[0]
     props["status"] = "scope_approved"
     props["scope_hash"] = content_hash(props, body, exclude=MUTABLE | {"scope_hash"})
     props["approved_at_utc"] = utc_now()
@@ -983,7 +1179,10 @@ def approve_scope(args) -> int:
     props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + ["status/scope-approved"]
     atomic_text(path, frontmatter(props, body))
     render_map(docs)
-    print(json.dumps({"ok": True, "id": props["id"], "scope_hash": props["scope_hash"]}, indent=2)); return 0
+    result = {"ok": True, "id": props["id"], "scope_hash": props["scope_hash"]}
+    if path_record is not None:
+        result["delivery_path"] = path_record[1]
+    print(json.dumps(result, indent=2)); return 0
 
 
 def _string_list(value: object, label: str, errors: list[str]) -> list[str]:
@@ -1024,9 +1223,91 @@ def verification_schedule(props: dict) -> str:
     return value
 
 
+def document_contract() -> dict:
+    path = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/delivery-document-contract.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def implementation_schedule(props: dict) -> str:
+    """Read an Item's implementation schedule; an Item without one runs sequentially."""
+    contract = document_contract()["document_types"]["delivery_item"]
+    value = props.get("implementation_schedule", contract["missing_implementation_schedule"])
+    if value not in contract["implementation_schedules"]:
+        raise ValueError("unsupported implementation_schedule")
+    return value
+
+
+READER_ROLES = ("code_reviewer", "qa_engineer")
+# Vault, Git and runtime state stay serial across lanes, so no lane scope reaches them.
+LANE_EXCLUDED_ROOTS = ("workspace/docs", ".git", ".agentrof")
+LANE_SEAM_RE = re.compile(r"^([a-z][a-z0-9_]*) -> ([a-z][a-z0-9_]*) via (\S(?:.*\S)?)$")
+
+
+def lane_roles(props: dict) -> list[str]:
+    """Return the Item's lane roles: its implementation roles except the Software Architect."""
+    return [role for role in props.get("role_sequence", []) or []
+            if role not in READER_ROLES and role != "software_architect"]
+
+
+def lane_scope_map(props: dict) -> tuple[dict[str, list[str]], list[str]]:
+    """Read lane_scopes, entries of `<role>:<path>`, as role to paths, with unreadable entries."""
+    scopes: dict[str, list[str]] = {}
+    unreadable: list[str] = []
+    entries = props.get("lane_scopes", [])
+    for entry in entries if isinstance(entries, list) else [entries]:
+        role, separator, path = entry.partition(":") if isinstance(entry, str) else ("", "", "")
+        if (not separator or not re.fullmatch(r"[a-z][a-z0-9_]*", role) or path != path.strip()
+                or not _is_normalized_claim(path)):
+            unreadable.append(str(entry))
+        else:
+            scopes.setdefault(role, []).append(path)
+    return scopes, unreadable
+
+
+def lane_seam_edges(props: dict) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Read lane_seams, entries of `<producer> -> <consumer> via <interface>`, with unreadable entries."""
+    edges: list[tuple[str, str, str]] = []
+    unreadable: list[str] = []
+    entries = props.get("lane_seams", [])
+    for entry in entries if isinstance(entries, list) else [entries]:
+        match = LANE_SEAM_RE.fullmatch(entry) if isinstance(entry, str) else None
+        if match is None:
+            unreadable.append(str(entry))
+        else:
+            edges.append((match.group(1), match.group(2), match.group(3)))
+    return edges, unreadable
+
+
+def lane_phases(props: dict) -> list[list[str]]:
+    """Group implementation roles: the Software Architect alone first, then lanes by seam order.
+
+    A lane starts once every producer its seams name has finished; lanes
+    without such a producer between them share a phase.
+    """
+    lanes = lane_roles(props)
+    edges, unreadable = lane_seam_edges(props)
+    if unreadable:
+        raise ValueError("lane_seams cannot be read: " + ", ".join(unreadable))
+    producers = {role: {producer for producer, consumer, _interface in edges if consumer == role}
+                 for role in lanes}
+    phases = [["software_architect"]] if "software_architect" in (props.get("role_sequence") or []) else []
+    finished: set[str] = set()
+    while len(finished) < len(lanes):
+        ready = [role for role in lanes if role not in finished and producers[role] <= finished]
+        if not ready:
+            raise ValueError("lane_seams contain a cycle or name a role without a lane")
+        phases.append(ready)
+        finished.update(ready)
+    return phases
+
+
 def execution_phases(props: dict) -> list[list[str]]:
     """Derive phase grouping without rewriting legacy plan inputs."""
     roles = list(props.get("role_sequence", []))
+    if implementation_schedule(props) == "parallel_lanes_v1":
+        readers = ([list(READER_ROLES)] if verification_schedule(props) == "parallel_snapshot_v1"
+                   else [[role] for role in roles if role in READER_ROLES])
+        return lane_phases(props) + readers
     if verification_schedule(props) == "parallel_snapshot_v1":
         return [[role] for role in roles if role not in {"code_reviewer", "qa_engineer"}] + [["code_reviewer", "qa_engineer"]]
     return [[role] for role in roles]
@@ -1037,7 +1318,96 @@ def _claims_overlap(first: str, second: str) -> bool:
     return left == right or left in right.parents or right in left.parents
 
 
-def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) -> list[str]:
+def lane_plan_findings(story_id: str, props: dict, paths: list[str], contracts: list[str],
+                       architecture_kinds: list[str]) -> list[str]:
+    """Validate an Item's lane scopes and seams against its schedule and claims."""
+    try:
+        schedule = implementation_schedule(props)
+    except ValueError as exc:
+        return [f"{story_id} {exc}"]
+    if schedule != "parallel_lanes_v1":
+        if props.get("lane_scopes") or props.get("lane_seams"):
+            return [f"{story_id} declares lane_scopes or lane_seams, which only"
+                    " implementation_schedule parallel_lanes_v1 reads"]
+        return []
+    errors: list[str] = []
+    lanes = lane_roles(props)
+    scopes, unreadable = lane_scope_map(props)
+    errors.extend(f"{story_id} lane_scope must be <role>:<normalized path>: {entry}" for entry in unreadable)
+    for role in sorted(set(scopes) - set(lanes)):
+        errors.append(f"{story_id} lane_scopes name {role}, which "
+                      + ("runs alone before the lanes and takes no lane scope" if role == "software_architect"
+                         else "is not an implementation role of this Item"))
+    for role in lanes:
+        if role not in scopes:
+            errors.append(f"{story_id} implementation role {role} has no lane scope; give it one or"
+                          " declare implementation_schedule sequential_v1")
+    owned = [(role, path) for role in sorted(scopes) for path in scopes[role]]
+    if len(owned) != len(set(owned)):
+        errors.append(f"{story_id} lane_scopes repeat an entry")
+    for role, path in owned:
+        excluded = next((root for root in LANE_EXCLUDED_ROOTS if _claims_overlap(path, root)), None)
+        if excluded:
+            errors.append(f"{story_id} lane scope {path} of {role} overlaps {excluded}, which stays serial")
+    for index, (role, path) in enumerate(owned):
+        for other_role, other in owned[index + 1:]:
+            if role != other_role and _claims_overlap(path, other):
+                errors.append(f"{story_id} lane scopes of {role} and {other_role} overlap: {path}, {other}")
+    union = {path for _role, path in owned}
+    if union != set(paths):
+        missing, extra = sorted(set(paths) - union), sorted(union - set(paths))
+        errors.append(f"{story_id} lane scopes must together equal path_claims"
+                      + (f"; unassigned claims: {', '.join(missing)}" if missing else "")
+                      + (f"; unclaimed lane paths: {', '.join(extra)}" if extra else ""))
+    edges, unreadable = lane_seam_edges(props)
+    errors.extend(f"{story_id} lane_seam must be <producer> -> <consumer> via <interface>: {entry}"
+                  for entry in unreadable)
+    if len(edges) != len(set(edges)):
+        errors.append(f"{story_id} lane_seams repeat a seam")
+    for producer, consumer, interface in edges:
+        seam = f"{producer} -> {consumer} via {interface}"
+        if producer not in lanes or consumer not in lanes or producer == consumer:
+            errors.append(f"{story_id} lane seam {seam} must join two different lane roles")
+        if interface in contracts:
+            continue
+        import architecture_compile
+        kind = architecture_compile.kind_for_id(interface) if architecture_compile.RECORD.fullmatch(interface) else None
+        if kind is None or kind[3] not in architecture_kinds:
+            errors.append(f"{story_id} lane seam {seam} must name one of its contract_claims or an"
+                          " architecture record id of a claimed record kind")
+    if not errors:
+        try:
+            lane_phases(props)
+        except ValueError as exc:
+            errors.append(f"{story_id} {exc}")
+    return errors
+
+
+def policy_implementation_schedule(docs: Path) -> tuple[str | None, list[str]]:
+    """Return the implementation schedule the Process Policy selects, or its refusal."""
+    try:
+        values, _snapshot = process_policy.effective_values(docs)
+    except ValueError as exc:
+        return None, [str(exc)]
+    # A registry that does not declare the switch keeps today's order.
+    missing = document_contract()["document_types"]["delivery_item"]["missing_implementation_schedule"]
+    return values.get("implementation_schedule", {}).get("value", missing), []
+
+
+def new_item_lane_fields(source: dict, schedule: str | None) -> dict:
+    """Return the lane fields a new Item declares; none keeps today's Item bytes.
+
+    Only an Item with two or more lane roles has lanes to run in parallel.
+    """
+    missing = document_contract()["document_types"]["delivery_item"]["missing_implementation_schedule"]
+    if schedule in {None, missing} or len(lane_roles({"role_sequence": execution_roles(source)})) < 2:
+        return {}
+    return {"implementation_schedule": schedule, "lane_scopes": [], "lane_seams": []}
+
+
+def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path,
+                            reopen: list[str] | tuple = (),
+                            pending: frozenset | set = frozenset()) -> list[str]:
     """Validate the authored Item topology before execution approval.
 
     The Delivery compiler owns hashes and rendered plan summaries. People own
@@ -1045,6 +1415,7 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
     contradictory execution intent rather than silently inventing defaults.
     """
     errors: list[str] = []
+    policy_schedule: str | None = None
     selected = set(sources)
     graph: dict[str, set[str]] = {}
     path_owners: dict[str, str] = {}
@@ -1122,6 +1493,18 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
             )
         if len(roles) != len(set(roles)):
             errors.append(f"{story_id} role_sequence contains duplicate roles")
+        errors.extend(lane_plan_findings(story_id, props, paths, contracts, architecture_kinds))
+        # Lane roles bind their instructions only while the Process Policy selects
+        # parallel lanes, so an Item that will still run lanes needs that value.
+        if (props.get("implementation_schedule") == "parallel_lanes_v1"
+                and (props.get("status") not in TERMINAL_ITEM_STATUSES or story_id in reopen)):
+            if policy_schedule is None:
+                policy_schedule, policy_errors = policy_implementation_schedule(docs)
+                errors.extend(policy_errors)
+            if policy_schedule not in {None, "parallel_lanes_v1"}:
+                errors.append(f"{story_id} implementation_schedule parallel_lanes_v1 needs the Process"
+                              " Policy to select it; declare sequential_v1 or set switch"
+                              " implementation_schedule with /configure process")
         # A claim reserves a path against concurrent writers. A terminal Item has
         # no writer left, so its claim is a record of what it wrote rather than a
         # reservation, and holding it would keep any later Item out of that path
@@ -1160,11 +1543,13 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
         errors.append("Delivery execution_after graph contains a cycle")
     # Operation contracts are intentionally checked only at execution approval.
     # Bindings themselves are written below, after this preflight proves the
-    # current source contracts are approved and current.
-    _verification, verification_errors = operation_contract_snapshot(docs, "verification")
-    errors.extend(verification_errors)
-    if any(split_note(path)[0].get("runtime_required", False)
-           for path in sorted(root.glob("items/*/item.md"))):
+    # current source contracts are approved and current. A kind in *pending* is an
+    # open revision that the gate showing this plan approves before approval runs.
+    if "verification" not in pending:
+        _verification, verification_errors = operation_contract_snapshot(docs, "verification")
+        errors.extend(verification_errors)
+    if "environment" not in pending and any(split_note(path)[0].get("runtime_required", False)
+                                            for path in sorted(root.glob("items/*/item.md"))):
         _environment, environment_errors = operation_contract_snapshot(docs, "environment")
         errors.extend(environment_errors)
     return sorted(set(errors))
@@ -1180,6 +1565,25 @@ def reopen_findings(reopen: list[str], item_records: list[tuple[Path, dict]]) ->
         elif statuses[story] != "integrated":
             errors.append(f"reopen requires an integrated Item: {story}")
     return errors
+
+
+def superseded_plan_approvals(root: Path, delivery_props: dict) -> list[str]:
+    """Name every execution approval a new approval of this Delivery supersedes, newest first.
+
+    An approval is named by the source_hash of its execution plan. Approval is
+    offline, so it cannot tell whether the approval it replaces was published:
+    it lists that approval together with everything that one superseded, and
+    publication accepts any of them as the plan it revises. A plan hash cannot
+    name an approval, because a re-approval that changes nothing keeps it and a
+    revision that undoes another brings an earlier one back.
+    """
+    plan = root / "execution-plan.md"
+    if delivery_props.get("status") != "execution_approved" or not plan.is_file():
+        return []
+    previous, _body = split_note(plan)
+    approval, earlier = previous.get("source_hash"), previous.get("superseded_plan_approvals")
+    return ([approval] if isinstance(approval, str) and approval else []) + (
+        [str(value) for value in earlier] if isinstance(earlier, list) else [])
 
 
 # merge-pr merges a Delivery PR only on green provider checks, so execution
@@ -1357,14 +1761,16 @@ def pull_request_workflow_findings(docs: Path, delivery: str, remote: str = "ori
             f"(skill-content/setup/references/ci-bootstrap.md) describes{remedy}"]
 
 
-def approved_pull_request_checks(docs: Path) -> dict:
+def approved_pull_request_checks(docs: Path, pending: bool = False) -> dict:
     """Where the approved current Verification Contract declares the Delivery PR checks come from.
 
     Without such a contract, approval is refused anyway and the default stands.
+    A *pending* open revision that passes its own check is read as its approval
+    will read it.
     """
     receipt, errors = operation_compile.check_contract(docs, "verification")
     props = {}
-    if not errors and receipt.get("current"):
+    if not errors and (receipt.get("current") or (pending and receipt.get("status") == "draft")):
         props, _body = operation_compile.parse(operation_compile.contract_path(docs, "verification"))
     source, provider = operation_compile.pull_request_checks(props)
     if source != "external":
@@ -1374,35 +1780,104 @@ def approved_pull_request_checks(docs: Path) -> dict:
                                  f"Delivery PR only on green checks, so {provider} must report them on it"}
 
 
-def approve_execution(args) -> int:
-    docs = docs_root(args.docs)
-    # This verb writes the Item Operation bindings and refreshes the approved source
+def execution_approval_findings(docs: Path, root: Path, delivery_id: str, reopen: list[str] | tuple = (),
+                                remote: str = "origin",
+                                pending: frozenset | set = frozenset()) -> tuple[tuple, list[str]]:
+    """Resolve what execution approval binds, with everything it refuses in the plan."""
+    item_records, sources, backlog_snapshot, dod, source_errors = delivery_source_snapshots(docs, root)
+    policy, policy_errors = process_policy.approved_snapshot(docs)
+    errors = source_errors + policy_errors + reopen_findings(list(reopen), item_records)
+    if not errors:
+        errors = execution_plan_findings(root, sources, docs, reopen, pending)
+    pull_request_checks = approved_pull_request_checks(docs, "verification" in pending)
+    if pull_request_checks["source"] != "external":
+        errors += pull_request_workflow_findings(docs, delivery_id, remote)
+    return (item_records, sources, backlog_snapshot, dod, policy, pull_request_checks), sorted(set(errors))
+
+
+def execution_approval_refusals(docs: Path, delivery_id: str, reopen: list[str] | tuple = (),
+                                remote: str = "origin", statuses: tuple = EXECUTION_APPROVAL_STATUSES,
+                                pending: frozenset | set = frozenset()) -> tuple[dict | None, list[str]]:
+    """Return what execution approval binds, or everything it refuses, in the order it reports them.
+
+    Approval runs on an approved scope. A gate that shows the plan before
+    approval passes the statuses it runs in and the Operation contract kinds
+    whose open revision it approves itself before execution approval runs.
+    """
+    # Approval writes the Item Operation bindings and refreshes the approved source
     # pins, so it cannot require either to already match. The contracts themselves are
     # still proved approved and current by execution_plan_findings before anything is
-    # written, and the sources are re-resolved from the approved backlog below.
-    root, findings = delivery_findings(docs, args.delivery, check_item_operation_bindings=False,
+    # written, and the sources are re-resolved from the approved backlog.
+    root, findings = delivery_findings(docs, delivery_id, check_item_operation_bindings=False,
                                        compare_source_pins=False)
     if root is None:
-        print(json.dumps({"ok": False, "errors": findings}, indent=2)); return 1
-    path = root / "delivery.md"
-    props, body = split_note(path)
-    if props.get("status") not in {"scope_approved", "execution_approved"}:
-        print(json.dumps({"ok": False, "errors": ["Execution approval requires a scope-approved Delivery"]}, indent=2)); return 1
+        return None, findings
+    props, body = split_note(root / "delivery.md")
+    if props.get("status") not in statuses:
+        return None, ["Execution approval requires a scope-approved Delivery"]
     if findings:
-        print(json.dumps({"ok": False, "errors": findings}, indent=2)); return 1
-    items = sorted(root.glob("items/*/item.md"))
-    if not items:
-        print(json.dumps({"ok": False, "errors": ["Execution Plan requires at least one Item"]}, indent=2)); return 1
-    item_records, sources, backlog_snapshot, dod, source_errors = delivery_source_snapshots(docs, root)
+        return None, findings
+    if not any(root.glob("items/*/item.md")):
+        return None, ["Execution Plan requires at least one Item"]
+    inputs, errors = execution_approval_findings(docs, root, delivery_id, reopen, remote, pending)
+    if errors:
+        return None, errors
+    return {"root": root, "props": props, "body": body, "inputs": inputs}, []
+
+
+def pending_operation_revisions(docs: Path, root: Path) -> list[dict]:
+    """Return each open Operation revision the plan binds that passes its own check.
+
+    Under two fixed owner gates, gate A approves such a revision before
+    execution approval runs, so the gate may show the plan while it is open.
+    """
+    runtime = any(split_note(path)[0].get("runtime_required", False)
+                  for path in sorted(root.glob("items/*/item.md")))
+    pending = []
+    for kind in ("verification", "environment") if runtime else ("verification",):
+        if not operation_compile.contract_path(docs, kind).is_file():
+            continue
+        receipt, errors = operation_compile.check_contract(docs, kind)
+        if receipt.get("status") == "draft" and not errors:
+            pending.append({"kind": kind, "revision": receipt["revision"]})
+    return pending
+
+
+def check_plan(args) -> int:
+    """Report everything execution approval would refuse, before an owner gate shows the plan."""
+    docs = docs_root(args.docs)
+    root = find_delivery(docs, args.delivery)
+    status, pending = None, []
+    if root is not None:
+        props, _body = split_note(root / "delivery.md")
+        status = props.get("status")
+        if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
+            pending = pending_operation_revisions(docs, root)
+    reopen = sorted(set(str(story) for story in (args.reopen or [])))
+    with stage_package.candidate_session():
+        _approval, errors = execution_approval_refusals(
+            docs, args.delivery, reopen, args.remote, PLAN_GATE_STATUSES,
+            frozenset(revision["kind"] for revision in pending))
+    print(json.dumps({"ok": not errors, "id": args.delivery, "status": status, "errors": errors,
+                      "pending_operation_revisions": pending}, indent=2))
+    return 0 if not errors else 1
+
+
+def approve_execution(args) -> int:
+    docs = docs_root(args.docs)
     reopen = sorted(set(str(story) for story in (getattr(args, "reopen", None) or [])))
-    plan_errors = source_errors + reopen_findings(reopen, item_records)
-    if not plan_errors:
-        plan_errors = execution_plan_findings(root, sources, docs)
-    pull_request_checks = approved_pull_request_checks(docs)
-    if pull_request_checks["source"] != "external":
-        plan_errors += pull_request_workflow_findings(docs, args.delivery, getattr(args, "remote", "origin"))
-    if plan_errors:
-        print(json.dumps({"ok": False, "errors": sorted(set(plan_errors))}, indent=2)); return 1
+    remote = getattr(args, "remote", "origin")
+    approval, errors = execution_approval_refusals(docs, args.delivery, reopen, remote)
+    if approval is None:
+        print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
+    root, props, body = approval["root"], approval["props"], approval["body"]
+    path = root / "delivery.md"
+    items = sorted(root.glob("items/*/item.md"))
+    _item_records, sources, backlog_snapshot, dod, policy, pull_request_checks = approval["inputs"]
+    # Under switch delivery_path, execution approval keeps or leaves the light path record.
+    path_record = delivery_path_record(docs, root, body, "approve-execution", remote)
+    if path_record is not None:
+        body = path_record[0]
     refreshed_sources: list[str] = []
     rebound: list[str] = []
     item_ids = []
@@ -1489,20 +1964,375 @@ def approve_execution(args) -> int:
         "Navigation": link(path.relative_to(docs).as_posix(), props["id"]),
     })
     plan_props["plan_hash"] = content_hash(plan_props, plan_body, exclude=MUTABLE | {"plan_hash"})
+    # Outside the plan hash, so a re-approval that changes nothing keeps it; the
+    # source_hash below covers the lineage and so names this approval.
+    plan_props["superseded_plan_approvals"] = superseded_plan_approvals(root, props)
     plan_props["approved_at_utc"] = utc_now()
     plan_props["source_hash"] = content_hash(plan_props, plan_body)
     atomic_text(plan_path, frontmatter(plan_props, plan_body))
     delivery_pins = {**backlog_snapshot, **{key: dod[key] for key in DOD_SOURCE_FIELDS}}
-    refreshed_delivery_pins = sorted(key for key, value in delivery_pins.items() if props.get(key) != value)
+    refreshed_delivery_pins = sorted(
+        [key for key, value in delivery_pins.items() if props.get(key) != value]
+        + [key for key in PROCESS_POLICY_SOURCE_FIELDS if props.get(key) != policy.get(key)])
     props.update(delivery_pins)
+    props = with_process_policy_pin(props, policy)
     props["status"] = "execution_approved"
     props["plan_hash"] = plan_props["plan_hash"]
     props["source_hash"] = content_hash(props, body)
     props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + ["status/execution-approved"]
     atomic_text(path, frontmatter(props, body))
-    print(json.dumps({"ok": True, "id": props["id"], "plan_hash": props["plan_hash"], "items": item_ids,
-                      "refreshed_sources": refreshed_sources, "refreshed_delivery_pins": refreshed_delivery_pins,
-                      "rebound": rebound, "pull_request_checks": pull_request_checks}, indent=2)); return 0
+    result = {"ok": True, "id": props["id"], "plan_hash": props["plan_hash"], "items": item_ids,
+              "refreshed_sources": refreshed_sources, "refreshed_delivery_pins": refreshed_delivery_pins,
+              "rebound": rebound, "pull_request_checks": pull_request_checks}
+    if path_record is not None:
+        result["delivery_path"] = path_record[1]
+    print(json.dumps(result, indent=2)); return 0
+
+
+def policy_delivery_path(docs: Path) -> str | None:
+    """Return the delivery_path value the current Process Policy selects, or None when it cannot be read."""
+    try:
+        values, _snapshot = process_policy.effective_values(docs)
+    except ValueError:
+        return None
+    return values.get(DELIVERY_PATH_SWITCH, {}).get("value")
+
+
+def reused_contract_receipts(docs: Path, runtime: bool) -> tuple[list[dict], list[str]]:
+    """Return the Operation contract receipts a light plan reuses, and why it cannot reuse them.
+
+    The light path revises no contract: no revision may be open, and the
+    Verification Contract, with the Environment Contract for a runtime Item,
+    must be approved and current.
+    """
+    receipts: list[dict] = []
+    problems: list[str] = []
+    for kind in ("verification", "environment"):
+        title = f"{kind.title()} Contract"
+        needed = kind == "verification" or runtime
+        if not operation_compile.contract_path(docs, kind).is_file():
+            if needed:
+                problems.append(f"the {title} is missing")
+            continue
+        receipt, errors = operation_compile.check_contract(docs, kind)
+        if receipt.get("status") == "draft":
+            problems.append(f"{title} revision {receipt.get('revision')} is open")
+        elif needed and not receipt.get("current"):
+            problems.append(f"the {title} is not approved and current: " + ", ".join(errors))
+        elif needed:
+            receipts.append({"kind": kind, "revision": receipt["revision"],
+                             "source_hash": receipt["source_hash"]})
+    return receipts, problems
+
+
+def receipt_text(receipts: list[dict]) -> str:
+    return " and ".join(f"{receipt['kind']} revision {receipt['revision']} {receipt['source_hash']}"
+                        for receipt in receipts) or "no contract"
+
+
+def waited_for_stories(sources: dict[str, dict], items: dict[str, tuple[dict, str]] | None) -> list[str]:
+    """Every Story outside the selection that the selection waits for: approved dependencies and waits_for."""
+    waited = {story for source in sources.values() for story in source["depends_on"]}
+    for props, _body in (items or {}).values():
+        declared = props.get("waits_for")
+        if isinstance(declared, list):
+            waited.update(story for story in declared if isinstance(story, str))
+    return sorted(waited - set(sources))
+
+
+def unmet_dependency_findings(docs: Path, stories: list[str], remote: str) -> list[str]:
+    """Name each Story that no Delivery the target branch holds merged records integrated.
+
+    The target's remote-tracking ref answers, as current as the last fetch,
+    else HEAD; the proof is the one start-item accepts from a merged package.
+    """
+    if not stories:
+        return []
+    checkout = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), None)
+    if checkout is None:
+        return [f"{story} cannot be proven delivered outside a Git checkout" for story in stories]
+    from delivery_git import merged_story_owners, resolve_target_branch
+    try:
+        ref = f"refs/remotes/{remote}/{resolve_target_branch(checkout, remote)}"
+        if subprocess.run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
+                          capture_output=True, check=False).returncode:
+            ref = "HEAD"
+        owners = merged_story_owners(checkout, ref, stories)
+    except RuntimeError as exc:
+        return [f"{story} cannot be proven delivered: {exc}" for story in stories]
+    return [f"{story} is recorded integrated by no Delivery that the target branch holds merged"
+            for story in stories if story not in owners]
+
+
+def light_topology_hash(items: dict[str, tuple[dict, str]]) -> str:
+    """Hash what a topology pass authors: each Item's topology fields and its body."""
+    value = {story: {"fields": {key: props.get(key) for key in LIGHT_TOPOLOGY_FIELDS},
+                     "body": without_generated_relations(body).rstrip() + "\n"}
+             for story, (props, body) in sorted(items.items())}
+    return "sha256:" + hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                                  separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def light_path_state(docs: Path, sources: dict[str, dict], items: dict[str, tuple[dict, str]] | None,
+                     budget: dict | None, recorded: dict | None = None, remote: str = "origin") -> dict:
+    """Evaluate every light-path condition on a selection and, once it exists, its Item topology.
+
+    Before the topology pass there are no Items to read, so
+    architecture_not_applicable is pending. After scope approval recorded the
+    light path, the plan must still bind the Item topology and the contract
+    receipts recorded there.
+    """
+    failed: list[dict] = []
+
+    def fail(condition: str, finding: str) -> None:
+        failed.append({"condition": condition, "finding": " ".join(finding.split())})
+
+    stories = sorted(sources)
+    if len(stories) != 1:
+        fail("single_story", f"the selection holds {len(stories)} Stories, and the light path plans exactly one")
+    for story in stories:
+        if "software_architect" in {sources[story]["owner_role"], *sources[story]["supporting_roles"]}:
+            fail("no_architect_role", f"{story} lists software_architect among its roles")
+    for story in stories if items is not None else []:
+        props = items.get(story, ({}, ""))[0]
+        impact = props.get("architecture_impact")
+        reason = str(props.get("architecture_reason", "")).strip()
+        if impact != "not_applicable":
+            fail("architecture_not_applicable", f"{story} declares architecture_impact {impact or 'nothing'}")
+        elif reason in {"", NO_ARCHITECTURE_REASON}:
+            fail("architecture_not_applicable", f"{story} declares no architecture impact without the"
+                 " Software Architect's reason, since the reason init writes is a placeholder")
+    runtime = any(props.get("runtime_required") is True for props, _body in (items or {}).values())
+    receipts, problems = reused_contract_receipts(docs, runtime)
+    if recorded is not None and not problems and receipt_text(receipts) != receipt_text(recorded["receipts"]):
+        problems.append(f"the plan binds {receipt_text(receipts)}, not"
+                        f" {receipt_text(recorded['receipts'])} that scope approval recorded")
+    for problem in problems:
+        fail("operation_contracts_unchanged", problem)
+    for finding in unmet_dependency_findings(docs, waited_for_stories(sources, items), remote):
+        fail("dependencies_met", finding)
+    if budget is None or not budget.get("limits"):
+        fail("within_story_size_budget", "switch story_size_budget sets no size limit, and without an"
+             " owner-set limit no Story counts as small")
+    else:
+        for story in stories:
+            entry = sources[story].get("story_size")
+            if entry is None:
+                fail("within_story_size_budget", f"{story} has no size measures")
+                continue
+            for name in entry["over_budget"]:
+                measure = entry["measures"][name]
+                fail("within_story_size_budget",
+                     f"{story} {name} is {measure['value']}, over its limit of {measure['limit']}")
+    topology = light_topology_hash(items) if items is not None else None
+    if recorded is not None and topology != recorded["topology"]:
+        fail("topology_unchanged", "the Item topology differs from the one scope approval recorded")
+    return {"eligible": not failed, "failed": failed,
+            "pending": [] if items is not None else ["architecture_not_applicable"],
+            "receipts": receipts, "topology_hash": topology}
+
+
+def light_path_evaluation(docs: Path, root: Path, recorded: dict | None, remote: str = "origin") -> dict:
+    """Evaluate the light-path conditions on one Delivery's Items and approved Stories."""
+    items: dict[str, tuple[dict, str]] = {}
+    for item_path in sorted(root.glob("items/*/item.md")):
+        props, body = split_note(item_path)
+        items[str(props.get("story_id", ""))] = (props, body)
+    budget = backlog_compile.story_size_budget(docs)
+    sources, _snapshot, errors = approved_backlog_sources(docs, sorted(items), historical_inputs=True,
+                                                           story_size=budget)
+    if errors:
+        return {"eligible": False, "pending": [], "receipts": [], "topology_hash": None,
+                "failed": [{"condition": DELIVERY_PATH_SWITCH, "finding": " ".join(
+                    ("the approved Stories cannot be read: " + ", ".join(errors)).split())}]}
+    return light_path_state(docs, sources, items, budget, recorded, remote)
+
+
+def recorded_delivery_path(body: str) -> dict | None:
+    """Read the Delivery path line that approval keeps in User Decisions, or None without one."""
+    for line in section_bodies(body).get("User Decisions", "").splitlines():
+        match = DELIVERY_PATH_LINE_RE.match(line.strip())
+        if match:
+            topology = PATH_TOPOLOGY_RE.search(line)
+            return {"path": match.group(1), "line": line.strip(),
+                    "topology": topology.group(1) if topology else None,
+                    "receipts": [{"kind": kind, "revision": int(revision), "source_hash": digest}
+                                 for kind, revision, digest in PATH_RECEIPT_RE.findall(line)]}
+    return None
+
+
+def with_delivery_path_line(body: str, line: str) -> str:
+    """Put the one Delivery path line first in User Decisions and keep every other line as written."""
+    kept = [row for row in section_bodies(body).get("User Decisions", "").splitlines()
+            if not DELIVERY_PATH_LINE_RE.match(row.strip())]
+    rest = "\n".join(kept).strip()
+    return replace_section(body, "User Decisions", line + ("\n\n" + rest if rest else ""))
+
+
+def delivery_path_record(docs: Path, root: Path, body: str, step: str,
+                         remote: str = "origin") -> tuple[str, dict] | None:
+    """Record in User Decisions the path an approval finds, or None when switch delivery_path takes no part.
+
+    Scope approval records light when every condition holds, with the Item
+    topology and the contract receipts it approves, and standard otherwise.
+    Execution approval keeps a light record only while every condition holds
+    and the plan binds that topology and those receipts, and records standard
+    for a scope approved without one. A standard record never turns light.
+    """
+    value = policy_delivery_path(docs)
+    recorded = recorded_delivery_path(body)
+    if value != LIGHT_WHEN_ELIGIBLE and recorded is None:
+        return None
+    if recorded is not None and recorded["path"] == "standard":
+        return body, {"path": "standard", "failed": [], "line": recorded["line"]}
+    if value != LIGHT_WHEN_ELIGIBLE:
+        state = {"eligible": False, "failed": [{"condition": DELIVERY_PATH_SWITCH, "finding":
+                 f"the Process Policy that {step} pins sets it to {value or 'an unreadable value'}"}]}
+    elif step == "approve-execution" and recorded is None:
+        state = {"eligible": False, "failed": [{"condition": DELIVERY_PATH_SWITCH, "finding":
+                 "scope approval recorded no light path"}]}
+    else:
+        state = light_path_evaluation(docs, root, recorded, remote)
+    if state["eligible"]:
+        line = recorded["line"] if recorded is not None else (
+            f"Delivery path: light. {step} approved the scope with the Item topology"
+            f" {state['topology_hash']} and the reused contract receipts {receipt_text(state['receipts'])}.")
+    else:
+        reason = "the Delivery left the light path" if recorded is not None else "the light path does not hold"
+        line = (f"Delivery path: standard. {step} recorded that {reason}: "
+                + "; ".join(f"{failure['condition']}: {failure['finding']}" for failure in state["failed"]) + ".")
+    return (with_delivery_path_line(body, line),
+            {"path": "light" if state["eligible"] else "standard", "failed": state["failed"], "line": line})
+
+
+def light_path_check(args) -> int:
+    """Repeat the light-path conditions and the plan's approval checks before a light step."""
+    docs = docs_root(args.docs)
+    root = find_delivery(docs, args.delivery)
+
+    def refuse(error: str) -> int:
+        print(json.dumps({"ok": False, "errors": [error]}, indent=2)); return 1
+
+    if root is None:
+        return refuse("Delivery not found")
+    try:
+        value = delivery_switch_value(docs, args.delivery, DELIVERY_PATH_SWITCH)
+    except ValueError as exc:
+        return refuse(str(exc))
+    if value != LIGHT_WHEN_ELIGIBLE:
+        return refuse(f"{args.delivery} runs switch {DELIVERY_PATH_SWITCH} at {value}; only"
+                      f" {LIGHT_WHEN_ELIGIBLE} plans a Delivery on the light path")
+    props, body = split_note(root / "delivery.md")
+    status = props.get("status")
+    if status not in LIGHT_PATH_STATUSES:
+        return refuse(f"{args.delivery} is {status}; the light path ends once its Items are claimed")
+    recorded = recorded_delivery_path(body)
+    light = recorded if recorded is not None and recorded["path"] == "light" else None
+    with stage_package.candidate_session():
+        state = light_path_evaluation(docs, root, light, args.remote)
+        _approval, plan_findings = execution_approval_refusals(docs, args.delivery, remote=args.remote,
+                                                               statuses=PLAN_GATE_STATUSES)
+    path = "light" if state["eligible"] and (recorded is None or light is not None) else "standard"
+    result = {"ok": path == "light" and not plan_findings, "delivery": args.delivery, "status": status,
+              "value": value, "path": path, "recorded": recorded["path"] if recorded else None,
+              "eligible": state["eligible"], "failed": state["failed"], "receipts": state["receipts"],
+              "topology_hash": state["topology_hash"], "plan_findings": plan_findings}
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+EXECUTION_PLANNING = "execution_planning"
+SINGLE_SOURCE_BUNDLE = "single_source_bundle"
+# The bundle is reviewed while its execution plan can still be approved.
+BUNDLE_STATUSES = ("scope_proposed", "scope_approved", "execution_approved")
+
+
+def _file_record(docs: Path, relative: str) -> dict:
+    path = docs / relative
+    if not path.is_file():
+        raise ValueError(f"bundle input is missing: {relative}")
+    return {"path": relative, "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def bundle_manifest(docs: Path, delivery_id: str) -> dict:
+    """Return the contract and topology bundle one execution plan is reviewed on.
+
+    Only a Delivery that runs switch execution_planning at single_source_bundle
+    has one. It lists every Operation contract the plan revises or pins, every
+    Item record with its Story and Test Plan and the switch value's package
+    data, each with the hash of its bytes, and names the counterpart reader of
+    every revised contract. It changes nothing.
+    """
+    root = find_delivery(docs, delivery_id)
+    if root is None:
+        raise ValueError("Delivery not found")
+    value = delivery_switch_value(docs, delivery_id, EXECUTION_PLANNING)
+    if value != SINGLE_SOURCE_BUNDLE:
+        raise ValueError(f"{delivery_id} runs switch {EXECUTION_PLANNING} at {value}; only"
+                         f" {SINGLE_SOURCE_BUNDLE} reviews an execution-plan bundle")
+    props, _body = split_note(root / "delivery.md")
+    if props.get("status") not in BUNDLE_STATUSES:
+        raise ValueError(f"{delivery_id} is {props.get('status')}; its bundle is reviewed"
+                         " during execution planning")
+    items, sources = [], []
+    for item_path in sorted(root.glob("items/*/item.md")):
+        item, _item_body = split_note(item_path)
+        items.append({**_file_record(docs, item_path.relative_to(docs).as_posix()),
+                      "story": item.get("story_id"), "status": item.get("status"),
+                      "runtime_required": item.get("runtime_required") is True})
+        sources.extend(_file_record(docs, str(item.get(key, ""))) for key in ("story_path", "test_plan_path"))
+    if not items:
+        raise ValueError("Delivery must contain at least one Item")
+    # A sealed Item keeps the bindings its evidence was produced against.
+    open_items = [item for item in items if item["status"] not in TERMINAL_ITEM_STATUSES]
+    contracts = []
+    for kind in ("verification", "environment"):
+        path = operation_compile.contract_path(docs, kind)
+        if not path.is_file():
+            if kind == "verification":
+                raise ValueError("bundle input is missing: operation/verification-contract.md")
+            continue
+        contract, _contract_body = operation_compile.parse(path)
+        pinned = bool(open_items) and (kind == "verification"
+                                       or any(item["runtime_required"] for item in open_items))
+        revised = contract.get("status") == "draft"
+        if pinned or revised:
+            writer = operation_compile.WRITER_ROLES[kind]
+            contracts.append({**_file_record(docs, path.relative_to(docs).as_posix()),
+                              "kind": kind, "status": contract.get("status"),
+                              "revision": contract.get("revision"), "revised": revised,
+                              "pinned": pinned, "writer": writer,
+                              "counterpart": next(role for role in operation_compile.WRITER_ROLES.values()
+                                                  if role != writer)})
+    package = Path(__file__).resolve().parents[1]
+    spec = process_policy.load_registry()[EXECUTION_PLANNING]["spec"]
+    data = [{"path": relative, "sha256": "sha256:" + hashlib.sha256(
+        (package / relative).read_bytes()).hexdigest()}
+        for relative in spec.get("value_data", {}).get(SINGLE_SOURCE_BUNDLE, [])]
+    files = [record["path"] for record in (*contracts, *items, *sources)]
+    result = {"delivery": delivery_id, "contracts": contracts, "items": items,
+              "sources": sources, "data": data,
+              "readers": [contract["counterpart"] for contract in contracts if contract["revised"]],
+              "unpinned_revisions": [contract["path"] for contract in contracts
+                                     if contract["revised"] and not contract["pinned"]],
+              "inputs": sorted(dict.fromkeys(f"workspace/docs/{path}" for path in files))}
+    result["source_hash"] = "sha256:" + hashlib.sha256(json.dumps(
+        result, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
+    return result
+
+
+def bundle(args) -> int:
+    docs = docs_root(args.docs)
+    try:
+        result = bundle_manifest(docs, args.delivery)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
+    expected = getattr(args, "expected_hash", None)
+    if expected is not None and result["source_hash"] != expected:
+        print(json.dumps({"ok": False, "errors": [
+            "bundle manifest is stale; regenerate it and rerun every affected reader"]}, indent=2))
+        return 1
+    print(json.dumps({"ok": True, **result}, indent=2, sort_keys=True)); return 0
 
 
 def status(args) -> int:
@@ -1611,6 +2441,62 @@ def item_evidence_file_findings(worktree: Path, head: str, paths: tuple[Path, Pa
     return []
 
 
+def table_cell(value: object) -> str:
+    """One Markdown table cell: a single line with its pipes escaped."""
+    return " ".join(str(value).split()).replace("|", "\\|")
+
+
+def table_block(marker: str, columns: tuple[str, ...], rows: list[str]) -> str:
+    """A compiler-owned block: its marker line and a table of rendered rows."""
+    if not rows:
+        return f"{marker} none."
+    return "\n".join([marker, "", "| " + " | ".join(columns) + " |",
+                      "|" + "---|" * len(columns), *rows])
+
+
+def block_rows(text: str, marker: str) -> list[str]:
+    """The rows of the table that follows ``marker`` in a compiler-owned block."""
+    rows: list[str] = []
+    for line in text.split(marker, 1)[1].splitlines() if marker in text else []:
+        if line.strip().startswith("|"):
+            rows.append(line.strip())
+        elif rows:
+            break
+    return rows[2:]
+
+
+def replace_section(body: str, title: str, content: str) -> str:
+    """Replace the content of one `## title` section and keep every other byte."""
+    heading = re.search(rf"(?m)^## {re.escape(title)}[ \t]*$", body)
+    if heading is None:
+        raise ValueError(f"section {title} is missing")
+    following = re.search(r"(?m)^## ", body[heading.end():])
+    end = heading.end() + following.start() if following else len(body)
+    return body[:heading.end()] + "\n\n" + content.strip() + "\n\n" + body[end:]
+
+
+def with_compiler_block(body: str, title: str, marker: str, block: str) -> str:
+    """Keep a section's authored text and replace the compiler-owned block after it."""
+    authored = section_bodies(body).get(title, "").split(marker, 1)[0].strip()
+    if authored == SECTION_PLACEHOLDER:
+        authored = ""
+    return replace_section(body, title, f"{authored}\n\n{block}" if authored else block)
+
+
+def delivery_follow_ups(root: Path) -> list[str]:
+    """The follow-up rows of every integrated Item's code review record."""
+    rows: list[str] = []
+    for item in sorted(root.glob("items/*/item.md")):
+        props, _ = split_note(item)
+        review = item.parent / "code-review.md"
+        if props.get("status") != "integrated" or not review.is_file():
+            continue
+        text = section_bodies(split_note(review)[1]).get("Deviations and Follow-ups", "")
+        story = table_cell(props.get("story_id", item.parent.name))
+        rows.extend(f"| {story} {row}" for row in block_rows(text, ITEM_FOLLOW_UPS))
+    return rows
+
+
 def approve_item_evidence(args) -> int:
     value = getattr(args, "worktree", None)
     if isinstance(value, str) and value.strip():
@@ -1688,6 +2574,20 @@ def _approve_item_evidence(args) -> int:
                 review_body = review_result["report"]
             if set(SECTIONS["item"]).issubset(sections(verification_result["report"])):
                 verification_body = verification_result["report"]
+            if delivery_switch_value(docs, args.delivery, REVIEW_LOOP) == "blocking_delta":
+                # The Item record keeps its approved bytes; its code review record
+                # carries the follow-ups, since evidence approval writes only the reports.
+                rows = ["| " + " | ".join(table_cell({**finding, "finding": finding["id"]}[column])
+                                          for column in FOLLOW_UP_COLUMNS) + " |"
+                        for finding in delivery_verification.open_follow_ups(review_result, item_props)]
+                block = table_block(ITEM_FOLLOW_UPS, FOLLOW_UP_COLUMNS, rows)
+                calibration = sorted(review_result.get("calibration", []), key=lambda row: row["finding"])
+                if calibration:
+                    block += "\n\n" + table_block(ITEM_CALIBRATION, CALIBRATION_COLUMNS, [
+                        "| " + " | ".join(table_cell(row[column]) for column in CALIBRATION_COLUMNS) + " |"
+                        for row in calibration])
+                review_body = with_compiler_block(review_body, "Deviations and Follow-ups",
+                                                  ITEM_FOLLOW_UPS, block)
             for target, result in ((review_props, review_result), (verification_props, verification_result)):
                 target["verification_candidate_hash"] = session["candidate"]["candidate_hash"]
                 target["verification_mode"] = result["mode"]
@@ -1724,6 +2624,10 @@ def approve_review(args) -> int:
         ]}, indent=2)); return 2
     delivery_path_value = root / "delivery.md"
     delivery_props, _ = split_note(delivery_path_value)
+    try:
+        review_loop = delivery_switch_value(docs, args.delivery, REVIEW_LOOP)
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
     review_path = root / "delivery-review.md"
     review_subject = str(delivery_props.get("goal", args.delivery)).strip()
     review_props = {"type": "delivery-review", "id": f"{args.delivery}-REVIEW",
@@ -1745,6 +2649,10 @@ def approve_review(args) -> int:
     review_body = body_for("delivery-review", review_props["title"], {
         "Goal Outcome": delivery_props.get("goal", ""), "Verdict": "Approved for PR handoff.", **authored,
         "Navigation": link(delivery_path_value.relative_to(docs).as_posix(), args.delivery)})
+    if review_loop == "blocking_delta":
+        review_body = with_compiler_block(
+            review_body, "Lessons and Follow-up", DELIVERY_FOLLOW_UPS,
+            table_block(DELIVERY_FOLLOW_UPS, ("item", *FOLLOW_UP_COLUMNS), delivery_follow_ups(root)))
     review_props["approval_hash"] = content_hash(review_props, review_body, exclude=MUTABLE | {"approval_hash"})
     review_props["source_hash"] = content_hash(review_props, review_body)
     atomic_text(review_path, frontmatter(review_props, review_body))
@@ -1810,6 +2718,22 @@ def main(argv=None) -> int:
         "--remote", default="origin",
         help="the Git remote whose local remote-tracking refs hold the target and Integration branches")
     sub.add_parser("render").set_defaults(func=render)
+    plan_check = sub.add_parser("check-plan")
+    plan_check.add_argument("--delivery", required=True)
+    plan_check.add_argument("--reopen", action="append", default=[], metavar="STORY",
+                            help="an integrated Item the approval will name for reopen")
+    plan_check.add_argument("--remote", default="origin",
+                            help="the Git remote whose local remote-tracking refs hold the target and"
+                                 " Integration branches")
+    plan_check.set_defaults(func=check_plan)
+    light = sub.add_parser("light-path-check")
+    light.add_argument("--delivery", required=True)
+    light.add_argument("--remote", default="origin",
+                       help="the Git remote whose local remote-tracking refs hold the target branch")
+    light.set_defaults(func=light_path_check)
+    bundle_cmd = sub.add_parser("bundle-manifest")
+    bundle_cmd.add_argument("--delivery", required=True); bundle_cmd.add_argument("--expected-hash")
+    bundle_cmd.set_defaults(func=bundle)
     transition = sub.add_parser("prepare-item-transition")
     transition.add_argument("--delivery", required=True); transition.add_argument("--story", required=True)
     transition.add_argument("--to", required=True, choices=sorted(ITEM_STATUSES)); transition.set_defaults(func=prepare_item_transition)

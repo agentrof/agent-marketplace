@@ -16,8 +16,12 @@ import subprocess
 PACKAGE = Path(__file__).resolve().parents[1]
 POLICY = "templates/task-input-policy.json"
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
+SWITCH_REFERENCE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
+DELIVERY_PACKAGE = re.compile(r"^workspace/docs/delivery/deliveries/([^/]+)/")
 CATALOG_NAME_MAPS = ("role_skills", "required_role_skills", "entries",
                      "required_references", "stack_reference_by_role", "read_only_entry_roles")
+CANONICAL_SUFFIXES = {".md", ".json"}
+OPAQUE_NAMES = {"artifacts", ".obsidian", ".trash"}
 
 
 def digest(value) -> str:
@@ -42,8 +46,28 @@ def regular(root: Path, relative: str) -> Path:
     return result
 
 
-def source_inventory(root: Path) -> list[dict]:
-    """Bind incoming canonical edges without reading opaque artifact interiors."""
+def canonical_source(relative: str) -> bool:
+    """Whether the canonical source inventory holds this project-relative file."""
+    path = PurePosixPath(relative)
+    return (path.parts[:2] == ("workspace", "docs") and len(path.parts) > 2
+            and not OPAQUE_NAMES & set(path.parts[2:])
+            and path.suffix.lower() in CANONICAL_SUFFIXES)
+
+
+def outside(relative: str, bound: frozenset[str] | None) -> bool:
+    """Whether a task bound to ``bound`` leaves this path out: a canonical
+    source it does not read. Without a bound set every path stays in."""
+    return bound is not None and relative not in bound and canonical_source(relative)
+
+
+def source_inventory(root: Path, bound: frozenset[str] | None = None) -> list[dict]:
+    """Bind incoming canonical edges without reading opaque artifact interiors.
+
+    A task given ``bound``, the sources it reads, binds and reads only the
+    canonical sources among them.
+    """
+    if bound is not None:
+        return identity(root, [path for path in bound if canonical_source(path)])
     docs = root / "workspace/docs"
     for path in (docs.parent, docs):
         if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
@@ -55,14 +79,14 @@ def source_inventory(root: Path) -> list[dict]:
         with os.scandir(pending.pop()) as entries:
             children = sorted(entries, key=lambda entry: entry.name)
         for entry in children:
-            if entry.name in {"artifacts", ".obsidian", ".trash"}:
+            if entry.name in OPAQUE_NAMES:
                 continue
             path = Path(entry.path)
             if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
                 raise ValueError("canonical source inventory cannot traverse a symlink")
             if entry.is_dir(follow_symlinks=False):
                 pending.append(path)
-            elif path.suffix.lower() in {".md", ".json"}:
+            elif path.suffix.lower() in CANONICAL_SUFFIXES:
                 paths.append(path.relative_to(root).as_posix())
     return identity(root, paths)
 
@@ -144,6 +168,82 @@ def catalog(package: Path = PACKAGE) -> dict:
     return policy
 
 
+def switch_reference(package: Path, path: Path) -> tuple[str, str] | None:
+    """Return the switch and value a skill's switch reference file is named for."""
+    relative = path.relative_to(package).parts
+    if len(relative) != 4 or relative[0] != "skill-content" or relative[2] != "references":
+        return None
+    match = SWITCH_REFERENCE.match(relative[3])
+    return (match.group(1), match.group(2)) if match else None
+
+
+def switch_data(package: Path) -> dict[tuple[str, str], list[str]]:
+    """Return the package data files that the registry declares for each switch value.
+
+    Only that value's instructions read such a file, so it is bound together
+    with them and never on another path.
+    """
+    from process_policy import REGISTRY
+    path = package / REGISTRY
+    if not path.is_file():
+        return {}
+    try:
+        switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
+        return {(switch, value): list(paths)
+                for switch, spec in sorted(switches.items())
+                for value, paths in sorted(spec.get("value_data", {}).items())}
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"process switch registry cannot be read: {exc}") from exc
+
+
+def task_deliveries(project: Path, delivery: str | None, inputs: list[str]) -> list[str]:
+    """Return the Deliveries a task runs inside: the one it names and every one
+    whose package holds a selected input."""
+    found = {delivery} if delivery else set()
+    for relative in inputs:
+        match = DELIVERY_PACKAGE.match(relative)
+        if match is None or match.group(1) in {".", ".."}:
+            continue
+        record = project / "workspace/docs/delivery/deliveries" / match.group(1) / "delivery.md"
+        if not record.is_file():
+            continue
+        from ba_compile import parse_frontmatter
+        props, _line, error = parse_frontmatter(record.read_text(encoding="utf-8"))
+        if error or not isinstance(props.get("id"), str) or not props["id"]:
+            raise ValueError(f"Delivery record cannot be read: {record.relative_to(project).as_posix()}")
+        found.add(props["id"])
+    return sorted(found)
+
+
+def switch_choices(project: Path | None, route: dict, package: Path,
+                   deliveries: list[str] | None = None) -> tuple[set, list[str]]:
+    """Return the project's non-default switch values and its policy input.
+
+    Without a Process Policy both are empty, so the manifest is unchanged. A
+    task inside a Delivery whose pin is still enforced binds only the policy
+    that Delivery pinned: one changed since refuses the derivation, as a switch
+    read of that Delivery does.
+    """
+    if project is None or not route["project_state"]:
+        return set(), []
+    import process_policy
+    docs = project / "workspace" / "docs"
+    if deliveries:
+        snapshot, errors = process_policy.approved_snapshot(docs, package)
+        if errors:
+            raise ValueError("; ".join(errors))
+        for delivery in deliveries:
+            drift = process_policy.delivery_pin_findings(docs, delivery, snapshot)
+            if drift:
+                raise ValueError(f"{delivery}: " + "; ".join(drift))
+    if not process_policy.path_for(docs).exists():
+        return set(), []
+    values, _snapshot = process_policy.effective_values(docs, package)
+    return ({(switch, value["value"]) for switch, value in values.items()
+             if value["value"] != value["default"]},
+            ["workspace/docs/" + process_policy.RELATIVE])
+
+
 def git_bytes(command: list[str], *args: str) -> bytes:
     result = subprocess.run([*command, *args], capture_output=True)
     if result.returncode:
@@ -151,8 +251,12 @@ def git_bytes(command: list[str], *args: str) -> bytes:
     return result.stdout
 
 
-def working_inventory(root: Path, command: list[str], *, unborn: bool = False) -> list[dict]:
-    """Bind dirty and new sources that a HEAD-only diff cannot describe."""
+def working_inventory(root: Path, command: list[str], *, unborn: bool = False,
+                      bound: frozenset[str] | None = None) -> list[dict]:
+    """Bind dirty and new sources that a HEAD-only diff cannot describe.
+
+    With ``bound``, a canonical source outside it is neither listed nor read.
+    """
     flags = git_bytes(command, "ls-files", "-v", "-z")
     if any(row and (row[:1].islower() or row[:1] in {b"S", b"s"})
            for row in flags.split(b"\0")):
@@ -166,7 +270,7 @@ def working_inventory(root: Path, command: list[str], *, unborn: bool = False) -
     records = []
     for name in sorted(names):
         parts = PurePosixPath(name).parts
-        if parts[:2] == ("workspace", "docs") and "artifacts" in parts[2:]:
+        if (parts[:2] == ("workspace", "docs") and "artifacts" in parts[2:]) or outside(name, bound):
             continue
         path = root / name
         if not path.exists() and not path.is_symlink():
@@ -245,7 +349,7 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
             targets.append({"path": path, "coverage": "exact_file", "source": path})
             sources.append(path)
     elif spec["resolver"] == "item_claims":
-        from delivery_compile import _is_normalized_claim
+        from delivery_compile import _is_normalized_claim, implementation_schedule, lane_roles, lane_scope_map
         items = sorted(path for path in selected if re.fullmatch(
             r"workspace/docs/delivery/deliveries/[^/]+/items/[^/]+/item\.md", path))
         if len(items) != 1:
@@ -262,13 +366,30 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
                 or len(claims) != len(set(claims))):
             result["reason"] = "selected Item has no valid product path claims for this implementation role"
             return result
+        try:
+            lane = (implementation_schedule(props) == "parallel_lanes_v1"
+                    and role.replace("-", "_") in lane_roles(props))
+        except ValueError:
+            result["reason"] = "selected Item declares an unsupported implementation_schedule"
+            return result
+        owned = claims
+        if lane:
+            # A lane writes only its approved lane scope; the other lanes of the
+            # Item write theirs in the same worktree at the same time.
+            scopes, unreadable = lane_scope_map(props)
+            owned = scopes.get(role.replace("-", "_"), [])
+            if unreadable or not owned or not set(owned) <= set(claims):
+                result["reason"] = "selected Item has no valid lane scope for this implementation role"
+                return result
         targets = [{"path": path, "coverage": "path_and_descendants", "source": item}
-                   for path in sorted(claims)
+                   for path in sorted(owned)
                    if not any(path == root or path.startswith(root + "/")
                               for root in ("workspace/docs", ".git", ".agentrof"))]
         sources = [item]
         result["excluded_subtrees"] = ["workspace/docs", ".git", ".agentrof"]
         result["constraints"].append("approved Item plan, current writer receipt, and completed/cancelled readers remain mandatory")
+        if lane:
+            result["constraints"].append("parallel lane: write only this lane scope; the other lanes of the Item write theirs concurrently and the coordinator alone commits")
     if targets:
         result.update(status="resolved", allowed_write_area=targets, source_records=sources,
                       reason="derived only from selected bound owner records; no new writer authority")
@@ -278,7 +399,8 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
 def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = None,
              inputs: list[str] | None = None, skills: list[str] | None = None,
              findings: str | None = None, base: str | None = None, epic: str | None = None,
-             expected_hash: str | None = None, package: Path = PACKAGE) -> dict:
+             expected_hash: str | None = None, package: Path = PACKAGE,
+             delivery: str | None = None) -> dict:
     policy = catalog(package)
     package = package.resolve()
     project = project.resolve() if project is not None else None
@@ -299,6 +421,16 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         selected_skills.update(policy["required_role_skills"][role])
     if route["project_state"]:
         selected_skills.add("obsidian-vault")
+    if delivery is not None and (project is None or not route["project_state"]):
+        raise ValueError("a Delivery belongs to a project task")
+    try:
+        deliveries = task_deliveries(project, delivery, list(inputs or [])) \
+            if project is not None and route["project_state"] else []
+        chosen, policy_inputs = switch_choices(project, route, package, deliveries)
+    except ValueError as exc:
+        raise ValueError(f"process policy cannot bind switch instructions: {exc}") from exc
+    value_data = switch_data(package)
+    switch_only = {path for paths in value_data.values() for path in paths}
     required = {"constitution.md", POLICY, "templates/task-input-contract.md"}
     if role:
         required.add(f"agents/{role}.md")
@@ -320,32 +452,52 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
             path = f"skill-content/{skill}/references/{stack_reference}"
             if (package / path).is_file():
                 required.add(path)
+        switch_root = package / "skill-content" / skill / "references"
+        for path in sorted(switch_root.glob("switch-*.md")) if switch_root.is_dir() else []:
+            pair = switch_reference(package, path)
+            if pair in chosen:
+                required.add(path.relative_to(package).as_posix())
+                required.update(value_data.get(pair, []))
     instruction_inputs = required | set(references) | {"scripts/task_inputs.py"}
     # Tools and data influence the role's result even when they are not prose
     # reads. Bind them without turning an input index into extra reading work.
     implementation_roots = [package / "scripts", *(
         package / "skill-content" / skill for skill in selected_skills)]
     for root in implementation_roots:
+        # A switch reference or switch value data of a value the project did not
+        # choose is neither read nor hashed, so the default path binds exactly
+        # what it bound before.
         instruction_inputs.update(path.relative_to(package).as_posix()
                                   for path in root.rglob("*")
                                   if path.is_file() and "__pycache__" not in path.parts
                                   and path.suffix not in {".pyc", ".pyo"}
-                                  and path.name != ".DS_Store")
+                                  and path.name != ".DS_Store"
+                                  and switch_reference(package, path) is None
+                                  and path.relative_to(package).as_posix() not in switch_only)
     instruction_files = identity(package, instruction_inputs)
-    project_files = set(inputs or [])
+    project_files = set(inputs or []) | set(policy_inputs)
     if findings:
         project_files.add(findings)
+    read_only = (role in policy["read_only_roles"]
+                 or role in policy["read_only_entry_roles"].get(entry, [])
+                 or mode in {"review", "consume"})
     closure = None
     if epic is not None:
         if entry != "backlog-plan" or project is None:
             raise ValueError("epic scope belongs to a project backlog task")
         import backlog_review_inputs
-        closure = backlog_review_inputs.manifest(project / "workspace/docs", epic=epic or None)
+        closure = backlog_review_inputs.manifest(project / "workspace/docs", epic=epic or None,
+                                                 writer=not read_only)
         project_files.update("workspace/docs/" + path for path in closure["paths"])
     if project is None and project_files:
         raise ValueError("project root is required for project inputs")
+    # An exact epic's closure is derived again on every run, so a source that
+    # reaches it, an incoming dependency edge included, joins its paths. Like
+    # the epic's review manifest, the task binds those and none of the other
+    # canonical sources, which another epic's writer changes in parallel.
+    read_set = frozenset(project_files) if epic else None
     records = identity(project, project_files) if project is not None else []
-    inventory = source_inventory(project) if project is not None else []
+    inventory = source_inventory(project, read_set) if project is not None else []
     method_bindings = {}
     technology = set(skills or []) & set(policy["technology_method_skills"])
     if project is not None and technology:
@@ -364,9 +516,6 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
                         method_bindings.setdefault(skill, []).append(relative)
         if technology - set(method_bindings):
             raise ValueError("technology methods require selected committed accepted Solution decision inputs")
-    read_only = (role in policy["read_only_roles"]
-                 or role in policy["read_only_entry_roles"].get(entry, [])
-                 or mode in {"review", "consume"})
     scope = write_scope(project, set(inputs or []) | ({"workspace/docs/" + path for path in closure["paths"]}
                                                     if closure else set()),
                         role, route, read_only, closure, package)
@@ -397,7 +546,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         if unborn and (not route.get("allow_unborn_head", False) or base is not None):
             raise ValueError("project must have a committed Git HEAD")
         head = observed.stdout.decode("ascii").strip() if not unborn else None
-        working = working_inventory(project, command, unborn=unborn)
+        working = working_inventory(project, command, unborn=unborn, bound=read_set)
         changes = [record["path"] for record in working]
         if base is not None:
             if base.startswith("-"):
@@ -410,14 +559,15 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
                                       "--name-only", "--no-renames", "-z", base, head, "--"], capture_output=True)
             if changed.returncode:
                 raise ValueError("cannot derive complete task change inventory")
-            changes = sorted({os.fsdecode(path) for path in changed.stdout.split(b"\0") if path}
+            changes = sorted({os.fsdecode(path) for path in changed.stdout.split(b"\0")
+                              if path and not outside(os.fsdecode(path), read_set)}
                              | {record["path"] for record in working})
-        if records != identity(project, project_files) or inventory != source_inventory(project):
+        if records != identity(project, project_files) or inventory != source_inventory(project, read_set):
             raise ValueError("project inputs changed while building task inputs")
         current = subprocess.run([*command, "rev-parse", "--verify", "HEAD"], capture_output=True)
         if bool(current.returncode) != unborn or (not unborn and current.stdout.decode("ascii").strip() != head):
             raise ValueError("project HEAD changed while building task inputs")
-        if working != working_inventory(project, command, unborn=unborn):
+        if working != working_inventory(project, command, unborn=unborn, bound=read_set):
             raise ValueError("project worktree changed while building task inputs")
     if instruction_files != identity(package, instruction_inputs):
         raise ValueError("instructions changed while building task inputs")
@@ -433,7 +583,12 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
               "output_contract": policy["output_contract"], "approval_authority": False,
               "available_method_skills": policy["role_skills"].get(role, []),
               "selected_method_skills": sorted(skills or [])}
-    result["source_hash"] = digest(result)
+    hashed = result
+    if epic:
+        # The closure is bound as its own source_hash binds it: the stubs it
+        # lists from notes outside its paths are information, never an input.
+        hashed = dict(result, backlog_scope=backlog_review_inputs.bound_view(closure, not read_only))
+    result["source_hash"] = digest(hashed)
     if expected_hash is not None and result["source_hash"] != expected_hash:
         raise ValueError("task inputs are stale; regenerate before persisting a result")
     return result
@@ -452,12 +607,14 @@ def main(argv=None) -> int:
     parser.add_argument("--base")
     parser.add_argument("--epic", nargs="?", const="")
     parser.add_argument("--expected-hash")
+    parser.add_argument("--delivery")
     args = parser.parse_args(argv)
     try:
         result = ({"ok": True, "entries": sorted(catalog()["entries"])} if args.check_catalog else
                   manifest(entry=args.entry, role=args.role, mode=args.mode, project=args.project_root,
                            inputs=args.input, skills=args.skill, findings=args.findings, base=args.base,
-                           epic=args.epic, expected_hash=args.expected_hash))
+                           epic=args.epic, expected_hash=args.expected_hash,
+                           delivery=args.delivery))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError, KeyError, TypeError) as exc:

@@ -24,6 +24,11 @@ the catalog artifact path and relative-artifact link law.
    MASTER update, catalog update, sync-catalog, review, check, approve.
 4. Spawn `design-system-reviewer` read-only with MASTER, catalog, page
    overrides and the semantic token, accessibility and contradiction lens.
+   Switch `review_panels`: at `lens_panel`, review panel `design_system`
+   replaces this reviewer, as
+   `skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
+   defines. Switch `review_loop`: at `blocking_delta`, this review loop follows
+   `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
 5. Run compiler checks, then `approve`; changes to an approved MASTER begin a
    revision first. Compiler approval and a committed package are handoff.
 4. Requirement mode binds its receipt. Manual mode returns it and suggests

@@ -1,7 +1,7 @@
 ---
 name: qa-engineer
 description: QA engineer role that co-authors story test plans during Backlog Planning and independently verifies delivered behavior during Delivery; never auto-triggered.
-model: sonnet
+model: claude-sonnet-5-5
 output_contract: prose
 ---
 

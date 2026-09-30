@@ -1,7 +1,7 @@
 ---
 name: delivery-coordinator
 description: Delivery Coordinator role invoked by software-engineering-team flows with explicit project-local inputs; not auto-triggered.
-model: sonnet
+model: claude-sonnet-5-5
 output_contract: prose
 ---
 

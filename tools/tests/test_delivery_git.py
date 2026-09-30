@@ -853,25 +853,69 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(values["Target-Update-Intent"], "none")
         finally:
             remove_temporary(temporary)
+    def push_protocol_1_fence(self, project: Path) -> str:
+        """Push the open Fence a protocol-1 project left on the target tip and return it."""
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        v1 = delivery_git.commit_tree(
+            project, target, [], "Open legacy Agentrof Fence", {
+                "Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+                "Epoch": delivery_git.epoch_token(), "Target": target,
+                "Config-Hash": "none", "Source-Kind": "none", "Source-Intent": "none",
+                "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
+                "Target-Repository": "none", "Target-Carrier-Kind": "none",
+                "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
+                "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
+                "Upgrade-Phase": "none", "Upgrade-Contract": "none", "Handoff-Target": "none",
+                "Barrier-Kind": "none", "Barrier-Epoch": "none",
+            },
+        )
+        delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-000")["fence"], "", v1)])
+        return v1
+
+    def test_a_protocol_1_fence_points_each_reader_to_upgrade_fence_v1(self):
+        """A protocol-1 Fence is neither corrupt nor closed: each reader names its migration (#318)."""
+        project, docs = self.two_story_project()
+        self.scope_delivery(docs, "DLV-001", "auth", "AUTH-01")
+        fence = delivery_git.canonical_refs("DLV-000")["fence"]
+        v1 = self.push_protocol_1_fence(project)
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        for reader, refusal in (
+            ("reserve-delivery", lambda: delivery_git.reserve_delivery(project, "DLV-001")),
+            ("apply-governance", lambda: delivery_git.apply_governance(project)),
+            ("begin-source-handoff", lambda: delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)),
+            ("writer readiness", lambda: delivery_git.require_target_ancestry(
+                project, "origin", delivery_git.commit_message(project, v1), target)),
+        ):
+            with self.subTest(reader=reader):
+                self.assertEqual(self.refused_finding(refusal), (
+                    "DELIVERY_PROTOCOL_UNSUPPORTED",
+                    "the Fence is protocol 1; migrate it with upgrade-fence-v1 before new mutations"))
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
+        # A record of neither protocol stays corrupt, for the Fence context and for writer readiness.
+        corrupt = delivery_git.commit_tree(project, target, [], "Unknown Fence", {"Record": "project-fence-v3"})
+        delivery_git.atomic_push(project, "origin", [(fence, v1, corrupt)])
+        for reader, refusal in (
+            ("apply-governance", lambda: delivery_git.apply_governance(project)),
+            ("writer readiness", lambda: delivery_git.require_target_ancestry(
+                project, "origin", delivery_git.commit_message(project, corrupt), target)),
+        ):
+            with self.subTest(reader=reader, record="project-fence-v3"):
+                self.assertEqual(self.refused_finding(refusal),
+                                 ("DELIVERY_FENCE_CORRUPT", "current Fence record is unsupported"))
+        delivery_git.atomic_push(project, "origin", [(fence, corrupt, v1)])
+
+        # The remedy the refusal names converts the Fence, and the reservation then takes it over.
+        delivery_git.upgrade_fence_v1(project)
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, reserved["fence"]), "Record"),
+                         "project-fence-v2")
+
     def test_quiescent_v1_fence_upgrades_to_governed_v2(self):
         temporary, project = self.make_project()
         try:
-            target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
-            v1 = delivery_git.commit_tree(
-                project, target, [], "Open legacy Agentrof Fence", {
-                    "Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
-                    "Epoch": delivery_git.epoch_token(), "Target": target,
-                    "Config-Hash": "none", "Source-Kind": "none", "Source-Intent": "none",
-                    "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
-                    "Target-Repository": "none", "Target-Carrier-Kind": "none",
-                    "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
-                    "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
-                    "Upgrade-Phase": "none", "Upgrade-Contract": "none", "Handoff-Target": "none",
-                    "Barrier-Kind": "none", "Barrier-Epoch": "none",
-                },
-            )
-            fence = delivery_git.canonical_refs("DLV-000")["fence"]
-            delivery_git.atomic_push(project, "origin", [(fence, "", v1)])
+            self.push_protocol_1_fence(project)
             preview = delivery_git.upgrade_fence_v1(project, dry_run=True)
             self.assertTrue(preview["changed"])
             result = delivery_git.upgrade_fence_v1(project)

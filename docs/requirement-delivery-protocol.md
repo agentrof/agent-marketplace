@@ -331,7 +331,11 @@ binds the revision to the Fence.
 A protocol-1 Fence is accepted only by the dedicated quiescent migration path.
 It must be open with every Slot free; `upgrade-fence-v1` writes the
 protocol-2 Fence with the current approved Governance hash. No new Item
-mutation is legal until that conversion succeeds.
+mutation is legal until that conversion succeeds. The reservation, handoff,
+barrier, Governance, publication, claim, refresh and activation verbs refuse a
+protocol-1 Fence with `DELIVERY_PROTOCOL_UNSUPPORTED` and name
+`upgrade-fence-v1`; a Fence record of neither protocol refuses with
+`DELIVERY_FENCE_CORRUPT`.
 
 ## Item execution
 

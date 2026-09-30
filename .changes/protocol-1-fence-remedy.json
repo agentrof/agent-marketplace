@@ -1,0 +1,6 @@
+{
+  "summary": "A protocol-1 project Fence now refuses with `DELIVERY_PROTOCOL_UNSUPPORTED` and names `upgrade-fence-v1` as the migration, where the Fence handoff, barrier, Governance and reservation verbs called it `DELIVERY_FENCE_CORRUPT` and `publish-delivery-review`, `publish-execution-plan`, `refresh-target`, `claim-items`, `start-item` and the takeover readiness check called it a Fence that is not open (`DELIVERY_FENCE_MODE`). A Fence record of neither protocol refuses with `DELIVERY_FENCE_CORRUPT` in both places.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

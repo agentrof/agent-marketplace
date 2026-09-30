@@ -1360,7 +1360,8 @@ def publish_delivery_review(project_root: Path, delivery_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
-    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
+    require_fence_record(fence_message)
+    if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: publish-delivery-review requires an open Fence")
     stories = assert_integrated_items(root, remote, directory, integration_oid, delivery_id)
     reviewed_parent = str(review_props.get("reviewed_integration_commit", "none"))
@@ -2359,7 +2360,8 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
-    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
+    require_fence_record(fence_message)
+    if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: publish-execution-plan requires an open Fence")
     package = package_paths(root, directory, docs, include_map=False)
     operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
@@ -2468,7 +2470,8 @@ def direct_update_took_no_effect(root: Path, remote: str, head: str) -> bool:
 
 def require_target_ancestry(root: Path, remote: str, fence_message: str,
                             integration_oid: str, item_oid: str | None = None) -> str:
-    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
+    require_fence_record(fence_message)
+    if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: writer readiness requires an open Fence")
     _branch, target = fetch_target(root, remote)
     if trailer(fence_message, "Target") != target:
@@ -2605,7 +2608,8 @@ def refresh_target(project_root: Path, delivery_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
-    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
+    require_fence_record(fence_message)
+    if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: target-refresh requires an open Fence")
     previous_target = trailer(fence_message, "Target")
     if not previous_target or not OID_RE.fullmatch(previous_target):
@@ -2745,13 +2749,26 @@ def carried_fence_barrier(fence_message: str) -> dict[str, str]:
     }
 
 
+def require_fence_record(message: str) -> None:
+    """Refuse a Fence that is not a protocol-2 record, naming the migration a protocol-1 one needs.
+
+    Only upgrade-fence-v1 reads a protocol-1 Fence, so every other reader points there
+    instead of calling that Fence corrupt or closed.
+    """
+    record = trailer(message, "Record")
+    if record == "project-fence-v1":
+        raise RuntimeError("DELIVERY_PROTOCOL_UNSUPPORTED: the Fence is protocol 1; migrate it with "
+                           "upgrade-fence-v1 before new mutations")
+    if record != "project-fence-v2":
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: current Fence record is unsupported")
+
+
 def _fence_context(root: Path, remote: str) -> tuple[str, str, dict[str, str]]:
     """Read the current Fence tip and its closed control trailers."""
     ref = canonical_refs("DLV-000")["fence"]
     fence_oid = remote_oid(root, remote, ref)
     message = commit_message(root, fence_oid)
-    if trailer(message, "Record") != "project-fence-v2":
-        raise RuntimeError("DELIVERY_FENCE_CORRUPT: current Fence record is unsupported")
+    require_fence_record(message)
     protocol = trailer(message, "Protocol")
     if protocol != "2":
         raise RuntimeError("DELIVERY_PROTOCOL_UNSUPPORTED: Fence protocol is not 2; migrate the Fence before new mutations")
@@ -3423,7 +3440,8 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
-    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
+    require_fence_record(fence_message)
+    if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: claim-items requires an open Fence")
     require_target_ancestry(root, remote, fence_message, integration_oid)
     marker = commit_tree(root, integration_oid, [], f"Establish claims for {delivery_id}",
@@ -3907,7 +3925,8 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     integration_oid = remote_oid(root, remote, refs["integration"])
     item_oid = remote_oid(root, remote, refs["item"])
     fence_message = commit_message(root, fence_oid)
-    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
+    require_fence_record(fence_message)
+    if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: start-item requires an open Fence")
     fence_target = trailer(fence_message, "Target")
     if not fence_target or not OID_RE.fullmatch(fence_target):

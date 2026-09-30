@@ -4234,6 +4234,8 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     if not is_ancestor(root, item_oid, integration_oid):
         raise RuntimeError("reopen-item requires an Item its Integration has absorbed")
     target_before = require_target_ancestry(root, remote, fence_message, integration_oid)
+    # A reopen activates the Item, so it reads the limit only while the Fence carries it.
+    max_parallel = project_max_parallel(root, trailer(fence_message, "Governance-Hash") or "none")
     if any(oid == item_oid for oid in remote_slot_oids(root, remote).values()):
         raise RuntimeError("reopen-item requires a sealed, slotless Item")
     relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
@@ -4262,7 +4264,6 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
          "Story": story_id, "Previous-Tip": item_oid, "Item-Tip": item_candidate,
          "Integration-Base": integration_oid, "Writer-Epoch": writer},
     )
-    max_parallel = project_max_parallel(root)
     occupied = remote_slot_oids(root, remote)
     free = next((slot for slot in range(1, max_parallel + 1) if slot_key(slot) not in occupied), None)
     if free is None:

@@ -48,6 +48,7 @@ class FakeCommands:
         release_branch: Optional[str] = None,
         main_contains_candidate: bool = False,
         main_after_atomic_push: Optional[str] = None,
+        immutable: bool = True,
     ):
         self.main = main
         self.stable = stable
@@ -62,14 +63,15 @@ class FakeCommands:
         self.create_returncode = 0
         self.create_effect: Optional[str] = "exists"
         self.release_json: Optional[dict] = None
+        self.immutable = immutable
 
-    @staticmethod
-    def _release_json() -> str:
+    def _release_json(self) -> str:
         return json.dumps({
             "tagName": "v1.2.3",
             "name": "Agent Marketplace v1.2.3",
             "isDraft": False,
             "isPrerelease": False,
+            "isImmutable": self.immutable,
         })
 
     def __call__(self, argv: Sequence[str]) -> subprocess.CompletedProcess:
@@ -342,6 +344,7 @@ class PublicationStateMachineTests(unittest.TestCase):
             "name": "Agent Marketplace v1.2.3",
             "isDraft": True,
             "isPrerelease": False,
+            "isImmutable": True,
         }
         with self.assertRaisesRegex(
             release_publish.PublishError, "non-draft"
@@ -435,6 +438,131 @@ class PublicationStateMachineTests(unittest.TestCase):
             spec(), "release-notes.md", RELEASE_BRANCH
         )
         self.assertEqual(result["release_branch_cleanup"], "deleted")
+
+
+class ReleaseImmutabilityTests(unittest.TestCase):
+    """Publication never changes an existing Release and can require immutability."""
+
+    MUTATIONS = (
+        ("gh", "release", "edit"), ("gh", "release", "delete"),
+        ("gh", "release", "upload"), ("gh", "release", "delete-asset"),
+    )
+
+    def staged(self, **options) -> FakeCommands:
+        return FakeCommands(
+            stable=CANDIDATE, tag_target=CANDIDATE, tag_object=TAG_OBJECT,
+            release_branch=RELEASE_BRANCH, **options,
+        )
+
+    def assert_release_untouched(self, fake: FakeCommands) -> None:
+        created = [index for index, command in enumerate(fake.commands)
+                   if command[:3] == ("gh", "release", "create")]
+        for command in fake.commands[created[0] if created else 0:]:
+            self.assertNotIn(command[:3], self.MUTATIONS)
+            if command[:2] == ("git", "push"):
+                self.assertFalse(any("refs/tags/" in value for value in command), command)
+
+    def test_observation_reads_github_immutability(self):
+        for immutable in (True, False):
+            with self.subTest(immutable=immutable):
+                fake = self.staged(release="exists", immutable=immutable)
+                observed = release_publish.Publisher(fake).observe_release(spec())
+                self.assertEqual(observed.immutable, immutable)
+                view = next(command for command in fake.commands
+                            if command[:3] == ("gh", "release", "view"))
+                self.assertIn("isImmutable", view[-1].split(","))
+
+    def test_observation_requires_a_boolean_immutability_field(self):
+        for value, message in (
+            (None, "unknown or missing fields"),
+            ("true", "must be a boolean"),
+        ):
+            with self.subTest(value=value):
+                fake = self.staged(release="exists")
+                release_json = json.loads(fake._release_json())
+                if value is None:
+                    del release_json["isImmutable"]
+                else:
+                    release_json["isImmutable"] = value
+                fake.release_json = release_json
+                with self.assertRaisesRegex(release_publish.PublishError, message):
+                    release_publish.Publisher(fake).observe_release(spec())
+
+    def test_created_immutable_release_finalizes_and_is_reported(self):
+        fake = self.staged()
+        result = release_publish.Publisher(fake).finalize(
+            spec(), "release-notes.md", RELEASE_BRANCH, require_immutable=True,
+        )
+        self.assertEqual(result["action"], "created")
+        self.assertIs(result["github_release_immutable"], True)
+        self.assertEqual(result["release_branch_cleanup"], "deleted")
+        self.assert_release_untouched(fake)
+
+    def test_mutable_release_stops_before_release_branch_cleanup(self):
+        fake = self.staged(immutable=False)
+        with self.assertRaisesRegex(
+            release_publish.PublishError, "does not report it immutable"
+        ):
+            release_publish.Publisher(fake).finalize(
+                spec(), "release-notes.md", RELEASE_BRANCH,
+                require_immutable=True,
+            )
+        self.assertEqual(fake.release, "exists")
+        self.assertEqual(fake.release_branch, RELEASE_BRANCH)
+        self.assertEqual((fake.stable, fake.tag_target), (CANDIDATE, CANDIDATE))
+        self.assertFalse(any(command[:2] == ("git", "push")
+                             for command in fake.commands))
+        self.assert_release_untouched(fake)
+
+    def test_uncertain_create_response_reconciles_the_immutable_release(self):
+        fake = self.staged()
+        fake.create_returncode = 1
+        result = release_publish.Publisher(fake).finalize(
+            spec(), "release-notes.md", RELEASE_BRANCH, require_immutable=True,
+        )
+        self.assertEqual(result["action"], "reconciled-after-create-failure")
+        self.assertIs(result["github_release_immutable"], True)
+        self.assert_release_untouched(fake)
+
+    def test_resumed_publication_reconciles_without_changing_the_release(self):
+        fake = self.staged(release="exists")
+        staged = release_publish.Publisher(fake).stage(spec())
+        self.assertEqual(staged["phase"], "published")
+        self.assertIs(staged["github_release_immutable"], True)
+        with self.assertRaisesRegex(release_publish.PublishError, "forbidden"):
+            release_publish.Publisher(fake).rollback(spec())
+        result = release_publish.Publisher(fake).finalize(
+            spec(), "release-notes.md", RELEASE_BRANCH, require_immutable=True,
+        )
+        self.assertEqual(result["action"], "reconciled")
+        self.assertFalse(any(command[:3] == ("gh", "release", "create")
+                             for command in fake.commands))
+        self.assert_release_untouched(fake)
+        again = release_publish.Publisher(fake).finalize(
+            spec(), "release-notes.md", RELEASE_BRANCH, require_immutable=True,
+        )
+        self.assertEqual(again["release_branch_cleanup"], "already-absent")
+
+    def test_without_the_requirement_a_mutable_release_is_reported(self):
+        fake = self.staged(immutable=False)
+        result = release_publish.Publisher(fake).finalize(
+            spec(), "release-notes.md", RELEASE_BRANCH,
+        )
+        self.assertIs(result["github_release_immutable"], False)
+        self.assertEqual(result["release_branch_cleanup"], "deleted")
+
+    def test_cli_passes_the_immutability_requirement(self):
+        args = release_publish.build_parser().parse_args([
+            "finalize", "--version", "1.2.3", "--candidate-sha", CANDIDATE,
+            "--prior-stable-sha", PRIOR, "--notes-file", "notes.md",
+            "--require-immutable",
+        ])
+        self.assertTrue(args.require_immutable)
+        args = release_publish.build_parser().parse_args([
+            "finalize", "--version", "1.2.3", "--candidate-sha", CANDIDATE,
+            "--prior-stable-sha", PRIOR, "--notes-file", "notes.md",
+        ])
+        self.assertFalse(args.require_immutable)
 
 
 class ValidationTests(unittest.TestCase):

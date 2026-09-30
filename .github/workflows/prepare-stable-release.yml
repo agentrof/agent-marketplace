@@ -300,4 +300,5 @@ jobs:
             --version 0.0.1 \
             --candidate-sha "$CANDIDATE_SHA" \
             --bootstrap \
-            --notes-file release-notes.md
+            --notes-file release-notes.md \
+            --require-immutable

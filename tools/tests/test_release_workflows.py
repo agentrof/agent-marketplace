@@ -268,6 +268,25 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                         text.index("finalize-publication:"))
         self.assertIn("EXPECTED_RELEASE_SHA", text)
 
+    def test_finalize_requires_a_release_github_reports_immutable(self):
+        for workflow, job in (
+            ("publish-stable-release.yml", "finalize-publication"),
+            ("prepare-stable-release.yml", "bootstrap-finalize"),
+        ):
+            text = self.text(workflow)
+            block = text.split(f"\n  {job}:\n", 1)[1]
+            with self.subTest(workflow=workflow):
+                self.assertEqual(text.count("release_publish.py\" finalize")
+                                 + text.count("release_publish.py finalize"), 1)
+                self.assertIn("--require-immutable", block)
+                self.assertEqual(text.count("--require-immutable"), 1)
+        workflow_root = REPO / ".github" / "workflows"
+        for workflow in sorted(workflow_root.glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow.name):
+                for mutation in ("gh release edit", "gh release delete", "gh release upload"):
+                    self.assertNotIn(mutation, text)
+
     def test_publish_refuses_fork_or_wrong_base_release_prs(self):
         text = self.text("publish-stable-release.yml")
         self.assertIn("github.event.pull_request.base.ref == 'main'", text)

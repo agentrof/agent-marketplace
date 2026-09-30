@@ -450,6 +450,11 @@ class BundleManifestTests(unittest.TestCase):
         path = delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md"
         return delivery_compile.section_bodies(delivery_compile.split_note(path)[1])["User Decisions"]
 
+    def check_errors(self) -> list[str]:
+        _code, output = quiet(delivery_compile.main, [
+            "--docs", str(self.docs), "check", "--delivery", "DLV-001"])
+        return json.loads(output)["errors"]
+
     def draft_environment_contract(self) -> type:
         environment = type("Args", (), {"docs": str(self.docs), "kind": "environment",
                                         "constrained_by": ["solution-design/decisions/fixture-api"]})
@@ -605,6 +610,41 @@ class BundleManifestTests(unittest.TestCase):
         self.assertEqual(result["unpinned_revisions"], [])
         self.assertEqual(result["held_by"], "HEAD")
         self.assertEqual([record["kind"] for record in result["contracts"]], ["verification"])
+
+    def test_ruling_ids_are_unique_under_single_source_bundle_at_every_owner_gates_value(self):
+        """`check` refuses a repeated or malformed ruling id (rv-accept-ideas-10)."""
+        repeated = "delivery.md User Decisions gives id D-02 to 2 rulings"
+        malformed = "delivery.md User Decisions ruling D-3 needs an id of D- and at least two digits"
+        lines = ("D-01 Caches live under one fixed root.\n- D-02 Teardown keeps no volume.\n"
+                 "D-02 Suites run in declared order.\nD-3 Logs stay local.")
+        for fresh, owner_gates in enumerate(("per_step", "two_fixed_gates")):
+            with self.subTest(owner_gates=owner_gates):
+                if fresh:
+                    self.setUp()
+                policy(self.docs, "init")
+                policy(self.docs, "set", "--switch", SWITCH, "--value", "single_source_bundle")
+                policy(self.docs, "set", "--switch", "owner_gates", "--value", owner_gates)
+                policy(self.docs, "approve")
+                self.scope()
+                table = self.decisions() if owner_gates == "two_fixed_gates" else ""
+                self.section("User Decisions", "\n".join(filter(None, (table, lines))))
+                errors = self.check_errors()
+                self.assertIn(repeated, " ".join(errors))
+                self.assertIn(malformed, " ".join(errors))
+                self.section("User Decisions", "\n".join(filter(None, (
+                    table, "D-01 Caches live under one fixed root.",
+                    "D-02 Teardown keeps no volume."))))
+                self.assertFalse([error for error in self.check_errors() if "ruling" in error])
+        # A decision table row and a ruling line cannot share an id either.
+        row = "| D-01 | queued | Which cache root? | fixed; per run | fixed | answered | fixed |  |  |"
+        self.section("User Decisions", f"{table}\n{row}\n\nD-01 Caches live under one fixed root.")
+        self.assertIn("delivery.md User Decisions gives id D-01 to 2 rulings",
+                      " ".join(self.check_errors()))
+
+    def test_ruling_ids_are_free_text_at_per_document(self):
+        self.scope()
+        self.section("User Decisions", "D-02 One ruling.\nD-02 Another ruling.\nD-3 A third.")
+        self.assertFalse([error for error in self.check_errors() if "ruling" in error])
 
     def test_the_bundle_belongs_to_execution_planning(self):
         choose(self.docs, "single_source_bundle")

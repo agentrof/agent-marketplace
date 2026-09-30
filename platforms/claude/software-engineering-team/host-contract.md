@@ -81,3 +81,31 @@
   path, so the public entries do not change.
 - Delivery execution is available only through the exact public entries
   `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.
+
+## Autopilot
+
+- `/software-engineering-team:autopilot` is the user-invoked autopilot entry.
+  Only the user arms a grant: the plugin's `UserPromptExpansion` hook records
+  an `on` command the user typed as a short-lived arming record, and
+  `autopilot.py on`, run without options, refuses without that record and
+  takes the grant's options only from it. Never start, extend or widen a
+  grant, and never retry a refused `on` with options of your own. `off` and
+  `complete` may end a grant at any time. `autopilot.py` is the packaged
+  `skill-content/autopilot/scripts/autopilot.py`.
+- While a grant is active, the plugin's `PreToolUse` hook on `AskUserQuestion`
+  denies the call and states this procedure. Once the user started a grant or
+  a question is denied that way, run `autopilot.py check` before every choice
+  gate. While it exits 0, present no question:
+  - For a question of an allowed class, take the recommended option, or for
+    an open question the recommendation you would offer, apply it, run
+    `autopilot.py record`, and write the decision into the governing document
+    where the flow records the user's answer, marked with the grant id.
+  - For any other class, run `autopilot.py queue` and continue the work that
+    does not depend on it. An at-once owner decision and the Software
+    Architect's escalation clause are never taken: queue them as
+    `scope_or_rule` or as the never class they touch.
+  - Stop only when every remaining task waits on a queued question, then end
+    with the queued list of `autopilot.py report`.
+- When `check` reports the grant inactive, expired or completed, ask through
+  `AskUserQuestion` again, queued questions first. Roles never ask the user
+  and never read the grant.

@@ -23,6 +23,7 @@ invocation and choice gates.
 /sketch
 /organize-docs
 /issue-report
+/autopilot
 ```
 
 The public path for implementation work is:
@@ -51,6 +52,12 @@ internal operations invoked by the owning entry.
 Agent Marketplace GitHub issue in chat and files only the explicitly approved
 payload. It does not require setup and never reads or writes Requirement,
 Delivery, workspace or runtime state as workflow state.
+
+`/autopilot` lets the user arm a bounded grant under which the orchestrating
+session takes the recommended option of every question in an allowed class,
+records it and queues every other question. It creates no Requirement,
+Delivery or workspace state; [Orchestration](orchestration.md#autopilot)
+defines its classes, goals and limits.
 
 ## Durable project truth
 

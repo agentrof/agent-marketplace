@@ -677,11 +677,23 @@ def calibrated_verdict(result: dict) -> str:
                            for finding in calibrated_findings(result)) else "passed"
 
 
+def candidate_line_count(root: Path, commit: str, path: str) -> int | None:
+    """The number of lines ``path`` holds in the frozen candidate, or None without that file."""
+    completed = subprocess.run(["git", "--no-replace-objects", "-C", str(root), "cat-file", "blob",
+                                f"{commit}:{path}"], capture_output=True, check=False)
+    if completed.returncode:
+        return None
+    data = completed.stdout
+    return data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
+
+
 def cites_candidate(root: Path, current: dict, reason: str) -> bool:
-    """Whether a calibration reason cites the candidate text as path:line."""
-    for path in re.findall(r"(?<![\w./-])([\w.-]+(?:/[\w.-]+)*):[1-9][0-9]*\b", reason):
-        if delivery._is_normalized_claim(path) and (path in current["changed_files"] or (root / path).is_file()):
-            return True
+    """Whether a calibration reason cites a line of the frozen candidate as path:line."""
+    for path, line in re.findall(r"(?<![\w./-])([\w.-]+(?:/[\w.-]+)*):([1-9][0-9]*)\b", reason):
+        if delivery._is_normalized_claim(path):
+            count = candidate_line_count(root, current["product_commit"], path)
+            if count is not None and int(line) <= count:
+                return True
     return False
 
 
@@ -709,7 +721,8 @@ def calibration_problems(root: Path, current: dict, result: dict, ruled: set[str
             problems.append(f"{label} calibrated_severity must confirm {claim['severity']} or be minor or invalid")
         reason = row.get("reason")
         if not isinstance(reason, str) or not meaningful_text(reason) or not cites_candidate(root, current, reason):
-            problems.append(f"{label} calibration reason must cite the candidate text as path:line")
+            problems.append(f"{label} calibration reason must cite the candidate text as path:line,"
+                            " a line the frozen candidate holds")
         if isinstance(ruling, str) and ruling.casefold() == "minor" and (
                 row.get("owner_role") not in roles or not isinstance(row.get("revisit_trigger"), str)
                 or not meaningful_text(row["revisit_trigger"])):

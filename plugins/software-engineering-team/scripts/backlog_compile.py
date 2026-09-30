@@ -147,6 +147,10 @@ STORY_SIZE_MEASURES_PATH = (Path(__file__).resolve().parent.parent / "skill-cont
 SIZE_EXCEPTIONS = "Size Exceptions"
 SIZE_EXCEPTION_COLUMNS = ("story", "measure", "reason")
 CHECKLIST_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\](?:\s|$)")
+# CommonMark: a fence of three or more backticks or tildes indented at most
+# three columns, and a list item marker at the same indentation.
+CODE_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+LIST_ITEM_RE = re.compile(r"^ {0,3}(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]|$)")
 EPIC_GOAL_STUB = "Define the customer outcome and boundary."
 STORY_STUBS = {
     "scope": "Describe the smallest valuable behavior.",
@@ -956,14 +960,19 @@ def headings(body: str) -> set[str]:
             re.finditer(r"^##\s+(.+?)\s*$", body, flags=re.MULTILINE)}
 
 
-def section(body: str, title: str) -> str:
+def raw_section(body: str, title: str) -> str:
+    """Return a section's text as written, its first line's indentation kept."""
     match = re.search(rf"^##\s+{re.escape(title)}\s*$", body,
                       flags=re.MULTILINE)
     if not match:
         return ""
     following = re.search(r"^##\s+", body[match.end():], flags=re.MULTILINE)
     end = match.end() + following.start() if following else len(body)
-    return body[match.end():end].strip()
+    return body[match.end():end]
+
+
+def section(body: str, title: str) -> str:
+    return raw_section(body, title).strip()
 
 
 def required_section_findings(body: str, required: list[str], path: str) -> list[str]:
@@ -1241,14 +1250,41 @@ def accepted_minor_findings(docs: Path, body: str, path: str,
 
 
 def acceptance_checklist_lines(story: dict) -> int:
-    """Count the checklist criteria of the Acceptance section, outside code blocks."""
-    text = section(story["body"].split(NAV_MARKER, 1)[0], "Acceptance")
-    count, fenced = 0, False
-    for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-        elif not fenced and CHECKLIST_LINE_RE.match(line):
+    """Count the checklist criteria of the Acceptance section, outside code blocks.
+
+    A fenced block opens with three or more backticks or tildes and closes
+    only with a line of the same character at least as long. An indented
+    block is a line indented four or more columns after a blank line, or
+    after another such line, outside a list; inside a list the same line is
+    a nested item.
+    """
+    text = raw_section(story["body"].split(NAV_MARKER, 1)[0], "Acceptance")
+    count, fence, in_list, in_code, after_blank = 0, "", False, False, True
+    for raw in text.splitlines():
+        line = raw.expandtabs(4)
+        if fence:
+            if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", line):
+                fence = ""
+            continue
+        opened = CODE_FENCE_RE.match(line)
+        if opened:
+            fence, in_code = opened.group(1), False
+            continue
+        if not line.strip():
+            after_blank = True
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent >= 4 and not in_list and (after_blank or in_code):
+            in_code, after_blank = True, False
+            continue
+        in_code = False
+        if LIST_ITEM_RE.match(line):
+            in_list = True
+        elif indent == 0 and after_blank:
+            in_list = False
+        if CHECKLIST_LINE_RE.match(line):
             count += 1
+        after_blank = False
     return count
 
 

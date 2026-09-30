@@ -196,7 +196,12 @@ record of the policy the Delivery ran under and is no longer compared, so a
 policy set for the next Delivery never strands one that can no longer re-pin.
 Inside a Delivery a flow reads a switch with
 `process_policy.py value --switch <id> --delivery DLV-###`, which refuses a
-drifted pin instead of reading the new value.
+drifted pin instead of reading the new value. Task derivation follows the same
+pin: `task_inputs.py` refuses a task that names the Delivery with `--delivery`,
+or reads a file of its package, while that pin has drifted, so a Delivery's
+tasks never bind the switch references of a policy it did not pin. The
+Delivery stays `execution_approved` while its Items run, so the pin holds
+through Item execution.
 
 Process switch `owner_gates` decides when the owner answers a Delivery's
 questions. At `per_step`, the default, each is asked when it comes up and

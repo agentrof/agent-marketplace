@@ -17,6 +17,7 @@ PACKAGE = Path(__file__).resolve().parents[1]
 POLICY = "templates/task-input-policy.json"
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
 SWITCH_REFERENCE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
+DELIVERY_PACKAGE = re.compile(r"^workspace/docs/delivery/deliveries/([^/]+)/")
 CATALOG_NAME_MAPS = ("role_skills", "required_role_skills", "entries",
                      "required_references", "stack_reference_by_role", "read_only_entry_roles")
 
@@ -173,15 +174,46 @@ def switch_data(package: Path) -> dict[tuple[str, str], list[str]]:
         raise ValueError(f"process switch registry cannot be read: {exc}") from exc
 
 
-def switch_choices(project: Path | None, route: dict, package: Path) -> tuple[set, list[str]]:
+def task_deliveries(project: Path, delivery: str | None, inputs: list[str]) -> list[str]:
+    """Return the Deliveries a task runs inside: the one it names and every one
+    whose package holds a selected input."""
+    found = {delivery} if delivery else set()
+    for relative in inputs:
+        match = DELIVERY_PACKAGE.match(relative)
+        if match is None or match.group(1) in {".", ".."}:
+            continue
+        record = project / "workspace/docs/delivery/deliveries" / match.group(1) / "delivery.md"
+        if not record.is_file():
+            continue
+        from ba_compile import parse_frontmatter
+        props, _line, error = parse_frontmatter(record.read_text(encoding="utf-8"))
+        if error or not isinstance(props.get("id"), str) or not props["id"]:
+            raise ValueError(f"Delivery record cannot be read: {record.relative_to(project).as_posix()}")
+        found.add(props["id"])
+    return sorted(found)
+
+
+def switch_choices(project: Path | None, route: dict, package: Path,
+                   deliveries: list[str] | None = None) -> tuple[set, list[str]]:
     """Return the project's non-default switch values and its policy input.
 
-    Without a Process Policy both are empty, so the manifest is unchanged.
+    Without a Process Policy both are empty, so the manifest is unchanged. A
+    task inside a Delivery whose pin is still enforced binds only the policy
+    that Delivery pinned: one changed since refuses the derivation, as a switch
+    read of that Delivery does.
     """
     if project is None or not route["project_state"]:
         return set(), []
     import process_policy
     docs = project / "workspace" / "docs"
+    if deliveries:
+        snapshot, errors = process_policy.approved_snapshot(docs, package)
+        if errors:
+            raise ValueError("; ".join(errors))
+        for delivery in deliveries:
+            drift = process_policy.delivery_pin_findings(docs, delivery, snapshot)
+            if drift:
+                raise ValueError(f"{delivery}: " + "; ".join(drift))
     if not process_policy.path_for(docs).exists():
         return set(), []
     values, _snapshot = process_policy.effective_values(docs, package)
@@ -341,7 +373,8 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
 def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = None,
              inputs: list[str] | None = None, skills: list[str] | None = None,
              findings: str | None = None, base: str | None = None, epic: str | None = None,
-             expected_hash: str | None = None, package: Path = PACKAGE) -> dict:
+             expected_hash: str | None = None, package: Path = PACKAGE,
+             delivery: str | None = None) -> dict:
     policy = catalog(package)
     package = package.resolve()
     project = project.resolve() if project is not None else None
@@ -362,8 +395,12 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         selected_skills.update(policy["required_role_skills"][role])
     if route["project_state"]:
         selected_skills.add("obsidian-vault")
+    if delivery is not None and (project is None or not route["project_state"]):
+        raise ValueError("a Delivery belongs to a project task")
     try:
-        chosen, policy_inputs = switch_choices(project, route, package)
+        deliveries = task_deliveries(project, delivery, list(inputs or [])) \
+            if project is not None and route["project_state"] else []
+        chosen, policy_inputs = switch_choices(project, route, package, deliveries)
     except ValueError as exc:
         raise ValueError(f"process policy cannot bind switch instructions: {exc}") from exc
     value_data = switch_data(package)
@@ -533,12 +570,14 @@ def main(argv=None) -> int:
     parser.add_argument("--base")
     parser.add_argument("--epic", nargs="?", const="")
     parser.add_argument("--expected-hash")
+    parser.add_argument("--delivery")
     args = parser.parse_args(argv)
     try:
         result = ({"ok": True, "entries": sorted(catalog()["entries"])} if args.check_catalog else
                   manifest(entry=args.entry, role=args.role, mode=args.mode, project=args.project_root,
                            inputs=args.input, skills=args.skill, findings=args.findings, base=args.base,
-                           epic=args.epic, expected_hash=args.expected_hash))
+                           epic=args.epic, expected_hash=args.expected_hash,
+                           delivery=args.delivery))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError, KeyError, TypeError) as exc:

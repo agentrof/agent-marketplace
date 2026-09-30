@@ -451,6 +451,85 @@ class TaskInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "process policy cannot bind switch instructions"):
                 task_inputs.manifest(**reader, expected_hash=default["source_hash"])
 
+    def test_a_task_inside_a_pinned_delivery_refuses_a_policy_changed_since_the_pin(self):
+        import delivery_compile
+
+        lanes = "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            docs = root / "workspace/docs"
+            (docs / "maps").mkdir(parents=True)
+            make_approved_backlog(docs)
+            self.make_project(root)
+
+            def run(call, *args):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(call(*args), 0)
+
+            def policy(*argv):
+                run(process_policy.main, [argv[0], "--docs", str(docs), *argv[1:]])
+
+            dod = SimpleNamespace(docs=str(docs), title="Project", file=None)
+            run(delivery_compile.init_dod, dod)
+            run(delivery_compile.approve_dod, dod)
+            policy("init")
+            policy("approve")
+            run(delivery_compile.init_delivery, SimpleNamespace(
+                docs=str(docs), id=None, slug="auth", goal="Authenticate", outcome=None,
+                target_branch="main", story=["AUTH-01"]))
+            run(delivery_compile.approve_scope, SimpleNamespace(docs=str(docs), delivery="DLV-001"))
+            self.commit(root)
+            item = "workspace/docs/delivery/deliveries/dlv-001-auth/items/auth-01/item.md"
+            pinned = process_policy.path_for(docs).read_bytes()
+
+            def bound(**kwargs):
+                result = task_inputs.manifest(entry="deliver", role="backend-developer",
+                                              mode="create", project=root, **kwargs)
+                return set(result["required_reads"])
+
+            inside = ({"inputs": [item]}, {"delivery": "DLV-001"})
+            for kwargs in inside:
+                self.assertNotIn(lanes, bound(**kwargs))
+            policy("begin-revision")
+            policy("set", "--switch", "implementation_schedule", "--value", "parallel_lanes_v1")
+            policy("approve")
+            # The Delivery runs under the policy it pinned; its tasks never bind a later one.
+            for kwargs in inside:
+                with self.subTest(context=kwargs), self.assertRaisesRegex(
+                        ValueError, "process policy cannot bind switch instructions: DLV-001:"
+                        " Delivery process_policy_revision is stale"):
+                    bound(**kwargs)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = task_inputs.main(["--entry", "deliver", "--role", "backend-developer",
+                                         "--mode", "create", "--project-root", str(root),
+                                         "--delivery", "DLV-001"])
+            self.assertEqual(code, 1)
+            self.assertIn("Delivery process_policy_revision is stale", output.getvalue())
+            # A task outside any Delivery follows the project's current policy.
+            self.assertIn(lanes, bound())
+            # Restoring the pinned policy, or re-pinning through a new execution
+            # approval, lets the Delivery's tasks bind again.
+            current = process_policy.path_for(docs).read_bytes()
+            process_policy.path_for(docs).write_bytes(pinned)
+            for kwargs in inside:
+                self.assertNotIn(lanes, bound(**kwargs))
+            process_policy.path_for(docs).unlink()
+            for kwargs in inside:
+                with self.subTest(context=kwargs), self.assertRaisesRegex(
+                        ValueError, "Delivery pins a Process Policy that no longer exists"):
+                    bound(**kwargs)
+            # From the Delivery Review on the pin is the record of the policy it ran
+            # under, so a policy set for the next Delivery never strands it.
+            process_policy.path_for(docs).write_bytes(current)
+            path = docs / "delivery/deliveries/dlv-001-auth/delivery.md"
+            props, body = delivery_compile.split_note(path)
+            props["status"] = "review"
+            delivery_compile.atomic_text(path, delivery_compile.frontmatter(props, body))
+            self.assertIn(lanes, bound(inputs=[item]))
+            with self.assertRaisesRegex(ValueError, "Delivery not found: DLV-404"):
+                bound(delivery="DLV-404")
+
     def test_no_shipped_manifest_binds_a_switch_reference_without_a_policy(self):
         policy = task_inputs.catalog()
         for entry, route in policy["entries"].items():

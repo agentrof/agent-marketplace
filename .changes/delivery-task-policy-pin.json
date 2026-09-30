@@ -1,0 +1,6 @@
+{
+  "summary": "A task inside a Delivery now binds only the Process Policy that Delivery pinned. `task_inputs.py` accepts `--delivery DLV-###` and also treats a task whose inputs lie in a Delivery package as inside that Delivery; while the pin is enforced, before the Delivery Review, a policy changed, created or removed since the pin refuses the derivation with the same finding `process_policy.py value --delivery` reports, instead of binding the new policy's switch references. Restoring the pinned policy or a new execution approval, which re-pins it, clears the refusal. Tasks outside a Delivery and Deliveries from the Review on keep following the current policy.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -325,8 +325,7 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                         " omit the key",
                     ))
             reasoning = fm.get("reasoning", "")
-            reasoning_enum = set((tree.config or {}).get("reasoning_levels")
-                                 or AGENT_REASONING_ENUM)
+            reasoning_enum = declared_tiers(tree)
             if reasoning and reasoning not in reasoning_enum:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
@@ -2170,9 +2169,15 @@ def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
     let the enum silently fall back, so its shape is validated like any
     other policy artifact."""
     if tree.config is None:
+        try:
+            json.loads((tree.root / MODEL_CONFIG_RELPATH).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            problem = "model config is missing or not valid JSON"
+        else:
+            problem = ("model config must be a JSON object holding schema_version"
+                       " and reasoning_levels")
         findings.append(Finding(
-            "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape",
-            "model config is missing or not valid JSON",
+            "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape", problem,
             "restore tools/data/models.json; the agent reasoning enum"
             " lives there",
         ))
@@ -2937,8 +2942,10 @@ CHECKS = {
 def load_policy_json(root: Path, relpath: str) -> dict | None:
     try:
         config = json.loads((root / relpath).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None  # the owning *_config_shape check reports it
+    except (OSError, ValueError):
+        # ValueError covers JSONDecodeError and the UnicodeDecodeError of
+        # bytes that are not UTF-8; the owning *_config_shape check reports it.
+        return None
     return config if isinstance(config, dict) else None
 
 

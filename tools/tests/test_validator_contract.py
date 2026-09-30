@@ -195,6 +195,44 @@ class ValidatorContractTests(unittest.TestCase):
                 {(finding.path, finding.check) for finding in findings},
             )
 
+    def test_malformed_model_config_is_a_finding_not_a_crash(self):
+        missing = "model config is missing or not valid JSON"
+        shape = "reasoning_levels must be a non-empty kebab-case list"
+        cases = {
+            "missing file": (None, missing),
+            "invalid JSON": (b'{"schema_version": 1,', missing),
+            "not UTF-8": (b'{"schema_version": 1, "reasoning_levels": ["\xff"]}', missing),
+            "not an object": (b'["high", "medium"]', "model config must be a JSON object"),
+            "levels a number": (b'{"schema_version": 1, "reasoning_levels": 5}', shape),
+            "levels a boolean": (b'{"schema_version": 1, "reasoning_levels": true}', shape),
+            "levels a string": (b'{"schema_version": 1, "reasoning_levels": "high"}', shape),
+            "levels nested lists": (b'{"schema_version": 1, "reasoning_levels": [["high"]]}', shape),
+            "levels objects": (b'{"schema_version": 1, "reasoning_levels": [{"id": "high"}]}', shape),
+            "levels absent": (b'{"schema_version": 1}', shape),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            # An unrelated defect proves the run still reaches every later check.
+            (root / "plugins/software-engineering-team/cache.sqlite").write_bytes(b"fixture")
+            path = root / "tools/data/models.json"
+            for case, (content, message) in cases.items():
+                with self.subTest(case=case):
+                    if content is None:
+                        path.unlink()
+                    else:
+                        path.write_bytes(content)
+                    findings = validate.run(root)
+                    self.assertTrue(any(
+                        finding.path == "tools/data/models.json"
+                        and finding.check == "model_config_shape"
+                        and message in finding.message
+                        for finding in findings), findings)
+                    self.assertIn("packaged_state_files", {finding.check for finding in findings})
+                    # The agent tiers fall back to the builder's tiers instead of
+                    # being judged against a malformed list.
+                    self.assertEqual([finding for finding in findings
+                                      if finding.check == "frontmatter_shape"], [])
+
     def test_delivery_verification_policy_rejects_diagnostic_seal_and_weakened_scope(self):
         for mutate in (
                 lambda value: value["final_modes"].update(qa_engineer=["qa_diagnostic", "qa_final"]),

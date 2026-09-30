@@ -210,9 +210,13 @@ approval unless scope becomes ambiguous or a gate fails:
    non-draft state, intended issue linkage, required review approval, and every
    check green on each exact head SHA.
 2. Merge each selected feature PR using the repository's allowed merge method
-   and request remote branch deletion. Record the resulting `main` SHA and wait
-   for its required validation. Confirm only the linked issues expected to
-   close actually closed.
+   and request remote branch deletion. When `main` requires the merge queue
+   (see [Repository settings](#repository-settings)), add every selected PR
+   with `gh pr merge <number>` instead, never with `--admin`, which bypasses the
+   queue; the queue merges each one after its group passes the required
+   checks, and step 8 deletes the merged branches. Record the resulting `main`
+   SHA and wait for its required validation. Confirm only the linked issues
+   expected to close actually closed.
 3. Dispatch `Prepare stable release` on that verified `main`. Wait for its
    source validation, exact-SHA host gates and preparation job. Source
    validation verifies trusted exact-main evidence or runs fresh full tests.
@@ -242,7 +246,12 @@ approval unless scope becomes ambiguous or a gate fails:
    profile additionally requires successful main evidence and a closed proof
    that runtime bytes and modes are unchanged; otherwise full tests run.
    Merge it with a merge commit only when green; the explicit release
-   instruction authorizes this release PR merge.
+   instruction authorizes this release PR merge. Through the merge queue, add
+   it with `gh pr merge <number>` only while no other PR is queued; the queue
+   release gate removes it unless it is the first entry of its group, merged
+   by a two-parent merge commit of the `release/stable` head onto its
+   attested `main_source`. A removal because `main` advanced is a failed gate:
+   stop and report that the release must be prepared again.
 6. Wait for `Publish stable release`. It verifies the exact two-parent merge
    topology and release tree, verifies successful candidate test evidence or
    runs fresh full tests, and independently verifies matching checkout-host
@@ -289,13 +298,77 @@ If an invariant fails, stop at the current recoverable state and report the
 exact gate. Never repair a release by moving an existing tag, force-pushing
 `main` or `stable`, deleting an unmerged branch, or bypassing CI.
 
+## Repository settings
+
+Branch protection, rulesets and security settings belong to the repository
+owner. An agent reads them to check a gate and never changes them.
+
+### Merge queue
+
+With strict required status checks ("Require branches to be up to date before
+merging"), a release that selects several PRs merges them one at a time, and
+each remaining PR must merge `main`, regenerate distributions and pass its
+checks again. A merge queue instead tests each queued PR merged onto the
+latest `main` and the PRs ahead of it, and moves `main` to that exact tested
+commit.
+
+Every workflow that reports a required context (`check`, both
+`compatibility` contexts, `analyze-python` and `Claude Code and Codex
+lifecycle`) also runs on `merge_group`. A queue run selects impact coverage
+over the group's complete diff from its base. The `check` aggregate there also
+requires the queue release gate, `tools/release.py verify-merge-group`, which
+runs with the group base's trusted code. It refuses a group in which any entry
+merges the `release/stable` head or changes the attested release in
+`.release/stable.json` unless that entry is the group's first, a two-parent
+merge commit of the head onto its attested `main_source` with the head's
+exact tree, and the release still passes its deterministic replay. The merge
+`Publish stable release` verifies is therefore the only one the queue can
+land.
+
+Enable the queue only once these triggers are on `main`; a group built on an
+older `main` never reports its required checks. The owner then:
+
+1. Adds the merge queue to the `main protection` ruleset: Settings, Rules,
+   Rulesets, `main protection`, **Require merge queue**, with these values.
+
+   | Setting | Value | Reason |
+   | --- | --- | --- |
+   | Merge method | Merge commit | Release publication requires the two-parent merge |
+   | Build concurrency | 5 | Queued PRs start their checks in parallel |
+   | Minimum group size | 1 | A single ready PR never waits for others |
+   | Maximum group size | 5 | Bounds one merge to five PRs |
+   | Wait time to meet minimum group size | 5 minutes | Unused while the minimum is 1 |
+   | Require all queue entries to pass required checks | Enabled | Each PR's own merge commit on `main` passed every required check |
+   | Status check timeout | 60 minutes | Covers a full validation with queued runners |
+
+2. Turns off **Require branches to be up to date before merging** in the
+   classic branch protection rule for `main`, keeping its required contexts.
+   The queue replaces it; keeping both forces the branch updates the queue
+   exists to avoid.
+
+The equivalent API calls, run with the owner's credentials:
+
+```console
+ruleset="$(gh api 'repos/{owner}/{repo}/rulesets' --jq '.[] | select(.name == "main protection") | .id')"
+gh api "repos/{owner}/{repo}/rulesets/$ruleset" --jq '{rules: (.rules + [{type: "merge_queue", parameters: {merge_method: "MERGE", max_entries_to_build: 5, min_entries_to_merge: 1, max_entries_to_merge: 5, min_entries_to_merge_wait_minutes: 5, grouping_strategy: "ALLGREEN", check_response_timeout_minutes: 60}}])}' |
+  gh api -X PUT "repos/{owner}/{repo}/rulesets/$ruleset" --input -
+gh api -X PATCH 'repos/{owner}/{repo}/branches/main/protection/required_status_checks' -F strict=false
+gh api 'repos/{owner}/{repo}/rules/branches/main' --jq '.[] | select(.type == "merge_queue") | .parameters'
+```
+
+Two queued PRs that both regenerate the distribution provenance in
+`dist/*/.agent-marketplace-package.json` conflict. The queue removes the later
+one, which then needs `main` merged in, regenerated distributions and green
+checks before it is queued again. PRs that leave `dist/` untouched merge
+without that cycle.
+
 ## Impact and residual risk
 
 | Surface | Effect | Residual risk and control |
 | --- | --- | --- |
 | Issue intake | No background consumption or model/API invocation | Maintainer must explicitly select each issue; live issue evidence prevents stale assumptions |
 | Agent behavior | One short instruction expands to a repository-defined procedure | Scope and irreversible transitions remain bound to explicit user authority |
-| CI | One stable-name aggregate requires changeset/release policy, fresh static gates and complete selected test coverage or verified equivalent evidence | Every expected report and test ID is checked; missing, failed, cancelled or unjustified skipped work fails closed |
+| CI | One stable-name aggregate requires changeset/release policy or, for a merge queue group, the queue release gate, plus fresh static gates and complete selected test coverage or verified equivalent evidence | Every expected report and test ID is checked; missing, failed, cancelled or unjustified skipped work fails closed |
 | Hosts and operating systems | Every PR runs the required Claude Code and Codex lifecycle; policy selects complete Linux, macOS and native Windows partitions | Unknown/shared changes run full coverage; native Windows regressions cannot be replaced by emulation or unexpected skips |
 | Releases | One explicit command can perform several related mutations | Selected-set rule, deterministic release replay, public-host smoke, exact leases, resumable reconciliation and no force repair |
 | Branch cleanup | Deletes merged refs after a published release | Only named, bounded branches proven merged are eligible; ambiguity or drift stops cleanup |

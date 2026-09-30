@@ -3495,7 +3495,8 @@ def project_max_parallel(root: Path, expected_hash: str | None = None) -> int:
     value = receipt.get("max_parallel")
     observed_hash = governed_governance_hash(root)
     if expected_hash is not None and expected_hash != observed_hash:
-        raise RuntimeError("Delivery Governance differs from the governed Fence baseline")
+        raise RuntimeError("DELIVERY_FENCE_GOVERNANCE: the Fence does not carry the approved Governance; "
+                           "apply it with apply-governance before Item activation")
     return value
 
 

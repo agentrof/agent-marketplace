@@ -242,7 +242,10 @@ input set. Independent epic reviewers may run in parallel against unchanged
 inputs. Wait for every epic reviewer to return before any writer action.
 Recompute each manifest with `--expected-hash <source_hash>` before accepting
 its findings for the writer. Changed inputs require a fresh affected review;
-never use a stale manifest to justify omitting a dependency.
+never use a stale manifest to justify omitting a dependency. An epic
+manifest's hash binds the notes it names and the story identities and
+dependency edges that reach them, so another epic's writer finishing its own
+notes leaves it fresh; the root manifest's hash binds every backlog note.
 
 Readers audit source membership against the manifest's expected relation sets.
 Empty draft review fields and placeholder prose await the writer and do not

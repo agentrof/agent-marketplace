@@ -91,11 +91,13 @@ OPERATION_GOLDEN = {
 
 # Taken on frozen inputs at program tip 60497bf, before story_size_budget.
 # The check digests also match v0.6.0; its manifests lack the check block
-# that the review-panel change added on this branch.
+# that the review-panel change added on this branch. The epic manifest's
+# digest was retaken when its structure_hash came to bind the notes it reads
+# and the identities and edges that reach them (#340); nothing else moved.
 BACKLOG_GOLDEN = {
     "check": "sha256:2f97d3071160f3ea4d75fba6b954b0d895156f1e1ab0fd310309d2620330c385",
     "check_approved": "sha256:2f97d3071160f3ea4d75fba6b954b0d895156f1e1ab0fd310309d2620330c385",
-    "epic_manifest": "sha256:05c762760dd8915272c6aae26865d1a3e9edbb8b7da28c7bad47eace6fa028dd",
+    "epic_manifest": "sha256:62d1898826fed3aa5ab980a5430b003ffc126a08b85ae2c082c2bc85c279ffce",
     "root_manifest": "sha256:1a241a2cb7dc052d494515fc11339337740f5d202cd13efb88543fe785927030",
 }
 

@@ -2494,7 +2494,7 @@ def refuse_cancelled_delivery(root: Path, directory: Path, integration_oid: str,
     A cancellation publishes the cancelled status on the Integration alone, so a
     checkout's own delivery.md keeps the status it had and cannot say whether the
     Delivery was cancelled. A cancellation is final: its Review reaches the target
-    through its PR, and nothing publishes, revises or claims the Delivery again.
+    through its PR, and nothing publishes, revises, refreshes or claims the Delivery again.
     """
     from delivery_compile import split_note
     props, _body = split_remote_note(root, integration_oid, rel_posix(root, directory / "delivery.md"), split_note)
@@ -2661,6 +2661,7 @@ def refresh_target(project_root: Path, delivery_id: str,
     require_fence_record(fence_message)
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: target-refresh requires an open Fence")
+    refuse_cancelled_delivery(root, directory, integration_oid, "refresh-target")
     previous_target = trailer(fence_message, "Target")
     if not previous_target or not OID_RE.fullmatch(previous_target):
         raise RuntimeError("DELIVERY_FENCE_CORRUPT: Fence has no valid target baseline")

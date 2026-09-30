@@ -353,19 +353,15 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
     def test_review_tasks_bind_the_loop_only_at_blocking_delta_with_either_panel_value(self):
         states = (
             ("single_reader", "current", ()),
-            ("single_reader", "blocking_delta",
-             (("init",), ("set", "--switch", "review_loop", "--value", "blocking_delta"),
-              ("approve",))),
-            ("lens_panel", "blocking_delta",
-             (("begin-revision",), ("set", "--switch", "review_panels", "--value", "lens_panel"),
-              ("approve",))),
-            ("lens_panel", "current",
-             (("begin-revision",), ("set", "--switch", "review_loop", "--default"),
-              ("approve",))),
+            ("single_reader", "blocking_delta", ("review_loop", "--value", "blocking_delta")),
+            ("lens_panel", "blocking_delta", ("review_panels", "--value", "lens_panel")),
+            ("lens_panel", "current", ("review_loop", "--default")),
         )
-        for panels, loop, steps in states:
-            for step in steps:
-                policy(self.docs, *step)
+        for panels, loop, change in states:
+            if change:
+                policy(self.docs, "begin-revision" if process_policy.path_for(self.docs).exists() else "init")
+                policy(self.docs, "set", "--switch", *change)
+                policy(self.docs, "approve")
             manifests = self.manifests()
             for task in REVIEW_TASKS:
                 expected = set()

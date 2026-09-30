@@ -290,6 +290,12 @@ def _quiet(call, *args):
     return code, output.getvalue()
 
 
+def _policy(process_policy, docs: Path, *argv: str) -> None:
+    code, text = _quiet(process_policy.main, [argv[0], "--docs", str(docs), *argv[1:]])
+    if code:
+        raise AssertionError(text)
+
+
 def _input_harness(root: Path, raw_output: bool = False) -> dict:
     """Build the Delivery run's inputs with ``root``'s fixture and Operation compiler."""
     sys.path[:0] = [str(root / PLUGIN / "scripts"), str(root / "tools/tests")]
@@ -352,11 +358,9 @@ def _delivery_harness(root: Path, raw_output: bool = False, policy: bool = False
             import process_policy
 
             _freeze_clocks(process_policy)
-            for argv in (["init"], ["set", "--switch", "review_panels", "--value", "lens_panel"],
-                         ["approve"]):
-                code, text = _quiet(process_policy.main, [argv[0], "--docs", str(docs), *argv[1:]])
-                if code:
-                    raise AssertionError(text)
+            _policy(process_policy, docs, "init")
+            _policy(process_policy, docs, "set", "--switch", "review_panels", "--value", "lens_panel")
+            _policy(process_policy, docs, "approve")
         init_repository(project, initial_branch="main")
         for args in (("add", "--all"), ("commit", "-q", "-m", "fixture")):
             subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
@@ -468,11 +472,9 @@ def _backlog_harness(root: Path, raw_output: bool = False) -> dict:
                 import process_policy
 
                 _freeze_clocks(process_policy)
-                for argv in (["init"], ["set", "--switch", "review_panels", "--value", "lens_panel"],
-                             ["approve"]):
-                    code, text = _quiet(process_policy.main, [argv[0], "--docs", str(docs), *argv[1:]])
-                    if code:
-                        raise AssertionError(text)
+                _policy(process_policy, docs, "init")
+                _policy(process_policy, docs, "set", "--switch", "review_panels", "--value", "lens_panel")
+                _policy(process_policy, docs, "approve")
             for name, flags in (("check", []), ("check_approved", ["--approved"])):
                 code, text = _quiet(backlog_compile.main,
                                     ["check", "--docs", str(docs), "--json", *flags])

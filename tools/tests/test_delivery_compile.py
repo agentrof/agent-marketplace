@@ -749,8 +749,9 @@ class DeliveryCompilerTests(unittest.TestCase):
         """#345: gate A checks the plan before the scope is approved; the revision it approves may stay open."""
         self.approve_verification_contract()
         self.approve_dod()
-        for argv in (("init",), ("set", "--switch", "owner_gates", "--value", "two_fixed_gates"), ("approve",)):
-            self.policy(*argv)
+        self.policy("init")
+        self.policy("set", "--switch", "owner_gates", "--value", "two_fixed_gates")
+        self.policy("approve")
         init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
                                       "goal": "Authenticate", "outcome": None,
                                       "target_branch": "main", "story": ["AUTH-01"]})

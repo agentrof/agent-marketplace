@@ -236,10 +236,12 @@ class TaskInputTests(unittest.TestCase):
                 with self.subTest(entry=entry, role=role, policy=False):
                     self.assertFalse({planning, execution} & bound(entry, role))
             docs = root / "workspace/docs"
-            for argv in (["init"], ["set", "--switch", "implementation_schedule", "--value", "parallel_lanes_v1"],
-                         ["approve"]):
+            def policy(*argv):
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+            policy("init")
+            policy("set", "--switch", "implementation_schedule", "--value", "parallel_lanes_v1")
+            policy("approve")
             for entry, role, reference in tasks:
                 with self.subTest(entry=entry, role=role, policy=True):
                     self.assertEqual({planning, execution} & bound(entry, role), {reference})
@@ -399,10 +401,12 @@ class TaskInputTests(unittest.TestCase):
             plain = task_inputs.manifest(entry="configure", role="devops-engineer", mode="review")
             self.assertNotIn("skill-content/challenge-review/SKILL.md", plain["required_reads"])
             docs = root / "workspace/docs"
-            for argv in (["init"], ["set", "--switch", "review_panels", "--value", "lens_panel"],
-                         ["approve"]):
+            def policy(*argv):
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+            policy("init")
+            policy("set", "--switch", "review_panels", "--value", "lens_panel")
+            policy("approve")
             for entry, role, skills in tasks:
                 with self.subTest(entry=entry, role=role, policy=True):
                     result = task_inputs.manifest(entry=entry, role=role, mode="review",

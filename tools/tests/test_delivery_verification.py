@@ -720,9 +720,12 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
     def review_loop(self, value="blocking_delta"):
         import process_policy
         docs = self.root / "workspace/docs"
-        for argv in (["init"], ["set", "--switch", "review_loop", "--value", value], ["approve"]):
+        def policy(*argv):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+        policy("init")
+        policy("set", "--switch", "review_loop", "--value", value)
+        policy("approve")
         self.commit()
 
     def approve_evidence(self):

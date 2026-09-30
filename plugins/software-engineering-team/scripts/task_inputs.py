@@ -335,12 +335,16 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     project_files = set(inputs or [])
     if findings:
         project_files.add(findings)
+    read_only = (role in policy["read_only_roles"]
+                 or role in policy["read_only_entry_roles"].get(entry, [])
+                 or mode in {"review", "consume"})
     closure = None
     if epic is not None:
         if entry != "backlog-plan" or project is None:
             raise ValueError("epic scope belongs to a project backlog task")
         import backlog_review_inputs
-        closure = backlog_review_inputs.manifest(project / "workspace/docs", epic=epic or None)
+        closure = backlog_review_inputs.manifest(project / "workspace/docs", epic=epic or None,
+                                                 writer=not read_only)
         project_files.update("workspace/docs/" + path for path in closure["paths"])
     if project is None and project_files:
         raise ValueError("project root is required for project inputs")
@@ -364,9 +368,6 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
                         method_bindings.setdefault(skill, []).append(relative)
         if technology - set(method_bindings):
             raise ValueError("technology methods require selected committed accepted Solution decision inputs")
-    read_only = (role in policy["read_only_roles"]
-                 or role in policy["read_only_entry_roles"].get(entry, [])
-                 or mode in {"review", "consume"})
     scope = write_scope(project, set(inputs or []) | ({"workspace/docs/" + path for path in closure["paths"]}
                                                     if closure else set()),
                         role, route, read_only, closure, package)

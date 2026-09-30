@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import shutil
 import subprocess
@@ -9,12 +11,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 sys.path.insert(0, str(ROOT / "tools/tests"))
+import backlog_compile
 import task_inputs
+from backlog_fixture import make_approved_backlog
 from git_fixture import init_repository
 
 
@@ -110,6 +115,36 @@ class TaskInputTests(unittest.TestCase):
                     reader = task_inputs.manifest(**kwargs, role=role)
                     self.assertEqual(reader["write_scope"]["status"], "read_only")
                     self.assertEqual(reader["write_scope"]["allowed_write_area"], [])
+
+    def test_product_owner_scope_covers_a_story_right_after_stub_story(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            docs = root / "workspace/docs"
+            (docs / "maps").mkdir(parents=True)
+            (root / "workspace/config.json").write_text(json.dumps({
+                "schema_version": 2, "team_id": "software-engineering-team",
+                "output_language": "English", "terminology_language": "English",
+            }), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                make_approved_backlog(docs)
+                self.commit(root)
+                self.assertEqual(backlog_compile.stub_story(SimpleNamespace(
+                    docs=str(docs), epic="delivery-fixture", slug="job-worker", id="AUTH-02",
+                    title="Job worker", scope=None, work_kind="technical", criterion_ref=[],
+                    experience_ref=[], evidence_ref=["[[solution-design/decisions/fixture-api|Fixture API]]"],
+                    uses_design=[], constrained_by=[], implements=[])), 0)
+            folder = "workspace/docs/backlog/epics/delivery-fixture/stories/job-worker/"
+            kwargs = dict(entry="backlog-plan", project=root, epic="EP-001")
+            writer = task_inputs.manifest(**kwargs, role="product-owner", mode="revise")
+            self.assertEqual(writer["write_scope"]["status"], "resolved")
+            area = [row["path"] for row in writer["write_scope"]["allowed_write_area"]]
+            self.assertIn(folder + "story.md", area)
+            self.assertIn(folder + "test-plan.md", area)
+            self.assertTrue(writer["backlog_scope"]["check"]["scaffold_findings"])
+            for role, mode in (("backlog-reviewer", "review"), ("product-owner", "review")):
+                with self.assertRaisesRegex(ValueError, "untouched"):
+                    task_inputs.manifest(**kwargs, role=role, mode=mode)
 
     def test_item_claims_bind_one_item_and_role_without_granting_runtime_or_vault_writes(self):
         with tempfile.TemporaryDirectory() as raw:

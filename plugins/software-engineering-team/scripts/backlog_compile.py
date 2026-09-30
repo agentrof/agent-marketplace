@@ -157,6 +157,7 @@ SCENARIO_STUBS = {
     "When": "the user performs the story action",
     "Then": "the expected outcome is observable",
 }
+COVERAGE_REASON_STUB = "TODO: assess this coverage class."
 
 
 class ApprovalFailure(RuntimeError):
@@ -1283,8 +1284,11 @@ def ref_identity(value: str) -> tuple[str, str, str] | None:
 
 def scenario_findings(docs: Path, body: str, story_id: str,
                       criteria: list[str], evidence: list[str],
-                      work_kind: str, path: str) -> tuple[list[str], list[str]]:
+                      work_kind: str, path: str,
+                      scaffolds: list[str] | None = None) -> tuple[list[str], list[str]]:
+    """Validate a test plan; ``scaffolds`` receives untouched stub findings."""
     errors: list[str] = []
+    stubs = errors if scaffolds is None else scaffolds
     for candidate in re.findall(
         r"(?im)^##\s+(\S+-ts-\S+)\s*$", body
     ):
@@ -1321,7 +1325,7 @@ def scenario_findings(docs: Path, body: str, story_id: str,
         for field, sentinel in SCENARIO_STUBS.items():
             if normalized_text(fields.get(field, "")) == normalized_text(
                     sentinel):
-                errors.append(
+                stubs.append(
                     f"{path} scenario {scenario_id} has an untouched "
                     f"{field} stub"
                 )
@@ -1358,17 +1362,20 @@ def scenario_findings(docs: Path, body: str, story_id: str,
     for source in (criteria if work_kind == "feature" else criteria + evidence):
         if ref_identity(source) not in covered:
             errors.append(f"{path} does not map planning source {source} to a scenario")
-    errors.extend(scenario_coverage_findings(body, ids, path))
+    errors.extend(scenario_coverage_findings(body, ids, path, scaffolds))
     return errors, ids
 
 
 def scenario_coverage_findings(body: str, scenario_ids: list[str],
-                               path: str) -> list[str]:
+                               path: str,
+                               scaffolds: list[str] | None = None) -> list[str]:
     rows, errors = structured_table(
         section(body, "Coverage Classes"),
         ("class", "disposition", "scenario_refs", "reason"),
         path, "Coverage Classes",
     )
+    stubs = errors if scaffolds is None else scaffolds
+    stub_rows = False
     by_class: dict[str, dict[str, str]] = {}
     known_scenarios = set(scenario_ids)
     classified_scenarios: set[str] = set()
@@ -1400,13 +1407,18 @@ def scenario_coverage_findings(body: str, scenario_ids: list[str],
             if refs:
                 errors.append(f"{path} not_applicable class {class_name or number} must not cite scenarios")
             if not meaningful_text(row["reason"]):
-                errors.append(f"{path} not_applicable class {class_name or number} needs a concrete reason")
+                stub = normalized_text(row["reason"]) == normalized_text(COVERAGE_REASON_STUB)
+                stub_rows = stub_rows or stub
+                (stubs if stub else errors).append(
+                    f"{path} not_applicable class {class_name or number} needs a concrete reason")
     missing = sorted(set(SCENARIO_COVERAGE_CLASSES) - set(by_class))
     if missing:
         errors.append(f"{path} is missing coverage classes: {', '.join(missing)}")
     unclassified = sorted(known_scenarios - classified_scenarios)
     if unclassified:
-        errors.append(
+        # The stub table classifies nothing; while one of its rows is left,
+        # classifying the scenarios is still pending writer work.
+        (stubs if stub_rows else errors).append(
             f"{path} scenarios are not classified by Coverage Classes: "
             + ", ".join(unclassified)
         )
@@ -1500,12 +1512,18 @@ def round_number(path: Path, props: dict, suffix: str, errors: list[str]) -> int
 @experience_validation_session()
 def collect(docs: Path, *, historical_inputs: bool = False,
             review_inputs: bool = False) -> tuple[dict, list[str]]:
-    """Validate sources; input discovery may precede authored review findings."""
+    """Validate sources; input discovery may precede authored review findings.
+
+    ``record["scaffold_findings"]`` names the returned errors that exist only
+    because a placeholder the stub verbs write is still untouched.
+    """
     contract = backlog_contract()
     root = docs / "backlog"
     errors: list[str] = []
+    scaffolds: list[str] = []
     record = {"backlog": None, "backlog_reviews": [], "epics": [],
-              "stories": [], "test_plans": [], "epic_reviews": []}
+              "stories": [], "test_plans": [], "epic_reviews": [],
+              "scaffold_findings": []}
     root_note = root / "backlog.md"
     if not root_note.is_file():
         return record, ["backlog/backlog.md is missing"]
@@ -1577,7 +1595,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
             errors.append(f"{epic_rel} needs a goal")
         elif normalized_text(epic_props.get("goal")) == normalized_text(
                 EPIC_GOAL_STUB):
-            errors.append(f"{epic_rel} has an untouched goal stub")
+            scaffolds.append(f"{epic_rel} has an untouched goal stub")
         if "assignee" in epic_props:
             errors.append(f"{epic_rel} must not contain assignee")
         epic = {"path": epic_rel, "folder": epic_dir.name, "id": epic_id,
@@ -1645,7 +1663,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                     "scope", "priority_reason"
                 } else section(story_body, key)
                 if normalized_text(actual) == normalized_text(sentinel):
-                    errors.append(
+                    scaffolds.append(
                         f"{story_rel} has an untouched {key} stub"
                     )
 
@@ -1665,7 +1683,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
             responsibilities = section(story_body, "Implementation Responsibilities")
             if normalized_text(RESPONSIBILITY_STUB) in normalized_text(
                     responsibilities):
-                errors.append(
+                scaffolds.append(
                     f"{story_rel} has an untouched implementation "
                     "responsibility stub"
                 )
@@ -1789,7 +1807,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                     errors.append(f"{test_rel} must verify exactly {story_rel}")
                 scenario_errors, ids = scenario_findings(
                     docs, test_body, story_id, criteria, evidence,
-                    work_kind, test_rel)
+                    work_kind, test_rel, scaffolds)
                 errors.extend(scenario_errors)
             story = {
                 "path": story_rel,
@@ -1852,7 +1870,8 @@ def collect(docs: Path, *, historical_inputs: bool = False,
     errors.extend(global_criterion_coverage_findings(record, docs))
     if historical_inputs and {"input_contract", "absent_input_stages"}.intersection(record["backlog"]["props"]):
         errors.extend(backlog_input_policy.historical_absence_findings(docs, record))
-    return record, sorted(set(errors))
+    record["scaffold_findings"] = sorted(set(scaffolds))
+    return record, sorted(set(errors) | set(scaffolds))
 
 
 def latest(items: list[dict]) -> dict | None:
@@ -2459,8 +2478,7 @@ def coverage_class_table() -> str:
     ]
     for class_name in SCENARIO_COVERAGE_CLASSES:
         lines.append(
-            f"| {class_name} | not_applicable | - | "
-            "TODO: assess this coverage class. |"
+            f"| {class_name} | not_applicable | - | {COVERAGE_REASON_STUB} |"
         )
     return "\n".join(lines)
 

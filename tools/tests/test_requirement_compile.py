@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import subprocess
 import sys
@@ -14,10 +16,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "plugins" / "software-engineering-team" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(ROOT / "tools" / "tests"))
 
 import requirement_compile  # noqa: E402
 import requirement_route  # noqa: E402
 import vault_check  # noqa: E402
+from git_fixture import init_repository  # noqa: E402
 
 
 class RequirementCompilerTests(unittest.TestCase):
@@ -138,6 +142,40 @@ class RequirementCompilerTests(unittest.TestCase):
             routed = requirement_route.route(self.docs, "REQ-001")
         self.assertEqual(routed["action"], "repair")
         self.assertEqual(routed["reason"], repair["reason"])
+
+    def test_route_tolerates_only_the_rendered_relation_projection(self):
+        path = self.complete_draft()
+        props, body = requirement_compile.split_note(path)
+        for stage in requirement_compile.STAGES:
+            body = body.replace(
+                f"| {stage} | required |  | The {stage} output constrains this change. |",
+                f"| {stage} | not_applicable |  | The {stage} output is untouched by this callback change. |")
+        path.write_text(requirement_compile.render_note(props, body), encoding="utf-8")
+        requirement_compile.approve_requirement(path)
+        init_repository(self.root)
+        for command in (("config", "user.email", "test@example.com"), ("config", "user.name", "Test User"),
+                        ("add", "."), ("commit", "-qm", "Approved Requirement")):
+            subprocess.run(["git", *command], cwd=self.root, check=True)
+        self.assertEqual(requirement_route.route(self.docs, "REQ-001")["action"], "backlog")
+        story = self.docs / "backlog/epics/access/stories/saml-callback/story.md"
+        story.parent.mkdir(parents=True)
+        story.write_text(
+            "---\ntype: story\ntitle: SAML callback\nstatus: planned\nid: ST-001\nimplements:\n"
+            '  - "[[requirements/req-001-saml-access|REQ-001]]"\ntags:\n  - doc/story\n'
+            "  - status/planned\naliases:\n  - ST-001\n---\n\n# SAML callback\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(vault_check.main(["render-relations", "--vault", str(self.docs)]), 0)
+        self.assertIn("- Implemented by: [[backlog/epics/access/stories/saml-callback/story|",
+                      path.read_text(encoding="utf-8"))
+        # Draft withdraw and discard keep deciding on the exact local bytes.
+        self.assertFalse(requirement_route.is_committed(path))
+        routed = requirement_route.route(self.docs, "REQ-001")
+        self.assertEqual(routed["action"], "backlog", routed.get("reason"))
+        # Navigation is outside the semantic hash but is no generated projection.
+        path.write_text(path.read_text(encoding="utf-8") + "- [[home|Home]]\n", encoding="utf-8")
+        routed = requirement_route.route(self.docs, "REQ-001")
+        self.assertEqual((routed["action"], routed.get("reason")),
+                         ("requirement", "Requirement is not committed"))
 
     def test_discard_removes_only_an_uncommitted_draft(self):
         path = self.complete_draft()

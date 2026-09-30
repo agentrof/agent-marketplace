@@ -12,6 +12,12 @@ plan and every Operation or Governance change it needs together in gate A, whose
 approval is also the go for Item start, as
 `skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
 defines.
+Switch `delivery_path`: at `light_when_eligible`, an eligible Delivery's Item
+topology comes from a topology-only pass inside `/delivery-plan` and is
+approved in its one owner gate, while `/execution-plan DLV-###` stays the path
+for a plan revision and for a Delivery that left the light path, as
+`skill-content/execution-plan/references/switch-delivery_path-light_when_eligible.md`
+defines.
 
 New Items explicitly declare `verification_schedule: parallel_snapshot_v1`.
 Implementation roles retain their approved order; independent Code Review

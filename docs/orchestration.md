@@ -130,6 +130,18 @@ decided by default, and every gate groups its questions in calls of at most
 four, recommended option first.
 `deliver/references/switch-owner_gates-two_fixed_gates.md` defines the gates.
 
+How many planning steps and owner gates a Delivery takes is process switch
+`delivery_path`. At `standard`, the default, `/delivery-plan` plans the scope
+and `/execution-plan DLV-###` the execution, each with its own gate. At
+`light_when_eligible`, a Delivery the compiler finds eligible, one small Story
+with no architecture or Operation impact, gets a topology-only pass of the
+Software Architect inside `/delivery-plan` and one owner gate; the compiler
+approvals and the Git coordinator verbs then run in order with their checks
+unchanged, and `delivery_compile.py light-path-check` repeats the eligibility
+check before each of them. `delivery-plan/references/switch-delivery_path-light_when_eligible.md`
+and `execution-plan/references/switch-delivery_path-light_when_eligible.md`
+define the path.
+
 Requirement Flow is a linear, user-gated sequence. Each required stage commits
 its approved documents before the next stage begins. The backlog compiler is
 the only machine that derives backlog indexes. All durable changes are

@@ -39,3 +39,11 @@ selected Story's size measures and over-budget flags as `story_size`, which
 the proposal shows read-only, as
 `skill-content/product-planning/references/switch-story_size_budget-propose_split.md`
 defines.
+
+Switch `delivery_path`: at `light_when_eligible`, `init` also reports whether
+the selection may take the light path, and a Delivery the compiler finds
+eligible plans its scope and its Item topology in this flow with one owner
+gate, then runs scope approval, reservation, execution approval, publication
+and claims in order, as
+`skill-content/delivery-plan/references/switch-delivery_path-light_when_eligible.md`
+defines; every other Delivery follows this flow unchanged.

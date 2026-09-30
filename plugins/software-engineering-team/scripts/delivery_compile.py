@@ -98,6 +98,26 @@ USER_DECISION_ID_RE = re.compile(r"^D-[0-9]{2,}$")
 QUEUED_DECISION_CLASS = "queued"
 # The owner's questions are logged from the scope proposal through gate B.
 DECISION_LOG_STATUSES = ("scope_proposed", "scope_approved", "execution_approved", "active", "review")
+DELIVERY_PATH_SWITCH = "delivery_path"
+LIGHT_WHEN_ELIGIBLE = "light_when_eligible"
+# What a Delivery meets to plan its scope and its execution in one step with one
+# owner gate. topology_unchanged applies once scope approval recorded the light path.
+LIGHT_PATH_CONDITIONS = ("single_story", "no_architect_role", "architecture_not_applicable",
+                         "operation_contracts_unchanged", "dependencies_met",
+                         "within_story_size_budget", "topology_unchanged")
+# The light path runs from the proposal until its Items are claimed.
+LIGHT_PATH_STATUSES = ("scope_proposed", "scope_approved", "execution_approved")
+# init writes this before any Software Architect has stated a reason.
+NO_ARCHITECTURE_REASON = "No architecture delta is currently required."
+# What a topology pass authors on an Item; the light path's record binds them with its body.
+LIGHT_TOPOLOGY_FIELDS = ("execution_after", "waits_for", "path_claims", "contract_claims",
+                         "runtime_required", "architecture_impact", "architecture_components",
+                         "architecture_record_kinds", "architecture_reason", "role_sequence",
+                         "verification_schedule", "implementation_schedule", "lane_scopes",
+                         "lane_seams")
+DELIVERY_PATH_LINE_RE = re.compile(r"^Delivery path: (light|standard)\b")
+PATH_RECEIPT_RE = re.compile(r"\b(verification|environment) revision ([1-9][0-9]*) (sha256:[0-9a-f]{64})\b")
+PATH_TOPOLOGY_RE = re.compile(r"\btopology (sha256:[0-9a-f]{64})\b")
 
 
 atomic_text = atomic_file.replace_text
@@ -719,6 +739,9 @@ def init_delivery(args) -> int:
         if not errors:
             errors = handoff_binding_findings(
                 docs, {story: sources[story]["story_path"] for story in stories})
+        # Under switch delivery_path, the proposal reports whether it may take the light path.
+        light = (light_path_state(docs, {story: sources[story] for story in stories}, None, budget)
+                 if not errors and policy_delivery_path(docs) == LIGHT_WHEN_ELIGIBLE else None)
     if errors:
         delivery_result.write_line(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
         return 2
@@ -758,7 +781,7 @@ def init_delivery(args) -> int:
                       "path_claims": [], "contract_claims": [],
                       "runtime_required": False,
                       "architecture_impact": "not_applicable", "architecture_components": [],
-                      "architecture_record_kinds": [], "architecture_reason": "No architecture delta is currently required.",
+                      "architecture_record_kinds": [], "architecture_reason": NO_ARCHITECTURE_REASON,
                       "role_sequence": execution_roles(source),
                       "verification_schedule": verification_policy()["new_schedule"],
                       **new_item_lane_fields(source, schedule),
@@ -771,6 +794,10 @@ def init_delivery(args) -> int:
     if budget is not None:
         result["story_size"] = backlog_compile.story_size_block(
             budget, {story: sources[story]["story_size"] for story in stories})
+    if light is not None:
+        result["delivery_path"] = {"value": LIGHT_WHEN_ELIGIBLE, "eligible": light["eligible"],
+                                   "failed": light["failed"], "pending": light["pending"],
+                                   "receipts": light["receipts"]}
     print(json.dumps(result, indent=2))
     return 0
 
@@ -1137,6 +1164,10 @@ def approve_scope(args) -> int:
         print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
     # delivery_findings above already refused a draft or invalid policy.
     props = with_process_policy_pin(props, process_policy.approved_snapshot(docs)[0])
+    # Under switch delivery_path, the scope hash binds the path the Delivery takes.
+    path_record = delivery_path_record(docs, root, body, "approve-scope")
+    if path_record is not None:
+        body = path_record[0]
     props["status"] = "scope_approved"
     props["scope_hash"] = content_hash(props, body, exclude=MUTABLE | {"scope_hash"})
     props["approved_at_utc"] = utc_now()
@@ -1144,7 +1175,10 @@ def approve_scope(args) -> int:
     props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + ["status/scope-approved"]
     atomic_text(path, frontmatter(props, body))
     render_map(docs)
-    print(json.dumps({"ok": True, "id": props["id"], "scope_hash": props["scope_hash"]}, indent=2)); return 0
+    result = {"ok": True, "id": props["id"], "scope_hash": props["scope_hash"]}
+    if path_record is not None:
+        result["delivery_path"] = path_record[1]
+    print(json.dumps(result, indent=2)); return 0
 
 
 def _string_list(value: object, label: str, errors: list[str]) -> list[str]:
@@ -1737,6 +1771,20 @@ def approved_pull_request_checks(docs: Path) -> dict:
                                  f"Delivery PR only on green checks, so {provider} must report them on it"}
 
 
+def execution_approval_findings(docs: Path, root: Path, delivery_id: str, reopen: list[str] | tuple = (),
+                                remote: str = "origin") -> tuple[tuple, list[str]]:
+    """Resolve what execution approval binds, with everything it refuses in the plan."""
+    item_records, sources, backlog_snapshot, dod, source_errors = delivery_source_snapshots(docs, root)
+    policy, policy_errors = process_policy.approved_snapshot(docs)
+    errors = source_errors + policy_errors + reopen_findings(list(reopen), item_records)
+    if not errors:
+        errors = execution_plan_findings(root, sources, docs, reopen)
+    pull_request_checks = approved_pull_request_checks(docs)
+    if pull_request_checks["source"] != "external":
+        errors += pull_request_workflow_findings(docs, delivery_id, remote)
+    return (item_records, sources, backlog_snapshot, dod, policy, pull_request_checks), sorted(set(errors))
+
+
 def approve_execution(args) -> int:
     docs = docs_root(args.docs)
     # This verb writes the Item Operation bindings and refreshes the approved source
@@ -1756,17 +1804,16 @@ def approve_execution(args) -> int:
     items = sorted(root.glob("items/*/item.md"))
     if not items:
         print(json.dumps({"ok": False, "errors": ["Execution Plan requires at least one Item"]}, indent=2)); return 1
-    item_records, sources, backlog_snapshot, dod, source_errors = delivery_source_snapshots(docs, root)
     reopen = sorted(set(str(story) for story in (getattr(args, "reopen", None) or [])))
-    policy, policy_errors = process_policy.approved_snapshot(docs)
-    plan_errors = source_errors + policy_errors + reopen_findings(reopen, item_records)
-    if not plan_errors:
-        plan_errors = execution_plan_findings(root, sources, docs, reopen)
-    pull_request_checks = approved_pull_request_checks(docs)
-    if pull_request_checks["source"] != "external":
-        plan_errors += pull_request_workflow_findings(docs, args.delivery, getattr(args, "remote", "origin"))
+    remote = getattr(args, "remote", "origin")
+    inputs, plan_errors = execution_approval_findings(docs, root, args.delivery, reopen, remote)
+    _item_records, sources, backlog_snapshot, dod, policy, pull_request_checks = inputs
     if plan_errors:
-        print(json.dumps({"ok": False, "errors": sorted(set(plan_errors))}, indent=2)); return 1
+        print(json.dumps({"ok": False, "errors": plan_errors}, indent=2)); return 1
+    # Under switch delivery_path, execution approval keeps or leaves the light path record.
+    path_record = delivery_path_record(docs, root, body, "approve-execution", remote)
+    if path_record is not None:
+        body = path_record[0]
     refreshed_sources: list[str] = []
     rebound: list[str] = []
     item_ids = []
@@ -1870,9 +1917,263 @@ def approve_execution(args) -> int:
     props["source_hash"] = content_hash(props, body)
     props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + ["status/execution-approved"]
     atomic_text(path, frontmatter(props, body))
-    print(json.dumps({"ok": True, "id": props["id"], "plan_hash": props["plan_hash"], "items": item_ids,
-                      "refreshed_sources": refreshed_sources, "refreshed_delivery_pins": refreshed_delivery_pins,
-                      "rebound": rebound, "pull_request_checks": pull_request_checks}, indent=2)); return 0
+    result = {"ok": True, "id": props["id"], "plan_hash": props["plan_hash"], "items": item_ids,
+              "refreshed_sources": refreshed_sources, "refreshed_delivery_pins": refreshed_delivery_pins,
+              "rebound": rebound, "pull_request_checks": pull_request_checks}
+    if path_record is not None:
+        result["delivery_path"] = path_record[1]
+    print(json.dumps(result, indent=2)); return 0
+
+
+def policy_delivery_path(docs: Path) -> str | None:
+    """Return the delivery_path value the current Process Policy selects, or None when it cannot be read."""
+    try:
+        values, _snapshot = process_policy.effective_values(docs)
+    except ValueError:
+        return None
+    return values.get(DELIVERY_PATH_SWITCH, {}).get("value")
+
+
+def reused_contract_receipts(docs: Path, runtime: bool) -> tuple[list[dict], list[str]]:
+    """Return the Operation contract receipts a light plan reuses, and why it cannot reuse them.
+
+    The light path revises no contract: no revision may be open, and the
+    Verification Contract, with the Environment Contract for a runtime Item,
+    must be approved and current.
+    """
+    receipts: list[dict] = []
+    problems: list[str] = []
+    for kind in ("verification", "environment"):
+        title = f"{kind.title()} Contract"
+        needed = kind == "verification" or runtime
+        if not operation_compile.contract_path(docs, kind).is_file():
+            if needed:
+                problems.append(f"the {title} is missing")
+            continue
+        receipt, errors = operation_compile.check_contract(docs, kind)
+        if receipt.get("status") == "draft":
+            problems.append(f"{title} revision {receipt.get('revision')} is open")
+        elif needed and not receipt.get("current"):
+            problems.append(f"the {title} is not approved and current: " + ", ".join(errors))
+        elif needed:
+            receipts.append({"kind": kind, "revision": receipt["revision"],
+                             "source_hash": receipt["source_hash"]})
+    return receipts, problems
+
+
+def receipt_text(receipts: list[dict]) -> str:
+    return " and ".join(f"{receipt['kind']} revision {receipt['revision']} {receipt['source_hash']}"
+                        for receipt in receipts) or "no contract"
+
+
+def waited_for_stories(sources: dict[str, dict], items: dict[str, tuple[dict, str]] | None) -> list[str]:
+    """Every Story outside the selection that the selection waits for: approved dependencies and waits_for."""
+    waited = {story for source in sources.values() for story in source["depends_on"]}
+    for props, _body in (items or {}).values():
+        declared = props.get("waits_for")
+        if isinstance(declared, list):
+            waited.update(story for story in declared if isinstance(story, str))
+    return sorted(waited - set(sources))
+
+
+def unmet_dependency_findings(docs: Path, stories: list[str], remote: str) -> list[str]:
+    """Name each Story that no Delivery the target branch holds merged records integrated.
+
+    The target's remote-tracking ref answers, as current as the last fetch,
+    else HEAD; the proof is the one start-item accepts from a merged package.
+    """
+    if not stories:
+        return []
+    checkout = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), None)
+    if checkout is None:
+        return [f"{story} cannot be proven delivered outside a Git checkout" for story in stories]
+    from delivery_git import merged_story_owners, resolve_target_branch
+    try:
+        ref = f"refs/remotes/{remote}/{resolve_target_branch(checkout, remote)}"
+        if subprocess.run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
+                          capture_output=True, check=False).returncode:
+            ref = "HEAD"
+        owners = merged_story_owners(checkout, ref, stories)
+    except RuntimeError as exc:
+        return [f"{story} cannot be proven delivered: {exc}" for story in stories]
+    return [f"{story} is recorded integrated by no Delivery that the target branch holds merged"
+            for story in stories if story not in owners]
+
+
+def light_topology_hash(items: dict[str, tuple[dict, str]]) -> str:
+    """Hash what a topology pass authors: each Item's topology fields and its body."""
+    value = {story: {"fields": {key: props.get(key) for key in LIGHT_TOPOLOGY_FIELDS},
+                     "body": without_generated_relations(body).rstrip() + "\n"}
+             for story, (props, body) in sorted(items.items())}
+    return "sha256:" + hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                                  separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def light_path_state(docs: Path, sources: dict[str, dict], items: dict[str, tuple[dict, str]] | None,
+                     budget: dict | None, recorded: dict | None = None, remote: str = "origin") -> dict:
+    """Evaluate every light-path condition on a selection and, once it exists, its Item topology.
+
+    Before the topology pass there are no Items to read, so
+    architecture_not_applicable is pending. After scope approval recorded the
+    light path, the plan must still bind the Item topology and the contract
+    receipts recorded there.
+    """
+    failed: list[dict] = []
+
+    def fail(condition: str, finding: str) -> None:
+        failed.append({"condition": condition, "finding": " ".join(finding.split())})
+
+    stories = sorted(sources)
+    if len(stories) != 1:
+        fail("single_story", f"the selection holds {len(stories)} Stories, and the light path plans exactly one")
+    for story in stories:
+        if "software_architect" in {sources[story]["owner_role"], *sources[story]["supporting_roles"]}:
+            fail("no_architect_role", f"{story} lists software_architect among its roles")
+    for story in stories if items is not None else []:
+        props = items.get(story, ({}, ""))[0]
+        impact = props.get("architecture_impact")
+        reason = str(props.get("architecture_reason", "")).strip()
+        if impact != "not_applicable":
+            fail("architecture_not_applicable", f"{story} declares architecture_impact {impact or 'nothing'}")
+        elif reason in {"", NO_ARCHITECTURE_REASON}:
+            fail("architecture_not_applicable", f"{story} declares no architecture impact without the"
+                 " Software Architect's reason, since the reason init writes is a placeholder")
+    runtime = any(props.get("runtime_required") is True for props, _body in (items or {}).values())
+    receipts, problems = reused_contract_receipts(docs, runtime)
+    if recorded is not None and not problems and receipt_text(receipts) != receipt_text(recorded["receipts"]):
+        problems.append(f"the plan binds {receipt_text(receipts)}, not"
+                        f" {receipt_text(recorded['receipts'])} that scope approval recorded")
+    for problem in problems:
+        fail("operation_contracts_unchanged", problem)
+    for finding in unmet_dependency_findings(docs, waited_for_stories(sources, items), remote):
+        fail("dependencies_met", finding)
+    if budget is None or not budget.get("limits"):
+        fail("within_story_size_budget", "switch story_size_budget sets no size limit, and without an"
+             " owner-set limit no Story counts as small")
+    else:
+        for story in stories:
+            entry = sources[story].get("story_size")
+            if entry is None:
+                fail("within_story_size_budget", f"{story} has no size measures")
+                continue
+            for name in entry["over_budget"]:
+                measure = entry["measures"][name]
+                fail("within_story_size_budget",
+                     f"{story} {name} is {measure['value']}, over its limit of {measure['limit']}")
+    topology = light_topology_hash(items) if items is not None else None
+    if recorded is not None and topology != recorded["topology"]:
+        fail("topology_unchanged", "the Item topology differs from the one scope approval recorded")
+    return {"eligible": not failed, "failed": failed,
+            "pending": [] if items is not None else ["architecture_not_applicable"],
+            "receipts": receipts, "topology_hash": topology}
+
+
+def light_path_evaluation(docs: Path, root: Path, recorded: dict | None, remote: str = "origin") -> dict:
+    """Evaluate the light-path conditions on one Delivery's Items and approved Stories."""
+    items: dict[str, tuple[dict, str]] = {}
+    for item_path in sorted(root.glob("items/*/item.md")):
+        props, body = split_note(item_path)
+        items[str(props.get("story_id", ""))] = (props, body)
+    budget = backlog_compile.story_size_budget(docs)
+    sources, _snapshot, errors = approved_backlog_sources(docs, sorted(items), historical_inputs=True,
+                                                           story_size=budget)
+    if errors:
+        return {"eligible": False, "pending": [], "receipts": [], "topology_hash": None,
+                "failed": [{"condition": DELIVERY_PATH_SWITCH, "finding": " ".join(
+                    ("the approved Stories cannot be read: " + ", ".join(errors)).split())}]}
+    return light_path_state(docs, sources, items, budget, recorded, remote)
+
+
+def recorded_delivery_path(body: str) -> dict | None:
+    """Read the Delivery path line that approval keeps in User Decisions, or None without one."""
+    for line in section_bodies(body).get("User Decisions", "").splitlines():
+        match = DELIVERY_PATH_LINE_RE.match(line.strip())
+        if match:
+            topology = PATH_TOPOLOGY_RE.search(line)
+            return {"path": match.group(1), "line": line.strip(),
+                    "topology": topology.group(1) if topology else None,
+                    "receipts": [{"kind": kind, "revision": int(revision), "source_hash": digest}
+                                 for kind, revision, digest in PATH_RECEIPT_RE.findall(line)]}
+    return None
+
+
+def with_delivery_path_line(body: str, line: str) -> str:
+    """Put the one Delivery path line first in User Decisions and keep every other line as written."""
+    kept = [row for row in section_bodies(body).get("User Decisions", "").splitlines()
+            if not DELIVERY_PATH_LINE_RE.match(row.strip())]
+    rest = "\n".join(kept).strip()
+    return replace_section(body, "User Decisions", line + ("\n\n" + rest if rest else ""))
+
+
+def delivery_path_record(docs: Path, root: Path, body: str, step: str,
+                         remote: str = "origin") -> tuple[str, dict] | None:
+    """Record in User Decisions the path an approval finds, or None when switch delivery_path takes no part.
+
+    Scope approval records light when every condition holds, with the Item
+    topology and the contract receipts it approves, and standard otherwise.
+    Execution approval keeps a light record only while every condition holds
+    and the plan binds that topology and those receipts, and records standard
+    for a scope approved without one. A standard record never turns light.
+    """
+    value = policy_delivery_path(docs)
+    recorded = recorded_delivery_path(body)
+    if value != LIGHT_WHEN_ELIGIBLE and recorded is None:
+        return None
+    if recorded is not None and recorded["path"] == "standard":
+        return body, {"path": "standard", "failed": [], "line": recorded["line"]}
+    if value != LIGHT_WHEN_ELIGIBLE:
+        state = {"eligible": False, "failed": [{"condition": DELIVERY_PATH_SWITCH, "finding":
+                 f"the Process Policy that {step} pins sets it to {value or 'an unreadable value'}"}]}
+    elif step == "approve-execution" and recorded is None:
+        state = {"eligible": False, "failed": [{"condition": DELIVERY_PATH_SWITCH, "finding":
+                 "scope approval recorded no light path"}]}
+    else:
+        state = light_path_evaluation(docs, root, recorded, remote)
+    if state["eligible"]:
+        line = recorded["line"] if recorded is not None else (
+            f"Delivery path: light. {step} approved the scope with the Item topology"
+            f" {state['topology_hash']} and the reused contract receipts {receipt_text(state['receipts'])}.")
+    else:
+        reason = "the Delivery left the light path" if recorded is not None else "the light path does not hold"
+        line = (f"Delivery path: standard. {step} recorded that {reason}: "
+                + "; ".join(f"{failure['condition']}: {failure['finding']}" for failure in state["failed"]) + ".")
+    return (with_delivery_path_line(body, line),
+            {"path": "light" if state["eligible"] else "standard", "failed": state["failed"], "line": line})
+
+
+def light_path_check(args) -> int:
+    """Repeat the light-path conditions and the plan's approval checks before a light step."""
+    docs = docs_root(args.docs)
+    root = find_delivery(docs, args.delivery)
+
+    def refuse(error: str) -> int:
+        print(json.dumps({"ok": False, "errors": [error]}, indent=2)); return 1
+
+    if root is None:
+        return refuse("Delivery not found")
+    try:
+        value = delivery_switch_value(docs, args.delivery, DELIVERY_PATH_SWITCH)
+    except ValueError as exc:
+        return refuse(str(exc))
+    if value != LIGHT_WHEN_ELIGIBLE:
+        return refuse(f"{args.delivery} runs switch {DELIVERY_PATH_SWITCH} at {value}; only"
+                      f" {LIGHT_WHEN_ELIGIBLE} plans a Delivery on the light path")
+    props, body = split_note(root / "delivery.md")
+    status = props.get("status")
+    if status not in LIGHT_PATH_STATUSES:
+        return refuse(f"{args.delivery} is {status}; the light path ends once its Items are claimed")
+    recorded = recorded_delivery_path(body)
+    light = recorded if recorded is not None and recorded["path"] == "light" else None
+    with stage_package.candidate_session():
+        state = light_path_evaluation(docs, root, light, args.remote)
+        _inputs, plan_findings = execution_approval_findings(docs, root, args.delivery, remote=args.remote)
+    path = "light" if state["eligible"] and (recorded is None or light is not None) else "standard"
+    result = {"ok": path == "light" and not plan_findings, "delivery": args.delivery, "status": status,
+              "value": value, "path": path, "recorded": recorded["path"] if recorded else None,
+              "eligible": state["eligible"], "failed": state["failed"], "receipts": state["receipts"],
+              "topology_hash": state["topology_hash"], "plan_findings": plan_findings}
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["ok"] else 1
 
 
 EXECUTION_PLANNING = "execution_planning"
@@ -2352,6 +2653,11 @@ def main(argv=None) -> int:
         "--remote", default="origin",
         help="the Git remote whose local remote-tracking refs hold the target and Integration branches")
     sub.add_parser("render").set_defaults(func=render)
+    light = sub.add_parser("light-path-check")
+    light.add_argument("--delivery", required=True)
+    light.add_argument("--remote", default="origin",
+                       help="the Git remote whose local remote-tracking refs hold the target branch")
+    light.set_defaults(func=light_path_check)
     bundle_cmd = sub.add_parser("bundle-manifest")
     bundle_cmd.add_argument("--delivery", required=True); bundle_cmd.add_argument("--expected-hash")
     bundle_cmd.set_defaults(func=bundle)

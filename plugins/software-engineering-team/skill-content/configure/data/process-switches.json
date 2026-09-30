@@ -1,6 +1,27 @@
 {
   "schema_version": 1,
   "switches": {
+    "delivery_path": {
+      "summary": "Whether a Delivery of one small Story that reuses the current Operation contracts and changes no architecture plans its scope and its execution in one step with one owner gate, or every Delivery plans them in two steps with two owner gates.",
+      "issue": 328,
+      "flows": ["delivery-planning", "execution-planning"],
+      "values": [
+        {
+          "id": "standard",
+          "tradeoffs": "Every Delivery plans its scope in /delivery-plan and its execution in /execution-plan DLV-###, each step with its own owner gate. Today's behaviour and the baseline the light path is measured against: in one measured project, its first Delivery took 78 min from reservation to its first published plan, and its second Delivery's two gates were 6 h apart."
+        },
+        {
+          "id": "light_when_eligible",
+          "tradeoffs": "A Delivery the compiler finds eligible, exactly one Story with no software_architect role, no architecture impact, reused current Operation contracts, met dependencies and a size within the owner's story_size_budget limits, plans its scope and its Item topology in one step and one owner gate; approve-scope, reserve-delivery, approve-execution, publish-execution-plan and claim-items then run in order with their checks and refusals unchanged, and every other Delivery takes the standard path. One gate and one planning pass less for a small Story, while reservation and publication run without a pause between them, a Story that needs architecture work can slip through until code review, and with no story_size_budget limit set no Story is eligible."
+        }
+      ],
+      "default": "standard",
+      "metric": "Per light-path Delivery: time from the proposal's start to the plan's publication, owner gates, model passes on that path, and fallbacks to the standard path with the condition or refused verb that caused each, against the standard path's 2 owner gates and 2 planning passes. Guards: an Item reopened or re-planned because the light path missed architecture or Operation impact, code review conformance findings about path claims, and plan revisions after publication.",
+      "promotion": {
+        "unit": "At least 3 light-path Deliveries.",
+        "threshold": "A median proposal-to-publication time of at most 30 min with exactly one owner gate per light-path Delivery, and zero reopens or re-plans caused by missed architecture or Operation impact, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "execution_planning": {
       "summary": "How execution planning writes and reviews the facts an execution plan needs: each Operation contract written and reviewed on its own, or every fact written once in the document that owns it and the revised contracts reviewed together with the Item topology in one pass.",
       "issue": 324,

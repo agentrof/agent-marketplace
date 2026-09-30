@@ -2869,6 +2869,45 @@ def check_switch_references(plugin: Path, switches: dict, err) -> None:
                         f" switch {name!r}", "name the reference in the owning flow step it replaces")
 
 
+VARIANT_TOKEN_RE = re.compile(r"`([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`")
+
+
+def check_switch_variant_references(tree: Tree, findings: list[Finding]) -> None:
+    """Every generated agent variant a switch reference routes work to is
+    declared by that reference's switch value, so every build ships it."""
+    for plugin in plugin_dirs(tree):
+        try:
+            switches = json.loads(read_text(plugin / PROCESS_SWITCHES_RELPATH))["switches"]
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            continue  # process_switches reports a missing or broken registry
+        if not isinstance(switches, dict):
+            continue
+        agents = {path.stem for path in agent_files(plugin)}
+        for skill in skill_dirs(plugin):
+            for reference in sorted((skill / "references").glob("switch-*.md")):
+                match = SWITCH_REFERENCE_RE.match(reference.name)
+                if match is None:
+                    continue  # process_switches reports the name
+                name, value = match.groups()
+                spec = switches.get(name)
+                variants = spec.get("agent_variants") if isinstance(spec, dict) else None
+                variant = variants.get(value) if isinstance(variants, dict) else None
+                listed = variant.get("agents") if isinstance(variant, dict) else None
+                declared = {f"{agent}-{variant.get('suffix')}" for agent in listed
+                            if isinstance(agent, str)} if isinstance(listed, list) else set()
+                text = read_text(reference)
+                for token in sorted(set(VARIANT_TOKEN_RE.findall(text)) - agents - declared):
+                    if not any(token.startswith(f"{agent}-") for agent in agents):
+                        continue
+                    line = text[:text.index(f"`{token}`")].count("\n") + 1
+                    findings.append(Finding(
+                        "error", rel(tree, reference), line, "switch_variant_references",
+                        f"switch reference names agent variant {token!r}, which switch"
+                        f" {name!r} at {value!r} does not declare",
+                        "declare the variant in the value's agent_variants, or route the"
+                        " work to a declared role"))
+
+
 STORY_SIZE_MEASURES_RELPATH = "skill-content/product-planning/data/story-size-measures.json"
 BACKLOG_COMPILER_RELPATH = "scripts/backlog_compile.py"
 
@@ -3609,6 +3648,7 @@ CHECKS = {
     "host_cli_versions": check_host_cli_versions,
     "review_panels": check_review_panels,
     "process_switches": check_process_switches,
+    "switch_variant_references": check_switch_variant_references,
     "story_size_measures": check_story_size_measures,
     "fact_ownership": check_fact_ownership,
     "fact_ownership_anchors": check_fact_ownership_anchors,

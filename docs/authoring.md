@@ -379,9 +379,10 @@ The switch's `agent_variants` make every build ship `product-owner-mechanical`,
 `qa-engineer-mechanical`, `devops-engineer-mechanical` and
 `solution-architect-mechanical` on the `mechanical` tier; each keeps its
 writer's body, boundaries and identity, so writer ownership is unchanged. The
-validator requires the switch to declare these variants and rejects one for a
-read-only reviewer or challenger, so every review, re-check and calibration
-keeps its tier under both values.
+validator requires a switch value to declare every variant its switch
+reference names, so a build never stops shipping a variant a pass spawns, and
+rejects a mechanical variant for a read-only reviewer or challenger, so every
+review, re-check and calibration keeps its tier under both values.
 
 What a variant changes depends on the host's tables. On Claude the
 `mechanical` tier, Sonnet at effort `high`, is a lower model only for

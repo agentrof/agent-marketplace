@@ -245,6 +245,22 @@ and the Integration does not hold it. Publication leaves out a differing local
 copy that is not approved and current, and its result names that copy as a
 `not_carried` file observation.
 
+Publication reads its leases when it runs, so they stop a concurrent publisher
+but not a checkout that still holds an earlier approval. Each execution
+approval therefore lists in `superseded_plan_approvals` the `source_hash` of
+every earlier execution approval it revises, newest first; approval is offline
+and cannot tell which of them was published, so it keeps them all. When the
+Integration already holds a different published plan, `publish-execution-plan`
+publishes only an approval that lists the Integration's. It publishes a pinned
+Operation contract only when the Integration's copy is not approved at a later
+revision or as another approval of the same revision, because a sealed Item
+keeps its bindings and so the plan hash cannot show an older contract.
+Otherwise it refuses with `DELIVERY_PLAN_SUPERSEDED`, names the Integration's
+plan hash and contract revisions, and moves no ref: take the Delivery package
+and the Operation contracts from the Integration, then revise inside
+`begin-plan-revision`. The first publication and a republication of the same
+plan are unchanged.
+
 Closure requires successful provider checks, so execution approval also
 carries the pull request check precondition that
 `plugins/software-engineering-team/flows/execution-planning.md` states and

@@ -1,0 +1,6 @@
+{
+  "summary": "`delivery_git.py publish-execution-plan` now refuses with the newly declared `DELIVERY_PLAN_SUPERSEDED`, moving no ref, when a checkout that still holds an earlier approval would publish it over a newer one, where it published and reported `ok`. Execution approval lists the `source_hash` of every earlier approval it revises in the new `execution-plan.md` property `superseded_plan_approvals`. When the Integration holds a different published plan, publication takes only an approval that lists the Integration's; a pinned Operation contract is refused when the Integration's copy is approved at a later revision or as another approval of the same revision, which also covers a sealed Item whose plan hash stays the same. The message names the Integration's plan hash and contract revisions and the remedy: take the Delivery package and the Operation contracts from the Integration, then revise inside `begin-plan-revision`. The first publication and a republication of the same plan are unchanged. An approval made before this change lists nothing, so one that differs from the plan the Integration holds is refused after the upgrade. Setup's project refresh declares the new property in `.obsidian/types.json`.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

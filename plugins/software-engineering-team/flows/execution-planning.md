@@ -23,7 +23,13 @@ and approve an unsuitable Operation Contract before starting the Item.
 
 Approval is offline. `publish-execution-plan` is the only later network writer;
 it creates no Item worktree, slot or product-code branch. Item claims begin only
-after the published plan is verified remotely.
+after the published plan is verified remotely. Each approval lists the earlier
+approvals it supersedes. Publication refuses with `DELIVERY_PLAN_SUPERSEDED` a
+plan that differs from the Integration's when its approval does not list the
+Integration's, and a pinned Operation contract that is neither the
+Integration's approved revision nor a later one; take the Delivery package and
+the Operation contracts from the Integration, then revise inside
+`begin-plan-revision`.
 
 Every executable Item binds the current approved Verification Contract during
 approval. Set `runtime_required: true` only when the Item genuinely needs a

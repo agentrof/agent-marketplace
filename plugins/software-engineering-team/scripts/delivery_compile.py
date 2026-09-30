@@ -1182,6 +1182,25 @@ def reopen_findings(reopen: list[str], item_records: list[tuple[Path, dict]]) ->
     return errors
 
 
+def superseded_plan_approvals(root: Path, delivery_props: dict) -> list[str]:
+    """Name every execution approval a new approval of this Delivery supersedes, newest first.
+
+    An approval is named by the source_hash of its execution plan. Approval is
+    offline, so it cannot tell whether the approval it replaces was published:
+    it lists that approval together with everything that one superseded, and
+    publication accepts any of them as the plan it revises. A plan hash cannot
+    name an approval, because a re-approval that changes nothing keeps it and a
+    revision that undoes another brings an earlier one back.
+    """
+    plan = root / "execution-plan.md"
+    if delivery_props.get("status") != "execution_approved" or not plan.is_file():
+        return []
+    previous, _body = split_note(plan)
+    approval, earlier = previous.get("source_hash"), previous.get("superseded_plan_approvals")
+    return ([approval] if isinstance(approval, str) and approval else []) + (
+        [str(value) for value in earlier] if isinstance(earlier, list) else [])
+
+
 # merge-pr merges a Delivery PR only on green provider checks, so execution
 # approval requires a GitHub workflow that the Delivery PR runs: a `.yml` or
 # `.yaml` file directly in `.github/workflows/`, the only place GitHub reads.
@@ -1489,6 +1508,9 @@ def approve_execution(args) -> int:
         "Navigation": link(path.relative_to(docs).as_posix(), props["id"]),
     })
     plan_props["plan_hash"] = content_hash(plan_props, plan_body, exclude=MUTABLE | {"plan_hash"})
+    # Outside the plan hash, so a re-approval that changes nothing keeps it; the
+    # source_hash below covers the lineage and so names this approval.
+    plan_props["superseded_plan_approvals"] = superseded_plan_approvals(root, props)
     plan_props["approved_at_utc"] = utc_now()
     plan_props["source_hash"] = content_hash(plan_props, plan_body)
     atomic_text(plan_path, frontmatter(plan_props, plan_body))

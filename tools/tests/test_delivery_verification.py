@@ -738,6 +738,10 @@ print(sys.argv[1])
                 with command_ends(failure), self.assertRaises(type(failure)):
                     self.lane("devops_engineer", "environment", "up")
                 self.assert_environment_free()
+        with mock.patch.object(verification.atomic_file, "replace_text", side_effect=OSError("disk full")), \
+                self.assertRaisesRegex(OSError, "disk full"):
+            self.lane("backend_developer", "test")
+        self.assert_environment_free()
         for refused in (("backend_developer", "environment", "seed", "unknown"),
                         ("qa_engineer", "test"), ("backend_developer", "test", "up")):
             with self.subTest(refused=refused), self.assertRaises(RuntimeError):

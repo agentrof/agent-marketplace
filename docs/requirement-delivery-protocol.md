@@ -369,10 +369,10 @@ report, and the coordinator alone commits the combined change before the
 freeze. Environment verbs and verification commands of the Item run one at a
 time under its environment lock: `delivery_verification.py lane-run` runs a
 lane's approved full test command or environment verb in the Item worktree,
-and the readers' `run` and `environment` take the same lock. While another
-command holds it they refuse with `DELIVERY_ENVIRONMENT_BUSY` and name the
-holder from its owner record. The lock ends with its holder's process, so a
-holder that died frees it, and the next command reports it as interrupted.
+and QA's `run` and `environment` take the same lock. While another command
+holds it they refuse with `DELIVERY_ENVIRONMENT_BUSY` and name the holder from
+its owner record. The lock ends with its holder's process, so a holder that
+died frees it, and the next command reports it as interrupted.
 After a host loss, `delivery_git.py lane-status` reports each lane's changed
 paths inside its approved scope against the Item worktree's committed head,
 and `takeover-item` refuses to discard uncommitted lane work: it names each

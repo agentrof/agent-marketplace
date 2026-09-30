@@ -18,11 +18,14 @@ approval and Requirement-flow gates keep their own gates.
    The Item topology, the Operation contract and Governance revisions the plan
    needs and their reviews run as their flows describe, up to their approval.
 2. When the plan and every revision it needs pass their checks
-   (`delivery_compile.py check`, `operation_compile.py check`,
-   `delivery_governance.py check`), present gate A as one choice gate: the
-   Delivery scope, the execution plan with its topology, claims, role sequence
-   and schedules, every Operation revision and Governance change the plan
-   needs, the decision log so far and every queued question.
+   (`delivery_compile.py check` and `check-plan`, `operation_compile.py
+   check`, `delivery_governance.py check`), present gate A as one choice gate:
+   the Delivery scope, the execution plan with its topology, claims, role
+   sequence and schedules, every Operation revision and Governance change the
+   plan needs, the decision log so far and every queued question.
+   `check-plan` reports every refusal execution approval would raise on the
+   plan; an open Operation revision that passes its own check is listed under
+   `pending_operation_revisions` instead, since gate A approves it first.
 3. Group the questions in calls of at most four, with the recommended option
    first and the tradeoffs in the option descriptions.
 4. Record every answer, then carry out what gate A approved without asking

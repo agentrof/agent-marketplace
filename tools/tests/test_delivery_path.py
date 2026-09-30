@@ -493,6 +493,18 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual((code, report["path"], report["failed"], report["plan_findings"]),
                          (0, "light", [], []), report)
 
+    def test_the_light_gate_reports_the_findings_check_plan_reports(self):
+        docs = self.project()
+        set_policy(docs, LIGHT, LIMITS)
+        self.propose(docs)
+        author_topology(docs, path_claims=["../src/auth.py"])
+        code, report = self.check(docs)
+        checked_code, checked = run(delivery_compile.check_plan, type("Args", (), {
+            "docs": str(docs), "delivery": DELIVERY, "reopen": [], "remote": "origin"}))
+        self.assertEqual((code, checked_code, report["failed"]), (1, 1, []))
+        self.assertEqual(report["plan_findings"], checked["errors"])
+        self.assertIn("AUTH-01 path_claim is not normalized: ../src/auth.py", checked["errors"])
+
     def test_an_open_or_not_current_operation_contract_is_not_eligible(self):
         docs = self.project()
         set_policy(docs, LIGHT, LIMITS)

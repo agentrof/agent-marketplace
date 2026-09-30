@@ -383,6 +383,14 @@ validator requires the switch to declare these variants and rejects one for a
 read-only reviewer or challenger, so every review, re-check and calibration
 keeps its tier under both values.
 
+What a variant changes depends on the host's tables. On Claude the
+`mechanical` tier, Sonnet at effort `high`, is a lower model only for
+`solution-architect`, which runs Opus; `product-owner`, `qa-engineer` and
+`devops-engineer` already run Sonnet at the session's effort, so their
+variant is lower only when the session runs above effort `high`. On Codex
+every variant moves its writer from Sol to Luna. These values are
+placeholders until the tier's frozen-task A/B sets them.
+
 ## Story size budget
 
 `plugins/software-engineering-team/skill-content/product-planning/data/story-size-measures.json`

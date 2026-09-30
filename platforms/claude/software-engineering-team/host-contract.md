@@ -79,6 +79,13 @@
   Only switch `mechanical_pass_tier` at `mechanical` spawns them, for a pass
   that applies the fixes a review names; the writers themselves keep their
   own tier, and no review, re-check or calibration runs on a variant.
+  A variant runs its pass in a fresh context at that setting. It is a lower
+  model only for `solution-architect`, which runs Opus; `product-owner`,
+  `qa-engineer` and `devops-engineer` already run Sonnet at the session's
+  effort, so their variant is lower only when the session runs above effort
+  `high` and runs a higher effort at the `medium` default of Opus 5.5 and
+  Sonnet 5.5. These values are placeholders until the tier's frozen-task A/B
+  sets them.
 - Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
   is planned inside `/delivery-plan` with one owner gate, presented through
   `AskUserQuestion`, and handed over to `/deliver DLV-###`; `/execution-plan

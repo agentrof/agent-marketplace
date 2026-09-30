@@ -1023,7 +1023,7 @@ class ExecutionProfileTests(unittest.TestCase):
     def test_writers_keep_their_tier_beside_their_mechanical_variants(self):
         settings = {host: setting_lines(self.root, host, "mechanical")
                     for host in build_distributions.HOSTS}
-        suffix = " Lower-tier variant for mechanical passes that apply only the fixes a review verdict names."
+        suffix = " Mechanical-tier variant for passes that apply only the fixes a review verdict names."
         tiers = self.tiers()
         for variant, agent in sorted(MECHANICAL_VARIANTS.items()):
             self.assertNotEqual(tiers[agent], "mechanical")

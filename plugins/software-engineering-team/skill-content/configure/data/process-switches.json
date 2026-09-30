@@ -138,7 +138,7 @@
         },
         {
           "id": "mechanical",
-          "tradeoffs": "A writer pass whose findings each name their exact fix runs on the owning writer's -mechanical variant, a fresh agent on the lower mechanical tier, and render, stamp and check steps run as direct entry commands with no role pass. Shorter fix passes, while the fresh variant re-reads what a resumed writer held and a lower tier may misapply a fix, which the unchanged re-check catches at the cost of a round."
+          "tradeoffs": "A writer pass whose findings each name their exact fix runs on the owning writer's -mechanical variant, a fresh agent on the mechanical tier, and render, stamp and check steps run as direct entry commands with no role pass. The host contract states per host what a variant changes against its writer's own tier: a lower model class, or only a fixed effort that is lower only when the session runs above it. The tier's values are placeholders until the frozen-task A/B sets them. Shorter fix passes where the tier is lower, while the fresh variant re-reads what a resumed writer held and a lower tier may misapply a fix, which the unchanged re-check catches at the cost of a round."
         }
       ],
       "default": "role_tier",
@@ -146,7 +146,7 @@
         "mechanical": {
           "suffix": "mechanical",
           "tier": "mechanical",
-          "description": "Lower-tier variant for mechanical passes that apply only the fixes a review verdict names.",
+          "description": "Mechanical-tier variant for passes that apply only the fixes a review verdict names.",
           "agents": ["devops-engineer", "product-owner", "qa-engineer", "solution-architect"]
         }
       },

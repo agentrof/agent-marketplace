@@ -1,0 +1,6 @@
+{
+  "summary": "`delivery_git.py publish-execution-plan` now refuses with the newly declared `DELIVERY_OPERATION_UNCARRIED` when an Operation Contract that no Item pins is approved and current locally but the Integration does not hold that revision, where it published without it and reported `ok`. The message names the contract and both routes: record the revision on the target branch and run `refresh-target`, or pin it with `runtime_required: true` on an Item that needs a live service environment. A differing local copy that is not approved and current still publishes and is named in `operation_not_carried`, which the result envelope reports as a `file` observation with the value `not_carried`; identical copies publish as before.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

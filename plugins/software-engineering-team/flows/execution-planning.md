@@ -28,8 +28,10 @@ after the published plan is verified remotely.
 Every executable Item binds the current approved Verification Contract during
 approval. Set `runtime_required: true` only when the Item genuinely needs a
 live service environment; that Item then also binds the approved Environment
-Contract. A later hash drift blocks start, resume, reopen and takeover until a
-new execution plan is approved. Re-approval refreshes every Item's Story and
+Contract. An Operation revision that no Item pins reaches the Delivery through
+the target branch; record it there, then run `refresh-target`. A later hash
+drift blocks start, resume, reopen and takeover until a new execution plan is
+approved. Re-approval refreshes every Item's Story and
 Test Plan pins and the Delivery's backlog and Definition of Done pins from the
 current approved sources. A sealed Item keeps the Operation bindings its
 evidence was produced against unless the approval names it with `--reopen`;

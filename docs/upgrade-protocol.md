@@ -92,14 +92,21 @@ recreate it without changing Requirement or Delivery state.
 - A `.changes/*.json` file declares release impact. The release workflow is the
   only writer that bumps `versions.json`; host manifests expose that semantic
   plugin version.
-- Each generated package carries `.agent-marketplace-package.json` with a
-  deterministic snapshot `build_id`, source provenance, the closed file/hash
-  inventory, executable paths and the closed `delivery_protocol` read/write
-  capability. This schema-v3 metadata verifies the complete package and selects
-  compatible Delivery record adapters; it is not project state. Generated
-  UTF-8 text uses canonical LF bytes and release preparation rematerializes
-  tracked files under its fixed Git checkout policy; unknown and binary
-  payloads remain byte-exact.
+- Each generated package carries `.agent-marketplace-package.json` with its
+  plugin and marketplace release versions, the closed file/hash inventory,
+  executable paths and the closed `delivery_protocol` read/write capability.
+  This schema-v4 metadata verifies the complete package and selects compatible
+  Delivery record adapters; it is not project state. Generated UTF-8 text uses
+  canonical LF bytes and release preparation rematerializes tracked files
+  under its fixed Git checkout policy; unknown and binary payloads remain
+  byte-exact.
+- Packages carry no per-commit source identity, and each file hash has a line
+  of its own, so pull requests that change different package files merge
+  without a `dist/` conflict. The deterministic snapshot `build_id` of the
+  canonical sources that every host build shares is computed instead: release
+  preparation records it in `.release/stable.json`, the release replay
+  reproduces it, and `python3 tools/release.py verify-release` recomputes it
+  at a release commit.
 - Setup never copies a package version or build ID into project configuration,
   and upgrade never compares an old project build ID with a new one. Active
   Delivery compatibility is proven from package metadata plus the remote Fence

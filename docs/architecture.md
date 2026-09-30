@@ -152,9 +152,12 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     replacement refs and graph overlays. Snapshot records are prefix-free;
     generated text uses LF, unknown/binary payloads remain byte-exact, and the
     tracked `package-modes.json` contract supplies platform-neutral executable
-    modes. Schema-v3 package provenance binds the closed file inventory, hashes
-    and executable set. Public stable installs, exact-lease ref transactions,
-    immutable Release reconciliation and clean-ref completion remain mandatory.
+    modes. Schema-v4 package provenance binds the closed file inventory, hashes
+    and executable set, one hash line per file, and carries no per-commit
+    source identity; the release metadata records the source snapshot
+    `build_id` and verification recomputes it. Public stable installs,
+    exact-lease ref transactions, immutable Release reconciliation and
+    clean-ref completion remain mandatory.
 29. Backlog, Solution Design, Design System and Operation contract reviews
     run as process switch `review_panels` selects in the project's Process
     Policy: one reviewer per step at the default, `single_reader`, or at

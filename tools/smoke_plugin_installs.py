@@ -228,7 +228,7 @@ def verify_installed_package(
     if not isinstance(files, dict) or not files:
         raise SmokeFailure(f"{host} installed package provenance has no file hashes")
     executables = actual_provenance.get("executables")
-    if actual_provenance.get("schema_version") != 3 \
+    if actual_provenance.get("schema_version") != 4 \
             or not isinstance(executables, list) \
             or any(not isinstance(path, str) for path in executables) \
             or len(executables) != len(set(executables)):

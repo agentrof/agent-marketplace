@@ -432,6 +432,96 @@ class BacklogReviewInputTests(unittest.TestCase):
             with self.assertRaisesRegex(inputs.InputError, "changed during"):
                 inputs.manifest(self.docs, epic="EP-001")
 
+    def test_check_block_carries_compiler_facts_for_the_current_review(self):
+        value = inputs.manifest(self.docs, epic="EP-001")
+        check = value["check"]
+        self.assertEqual(check["source_errors"], [])
+        self.assertEqual(check["review_note"], {
+            "path": "backlog/epics/delivery-fixture/reviews/round-1-epic-review.md",
+            "pending_findings": [],
+        })
+        self.assertEqual(check["relation_audit"], {key: {"state": "exact"} for key in (
+            "dependency_refs", "derives_from", "scenario_refs", "verifies")})
+        self.assertEqual(check["counts"], {
+            "epics": 1, "stories": 2, "test_plans": 2, "scenarios": 2,
+            "planning_sources": 2, "dependency_refs": 0,
+        })
+        self.assertEqual(check["stories"], {
+            identity: {"epic": "EP-001", "scenarios": 1,
+                       "source_scenarios": {"delivery:AC-DEL-001": [f"{identity}-TS-001"]}}
+            for identity in ("ST-001", "ST-002")
+        })
+        self.assertEqual(value["source_hash"], inputs.digest(
+            {key: item for key, item in value.items() if key != "source_hash"}))
+        self.assertEqual(inputs.manifest(self.docs, epic="EP-001",
+                                         expected_hash=value["source_hash"]), value)
+
+    def test_root_check_counts_the_backlog_its_dependencies_and_deferrals(self):
+        self.depends(1, 3)
+        self.refresh_reviews()
+        registry = self.docs / "business-analysis/delivery/_generated/registry.json"
+        data = json.loads(registry.read_text(encoding="utf-8"))
+        data["ids"]["AC-DEL-002"] = dict(data["ids"]["AC-DEL-001"])
+        registry.write_text(json.dumps(data), encoding="utf-8")
+        review = self.docs / "backlog/reviews/round-1-backlog-review.md"
+        header = "|---|---|---|---|\n"
+        row = ("| [[business-analysis/delivery/domains/identity/acceptance/delivery-acceptance"
+               "\\|delivery:AC-DEL-002]] | product_owner | The partner registration contract is"
+               " not approved yet. | Revisit when the partner registration contract is approved. |\n")
+        text = review.read_text(encoding="utf-8")
+        self.assertIn(header, text)
+        review.write_text(text.replace(header, header + row, 1), encoding="utf-8")
+        check = inputs.manifest(self.docs)["check"]
+        self.assertEqual(check["review_note"], {
+            "path": "backlog/reviews/round-1-backlog-review.md", "pending_findings": []})
+        self.assertEqual(check["relation_audit"], {key: {"state": "exact"} for key in (
+            "dependency_refs", "derives_from", "related_to")})
+        self.assertEqual(check["counts"], {
+            "epics": 2, "stories": 4, "test_plans": 4, "scenarios": 4,
+            "planning_sources": 4, "dependency_refs": 1, "deferred_criteria": 1,
+        })
+        self.assertEqual({identity: facts["epic"] for identity, facts in check["stories"].items()},
+                         {"ST-001": "EP-001", "ST-002": "EP-001",
+                          "ST-003": "EP-002", "ST-004": "EP-002"})
+
+    def test_draft_review_check_reports_pending_writer_work_for_that_note_only(self):
+        self.draft_reviews()
+        epic = inputs.manifest(self.docs, epic="EP-001")["check"]
+        self.assertEqual(epic["source_errors"], [])
+        self.assertEqual(epic["relation_audit"]["verifies"], {"state": "pending"})
+        self.assertEqual(epic["relation_audit"]["scenario_refs"], {"state": "pending"})
+        pending = epic["review_note"]["pending_findings"]
+        self.assertTrue(pending)
+        self.assertEqual(pending, sorted(set(pending)))
+        self.assertTrue(any("section-specific" in finding for finding in pending))
+        self.assertFalse([finding for finding in pending
+                          if "backlog/epics/second/" in finding or "backlog/reviews/" in finding])
+        root = inputs.manifest(self.docs)["check"]
+        self.assertEqual(root["relation_audit"]["related_to"], {"state": "pending"})
+        self.assertTrue(root["review_note"]["pending_findings"])
+        self.assertFalse([finding for finding in root["review_note"]["pending_findings"]
+                          if "/reviews/round-1-epic-review.md" in finding])
+
+    def test_check_block_audits_declared_against_expected_relations(self):
+        path = self.docs / "backlog/epics/delivery-fixture/reviews/round-1-epic-review.md"
+        props, body = backlog.parse_front_matter(path)
+        props["verifies"] = props["verifies"][:-1] + props["verifies"][:1] + [
+            "[[backlog/epics/second/stories/st-003/story|ST-003]]"]
+        path.write_text(backlog.front_matter(props, body), encoding="utf-8")
+        value = inputs.manifest(self.docs, epic="EP-001")
+        self.assertEqual(value["check"]["relation_audit"]["verifies"], {
+            "state": "differs",
+            "missing": ["backlog/epics/delivery-fixture/stories/st-002/test-plan"],
+            "extra": ["backlog/epics/second/stories/st-003/story"],
+            "duplicates": ["backlog/epics/delivery-fixture/stories/st-001/story"],
+        })
+        self.assertIn(
+            "backlog/epics/delivery-fixture/reviews/round-1-epic-review.md verifies set does not"
+            " exactly cover every story and test plan",
+            value["check"]["review_note"]["pending_findings"],
+        )
+        self.assertEqual(len(value["review"]["expected_relations"]["verifies"]), 4)
+
     def test_each_input_is_validated_once_per_run_and_again_at_close(self):
         # Closure walks revisit shared paths; validation cost must follow the
         # read set, not the number of visits.

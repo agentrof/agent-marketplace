@@ -32,12 +32,18 @@
 - When the canonical workflow says `spawn`, use the
   `software-engineering-team:<agent-id>` identity and wait for every required
   agent before synthesis. Never run overlapping writers concurrently.
+- Run a review panel's lens readers in parallel: spawn every reader of the
+  panel in one message, then wait for all of them before triage.
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.
 - Role agents use the package's `auto` execution profile: `model` and, when
-  set, `effort` per role tier. The package cannot switch it per user. To run
-  every role on the main conversation's model, the user sets
+  set, `effort` per role tier. The `lens` tier of the read-only document lens
+  readers is `sonnet` at effort `high`; the default `single` review mode
+  renders those readers on the tier that `tier_overrides` in
+  `skill-content/challenge-review/data/review-panels.json` names instead. The
+  package cannot switch the profile per user. To run every role on the main
+  conversation's model, the user sets
   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in the `env` block of their settings
   (Claude Code 2.1.257 or later). A
   role's `effort` overrides the session level but not

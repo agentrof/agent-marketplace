@@ -84,9 +84,10 @@ Use the owning compiler's exact scope and source bindings.
    `design_system_compile.py sync-catalog --root workspace/docs/design-system`
    after every MASTER token or revision change. Never overwrite a catalog with
    `init-catalog`; it is creation-only.
-8. Spawn `design-system-reviewer` read-only with MASTER, catalog, overrides
-   and exact upstream bindings; resolve all blocking findings, including
-   light/dark, desktop/mobile and reduced-motion renders.
+8. Review with read-only `design-system-reviewer` readers in the flow's
+   review mode, one reviewer or its review panel, with MASTER, catalog,
+   overrides and exact upstream bindings; resolve all blocking findings,
+   including light/dark, desktop/mobile and reduced-motion renders.
 9. Close: update maps/design-system.md to match (including a relative link to
    `artifacts/standalone.html`; one wikilink per
    override with its deviation summary), ensure home.md links this

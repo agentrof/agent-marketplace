@@ -1,7 +1,8 @@
 # Design System Flow
 
 Spawn template: paste `{{constitution}}`, exact BA/Solution receipts, MASTER
-and override paths, review lens and `SELF-CHECK` into every reviewer prompt.
+and override paths, the review lens or the reader's lens assignment and
+`SELF-CHECK` into every reviewer prompt.
 
 Read this complete flow before `/design-system` changes durable state. Exact
 `REQ-###` selects router-bound Requirement inputs. Manual mode requires an
@@ -22,8 +23,15 @@ the catalog artifact path and relative-artifact link law.
 3. Before review run `design_system_compile.py sync-catalog --root
    workspace/docs/design-system`. Revisions are ordered: begin-revision,
    MASTER update, catalog update, sync-catalog, review, check, approve.
-4. Spawn `design-system-reviewer` read-only with MASTER, catalog, page
-   overrides and the semantic token, accessibility and contradiction lens.
+4. Review in the mode that `review_mode` in
+   `skill-content/challenge-review/data/review-panels.json` selects. In
+   `single` mode, the default, spawn `design-system-reviewer` read-only with
+   MASTER, catalog, page overrides and the semantic token, accessibility and
+   contradiction lens. In `panel` mode run review panel `design_system` as
+   `skill-content/challenge-review/references/review-panel.md` defines: one
+   read-only `design-system-reviewer` per lens assignment, in parallel, each
+   with MASTER, catalog, page overrides and the exact BA/Solution bindings.
+   Resolve every critical or major finding before approval.
 5. Run compiler checks, then `approve`; changes to an approved MASTER begin a
    revision first. Compiler approval and a committed package are handoff.
 4. Requirement mode binds its receipt. Manual mode returns it and suggests

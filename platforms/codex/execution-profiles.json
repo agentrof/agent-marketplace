@@ -5,6 +5,7 @@
       "high": {"effort": "high"},
       "medium": {"effort": "medium"},
       "low": {"effort": "low"},
+      "lens": {"effort": "high"},
       "inherit": {}
     }
   }

@@ -5,6 +5,7 @@
       "high": {"model": "opus"},
       "medium": {"model": "sonnet"},
       "low": {"model": "haiku"},
+      "lens": {"model": "sonnet", "effort": "high"},
       "inherit": {"model": "inherit"}
     }
   }

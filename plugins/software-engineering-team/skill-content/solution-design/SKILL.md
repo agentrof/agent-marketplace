@@ -57,8 +57,10 @@ Use the owning compiler's exact scope and source bindings.
    differ; no config-derived global stack is assumed.
 6. Before the project decision gate, use the single review plan in
    `solution-architecture/references/challenge-lenses.md`: one independent
-   primary `solution-reviewer` covers all four required lenses and the role's
-   package checks, with additional specialists only for the stated risks.
+   primary `solution-reviewer`, or in `panel` review mode one panel of
+   `solution-reviewer` lens readers, covers the four challenge lenses and the
+   role's package checks, with additional specialists only for the stated
+   risks.
    Wait for all selected readers, apply accepted resolutions to canonical
    documents, then re-run only affected readers until no blocking evidence
    gap remains. Reviewer replies are transient input, not files. Render the

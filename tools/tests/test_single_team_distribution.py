@@ -569,8 +569,20 @@ class SingleTeamDistributionTests(unittest.TestCase):
 
 
 CLAUDE_AUTO_MODELS = {
-    "high": "opus", "medium": "sonnet", "low": "haiku", "inherit": "inherit",
+    "high": "opus", "medium": "sonnet", "low": "haiku", "lens": "sonnet",
+    "inherit": "inherit",
 }
+# A tier missing here writes no Claude effort line.
+CLAUDE_AUTO_EFFORTS = {"lens": "high"}
+CODEX_AUTO_EFFORTS = {"high": "high", "medium": "medium", "low": "low", "lens": "high"}
+LENS_READERS = {
+    "analysis-challenger", "backlog-reviewer", "design-system-reviewer",
+    "domain-expert", "solution-reviewer",
+}
+
+
+def claude_efforts(tier: str) -> list[str]:
+    return [f"effort: {CLAUDE_AUTO_EFFORTS[tier]}"] if tier in CLAUDE_AUTO_EFFORTS else []
 
 
 def frontmatter_lines(path: Path) -> list[str]:
@@ -605,6 +617,21 @@ class ExecutionProfileTests(unittest.TestCase):
             path.stem: build_distributions.parse_frontmatter(path)[0]["reasoning"]
             for path in sorted(agents.glob("*.md"))
         }
+
+    def panels(self) -> Path:
+        return (self.root / "plugins" / fixtures.PLUGIN
+                / build_distributions.REVIEW_PANELS_RELPATH)
+
+    def set_review_mode(self, mode: str) -> None:
+        data = json.loads(self.panels().read_text(encoding="utf-8"))
+        data["review_mode"] = mode
+        self.panels().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    def rendered_tiers(self) -> dict[str, str]:
+        """Each agent's declared tier after the selected review mode's overrides."""
+        data = json.loads(self.panels().read_text(encoding="utf-8"))
+        overrides = data["review_modes"][data["review_mode"]]["tier_overrides"]
+        return {name: overrides.get(tier, tier) for name, tier in self.tiers().items()}
 
     def edit_table(self, host: str, mutate) -> None:
         path = build_distributions.execution_profile_path(self.root, host)
@@ -643,17 +670,21 @@ class ExecutionProfileTests(unittest.TestCase):
             for path in sorted((self.project / ".codex/agents").glob("*.toml"))
         }
 
-    def test_default_tables_reproduce_the_pre_table_role_settings(self):
-        tiers = self.tiers()
+    def test_default_tables_render_the_declared_role_settings(self):
+        tiers = self.rendered_tiers()
         for name, tier in tiers.items():
             with self.subTest(agent=name):
                 claude = frontmatter_lines(self.dist_agent("claude", name))
                 self.assertEqual(claude[2], f"model: {CLAUDE_AUTO_MODELS[tier]}")
-                self.assertFalse([line for line in claude if line.startswith("effort")])
+                self.assertEqual(
+                    [line for line in claude if line.startswith("effort")],
+                    claude_efforts(tier),
+                )
                 codex = frontmatter_lines(self.dist_agent("codex", name))
                 self.assertEqual(
                     [line for line in codex if line.startswith(("model", "reasoning"))],
-                    [] if tier == "inherit" else [f"model_reasoning_effort: {tier}"],
+                    [] if tier == "inherit"
+                    else [f"model_reasoning_effort: {CODEX_AUTO_EFFORTS[tier]}"],
                 )
         generated = self.codex_json("apply", "--scope", "local")
         self.assertEqual(generated["execution_profile"], "auto")
@@ -663,7 +694,7 @@ class ExecutionProfileTests(unittest.TestCase):
             self.assertEqual(
                 role_settings(text),
                 [] if tiers[name] == "inherit"
-                else [f'model_reasoning_effort = "{tiers[name]}"'],
+                else [f'model_reasoning_effort = "{CODEX_AUTO_EFFORTS[tiers[name]]}"'],
                 name,
             )
         challenger = files["analysis-challenger"].splitlines()
@@ -680,7 +711,7 @@ class ExecutionProfileTests(unittest.TestCase):
     def test_claude_frontmatter_writes_effort_only_when_the_table_sets_one(self):
         self.set_tier("claude", "high", {"model": "sonnet", "effort": "xhigh"})
         build_distributions.replace_generated(self.root, self.root / "dist")
-        tiers = self.tiers()
+        tiers = self.rendered_tiers()
         for name, tier in tiers.items():
             with self.subTest(agent=name):
                 lines = frontmatter_lines(self.dist_agent("claude", name))
@@ -689,13 +720,16 @@ class ExecutionProfileTests(unittest.TestCase):
                     self.assertTrue(lines[4].startswith("output_contract:"))
                 else:
                     self.assertEqual(lines[2], f"model: {CLAUDE_AUTO_MODELS[tier]}")
-                    self.assertFalse([line for line in lines if line.startswith("effort")])
+                    self.assertEqual(
+                        [line for line in lines if line.startswith("effort")],
+                        claude_efforts(tier),
+                    )
 
     def test_codex_role_files_carry_a_model_only_when_the_table_sets_one(self):
         self.set_tier("codex", "high", {"model": "gpt-test-1.5", "effort": "max"})
         build_distributions.replace_generated(self.root, self.root / "dist")
         self.assertEqual(
-            frontmatter_lines(self.dist_agent("codex", "analysis-challenger"))[2:4],
+            frontmatter_lines(self.dist_agent("codex", "code-reviewer"))[2:4],
             ["model: gpt-test-1.5", "model_reasoning_effort: max"],
         )
         self.codex_json("apply", "--scope", "local")
@@ -703,11 +737,96 @@ class ExecutionProfileTests(unittest.TestCase):
             "high": ['model = "gpt-test-1.5"', 'model_reasoning_effort = "max"'],
             "medium": ['model_reasoning_effort = "medium"'],
             "low": ['model_reasoning_effort = "low"'],
+            "lens": ['model_reasoning_effort = "high"'],
             "inherit": [],
         }
-        tiers = self.tiers()
+        tiers = self.rendered_tiers()
         for name, text in self.role_files().items():
             self.assertEqual(role_settings(text), expected[tiers[name]], name)
+
+    def test_single_review_mode_renders_lens_readers_as_before_panels(self):
+        # The default mode keeps the official reviews on the tier they used
+        # before panels: Claude opus with the session effort, Codex effort high.
+        tiers = self.tiers()
+        self.assertEqual({name for name, tier in tiers.items() if tier == "lens"}, LENS_READERS)
+        for name in sorted(LENS_READERS):
+            with self.subTest(agent=name):
+                claude = frontmatter_lines(self.dist_agent("claude", name))
+                self.assertEqual(claude[2], "model: opus")
+                self.assertTrue(claude[3].startswith("output_contract:"))
+                self.assertFalse([line for line in claude if line.startswith("effort")])
+                codex = frontmatter_lines(self.dist_agent("codex", name))
+                self.assertEqual(
+                    [line for line in codex if line.startswith(("model", "reasoning"))],
+                    ["model_reasoning_effort: high"],
+                )
+        self.codex_json("apply", "--scope", "local")
+        files = self.role_files()
+        for name in sorted(LENS_READERS):
+            self.assertEqual(role_settings(files[name]), ['model_reasoning_effort = "high"'], name)
+
+    def test_panel_review_mode_runs_lens_readers_on_the_lens_tier(self):
+        self.set_tier("codex", "high", {"model": "gpt-test-1.5", "effort": "max"})
+        self.set_review_mode("panel")
+        build_distributions.replace_generated(self.root, self.root / "dist")
+        tiers = self.tiers()
+        for name in sorted(LENS_READERS):
+            with self.subTest(agent=name):
+                claude = frontmatter_lines(self.dist_agent("claude", name))
+                self.assertEqual(claude[2:4], ["model: sonnet", "effort: high"])
+                self.assertTrue(claude[4].startswith("output_contract:"))
+                codex = frontmatter_lines(self.dist_agent("codex", name))
+                self.assertEqual(
+                    [line for line in codex if line.startswith(("model", "reasoning"))],
+                    ["model_reasoning_effort: high"],
+                )
+        self.codex_json("apply", "--scope", "local")
+        files = self.role_files()
+        for name in sorted(LENS_READERS):
+            self.assertEqual(role_settings(files[name]), ['model_reasoning_effort = "high"'], name)
+        # Only the lens readers move; every other role keeps its declared tier.
+        for name, tier in tiers.items():
+            if tier == "high":
+                self.assertEqual(
+                    role_settings(files[name]),
+                    ['model = "gpt-test-1.5"', 'model_reasoning_effort = "max"'], name,
+                )
+
+    def test_builder_refuses_a_review_mode_it_cannot_resolve(self):
+        source = self.root / "plugins" / fixtures.PLUGIN
+        self.set_review_mode("shadow")
+        with self.assertRaisesRegex(ValueError, "review_mode must select a review_modes entry"):
+            build_distributions.review_mode_tier_overrides(source)
+        self.set_review_mode("single")
+        data = json.loads(self.panels().read_text(encoding="utf-8"))
+        data["review_modes"]["single"]["tier_overrides"] = {"lens": "ghost"}
+        self.panels().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, r"tier_overrides name unknown tiers \['ghost'\]"):
+            build_distributions.replace_generated(self.root, self.root / "dist")
+        self.panels().unlink()
+        self.assertEqual(build_distributions.review_mode_tier_overrides(source), {})
+
+    def test_lens_tier_and_panel_data_are_build_inputs(self):
+        before = build_distributions.marketplace_snapshot(self.root)["build_id"]
+        self.set_tier("claude", "lens", {"model": "opus", "effort": "high"})
+        retiered = build_distributions.marketplace_snapshot(self.root)["build_id"]
+        self.assertNotEqual(retiered, before)
+        panels = (
+            self.root / "plugins" / fixtures.PLUGIN
+            / "skill-content/challenge-review/data/review-panels.json"
+        )
+        data = json.loads(panels.read_text(encoding="utf-8"))
+        data["review_steps"]["backlog_epic"]["default_panel"] = [[
+            lens for assignment in data["review_steps"]["backlog_epic"]["default_panel"]
+            for lens in assignment
+        ]]
+        panels.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        regrouped = build_distributions.marketplace_snapshot(self.root)["build_id"]
+        self.assertNotEqual(regrouped, retiered)
+        self.set_review_mode("panel")
+        self.assertNotEqual(
+            build_distributions.marketplace_snapshot(self.root)["build_id"], regrouped,
+        )
 
     def test_inherit_profile_omits_role_settings_and_survives_refresh(self):
         self.set_tier("codex", "high", {"model": "gpt-test-1.5", "effort": "max"})

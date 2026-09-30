@@ -160,7 +160,11 @@ platform, installation or release checks.
 ## Execution profiles
 
 Canonical agents declare only a host-neutral `reasoning` tier from
-`tools/data/models.json`. Each host maps every tier to its own model and
+`tools/data/models.json`. The read-only document lens readers use the `lens`
+tier; tier names are single words because each is both a kebab-case reasoning
+level and a snake_case key in the profile tables. The selected review mode
+can render a tier as another one (see Review panels). Each host maps every
+tier to its own model and
 effort in `platforms/<host>/execution-profiles.json`, profile `auto`. The
 builder and `tools/validate.py` accept only the host's documented values, so
 model names stay out of `plugins/`. Claude agents receive `model:` and, when
@@ -184,3 +188,29 @@ session's model and effort:
   level but not `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level for the
   session. Both reach every subagent in the session, not only this team.
   Claude Code's permission modes do not select a model or effort.
+
+## Review panels
+
+`plugins/software-engineering-team/skill-content/challenge-review/data/review-panels.json`
+declares each review step's reader role, its lenses (`id`, `focus` and, for a
+step whose writer records a review note, the note sections each lens
+`covers`) and `default_panel`, the list of lens assignments whose length is
+the default panel size. A flow anchors its step as review panel `<step>`, and
+prose names a lens as lens `<id>`. The `review_panels` validator check rejects
+unknown readers, steps no flow anchors, anchors to undeclared steps, unknown,
+duplicate or unassigned lens ids, empty panels or assignments, and review-note
+sections that no lens or more than one owner covers. Adding a lens or a
+review step needs only a data change plus its anchor.
+
+`review_mode` in the same file is the one switch between each step's single
+reviewer and its review panel. Every flow that anchors a review panel names
+the switch and describes both paths; the validator rejects a flow that
+anchors a panel without naming `review_mode`. `review_modes` declares the
+`tier_overrides` each mode applies when the builder renders agents: `single`
+renders the `lens` tier as `high`, the tier the read-only document readers
+used before panels, so the official reviews keep their model and effort until
+the switch changes. The switch stays `single` until the owner's promotion
+rule is met: at least 5 panel passes across at least 2 flows, panel
+valid-major recall at least equal to the official review's, and panel wall
+time at most 50% of the official one. Promotion is then a one-line data
+change to `panel`, released like any other package change.

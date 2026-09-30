@@ -108,6 +108,86 @@ def contract_hash() -> str:
     return digest([[path.name, file_hash(path)] for path in files])
 
 
+LINK_RELATIONS = {"derives_from", "verifies", "related_to"}
+
+
+def link_target(value: str) -> str:
+    parsed = backlog.split_wikilink(value)
+    return parsed[0] if parsed else value
+
+
+def source_scenarios(story: dict) -> dict[str, list[str]]:
+    """Map each declared planning source to the scenarios that cite it."""
+    declared = list(story["criteria"])
+    if story["work_kind"] != "feature":
+        declared += backlog.values(story["props"], "related_to")
+    labels = {}
+    for value in declared:
+        parsed = backlog.split_wikilink(value)
+        if parsed is not None:
+            labels[parsed] = parsed[2] or parsed[0]
+    cited: dict[str, set[str]] = {label: set() for label in labels.values()}
+    for scenario_id, block in backlog.scenario_blocks(story["test_body"]):
+        fields, _duplicates = backlog.scenario_fields(block)
+        values, _clean = backlog.source_ref_values(fields.get("source_refs", ""))
+        for value in values:
+            parsed = backlog.split_wikilink(value)
+            if parsed in labels:
+                cited[labels[parsed]].add(scenario_id)
+    return {label: sorted(ids) for label, ids in sorted(cited.items())}
+
+
+def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: dict,
+                   relations: dict[str, list[str]], root: bool) -> dict:
+    """Report the compiler facts a reader would otherwise re-derive.
+
+    Source errors already failed the manifest, so they are empty here. The
+    current review note gets the findings the final gate will report for it.
+    """
+    contract = backlog.backlog_contract()
+    sections = contract["required_backlog_review_sections" if root
+                        else "required_epic_review_sections"]
+    pending = backlog.review_section_findings(review["body"], sections, review["path"], docs)
+    pending += backlog.accepted_minor_findings(docs, review["body"], review["path"], contract)
+    # The coverage check reads every current review; hand it only this one.
+    if root:
+        scoped = dict(record, epics=[dict(item, reviews=[]) for item in record["epics"]])
+    else:
+        scoped = dict(record, backlog_reviews=[], epics=scope_epics)
+    pending += backlog.review_coverage_findings(scoped, docs)
+    # Expected sets live in review.expected_relations; the audit states only
+    # how the note's declaration compares with them.
+    audit = {}
+    for key, expected in sorted(relations.items()):
+        declared = [link_target(value) if key in LINK_RELATIONS else value
+                    for value in backlog.values(review["props"], key)]
+        duplicates = sorted({value for value in declared if declared.count(value) > 1})
+        missing = sorted(set(expected) - set(declared))
+        extra = sorted(set(declared) - set(expected))
+        if not declared and expected:
+            audit[key] = {"state": "pending"}
+        elif missing or extra or duplicates:
+            audit[key] = {"state": "differs", "missing": missing, "extra": extra,
+                          "duplicates": duplicates}
+        else:
+            audit[key] = {"state": "exact"}
+    stories = [story for item in scope_epics for story in item["stories"]]
+    facts = {story["id"]: {"epic": story["epic_id"],
+                           "scenarios": len(story["scenario_ids"]),
+                           "source_scenarios": source_scenarios(story)}
+             for story in stories}
+    counts = {"epics": len(scope_epics), "stories": len(stories), "test_plans": len(stories),
+              "scenarios": sum(len(story["scenario_ids"]) for story in stories),
+              "planning_sources": sum(len(facts[story["id"]]["source_scenarios"]) for story in stories),
+              "dependency_refs": len(relations["dependency_refs"])}
+    if root:
+        deferred, _findings = backlog.deferred_criteria(docs, review["body"], review["path"])
+        counts["deferred_criteria"] = len(deferred)
+    return {"source_errors": [], "review_note": {"path": review["path"],
+                                                 "pending_findings": sorted(set(pending))},
+            "relation_audit": audit, "counts": counts, "stories": facts}
+
+
 def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None = None) -> dict:
     docs = docs.resolve()
     if not docs.is_dir():
@@ -260,25 +340,27 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                 for match in matches:
                     include(match, f"declared analysis scope from {relative}")
 
+        if epic is None:
+            current_review = backlog.latest(record["backlog_reviews"])
+            relations = {"derives_from": [record["backlog"]["path"][:-3]],
+                         "related_to": sorted(item["path"][:-3] for item in epics),
+                         "dependency_refs": sorted(backlog.dependency_edges(record["stories"], False, record))}
+            scope = "backlog"
+        else:
+            selected = owning_epics[0]
+            current_review = backlog.latest(selected["reviews"])
+            relations = {"derives_from": [selected["path"][:-3]],
+                         "verifies": sorted(path[:-3] for story in selected["stories"]
+                                            for path in (story["path"], story["test_plan"])),
+                         "scenario_refs": sorted(scenario for story in selected["stories"] for scenario in story["scenario_ids"]),
+                         "dependency_refs": sorted(backlog.dependency_edges(selected["stories"], True, record))}
+            scope = selected["path"]
+        check = compiler_check(docs, record, owning_epics, current_review, relations, epic is None)
+
     after = snapshot(docs)
     if before != after or contract != contract_hash() or any(
             file_hash(regular_file(docs, path)) != value for path, value in hashes.items()):
         raise InputError("review sources changed during manifest generation; retry from current sources")
-    if epic is None:
-        current_review = backlog.latest(record["backlog_reviews"])
-        relations = {"derives_from": [record["backlog"]["path"][:-3]],
-                     "related_to": sorted(item["path"][:-3] for item in epics),
-                     "dependency_refs": sorted(backlog.dependency_edges(record["stories"], False, record))}
-        scope = "backlog"
-    else:
-        selected = owning_epics[0]
-        current_review = backlog.latest(selected["reviews"])
-        relations = {"derives_from": [selected["path"][:-3]],
-                     "verifies": sorted(path[:-3] for story in selected["stories"]
-                                        for path in (story["path"], story["test_plan"])),
-                     "scenario_refs": sorted(scenario for story in selected["stories"] for scenario in story["scenario_ids"]),
-                     "dependency_refs": sorted(backlog.dependency_edges(selected["stories"], True, record))}
-        scope = selected["path"]
     # An edited outside Story can introduce a new incoming edge. Bind all backlog
     # sources, while keeping unrelated documents out of the reviewer's read set.
     structure_hash = digest({path: value for path, value in before.items() if path.startswith("backlog/")})
@@ -287,7 +369,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
               "paths": sorted(hashes), "files": [{"path": path, "sha256": hashes[path],
                   "reasons": sorted(reasons[path])} for path in sorted(hashes)],
               "structure_hash": structure_hash, "contract_hash": contract,
-              "review": {"path": current_review["path"], "expected_relations": relations}}
+              "review": {"path": current_review["path"], "expected_relations": relations},
+              "check": check}
     if unparsed:
         result["unparsed_link_sources"] = sorted(unparsed)
     result["source_hash"] = digest(result)

@@ -106,7 +106,7 @@
         },
         {
           "id": "lens_panel",
-          "tradeoffs": "One fresh read-only reader per lens assignment runs in parallel and replaces the step's reviewer; the read-only reviewer roles run as their lens-tier variants. Shorter review wall time, while valid-major recall is still measured against the single reader and a panel major can be overrated."
+          "tradeoffs": "One fresh read-only reader per lens assignment runs in parallel and replaces the step's reviewer; the read-only reviewer roles run as their lens-tier variants. The panel changes who reads, never the review loop: switch `review_loop` sets that, so at its `current` the panel keeps the step's own loop and a re-review reruns the whole panel, and at `blocking_delta` a re-review reruns only the assignments that returned a blocking finding. Shorter review wall time, while valid-major recall is still measured against the single reader and a panel major can be overrated."
         }
       ],
       "default": "single_reader",
@@ -184,15 +184,15 @@
       "values": [
         {
           "id": "current",
-          "tradeoffs": "Every review loop runs as today, the baseline the other value is measured against. Operation and Design System reviews have no minor rule or re-review scope, so a review that approves with only minor findings can still take a fix pass and a recheck, a code review minor stays a note with no owner, and every critical or major claim gates as returned."
+          "tradeoffs": "Every review loop runs as today, the baseline the other value is measured against, with a single reader or a lens panel alike: switch `review_panels` changes only who reads, and a panel keeps the step's own loop. Operation and Design System reviews have no minor rule or re-review scope, so a review that approves with only minor findings can still take a fix pass and a recheck, a code review minor stays a note with no owner, and every critical or major claim gates as returned."
         },
         {
           "id": "blocking_delta",
-          "tradeoffs": "Only a critical or major finding starts a round, and only once one fresh calibration reader of the claiming reviewer's role, on that role's own tier, confirms it. A minor finding becomes a follow-up with an owner role and a revisit trigger, and a re-review reads only the open blocking findings, the changed text and its dependency context. Shorter review loops, while calibration adds a few minutes whenever a major is real, a wrong downgrade can hide a defect until the shadow judge audits it, and a changed-text re-review can miss a knock-on effect outside the dependency context it is given."
+          "tradeoffs": "Only a critical or major finding starts a round, and only once one fresh calibration reader of the claiming reviewer's role, on that role's own tier, confirms it. A minor finding becomes a follow-up with an owner role and a revisit trigger, and a re-review reads only the open blocking findings, the changed text and its dependency context. It applies to a single reader and a lens panel alike, and a panel's re-review reruns only the assignments that returned a blocking finding. Shorter review loops, while calibration adds a few minutes whenever a major is real, a wrong downgrade can hide a defect until the shadow judge audits it, and a changed-text re-review can miss a knock-on effect outside the dependency context it is given."
         }
       ],
       "default": "current",
-      "metric": "Per reviewed document against its matching baseline: review-loop minutes from review start to final verdict, fixes included; rounds; minor findings fixed in a blocking pass against those recorded as follow-ups; and calibration counts, claimed, confirmed, downgraded and invalid, with calibration minutes.",
+      "metric": "Per reviewed document against its matching baseline, a `current` run under the same `review_panels` value: review-loop minutes from review start to final verdict, fixes included; rounds; minor findings fixed in a blocking pass against those recorded as follow-ups; and calibration counts, claimed, confirmed, downgraded and invalid, with calibration minutes.",
       "promotion": {
         "unit": "At least 5 reviewed documents across at least 2 flows: a contract revision, an epic or root review, a Solution or Design System review, or an Item code review.",
         "threshold": "Median review-loop minutes at most 50% of the matching baseline, zero valid critical or major findings found later in the same document and traced to a skipped minor round or a calibration downgrade, the shadow judge confirming every downgrade, and an owner role and revisit trigger on every follow-up, with every shared quality guard holding and the owner's approval."

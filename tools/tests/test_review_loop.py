@@ -129,6 +129,28 @@ class ReviewLoopRegistryTests(unittest.TestCase):
             with self.subTest(term=term):
                 self.assertIn(term, switch["promotion"]["threshold"])
 
+    def test_both_switches_state_how_they_compose(self):
+        # A panel changes who reads; the loop is review_loop's alone, so a
+        # lens panel at review_loop current keeps the step's own loop.
+        switches = json.loads(read(REGISTRY))["switches"]
+        panel = {value["id"]: value["tradeoffs"] for value in switches["review_panels"]["values"]}
+        self.assertIn("The panel changes who reads, never the review loop: switch `review_loop` sets"
+                      " that, so at its `current` the panel keeps the step's own loop and a re-review"
+                      " reruns the whole panel, and at `blocking_delta` a re-review reruns only the"
+                      " assignments that returned a blocking finding", panel["lens_panel"])
+        loop = {value["id"]: value["tradeoffs"] for value in switches["review_loop"]["values"]}
+        self.assertIn("with a single reader or a lens panel alike: switch `review_panels` changes only"
+                      " who reads, and a panel keeps the step's own loop", loop["current"])
+        self.assertIn("It applies to a single reader and a lens panel alike, and a panel's re-review"
+                      " reruns only the assignments that returned a blocking finding",
+                      loop["blocking_delta"])
+        self.assertIn("a `current` run under the same `review_panels` value",
+                      switches["review_loop"]["metric"])
+        orchestration = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
+        self.assertIn("A panel changes who reads, never the review loop: at `review_loop` `current` it"
+                      " keeps the step's own loop and a re-review reruns the whole panel",
+                      orchestration)
+
 
 class ReviewLoopReferenceTests(unittest.TestCase):
     def test_references_apply_only_at_blocking_delta_and_are_never_linked(self):

@@ -173,7 +173,8 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     Policy: one reviewer per step at the default, `single_reader`, or at
     `lens_panel` a review panel of parallel, read-only lens readers. Lens sets
     are validated data in `challenge-review/data/review-panels.json`; a panel
-    replaces a step's single reviewer and never stacks on top of it. The
+    replaces a step's single reviewer and never stacks on top of it, and it
+    keeps the step's review loop, which process switch `review_loop` sets. The
     read-only document reviewers keep their own tier, and every build ships
     their generated `-lens` variants on the `lens` tier for panel readers.
     Review steps whose machine interface accepts one result per role keep one

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TEAM = ROOT / "plugins" / "software-engineering-team"
 PANELS = "skill-content/challenge-review/data/review-panels.json"
 PROTOCOL = "skill-content/challenge-review/references/switch-review_panels-lens_panel.md"
+LOOP = "skill-content/challenge-review/references/switch-review_loop-blocking_delta.md"
 REGISTRY = "skill-content/configure/data/process-switches.json"
 BACKLOG_LENSES = [
     "scope-and-slicing",
@@ -129,23 +130,46 @@ class ReviewPanelProtocolTests(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertIn(rule, protocol)
 
-    def test_verdict_minor_and_re_review_rules(self):
+    def test_the_verdict_is_the_panels_and_the_loop_is_review_loops(self):
+        # A panel changes who reads. Where a minor finding goes and what a
+        # re-review reads belong to switch review_loop alone, so at its
+        # current value a panel keeps the step's own loop.
         protocol = flat(PROTOCOL)
         for rule in (
             "approved only when every assignment has returned, no lens has an open critical"
             " or major finding and the owning compiler checks named by the flow are green",
-            "A minor finding never blocks and never starts a round",
-            "rerun only the assignments that returned such a finding",
-            "The first rerun assignment in `default_panel` order also performs the"
-            " changed-text check",
-            "no clean extra round follows",
-            "adds that lens's assignment",
+            "The review loop, meaning which findings start a writer pass, where a minor finding"
+            " goes and what a re-review reads, is process switch `review_loop`'s: at its default,"
+            " `current`, a panel keeps the step's own loop",
+            "The merged findings then go to the step's writer exactly as a single reviewer's"
+            " findings would",
+            "At `review_loop` `current` it runs as the step's flow describes, with the whole"
+            " panel in place of the step's reviewer: regenerate the step's inputs and rerun every"
+            " assignment of `default_panel`",
+            "`switch-review_loop-blocking_delta.md` selects the assignments that rerun and what"
+            " each reads",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, protocol)
+        for rule in ("never starts a round", "rerun only the assignments",
+                     "reruns only the lens assignments", "changed-text check",
+                     "adds that lens's assignment", "no clean extra round"):
+            with self.subTest(absent=rule):
+                self.assertNotIn(rule, protocol)
         for row in ("| `critical` | yes |", "| `major` | yes |", "| `minor` | no |"):
             with self.subTest(row=row):
                 self.assertIn(row, protocol)
+        loop = flat(LOOP)
+        for rule in (
+            "at `lens_panel` the assignments that returned a blocking finding, and no other",
+            "The first of those assignments in `default_panel` order also reads every changed"
+            " path with its dependency context through all of the step's lenses and names the"
+            " owning lens of any new finding",
+            "a newly exposed risk in a lens that did not rerun adds that lens's assignment",
+            "no clean extra round runs once no critical or major finding is open",
+        ):
+            with self.subTest(loop=rule):
+                self.assertIn(rule, loop)
 
     def test_one_result_per_role_steps_wait_for_a_merge_step(self):
         protocol = flat(PROTOCOL)
@@ -238,7 +262,9 @@ class ReviewPanelFlowTests(unittest.TestCase):
             "Lens readers take them as given and never recount them",
             "The Product Owner merges findings that share one root cause",
             "Findings and Verdict come from the merged panel result",
-            "A re-review reruns only the lens assignments that returned the blocking findings",
+            "A re-review follows the Re-review section above. At `review_loop` `current` every"
+            " rerun lens reader receives what the step's rule gives its reviewer: the regenerated"
+            " manifest with the findings, any cited evidence and the changed paths",
             "The metadata-recovery root review is a `backlog_root` panel",
             "report `relation_audit` as `confirmed`",
         ):

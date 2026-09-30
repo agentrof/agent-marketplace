@@ -345,6 +345,13 @@ class LensTierTests(unittest.TestCase):
                 self.assertEqual(tier(agent), "high")
                 self.assertIn("tools: Read, Grep, Glob", read(f"agents/{agent}.md"))
 
+    def test_the_release_note_keeps_the_reviewers_tier_not_their_files(self):
+        # The model pin (#344) rewrites every reviewer's released model line.
+        summary = json.loads((ROOT / ".changes/review-panel-lens-variants.json").read_text(
+            encoding="utf-8"))["summary"]
+        self.assertIn("The reviewers themselves keep their tier.", summary)
+        self.assertNotIn("released files", summary)
+
     def test_lens_tier_is_declared_for_every_host(self):
         models = json.loads((ROOT / "tools/data/models.json").read_text(encoding="utf-8"))
         self.assertIn("lens", models["reasoning_levels"])

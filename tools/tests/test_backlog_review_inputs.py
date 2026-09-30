@@ -730,6 +730,15 @@ class BacklogReviewInputTests(unittest.TestCase):
         with self.assertRaisesRegex(inputs.InputError, "job-worker/story.md has an untouched"):
             inputs.manifest(self.docs, epic="EP-001")
 
+    def test_the_writer_scope_release_note_states_the_epic_reader_rule(self):
+        # #336 narrowed the reader rule that #301's release note still stated.
+        summary = json.loads((ROOT / ".changes/writer-epic-scope-after-stub-story.json")
+                             .read_text(encoding="utf-8"))["summary"]
+        self.assertIn("A read-only epic closure, `backlog_review_inputs.py` included, fails on"
+                      " such a placeholder only in a note it reads", summary)
+        self.assertIn("a read-only root closure still requires complete sources", summary)
+        self.assertNotIn("included, still require complete sources", summary)
+
     def test_writer_manifest_carries_the_stubs_a_reader_refuses(self):
         self.assertNotIn("check", inputs.manifest(self.docs, epic="EP-001"))
         folder = self.stub_story()

@@ -21,6 +21,37 @@ import backlog_review_inputs as inputs
 from backlog_fixture import _complete_review_body, make_approved_backlog
 
 
+class ReadSessionTests(unittest.TestCase):
+    def test_session_read_computes_once_per_key_and_never_caches_errors(self):
+        calls = []
+
+        def compute():
+            calls.append(1)
+            return {"value": len(calls)}
+
+        self.assertEqual(backlog.session_read(("key",), compute), {"value": 1})
+        self.assertEqual(backlog.session_read(("key",), compute), {"value": 2})
+        failures = []
+
+        def failing():
+            failures.append(1)
+            raise OSError("unreadable")
+
+        with backlog.experience_validation_session():
+            first = backlog.session_read(("key",), compute)
+            self.assertIs(backlog.session_read(("key",), compute), first)
+            backlog.session_read(("other",), compute)
+            self.assertEqual(len(calls), 4)
+            for _ in range(2):
+                with self.assertRaises(OSError):
+                    backlog.session_read(("broken",), failing)
+            self.assertEqual(len(failures), 2)
+            with backlog.experience_validation_session():
+                self.assertIs(backlog.session_read(("key",), compute), first)
+        with backlog.experience_validation_session():
+            self.assertEqual(backlog.session_read(("key",), compute), {"value": 5})
+
+
 class BacklogReviewInputTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -400,6 +431,67 @@ class BacklogReviewInputTests(unittest.TestCase):
         with mock.patch.object(backlog, "collect", side_effect=changing):
             with self.assertRaisesRegex(inputs.InputError, "changed during"):
                 inputs.manifest(self.docs, epic="EP-001")
+
+    def test_each_input_is_validated_once_per_run_and_again_at_close(self):
+        # Closure walks revisit shared paths; validation cost must follow the
+        # read set, not the number of visits.
+        original = inputs.regular_file
+        calls = []
+
+        def counting(docs, relative):
+            calls.append(relative)
+            return original(docs, relative)
+
+        with mock.patch.object(inputs, "regular_file", side_effect=counting):
+            value = inputs.manifest(self.docs, epic="EP-001")
+        snapshot = inputs.snapshot(self.docs)
+        self.assertEqual(len(calls), 2 * len(snapshot) + 2 * len(value["paths"]))
+        for path in value["paths"]:
+            self.assertEqual(calls.count(path), 2 + 2 * (path in snapshot), path)
+
+    def test_ba_registry_is_parsed_once_per_read_session(self):
+        value = ("[[business-analysis/delivery/domains/identity/acceptance/"
+                 "delivery-acceptance|delivery:AC-DEL-001]]")
+        registry = self.docs / "business-analysis/delivery/_generated/registry.json"
+        original = Path.read_text
+        reads = []
+
+        def counting(path, *args, **kwargs):
+            if path == registry:
+                reads.append(path)
+            return original(path, *args, **kwargs)
+
+        errors = []
+        with mock.patch.object(Path, "read_text", counting):
+            for _ in range(2):
+                backlog.validate_criterion_ref(self.docs, value, "label", errors)
+            self.assertEqual(len(reads), 2)
+            with backlog.experience_validation_session():
+                for _ in range(3):
+                    backlog.validate_criterion_ref(self.docs, value, "label", errors)
+            self.assertEqual(len(reads), 3)
+            with backlog.experience_validation_session():
+                backlog.validate_criterion_ref(self.docs, value, "label", errors)
+            self.assertEqual(len(reads), 4)
+        self.assertEqual(errors, [])
+
+    def test_ba_space_is_scanned_once_per_candidate_session(self):
+        import ba_compile
+        space = self.docs / "business-analysis/delivery"
+        stage = inputs.stage_package
+        with mock.patch.object(ba_compile, "scan_space", wraps=ba_compile.scan_space) as scan:
+            stage._session_ba_scan(space)
+            stage._session_ba_scan(space)
+            self.assertEqual(scan.call_count, 2)
+            with stage.candidate_session():
+                first = stage._session_ba_scan(space)
+                self.assertIs(stage._session_ba_scan(space), first)
+                with stage.candidate_session():
+                    self.assertIs(stage._session_ba_scan(space), first)
+            self.assertEqual(scan.call_count, 3)
+            with stage.candidate_session():
+                self.assertIsNot(stage._session_ba_scan(space), first)
+            self.assertEqual(scan.call_count, 4)
 
     def test_cli_reports_failure_and_success_without_writing_manifest(self):
         with contextlib.redirect_stdout(io.StringIO()) as output:

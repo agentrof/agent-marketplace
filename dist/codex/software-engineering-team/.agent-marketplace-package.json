@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.19910cf4940465b32d04e60adbb6e6b52b148efdfe5206ff0518b223f04f118c",
+  "build_id": "snapshot.9ab5732b328fd4488af156cea05f6641aa2298e7a57e4020943048648e4954ee",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -53,9 +53,9 @@
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
     "scripts/atomic_file.py": "91ff2cafb430fcf3e174f7310fb8eff2442fac334e27c3b2fbfc92b5b9f90c0c",
     "scripts/ba_compile.py": "6097b5a504ee3c8e98a414cb7a81961069d7435f92ce15882803b7cbec6a9899",
-    "scripts/backlog_compile.py": "3613c1f82912e51e256a98d8716f50fa11c0b282f6387e99511a1ca0304a6545",
+    "scripts/backlog_compile.py": "39e0ad9916e845deb9d0cf270e9241cfaf7dc4aa549d604d726f5d6cb9eb1575",
     "scripts/backlog_input_policy.py": "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb",
-    "scripts/backlog_review_inputs.py": "64cf22f37686c3b91cd91c97e7b24d66907a656c109e27289f7b3b05de5db62f",
+    "scripts/backlog_review_inputs.py": "2552f0e7417e615281794806b82148498402867a16ac58094f2b1e61782a5939",
     "scripts/delivery_compile.py": "f68f9101cda662e8da33b7c0bdfdf4263e947ed95adb7894499a2d146f596b0e",
     "scripts/delivery_git.py": "47a3f6e5d69cc9318359fd795761d6294bac8e865c449caf3bff2125d14fcb38",
     "scripts/delivery_governance.py": "70939ac67c9ac359f00a5cc7cee25a84e0b724527b34b3f6e22243e5fb66ec27",
@@ -77,7 +77,7 @@
     "scripts/requirement_route.py": "df313a76c6d6028ba7ab261dc643f4ac9208e586b71475562dba72824dbfb55c",
     "scripts/setup_check.py": "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025",
     "scripts/setup_project.py": "b3c8da81a64ec8658a13724bb5e26790f20f186da30e2757aaba3986e64636d0",
-    "scripts/stage_package.py": "01a2f84e5e793715d1ff7e18aa79584690ec1ced820d87c5a226e42c4ce87b1e",
+    "scripts/stage_package.py": "dabf47c67a04b5bc2976dc9a3d7bd909e50879e8e564e86671bc487af40f07bd",
     "scripts/task_inputs.py": "170575c91bbc5944fd05f61c78cea6528d91079a40eb086f64ef0cceeb338ecc",
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
     "scripts/vault_check.py": "7c7e0136437dbec5a5bc04c74da9202daabfe2a1e658330d70a8b589069bbec4",
@@ -291,6 +291,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.19910cf4940465b32d04e60adbb6e6b52b148efdfe5206ff0518b223f04f118c",
+  "source_ref": "snapshot.9ab5732b328fd4488af156cea05f6641aa2298e7a57e4020943048648e4954ee",
   "version": "0.6.0"
 }

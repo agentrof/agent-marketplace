@@ -2170,12 +2170,13 @@ class DeliveryGitTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(project), "push", "-q"], check=True)
             result = delivery_git.reserve_delivery(project, "DLV-001")
             self.assertTrue(result["ok"])
-            self.assertEqual(
-                delivery_git.trailer(
-                    delivery_git.commit_message(project, result["fence"]), "Governance-Hash"
-                ),
-                delivery_git.governed_governance_hash(project),
-            )
+            # A project without a Fence gets a new one on the target, carrying the approved Governance.
+            _ref, fence, values = delivery_git._fence_context(project, "origin")
+            self.assertEqual((fence, delivery_git.run_git(project, "rev-parse", fence + "^@")),
+                             (result["fence"], result["target"]))
+            self.assertEqual(values, {**dict.fromkeys(values, "none"), "Mode": "open", "Epoch": values["Epoch"],
+                                      "Target": result["target"],
+                                      "Governance-Hash": delivery_git.governed_governance_hash(project)})
             (project / "README.md").write_text("target moved\n", encoding="utf-8")
             subprocess.run(["git", "-C", str(project), "add", "README.md"], check=True)
             subprocess.run(["git", "-C", str(project), "commit", "-qm", "target advance"], check=True)
@@ -2227,6 +2228,137 @@ class DeliveryGitTests(unittest.TestCase):
                                    f"{refs['fence']} is {opened[0]}, leased as absent"))
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), opened[0])
         self.assertFalse(delivery_git.remote_has_ref(project, "origin", refs["integration"]))
+
+    def two_story_project(self) -> tuple[Path, Path]:
+        """A pushed project whose approved backlog holds AUTH-01 and AUTH-02 and whose Definition of Done is approved."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs, "AUTH-01", "AUTH-02")
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "approved backlog")
+        delivery_git.run_git(project, "push", "-q")
+        return project, docs
+
+    def scope_delivery(self, docs: Path, delivery: str, slug: str, story: str) -> None:
+        """Create *delivery* for one Story and approve its scope."""
+        init = type("Args", (), {"docs": str(docs), "id": delivery, "slug": slug, "goal": f"Deliver {story}",
+                                 "outcome": None, "target_branch": "main", "story": [story]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": delivery})), 0)
+
+    def test_the_next_delivery_reserves_on_a_child_of_the_fence_a_merged_one_left(self):
+        """A merged Delivery drops its refs and leaves the idle project Fence, which the next
+        reservation takes over: a Fence child with a new Epoch and the target tip as its Target,
+        pushed with the new Integration under the Fence lease. That Delivery claims without a
+        target refresh and is not reserved twice, and a checkout that still holds the merged
+        Delivery at its scope approval cannot reserve it again (#315)."""
+        project, docs = self.two_story_project()
+        self.scope_delivery(docs, "DLV-001", "auth", "AUTH-01")
+        delivery_git.run_git(project, "add", "workspace/docs")
+        delivery_git.run_git(project, "commit", "-qm", "scope")
+        delivery_git.run_git(project, "push", "-q")
+        scope = delivery_git.run_git(project, "rev-parse", "HEAD")
+        delivery_git.reserve_delivery(project, "DLV-001")
+        self.author_execution_topology(docs)
+        self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        self.merge_waited_for_delivery(project)
+        self.assertEqual(self.coordination_branches(project), ["agentrof/fence"])
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        stale = Path(temporary.name) / "stale"
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                        str(project / "remote.git"), str(stale)], check=True)
+        delivery_git.run_git(stale, "checkout", "-q", "--detach", scope)
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.reserve_delivery(stale, "DLV-001")), (
+            "DELIVERY_POST_MERGE_TRANSITION", "the target has merged the PR of DLV-001, so the Delivery is closed"))
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
+        self.scope_delivery(docs, "DLV-002", "session", "AUTH-02")
+        _ref, left, left_values = delivery_git._fence_context(project, "origin")
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        self.assertNotEqual(left_values["Target"], target)
+        reserved = delivery_git.reserve_delivery(project, "DLV-002")
+        _ref, fence, values = delivery_git._fence_context(project, "origin")
+        self.assertEqual((fence, delivery_git.run_git(project, "rev-parse", fence + "^@")), (reserved["fence"], left))
+        self.assertNotEqual(values["Epoch"], left_values["Epoch"])
+        self.assertEqual(values, {**left_values, "Epoch": values["Epoch"], "Target": target})
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", reserved["integration"] + "^@"), target)
+        message = delivery_git.commit_message(project, reserved["integration"])
+        self.assertEqual([delivery_git.trailer(message, key) for key in ("Record", "Delivery", "Target")],
+                         ["delivery-reservation-v1", "DLV-002", target])
+        self.assertEqual(self.coordination_branches(project), ["agentrof/deliveries/dlv-002", "agentrof/fence"])
+
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.reserve_delivery(project, "DLV-002")), (
+            "DELIVERY_REF_COLLISION", "reservation requires an absent Integration ref"))
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
+        # The Fence names the target the new Integration is built on, so claiming needs no refresh first.
+        waiting = delivery_compile.find_delivery(docs, "DLV-002") / "items" / "auth-02" / "item.md"
+        props, body = delivery_compile.split_note(waiting)
+        props["path_claims"] = ["src/session.py"]
+        delivery_compile.atomic_text(waiting, delivery_compile.frontmatter(props, body))
+        self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": "DLV-002"})), 0)
+        delivery_git.publish_execution_plan(project, "DLV-002")
+        self.assertEqual(delivery_git.claim_items(project, "DLV-002")["claims"], ["AUTH-02"])
+
+    def test_reservation_refuses_a_fence_it_cannot_take_over(self):
+        """A reservation takes over only an idle open Fence that carries the approved Governance
+        while no other Delivery or Slot holds it, and never while its own Integration ref exists.
+        Each other state refuses with its reason before any ref moves (#315)."""
+        project, docs = self.two_story_project()
+        for delivery, slug, story in (("DLV-001", "auth", "AUTH-01"), ("DLV-002", "session", "AUTH-02")):
+            self.scope_delivery(docs, delivery, slug, story)
+        first = delivery_git.reserve_delivery(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-002")
+        other = delivery_git.canonical_refs("DLV-001")["integration"]
+        # A merged Delivery drops its Integration ref and leaves the idle Fence.
+        delivery_git.atomic_push(project, "origin", [(other, first["integration"], "")])
+        _ref, idle, values = delivery_git._fence_context(project, "origin")
+        target, intent = first["target"], "sha256:" + "1" * 64
+        busy = "reservation requires an idle open Fence, not one with "
+        carrier = {"Target-Update-Attempt": delivery_git.epoch_token(), "Target-Repository": "upstream",
+                   "Target-Carrier-Kind": "direct_target", "Target-Carrier-Ref": "refs/heads/main",
+                   "Target-Carrier-Object": "direct", "Target-Carrier-Head": target, "Target-Carrier-Base": target}
+        for fence, held, finding in (
+            ({"Mode": "governance"}, {}, ("DELIVERY_REF_COLLISION", busy + "Mode governance")),
+            ({"Barrier-Kind": "plan-revision", "Barrier-Epoch": delivery_git.epoch_token()}, {},
+             ("DELIVERY_REF_COLLISION", busy + "Barrier-Kind plan-revision")),
+            ({"Source-Intent": intent}, {}, ("DELIVERY_REF_COLLISION", busy + "Source-Intent " + intent)),
+            ({"Target-Update-Intent": intent, **carrier}, {},
+             ("DELIVERY_REF_COLLISION", busy + "Target-Update-Intent " + intent)),
+            ({}, {other: first["integration"]},
+             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/deliveries/dlv-001")),
+            ({}, {"refs/heads/agentrof/slots/001": target},
+             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/slots/001")),
+            ({"Governance-Hash": "sha256:" + "2" * 64}, {},
+             ("DELIVERY_FENCE_GOVERNANCE", "the Fence does not carry the approved Governance; "
+                                           "apply it with apply-governance before reserving")),
+            ({}, {refs["integration"]: target}, ("DELIVERY_REF_COLLISION", "reservation requires an absent Integration ref")),
+        ):
+            with self.subTest(finding=finding[1]):
+                held = dict(held)
+                if fence:
+                    held[refs["fence"]] = delivery_git._fence_child(project, idle, {**values, **fence}, "Hold the Fence")
+                # Each held ref goes back to what it held before: the idle Fence, or absent.
+                resting = {ref: idle if ref == refs["fence"] else "" for ref in held}
+                delivery_git.atomic_push(project, "origin", [(ref, resting[ref], oid) for ref, oid in held.items()])
+                try:
+                    before = delivery_git.run_git(project, "ls-remote", "origin")
+                    self.assertEqual(self.refused_finding(lambda: delivery_git.reserve_delivery(project, "DLV-002")),
+                                     finding)
+                    self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+                finally:
+                    delivery_git.atomic_push(project, "origin", [(ref, oid, resting[ref]) for ref, oid in held.items()])
 
     def test_candidate_map_excludes_unpublished_local_governance(self):
         temporary, project = self.make_project()
@@ -4172,7 +4304,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_compile.init_delivery(init), 0)
             self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": delivery})), 0)
         reserved = delivery_git.reserve_delivery(project, "DLV-001")
-        # reserve-delivery takes only a ref-free project, so the second Integration is created directly.
+        # reserve-delivery refuses while DLV-001 holds the Fence, so the second Integration is created directly.
         second = delivery_compile.find_delivery(docs, "DLV-002")
         reservation = delivery_git.commit_tree(
             project, reserved["target"], delivery_git.package_paths(project, second, docs, include_map=False),
@@ -4249,7 +4381,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.refuse_waiting_start(project, project, undeliverable("AUTH-01 was cancelled with DLV-001"))
 
     def merge_waited_for_delivery(self, project: Path) -> dict:
-        """Deliver AUTH-01 of the DLV-001 claim_waiting_deliveries built and merge its PR through merge-pr."""
+        """Deliver AUTH-01 of a claimed DLV-001 and merge its PR through merge-pr."""
         docs = project / "workspace" / "docs"
         active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
         self.commit_item_product_change(active["worktree"], "def authenticate():\n    return 'v1'\n")

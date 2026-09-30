@@ -285,6 +285,16 @@ Delivery reservation, governed Delivery Governance handoff, source handoff, plan
 upgrade and provider target mutation. Every mutation uses exact observed OIDs
 and an atomic remote transaction. A lost lease changes no semantic ref.
 
+The first reservation of a project creates the Fence on the target tip. A
+later reservation takes over the Fence that earlier Deliveries left only while
+the Fence is open with no barrier, source intent or target-update intent and
+carries the approved Governance, and while no other Delivery's Integration ref
+or Slot exists. It pushes a Fence child with a new Epoch and the target tip as
+its Target together with the new Integration ref. A Delivery whose PR the
+target merged cannot be reserved again. One Delivery is open at a time:
+reserving beside an open Delivery needs a multi-Delivery protocol that does
+not exist yet.
+
 Approved Delivery Governance owns `max_parallel`, the hard project-wide maximum
 number of simultaneously active Items. Slot refs `001..N` enforce that limit across Deliveries, hosts and
 machines. Activation advances the Item and selected Slot to the same candidate

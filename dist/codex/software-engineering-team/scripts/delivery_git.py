@@ -2113,11 +2113,29 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
 
 
 def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
-    """Reserve a ref-free scope-approved Delivery with an atomic two-ref push.
+    """Reserve a scope-approved Delivery by pushing its Integration ref under the project Fence.
 
-    This v1 slice intentionally handles only a completely ref-free project.
-    Existing Fence/Delivery refs are classified as a coordinator handoff and
-    rejected until the dedicated resume/retry protocol is implemented.
+    The Integration ref must be absent. A project without a Fence gets a new
+    one on the target tip, and both refs are created in one atomic push.
+
+    A merged Delivery drops its Integration ref and integrated Item refs but
+    leaves the Fence, so every later reservation meets it. That Fence is taken
+    over only while it is idle: open, with no barrier and no source or
+    target-update intent, held by no other Delivery's Integration ref or Slot,
+    and carrying the approved Governance, which a reservation never changes;
+    apply-governance does. A Delivery whose PR the target merged is refused,
+    as by every other writer. Only a reservation onto an existing Fence can
+    meet one, since that Delivery's reservation left a Fence no verb deletes.
+    The reservation writes a Fence child with a new Epoch, as a new Fence
+    gets, and the target tip as its Target, the baseline the new Integration
+    starts from and writer readiness compares, then pushes it with the
+    Integration in one atomic push that leases the Fence tip. No reader
+    compares an Epoch: Delivery writers carry it, and handoff and migration
+    transitions and barrier releases replace it.
+
+    One open Delivery per project remains the limit. A reservation beside
+    another open Delivery or an active Slot is refused, because no protocol
+    lets concurrent Deliveries share the Fence Target and Epoch yet.
     """
     root = main_worktree(project_root.resolve())
     from delivery_compile import delivery_findings, docs_root, split_note
@@ -2131,8 +2149,25 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
         raise RuntimeError("reserve-delivery requires scope_approved")
     target_branch, target_oid = resolve_target(root, remote)
     refs = canonical_refs(delivery_id)
-    if any(remote_has_ref(root, remote, ref) for ref in refs.values()):
-        raise RuntimeError("DELIVERY_REF_COLLISION: reservation requires absent Fence and Integration refs")
+    if remote_has_ref(root, remote, refs["integration"]):
+        raise RuntimeError("DELIVERY_REF_COLLISION: reservation requires an absent Integration ref")
+    fence_exists = remote_has_ref(root, remote, refs["fence"])
+    if fence_exists:
+        refuse_merged_delivery(root, delivery_id, remote)
+        _fence_ref, previous_fence, values = _fence_context(root, remote)
+        busy = [f"{key} {values[key]}" for key, idle in (
+            ("Mode", "open"), ("Barrier-Kind", "none"), ("Source-Intent", "none"), ("Target-Update-Intent", "none"),
+        ) if values[key] != idle]
+        if busy:
+            raise RuntimeError("DELIVERY_REF_COLLISION: reservation requires an idle open Fence, not one with "
+                               + ", ".join(busy))
+        listed = run_git(root, "ls-remote", remote, "refs/heads/agentrof/deliveries/*", "refs/heads/agentrof/slots/*")
+        holders = sorted(line.partition("\t")[2].removeprefix("refs/heads/") for line in listed.splitlines())
+        if holders:
+            raise RuntimeError("DELIVERY_REF_COLLISION: another Delivery or Slot holds the Fence: " + ", ".join(holders))
+        if values["Governance-Hash"] != governed_governance_hash(root):
+            raise RuntimeError("DELIVERY_FENCE_GOVERNANCE: the Fence does not carry the approved Governance; "
+                               "apply it with apply-governance before reserving")
     package = package_paths(root, directory, docs, include_map=False)
     integration_oid = commit_tree(
         root, target_oid, sorted(set(package)),
@@ -2141,14 +2176,20 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
          "Slug": directory.name.removeprefix(delivery_id.lower() + "-"), "Target": target_oid},
         delivery_projections=True,
     )
-    fence_oid = commit_tree(
-        root, target_oid, [], f"Open Agentrof Fence for {delivery_id}",
-        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
-         "Epoch": epoch_token(), "Target": target_oid,
-         "Governance-Hash": governed_governance_hash(root),
-         "Barrier-Kind": "none", "Barrier-Epoch": "none"},
-    )
-    atomic_push(root, remote, [(refs["fence"], "", fence_oid), (refs["integration"], "", integration_oid)])
+    if fence_exists:
+        leased_fence = previous_fence
+        fence_oid = _fence_child(root, previous_fence, {**values, "Epoch": epoch_token(), "Target": target_oid},
+                                 f"Open Agentrof Fence for {delivery_id}")
+    else:
+        leased_fence = ""
+        fence_oid = commit_tree(
+            root, target_oid, [], f"Open Agentrof Fence for {delivery_id}",
+            {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
+             "Epoch": epoch_token(), "Target": target_oid,
+             "Governance-Hash": governed_governance_hash(root),
+             "Barrier-Kind": "none", "Barrier-Epoch": "none"},
+        )
+    atomic_push(root, remote, [(refs["fence"], leased_fence, fence_oid), (refs["integration"], "", integration_oid)])
     return {"ok": True, "delivery": delivery_id, "target_branch": target_branch,
             "target": target_oid, "fence": fence_oid, "integration": integration_oid,
             "refs": short_refs(delivery_id)}

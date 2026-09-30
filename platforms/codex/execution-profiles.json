@@ -6,6 +6,7 @@
       "medium": {"effort": "medium"},
       "low": {"effort": "low"},
       "lens": {"effort": "high"},
+      "mechanical": {"effort": "medium"},
       "inherit": {}
     }
   }

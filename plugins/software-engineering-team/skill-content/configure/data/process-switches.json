@@ -29,6 +29,35 @@
         "unit": "At least 5 panel review passes across at least 2 flows.",
         "threshold": "Panel valid-major recall at least equal to the official review's and panel wall time at most 50% of it, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "mechanical_pass_tier": {
+      "summary": "Which tier runs a backlog, Operation contract or Solution Design writer pass that only applies the fixes a review verdict names, and whether a compiler render, stamp or check step spawns a role at all.",
+      "issue": 330,
+      "flows": ["backlog-planning", "operation", "solution-design"],
+      "values": [
+        {
+          "id": "role_tier",
+          "tradeoffs": "Every writer pass runs on its role's own tier, usually as the resumed writer that still holds the document, and compiler steps run as each flow describes. Today's behaviour and the baseline the mechanical tier is measured against; a pass that only applies spelled-out fixes still generates every edit at the writer's full tier."
+        },
+        {
+          "id": "mechanical",
+          "tradeoffs": "A writer pass whose findings each name their exact fix runs on the owning writer's -mechanical variant, a fresh agent on the lower mechanical tier, and render, stamp and check steps run as direct entry commands with no role pass. Shorter fix passes, while the fresh variant re-reads what a resumed writer held and a lower tier may misapply a fix, which the unchanged re-check catches at the cost of a round."
+        }
+      ],
+      "default": "role_tier",
+      "agent_variants": {
+        "mechanical": {
+          "suffix": "mechanical",
+          "tier": "mechanical",
+          "description": "Lower-tier variant for mechanical passes that apply only the fixes a review verdict names.",
+          "agents": ["devops-engineer", "product-owner", "qa-engineer", "solution-architect"]
+        }
+      },
+      "metric": "Per mechanical pass, its wall time and output tokens against the base writer's median for the same pass kind, whether the re-check finds the fix incomplete or wrong (rework), and any unrelated edit the re-check finds.",
+      "promotion": {
+        "unit": "A frozen-task A/B that sets the mechanical tier's host values, then at least 3 Deliveries run with mechanical.",
+        "threshold": "Median apply_findings wall time at most 50% of the base writer's median for the same pass kind, a rework rate no higher than role_tier's over the same period and zero accepted unrelated edits, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

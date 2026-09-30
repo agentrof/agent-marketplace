@@ -163,7 +163,8 @@ Canonical agents declare only a host-neutral `reasoning` tier from
 `tools/data/models.json`. Tier names are single words because each is both a
 kebab-case reasoning level and a snake_case key in the profile tables. A
 process switch value may declare generated agent variants on another tier,
-such as the `lens` tier of the review-panel readers (see Process switches).
+such as the `lens` tier of the review-panel readers or the `mechanical` tier
+of the writers' fix passes (see Process switches).
 Each host maps every tier to its own model and
 effort in `platforms/<host>/execution-profiles.json`, profile `auto`. The
 builder and `tools/validate.py` accept only the host's documented values, so
@@ -271,3 +272,22 @@ read-only panel reader. The switch's flip rule is the owner's condition for
 #312: at least 5 panel passes across at least 2 flows, panel valid-major
 recall at least equal to the official review's, and panel wall time at most
 50% of the official one.
+
+## Mechanical passes
+
+Process switch `mechanical_pass_tier` selects who runs the writer side of
+backlog, Operation contract and Solution Design reviews. At `role_tier`, the
+default, every writer pass runs on its role's own tier. At `mechanical`, a
+pass whose returned findings each name their exact fix (`apply_findings`)
+runs on the owning writer's `-mechanical` variant, and `render`, `stamp` and
+`check` steps run as direct entry commands with no role pass. The pass kinds,
+their eligibility and the frozen-task A/B that sets the tier's host values
+live in
+`challenge-review/references/switch-mechanical_pass_tier-mechanical.md`.
+The switch's `agent_variants` make every build ship `product-owner-mechanical`,
+`qa-engineer-mechanical`, `devops-engineer-mechanical` and
+`solution-architect-mechanical` on the `mechanical` tier; each keeps its
+writer's body, boundaries and identity, so writer ownership is unchanged. The
+validator requires the switch to declare these variants and rejects one for a
+read-only reviewer or challenger, so every review, re-check and calibration
+keeps its tier under both values.

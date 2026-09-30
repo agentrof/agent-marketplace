@@ -6,6 +6,7 @@
       "medium": {"model": "sonnet"},
       "low": {"model": "haiku"},
       "lens": {"model": "sonnet", "effort": "high"},
+      "mechanical": {"model": "sonnet", "effort": "high"},
       "inherit": {"model": "inherit"}
     }
   }

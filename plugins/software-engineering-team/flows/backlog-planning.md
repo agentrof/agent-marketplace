@@ -175,6 +175,10 @@ belong to delivery.
 Switch `review_panels`: at `lens_panel`, review panel `backlog_epic` and review
 panel `backlog_root` replace this section's epic and root reviewers, as
 `skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
+defines. Switch `mechanical_pass_tier`: at `mechanical`, a Product Owner pass
+that only applies the fixes returned findings name, and the compiler commands
+of this section and section 5, run as
+`skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md`
 defines.
 
 ### Recovery that removes only operating-system metadata

@@ -30,6 +30,16 @@ QA, and the Experience attestation, keep one reader per role because their
 machine interfaces accept one result per role; they join through a later
 merge step.
 
+The writer side of those backlog, Solution Design and Operation contract
+reviews runs as process switch `mechanical_pass_tier` selects. `role_tier`,
+the default, keeps every writer pass on its role's own tier. `mechanical`,
+defined in
+`challenge-review/references/switch-mechanical_pass_tier-mechanical.md`,
+gives a pass whose findings each name their exact fix to the owning writer's
+`-mechanical` variant and runs render, stamp and check steps as direct entry
+commands. Triage, authoring, design, code repairs and every review, re-check
+or calibration keep their roles and tiers.
+
 Requirement Flow is a linear, user-gated sequence. Each required stage commits
 its approved documents before the next stage begins. The backlog compiler is
 the only machine that derives backlog indexes. All durable changes are

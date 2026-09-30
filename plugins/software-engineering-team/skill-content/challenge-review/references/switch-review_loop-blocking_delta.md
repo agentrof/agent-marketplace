@@ -83,15 +83,22 @@ re-review reads only:
 - its dependency context: every note, contract or decision the changed text
   cites or that cites it, and anything else a fix could have touched.
 
-For the Solution Design, Design System and Operation contract reviews, commit
-the candidate before its first review, so the reviewed revision has a commit.
-Write the open critical and major findings to a record under the project-local
-runtime directory, `.agentrof/agent-marketplace/.runtime/`, and derive each
-rerun reader's task with `--findings <record>`, `--base <reviewed commit>` and
-one `--input` per changed path and dependency-context note, and no other
-document of the step. A backlog re-review keeps its regenerated manifest:
-the changed paths, the files whose `sha256` changed, are the changed text, as
-the Review findings section of `structured-records.md` defines.
+Commit the candidate before its first review, so the reviewed revision has a
+commit. Write the open critical and major findings to a record under the
+project-local runtime directory, `.agentrof/agent-marketplace/.runtime/`, and
+derive each rerun reader's task with `task_inputs.py`, `--findings <record>`,
+`--base <reviewed commit>` and one `--input` per changed path and
+dependency-context note, and no other document of the step.
+
+A backlog rerun reader's task takes no `--epic`, so it binds no epic or root
+review manifest and never the whole closure again. Its dependency context is
+the epic, test plan and dependency stories of each changed story, the review
+note that records the findings, and every note the changed text cites or that
+cites it. The step still runs `backlog_compile.py check` after the fix. The
+task's own `--expected-hash` rerun, which every task carries, binds exactly
+those inputs, so the re-review needs no narrower backlog manifest with a
+second freshness contract: rerun the task with its `source_hash` before
+accepting the re-review's result, and a changed input needs a fresh rerun.
 
 Each rerun reader confirms that every finding it was given is closed and
 reviews the changed text; it never re-audits unchanged text. The step's own

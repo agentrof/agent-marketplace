@@ -20,6 +20,7 @@ import tempfile
 import uuid
 
 import atomic_file
+from backlog_compile import meaningful_text
 import delivery_compile as delivery
 import file_lock
 
@@ -541,6 +542,57 @@ def require_raw_evidence(root: Path, session: dict, checks: dict) -> None:
             raise RuntimeError(f"{check} raw command output is missing or changed")
 
 
+def review_loop(root: Path, delivery_id: str) -> str:
+    """The review_loop value the Delivery runs under, as its pinned policy sets it."""
+    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, delivery.REVIEW_LOOP)
+
+
+def item_record(root: Path, delivery_id: str, story: str) -> dict:
+    directory = delivery.find_delivery(delivery.docs_root(root), delivery_id)
+    if directory is None:
+        raise RuntimeError("Delivery Item not found")
+    return delivery.split_note(directory / "items" / delivery.id_slug(story) / "item.md")[0]
+
+
+def nonblocking(finding: dict) -> bool:
+    return finding["severity"].casefold() in {value.casefold() for value in policy()["nonblocking_severities"]}
+
+
+def follow_up_roles(item: dict) -> list[str]:
+    """The Item's implementation roles, which own its code review follow-ups."""
+    roles = item.get("role_sequence")
+    return [role for role in roles if role not in ROLES] if isinstance(roles, list) else []
+
+
+def follow_up_problems(findings: list, roles: list[str]) -> list[str]:
+    """Every open non-blocking code review finding is a tracked follow-up."""
+    problems = []
+    for finding in findings:
+        if finding.get("status") != "open" or not nonblocking(finding):
+            continue
+        identifier = finding["id"]
+        for key in ("file", "description"):
+            if not isinstance(finding.get(key), str) or not finding[key].strip():
+                problems.append(f"{identifier} needs its {key}")
+        if finding.get("owner_role") not in roles:
+            problems.append(f"{identifier} owner_role must be one of: {', '.join(roles)}")
+        trigger = finding.get("revisit_trigger")
+        if not isinstance(trigger, str) or not meaningful_text(trigger):
+            problems.append(f"{identifier} needs a concrete revisit_trigger")
+    return problems
+
+
+def open_follow_ups(result: dict, item: dict) -> list[dict]:
+    """The open non-blocking findings of a code review result, each a complete follow-up."""
+    findings = result.get("findings", [])
+    problems = follow_up_problems(findings, follow_up_roles(item))
+    if problems:
+        raise RuntimeError("code review follow-ups are incomplete: " + "; ".join(problems))
+    return sorted((finding for finding in findings
+                   if finding.get("status") == "open" and nonblocking(finding)),
+                  key=lambda finding: finding["id"])
+
+
 def register_result(root: Path, result: dict) -> dict:
     root = root.resolve()
     with locked(root):
@@ -607,6 +659,10 @@ def register_result(root: Path, result: dict) -> dict:
                 or any(finding["severity"].casefold() in blocking and dispositions[identifier]["status"] != "resolved"
                        for identifier, finding in inherited.items())):
             raise RuntimeError("final result must explicitly disposition every inherited finding and resolve blocking findings")
+        if (role == "code_reviewer" and verdict != "cancelled"
+                and review_loop(root, current["delivery"]) == "blocking_delta"):
+            # Refuses an open minor finding that is not a complete follow-up.
+            open_follow_ups(result, item_record(root, current["delivery"], current["story"]))
         stored = dict(result)
         stored["result_hash"] = digest(result)
         value["workers"][role] = {"state": "cancelled" if verdict == "cancelled" else "settled", "result": stored,

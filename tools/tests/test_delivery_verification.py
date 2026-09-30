@@ -716,6 +716,67 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertEqual(verification.require_current(self.root, frozen), frozen["candidate"])
 
 
+    def review_loop(self, value="blocking_delta"):
+        import process_policy
+        docs = self.root / "workspace/docs"
+        for argv in (["init"], ["set", "--switch", "review_loop", "--value", value], ["approve"]):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+        self.commit()
+
+    def approve_evidence(self):
+        args = type("Args", (), {"docs": ".", "worktree": str(self.root), "delivery": "DLV-001", "story": "AUTH-01"})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery.approve_item_evidence(args)
+        self.assertEqual(code, 0, output.getvalue())
+        return delivery.section_bodies(delivery.split_note(self.root / self.directory / "items/auth-01/code-review.md")[1])
+
+    def test_current_keeps_code_review_minors_as_notes(self):
+        self.freeze()
+        result = self.result()
+        result["findings"] = [{"id": "CR-2", "severity": "minor", "status": "open", "verification": "Rename it"}]
+        verification.register_result(self.root, result)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
+        self.assertEqual(self.approve_evidence()["Deviations and Follow-ups"], delivery.SECTION_PLACEHOLDER)
+
+    def test_blocking_delta_code_review_minors_are_follow_ups_on_the_record(self):
+        self.review_loop()
+        self.freeze()
+        item = (self.root / self.item_path).read_bytes()
+        result = self.result()
+        minor = {"id": "CR-2", "severity": "MINOR", "status": "open", "verification": "Rename it"}
+        result["findings"] = [dict(minor)]
+        with self.assertRaisesRegex(RuntimeError, "code review follow-ups are incomplete: CR-2 needs its file; "
+                                                  "CR-2 needs its description; CR-2 owner_role must be one of: "
+                                                  "backend_developer; CR-2 needs a concrete revisit_trigger"):
+            verification.register_result(self.root, result)
+        minor.update(file="src/product.py:1", description="The name value hides | its unit.",
+                     owner_role="frontend_developer", revisit_trigger="Revisit at the next change to src/product.py.")
+        result["findings"] = [dict(minor)]
+        with self.assertRaisesRegex(RuntimeError, "CR-2 owner_role must be one of: backend_developer$"):
+            verification.register_result(self.root, result)
+        minor["owner_role"] = "backend_developer"
+        # A resolved minor is no follow-up, so it needs no follow-up fields.
+        result["findings"] = [dict(minor), {"id": "CR-1", "severity": "minor", "status": "resolved",
+                                            "verification": "Renamed"}]
+        verification.register_result(self.root, result)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
+        self.assertEqual(self.approve_evidence()["Deviations and Follow-ups"], "\n".join([
+            delivery.ITEM_FOLLOW_UPS, "",
+            "| finding | severity | file | description | owner_role | revisit_trigger |",
+            "|---|---|---|---|---|---|",
+            "| CR-2 | MINOR | src/product.py:1 | The name value hides \\| its unit. | backend_developer "
+            "| Revisit at the next change to src/product.py. |"]))
+        # Evidence approval writes only the two reports; the Item keeps its approved bytes.
+        self.assertEqual((self.root / self.item_path).read_bytes(), item)
+
+    def test_blocking_delta_records_that_no_follow_up_is_open(self):
+        self.review_loop()
+        self.freeze()
+        self.settle()
+        self.assertEqual(self.approve_evidence()["Deviations and Follow-ups"], delivery.ITEM_FOLLOW_UPS + " none.")
+
     def test_durable_diagnostic_or_mismatched_report_cannot_integrate(self):
         item = {"verification_schedule": "parallel_snapshot_v1"}
         review = {"verification_candidate_hash": "sha256:candidate", "verification_result_hash": "sha256:review", "verification_mode": "review_initial"}

@@ -10,10 +10,11 @@ change updates the digest with its reason in the same commit.
 upstream notes and Verification Contract from the frozen
 ``default_equivalence_inputs.json`` instead of rebuilding them with the
 backlog and Operation compilers, whose own fixes would otherwise move every
-Delivery hash that covers them. ``--harness inputs`` rebuilds that file.
-Neither golden hides a field: no Delivery record carries a package script or
-instruction hash, and the manifest run hashes a package the harness writes
-byte for byte, so release changes to scripts and contracts reach neither.
+Delivery hash that covers them; the Operation run checks the same contract.
+``--harness inputs`` rebuilds that file. No golden hides a field: no Delivery
+record or Operation receipt carries a package script or instruction hash, and
+the manifest run hashes a package the harness writes byte for byte, so
+release changes to scripts and contracts reach none of them.
 """
 
 from __future__ import annotations
@@ -78,6 +79,13 @@ DELIVERY_GOLDEN = {
     ],
 }
 
+# Taken on frozen inputs at program tip 18a7a35; 038daef and the base e56acfb
+# produce the same digests.
+OPERATION_GOLDEN = {
+    "environment": "sha256:9997854f6d8c6eac9c2d5e72eb1162b7104d59cfbd4322acba98df123b62336b",
+    "verification": "sha256:f12c13e4555da039f3b6c446795949178c3c2379895ab39949ddecf47830d251",
+}
+
 # Taken at program tip 95298e5; 679de01 and e56acfb produce the same digests.
 MANIFEST_GOLDEN = {
     "entry:without_switch_files":
@@ -115,6 +123,11 @@ class DefaultEquivalenceTests(unittest.TestCase):
     def test_delivery_compiler_outputs_match_the_base_on_frozen_inputs(self):
         self.assertEqual(run_harness("delivery"), DELIVERY_GOLDEN,
                          "run this file with --harness delivery --raw to read the outputs")
+
+    def test_operation_compiler_checks_match_the_base_on_frozen_inputs(self):
+        # A contract without an Accepted Minor Findings section checks as released.
+        self.assertEqual(run_harness("operation"), OPERATION_GOLDEN,
+                         "run this file with --harness operation --raw to read the outputs")
 
     def test_task_manifests_match_the_base_without_a_policy(self):
         actual = run_harness("manifests")
@@ -254,6 +267,28 @@ def _delivery_harness(root: Path, raw_output: bool = False) -> dict:
     return {"files": files, "outputs": normalized if raw_output else [digest(text) for text in normalized]}
 
 
+def _operation_harness(root: Path, raw_output: bool = False) -> dict:
+    """Check both Operation contracts of the frozen inputs with ``root``'s compiler."""
+    sys.path[:0] = [str(root / PLUGIN / "scripts")]
+    import operation_compile
+
+    inputs = json.loads(INPUTS.read_text(encoding="utf-8"))
+    outputs = {}
+    with tempfile.TemporaryDirectory() as raw:
+        project = Path(raw).resolve()
+        for relative, text in inputs["files"].items():
+            path = project / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(text.encode("utf-8"))
+        docs = project / "workspace" / "docs"
+        for kind in ("verification", "environment"):
+            code, text = _quiet(operation_compile.main,
+                                ["check", "--kind", kind, "--docs", str(docs), "--json"])
+            text = f"{code}\n" + text.replace(str(project), "<project>").replace(raw, "<project>")
+            outputs[kind] = text if raw_output else digest(text)
+    return outputs
+
+
 FIXTURE_SWITCHES = {"schema_version": 1, "switches": {"fixture_mode": {
     "summary": "How the fixture step runs.", "flows": ["fixture-flow"],
     "values": [{"id": "current", "tradeoffs": "Today's behaviour."},
@@ -360,7 +395,7 @@ def _manifest_harness(root: Path, raw_output: bool = False) -> dict:
 
 
 HARNESSES = {"delivery": _delivery_harness, "inputs": _input_harness,
-             "manifests": _manifest_harness}
+             "manifests": _manifest_harness, "operation": _operation_harness}
 
 
 if __name__ == "__main__":

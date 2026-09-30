@@ -1308,6 +1308,51 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(props["approval_hash"], delivery_compile.content_hash(
             props, body, exclude=delivery_compile.MUTABLE | {"approval_hash"}))
 
+    def test_review_approval_lists_code_review_follow_ups_at_blocking_delta(self):
+        self.policy("init")
+        self.policy("set", "--switch", "review_loop", "--value", "blocking_delta")
+        self.policy("approve")
+        plan_args = self.scope_ready_for_execution()
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 0, result)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        item = root / "items/auth-01/item.md"
+        props, body = delivery_compile.split_note(item)
+        props["status"] = "integrated"
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        record = item.parent / "code-review.md"
+        row = ("| CR-2 | minor | src/auth.py:12 | The helper name hides \\| its unit. "
+               "| backend_developer | Revisit at the next change to src/auth.py. |")
+        record_props, record_body = delivery_compile.split_note(record)
+        delivery_compile.atomic_text(record, delivery_compile.frontmatter(
+            record_props, delivery_compile.replace_section(
+                record_body, "Deviations and Follow-ups", delivery_compile.table_block(
+                    delivery_compile.ITEM_FOLLOW_UPS, delivery_compile.FOLLOW_UP_COLUMNS, [row]))))
+        review_path = root / "delivery-review.md"
+        review_path.write_text(delivery_compile.frontmatter(
+            {"type": "delivery-review", "status": "draft"},
+            delivery_compile.body_for("delivery-review", "Draft review",
+                                      {"Lessons and Follow-up": "Rotate the fixture keys."})),
+            encoding="utf-8")
+        review = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
+                                   "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
+        expected = "\n".join([
+            "Rotate the fixture keys.", "", delivery_compile.DELIVERY_FOLLOW_UPS, "",
+            "| item | finding | severity | file | description | owner_role | revisit_trigger |",
+            "|---|---|---|---|---|---|---|", "| AUTH-01 " + row])
+        for attempt in ("first", "repeated"):
+            with self.subTest(attempt=attempt), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(delivery_compile.approve_review(review), 0)
+                props, body = delivery_compile.split_note(review_path)
+                self.assertEqual(delivery_compile.section_bodies(body)["Lessons and Follow-up"], expected)
+                self.assertEqual(props["approval_hash"], delivery_compile.content_hash(
+                    props, body, exclude=delivery_compile.MUTABLE | {"approval_hash"}))
+        self.policy("begin-revision")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.approve_review(review), 1)
+        self.assertIn("Process Policy revision 2 is a draft", output.getvalue())
+
     def test_vault_paths_stay_posix_on_a_host_with_backslash_separators(self):
         """A vault path uses forward slashes on every host (#228)."""
         from test_delivery_git import WindowsVaultPath, windows_vault_paths

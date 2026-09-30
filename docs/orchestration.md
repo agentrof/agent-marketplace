@@ -40,6 +40,21 @@ gives a pass whose findings each name their exact fix to the owning writer's
 commands. Triage, authoring, design, code repairs and every review, re-check
 or calibration keep their roles and tiers.
 
+Process switch `review_loop` decides how a review loop treats the findings a
+review returns, with either value of `review_panels`. At `current`, the
+default, every step keeps its own loop. At `blocking_delta`, only a critical or
+major finding starts a round in the backlog, Solution Design, Design System and
+Operation contract reviews and in Delivery code review. A minor finding is fixed
+only in a writer pass that already carries a blocking fix; otherwise it becomes
+a follow-up with an owner role and a revisit trigger: in the compiler-validated
+`Accepted Minor Findings` table of a backlog review note or an Operation
+contract, at the approval gate of Solution Design and Design System, and for
+code review in result fields that `approve-item-evidence` copies into the
+Item's code review record and `approve-review` lists in the Delivery Review. A
+re-review reads only the open blocking findings, the changed text and its
+dependency context. The instructions live in the `challenge-review` and
+`code-review` references `switch-review_loop-blocking_delta.md`.
+
 Requirement Flow is a linear, user-gated sequence. Each required stage commits
 its approved documents before the next stage begins. The backlog compiler is
 the only machine that derives backlog indexes. All durable changes are

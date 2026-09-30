@@ -30,6 +30,8 @@ Requirement stage and it does not alter product-stage package hashes.
    commands of steps 2 and 4, run as
    `skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md`
    defines.
+   Switch `review_loop`: at `blocking_delta`, this review loop follows
+   `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
 4. Approve with `operation_compile.py approve --kind <kind>`. Return the exact
    contract receipt. Do not run a downstream product stage automatically.
 

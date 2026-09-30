@@ -32,6 +32,17 @@ The public path for implementation work is:
        -> /delivery-plan -> /execution-plan -> /deliver
 ```
 
+Process switch `delivery_path` decides how many planning steps and owner gates
+one Delivery takes between the backlog and `/deliver`. `standard`, the
+default, is the path above. At `light_when_eligible`, a Delivery the compiler
+finds eligible plans its scope and its execution inside `/delivery-plan`, and
+every other Delivery keeps the standard path:
+
+```text
+standard: /delivery-plan -> scope gate -> /execution-plan DLV-### -> execution gate -> /deliver DLV-###
+light:    /delivery-plan -> one gate: scope, topology, reused contract receipts -> /deliver DLV-###
+```
+
 Entry skills are the only user-facing commands. Coordinator verbs such as
 `claim-items`, `start-item`, `integrate-item`, `open-pr` and `merge-pr` are
 internal operations invoked by the owning entry.
@@ -257,6 +268,34 @@ A Delivery is one reviewable outcome. It has no duration, estimate, cadence,
 capacity or release field. Before reservation, declining or stopping leaves no
 tracked file, ID, ref or provider object. After reservation, its ID,
 goal-derived slug and scope hash are immutable.
+
+Process switch `delivery_path` decides whether a small Delivery plans in one
+step. At `standard`, the default, every Delivery takes the scope gate here and
+the execution gate in Execution Planning. At `light_when_eligible`, `init`
+reports under `delivery_path` whether the selection is eligible and names each
+failed condition, and `delivery_compile.py light-path-check --delivery DLV-###`
+repeats the check on the Delivery's records before each light step, with the
+findings execution approval would refuse. The compiler finds a Delivery
+eligible only when it selects one Story without a `software_architect` role,
+whose Item declares no architecture impact with the Software Architect's own
+reason, that reuses the approved current Operation contracts with no revision
+open, whose dependencies a merged Delivery records integrated, and that stays
+within the limits the owner set in switch `story_size_budget`; with no limit
+set no Story is eligible. An eligible Delivery gets a topology-only pass inside
+`/delivery-plan` and one owner gate for the scope, the Item topology and the
+reused contract receipts. Then `approve-scope`, `reserve-delivery`,
+`approve-execution`, `publish-execution-plan` and `claim-items` run in that
+order with every check and refusal unchanged. A failed check falls back to the
+standard path and keeps every approval already made; a
+`DELIVERY_TRANSACTION_UNCERTAIN` from reservation or publication is resolved by
+reading the refs again, not by a second gate. `approve-scope` writes one
+`Delivery path:` line first in `User Decisions`, inside the scope hash: `light`
+with the Item topology hash and the contract receipts it approved, or
+`standard` with each failed condition. `approve-execution` keeps a light line
+only while every condition holds and the plan binds that topology and those
+receipts, and otherwise records `standard`. With the pinned Process Policy,
+the line names the path the Delivery ran. At `owner_gates` `two_fixed_gates`
+the one gate is gate A.
 
 ## Execution Planning
 

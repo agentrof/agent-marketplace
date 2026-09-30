@@ -34,6 +34,20 @@ approval and Requirement-flow gates keep their own gates.
 5. A rejection writes nothing that gate A would have authorized. Revise, then
    present gate A again.
 
+## With delivery_path
+
+Switch `delivery_path` at `light_when_eligible` plans an eligible Delivery, one
+small Story, in one step with one owner gate. Gate A already holds the scope
+and the plan, so the two switches compose into one gate, never two: for an
+eligible Delivery, gate A is that one gate. The Software Architect's
+topology-only pass replaces the execution planning before it, gate A presents
+the reused contract receipts in place of Operation revisions, and its approval
+authorizes the writes above in the same order, as
+`skill-content/delivery-plan/references/switch-delivery_path-light_when_eligible.md`
+defines. The decision log and the queued questions are presented and recorded
+as this file defines; the Delivery's `Delivery path:` line stands above the
+log's table.
+
 ## Between the gates
 
 - A question outside the at-once classes is queued: add a `pending` row to the

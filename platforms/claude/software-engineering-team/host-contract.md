@@ -69,5 +69,10 @@
   `mechanical_pass_tier` at `mechanical` spawns them, for a pass that applies
   the fixes a review names; the writers themselves keep their own tier, and no
   review, re-check or calibration runs on a variant.
+- Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
+  is planned inside `/delivery-plan` with one owner gate, presented through
+  `AskUserQuestion`, and handed over to `/deliver DLV-###`; `/execution-plan
+  DLV-###` stays for a plan revision and for a Delivery that left the light
+  path, so the public entries do not change.
 - Delivery execution is available only through the exact public entries
   `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.

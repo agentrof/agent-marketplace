@@ -82,6 +82,48 @@ DELIVERY_GOLDEN = {
     ],
 }
 
+# The same run under an approved Process Policy that sets only review_panels,
+# so delivery_path stays at standard and every Delivery switch at its default.
+# Taken on frozen inputs with the scripts of program tip 6305138, before
+# delivery_path existed; the pins name the policy, so the Delivery records
+# differ from DELIVERY_GOLDEN's.
+DELIVERY_POLICY_GOLDEN = {
+    "files": {
+        "delivery/definition-of-done.md":
+            "sha256:7b766655dd95e17b5b8a8a72dacad577524c8d2010bca777e5eaf85325cde7e0",
+        "delivery/deliveries/dlv-001-auth/delivery-review.md":
+            "sha256:7d76c5b8085a6bff8c09736e9354366df2f816e49be252e8809c1bac47501511",
+        "delivery/deliveries/dlv-001-auth/delivery.md":
+            "sha256:29ad2e649d6276ac859abb0dd26e4793a294ccee9b37bae5410923f09b18490f",
+        "delivery/deliveries/dlv-001-auth/execution-plan.md":
+            "sha256:f2919d5b003f95b28e6e56d5685ef4e52b6cc7e464462668ebffe2d1143c7d00",
+        "delivery/deliveries/dlv-001-auth/items/auth-01/code-review.md":
+            "sha256:1bab717a4131ecf98e4471801c1329db7cb418b1a5e527589795cba84f1b96ab",
+        "delivery/deliveries/dlv-001-auth/items/auth-01/item.md":
+            "sha256:5c9a8f0191600cd81c41cb50649818a9e6e8398752e242a3026e179807ee2810",
+        "delivery/deliveries/dlv-001-auth/items/auth-01/verification.md":
+            "sha256:0d7ce7622e3a05777ed8c461e8a40042c4e9b5fd4cf361d87a3238913fc74231",
+        "delivery/process-policy.md":
+            "sha256:0771354cfcefd7ac40197d1695d91ab54f23d1022a116f8b1ed046297aa09175",
+        "maps/delivery.md":
+            "sha256:43b7fe7e8c051729679a605a71913509f9424bbb925135c3a4c8a0ee74330796",
+    },
+    "outputs": [
+        "sha256:41ae602c5e6815cc3f4d31cd2e1c1cd0e458ce43bc3973c050b4921a4bc1c9b7",
+        "sha256:57f15c73e2bad9e1c7647fbc2e0cb680b7cb6352dfca5d72c1738d907fadfc9d",
+        "sha256:2a569505e9e63ce2543b513ce0341738f5952152c30fb3b2e1fa8ddc72aa3b29",
+        "sha256:d87f2a99c3040d4ffe46ee5e1c6b81cacb5b8956ccb5c62316447138c02fdd2f",
+        "sha256:63f038986e1379180c8fbbcc0dbcd995782805d64e4bb1b3cd3f427ac42c54e5",
+        "sha256:959eb46a2bfcd24a9862e85ca051ff11950cf7a3cb232ee7c82b3a661eeb0e42",
+        "sha256:959eb46a2bfcd24a9862e85ca051ff11950cf7a3cb232ee7c82b3a661eeb0e42",
+        "sha256:9fac5f29db46fe2668b73a4507b0c976eae80286547f4e3108b8c5db16799cb8",
+        "sha256:241a3ca0c7944c139fa41f35293a402856d29e05317dfa8229076d6cbfda384b",
+        "sha256:04f01a3fa02b803bfb40851827e36a2ffe2a4f169e6dcb6fa8289a97976d9d34",
+        "sha256:738ab1650128715429b5c087efee1484d23ac7168b9435f0bea287291827524b",
+        "sha256:3817d097b8d4f6463446b0d46ab75656dffb9da0bea7eb68731433c31d5fe0aa",
+    ],
+}
+
 # Taken on frozen inputs at program tip 18a7a35; 038daef and the base e56acfb
 # produce the same digests.
 OPERATION_GOLDEN = {
@@ -151,6 +193,11 @@ class DefaultEquivalenceTests(unittest.TestCase):
     def test_delivery_compiler_outputs_match_the_base_on_frozen_inputs(self):
         self.assertEqual(run_harness("delivery"), DELIVERY_GOLDEN,
                          "run this file with --harness delivery --raw to read the outputs")
+
+    def test_delivery_compiler_outputs_match_the_base_under_a_policy_at_the_defaults(self):
+        # A policy that exists but sets only review_panels leaves delivery_path at standard.
+        self.assertEqual(run_harness("delivery_policy"), DELIVERY_POLICY_GOLDEN,
+                         "run this file with --harness delivery_policy --raw to read the outputs")
 
     def test_operation_compiler_checks_match_the_base_on_frozen_inputs(self):
         # A contract without an Accepted Minor Findings section checks as released.
@@ -240,7 +287,9 @@ def _input_harness(root: Path, raw_output: bool = False) -> dict:
     return {"schema_version": 1, "files": files}
 
 
-def _delivery_harness(root: Path, raw_output: bool = False) -> dict:
+def _delivery_harness(root: Path, raw_output: bool = False, policy: bool = False) -> dict:
+    """Run the Delivery compiler on the frozen inputs, under an approved Process
+    Policy that sets only review_panels when *policy* is true."""
     sys.path[:0] = [str(root / PLUGIN / "scripts"), str(root / "tools/tests")]
     import delivery_compile
     from git_fixture import init_repository
@@ -265,6 +314,15 @@ def _delivery_harness(root: Path, raw_output: bool = False) -> dict:
         (workflows / "tests.yml").write_bytes(
             b"on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
             b"    steps:\n      - run: make test\n")
+        if policy:
+            import process_policy
+
+            _freeze_clocks(process_policy)
+            for argv in (["init"], ["set", "--switch", "review_panels", "--value", "lens_panel"],
+                         ["approve"]):
+                code, text = _quiet(process_policy.main, [argv[0], "--docs", str(docs), *argv[1:]])
+                if code:
+                    raise AssertionError(text)
         init_repository(project, initial_branch="main")
         for args in (("add", "--all"), ("commit", "-q", "-m", "fixture")):
             subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
@@ -535,6 +593,7 @@ def _shipped_harness(root: Path, raw_output: bool = False) -> dict:
 
 
 HARNESSES = {"backlog": _backlog_harness, "delivery": _delivery_harness,
+             "delivery_policy": lambda root, raw_output=False: _delivery_harness(root, raw_output, True),
              "inputs": _input_harness, "manifests": _manifest_harness,
              "operation": _operation_harness, "shipped": _shipped_harness}
 

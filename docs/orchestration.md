@@ -86,7 +86,8 @@ the Software Architect runs alone, roles whose approved lane scopes are
 disjoint write at the same time in the Item's one worktree, and a lane that
 consumes a declared seam starts as soon as its own producers finish. Lanes
 make no Git writes, the coordinator runs intent-to-add for the new files they
-report, environment verbs and vault writes stay serial, and the coordinator
+report, environment verbs and verification commands hold the Item's
+environment lock one at a time, vault writes stay serial, and the coordinator
 alone commits, once, before the candidate freeze.
 `execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md`
 and `deliver/references/switch-implementation_schedule-parallel_lanes_v1.md`

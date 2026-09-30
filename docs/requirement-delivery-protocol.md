@@ -366,8 +366,14 @@ seams. The Item keeps one worktree, Item ref, Slot and writer receipt epoch:
 each lane role's task manifest bounds its write scope to its lane, lanes make
 no Git writes, the coordinator runs intent-to-add for the new files they
 report, and the coordinator alone commits the combined change before the
-freeze. A schedule change follows normal execution
-revision, approval and publication.
+freeze. Environment verbs and verification commands of the Item run one at a
+time under its environment lock: `delivery_verification.py lane-run` runs a
+lane's approved full test command or environment verb in the Item worktree,
+and the readers' `run` and `environment` take the same lock. While another
+command holds it they refuse with `DELIVERY_ENVIRONMENT_BUSY` and name the
+holder from its owner record. The lock ends with its holder's process, so a
+holder that died frees it, and the next command reports it as interrupted. A
+schedule change follows normal execution revision, approval and publication.
 
 Process switch `execution_planning` decides how the facts a plan needs are
 written and reviewed. At `per_document`, the default, each Operation contract

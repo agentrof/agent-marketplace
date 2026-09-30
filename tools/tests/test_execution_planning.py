@@ -128,13 +128,17 @@ class FactOwnershipTests(unittest.TestCase):
     def test_every_fact_class_has_the_one_owner_the_issue_names(self):
         data = json.loads(read(OWNERSHIP))
         owners = {name: (data["documents"][spec["owner"]["document"]]["type"],
-                         spec["owner"]["section"], spec["owner"]["writer"])
+                         spec["owner"].get("section") or tuple(spec["owner"]["keys"]),
+                         spec["owner"]["writer"])
                   for name, spec in data["fact_classes"].items()}
+        # A section is one the owning compiler scaffolds; the Item topology is
+        # held in front-matter keys, every one that a topology pass authors.
         self.assertEqual(owners, {
             "verification_semantics": ("verification_contract", "Contract", "qa_engineer"),
             "runtime_topology": ("environment_contract", "Contract", "devops_engineer"),
-            "structural_decisions": ("decision", "Decision", "software_architect"),
-            "item_topology": ("delivery_item", "front matter", "software_architect"),
+            "structural_decisions": ("decision", "Scope", "software_architect"),
+            "item_topology": ("delivery_item", delivery_compile.LIGHT_TOPOLOGY_FIELDS,
+                              "software_architect"),
             "owner_rulings": ("delivery", "User Decisions", "delivery_coordinator"),
         })
         for term in ("Item's context", "test suites", "evidence and coverage rules",
@@ -162,19 +166,104 @@ class FactOwnershipValidatorTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.temporary.cleanup()
 
-    def messages(self, mutate) -> list[str]:
+    def messages(self, mutate, check=validate.check_fact_ownership) -> list[str]:
         data = json.loads(self.original)
         mutate(data)
         self.path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         try:
             findings: list = []
-            validate.check_fact_ownership(validate.build_tree(self.root), findings)
+            check(validate.build_tree(self.root), findings)
             return [finding.message for finding in findings]
         finally:
             self.path.write_text(self.original, encoding="utf-8")
 
+    def anchor_messages(self, mutate) -> list[str]:
+        return self.messages(mutate, validate.check_fact_ownership_anchors)
+
     def test_shipped_data_is_clean(self):
         self.assertEqual(self.messages(lambda data: None), [])
+        self.assertEqual(self.anchor_messages(lambda data: None), [])
+
+    def test_an_owner_holds_its_facts_in_one_section_or_in_front_matter_keys(self):
+        def owner(name, **changes):
+            return lambda data: data["fact_classes"][name]["owner"].update(changes)
+
+        def document(name, **changes):
+            return lambda data: data["documents"][name].update(changes)
+
+        cases = (
+            (owner("structural_decisions", keys=["record_id"]),
+             "fact class 'structural_decisions': names a section and front-matter keys"),
+            (owner("item_topology", keys=[]),
+             "fact class 'item_topology': front-matter keys must be a non-empty list"),
+            (owner("item_topology", keys=["waits_for", "waits_for"]),
+             "fact class 'item_topology': front-matter keys must be a non-empty list"),
+            (lambda data: data["documents"]["user_decisions"].pop("sections_from"),
+             "document 'user_decisions': holds exactly a vault type, a title, the flow that"
+             " names its writer, and where its sections or front-matter keys are declared"),
+            (document("user_decisions", sections="User Decisions"),
+             "document 'user_decisions': holds exactly a vault type"),
+        )
+        for mutate, fragment in cases:
+            with self.subTest(fragment=fragment):
+                messages = self.messages(mutate)
+                self.assertTrue(any(fragment in message for message in messages), messages)
+
+    def test_each_owning_section_or_key_is_one_its_document_type_carries(self):
+        """rv-accept-ideas-08: an anchor the owning compiler never writes is refused."""
+        def owner(name, **changes):
+            return lambda data: data["fact_classes"][name]["owner"].update(changes)
+
+        def source(name, key, value):
+            return lambda data: data["documents"][name].update({key: value})
+
+        def topology_section(data):
+            data["fact_classes"]["item_topology"]["owner"] = {
+                "document": "item_topology", "section": "front matter",
+                "writer": "software_architect"}
+
+        cases = (
+            (owner("structural_decisions", section="Decision"),
+             "fact class 'structural_decisions': section 'Decision' is not a heading that"
+             " scripts/architecture_compile.py:stub scaffolds"),
+            (topology_section,
+             "fact class 'item_topology': document 'item_topology' declares no sections_from,"
+             " so its section cannot be checked"),
+            (owner("item_topology", keys=["waits_for", "story_points"]),
+             "fact class 'item_topology': front-matter key 'story_points' is not one that"
+             " scripts/delivery_compile.py:LIGHT_TOPOLOGY_FIELDS declares"),
+            (source("user_decisions", "sections_from", "delivery_compile.py:SECTIONS"),
+             "document 'user_decisions': sections_from 'delivery_compile.py:SECTIONS' must name"
+             " a plugin script"),
+            (source("user_decisions", "sections_from", "scripts/ghost_compile.py:SECTIONS"),
+             "names missing script scripts/ghost_compile.py"),
+            (source("user_decisions", "sections_from", "scripts/delivery_compile.py:HEADINGS"),
+             "names no module-level function or constant HEADINGS of"
+             " scripts/delivery_compile.py"),
+            (source("user_decisions", "sections_from", "scripts/delivery_compile.py:SECTIONS.plan"),
+             "names SECTIONS.plan, which lists no names"),
+            (source("verification_contract", "sections_from", "scripts/operation_compile.py:revise"),
+             "names revise, which scaffolds no heading"),
+            (source("user_decisions", "sections_from", "scripts/delivery_compile.py:SECTIONS.item"),
+             "fact class 'owner_rulings': section 'User Decisions' is not a heading that"
+             " scripts/delivery_compile.py:SECTIONS.item scaffolds"),
+        )
+        for mutate, fragment in cases:
+            with self.subTest(fragment=fragment):
+                messages = self.anchor_messages(mutate)
+                self.assertTrue(any(fragment in message for message in messages), messages)
+
+    def test_a_renamed_scaffold_heading_is_caught(self):
+        compiler = self.root / "plugins/software-engineering-team/scripts/operation_compile.py"
+        original = compiler.read_text(encoding="utf-8")
+        compiler.write_text(original.replace("\\n\\n## Contract\\n\\n", "\\n\\n## Commands\\n\\n", 1),
+                            encoding="utf-8")
+        try:
+            messages = self.anchor_messages(lambda data: None)
+        finally:
+            compiler.write_text(original, encoding="utf-8")
+        self.assertIn("fact class 'verification_semantics': section 'Contract' is not a heading"
+                      " that scripts/operation_compile.py:init scaffolds", messages)
 
     def test_no_owner_two_owners_unknown_or_unnamed_writer_are_rejected(self):
         def owner(name, **changes):
@@ -640,6 +729,53 @@ class BundleManifestTests(unittest.TestCase):
         self.section("User Decisions", f"{table}\n{row}\n\nD-01 Caches live under one fixed root.")
         self.assertIn("delivery.md User Decisions gives id D-01 to 2 rulings",
                       " ".join(self.check_errors()))
+
+    def decision_record(self) -> Path:
+        """Write an architecture decision record as an active Item's architect does."""
+        import architecture_compile
+        docs = Path(self.temporary.name) / "architecture" / "workspace" / "docs"
+        solution = docs / "solution-design"
+        (solution / "_generated").mkdir(parents=True)
+        (solution / "landscape.md").write_text(
+            "---\ntype: landscape\npackage_status: approved\n---\n# Landscape\n", encoding="utf-8")
+        (solution / "_generated" / "component-catalog.json").write_text(json.dumps({"components": [
+            {"component_id": "orders-api", "sourcing": "build"},
+            {"component_id": "other-api", "sourcing": "build"}]}), encoding="utf-8")
+        item = docs / "delivery/deliveries/dlv-001-test/items/auth-01/item.md"
+        item.parent.mkdir(parents=True)
+        item.write_text("---\ntype: delivery-item\nstory_id: AUTH-01\nstatus: active\n---\n# Item\n",
+                        encoding="utf-8")
+        self.assertEqual(quiet(architecture_compile.init_root, docs, "AUTH-01")[0], 0)
+        self.assertEqual(quiet(architecture_compile.stub, docs, "decision", "", "ADR-001",
+                               "auth-boundary", "AUTH-01", "", None,
+                               ["orders-api", "other-api"])[0], 0)
+        return docs / "system-architecture/decisions/auth-boundary-decision.md"
+
+    def test_every_owning_anchor_is_in_the_document_its_compiler_writes(self):
+        """fact-ownership.json names sections and keys the compilers write (rv-accept-ideas-08)."""
+        choose(self.docs, "single_source_bundle")
+        self.scope()
+        self.draft_environment_contract()
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        written = {"verification_contract": operation_compile.contract_path(self.docs, "verification"),
+                   "environment_contract": operation_compile.contract_path(self.docs, "environment"),
+                   "decision": self.decision_record(), "delivery": root / "delivery.md",
+                   "delivery_item": root / "items/auth-01/item.md"}
+        data = json.loads(read(OWNERSHIP))
+        for name, spec in data["fact_classes"].items():
+            owner = spec["owner"]
+            props, body = delivery_compile.split_note(
+                written[data["documents"][owner["document"]]["type"]])
+            with self.subTest(fact_class=name):
+                if "section" in owner:
+                    self.assertIn(owner["section"], delivery_compile.section_bodies(body))
+                else:
+                    # Every topology key a new Item holds is owned; a lane
+                    # schedule adds the rest.
+                    topology = set(delivery_compile.LIGHT_TOPOLOGY_FIELDS)
+                    self.assertLessEqual(set(owner["keys"]), topology)
+                    self.assertEqual(set(owner["keys"]) & set(props), topology & set(props))
+                    self.assertIn("architecture_reason", props)
 
     def test_ruling_ids_are_free_text_at_per_document(self):
         self.scope()

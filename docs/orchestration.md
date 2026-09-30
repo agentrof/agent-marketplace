@@ -119,8 +119,9 @@ Execution planning writes and reviews the facts a plan needs as process switch
 `execution_planning` selects. `per_document`, the default, revises and reviews
 each Operation contract on its own through the Operation flow.
 `single_source_bundle` writes every execution-planning fact once, in the
-document, section and writer role that `execution-plan/data/fact-ownership.json`
-names, and every other document links it: the architect's planning output is a
+document, section or front-matter keys, and writer role that
+`execution-plan/data/fact-ownership.json` names, and every other document
+links it: the architect's planning output is a
 transient handoff to the contract writers, and the revised contracts, the Item
 records and their Stories and Test Plans take one review layer over one
 hash-checked bundle manifest, which also binds the owner rulings in the

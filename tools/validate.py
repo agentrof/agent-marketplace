@@ -2918,7 +2918,17 @@ def check_story_size_measures(tree: Tree, findings: list[Finding]) -> None:
 
 FACT_OWNERSHIP_RELPATH = "skill-content/execution-plan/data/fact-ownership.json"
 FACT_DOCUMENT_KEYS = {"type", "title", "flow"}
-FACT_OWNER_KEYS = {"document", "section", "writer"}
+# Where an owning document type declares what it carries: its scaffolded
+# sections, its front-matter keys, or both.
+FACT_ANCHOR_SOURCES = {"sections_from", "keys_from"}
+FACT_OWNER_KEYS = {"document", "writer"}
+# An owner holds its facts in exactly one of these: a section or front-matter keys.
+FACT_OWNER_ANCHORS = {"section", "keys"}
+# A plugin script and one of its module-level functions or constants; `.key`
+# selects one entry of a constant dict.
+FACT_ANCHOR_SOURCE_RE = re.compile(
+    r"^(scripts/[a-z0-9_]+\.py):([A-Za-z_][A-Za-z0-9_]*)(?:\.([a-z0-9][a-z0-9_-]*))?$")
+SCAFFOLD_HEADING_RE = re.compile(r"^## (.+?)\s*$")
 
 
 def flow_names_writer(flow_text: str, role: str, title: str) -> bool:
@@ -2944,10 +2954,13 @@ def fact_ownership_problems(data: object, plugin: Path, vault_types: set[str]) -
         problems.append("documents must declare at least one owning document")
     for key, spec in sorted(documents.items()):
         where = f"document {key!r}"
-        if not isinstance(spec, dict) or set(spec) != FACT_DOCUMENT_KEYS \
-                or not all(_nonblank(spec[field]) for field in FACT_DOCUMENT_KEYS):
-            problems.append(f"{where}: holds exactly a vault type, a title and the flow that"
-                            " names its writer")
+        sources = set(spec) - FACT_DOCUMENT_KEYS if isinstance(spec, dict) else set()
+        if not isinstance(spec, dict) or not FACT_DOCUMENT_KEYS <= set(spec) \
+                or not sources or not sources <= FACT_ANCHOR_SOURCES \
+                or not all(_nonblank(spec[field]) for field in spec):
+            problems.append(f"{where}: holds exactly a vault type, a title, the flow that"
+                            " names its writer, and where its sections or front-matter keys"
+                            " are declared")
             continue
         if spec["type"] not in vault_types:
             problems.append(f"{where}: unknown vault document type {spec['type']!r}")
@@ -2969,21 +2982,34 @@ def fact_ownership_problems(data: object, plugin: Path, vault_types: set[str]) -
             problems.append(f"{where}: has no owner")
             continue
         if not isinstance(owner, dict) or any(isinstance(owner.get(field), list)
-                                              for field in FACT_OWNER_KEYS):
-            problems.append(f"{where}: has two owners; exactly one document, section and"
+                                              for field in (*FACT_OWNER_KEYS, "section")):
+            problems.append(f"{where}: has two owners; exactly one document, anchor and"
                             " writer own a fact")
             continue
-        if set(owner) != FACT_OWNER_KEYS or not all(_nonblank(owner[field])
-                                                    for field in FACT_OWNER_KEYS):
-            problems.append(f"{where}: has no owner; its owner names one document, section"
-                            " and writer")
+        anchors = set(owner) & FACT_OWNER_ANCHORS
+        if set(owner) - FACT_OWNER_ANCHORS != FACT_OWNER_KEYS or not anchors \
+                or not all(_nonblank(owner[field]) for field in (*FACT_OWNER_KEYS, "section")
+                           if field in owner):
+            problems.append(f"{where}: has no owner; its owner names one document, one section"
+                            " or its front-matter keys, and one writer")
+            continue
+        if len(anchors) > 1:
+            problems.append(f"{where}: names a section and front-matter keys; a fact is held"
+                            " in one of them")
+            continue
+        keys = owner.get("keys")
+        if "keys" in owner and (not isinstance(keys, list) or not keys
+                                or not all(_nonblank(item) for item in keys)
+                                or len(set(keys)) != len(keys)):
+            problems.append(f"{where}: front-matter keys must be a non-empty list of distinct"
+                            " key names")
             continue
         writer = owner["writer"].replace("_", "-")
         if not REVIEW_STEP_ID_RE.match(owner["writer"]) or writer not in agents:
             problems.append(f"{where}: names unknown writer role {owner['writer']!r}")
             continue
         document = documents.get(owner["document"])
-        if not isinstance(document, dict) or set(document) != FACT_DOCUMENT_KEYS:
+        if not isinstance(document, dict) or not FACT_DOCUMENT_KEYS <= set(document):
             problems.append(f"{where}: names undeclared document {owner['document']!r}")
             continue
         flow = plugin / "flows" / f"{document['flow']}.md"
@@ -2996,7 +3022,8 @@ def fact_ownership_problems(data: object, plugin: Path, vault_types: set[str]) -
 
 def check_fact_ownership(tree: Tree, findings: list[Finding]) -> None:
     """Each execution-planning fact class has exactly one owning document,
-    section and writer, and the owning flow names that writer."""
+    section or set of front-matter keys, and writer, and the owning flow names
+    that writer."""
     for plugin in plugin_dirs(tree):
         path = plugin / FACT_OWNERSHIP_RELPATH
         if not path.is_file():
@@ -3014,8 +3041,109 @@ def check_fact_ownership(tree: Tree, findings: list[Finding]) -> None:
         for problem in fact_ownership_problems(data, plugin, vault_types):
             findings.append(Finding(
                 "error", rel(tree, path), 1, "fact_ownership", problem,
-                "give every fact class one owning document, section and writer that its"
-                " flow names"))
+                "give every fact class one owning document, section or front-matter keys,"
+                " and writer that its flow names"))
+
+
+def declared_anchor_names(plugin: Path, source: object) -> tuple[set[str], str | None]:
+    """Return the names an anchor source declares, or why it declares none.
+
+    A function declares the `## ` headings its string literals scaffold, its
+    docstring aside; a constant declares its strings, or those of the one dict
+    entry that `.key` selects. The script's source is read, never imported.
+    """
+    match = FACT_ANCHOR_SOURCE_RE.fullmatch(source) if isinstance(source, str) else None
+    if match is None:
+        return set(), ("must name a plugin script and one of its module-level functions or"
+                       " constants, as scripts/<name>.py:<NAME>, with .<key> for a dict entry")
+    script, symbol, key = match.groups()
+    path = plugin / script
+    if not path.is_file():
+        return set(), f"names missing script {script}"
+    try:
+        module = ast.parse(read_text(path))
+    except SyntaxError:
+        return set(), f"names {script}, which does not parse"
+    for node in module.body:
+        if isinstance(node, ast.FunctionDef) and node.name == symbol and key is None:
+            docstring = node.body[0] if node.body and isinstance(node.body[0], ast.Expr) \
+                and isinstance(node.body[0].value, ast.Constant) else None
+            skipped = set(map(id, ast.walk(docstring))) if docstring is not None else set()
+            headings = {re.sub(r"\s*<!--.*?-->", "", found.group(1)).strip()
+                        for inner in ast.walk(node)
+                        if id(inner) not in skipped and isinstance(inner, ast.Constant)
+                        and isinstance(inner.value, str)
+                        for line in inner.value.splitlines()
+                        if (found := SCAFFOLD_HEADING_RE.match(line))}
+            return headings, None if headings else f"names {symbol}, which scaffolds no heading"
+        targets = node.targets if isinstance(node, ast.Assign) else \
+            [node.target] if isinstance(node, ast.AnnAssign) else []
+        if any(isinstance(target, ast.Name) and target.id == symbol for target in targets):
+            value = node.value
+            if key is not None:
+                value = next((item for name, item in zip(value.keys, value.values)
+                              if isinstance(name, ast.Constant) and name.value == key), None) \
+                    if isinstance(value, ast.Dict) else None
+            if isinstance(value, (ast.Tuple, ast.List, ast.Set)) and value.elts and all(
+                    isinstance(item, ast.Constant) and isinstance(item.value, str)
+                    for item in value.elts):
+                return {item.value for item in value.elts}, None
+            return set(), f"names {source.split(':', 1)[1]}, which lists no names"
+    return set(), f"names no module-level function or constant {symbol} of {script}"
+
+
+def fact_anchor_problems(data: dict, plugin: Path) -> list[str]:
+    """Return each owning section or key that its document type does not carry."""
+    problems: list[str] = []
+    declared: dict[tuple[str, str], set[str] | None] = {}
+    for key, spec in sorted(data["documents"].items()):
+        for source in sorted(FACT_ANCHOR_SOURCES & set(spec)):
+            names, problem = declared_anchor_names(plugin, spec[source])
+            declared[(key, source)] = None if problem else names
+            if problem:
+                problems.append(f"document {key!r}: {source} {spec[source]!r} {problem}")
+    for name, spec in sorted(data["fact_classes"].items()):
+        owner, where = spec["owner"], f"fact class {name!r}"
+        document = owner["document"]
+        source = "sections_from" if "section" in owner else "keys_from"
+        if (document, source) not in declared:
+            problems.append(f"{where}: document {document!r} declares no {source}, so its"
+                            f" {'section' if 'section' in owner else 'front-matter keys'}"
+                            " cannot be checked")
+            continue
+        names = declared[(document, source)]
+        if names is None:
+            continue
+        origin = data["documents"][document][source]
+        if "section" in owner and owner["section"] not in names:
+            problems.append(f"{where}: section {owner['section']!r} is not a heading that"
+                            f" {origin} scaffolds")
+        problems.extend(f"{where}: front-matter key {item!r} is not one that {origin} declares"
+                        for item in owner.get("keys", []) if item not in names)
+    return problems
+
+
+def check_fact_ownership_anchors(tree: Tree, findings: list[Finding]) -> None:
+    """Each owning section or front-matter key is one the owning document type
+    carries, as the plugin script that writes that document declares it."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / FACT_OWNERSHIP_RELPATH
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+            policy = json.loads(read_text(plugin / VAULT_POLICY_RELPATH))
+            vault_types = set(policy.get("type_path_patterns", {}))
+        except (OSError, json.JSONDecodeError, ValueError, AttributeError):
+            continue
+        # The shape check reports a malformed file first.
+        if fact_ownership_problems(data, plugin, vault_types):
+            continue
+        for problem in fact_anchor_problems(data, plugin):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "fact_ownership_anchors", problem,
+                "name a section the owning document's script scaffolds, or front-matter keys"
+                " it declares, and declare where they come from"))
 
 
 OWNER_DECISION_CLASSES_RELPATH = "skill-content/deliver/data/owner-decision-classes.json"
@@ -3453,6 +3581,7 @@ CHECKS = {
     "process_switches": check_process_switches,
     "story_size_measures": check_story_size_measures,
     "fact_ownership": check_fact_ownership,
+    "fact_ownership_anchors": check_fact_ownership_anchors,
     "owner_decision_classes": check_owner_decision_classes,
     "autopilot_policy": check_autopilot_policy,
     "limits_config_shape": check_limits_config_shape,

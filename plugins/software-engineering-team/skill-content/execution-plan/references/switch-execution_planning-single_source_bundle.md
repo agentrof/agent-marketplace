@@ -10,10 +10,12 @@ governs.
 ## Fact ownership
 
 `data/fact-ownership.json` names, for each fact class of an execution plan,
-the one document, section and writer role that own it. Write each fact once,
-in its owning section. Every other document links that section, or cites an
-owner ruling by its id, and never restates it: a copy is a second truth that
-some review then has to reconcile.
+the one document, the section or front-matter keys within it and the writer
+role that own it. A section is a heading that the document's compiler writes;
+the Item topology lives in the Item record's front-matter keys. Write each
+fact once, where it is owned. Every other document links that section or
+record, or cites an owner ruling by its id, and never restates it: a copy is a
+second truth that some review then has to reconcile.
 
 Four deliberate rules stay exactly as they are:
 

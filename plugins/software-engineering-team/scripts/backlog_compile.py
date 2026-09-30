@@ -1354,6 +1354,21 @@ def size_exception_findings(record: dict, docs: Path) -> list[str]:
     return errors
 
 
+def size_exception_approval_findings(record: dict, docs: Path) -> list[str]:
+    """Validate the Size Exceptions an approval would seal while the budget is on.
+
+    An approved review is immutable, so a row check rejects must fail the
+    approval before any write, as collect() fails an invalid Accepted Minor
+    Findings row. At the default nothing is read.
+    """
+    try:
+        if story_size_budget(docs) is None:
+            return []
+        return size_exception_findings(record, docs)
+    except (ValueError, RuntimeError) as exc:
+        return [str(exc)]
+
+
 def story_size_entries(record: dict, docs: Path, budget: dict,
                        story_ids: set[str] | None = None) -> dict[str, dict]:
     """Measure each story against the limits; the result never fails a check."""
@@ -3062,6 +3077,7 @@ def approve(args) -> int:
             errors.extend(pin_errors)
             if not pin_errors:
                 errors.extend(review_pin_findings(record, docs, pin, preserved))
+                errors.extend(size_exception_approval_findings(record, docs))
     errors = sorted(set(errors))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2,

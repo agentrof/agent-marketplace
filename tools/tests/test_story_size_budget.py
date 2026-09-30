@@ -507,6 +507,83 @@ class ApprovalTests(unittest.TestCase):
         self.assertEqual(result["story_size"]["over_budget_stories"], ["ST-001", "ST-002"])
 
 
+def next_round(review: Path, body: str | None = None) -> Path:
+    """Write a draft next round of a review as the Product Owner does, by hand."""
+    props, text = backlog_compile.parse_front_matter(review)
+    number = int(props["round"]) + 1
+    props = backlog_compile.without_policy_pin(props)
+    props["round"] = number
+    props["aliases"] = [props["aliases"][0].rsplit("-", 1)[0] + f"-{number:03d}"]
+    backlog_compile.status_tag(props, "draft")
+    for key in ("approved_at_utc", "source_hash"):
+        props.pop(key, None)
+    path = review.with_name(review.name.replace(f"round-{number - 1}-", f"round-{number}-"))
+    path.write_text(backlog_compile.front_matter(props, text if body is None else body),
+                    encoding="utf-8")
+    return path
+
+
+class SizeExceptionApprovalTests(unittest.TestCase):
+    """While the budget is on, approval seals only Size Exceptions check accepts."""
+
+    def setUp(self) -> None:
+        self.fx = Project(self)
+
+    def revise(self, *rows: str) -> Path:
+        """Open revision 2 with new root and epic review rounds; the epic round keeps rows."""
+        root = self.fx.docs / "backlog/backlog.md"
+        props, body = backlog_compile.parse_front_matter(root)
+        props = backlog_compile.without_policy_pin(props)
+        props["revision"] = 2
+        backlog_compile.status_tag(props, "draft")
+        for key in ("approved_at_utc", "source_hash", "package_hash"):
+            props.pop(key, None)
+        root.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+        next_round(self.fx.docs / "backlog/reviews/round-1-backlog-review.md")
+        epic = self.fx.docs / f"{EPIC}/reviews/round-1-epic-review.md"
+        body = backlog_compile.parse_front_matter(epic)[1]
+        table = ("\n## Size Exceptions\n\n| story | measure | reason |\n|---|---|---|\n"
+                 + "\n".join(rows) + "\n")
+        return next_round(epic, body.replace("\n## Findings", table + "\n## Findings", 1))
+
+    def approve(self) -> tuple[int, dict]:
+        code, output = quiet(backlog_compile.approve, SimpleNamespace(docs=str(self.fx.docs)))
+        return code, json.loads(output)
+
+    def test_approval_refuses_a_size_exception_check_rejects_before_any_write(self):
+        self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 1})
+        self.fx.commit()
+        link = f"[[{EPIC}/stories/st-001/story\\|ST-001]]"
+        review = self.revise(f"| {link} | story_points | TBD |")
+        path = review.relative_to(self.fx.docs).as_posix()
+        before = backlog_compile.snapshot_tree(self.fx.docs)
+        code, result = self.approve()
+        self.assertEqual(code, 1, result)
+        for finding in (f"{path} size exception 1 names undeclared measure story_points; the"
+                        " measures are acceptance_criteria, contract_deltas,"
+                        " implementation_roles, test_scenarios",
+                        f"{path} size exception 1 needs a concrete reason"):
+            self.assertIn(finding, result["errors"])
+        self.assertEqual(backlog_compile.snapshot_tree(self.fx.docs), before)
+        # A row check accepts approves, and the approved backlog checks clean.
+        text = review.read_text(encoding="utf-8").replace(
+            "| story_points | TBD |",
+            "| acceptance_criteria | The two results share one boundary one review covers. |")
+        review.write_text(text, encoding="utf-8")
+        code, result = self.approve()
+        self.assertEqual(code, 0, result)
+        code, output = self.fx.check("--approved")
+        self.assertEqual((code, json.loads(output)["errors"]), (0, []))
+
+    def test_at_the_default_approval_never_reads_the_table(self):
+        self.fx.choose()
+        self.fx.commit()
+        link = f"[[{EPIC}/stories/st-001/story\\|ST-001]]"
+        self.revise(f"| {link} | story_points | TBD |")
+        code, result = self.approve()
+        self.assertEqual(code, 0, result)
+
+
 def two_epic_backlog(fixture: Project) -> None:
     """Two epics: ST-001 and ST-002 in EP-001, ST-003 in EP-002."""
     docs = fixture.docs

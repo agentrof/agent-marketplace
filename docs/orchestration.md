@@ -87,6 +87,22 @@ verbatim. Review manifests carry the measures as given facts, and
 `product-planning/references/switch-story_size_budget-propose_split.md`
 defines the steps.
 
+Execution planning writes and reviews the facts a plan needs as process switch
+`execution_planning` selects. `per_document`, the default, revises and reviews
+each Operation contract on its own through the Operation flow.
+`single_source_bundle` writes every execution-planning fact once, in the
+document, section and writer role that `execution-plan/data/fact-ownership.json`
+names, and every other document links it: the architect's planning output is a
+transient handoff to the contract writers, and the revised contracts, the Item
+records and their Stories and Test Plans take one review layer over one
+hash-checked bundle manifest. Each revised contract's counterpart reads the
+whole bundle in parallel, or review panel `execution_bundle` does at
+`review_panels` `lens_panel`, and the bundle gets one verdict. Writer
+ownership, architecture inside the active Item, pinned-only publication and the
+non-runtime Environment rule do not change.
+`execution-plan/references/switch-execution_planning-single_source_bundle.md`
+defines the steps.
+
 Requirement Flow is a linear, user-gated sequence. Each required stage commits
 its approved documents before the next stage begins. The backlog compiler is
 the only machine that derives backlog indexes. All durable changes are

@@ -125,6 +125,38 @@
         ["boundary-fit"]
       ]
     },
+    "execution_bundle": {
+      "reader_role": "devops-engineer",
+      "lenses": [
+        {
+          "id": "command-safety",
+          "focus": "Each command the revised contracts state runs as written from its repository-relative workdir, passes data such as test ids as arguments rather than through shell interpolation, has no destructive, network or credential side effect beyond its contract and reports failure through its exit status."
+        },
+        {
+          "id": "boundary-fit",
+          "focus": "Every service, version, port, seed, cache location and teardown the contracts assume exists in the approved environment or the private candidate checkout, the cited accepted Solution decisions justify each command, the stated source of Delivery PR checks matches the CI bootstrap contract, and a change still fits every later Delivery that pins these project-global contracts."
+        },
+        {
+          "id": "criteria-to-contract-coverage",
+          "focus": "Every scenario of each Item's Test Plan can run and leave evidence under the contracts the Item binds, and every acceptance criterion its Story cites has a verification path in them."
+        },
+        {
+          "id": "topology-and-claims",
+          "focus": "Each Item's execution order, path and contract claims, role sequence, runtime_required and architecture impact agree with the contracts and with one another, and every revised contract that no Item pins is named for the target branch before publication."
+        },
+        {
+          "id": "single-source",
+          "focus": "Each fact is stated only in the section that fact-ownership.json names, and every other document links that section or cites the owner ruling's id. A restatement elsewhere is a finding that names the owning section; one that contradicts the owner is critical."
+        }
+      ],
+      "default_panel": [
+        ["command-safety"],
+        ["boundary-fit"],
+        ["criteria-to-contract-coverage"],
+        ["topology-and-claims"],
+        ["single-source"]
+      ]
+    },
     "operation_environment": {
       "reader_role": "qa-engineer",
       "lenses": [

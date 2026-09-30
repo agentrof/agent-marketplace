@@ -213,7 +213,11 @@ To add a switch:
    `min_count`). The package sets no parameter value: the owner sets each one
    in the policy's Parameters table through `/configure process`, a parameter
    exists only while its switch is at a value that takes it, and
-   `process_policy.py value` reports the typed values beside the switch's.
+   `process_policy.py value` reports the typed values beside the switch's. A
+   value whose instructions read package data that nothing else reads declares
+   it in `value_data`, a list of `skill-content/<skill>/data/<file>.json` paths
+   per value; a task binds that data only together with the value's switch
+   references.
 2. Anchor it as switch `<id>` at each step it changes in its owning flows.
    The anchor names the switch reference that the other value follows and
    adds nothing else to the flow.
@@ -233,9 +237,10 @@ To add a switch:
 The `process_switches` validator check rejects a default outside the values,
 a switch that an owning flow does not name, a flow that names an undeclared
 switch or one it does not own, a switch without a metric or promotion rule,
-malformed agent variants or parameters, and a switch reference that names an
-undeclared switch or value or the default, that no owning flow names, or that
-a SKILL.md links.
+malformed agent variants or parameters, value data that is missing, declared
+twice, declared for the default or bound by no reference of its value, and a
+switch reference that names an undeclared switch or value or the default, that
+no owning flow names, or that a SKILL.md links.
 
 ### Promotion rule
 

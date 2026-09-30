@@ -39,6 +39,9 @@
   overlap only when their approved lane scopes intersect. Spawn every lane of
   an Item phase in one message, then wait for all of them before the next
   phase.
+- Under switch `execution_planning` at `single_source_bundle`, start every
+  reader of an execution-plan bundle together: spawn them in one message, then
+  wait for all of them before triage.
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.

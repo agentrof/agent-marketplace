@@ -21,6 +21,11 @@ Switch `implementation_schedule`: at `parallel_lanes_v1`, an Item whose approved
 plan declares it runs its implementation roles in parallel lanes, as
 `skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md`
 defines.
+Switch `execution_planning`: at `single_source_bundle`, the Item's Software
+Architect records decisions, alternatives and rationale and links the owning
+contract section for rule text, as
+`skill-content/software-architecture/references/switch-execution_planning-single_source_bundle.md`
+defines.
 
 ## Parallel verification
 

@@ -22,7 +22,7 @@ import process_policy
 import task_inputs
 from backlog_fixture import make_approved_backlog
 from git_fixture import init_repository
-from test_default_equivalence import SWITCH_FILES, build_task_package, build_task_project
+from test_default_equivalence import SWITCH_DATA, SWITCH_FILES, build_task_package, build_task_project
 
 
 class TaskInputTests(unittest.TestCase):
@@ -429,12 +429,15 @@ class TaskInputTests(unittest.TestCase):
                 task_inputs.manifest(**reader)
             policy("approve")
             chosen = task_inputs.manifest(**reader)
+            # The value's data travels with its references as a required read.
             self.assertEqual(sorted(set(chosen["required_reads"]) - set(plain["required_reads"])),
-                             sorted(SWITCH_FILES))
+                             sorted([*SWITCH_FILES, SWITCH_DATA]))
             self.assertEqual(chosen["conditional_reads"], plain["conditional_reads"])
             self.assertIn("workspace/docs/delivery/process-policy.md",
                           [record["path"] for record in chosen["project_inputs"]])
-            self.assertTrue(set(SWITCH_FILES) <= {record["path"] for record in chosen["instructions"]})
+            self.assertTrue({*SWITCH_FILES, SWITCH_DATA}
+                            <= {record["path"] for record in chosen["instructions"]})
+            self.assertNotIn(SWITCH_DATA, [record["path"] for record in plain["instructions"]])
 
             policy("begin-revision")
             policy("set", "--switch", "fixture_mode", "--default")

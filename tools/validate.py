@@ -2464,9 +2464,10 @@ PROCESS_SWITCHES_RELPATH = build_distributions.PROCESS_SWITCHES_RELPATH
 SWITCH_ANCHOR_RE = re.compile(r"\b[Ss]witch\s+`([a-z][a-z0-9_]*)`")
 SWITCH_REFERENCE_RE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}
-PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants", "parameters"}
+PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants", "parameters", "value_data"}
 SWITCH_PARAMETER_KEYS = {"summary", "values", "declared_by", "type", "min_count"}
 SWITCH_PARAMETER_TYPES = {"positive_integer"}
+VALUE_DATA_RE = re.compile(r"^skill-content/[a-z0-9]+(?:-[a-z0-9]+)*/data/[a-z0-9]+(?:-[a-z0-9]+)*\.json$")
 AGENT_VARIANT_KEYS = {"suffix", "tier", "description", "agents"}
 MECHANICAL_PASS_SWITCH = "mechanical_pass_tier"
 MECHANICAL_PASS_VALUE = "mechanical"
@@ -2507,6 +2508,47 @@ def agent_variant_problems(where: str, variants: object, values: list[str], defa
             problems.append(f"{at}: duplicate variant agent {agent!r}")
         for agent in sorted(set(listed) - agents):
             problems.append(f"{at}: unknown variant agent {agent!r}")
+    return problems
+
+
+def value_data_problems(plugin: Path, switches: dict) -> list[str]:
+    """Package data that only one switch value reads is bound with that value's
+    switch references, so each file exists once, belongs to a value other than
+    the default and travels with at least one reference of that value."""
+    problems: list[str] = []
+    owners: dict[str, str] = {}
+    references = {SWITCH_REFERENCE_RE.match(path.name).groups()
+                  for skill in skill_dirs(plugin)
+                  for path in (skill / "references").glob("switch-*.md")
+                  if SWITCH_REFERENCE_RE.match(path.name)}
+    for switch, spec in sorted(switches.items()):
+        if not isinstance(spec, dict) or "value_data" not in spec:
+            continue
+        where = f"switch {switch!r}"
+        data = spec["value_data"]
+        values = [item.get("id") for item in spec.get("values", []) if isinstance(item, dict)] \
+            if isinstance(spec.get("values"), list) else []
+        if not isinstance(data, dict) or not data:
+            problems.append(f"{where}: value_data must map a switch value to its data files")
+            continue
+        for value, paths in sorted(data.items()):
+            at = f"{where} value {value!r}"
+            if value not in values or value == spec.get("default"):
+                problems.append(f"{at}: value data belongs to a declared value other than the default")
+            if not isinstance(paths, list) or not paths \
+                    or not all(isinstance(path, str) for path in paths):
+                problems.append(f"{at}: value data must list at least one data file")
+                continue
+            for path in paths:
+                if not VALUE_DATA_RE.match(path):
+                    problems.append(f"{at}: value data {path!r} is not a skill data JSON file")
+                elif not (plugin / path).is_file():
+                    problems.append(f"{at}: value data {path!r} does not exist")
+                if path in owners:
+                    problems.append(f"{at}: value data {path!r} is already declared by {owners[path]}")
+                owners.setdefault(path, at)
+            if (switch, value) not in references:
+                problems.append(f"{at}: value data needs a switch reference of that value to bind it")
     return problems
 
 
@@ -2702,6 +2744,9 @@ def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
                 " default, component metric and promotion rule")
         switches = data.get("switches") if isinstance(data, dict) else None
         switches = switches if isinstance(switches, dict) else {}
+        for problem in value_data_problems(plugin, switches):
+            err(path, problem, "declare each data file once, under the switch value whose"
+                " references read it")
         for problem in mechanical_variant_problems(plugin, switches):
             err(path, problem, "list only the writers whose fix passes the switch moves as"
                 " its mechanical agent variants")
@@ -2833,6 +2878,108 @@ def check_story_size_measures(tree: Tree, findings: list[Finding]) -> None:
                     "give each measure its own derivation")
             else:
                 owners[derivation] = name
+
+
+FACT_OWNERSHIP_RELPATH = "skill-content/execution-plan/data/fact-ownership.json"
+FACT_DOCUMENT_KEYS = {"type", "title", "flow"}
+FACT_OWNER_KEYS = {"document", "section", "writer"}
+
+
+def flow_names_writer(flow_text: str, role: str, title: str) -> bool:
+    """The flow names the role as the document's writer in the form
+    flows/operation.md uses: "`<role>` is the only <title> writer", where one
+    role may name several titles before the next role's statement starts."""
+    for clause in re.split(r"[.;]\s", " ".join(flow_text.split())):
+        for part in re.split(r"(?=`[a-z][a-z0-9-]*` is the only )", clause):
+            if part.startswith(f"`{role}` is the only ") and f"{title} writer" in part:
+                return True
+    return False
+
+
+def fact_ownership_problems(data: object, plugin: Path, vault_types: set[str]) -> list[str]:
+    """Return the problems of the execution-planning fact ownership data."""
+    if not isinstance(data, dict) or set(data) != {"schema_version", "documents", "fact_classes"} \
+            or data.get("schema_version") != 1:
+        return ["data must hold exactly schema_version 1, documents and fact_classes"]
+    agents = {agent.stem for agent in agent_files(plugin)}
+    problems: list[str] = []
+    documents = data["documents"] if isinstance(data["documents"], dict) else {}
+    if not documents:
+        problems.append("documents must declare at least one owning document")
+    for key, spec in sorted(documents.items()):
+        where = f"document {key!r}"
+        if not isinstance(spec, dict) or set(spec) != FACT_DOCUMENT_KEYS \
+                or not all(_nonblank(spec[field]) for field in FACT_DOCUMENT_KEYS):
+            problems.append(f"{where}: holds exactly a vault type, a title and the flow that"
+                            " names its writer")
+            continue
+        if spec["type"] not in vault_types:
+            problems.append(f"{where}: unknown vault document type {spec['type']!r}")
+        if not (plugin / "flows" / f"{spec['flow']}.md").is_file():
+            problems.append(f"{where}: unknown flow {spec['flow']!r}")
+    classes = data["fact_classes"]
+    if not isinstance(classes, dict) or not classes:
+        return problems + ["fact_classes must declare at least one fact class"]
+    for name, spec in sorted(classes.items()):
+        where = f"fact class {name!r}"
+        if not REVIEW_STEP_ID_RE.match(name):
+            problems.append(f"{where}: id must be lowercase snake_case")
+        if not isinstance(spec, dict) or not set(spec) <= {"facts", "owner"} \
+                or not _nonblank(spec.get("facts")):
+            problems.append(f"{where}: holds the facts it covers and its owner")
+            continue
+        owner = spec.get("owner")
+        if not owner:
+            problems.append(f"{where}: has no owner")
+            continue
+        if not isinstance(owner, dict) or any(isinstance(owner.get(field), list)
+                                              for field in FACT_OWNER_KEYS):
+            problems.append(f"{where}: has two owners; exactly one document, section and"
+                            " writer own a fact")
+            continue
+        if set(owner) != FACT_OWNER_KEYS or not all(_nonblank(owner[field])
+                                                    for field in FACT_OWNER_KEYS):
+            problems.append(f"{where}: has no owner; its owner names one document, section"
+                            " and writer")
+            continue
+        writer = owner["writer"].replace("_", "-")
+        if not REVIEW_STEP_ID_RE.match(owner["writer"]) or writer not in agents:
+            problems.append(f"{where}: names unknown writer role {owner['writer']!r}")
+            continue
+        document = documents.get(owner["document"])
+        if not isinstance(document, dict) or set(document) != FACT_DOCUMENT_KEYS:
+            problems.append(f"{where}: names undeclared document {owner['document']!r}")
+            continue
+        flow = plugin / "flows" / f"{document['flow']}.md"
+        if flow.is_file() and not flow_names_writer(read_text(flow), writer, document["title"]):
+            problems.append(
+                f"{where}: flow {document['flow']!r} does not name `{writer}` as the"
+                f" {document['title']} writer")
+    return problems
+
+
+def check_fact_ownership(tree: Tree, findings: list[Finding]) -> None:
+    """Each execution-planning fact class has exactly one owning document,
+    section and writer, and the owning flow names that writer."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / FACT_OWNERSHIP_RELPATH
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+            policy = json.loads(read_text(plugin / VAULT_POLICY_RELPATH))
+            vault_types = set(policy.get("type_path_patterns", {}))
+        except (OSError, json.JSONDecodeError, ValueError, AttributeError) as exc:
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "fact_ownership",
+                f"fact ownership data is not valid unique-key JSON: {exc}",
+                "declare every fact class and document once"))
+            continue
+        for problem in fact_ownership_problems(data, plugin, vault_types):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "fact_ownership", problem,
+                "give every fact class one owning document, section and writer that its"
+                " flow names"))
 
 
 def _limits_shape_errors(config: dict) -> list[str]:
@@ -3102,6 +3249,7 @@ CHECKS = {
     "review_panels": check_review_panels,
     "process_switches": check_process_switches,
     "story_size_measures": check_story_size_measures,
+    "fact_ownership": check_fact_ownership,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,

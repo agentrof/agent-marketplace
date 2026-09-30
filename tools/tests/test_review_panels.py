@@ -37,6 +37,13 @@ APPROVED_PANELS = {
     ]),
     "operation_verification": ("operation", "devops-engineer", ["command-safety", "boundary-fit"]),
     "operation_environment": ("operation", "qa-engineer", ["command-safety", "boundary-fit"]),
+    "execution_bundle": ("execution-planning", "devops-engineer", [
+        "command-safety",
+        "boundary-fit",
+        "criteria-to-contract-coverage",
+        "topology-and-claims",
+        "single-source",
+    ]),
 }
 LENS_VARIANTS = ["backlog-reviewer", "design-system-reviewer", "solution-reviewer"]
 # flow: the released single-reviewer path, which stays the default path.

@@ -154,6 +154,25 @@ def switch_reference(package: Path, path: Path) -> tuple[str, str] | None:
     return (match.group(1), match.group(2)) if match else None
 
 
+def switch_data(package: Path) -> dict[tuple[str, str], list[str]]:
+    """Return the package data files that the registry declares for each switch value.
+
+    Only that value's instructions read such a file, so it is bound together
+    with them and never on another path.
+    """
+    from process_policy import REGISTRY
+    path = package / REGISTRY
+    if not path.is_file():
+        return {}
+    try:
+        switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
+        return {(switch, value): list(paths)
+                for switch, spec in sorted(switches.items())
+                for value, paths in sorted(spec.get("value_data", {}).items())}
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"process switch registry cannot be read: {exc}") from exc
+
+
 def switch_choices(project: Path | None, route: dict, package: Path) -> tuple[set, list[str]]:
     """Return the project's non-default switch values and its policy input.
 
@@ -347,6 +366,8 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         chosen, policy_inputs = switch_choices(project, route, package)
     except ValueError as exc:
         raise ValueError(f"process policy cannot bind switch instructions: {exc}") from exc
+    value_data = switch_data(package)
+    switch_only = {path for paths in value_data.values() for path in paths}
     required = {"constitution.md", POLICY, "templates/task-input-contract.md"}
     if role:
         required.add(f"agents/{role}.md")
@@ -370,22 +391,26 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
                 required.add(path)
         switch_root = package / "skill-content" / skill / "references"
         for path in sorted(switch_root.glob("switch-*.md")) if switch_root.is_dir() else []:
-            if switch_reference(package, path) in chosen:
+            pair = switch_reference(package, path)
+            if pair in chosen:
                 required.add(path.relative_to(package).as_posix())
+                required.update(value_data.get(pair, []))
     instruction_inputs = required | set(references) | {"scripts/task_inputs.py"}
     # Tools and data influence the role's result even when they are not prose
     # reads. Bind them without turning an input index into extra reading work.
     implementation_roots = [package / "scripts", *(
         package / "skill-content" / skill for skill in selected_skills)]
     for root in implementation_roots:
-        # A switch reference of a value the project did not choose is neither
-        # read nor hashed, so the default path binds exactly what it bound before.
+        # A switch reference or switch value data of a value the project did not
+        # choose is neither read nor hashed, so the default path binds exactly
+        # what it bound before.
         instruction_inputs.update(path.relative_to(package).as_posix()
                                   for path in root.rglob("*")
                                   if path.is_file() and "__pycache__" not in path.parts
                                   and path.suffix not in {".pyc", ".pyo"}
                                   and path.name != ".DS_Store"
-                                  and switch_reference(package, path) is None)
+                                  and switch_reference(package, path) is None
+                                  and path.relative_to(package).as_posix() not in switch_only)
     instruction_files = identity(package, instruction_inputs)
     project_files = set(inputs or []) | set(policy_inputs)
     if findings:

@@ -149,6 +149,20 @@ includes the exact contract path, accepted Solution references, the reader's
 lens assignment and `SELF-CHECK`. Resolve every critical or major finding
 before approval.
 
+## Execution-plan bundle review
+
+Under switch `execution_planning` at `single_source_bundle`, review panel
+`execution_bundle` replaces the counterpart readers of an execution plan's
+contract and topology bundle. Its lens `command-safety` and lens
+`boundary-fit` assignments run once for each contract the bundle revises, as
+that contract's counterpart: `devops-engineer`, the step's reader role, for the
+Verification Contract and `qa-engineer` for the Environment Contract. Its other
+assignments run once, as `devops-engineer`, or as `qa-engineer` when the bundle
+revises only the Environment Contract. Every reader stays on its role's own
+tier, receives the same bundle manifest and every path it names, and derives
+its task as the bundle's instructions say. A re-review reruns an assignment
+under the role that returned its blocking finding.
+
 ## Lens reader output
 
 A lens reader returns its role file's output contract for its assigned lens:

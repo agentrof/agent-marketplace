@@ -705,6 +705,34 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.anchor(FIXTURE_ANCHOR + "Switch `other_mode` selects the same step.\n")
         self.assert_rejected("variant 'backlog-reviewer-quick' collides with switch 'fixture_mode'")
 
+    def test_value_data_is_bound_with_one_value_and_its_references(self):
+        reference = "skill-content/challenge-review/references/switch-fixture_mode-fast.md"
+        data = "skill-content/challenge-review/data/fast-table.json"
+        (self.root / PLUGIN_ROOT / reference).write_text("# Fast fixture step\n", encoding="utf-8")
+        (self.root / PLUGIN_ROOT / data).write_text("{}\n", encoding="utf-8")
+        self.anchor(FIXTURE_ANCHOR + f"At `fast` follow `{reference}`.\n")
+        self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data={"fast": [data]}))
+        self.assertEqual(self.messages(), [])
+        owned = "skill-content/execution-plan/data/fact-ownership.json"
+        cases = (
+            ({"current": [data]}, "value data belongs to a declared value other than the default"),
+            ({"slow": [data]}, "value data belongs to a declared value other than the default"),
+            ({"fast": []}, "value data must list at least one data file"),
+            ({"fast": ["skill-content/challenge-review/references/triage.md"]},
+             "is not a skill data JSON file"),
+            ({"fast": ["skill-content/challenge-review/data/ghost.json"]}, "does not exist"),
+            ({"fast": [owned]}, "is already declared by switch 'execution_planning'"),
+            ({}, "value_data must map a switch value to its data files"),
+        )
+        for value_data, fragment in cases:
+            with self.subTest(fragment=fragment):
+                self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data=value_data))
+                self.assert_rejected(fragment)
+        (self.root / PLUGIN_ROOT / reference).unlink()
+        self.anchor()
+        self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data={"fast": [data]}))
+        self.assert_rejected("value data needs a switch reference of that value to bind it")
+
 
 MEASURES_RELPATH = "skill-content/product-planning/data/story-size-measures.json"
 MEASURES = f"{PLUGIN_ROOT}/{MEASURES_RELPATH}"
@@ -910,6 +938,9 @@ VALIDATOR_BUILDERS = {
     "story_size_measures": lambda root: edit_json(
         root, MEASURES,
         lambda value: value["measures"]["acceptance_criteria"].update(derivation="ghost_count")),
+    "fact_ownership": lambda root: edit_json(
+        root, f"{PLUGIN_ROOT}/skill-content/execution-plan/data/fact-ownership.json",
+        lambda value: value["fact_classes"]["runtime_topology"].pop("owner")),
     "limits_config_shape": lambda root: edit_json(
         root, "tools/data/limits.json",
         lambda value: value["authoring_caps"].update(ghost_cap=1)),

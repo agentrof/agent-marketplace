@@ -1789,6 +1789,100 @@ def approve_execution(args) -> int:
                       "rebound": rebound, "pull_request_checks": pull_request_checks}, indent=2)); return 0
 
 
+EXECUTION_PLANNING = "execution_planning"
+SINGLE_SOURCE_BUNDLE = "single_source_bundle"
+# The bundle is reviewed while its execution plan can still be approved.
+BUNDLE_STATUSES = ("scope_proposed", "scope_approved", "execution_approved")
+
+
+def _file_record(docs: Path, relative: str) -> dict:
+    path = docs / relative
+    if not path.is_file():
+        raise ValueError(f"bundle input is missing: {relative}")
+    return {"path": relative, "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def bundle_manifest(docs: Path, delivery_id: str) -> dict:
+    """Return the contract and topology bundle one execution plan is reviewed on.
+
+    Only a Delivery that runs switch execution_planning at single_source_bundle
+    has one. It lists every Operation contract the plan revises or pins, every
+    Item record with its Story and Test Plan and the switch value's package
+    data, each with the hash of its bytes, and names the counterpart reader of
+    every revised contract. It changes nothing.
+    """
+    root = find_delivery(docs, delivery_id)
+    if root is None:
+        raise ValueError("Delivery not found")
+    value = delivery_switch_value(docs, delivery_id, EXECUTION_PLANNING)
+    if value != SINGLE_SOURCE_BUNDLE:
+        raise ValueError(f"{delivery_id} runs switch {EXECUTION_PLANNING} at {value}; only"
+                         f" {SINGLE_SOURCE_BUNDLE} reviews an execution-plan bundle")
+    props, _body = split_note(root / "delivery.md")
+    if props.get("status") not in BUNDLE_STATUSES:
+        raise ValueError(f"{delivery_id} is {props.get('status')}; its bundle is reviewed"
+                         " during execution planning")
+    items, sources = [], []
+    for item_path in sorted(root.glob("items/*/item.md")):
+        item, _item_body = split_note(item_path)
+        items.append({**_file_record(docs, item_path.relative_to(docs).as_posix()),
+                      "story": item.get("story_id"), "status": item.get("status"),
+                      "runtime_required": item.get("runtime_required") is True})
+        sources.extend(_file_record(docs, str(item.get(key, ""))) for key in ("story_path", "test_plan_path"))
+    if not items:
+        raise ValueError("Delivery must contain at least one Item")
+    # A sealed Item keeps the bindings its evidence was produced against.
+    open_items = [item for item in items if item["status"] not in TERMINAL_ITEM_STATUSES]
+    contracts = []
+    for kind in ("verification", "environment"):
+        path = operation_compile.contract_path(docs, kind)
+        if not path.is_file():
+            if kind == "verification":
+                raise ValueError("bundle input is missing: operation/verification-contract.md")
+            continue
+        contract, _contract_body = operation_compile.parse(path)
+        pinned = bool(open_items) and (kind == "verification"
+                                       or any(item["runtime_required"] for item in open_items))
+        revised = contract.get("status") == "draft"
+        if pinned or revised:
+            writer = operation_compile.WRITER_ROLES[kind]
+            contracts.append({**_file_record(docs, path.relative_to(docs).as_posix()),
+                              "kind": kind, "status": contract.get("status"),
+                              "revision": contract.get("revision"), "revised": revised,
+                              "pinned": pinned, "writer": writer,
+                              "counterpart": next(role for role in operation_compile.WRITER_ROLES.values()
+                                                  if role != writer)})
+    package = Path(__file__).resolve().parents[1]
+    spec = process_policy.load_registry()[EXECUTION_PLANNING]["spec"]
+    data = [{"path": relative, "sha256": "sha256:" + hashlib.sha256(
+        (package / relative).read_bytes()).hexdigest()}
+        for relative in spec.get("value_data", {}).get(SINGLE_SOURCE_BUNDLE, [])]
+    files = [record["path"] for record in (*contracts, *items, *sources)]
+    result = {"delivery": delivery_id, "contracts": contracts, "items": items,
+              "sources": sources, "data": data,
+              "readers": [contract["counterpart"] for contract in contracts if contract["revised"]],
+              "unpinned_revisions": [contract["path"] for contract in contracts
+                                     if contract["revised"] and not contract["pinned"]],
+              "inputs": sorted(dict.fromkeys(f"workspace/docs/{path}" for path in files))}
+    result["source_hash"] = "sha256:" + hashlib.sha256(json.dumps(
+        result, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
+    return result
+
+
+def bundle(args) -> int:
+    docs = docs_root(args.docs)
+    try:
+        result = bundle_manifest(docs, args.delivery)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
+    expected = getattr(args, "expected_hash", None)
+    if expected is not None and result["source_hash"] != expected:
+        print(json.dumps({"ok": False, "errors": [
+            "bundle manifest is stale; regenerate it and rerun every affected reader"]}, indent=2))
+        return 1
+    print(json.dumps({"ok": True, **result}, indent=2, sort_keys=True)); return 0
+
+
 def status(args) -> int:
     docs = docs_root(args.docs)
     root = find_delivery(docs, args.delivery)
@@ -2172,6 +2266,9 @@ def main(argv=None) -> int:
         "--remote", default="origin",
         help="the Git remote whose local remote-tracking refs hold the target and Integration branches")
     sub.add_parser("render").set_defaults(func=render)
+    bundle_cmd = sub.add_parser("bundle-manifest")
+    bundle_cmd.add_argument("--delivery", required=True); bundle_cmd.add_argument("--expected-hash")
+    bundle_cmd.set_defaults(func=bundle)
     transition = sub.add_parser("prepare-item-transition")
     transition.add_argument("--delivery", required=True); transition.add_argument("--story", required=True)
     transition.add_argument("--to", required=True, choices=sorted(ITEM_STATUSES)); transition.set_defaults(func=prepare_item_transition)

@@ -11,9 +11,12 @@ network or GitHub.
 
 Host catalogs it reads, detected by shape:
 
-- Codex: the JSON of ``codex debug models --bundled``, the catalog bundled
-  with the installed CLI, or of ``codex debug models``, the catalog of the
-  signed-in account.
+- Codex: only the JSON of ``codex debug models --bundled``, the catalog
+  bundled with the installed CLI, with ``--cli-version codex=<version>``. The
+  report records that CLI and refuses one older than the release the pinned
+  sources name. The signed-in ``codex debug models`` is never a capture: when
+  it cannot refresh online, or runs on an API key, it prints the cached or
+  bundled catalog in the same shape and still exits 0.
 - Claude: the JSON of the Models API list, ``GET /v1/models``, or any text
   such as the models overview page as Markdown, whose model IDs are read in
   the host's documented ID format.
@@ -42,6 +45,7 @@ AB_REFERENCE = (
     "references/switch-mechanical_pass_tier-mechanical.md"
 )
 TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+CLI_VERSION_RE = re.compile(r"(?<![0-9.])([0-9]+\.[0-9]+\.[0-9]+)(?![0-9.])")
 
 
 def text_models(text: str, adapter) -> dict[str, list[str] | None]:
@@ -157,19 +161,60 @@ def class_report(
     return report
 
 
-def drift_report(root: Path, catalogs: dict[str, Path]) -> dict:
+def bundled_source(adapter):
+    """Return the pattern of a pinned source that names a bundled-catalog
+    release, or None for a host whose catalog capture comes from no CLI."""
+    return getattr(adapter.module, "BUNDLED_CATALOG_SOURCE_RE", None)
+
+
+def capture_cli(host: str, catalog: dict, adapter, version: str | None) -> str | None:
+    """Return the CLI release a bundled-catalog capture came from.
+
+    It may not be older than the newest release whose bundled catalog a
+    pinned source names.
+    """
+    pattern = bundled_source(adapter)
+    if pattern is None:
+        return None
+    if version is None:
+        raise ValueError(
+            f"--cli-version {host}=<version> is required: the {host} catalog is the one"
+            " bundled with its CLI, so the report records the CLI that printed it"
+        )
+    named = [
+        match["version"] for entry in catalog["classes"].values()
+        for match in map(pattern.fullmatch, entry["sources"]) if match
+    ]
+    floor = max(named, key=build_distributions.cli_version, default=None)
+    if floor is not None and \
+            build_distributions.cli_version(version) < build_distributions.cli_version(floor):
+        raise ValueError(
+            f"the {host} catalog comes from CLI {version}, older than {floor}, the release"
+            " the pinned sources name; capture it with that release or a newer one"
+        )
+    return version
+
+
+def drift_report(
+    root: Path, catalogs: dict[str, Path], cli_versions: dict[str, str] | None = None,
+) -> dict:
     """Compare each named host's pinned classes with its listed models."""
     adapters = build_distributions.load_adapters(root)
-    unknown = sorted(set(catalogs) - set(adapters))
+    cli_versions = cli_versions or {}
+    unknown = sorted((set(catalogs) | set(cli_versions)) - set(adapters))
     if unknown:
         raise ValueError(
             f"unknown host {', '.join(unknown)}; hosts are {', '.join(adapters)}"
         )
+    for host in sorted(cli_versions):
+        if bundled_source(adapters[host]) is None:
+            raise ValueError(f"--cli-version names {host}, whose catalog capture comes from no CLI")
     tier_roles = roles_by_tier(root)
     hosts = {}
     for host in sorted(catalogs):
         adapter = adapters[host]
         catalog, table = build_distributions.load_model_tables(root, adapter)
+        cli = capture_cli(host, catalog, adapter, cli_versions.get(host))
         form, listed = listed_models(catalogs[host], adapter)
         auto = table["profiles"][build_distributions.AUTO_EXECUTION_PROFILE]
         classes = {}
@@ -178,7 +223,8 @@ def drift_report(root: Path, catalogs: dict[str, Path]) -> dict:
             roles = sorted({role for tier in tiers for role in tier_roles.get(tier, [])})
             classes[name] = class_report(entry, tiers, roles, listed, adapter)
         hosts[host] = {
-            "catalog": {"path": str(catalogs[host]), "format": form, "models": len(listed)},
+            "catalog": {"path": str(catalogs[host]), "format": form, "models": len(listed),
+                        "cli_version": cli},
             "classes": classes,
         }
     return {
@@ -288,11 +334,12 @@ def issue_body(root: Path, report: dict, today: str) -> str:
     lines = [f"# Model catalog drift: {title}", "", "## What changed", ""]
     lines += [finding_text(host, name, item) for host, name, item in drifting]
     lines += ["", "## Evidence", "",
-              "| Host | Host catalog | Format | Models |", "| --- | --- | --- | --- |"]
+              "| Host | Host catalog | Format | Models | CLI |",
+              "| --- | --- | --- | --- | --- |"]
     for host, data in report["hosts"].items():
         catalog = data["catalog"]
         lines.append(f"| {host} | `{Path(catalog['path']).name}` | {catalog['format']}"
-                     f" | {catalog['models']} |")
+                     f" | {catalog['models']} | {catalog['cli_version'] or 'none'} |")
     if report["unchecked"]:
         lines += ["", f"Not checked in this run: {', '.join(report['unchecked'])}."]
     lines += ["", "## Catalog change", ""]
@@ -390,6 +437,22 @@ def parse_catalog_arguments(values: list[str]) -> dict[str, Path]:
     return catalogs
 
 
+def parse_cli_arguments(values: list[str]) -> dict[str, str]:
+    """Read HOST=VERSION pairs; VERSION may be the CLI's `--version` output."""
+    versions: dict[str, str] = {}
+    for value in values:
+        host, separator, text = value.partition("=")
+        found = CLI_VERSION_RE.findall(text)
+        if not separator or not host or len(found) != 1:
+            raise ValueError(
+                f"--cli-version takes HOST=VERSION with exactly one X.Y.Z, not {value!r}"
+            )
+        if host in versions:
+            raise ValueError(f"--cli-version names {host} twice")
+        versions[host] = found[0]
+    return versions
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__.split("\n\n", 1)[0],
@@ -398,6 +461,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--catalog", action="append", required=True, metavar="HOST=PATH",
         help="the host's own model catalog file; repeat once per host",
+    )
+    parser.add_argument(
+        "--cli-version", action="append", default=[], metavar="HOST=VERSION",
+        help="the host CLI that printed a bundled catalog, such as"
+             ' "codex=$(codex --version)"; required for Codex',
     )
     parser.add_argument(
         "--issue-body", action="store_true",
@@ -413,7 +481,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         today = args.date or datetime.date.today().isoformat()
         datetime.date.fromisoformat(today)
-        report = drift_report(root, parse_catalog_arguments(args.catalog))
+        report = drift_report(root, parse_catalog_arguments(args.catalog),
+                              parse_cli_arguments(args.cli_version))
         if not args.issue_body:
             output = json.dumps(report, indent=2) + "\n"
         elif report["drift"]:

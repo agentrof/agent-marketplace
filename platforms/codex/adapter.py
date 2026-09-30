@@ -17,6 +17,13 @@ MODEL_ID_RE = re.compile(
 # This host's CLI in tools/data/host-cli-versions.json, the exact version CI
 # installs; no model class's min_cli_version may be newer.
 HOST_CLI_KEY = "codex"
+# The drift check reads the catalog bundled with the CLI, from `codex debug
+# models --bundled`. A pinned source of this form names the CLI release whose
+# bundled catalog the pins were verified against.
+BUNDLED_CATALOG_SOURCE_RE = re.compile(
+    r"https://github\.com/openai/codex/blob/rust-v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)"
+    r"/codex-rs/models-manager/models\.json"
+)
 # How a frozen-task A/B runs every role on one candidate model.
 MODEL_TRIAL = (
     "Codex: in a scratch copy of the project, run `generate_codex_project.py"

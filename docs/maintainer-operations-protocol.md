@@ -320,18 +320,29 @@ DRIFT_REPORT
   -> RELEASE_REQUESTED
 ```
 
-1. Capture each host's catalog. `codex debug models --bundled >
-   codex-models.json` prints the catalog bundled with the installed Codex
-   CLI, and `curl -sL
-   https://platform.claude.com/docs/en/about-claude/models/overview.md >
-   claude-models.md` saves the Claude models overview; neither needs
-   credentials. A signed-in `codex debug models` and the Anthropic Models API
-   list, `GET /v1/models`, show the models one account can use instead.
-2. Run `python3 tools/model_drift.py --catalog codex=codex-models.json
-   --catalog claude=claude-models.md`. Exit 0 means every pin is current.
-   Exit 1 reports a pinned ID the host no longer lists, a newer model of a
-   pinned family or changed effort support, per class with its tiers and
-   roles.
+1. Capture each host's catalog with the newest CLI and run the check. The
+   commands are chained, so a capture that fails stops the run:
+
+   ```console
+   codex debug models --bundled > codex-models.json &&
+     curl -fsSL https://platform.claude.com/docs/en/about-claude/models/overview.md \
+       -o claude-models.md &&
+     python3 tools/model_drift.py --catalog codex=codex-models.json \
+       --cli-version "codex=$(codex --version)" --catalog claude=claude-models.md
+   ```
+
+   `--bundled` prints the catalog bundled with the installed Codex CLI, and
+   `--cli-version` records that CLI in the report, which refuses one older
+   than the release the pinned sources name. Never use the signed-in `codex
+   debug models`: when it cannot refresh online, or runs on an API key, it
+   prints the cached or bundled catalog in the same shape and still exits 0.
+   `curl -f` fails on an HTTP error instead of saving the error page. Neither
+   capture needs credentials; the Anthropic Models API list, `GET
+   /v1/models`, is also a Claude capture and shows the models one account can
+   use.
+2. Exit 0 means every pin is current. Exit 1 reports a pinned ID the host no
+   longer lists, a newer model of a pinned family or changed effort support,
+   per class with its tiers and roles.
 3. On drift, `--issue-body` renders the upstream issue: the finding in plain
    words, the catalog bump diff, the frozen-task A/B and the approval steps.
    The maintainer files it. A pinned model that is gone without a successor

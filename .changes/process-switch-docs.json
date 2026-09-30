@@ -1,0 +1,4 @@
+{
+  "summary": "The authoring guide describes how to add a process switch and the promotion rule for flipping a default, and the architecture gains the default-equivalence invariant: with every switch at its default, every compiler and coordinator output and every bound instruction stays as the previous release had it.",
+  "components": {}
+}

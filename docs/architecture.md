@@ -149,6 +149,17 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     their generated `-lens` variants on the `lens` tier for panel readers.
     Review steps whose machine interface accepts one result per role keep one
     reader until a merge step exists.
+30. Every new process behaviour ships behind a process switch declared in
+    `configure/data/process-switches.json` whose default is the behaviour it
+    changes. With every switch at its default, every compiler and coordinator
+    output is byte-identical to the previous release on the same inputs and
+    every task binds the same instructions; only script and contract hashes
+    change, and golden all-default runs prove it. A non-default value's
+    instructions live in switch references that `task_inputs.py` binds only
+    when the project's Process Policy selects that value. Project values live
+    in `workspace/docs/delivery/process-policy.md`, never in
+    `workspace/config.json`, and each Delivery pins the policy revision it ran
+    under.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

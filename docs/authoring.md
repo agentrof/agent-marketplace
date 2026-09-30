@@ -163,7 +163,7 @@ Canonical agents declare only a host-neutral `reasoning` tier from
 `tools/data/models.json`. Tier names are single words because each is both a
 kebab-case reasoning level and a snake_case key in the profile tables. A
 process switch value may declare generated agent variants on another tier,
-such as the `lens` tier of the review-panel readers (see Review panels).
+such as the `lens` tier of the review-panel readers (see Process switches).
 Each host maps every tier to its own model and
 effort in `platforms/<host>/execution-profiles.json`, profile `auto`. The
 builder and `tools/validate.py` accept only the host's documented values, so
@@ -188,6 +188,61 @@ session's model and effort:
   level but not `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level for the
   session. Both reach every subagent in the session, not only this team.
   Claude Code's permission modes do not select a model or effort.
+
+## Process switches
+
+Every new process behaviour ships behind a switch whose default is today's
+behaviour. `plugins/software-engineering-team/skill-content/configure/data/process-switches.json`
+declares each switch; a project's values live in
+`workspace/docs/delivery/process-policy.md`, changed only through
+`/configure process` and never in `workspace/config.json`. A switch without a
+policy row follows its package default.
+
+To add a switch:
+
+1. Declare it in the registry: its `summary`, owning `flows`, at least two
+   `values` with their `tradeoffs`, which the choice gate shows, the `default`
+   that keeps today's behaviour, its component `metric` and `promotion` with
+   its `unit` and `threshold`; `issue` names its idea issue. A value that runs
+   a role on another tier declares `agent_variants` (`suffix`, `tier`,
+   `description`, `agents`), and every build then ships `<agent>-<suffix>`
+   with the base agent's body.
+2. Anchor it as switch `<id>` at each step it changes in its owning flows.
+   The anchor names the switch reference that the other value follows and
+   adds nothing else to the flow.
+3. Write each non-default value's instructions in
+   `skill-content/<skill>/references/switch-<switch>-<value>.md`, in the skill
+   that the tasks needing them select. `task_inputs.py` binds the file only
+   when the project's policy selects that value. Never link it from SKILL.md
+   and never write one for the default value.
+4. Keep the default path unchanged: with the switch at its default, flows,
+   skills, agents, manifests and compiler outputs stay byte-identical. Extend
+   `tools/tests/test_default_equivalence.py` when the switch touches a
+   compiler, and test each value with every other switch at its default.
+5. Inside a Delivery, read the value with
+   `process_policy.py value --switch <id> --delivery DLV-###`, which refuses a
+   Delivery whose pinned policy has drifted.
+
+The `process_switches` validator check rejects a default outside the values,
+a switch that an owning flow does not name, a flow that names an undeclared
+switch or one it does not own, a switch without a metric or promotion rule,
+malformed agent variants, and a switch reference that names an undeclared
+switch or value or the default, that no owning flow names, or that a SKILL.md
+links.
+
+### Promotion rule
+
+A default flips only when the switch's component metric meets its threshold
+over its promotion unit, at least 3 Deliveries unless the switch declares
+another unit; when every shared quality guard holds: valid critical or major
+findings found after an approval, Item reopens, code review cycles and QA
+rounds per Item, Delivery Review deviations and defects reported after merge;
+and when the owner approves the flip. One default flips per release, so the
+following Deliveries attribute a change to one flip. A flipped default that
+later breaks a quality guard flips back in the next release. A flip changes
+`default`, keeps every value, moves the promoted value's instructions into
+the default path and moves the previous default's path into its own switch
+reference, so a project that chose either value explicitly keeps it.
 
 ## Review panels
 

@@ -47,6 +47,16 @@ REVIEW_TASKS = (
     ("solution-design", "solution-architect", "revise", ["challenge-review"], DOCUMENT),
     ("deliver", "code-reviewer", "review", [], CODE),
 )
+# step: (entry, calibration reader role, added skills, the step's writer roles)
+CALIBRATION_READERS = {
+    "backlog": ("backlog-plan", "backlog-reviewer", [], {"product-owner"}),
+    "solution_design": ("solution-design", "solution-reviewer", [], {"solution-architect"}),
+    "design_system": ("design-system", "design-system-reviewer", [], {"ux-designer"}),
+    "operation_verification": ("configure", "devops-engineer", ["challenge-review"], {"qa-engineer"}),
+    "operation_environment": ("configure", "qa-engineer", ["challenge-review"], {"devops-engineer"}),
+    "code_review": ("deliver", "code-reviewer", [],
+                    {"software-architect", "backend-developer", "frontend-developer", "devops-engineer"}),
+}
 
 
 def read(relative: str) -> str:
@@ -108,9 +118,15 @@ class ReviewLoopRegistryTests(unittest.TestCase):
             with self.subTest(term=term):
                 self.assertIn(term, switch["promotion"]["threshold"])
         for term in ("review-loop minutes", "rounds",
-                     "minor findings fixed in a blocking pass against those recorded as follow-ups"):
+                     "minor findings fixed in a blocking pass against those recorded as follow-ups",
+                     "calibration counts, claimed, confirmed, downgraded and invalid, with calibration"
+                     " minutes"):
             with self.subTest(term=term):
                 self.assertIn(term, switch["metric"])
+        for term in ("traced to a skipped minor round or a calibration downgrade",
+                     "the shadow judge confirming every downgrade"):
+            with self.subTest(term=term):
+                self.assertIn(term, switch["promotion"]["threshold"])
 
 
 class ReviewLoopReferenceTests(unittest.TestCase):
@@ -207,6 +223,62 @@ class ReviewLoopReferenceTests(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)
 
+    def test_document_calibration_confirms_a_claim_before_it_gates(self):
+        text = flat(DOCUMENT)
+        for rule in (
+            "Before a verdict with an open critical or major finding becomes a gate, one fresh,"
+            " read-only calibration reader checks every critical and major claim of the review",
+            "Calibration is skipped when no critical or major finding is open",
+            "a new critical or major finding of a re-review gets its own calibration before it gates",
+            "The calibration reader is neither the writer nor a reader that returned a finding of"
+            " the review",
+            "`backlog-reviewer-lens`, `solution-reviewer-lens` or `design-system-reviewer-lens`",
+            "`devops-engineer` for the Verification Contract and `qa-engineer` for the Environment"
+            " Contract",
+            "adding `--findings <record of the claims>`",
+            "Never pass the writer's triage or interpretation, another reply or the conversation",
+            "`finding`, `claimed_severity`, `calibrated_severity` and `reason`",
+            "calibration never raises a severity",
+            "A row that lowers or invalidates a claim without citing the text is refused: that claim"
+            " keeps its claimed severity",
+            "Only confirmed critical and major findings keep the verdict at `changes_requested`",
+            "The writer never changes a returned or calibrated severity",
+            "`Severity Calibration` section placed before `Verdict`",
+            "they show the rows with the verdict at the approval gate",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, text)
+
+    def test_code_review_calibration_is_enforced_at_registration(self):
+        text = flat(CODE)
+        for rule in (
+            "one fresh, read-only calibration reader checks every such claim that no earlier"
+            " calibration ruled",
+            "Calibration is skipped when the result has none",
+            "Spawn a fresh `code-reviewer` on its own tier, neither an implementation writer nor the"
+            " reviewer that returned the claims",
+            "The claiming reviewer's result is not registered yet, so the implementation writer"
+            " stays idle",
+            "`reason` cites the candidate as `path:line`",
+            "Credentials or secrets that reach a client artifact or a log stay critical",
+            "Attach the rows unchanged as the result's `calibration` list",
+            "Only confirmed claims gate",
+            "Neither the claiming reviewer nor the writer changes a severity",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, text)
+
+    def test_host_contracts_start_the_calibration_reader_on_the_lens_variants(self):
+        variants = json.loads(read(REGISTRY))["switches"]["review_panels"]["agent_variants"]
+        self.assertEqual(variants["lens_panel"]["agents"],
+                         ["backlog-reviewer", "design-system-reviewer", "solution-reviewer"])
+        for host in ("claude", "codex"):
+            contract = " ".join((ROOT / "platforms" / host / "software-engineering-team"
+                                 / "host-contract.md").read_text(encoding="utf-8").split())
+            with self.subTest(host=host):
+                self.assertIn("the calibration reader under switch `review_loop` at `blocking_delta`",
+                              contract)
+
     def test_default_path_instructions_name_no_review_loop_value(self):
         for path in TEAM.rglob("*.md"):
             relative = path.relative_to(TEAM).as_posix()
@@ -232,6 +304,7 @@ class ReviewLoopReferenceTests(unittest.TestCase):
                 self.assertIn("`blocking_delta`", text)
                 self.assertIn("re-review reads only the open blocking findings, the changed"
                               " text and its dependency context", text)
+                self.assertIn("one fresh, read-only calibration reader", text)
 
 
 class ReviewLoopTaskInputTests(unittest.TestCase):
@@ -277,6 +350,29 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                     expected.add(PANEL)
                 with self.subTest(panels=panels, loop=loop, task=task[:3]):
                     self.assertEqual(bound(manifests[task[:3]]), expected)
+
+    def test_the_calibration_reader_is_a_fresh_read_only_non_writer(self):
+        claims = write(self.root, ".agentrof/agent-marketplace/.runtime/review-loop/claims.md",
+                       "| id | severity | evidence |\n|---|---|---|\n| F-3 | major | Scope repeats. |\n")
+        policy(self.docs, "init")
+        policy(self.docs, "set", "--switch", "review_loop", "--value", "blocking_delta")
+        policy(self.docs, "approve")
+        for panels in ("single_reader", "lens_panel"):
+            if panels == "lens_panel":
+                for step in (("begin-revision",),
+                             ("set", "--switch", "review_panels", "--value", "lens_panel"),
+                             ("approve",)):
+                    policy(self.docs, *step)
+            for step, (entry, role, skills, writers) in CALIBRATION_READERS.items():
+                result = task_inputs.manifest(entry=entry, role=role, mode="review",
+                                              project=self.root, skills=skills, findings=claims)
+                with self.subTest(panels=panels, step=step):
+                    self.assertNotIn(role, writers)
+                    self.assertEqual(result["write_boundary"], "read_only")
+                    self.assertEqual(result["write_scope"]["allowed_write_area"], [])
+                    self.assertEqual(result["open_findings"], claims)
+                    self.assertIn(CODE if step == "code_review" else DOCUMENT,
+                                  result["required_reads"])
 
     def test_re_review_task_binds_only_the_findings_the_diff_and_the_context(self):
         contract = write(self.root, "workspace/docs/operation/verification-contract.md",

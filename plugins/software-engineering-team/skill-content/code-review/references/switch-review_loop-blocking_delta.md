@@ -12,8 +12,8 @@ DLV-###`; the Delivery pins the policy it runs under.
 ## Blocking findings
 
 CRITICAL and MAJOR findings block, as the Severity Definitions of this skill
-define: the verdict is `fix_required` only while one is open. QA keeps its own
-blocking severities.
+define, once calibration confirms them: the verdict is `fix_required` only while
+one is open. QA keeps its own blocking severities.
 
 ## Minor findings as follow-ups
 
@@ -49,3 +49,37 @@ A repair review keeps its scope: the unresolved blocking findings, the new
 delta and the consumers a fix could have touched, with the correctness,
 conformance and security passes all mandatory. Once no CRITICAL or MAJOR
 finding is open, the Item needs no further review cycle.
+
+## Calibration
+
+Before a code review result with an open CRITICAL or MAJOR claim is registered,
+one fresh, read-only calibration reader checks every such claim that no earlier
+calibration ruled. Calibration is skipped when the result has none. A claim that
+the manifest's `unresolved_findings` marks with `calibrated_severity` was ruled
+in an earlier cycle and keeps that ruling.
+
+1. Spawn a fresh `code-reviewer` on its own tier, neither an implementation
+   writer nor the reviewer that returned the claims. Give it each claim as
+   returned, with its id, severity, file, description and impact, the Severity
+   Definitions and `SELF-CHECK`, and let it read the frozen candidate through
+   `inspect` and `diff`. The claiming reviewer's result is not registered yet,
+   so the implementation writer stays idle.
+2. It returns one row per claim: `finding`, `claimed_severity`,
+   `calibrated_severity` and `reason`. `calibrated_severity` is the claimed
+   severity when the claim holds, `minor` when the code as written causes no
+   security, correctness or contract defect, and `invalid` when the cited code
+   disproves the claim. `reason` cites the candidate as `path:line`. A `minor`
+   row adds the `owner_role` and `revisit_trigger` of the follow-up it becomes.
+   Credentials or secrets that reach a client artifact or a log stay critical.
+3. Attach the rows unchanged as the result's `calibration` list and register
+   the result with `delivery_verification.py result`. It refuses a missing,
+   extra or duplicate row, a changed claimed severity, a raised severity, a
+   reason without a `path:line` citation of the candidate and a `minor` row
+   without its follow-up fields.
+
+Only confirmed claims gate. A result whose every claim is calibrated `minor` or
+`invalid` counts as passed once each review pass carries its evidence; a
+calibrated `minor` becomes a follow-up and a calibrated `invalid` closes. The
+next cycle's session keeps each ruling. Neither the claiming reviewer nor the
+writer changes a severity, and `approve-item-evidence` records every row in the
+`Deviations and Follow-ups` section of the Item's code review record.

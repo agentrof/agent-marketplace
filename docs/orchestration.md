@@ -52,8 +52,13 @@ contract, at the approval gate of Solution Design and Design System, and for
 code review in result fields that `approve-item-evidence` copies into the
 Item's code review record and `approve-review` lists in the Delivery Review. A
 re-review reads only the open blocking findings, the changed text and its
-dependency context. The instructions live in the `challenge-review` and
-`code-review` references `switch-review_loop-blocking_delta.md`.
+dependency context. Before a critical or major claim gates, one fresh,
+read-only calibration reader, neither the writer nor the claiming reader,
+confirms it, lowers it to minor or rules it invalid, citing the text; only
+confirmed claims gate, each claim is ruled once, and the review note, the
+code review record or the approval gate keeps every ruling. The instructions
+live in the `challenge-review` and `code-review` references
+`switch-review_loop-blocking_delta.md`.
 
 Requirement Flow is a linear, user-gated sequence. Each required stage commits
 its approved documents before the next stage begins. The backlog compiler is

@@ -1,0 +1,6 @@
+{
+  "summary": "At process switch `review_loop` value `blocking_delta`, a critical or major claim gates only once one fresh, read-only calibration reader, neither the writer nor the claiming reader, confirms it. The reader returns one row per claim with the claimed severity, the calibrated severity, which confirms the claim or lowers it to minor or invalid, and a reason that cites the text; a lowering without a citation is refused, and each claim is ruled once. Document reviews run the reader as the step's lens-tier reviewer variant, or the Operation counterpart on its own tier, and record the rows in the backlog review note's `Severity Calibration` section or at the approval gate. Delivery code review runs a fresh code reviewer before the result is registered: `delivery_verification.py result` validates the rows against the open claims and the candidate, passes a result whose every claim was lowered or disproved, and carries each ruling into the next cycle, and `approve-item-evidence` records the rows in the Item's code review record. At the default, `current`, calibration rows are ignored.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

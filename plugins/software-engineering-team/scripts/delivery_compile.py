@@ -86,6 +86,9 @@ FOLLOW_UP_COLUMNS = ("finding", "severity", "file", "description", "owner_role",
 # Each compiler-owned block starts at its marker line, after any authored text.
 ITEM_FOLLOW_UPS = "Open code review follow-ups, copied by approve-item-evidence:"
 DELIVERY_FOLLOW_UPS = "Open code review follow-ups of the integrated Items, listed by approve-review:"
+CALIBRATION_COLUMNS = ("finding", "claimed_severity", "calibrated_severity", "reason")
+ITEM_CALIBRATION = ("Severity calibration of the open critical and major claims,"
+                    " recorded by approve-item-evidence:")
 
 
 atomic_text = atomic_file.replace_text
@@ -1703,9 +1706,14 @@ def table_block(marker: str, columns: tuple[str, ...], rows: list[str]) -> str:
 
 
 def block_rows(text: str, marker: str) -> list[str]:
-    """The table rows of the compiler-owned block that starts at ``marker``."""
-    lines = text.split(marker, 1)[1].splitlines() if marker in text else []
-    return [line.strip() for line in lines if line.strip().startswith("|")][2:]
+    """The rows of the table that follows ``marker`` in a compiler-owned block."""
+    rows: list[str] = []
+    for line in text.split(marker, 1)[1].splitlines() if marker in text else []:
+        if line.strip().startswith("|"):
+            rows.append(line.strip())
+        elif rows:
+            break
+    return rows[2:]
 
 
 def replace_section(body: str, title: str, content: str) -> str:
@@ -1823,9 +1831,14 @@ def _approve_item_evidence(args) -> int:
                 rows = ["| " + " | ".join(table_cell({**finding, "finding": finding["id"]}[column])
                                           for column in FOLLOW_UP_COLUMNS) + " |"
                         for finding in delivery_verification.open_follow_ups(review_result, item_props)]
+                block = table_block(ITEM_FOLLOW_UPS, FOLLOW_UP_COLUMNS, rows)
+                calibration = sorted(review_result.get("calibration", []), key=lambda row: row["finding"])
+                if calibration:
+                    block += "\n\n" + table_block(ITEM_CALIBRATION, CALIBRATION_COLUMNS, [
+                        "| " + " | ".join(table_cell(row[column]) for column in CALIBRATION_COLUMNS) + " |"
+                        for row in calibration])
                 review_body = with_compiler_block(review_body, "Deviations and Follow-ups",
-                                                  ITEM_FOLLOW_UPS,
-                                                  table_block(ITEM_FOLLOW_UPS, FOLLOW_UP_COLUMNS, rows))
+                                                  ITEM_FOLLOW_UPS, block)
             for target, result in ((review_props, review_result), (verification_props, verification_result)):
                 target["verification_candidate_hash"] = session["candidate"]["candidate_hash"]
                 target["verification_mode"] = result["mode"]

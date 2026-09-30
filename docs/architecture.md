@@ -49,8 +49,11 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     its own loop; at `blocking_delta`, Operation contracts record accepted minor
     findings in their own compiler-validated `Accepted Minor Findings` section,
     Delivery code review minors carry an owner role and revisit trigger into the
-    Item's code review record and the Delivery Review, and a re-review reads only
-    the open blocking findings, the changed text and its dependency context.
+    Item's code review record and the Delivery Review, a re-review reads only
+    the open blocking findings, the changed text and its dependency context,
+    and a critical or major claim gates only once one fresh, read-only
+    calibration reader, never its writer or claimant, confirms it with a
+    citation of the text.
 15. File names are stable slugs; membership is path-derived. A story does not
     duplicate its epic relationship in front matter.
 16. Authored titles are direct, natural phrases in the configured output

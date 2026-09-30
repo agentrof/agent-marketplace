@@ -148,6 +148,80 @@ class ArchitectureCompilerTests(unittest.TestCase):
             result = self.run_cli("init-root", "--docs", docs, "--item-ref", "AUTH-01", expected=2)
             self.assertIn("claimed or active", result.stderr)
 
+    def hold(self, docs, folder, identity, status):
+        """Record a Delivery ``identity`` in a slugged ``folder`` holding AUTH-01."""
+        package = docs / "delivery/deliveries" / folder
+        (package / "items/auth-01").mkdir(parents=True, exist_ok=True)
+        (package / "delivery.md").write_text(
+            f"---\ntype: delivery\nid: {identity}\ntitle: Delivery scope\n---\n# Delivery\n", encoding="utf-8")
+        (package / "items/auth-01/item.md").write_text(
+            f"---\ntype: delivery-item\nstory_id: AUTH-01\nstatus: {status}\n---\n# Item\n", encoding="utf-8")
+
+    def test_delivery_id_comes_from_delivery_md_before_the_folder_prefix(self):
+        sys.path.insert(0, str(COMPILER.parent))
+        import architecture_compile
+        with tempfile.TemporaryDirectory() as raw:
+            deliveries = Path(raw) / "workspace/docs/delivery/deliveries"
+            for folder, note, expected in (
+                    ("dlv-002-verify-every-item", "---\ntype: delivery\nid: DLV-002\n---\n", "DLV-002"),
+                    ("dlv-004-renamed-scope", "---\ntype: delivery\nid: DLV-009\n---\n", "DLV-009"),
+                    ("dlv-003-no-id", "---\ntype: delivery\n---\n", "DLV-003"),
+                    ("dlv-005-unreadable", "id: DLV-099\n", "DLV-005"),
+                    ("dlv-006", None, "DLV-006"),
+                    ("scope", None, "SCOPE")):
+                package = deliveries / folder
+                package.mkdir(parents=True)
+                if note is not None:
+                    (package / "delivery.md").write_text(note, encoding="utf-8")
+                self.assertEqual(architecture_compile.delivery_id(package), expected, folder)
+
+    def test_qualified_item_ref_resolves_a_slugged_delivery_and_keys_the_delta_by_story(self):
+        sys.path.insert(0, str(COMPILER.parent))
+        import architecture_compile
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.prepare(docs)
+            self.hold(docs, "dlv-001-test", "DLV-001", "active")
+            qualified = ("--item-ref", "DLV-001:AUTH-01")
+            self.run_cli("init-root", "--docs", docs, *qualified)
+            self.run_cli("init-component", "--docs", docs, "--component-ref", "orders-api", *qualified)
+            self.run_cli("stub", "--docs", docs, *qualified, "--kind", "interface",
+                         "--component", "orders-api", "--record-id", "IFC-001", "--slug", "orders")
+            stamped = json.loads(self.run_cli("stamp-item", "--docs", docs, *qualified).stdout)
+            self.assertEqual(stamped["item_ref"], "AUTH-01")
+            architecture = docs / "system-architecture"
+            for record in architecture_compile.records(architecture):
+                self.assertEqual(architecture_compile.record_props(record)["introduced_by"], ["AUTH-01"])
+            # push-item reads the delta by the bare story, as delivery_git does.
+            delta = architecture_compile.current_item_delta(architecture, "AUTH-01")
+            self.assertEqual(delta["architecture_delta_hash"], stamped["architecture_delta_hash"])
+            self.assertEqual(len(delta["records"]), 3)
+            self.run_cli("check", "--docs", docs, *qualified)
+            self.run_cli("check", "--docs", docs, "--item-ref", "AUTH-01")
+
+    def test_an_omitted_item_ref_selects_no_item(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.prepare(docs)
+            refused = self.run_cli("init-root", "--docs", docs, expected=2)
+            self.assertIn("item_ref is required", refused.stderr)
+            self.assertFalse((docs / "system-architecture/architecture.md").exists())
+
+    def test_a_story_held_by_two_deliveries_needs_the_qualified_item_ref(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.prepare(docs)
+            self.hold(docs, "dlv-001-test", "DLV-001", "integrated")
+            self.hold(docs, "dlv-002-reopen-the-account-boundary", "DLV-002", "active")
+            refused = self.run_cli("init-root", "--docs", docs, "--item-ref", "AUTH-01", expected=2)
+            self.assertIn("item_ref must resolve to exactly one Delivery Item: AUTH-01;"
+                          " name one of DLV-001:AUTH-01, DLV-002:AUTH-01", refused.stderr)
+            self.run_cli("init-root", "--docs", docs, "--item-ref", "DLV-002:AUTH-01")
+            self.run_cli("render", "--docs", docs)
+            self.run_cli("check", "--docs", docs, "--item-ref", "DLV-002:AUTH-01")
+            inactive = self.run_cli("check", "--docs", docs, "--item-ref", "DLV-001:AUTH-01", expected=1)
+            self.assertIn("claimed or active", inactive.stdout)
+
     def test_sealing_preserves_quoted_wikilinks_and_item_source_hash(self):
         sys.path.insert(0, str(COMPILER.parent))
         import architecture_compile

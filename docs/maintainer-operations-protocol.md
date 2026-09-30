@@ -455,6 +455,22 @@ finalization fails with the Release already public; only the owner decides
 whether to keep it or to enable the setting, delete that Release (never its
 tag) and re-run the failed finalize job so it creates an immutable one.
 
+To keep it, the maintainer completes the publication with the finalize the
+failed job ran, without `--require-immutable`, since both workflows pass it.
+It reconciles the existing Release unchanged and deletes `release/stable`
+with an exact lease on the release head, using the values in the failed
+job's environment:
+
+```console
+python3 tools/release_publish.py finalize --version "$VERSION" \
+  --candidate-sha "$EXPECTED_MERGE_SHA" --prior-stable-sha "$STABLE_BASE" \
+  --notes-file release-notes.md --release-branch-sha "$RELEASE_HEAD_SHA"
+```
+
+The notes file must exist but is unused for an existing Release. A kept
+bootstrap Release takes `--bootstrap` in place of `--prior-stable-sha` and
+`--release-branch-sha`.
+
 ## Impact and residual risk
 
 | Surface | Effect | Residual risk and control |

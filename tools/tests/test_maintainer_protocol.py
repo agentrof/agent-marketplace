@@ -80,6 +80,21 @@ class MaintainerProtocolTests(unittest.TestCase):
         self.assertIn("Never use the signed-in `codex debug models`", flat)
         self.assertNotIn("A signed-in `codex debug models` and", flat)
 
+    def test_a_kept_mutable_release_completes_with_the_publication_tooling(self):
+        protocol = PROTOCOL.read_text(encoding="utf-8")
+        section = protocol.split("### Release immutability", 1)[1].split("\n## ", 1)[0]
+        command = section.split("python3 tools/release_publish.py finalize", 1)[1]
+        command = command.split("```", 1)[0]
+        # Both workflows hard-code --require-immutable, so keeping the Release
+        # needs a manual finalize that reconciles it and removes release/stable.
+        self.assertIn("--release-branch-sha", command)
+        self.assertNotIn("--require-immutable", command)
+        flat = " ".join(section.split())
+        self.assertIn("delete that Release (never its tag) and re-run the failed finalize job",
+                      flat)
+        self.assertIn("To keep it, the maintainer completes the publication", flat)
+        self.assertIn("with an exact lease", flat)
+
     def test_merge_and_release_authority_remain_explicit(self):
         protocol = PROTOCOL.read_text(encoding="utf-8")
         self.assertIn("Explicit user approval identifying that PR", protocol)

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "auto": {
+      "high": {"effort": "high"},
+      "medium": {"effort": "medium"},
+      "low": {"effort": "low"},
+      "inherit": {}
+    }
+  }
+}

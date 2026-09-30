@@ -1,7 +1,7 @@
 ---
 name: qa-engineer
 description: QA engineer role that co-authors story test plans during Backlog Planning and independently verifies delivered behavior during Delivery; never auto-triggered.
-reasoning: medium
+model_reasoning_effort: medium
 output_contract: prose
 ---
 

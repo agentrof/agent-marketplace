@@ -671,7 +671,8 @@ def check_content_bans(tree: Tree, findings: list[Finding]) -> None:
                     findings.append(Finding(
                         "error", rel(tree, path), lineno, "content_bans",
                         "model name outside agent frontmatter",
-                        "host model names belong only in generated distributions",
+                        "host model names belong only in platforms/<host>/"
+                        "execution-profiles.json and generated distributions",
                     ))
             if ABSOLUTE_PATH_RE.search(line):
                 findings.append(Finding(
@@ -2180,6 +2181,50 @@ def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
             "fix the config block; the enum feeds the frontmatter_shape"
             " reasoning check",
         ))
+    levels = tree.config.get("reasoning_levels")
+    builder_levels = build_distributions.CANONICAL_REASONING_LEVELS
+    if isinstance(levels, list) \
+            and all(isinstance(level, str) for level in levels) \
+            and set(levels) != builder_levels:
+        findings.append(Finding(
+            "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape",
+            f"reasoning_levels {sorted(set(levels))} differ from the"
+            f" distribution builder's tiers {sorted(builder_levels)}",
+            "change reasoning_levels and CANONICAL_REASONING_LEVELS in"
+            " tools/build_distributions.py together",
+        ))
+
+
+def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
+    """Every host maps exactly the canonical reasoning tiers to its own
+    documented model and effort values; model names stay under platforms/."""
+    try:
+        adapters = build_distributions.load_adapters(tree.root)
+    except ValueError:
+        return  # registration and product_namespace report adapter failures
+    levels = (tree.config or {}).get("reasoning_levels")
+    tiers = set(levels) if isinstance(levels, list) and levels and all(
+        isinstance(level, str) for level in levels
+    ) else set(AGENT_REASONING_ENUM)  # model_config_shape reports bad shapes
+    for host, adapter in adapters.items():
+        path = build_distributions.execution_profile_path(tree.root, host)
+        try:
+            table = json.loads(read_text(path))
+        except (OSError, json.JSONDecodeError):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "execution_profiles",
+                "execution profile table is missing or not valid JSON",
+                "restore the host table that maps each reasoning tier to"
+                " model and effort",
+            ))
+            continue
+        for problem in build_distributions.execution_profile_problems(
+                table, adapter, tiers):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "execution_profiles", problem,
+                "map every reasoning tier in tools/data/models.json to the"
+                " host's documented model and effort values",
+            ))
 
 
 def _limits_shape_errors(config: dict) -> list[str]:
@@ -2433,6 +2478,7 @@ CHECKS = {
     "vault_policy_shape": check_vault_policy_shape,
     "vault_wiring": check_vault_wiring,
     "model_config_shape": check_model_config_shape,
+    "execution_profiles": check_execution_profiles,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "auto": {
+      "high": {"model": "opus"},
+      "medium": {"model": "sonnet"},
+      "low": {"model": "haiku"},
+      "inherit": {"model": "inherit"}
+    }
+  }
+}

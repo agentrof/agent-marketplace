@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import tempfile
@@ -649,6 +650,197 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
                      other_mode=second)
         self.anchor(FIXTURE_ANCHOR + "Switch `other_mode` selects the same step.\n")
         self.assert_rejected("variant 'backlog-reviewer-quick' collides with switch 'fixture_mode'")
+
+
+# ---------------------------------------------------------------------------
+# Builder registry: one deliberately broken fixture per validator check, the
+# doctrine test_ba_compile.py and test_vault_check.py apply to their checkers.
+# Each builder breaks the valid fixture repository so that its check reports
+# it; a check without a builder fails the lockstep test. Builders change files
+# only through the helpers below, which remember every original so the test
+# puts the fixture back after each builder instead of copying it per check.
+# ---------------------------------------------------------------------------
+
+AGENT = f"{PLUGIN_ROOT}/agents/product-owner.md"
+FLOW = f"{PLUGIN_ROOT}/flows/operation.md"
+ORIGINALS: dict = {}
+
+
+def remember(path: Path) -> Path:
+    ORIGINALS.setdefault(path, path.read_bytes() if path.is_file() else None)
+    return path
+
+
+def restore() -> None:
+    for path, original in ORIGINALS.items():
+        if original is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(original)
+    ORIGINALS.clear()
+
+
+def edit(root: Path, relative: str, old: str, new: str) -> None:
+    path = remember(root / relative)
+    text = path.read_text(encoding="utf-8")
+    if old not in text:
+        raise AssertionError(f"{relative} no longer holds {old!r}; update its builder")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def append(root: Path, relative: str, text: str) -> None:
+    path = remember(root / relative)
+    path.write_text(path.read_text(encoding="utf-8") + text, encoding="utf-8")
+
+
+def write(root: Path, relative: str, text: str) -> None:
+    remember(root / relative).write_text(text, encoding="utf-8")
+
+
+def remove(root: Path, relative: str) -> None:
+    remember(root / relative).unlink()
+
+
+def edit_json(root: Path, relative: str, mutate) -> None:
+    path = remember(root / relative)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    mutate(value)
+    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def tree_digest(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+        if path.is_file():
+            digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
+
+
+VALIDATOR_BUILDERS = {
+    "frontmatter_shape": lambda root: edit(
+        root, AGENT, "output_contract: prose", "output_contract: table"),
+    "agent_name": lambda root: edit(root, AGENT, "name: product-owner", "name: product-lead"),
+    "skill_name": lambda root: edit(
+        root, f"{PLUGIN_ROOT}/skill-content/configure/SKILL.md",
+        "name: configure", "name: configuration"),
+    "trigger_policy": lambda root: edit(
+        root, AGENT, "description: ", "description: Use when planning. "),
+    "size_caps": lambda root: append(
+        root, f"{PLUGIN_ROOT}/constitution.md", "- Filler principle.\n" * 61),
+    "section_contract": lambda root: edit(root, AGENT, "## Output Contract", "## Output"),
+    "content_bans": lambda root: append(root, FLOW, "\nOne step \u2014 then another.\n"),
+    "agent_tech_nouns": lambda root: append(root, AGENT, "- Reads pytest reports.\n"),
+    "handwritten_counts": lambda root: append(root, FLOW, "\nThe team ships 12 agents.\n"),
+    "dead_links": lambda root: append(root, FLOW, "\nSee [the ghost](ghost.md).\n"),
+    "reference_triggers": lambda root: append(
+        root, f"{PLUGIN_ROOT}/skill-content/challenge-review/SKILL.md",
+        "- [triage again](references/triage.md): triage.\n"),
+    "registration": lambda root: edit_json(
+        root, ".claude-plugin/marketplace.json",
+        lambda value: value["plugins"][0].update(source="./elsewhere")),
+    "distribution_packaging": lambda root: edit_json(
+        root, ".agents/plugins/marketplace.json", lambda value: value.update(name="other")),
+    "single_team_contract": lambda root: edit_json(
+        root, "platforms/claude/software-engineering-team/manifest.json",
+        lambda value: value.update(dependencies=["some-team"])),
+    "packaged_state_files": lambda root: write(root, f"{PLUGIN_ROOT}/cache.sqlite", "state"),
+    "json_hygiene": lambda root: write(
+        root, f"{PLUGIN_ROOT}/skill-content/configure/data/probe.json", '{"camelCase": 1}\n'),
+    "orchestrator_integrity": lambda root: edit(
+        root, FLOW, "{{constitution}}", "the constitution"),
+    "choice_gate": lambda root: append(root, FLOW, "\n\n\n\nThis needs an explicit user choice.\n"),
+    "stdlib_only": lambda root: write(
+        root, f"{PLUGIN_ROOT}/scripts/probe_import.py", "import requests\n"),
+    "naive_clock": lambda root: write(
+        root, f"{PLUGIN_ROOT}/scripts/probe_clock.py",
+        "from datetime import date\n\nTODAY = date.today()\n"),
+    "script_references": lambda root: append(root, FLOW, "\nRun scripts/ghost_tool.py first.\n"),
+    "template_placeholders": lambda root: append(
+        root, f"{PLUGIN_ROOT}/templates/task-input-contract.md", "\n{{ghost_token}}\n"),
+    "project_instruction_contract": lambda root: remove(
+        root, f"{PLUGIN_ROOT}/templates/memory/profile.md"),
+    "spawn_shape_constitution": lambda root: append(
+        root, f"{PLUGIN_ROOT}/skill-content/challenge-review/references/triage.md",
+        "\n## Spawn Shape\n\nSpawn the reviewer with the named files.\n"),
+    "ba_schema_shape": lambda root: edit_json(
+        root, f"{PLUGIN_ROOT}/skill-content/business-analysis/data/space-schema.json",
+        lambda value: value.update(schema_version="one")),
+    "wikilink_ban": lambda root: append(root, FLOW, "\nSee [[ghost]].\n"),
+    "version_sync": lambda root: edit_json(
+        root, "versions.json",
+        lambda value: value["plugins"].update({fixtures.PLUGIN: "9.9.9"})),
+    "vault_policy_shape": lambda root: edit_json(
+        root, f"{PLUGIN_ROOT}/skill-content/obsidian-vault/data/vault-policy.json",
+        lambda value: value.update(schema_version="one")),
+    "vault_wiring": lambda root: edit(root, FLOW, "`obsidian-vault` skill", "vault skill"),
+    "model_config_shape": lambda root: edit_json(
+        root, "tools/data/models.json", lambda value: value["reasoning_levels"].remove("low")),
+    "execution_profiles": lambda root: edit_json(
+        root, "platforms/codex/execution-profiles.json",
+        lambda value: value["profiles"].update(fast={})),
+    "review_panels": lambda root: edit_json(
+        root, PANELS, lambda value: value["review_steps"]["design_system"].update(lenses=[])),
+    "process_switches": lambda root: edit_json(
+        root, SWITCHES, lambda value: value["switches"]["review_panels"].update(default="ghost")),
+    "limits_config_shape": lambda root: edit_json(
+        root, "tools/data/limits.json",
+        lambda value: value["authoring_caps"].update(ghost_cap=1)),
+    "delivery_contract_shape": lambda root: remove(
+        root, f"{PLUGIN_ROOT}/skill-content/deliver/data/delivery-receipt-contract.json"),
+    "product_namespace": lambda root: append(
+        root, f"{PLUGIN_ROOT}/scripts/marketplace_paths.py", "# drift\n"),
+    "task_input_catalog": lambda root: edit_json(
+        root, f"{PLUGIN_ROOT}/templates/task-input-policy.json",
+        lambda value: value["role_skills"].pop("ux_designer")),
+}
+
+
+class ValidatorBuilderTests(unittest.TestCase):
+    """Every validator check fires on its broken fixture and stays silent on
+    the valid one; CHECKS and VALIDATOR_BUILDERS name the same checks."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name) / "valid"
+        fixtures.make_valid_root(cls.root)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+
+    def test_registry_lockstep_with_checks(self):
+        self.assertEqual(sorted(VALIDATOR_BUILDERS), sorted(validate.CHECKS))
+
+    def test_contributing_and_the_validator_name_the_registry(self):
+        contributing = (TESTS.parents[1] / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        for name, text in (("CONTRIBUTING.md", contributing), ("validate.py", validate.__doc__)):
+            with self.subTest(document=name):
+                text = " ".join(text.split())
+                self.assertTrue("VALIDATOR_BUILDERS" in text
+                                and "tools/tests/test_validator_contract.py" in text,
+                                f"{name} does not name the builder registry")
+                self.assertFalse("tools/tests/fixtures/" in text,
+                                 f"{name} names a fixtures folder that does not exist")
+
+    def test_each_builder_fires_its_check(self):
+        pristine = tree_digest(self.root)
+        for check, builder in sorted(VALIDATOR_BUILDERS.items()):
+            with self.subTest(check=check):
+                silent: list = []
+                validate.CHECKS[check](validate.build_tree(self.root), silent)
+                self.assertEqual(silent, [])
+                found: list = []
+                try:
+                    builder(self.root)
+                    validate.CHECKS[check](validate.build_tree(self.root), found)
+                finally:
+                    restore()
+                self.assertEqual(tree_digest(self.root), pristine,
+                                 f"the {check} builder changed a file outside the helpers")
+                self.assertTrue([finding for finding in found if finding.check == check],
+                                f"{check} reported nothing on its broken fixture")
 
 
 if __name__ == "__main__":

@@ -136,8 +136,10 @@ validator.
 
 ## Guarding the guard
 
-Every validator check has at least one deliberately broken fixture in
-`tools/tests/`, and a meta-test keeps the check list and fixture list in
-lockstep. Adding a check without a fixture turns the suite red. If your
-PR changes validation behavior, it must change the fixtures in the same
-commit.
+Every validator check has a deliberately broken fixture:
+`VALIDATOR_BUILDERS` in `tools/tests/test_validator_contract.py` holds one
+builder per entry of `CHECKS` in `tools/validate.py`, and each builder breaks
+the valid fixture repository so that its check reports it. A meta-test keeps
+the two in lockstep, so adding a check without a builder turns the suite red.
+If your PR changes validation behavior, it must change the builders in the
+same commit.

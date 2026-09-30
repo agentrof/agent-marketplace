@@ -384,6 +384,7 @@ class TaskInputTests(unittest.TestCase):
 
     def test_review_panel_protocol_is_bound_only_at_lens_panel(self):
         protocol = "skill-content/challenge-review/references/switch-review_panels-lens_panel.md"
+        panels = "skill-content/challenge-review/data/review-panels.json"
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
             self.make_project(root)
@@ -396,8 +397,8 @@ class TaskInputTests(unittest.TestCase):
                     result = task_inputs.manifest(entry=entry, role=role, mode="review",
                                                   project=root, skills=skills)
                     self.assertIn("skill-content/challenge-review/SKILL.md", result["required_reads"])
-                    self.assertIn("skill-content/challenge-review/data/review-panels.json",
-                                  [item["path"] for item in result["instructions"]])
+                    # The lens data is read only by the values that list it.
+                    self.assertNotIn(panels, [item["path"] for item in result["instructions"]])
                     self.assertNotIn(protocol, [item["path"] for item in result["instructions"]])
             plain = task_inputs.manifest(entry="configure", role="devops-engineer", mode="review")
             self.assertNotIn("skill-content/challenge-review/SKILL.md", plain["required_reads"])
@@ -413,6 +414,7 @@ class TaskInputTests(unittest.TestCase):
                     result = task_inputs.manifest(entry=entry, role=role, mode="review",
                                                   project=root, skills=skills)
                     self.assertIn(protocol, result["required_reads"])
+                    self.assertIn(panels, result["required_reads"])
                     self.assertEqual(result["write_boundary"], "read_only")
 
     def test_process_policy_binds_only_the_chosen_switch_references(self):

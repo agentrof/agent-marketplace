@@ -740,7 +740,10 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.anchor(FIXTURE_ANCHOR + f"At `fast` follow `{reference}`.\n")
         self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data={"fast": [data]}))
         self.assertEqual(self.messages(), [])
-        owned = "skill-content/execution-plan/data/fact-ownership.json"
+        # A file that values of several switches read is listed under each.
+        shared = "skill-content/challenge-review/data/review-panels.json"
+        self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data={"fast": [data, shared]}))
+        self.assertEqual(self.messages(), [])
         cases = (
             ({"current": [data]}, "value data belongs to a declared value other than the default"),
             ({"slow": [data]}, "value data belongs to a declared value other than the default"),
@@ -748,7 +751,7 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
             ({"fast": ["skill-content/challenge-review/references/triage.md"]},
              "is not a skill data JSON file"),
             ({"fast": ["skill-content/challenge-review/data/ghost.json"]}, "does not exist"),
-            ({"fast": [owned]}, "is already declared by switch 'execution_planning'"),
+            ({"fast": [data, data]}, f"value data {data!r} is listed more than once"),
             ({}, "value_data must map a switch value to its data files"),
         )
         for value_data, fragment in cases:

@@ -253,11 +253,13 @@ To add a switch:
    in the policy's Parameters table through `/configure process`, a parameter
    exists only while its switch is at a value that takes it, and
    `process_policy.py value` reports the typed values beside the switch's. A
-   value whose instructions read package data that nothing else reads declares
-   it in `value_data`, a list of `skill-content/<skill>/data/<file>.json` paths
-   per value; a task binds that data only together with the value's switch
-   references. A switch whose instructions every task of its owning flows
-   follows, whichever skills the task selects, declares
+   value whose instructions read package data that no default path reads
+   declares it in `value_data`, a list of
+   `skill-content/<skill>/data/<file>.json` paths per value; a task binds that
+   data only together with the value's switch references. Data that several
+   values read, of one switch or of several, is listed under each of them and
+   bound when any of them is chosen. A switch whose instructions every task of
+   its owning flows follows, whichever skills the task selects, declares
    `reference_scope: owning_flows`, as `owner_gates` does.
 2. Anchor it as switch `<id>` at each step it changes in its owning flows.
    The anchor names the switch reference that the other value follows and
@@ -286,10 +288,10 @@ The `process_switches` validator check rejects a default outside the values,
 a switch that an owning flow does not name, a flow that names an undeclared
 switch or one it does not own, a switch without a metric or promotion rule,
 malformed agent variants or parameters, a `reference_scope` other than
-`owning_flows`, value data that is missing, declared
-twice, declared for the default or bound by no reference of its value, and a
-switch reference that names an undeclared switch or value or the default, that
-no owning flow names, or that a SKILL.md links.
+`owning_flows`, value data that is missing, listed twice for one value,
+declared for the default or bound by no reference of its value, and a switch
+reference that names an undeclared switch or value or the default, that no
+owning flow names, or that a SKILL.md links.
 
 ### Promotion rule
 

@@ -2529,11 +2529,13 @@ def agent_variant_problems(where: str, variants: object, values: list[str], defa
 
 
 def value_data_problems(plugin: Path, switches: dict) -> list[str]:
-    """Package data that only one switch value reads is bound with that value's
-    switch references, so each file exists once, belongs to a value other than
-    the default and travels with at least one reference of that value."""
+    """Package data that only non-default switch values read is bound with the
+    switch references of whichever of those values a project chose, so each
+    file is listed once per value that reads it, belongs to a value other than
+    the default and travels with at least one reference of each such value. A
+    file that several values read, of one switch or of several, is listed
+    under each of them."""
     problems: list[str] = []
-    owners: dict[str, str] = {}
     references = {SWITCH_REFERENCE_RE.match(path.name).groups()
                   for skill in skill_dirs(plugin)
                   for path in (skill / "references").glob("switch-*.md")
@@ -2561,9 +2563,8 @@ def value_data_problems(plugin: Path, switches: dict) -> list[str]:
                     problems.append(f"{at}: value data {path!r} is not a skill data JSON file")
                 elif not (plugin / path).is_file():
                     problems.append(f"{at}: value data {path!r} does not exist")
-                if path in owners:
-                    problems.append(f"{at}: value data {path!r} is already declared by {owners[path]}")
-                owners.setdefault(path, at)
+            for path in sorted({path for path in paths if paths.count(path) > 1}):
+                problems.append(f"{at}: value data {path!r} is listed more than once")
             if (switch, value) not in references:
                 problems.append(f"{at}: value data needs a switch reference of that value to bind it")
     return problems
@@ -2775,8 +2776,8 @@ def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
         switches = data.get("switches") if isinstance(data, dict) else None
         switches = switches if isinstance(switches, dict) else {}
         for problem in value_data_problems(plugin, switches):
-            err(path, problem, "declare each data file once, under the switch value whose"
-                " references read it")
+            err(path, problem, "list each data file once under every non-default switch value"
+                " whose references read it")
         for problem in mechanical_variant_problems(plugin, switches):
             err(path, problem, "list only the writers whose fix passes the switch moves as"
                 " its mechanical agent variants")

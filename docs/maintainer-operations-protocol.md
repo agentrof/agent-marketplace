@@ -145,10 +145,10 @@ reaches them.
 4. Regenerate every registered distribution with
    `python3 tools/build_distributions.py` when canonical content changes.
 5. Add exactly the release-impact declaration required by repository policy.
-   Changes limited to generated `.agent-marketplace-package.json` provenance
-   may be release-free only when the deterministic distribution gate proves
-   every non-provenance package byte and executable mode is unchanged. Every
-   other generated distribution change requires its component impact.
+   Every generated distribution change requires its component impact,
+   including one limited to the `.agent-marketplace-package.json` provenance:
+   that file carries no build identity, so it changes only when what the
+   package declares changes.
 6. Run focused tests while iterating. Stage the complete candidate, run
    `make check-local`, and run `make verify-local` immediately before commit.
    Partial staging is unsupported. `make check` remains the exhaustive gate;

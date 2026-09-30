@@ -779,7 +779,6 @@ def check_pr_changeset(root: Path, base: str) -> None:
     declared = {component for item in selected for component in item.components}
     required: set[str] = set()
     adapters = build_distributions.load_adapters(root)
-    _, provenance_name = build_distributions.packaging_names(root)
     for _status, path in changed:
         parts = Path(path).parts
         if len(parts) >= 2 and parts[0] == "plugins" and parts[1] in versions["plugins"]:
@@ -787,9 +786,7 @@ def check_pr_changeset(root: Path, base: str) -> None:
         if len(parts) >= 3 and parts[0] == "platforms" and parts[1] in adapters and parts[2] in versions["plugins"]:
             required.add(parts[2])
         if len(parts) >= 3 and parts[0] == "dist" and parts[1] in adapters and parts[2] in versions["plugins"]:
-            derived_provenance = len(parts) == 4 and parts[3] == provenance_name
-            if not derived_provenance:
-                required.add(parts[2])
+            required.add(parts[2])
         if path in {".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"}:
             required.add(MARKETPLACE_COMPONENT)
     if not added:

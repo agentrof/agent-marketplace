@@ -51,6 +51,8 @@ WRITER_ROLES = {"verification": "qa_engineer", "environment": "devops_engineer"}
 # An accepted minor review finding is followed up by one of the contract writers.
 MINOR_FINDING_OWNER_ROLES = tuple(WRITER_ROLES.values())
 ACCEPTED_MINOR_FINDINGS = "Accepted Minor Findings"
+# Only this review_loop value writes and validates the contract's review record.
+REVIEW_LOOP, BLOCKING_DELTA = "review_loop", "blocking_delta"
 DISPOSITIONS = {"required", "not_applicable"}
 # Where the checks that merge-pr requires on a Delivery PR come from. The first
 # is the default, so a contract approved before the field existed keeps it.
@@ -162,11 +164,33 @@ def accepted_solution_ref(docs: Path, value: object) -> bool:
     return props.get("status") == "accepted" and not package_errors
 
 
+def review_loop(docs: Path) -> str:
+    """The review_loop value of the project's approved Process Policy.
+
+    Without a policy it is the package default. A draft or invalid policy
+    raises ValueError: it is refused, never read.
+    """
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    return values[REVIEW_LOOP]["value"]
+
+
 def accepted_minor_findings(docs: Path, kind: str, body: str) -> list[str]:
-    """Validate the optional record of minor review findings accepted as written."""
+    """Validate the optional record of minor review findings accepted as written.
+
+    Only the blocking_delta review loop records them. At any other value a
+    section of that name is authored text, as it was before the switch, and
+    the Process Policy is read only when the section exists.
+    """
     authored = without_generated_relations(body)
     if not re.search(rf"(?m)^##\s+{ACCEPTED_MINOR_FINDINGS}\s*$", authored):
         return []
+    try:
+        if review_loop(docs) != BLOCKING_DELTA:
+            return []
+    except ValueError as exc:
+        return [f"{ACCEPTED_MINOR_FINDINGS} needs the review_loop value of the Process Policy: {exc}"]
     # The backlog review note records accepted minor findings in the same table.
     import backlog_compile
 

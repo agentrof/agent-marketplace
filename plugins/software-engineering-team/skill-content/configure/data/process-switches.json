@@ -38,7 +38,10 @@
       ],
       "default": "per_document",
       "value_data": {
-        "single_source_bundle": ["skill-content/execution-plan/data/fact-ownership.json"]
+        "single_source_bundle": [
+          "skill-content/execution-plan/data/fact-ownership.json",
+          "skill-content/challenge-review/data/review-panels.json"
+        ]
       },
       "metric": "Per Delivery that revises at least one Operation contract or declares architecture impact: execution-planning wall time from plan start to publication; serial model passes on that path; review layers and review-loop minutes; the restated share, the distinct 8-word sequences of any planning document found in another one; and owner rulings recorded once with an id. Guards: valid critical or major findings against the contracts or the topology found after approval, plan revisions caused by contract errors and DELIVERY_OPERATION_UNCARRIED refusals.",
       "promotion": {
@@ -114,6 +117,9 @@
           "description": "Lens-tier reader variant for review panels.",
           "agents": ["backlog-reviewer", "design-system-reviewer", "solution-reviewer"]
         }
+      },
+      "value_data": {
+        "lens_panel": ["skill-content/challenge-review/data/review-panels.json"]
       },
       "metric": "Per review pass on the same document, the panel's valid critical and major findings against the official single-reader review's, and the panel's wall time against the official review's.",
       "promotion": {

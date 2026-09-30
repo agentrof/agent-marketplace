@@ -197,10 +197,6 @@ SHIPPED_ADDITIONS = {
         72, "#332: the Process Policy lifecycle compiler. task_inputs.py and the backlog"
             " and Delivery compilers resolve every switch through it, the default path"
             " included, so every task binds it with the other package scripts."),
-    "skill-content/challenge-review/data/review-panels.json": (
-        10, "#312: the review panel lens data. Only the lens_panel and single_source_bundle"
-            " instructions read it, yet every task that selects challenge-review hashes it"
-            " (rv-switches-02)."),
     "skill-content/configure/data/process-switches.json": (
         6, "#332: the process switch registry. /configure process lists and changes the"
            " switches from it and process_policy.py resolves each default from it, so every"

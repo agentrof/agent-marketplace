@@ -32,6 +32,8 @@ from git_fixture import init_repository, remove_temporary  # noqa: E402
 SWITCH = "execution_planning"
 REGISTRY = "skill-content/configure/data/process-switches.json"
 OWNERSHIP = "skill-content/execution-plan/data/fact-ownership.json"
+# The bundle reader judges through the execution_bundle lenses this data declares.
+PANELS = "skill-content/challenge-review/data/review-panels.json"
 PLAN = "skill-content/execution-plan/references/switch-execution_planning-single_source_bundle.md"
 CONTRACTS = "skill-content/configure/references/switch-execution_planning-single_source_bundle.md"
 ARCHITECT = "skill-content/software-architecture/references/switch-execution_planning-single_source_bundle.md"
@@ -41,16 +43,18 @@ ANCHORS = {"execution-planning": (PLAN, ARCHITECT), "operation": (CONTRACTS,),
            "delivery-execution": (ARCHITECT,)}
 # (entry, role, mode, added skills): the switch files the task binds at single_source_bundle.
 TASKS = {
-    ("configure", "qa-engineer", "revise", ("challenge-review",)): {CONTRACTS, OWNERSHIP},
-    ("configure", "devops-engineer", "review", ("challenge-review",)): {CONTRACTS, OWNERSHIP},
-    ("configure", "delivery-coordinator", "revise", ()): {CONTRACTS, OWNERSHIP},
-    ("execution-plan", "software-architect", "create", ()): {PLAN, ARCHITECT, OWNERSHIP},
-    ("execution-plan", "delivery-coordinator", "create", ()): {PLAN, OWNERSHIP},
-    ("deliver", "software-architect", "create", ()): {ARCHITECT, OWNERSHIP},
+    ("configure", "qa-engineer", "revise", ("challenge-review",)):
+        {CONTRACTS, OWNERSHIP, PANELS},
+    ("configure", "devops-engineer", "review", ("challenge-review",)):
+        {CONTRACTS, OWNERSHIP, PANELS},
+    ("configure", "delivery-coordinator", "revise", ()): {CONTRACTS, OWNERSHIP, PANELS},
+    ("execution-plan", "software-architect", "create", ()): {PLAN, ARCHITECT, OWNERSHIP, PANELS},
+    ("execution-plan", "delivery-coordinator", "create", ()): {PLAN, OWNERSHIP, PANELS},
+    ("deliver", "software-architect", "create", ()): {ARCHITECT, OWNERSHIP, PANELS},
     ("deliver", "backend-developer", "create", ()): set(),
     ("backlog-plan", "product-owner", "revise", ()): set(),
 }
-SWITCH_FILES = {PLAN, CONTRACTS, ARCHITECT, OWNERSHIP}
+SWITCH_FILES = {PLAN, CONTRACTS, ARCHITECT, OWNERSHIP, PANELS}
 GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
                 "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"}
 
@@ -90,7 +94,7 @@ class ExecutionPlanningRegistryTests(unittest.TestCase):
                          ["per_document", "single_source_bundle"])
         self.assertEqual(switch["default"], "per_document")
         self.assertEqual(switch["flows"], sorted(ANCHORS))
-        self.assertEqual(switch["value_data"], {"single_source_bundle": [OWNERSHIP]})
+        self.assertEqual(switch["value_data"], {"single_source_bundle": [OWNERSHIP, PANELS]})
         self.assertNotIn("agent_variants", switch)
         # #324 names its own unit, so the owner's plain 3-Delivery default is refined.
         self.assertEqual(switch["promotion"]["unit"],
@@ -472,7 +476,7 @@ class BundleManifestTests(unittest.TestCase):
         self.assertEqual([record["story"] for record in result["items"]], ["AUTH-01"])
         self.assertEqual([record["path"].rsplit("/", 1)[1] for record in result["sources"]],
                          ["story.md", "test-plan.md"])
-        self.assertEqual([record["path"] for record in result["data"]], [OWNERSHIP])
+        self.assertEqual([record["path"] for record in result["data"]], [OWNERSHIP, PANELS])
         self.assertTrue(all(record["sha256"].startswith("sha256:") for record in
                             (*result["contracts"], *result["items"], *result["sources"],
                              *result["data"])))

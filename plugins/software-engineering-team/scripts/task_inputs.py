@@ -311,8 +311,10 @@ def switch_reference(package: Path, path: Path) -> tuple[str, str] | None:
 def switch_data(package: Path) -> dict[tuple[str, str], list[str]]:
     """Return the package data files that the registry declares for each switch value.
 
-    Only that value's instructions read such a file, so it is bound together
-    with them and never on another path.
+    Only the instructions of the values that list a file read it, so it is
+    bound together with the switch references of whichever of them the project
+    chose, and never on another path. A file that several values read, of one
+    switch or of several, is listed under each of them.
     """
     from process_policy import REGISTRY
     path = package / REGISTRY

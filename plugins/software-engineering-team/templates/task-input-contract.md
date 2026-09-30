@@ -26,9 +26,10 @@ otherwise the file is neither read nor hashed. A switch at its default binds
 nothing, so the default path keeps its instructions. Package data that only one
 value reads, which the registry lists as that value's `value_data`, is bound as
 a required read together with that value's switch references and is never read
-or hashed on another path. When the policy exists it is a project input, and a
-draft or invalid policy fails the derivation. Before the flow step that names
-switch `<id>`, the entry reads its value with
+or hashed on another path; data that several values read is listed under each
+and bound with the references of any of them. When the policy exists it is a
+project input, and a draft or invalid policy fails the derivation. Before the
+flow step that names switch `<id>`, the entry reads its value with
 `process_policy.py value --switch <id>`, adding `--delivery DLV-###` inside a
 Delivery. Derive a Delivery's tasks with `--delivery DLV-###` too: a task that
 names a Delivery, or reads a file of its package, binds the switch values that

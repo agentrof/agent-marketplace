@@ -807,6 +807,11 @@ class StorySizeMeasureValidatorTests(unittest.TestCase):
             (measure("acceptance_criteria", derivation="ghost_count"),
              "measure 'acceptance_criteria': derivation 'ghost_count' is not one the backlog"
              " compiler implements"),
+            # A list is a finding, never a crash on an unhashable value.
+            (measure("acceptance_criteria", derivation=["acceptance_checklist_lines"]),
+             "measure 'acceptance_criteria': derivation must be one derivation name, not list"),
+            (measure("test_scenarios", derivation={"name": "plan_scenario_blocks"}),
+             "measure 'test_scenarios': derivation must be one derivation name, not dict"),
             (measure("contract_deltas", derivation="owner_and_supporting_roles"),
              "measure 'implementation_roles': repeats the derivation of measure"
              " 'contract_deltas'"),

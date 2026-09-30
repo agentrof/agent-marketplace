@@ -2901,7 +2901,11 @@ def check_story_size_measures(tree: Tree, findings: list[Finding]) -> None:
                     "state what the measure counts and how the compiler derives it")
                 continue
             derivation = spec["derivation"]
-            if derivation not in derivations:
+            if not isinstance(derivation, str):
+                err(f"{where}: derivation must be one derivation name, not"
+                    f" {type(derivation).__name__} {derivation!r}",
+                    "name one key of STORY_SIZE_DERIVATIONS in scripts/backlog_compile.py")
+            elif derivation not in derivations:
                 err(f"{where}: derivation {derivation!r} is not one the backlog compiler implements",
                     "name a key of STORY_SIZE_DERIVATIONS in scripts/backlog_compile.py, or"
                     " implement the derivation there first")

@@ -54,10 +54,11 @@ Item's code review record and `approve-review` lists in the Delivery Review. A
 re-review reads only the open blocking findings, the changed text and its
 dependency context. Before a critical or major claim gates, one fresh,
 read-only calibration reader, neither the writer nor the claiming reader,
-confirms it, lowers it to minor or rules it invalid, citing the text; only
-confirmed claims gate, each claim is ruled once, and the review note, the
-code review record or the approval gate keeps every ruling. The instructions
-live in the `challenge-review` and `code-review` references
+confirms it, lowers it to minor or rules it invalid, citing the text. It runs
+as the claiming reviewer's role on that role's own tier, never as a `-lens`
+variant. Only confirmed claims gate, each claim is ruled once, and the review
+note, the code review record or the approval gate keeps every ruling. The
+instructions live in the `challenge-review` and `code-review` references
 `switch-review_loop-blocking_delta.md`.
 
 What a backlog epic reviewer reads is process switch `review_manifest_scope`.

@@ -53,8 +53,7 @@
   tier's reasoning effort and, when the table names one, its model. Every
   build also ships the `-lens` variants of the read-only document reviewers on
   the `lens` tier, effort `high` and no model, so they use the session model;
-  only review panels under switch `review_panels` at `lens_panel` and the
-  calibration reader under switch `review_loop` at `blocking_delta` start them,
+  only review panels under switch `review_panels` at `lens_panel` start them,
   and the reviewers themselves keep their own tier. When the user wants every
   role to follow the parent session, run
   `<absolute-python> <absolute-package-scripts>/generate_codex_project.py apply

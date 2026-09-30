@@ -55,6 +55,6 @@ these rules, lane fields on a sequential Item, and an Item that still declares
 `parallel_lanes_v1` once the Process Policy no longer selects it. The Execution
 Plan's Role Sequences render the phases: the Software Architect alone, then
 every lane, each consumer rendered `(after <producers>)`, then Code Review and
-QA as the verification schedule sets. `item_plan_hash` and the plan hash cover the schedule, the
-scopes and the seams, so changing any of them follows the normal plan
-revision, approval and publication.
+QA as the verification schedule sets. `item_plan_hash` and the plan hash cover
+the schedule, the scopes and the seams, so changing any of them follows the
+normal plan revision, approval and publication.

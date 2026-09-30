@@ -2,7 +2,9 @@
 
 The user starts an entry skill. The entry reads its canonical flow, checks the
 project-local workspace and delegates read-only challenges to role agents when
-needed. Writers are serialized; independent readers may run in parallel.
+needed. Writers are serialized, except in the two process-switch cases below:
+the parallel lanes of `implementation_schedule` and the parallel contract
+drafts of `execution_planning`. Independent readers may run in parallel.
 
 Every delegated review has three explicit boundaries: the orchestrator names
 the complete input file set and expected output shape before invocation; it
@@ -56,10 +58,13 @@ dependency context. Before a critical or major claim gates, one fresh,
 read-only calibration reader, neither the writer nor the claiming reader,
 confirms it, lowers it to minor or rules it invalid, citing the text. It runs
 as the claiming reviewer's role on that role's own tier, never as a `-lens`
-variant. Only confirmed claims gate, each claim is ruled once, and the review
-note, the code review record or the approval gate keeps every ruling. The
-instructions live in the `challenge-review` and `code-review` references
-`switch-review_loop-blocking_delta.md`.
+variant. A claim on an Operation contract is calibrated by the counterpart of
+the contract the claim concerns, the DevOps Engineer for the Verification
+Contract and the QA Engineer for the Environment Contract, never by that
+contract's writer. Only confirmed claims gate, each claim is ruled once, and
+the review note, the code review record or the approval gate keeps every
+ruling. The instructions live in the `challenge-review` and `code-review`
+references `switch-review_loop-blocking_delta.md`.
 
 What a backlog epic reviewer reads is process switch `review_manifest_scope`.
 At `transitive`, the default, every note the epic's manifest includes expands
@@ -74,14 +79,15 @@ read set.
 
 A Delivery Item's implementation writers run as process switch
 `implementation_schedule` selects. `sequential_v1`, the default, runs them one
-after another in their approved order. `parallel_lanes_v1` is the one exception
-to serialized writers, for an Item whose approved plan declares it: after the
-Software Architect runs alone, roles whose approved lane scopes are disjoint
-write at the same time in the Item's one worktree, and a lane that consumes a
-declared seam starts as soon as its own producers finish. Lanes make no Git
-writes, the coordinator runs intent-to-add for the new files they report,
-environment verbs and vault writes stay serial, and the coordinator alone
-commits, once, before the candidate freeze.
+after another in their approved order. For an Item whose approved plan
+declares it, `parallel_lanes_v1` is one of the two exceptions to serialized
+writers, beside the parallel contract drafts of `single_source_bundle`: after
+the Software Architect runs alone, roles whose approved lane scopes are
+disjoint write at the same time in the Item's one worktree, and a lane that
+consumes a declared seam starts as soon as its own producers finish. Lanes
+make no Git writes, the coordinator runs intent-to-add for the new files they
+report, environment verbs and vault writes stay serial, and the coordinator
+alone commits, once, before the candidate freeze.
 `execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md`
 and `deliver/references/switch-implementation_schedule-parallel_lanes_v1.md`
 define the lanes.

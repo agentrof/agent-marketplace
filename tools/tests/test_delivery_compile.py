@@ -1748,6 +1748,19 @@ class DeliveryCompilerTests(unittest.TestCase):
                 self.assertIn("the coordinator runs intent-to-add for the new files they report", text)
                 self.assertNotIn("no Git writes except intent-to-add", text)
 
+    def test_orchestration_names_both_writer_exceptions_and_the_operation_calibrator(self):
+        """orchestration.md keeps its general rules true to the switch references (rv-seams-13)."""
+        text = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
+        self.assertIn("Writers are serialized, except in the two process-switch cases below: the parallel"
+                      " lanes of `implementation_schedule` and the parallel contract drafts of"
+                      " `execution_planning`.", text)
+        self.assertIn("`parallel_lanes_v1` is one of the two exceptions to serialized writers, beside the"
+                      " parallel contract drafts of `single_source_bundle`", text)
+        self.assertNotIn("the one exception", text)
+        self.assertIn("A claim on an Operation contract is calibrated by the counterpart of the contract the"
+                      " claim concerns, the DevOps Engineer for the Verification Contract and the QA Engineer"
+                      " for the Environment Contract, never by that contract's writer.", text)
+
     def test_items_without_a_schedule_keep_their_phases(self):
         roles = ["software_architect", "backend_developer", "devops_engineer", "code_reviewer", "qa_engineer"]
         self.assertEqual(delivery_compile.execution_phases({"role_sequence": roles}),

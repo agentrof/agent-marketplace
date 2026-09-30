@@ -1,15 +1,14 @@
 {
   "schema_version": 1,
-  "version": "0.5.0",
-  "stable_base": "f01e7f403e121f4cff9ee535e180f609cdc9d405",
-  "main_source": "66426ce995da386cdeca7c618afc9b32b4e35924",
+  "version": "0.6.0",
+  "stable_base": "1dc47cd765ef96066d18eeb97de7e1eabbbc04ef",
+  "main_source": "85f696b57303acbd0e9165a7e0293e00de8bcfab",
   "impacts": {
     "software-engineering-team": "minor"
   },
   "summaries": [
-    "Block Backlog and Solution review approval only on critical or major findings, scope re-reviews to fixed findings and changed text, and record accepted minor Backlog findings in an optional compiler-validated review table with an owner role and revisit trigger.",
-    "Partition CI tests with complete coverage verification and isolated reusable fixtures, select affected suites conservatively, reuse matching trusted test and checkout-host evidence across merge and release transitions, and keep release replay and public installation checks fresh.",
-    "Add source-bound parallel Item review and QA with diagnostic and final verification barriers, derive role task inputs from canonical instructions, batch equivalent Vault and Git checks, reuse isolated test preparation, and provide staged local impact validation with measured CI scheduling and fixture costs.",
-    "Preserve verified identical Requirement receipt bindings and generated Backlog files, derive scoped review input manifests with dependency and freshness checks, unify Solution and Experience review checkpoints, and support an explicit guarded input-absence contract for headless technical and defect planning."
+    "Backlog review manifests read links as the vault gate does: code spans and fenced code, such as a `[[...resource]]` route file, are never review sources, embeds resolve as the vault file they name, upstream notes keep the alias-free links their compilers write, and an approved upstream note with unparsable link text is listed in `unparsed_link_sources` instead of failing every manifest; review Evidence, accepted minor findings and the headless absent-input check no longer read code as a link.",
+    "Role agents take their model and reasoning effort from per-host execution profile tables (`platforms/<host>/execution-profiles.json`, profile `auto`) whose defaults keep today's settings, and Codex setup accepts `--execution-profile inherit` so every role follows the parent session; the Claude Code host contract documents the equivalent session setting.",
+    "`backlog_compile.py stub-story` writes `uses_design` and `constrained_by` only when they have a value, so the per-write vault check no longer rejects the compiler's own stub of a story without design or constraint references as an empty typed relation list."
   ]
 }

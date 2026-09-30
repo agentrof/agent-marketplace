@@ -33,6 +33,7 @@ FINDING_CODES = {
     "DELIVERY_BARRIER_ACTIVE", "DELIVERY_ITEM_NOT_READY", "DELIVERY_ITEM_ALREADY_INTEGRATED",
     "DELIVERY_ITEM_REF_MISSING", "DELIVERY_PATH_CLAIM_EXCEEDED",
     "DELIVERY_CONTRACT_CLAIM_EXCEEDED", "DELIVERY_CANCELLATION_INVALID",
+    "DELIVERY_OPERATION_UNCARRIED",
     "DELIVERY_CANCELLATION_FINALIZATION_STALE", "DELIVERY_TARGET_IMPACT_INVALID",
     "DELIVERY_TARGET_SOURCE_VIOLATION", "DELIVERY_TARGET_CONVERGENCE_REQUIRED",
     "DELIVERY_SOURCE_HANDOFF_STALE", "DELIVERY_TARGET_CARRIER_INVALID",
@@ -197,6 +198,8 @@ def from_raw(operation: str, raw: dict, *, error: str | None = None) -> dict:
                 observations.append(_observation("ref", key, value if OID_RE.fullmatch(value) else value))
         elif key == "pull_request_url" and isinstance(value, str):
             observations.append(_observation("provider", "pull_request_url", value))
+        elif key == "operation_not_carried" and isinstance(value, list):
+            observations.extend(_observation("file", path, "not_carried") for path in value)
     supplied_observations, observation_errors = _normalise_observations(raw.get("observations", []))
     observations.extend(supplied_observations)
     observations, duplicate_errors = _normalise_observations(observations)

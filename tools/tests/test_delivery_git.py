@@ -2586,7 +2586,10 @@ class DeliveryGitTests(unittest.TestCase):
             args = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
             self.assertEqual(delivery_compile.approve_scope(args), 0)
             reserved = delivery_git.reserve_delivery(project, "DLV-001")
-            for kind, command in (("verification", "test_command"), ("environment", "env_command")):
+            # Approve only what the Item pins: publication refuses an approved contract no
+            # Item pins while the Integration holds another revision of it.
+            pinned = [("verification", "test_command")] + ([("environment", "env_command")] if runtime else [])
+            for kind, command in pinned:
                 path = operation_compile.contract_path(docs, kind)
                 props, body = operation_compile.parse(path)
                 props[command] = "make test" if kind == "verification" else "make env"
@@ -3090,6 +3093,11 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_projections=True)
         delivery_git.atomic_push(project, "origin", [(second_ref, "", second_base)])
         self.author_execution_topology(docs, "DLV-002")
+        # This Integration also holds the target's draft, so its Item pins the approved
+        # Environment Contract as DLV-001's does; publication carries no other revision.
+        second_item = second_dir / "items/auth-01/item.md"
+        props, body = delivery_compile.split_note(second_item)
+        delivery_compile.atomic_text(second_item, delivery_compile.frontmatter({**props, "runtime_required": True}, body))
         self.assertEqual(delivery_compile.approve_execution(scope), 0)
         second = delivery_git.publish_execution_plan(project, "DLV-002")
         target, fence = self.governance_target_handoff(project, docs)
@@ -3971,6 +3979,9 @@ class DeliveryGitTests(unittest.TestCase):
                 draft_environment = delivery_git.run_git(project, "show", reserved["integration"] + ":workspace/docs/operation/environment-contract.md")
                 self.assertIn("status: draft", draft_environment)
                 published = delivery_git.publish_execution_plan(project, "DLV-001")
+                # A non-runtime plan leaves the Environment Contract the draft the Integration
+                # holds, and an identical copy is neither refused nor reported.
+                self.assertEqual(published["operation_not_carried"], [])
                 with tempfile.TemporaryDirectory() as temporary:
                     clone = Path(temporary) / "checkout"
                     delivery_git.run_git(project, "clone", "-q", str(project / "remote.git"), str(clone))
@@ -4002,6 +4013,92 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(delivery_git.run_git(project, "rev-parse", "HEAD"), target)
                 self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
                 self.assertEqual(unrelated.read_text(encoding="utf-8"), "# Unpublished local notes\n")
+
+    def approve_environment_revision(self, docs: Path) -> dict:
+        """Approve a local Environment Contract revision, as execution planning may, and return its receipt."""
+        path = operation_compile.contract_path(docs, "environment")
+        args = type("Args", (), {"docs": str(docs), "kind": "environment",
+                                 "constrained_by": ["[[solution-design/decisions/fixture-api|Fixture API]]"]})
+        if not path.exists():
+            self.assertEqual(operation_compile.init(args), 0)
+        props, body = operation_compile.parse(path)
+        props["env_command"] = "make env"
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        self.assertEqual(operation_compile.approve(args), 0)
+        receipt, errors = operation_compile.check_contract(docs, "environment")
+        self.assertEqual(errors, [])
+        return receipt
+
+    def test_execution_publication_refuses_an_approved_operation_revision_no_item_pins(self):
+        """A non-runtime Item pins no Environment Contract, so publication cannot carry its approved revision (#320)."""
+        contract = "workspace/docs/operation/environment-contract.md"
+        refs = delivery_git.canonical_refs("DLV-001")
+        for held in ("draft revision 1", "no copy"):
+            with self.subTest(integration_holds=held):
+                if held != "no copy":
+                    project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                else:
+                    temporary, project, docs = self.reserve_scope()
+                    self.addCleanup(remove_temporary, temporary)
+                    self.author_execution_topology(docs)
+                    self.assertEqual(delivery_compile.approve_execution(
+                        type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+                    item = delivery_compile.find_delivery(docs, "DLV-001") / "items/auth-01/item.md"
+                self.assertFalse(delivery_compile.split_note(item)[0]["runtime_required"])
+                before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
+                held_copy = delivery_git.published_plan_blobs(project, before[refs["integration"]], [contract]).get(contract)
+                if held == "no copy":
+                    self.assertIsNone(held_copy)
+                else:
+                    self.assertIn("status: draft", held_copy)
+                receipt = self.approve_environment_revision(docs)
+                self.assertEqual(receipt["revision"], 1)
+                self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(project, "DLV-001")), (
+                    "DELIVERY_OPERATION_UNCARRIED",
+                    f"no Item pins the approved Environment Contract revision 1, and the Integration holds {held} "
+                    f"at {contract}, so publication would leave revision 1 out; record that revision on the target "
+                    "branch and run refresh-target, or pin it with runtime_required: true on an Item that needs a "
+                    "live service environment"))
+                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
+
+    def test_an_unpinned_operation_revision_reaches_the_delivery_through_the_target(self):
+        """The refusal's first route: record the revision on the target, refresh, then publish."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        receipt = self.approve_environment_revision(docs)
+        with self.assertRaisesRegex(RuntimeError, "^DELIVERY_OPERATION_UNCARRIED: "):
+            delivery_git.publish_execution_plan(project, "DLV-001")
+        contract = "workspace/docs/operation/environment-contract.md"
+        delivery_git.run_git(project, "add", "--", contract)
+        delivery_git.run_git(project, "commit", "-qm", "Record the approved Environment Contract")
+        delivery_git.run_git(project, "push", "-q", "origin", "main")
+        refreshed = delivery_git.refresh_target(project, "DLV-001")
+        self.assertIn(contract, refreshed["paths"])
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(published["operation_not_carried"], [])
+        carried = delivery_git.published_plan_blobs(project, published["integration"], [contract])[contract]
+        self.assertEqual(operation_compile.check_contract(docs, "environment", carried), (receipt, []))
+
+    def test_execution_publication_reports_an_operation_contract_it_cannot_carry(self):
+        """A differing local copy that is not approved and current is left out and named, not refused."""
+        contract = "workspace/docs/operation/environment-contract.md"
+        for local in ("draft", "stale approval"):
+            with self.subTest(local=local):
+                project, docs, _directory, _item, reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                path = operation_compile.contract_path(docs, "environment")
+                if local == "draft":
+                    props, body = operation_compile.parse(path)
+                    props["env_command"] = "make env"
+                    operation_compile.atomic_text(path, operation_compile.render(props, body))
+                else:
+                    self.approve_environment_revision(docs)
+                    path.write_text(path.read_text(encoding="utf-8") + "\nEdited after approval.\n", encoding="utf-8")
+                self.assertFalse(operation_compile.check_contract(docs, "environment")[0]["current"])
+                published = delivery_git.publish_execution_plan(project, "DLV-001")
+                self.assertEqual(published["operation_not_carried"], [contract])
+                self.assertIn({"kind": "file", "target": contract, "value": "not_carried"},
+                              delivery_result.from_raw("publish-execution-plan", published)["observations"])
+                self.assertEqual(delivery_git.run_git(project, "show", published["integration"] + ":" + contract),
+                                 delivery_git.run_git(project, "show", reserved["integration"] + ":" + contract))
 
     def test_execution_publication_keeps_a_terminal_item_on_its_verified_revision(self):
         """A closed Item's binding names history, not a stale current receipt."""

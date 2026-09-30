@@ -16,6 +16,7 @@ import subprocess
 PACKAGE = Path(__file__).resolve().parents[1]
 POLICY = "templates/task-input-policy.json"
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
+SWITCH_REFERENCE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 CATALOG_NAME_MAPS = ("role_skills", "required_role_skills", "entries",
                      "required_references", "stack_reference_by_role", "read_only_entry_roles")
 
@@ -142,6 +143,32 @@ def catalog(package: Path = PACKAGE) -> dict:
         for reference in references:
             regular(package, f"skill-content/{skill}/{reference}")
     return policy
+
+
+def switch_reference(package: Path, path: Path) -> tuple[str, str] | None:
+    """Return the switch and value a skill's switch reference file is named for."""
+    relative = path.relative_to(package).parts
+    if len(relative) != 4 or relative[0] != "skill-content" or relative[2] != "references":
+        return None
+    match = SWITCH_REFERENCE.match(relative[3])
+    return (match.group(1), match.group(2)) if match else None
+
+
+def switch_choices(project: Path | None, route: dict, package: Path) -> tuple[set, list[str]]:
+    """Return the project's non-default switch values and its policy input.
+
+    Without a Process Policy both are empty, so the manifest is unchanged.
+    """
+    if project is None or not route["project_state"]:
+        return set(), []
+    import process_policy
+    docs = project / "workspace" / "docs"
+    if not process_policy.path_for(docs).exists():
+        return set(), []
+    values, _snapshot = process_policy.effective_values(docs, package)
+    return ({(switch, value["value"]) for switch, value in values.items()
+             if value["value"] != value["default"]},
+            ["workspace/docs/" + process_policy.RELATIVE])
 
 
 def git_bytes(command: list[str], *args: str) -> bytes:
@@ -299,6 +326,10 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         selected_skills.update(policy["required_role_skills"][role])
     if route["project_state"]:
         selected_skills.add("obsidian-vault")
+    try:
+        chosen, policy_inputs = switch_choices(project, route, package)
+    except ValueError as exc:
+        raise ValueError(f"process policy cannot bind switch instructions: {exc}") from exc
     required = {"constitution.md", POLICY, "templates/task-input-contract.md"}
     if role:
         required.add(f"agents/{role}.md")
@@ -320,19 +351,26 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
             path = f"skill-content/{skill}/references/{stack_reference}"
             if (package / path).is_file():
                 required.add(path)
+        switch_root = package / "skill-content" / skill / "references"
+        for path in sorted(switch_root.glob("switch-*.md")) if switch_root.is_dir() else []:
+            if switch_reference(package, path) in chosen:
+                required.add(path.relative_to(package).as_posix())
     instruction_inputs = required | set(references) | {"scripts/task_inputs.py"}
     # Tools and data influence the role's result even when they are not prose
     # reads. Bind them without turning an input index into extra reading work.
     implementation_roots = [package / "scripts", *(
         package / "skill-content" / skill for skill in selected_skills)]
     for root in implementation_roots:
+        # A switch reference of a value the project did not choose is neither
+        # read nor hashed, so the default path binds exactly what it bound before.
         instruction_inputs.update(path.relative_to(package).as_posix()
                                   for path in root.rglob("*")
                                   if path.is_file() and "__pycache__" not in path.parts
                                   and path.suffix not in {".pyc", ".pyo"}
-                                  and path.name != ".DS_Store")
+                                  and path.name != ".DS_Store"
+                                  and switch_reference(package, path) is None)
     instruction_files = identity(package, instruction_inputs)
-    project_files = set(inputs or [])
+    project_files = set(inputs or []) | set(policy_inputs)
     if findings:
         project_files.add(findings)
     read_only = (role in policy["read_only_roles"]

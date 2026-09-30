@@ -70,6 +70,17 @@ DELIVERY_GOLDEN = {
     ],
 }
 
+MANIFEST_GOLDEN = {
+    "entry:without_switch_files":
+        "sha256:e0ca7b6f1cf42fd533887f93ac2591a4ba5de7ee44756e95eaadbe69614fc7de",
+    "package_only:without_switch_files":
+        "sha256:28680561f56b2f8dce1a5787c527d68f53a466e561da5e25622ff06e6d9b51be",
+    "reader:without_switch_files":
+        "sha256:6943efcb97ebf69f5786c63dba2d9269ca2c7a85f4f1e16e45f27ed2a74bed84",
+    "writer:without_switch_files":
+        "sha256:73d21f2c1c38e51cde995c0d6640e71687f4b9c48bdf13c1d633db9166fb4b22",
+}
+
 
 def digest(value) -> str:
     data = value if isinstance(value, bytes) else value.encode("utf-8")
@@ -95,6 +106,15 @@ class DefaultEquivalenceTests(unittest.TestCase):
 
     def test_delivery_compiler_outputs_match_the_base_without_a_policy(self):
         self.assertEqual(run_harness("delivery"), DELIVERY_GOLDEN)
+
+    def test_task_manifests_match_the_base_without_a_policy(self):
+        actual = run_harness("manifests")
+        self.assertEqual({name: value for name, value in actual.items()
+                          if name.endswith(":without_switch_files")}, MANIFEST_GOLDEN)
+        # Switch references of values no policy chose are neither read nor hashed.
+        self.assertEqual({name.replace(":with_", ":without_"): value
+                          for name, value in actual.items()
+                          if name.endswith(":with_switch_files")}, MANIFEST_GOLDEN)
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +223,112 @@ def _delivery_harness(root: Path, raw_output: bool = False) -> dict:
     return {"files": files, "outputs": normalized if raw_output else [digest(text) for text in normalized]}
 
 
-HARNESSES = {"delivery": _delivery_harness}
+FIXTURE_SWITCHES = {"schema_version": 1, "switches": {"fixture_mode": {
+    "summary": "How the fixture step runs.", "flows": ["fixture-flow"],
+    "values": [{"id": "current", "tradeoffs": "Today's behaviour."},
+               {"id": "fast", "tradeoffs": "Fewer passes, unmeasured recall."}],
+    "default": "current", "metric": "Minutes per fixture step.",
+    "promotion": {"unit": "3 Deliveries", "threshold": "Half the baseline minutes."}}}}
+SWITCH_FILES = ("skill-content/fixture-entry/references/switch-fixture_mode-fast.md",
+                "skill-content/fixture-method/references/switch-fixture_mode-fast.md")
+TASKS = {
+    "entry": {"entry": "fixture-entry", "role": None, "mode": "review"},
+    "writer": {"entry": "fixture-entry", "role": "fixture-writer", "mode": "create",
+               "inputs": ["workspace/docs/brief.md"]},
+    "reader": {"entry": "fixture-entry", "role": "fixture-reader", "mode": "review",
+               "inputs": ["workspace/docs/brief.md"]},
+    "package_only": {"entry": "fixture-entry", "role": "fixture-reader", "mode": "review",
+                     "project": None},
+}
+
+
+def build_task_package(package: Path, *, switch_files: bool) -> None:
+    """Write the smallest package the task-input catalog accepts."""
+    catalog = {
+        "schema_version": 1, "modes": ["create", "revise", "consume", "review", "repair"],
+        "role_skills": {"fixture_writer": ["fixture-method", "obsidian-vault"],
+                        "fixture_reader": ["fixture-method"]},
+        "required_role_skills": {"fixture_writer": ["fixture-method"],
+                                 "fixture_reader": ["fixture-method"]},
+        "entries": {"fixture_entry": {
+            "flows": ["fixture-flow"], "roles": ["fixture-writer", "fixture-reader"],
+            "scope_kind": "fixture", "project_state": True,
+            "write_scope": {"resolver": "unresolved", "roles": []},
+            "next_transition": "The fixture compiler approves the exact result."}},
+        "read_only_roles": ["fixture-reader"], "required_references": {},
+        "stack_reference_by_role": {}, "repair_policy": "Preserve finding ids.",
+        "barrier": "Wait for every reader before writing.", "output_contract": "Return the result.",
+        "read_only_entry_roles": {}, "technology_method_skills": []}
+    files = {
+        "constitution.md": "# Constitution\n",
+        "templates/task-input-contract.md": "# Derived task inputs\n",
+        "templates/task-input-policy.json": json.dumps(catalog, indent=2) + "\n",
+        "scripts/task_inputs.py": "# The fixture binds this path; its bytes are fixed.\n",
+        "agents/fixture-writer.md": "---\nname: fixture-writer\n---\n\n# Writer\n",
+        "agents/fixture-reader.md": "---\nname: fixture-reader\n---\n\n# Reader\n",
+        "flows/fixture-flow.md": "# Fixture flow\n\nSwitch `fixture_mode` selects step 2.\n",
+        "skill-content/fixture-entry/SKILL.md":
+            "---\nname: fixture-entry\nexposure: entry\n---\n\n# Entry\n",
+        "skill-content/fixture-method/SKILL.md":
+            "---\nname: fixture-method\nexposure: internal\n---\n\n# Method\n\n"
+            "- [guide](references/guide.md): the method. Read when reviewing.\n",
+        "skill-content/fixture-method/references/guide.md": "# Guide\n",
+        "skill-content/fixture-method/data/table.json": "{}\n",
+        "skill-content/obsidian-vault/SKILL.md":
+            "---\nname: obsidian-vault\nexposure: internal\n---\n\n# Vault\n",
+        "skill-content/configure/data/process-switches.json":
+            json.dumps(FIXTURE_SWITCHES, indent=2) + "\n",
+    }
+    if switch_files:
+        files.update({path: "# Fast fixture step\n" for path in SWITCH_FILES})
+    for relative, text in files.items():
+        path = package / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(text.encode("utf-8"))
+
+
+def build_task_project(project: Path) -> None:
+    """Write and commit one project whose Git identity is fixed by GIT_ENV."""
+    from git_fixture import init_repository
+
+    init_repository(project)
+    brief = project / "workspace" / "docs" / "brief.md"
+    brief.parent.mkdir(parents=True)
+    brief.write_bytes(b"---\ntype: note\n---\n\n# Brief\n")
+    for args in (("config", "core.autocrlf", "false"), ("add", "--all"),
+                 ("commit", "-q", "-m", "fixture")):
+        subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True,
+                       env={**os.environ, **GIT_ENV})
+
+
+def task_manifests(task_inputs, package: Path, project: Path) -> dict:
+    return {name: task_inputs.manifest(package=package, **{"project": project, **task})
+            for name, task in TASKS.items()}
+
+
+def _manifest_harness(root: Path, raw_output: bool = False) -> dict:
+    sys.path[:0] = [str(root / PLUGIN / "scripts"), str(root / "tools/tests")]
+    import task_inputs
+
+    result = {}
+    with tempfile.TemporaryDirectory() as raw:
+        base = Path(raw).resolve()
+        project = base / "project"
+        build_task_project(project)
+        # The base binds every file of a selected skill, so its golden is taken
+        # without switch references; this tree must match it with them present.
+        for switch_files in (False, True) if (root / PLUGIN / "scripts/process_policy.py").is_file() \
+                else (False,):
+            package = base / f"package-{switch_files}"
+            build_task_package(package, switch_files=switch_files)
+            for name, manifest in task_manifests(task_inputs, package, project).items():
+                text = json.dumps(manifest, indent=2, sort_keys=True)
+                result[f"{name}:{'with' if switch_files else 'without'}_switch_files"] = \
+                    text if raw_output else digest(text)
+    return result
+
+
+HARNESSES = {"delivery": _delivery_harness, "manifests": _manifest_harness}
 
 
 if __name__ == "__main__":

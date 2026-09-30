@@ -968,6 +968,13 @@ print(sys.argv[1])
             row.update(owner_role="backend_developer", revisit_trigger="Revisit at the next change to src/product.py.")
         return {**row, **extra}
 
+    def calibration(self, claims, rows):
+        """The calibration reader's own result: its rulings on the claims as returned."""
+        session = verification.read_session(self.root)
+        return {"candidate_hash": session["candidate"]["candidate_hash"], "session_id": session["session_id"],
+                "role": "code_reviewer", "mode": "calibration", "report": "Independent calibration of the claims",
+                "claims": claims, "calibration": rows}
+
     def test_blocking_delta_calibrates_every_open_blocking_claim_before_it_gates(self):
         self.review_loop()
         self.freeze()
@@ -992,11 +999,15 @@ print(sys.argv[1])
         )
         for message, rows in refusals:
             with self.subTest(message=message, rows=len(rows)):
-                failed["calibration"] = rows
                 with self.assertRaisesRegex(RuntimeError, re.escape(message)):
-                    verification.register_result(self.root, failed)
+                    verification.register_calibration(self.root, self.calibration(failed["findings"], rows))
+        # The claiming result registers only after the calibration reader's own result.
+        with self.assertRaisesRegex(RuntimeError, "register the calibration reader's result with calibrate"
+                                                  " for exactly the open critical or major claims no earlier"
+                                                  " calibration ruled, as returned: CR-1, CR-2"):
+            verification.register_result(self.root, failed)
+        verification.register_calibration(self.root, self.calibration(failed["findings"], [self.ruling(), invalid]))
         # A calibrated pass still proves that every review pass ran.
-        failed["calibration"] = [self.ruling(), invalid]
         with self.assertRaisesRegex(RuntimeError, "a calibrated code_reviewer pass requires correctness evidence"):
             verification.register_result(self.root, {**failed, "checks": {}})
         # Every claim lowered or disproved: the review passes without a repair cycle.
@@ -1016,12 +1027,58 @@ print(sys.argv[1])
             "| CR-1 | major | minor | src/product.py:1 assigns a constant, so no input reaches the column. |",
             "| CR-2 | critical | invalid | src/product.py:1 is the only write, and it holds no secret or input. |"])])
 
+    def test_the_claiming_reviewer_never_calibrates_its_own_claims(self):
+        # The reviewer that claimed two majors lowers both in its own result.
+        self.review_loop()
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [self.claim(), self.claim("CR-2")]
+        failed["calibration"] = [self.ruling(), self.ruling("CR-2")]
+        with self.assertRaisesRegex(RuntimeError, "calibration rows come only from the calibration reader's own"
+                                                  " result, registered with calibrate; the claiming result"
+                                                  " carries none"):
+            verification.register_result(self.root, failed)
+        del failed["calibration"]
+        # A calibration of other claims, or of edited claims, never stands in.
+        verification.register_calibration(self.root, self.calibration(
+            [self.claim(), self.claim("CR-2", description="The value is unused.")],
+            [self.ruling(), self.ruling("CR-2")]))
+        with self.assertRaisesRegex(RuntimeError, "for exactly the open critical or major claims no earlier"
+                                                  " calibration ruled, as returned: CR-1, CR-2"):
+            verification.register_result(self.root, failed)
+        with self.assertRaisesRegex(RuntimeError, "already calibrated; each claim is ruled once"):
+            verification.register_calibration(self.root, self.calibration(
+                failed["findings"], [self.ruling(), self.ruling("CR-2")]))
+        stored = verification.read_session(self.root)["calibration"]["result"]
+        self.assertEqual(stored["result_hash"], verification.digest(
+            {key: item for key, item in stored.items() if key != "result_hash"}))
+        # A calibration comes before the claiming result settles, never after it.
+        self.freeze_fresh()
+        verification.register_result(self.root, self.result())
+        with self.assertRaisesRegex(RuntimeError, "calibrate the claims before the claiming code review result"
+                                                  " is registered"):
+            verification.register_calibration(self.root, self.calibration(
+                failed["findings"], [self.ruling(), self.ruling("CR-2")]))
+
+    def freeze_fresh(self):
+        session = verification.read_session(self.root)
+        for role, worker in session["workers"].items():
+            if worker["state"] == "running":
+                cancelled = self.result(role, "review_initial" if role == "code_reviewer" else "qa_final", "cancelled")
+                verification.register_result(self.root, {**cancelled, "cancellation_confirmed": True})
+        return verification.freeze(self.root, "DLV-001", "AUTH-01", fresh=True)
+
     def test_calibration_runs_only_on_an_open_blocking_claim(self):
         self.review_loop()
         self.freeze()
         result = self.result()
-        result["calibration"] = [self.ruling()]
-        with self.assertRaisesRegex(RuntimeError, "no earlier calibration ruled: none"):
+        result["findings"] = [self.claim(severity="minor", owner_role="backend_developer",
+                                         revisit_trigger="Revisit at the next change to src/product.py.")]
+        with self.assertRaisesRegex(RuntimeError, "calibration claims must list each open critical or major"
+                                                  " claim once, as returned"):
+            verification.register_calibration(self.root, self.calibration(result["findings"], [self.ruling()]))
+        verification.register_calibration(self.root, self.calibration([self.claim()], [self.ruling()]))
+        with self.assertRaisesRegex(RuntimeError, "no earlier calibration ruled, as returned: none"):
             verification.register_result(self.root, result)
 
     def test_a_confirmed_claim_gates_and_each_ruling_carries_to_the_next_cycle(self):
@@ -1029,10 +1086,10 @@ print(sys.argv[1])
         self.freeze()
         failed = self.result(verdict="failed")
         failed["findings"] = [self.claim(), self.claim("CR-2"), self.claim("CR-3")]
-        failed["calibration"] = [
+        verification.register_calibration(self.root, self.calibration(failed["findings"], [
             self.ruling(ruling="major", reason="src/product.py:1 writes the value from user input unchecked."),
             self.ruling("CR-2"),
-            self.ruling("CR-3", ruling="invalid", reason="src/product.py:1 never reads the value it is said to read.")]
+            self.ruling("CR-3", ruling="invalid", reason="src/product.py:1 never reads the value it is said to read.")]))
         verification.register_result(self.root, failed)
         verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
         with self.assertRaisesRegex(RuntimeError, "same-candidate final passed code_reviewer"):
@@ -1051,12 +1108,11 @@ print(sys.argv[1])
             "id", "severity", "status", "verification", "file", "description", "owner_role", "revisit_trigger")}
         repeat = self.result(mode="review_repair", verdict="failed")
         repeat["findings"] = [self.claim(), follow_up]
-        repeat["calibration"] = [self.ruling(reason="src/product.py:1 assigns a constant, so no input reaches it.")]
-        with self.assertRaisesRegex(RuntimeError, "no earlier calibration ruled: none"):
-            verification.register_result(self.root, repeat)
+        with self.assertRaisesRegex(RuntimeError, "an earlier calibration already ruled CR-1"):
+            verification.register_calibration(self.root, self.calibration([self.claim()], [
+                self.ruling(reason="src/product.py:1 assigns a constant, so no input reaches it.")]))
         with self.assertRaisesRegex(RuntimeError, "inherited finding severity must be preserved"):
-            verification.register_result(self.root, {**repeat, "calibration": [],
-                                                     "findings": [self.claim(), {**follow_up, "severity": "major"}]})
+            verification.register_result(self.root, {**repeat, "findings": [self.claim(), {**follow_up, "severity": "major"}]})
         repair = self.result(mode="review_repair")
         repair["findings"] = [self.claim(status="resolved"), follow_up]
         verification.register_result(self.root, repair)
@@ -1065,6 +1121,9 @@ print(sys.argv[1])
         self.freeze()
         failed = self.result(verdict="failed")
         failed["findings"] = [self.claim()]
+        with self.assertRaisesRegex(RuntimeError, "severity calibration runs only at review_loop blocking_delta"):
+            verification.register_calibration(self.root, self.calibration([self.claim()], [self.ruling()]))
+        self.assertNotIn("calibration", verification.read_session(self.root))
         failed["calibration"] = [self.ruling()]
         verification.register_result(self.root, failed)
         verification.register_result(self.root, self.result("qa_engineer", "qa_final"))

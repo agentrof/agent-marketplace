@@ -6,6 +6,7 @@ blocking findings, the changed text and its dependency context."""
 from __future__ import annotations
 
 import contextlib
+import functools
 import io
 import json
 import re
@@ -19,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TEAM = ROOT / "plugins" / "software-engineering-team"
 sys.path.insert(0, str(TEAM / "scripts"))
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
+import operation_compile
 import process_policy
 import task_inputs
 from git_fixture import init_repository
@@ -48,15 +50,14 @@ REVIEW_TASKS = (
     ("solution-design", "solution-architect", "revise", ["challenge-review"], DOCUMENT),
     ("deliver", "code-reviewer", "review", [], CODE),
 )
-# step: (entry, calibration reader role, added skills, the step's writer roles)
+# step: (entry, calibration reader role, added skills, the Operation contract kind)
 CALIBRATION_READERS = {
-    "backlog": ("backlog-plan", "backlog-reviewer", [], {"product-owner"}),
-    "solution_design": ("solution-design", "solution-reviewer", [], {"solution-architect"}),
-    "design_system": ("design-system", "design-system-reviewer", [], {"ux-designer"}),
-    "operation_verification": ("configure", "devops-engineer", ["challenge-review"], {"qa-engineer"}),
-    "operation_environment": ("configure", "qa-engineer", ["challenge-review"], {"devops-engineer"}),
-    "code_review": ("deliver", "code-reviewer", [],
-                    {"software-architect", "backend-developer", "frontend-developer", "devops-engineer"}),
+    "backlog": ("backlog-plan", "backlog-reviewer", [], None),
+    "solution_design": ("solution-design", "solution-reviewer", [], None),
+    "design_system": ("design-system", "design-system-reviewer", [], None),
+    "operation_verification": ("configure", "devops-engineer", ["challenge-review"], "verification"),
+    "operation_environment": ("configure", "qa-engineer", ["challenge-review"], "environment"),
+    "code_review": ("deliver", "code-reviewer", [], None),
 }
 
 
@@ -290,7 +291,13 @@ class ReviewLoopReferenceTests(unittest.TestCase):
             " stays idle",
             "`reason` cites the candidate as `path:line`",
             "Credentials or secrets that reach a client artifact or a log stay critical",
-            "Attach the rows unchanged as the result's `calibration` list",
+            "The calibration reader registers its rows as its own result with"
+            " `delivery_verification.py calibrate --file <calibration.json>`",
+            "the `claims` it ruled exactly as returned",
+            "a second calibration in the session and one after the claiming result settled",
+            "It carries no `calibration` list of its own, which `result` refuses",
+            "it registers only when the session's calibration ruled exactly its open claims as"
+            " returned",
             "Only confirmed claims gate",
             "Neither the claiming reviewer nor the writer changes a severity",
         ):
@@ -309,7 +316,7 @@ class ReviewLoopReferenceTests(unittest.TestCase):
         orchestration = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
         self.assertIn("It runs as the claiming reviewer's role on that role's own tier, never as a"
                       " `-lens` variant", orchestration)
-        for step, (_entry, role, _skills, _writers) in CALIBRATION_READERS.items():
+        for step, (_entry, role, _skills, _kind) in CALIBRATION_READERS.items():
             with self.subTest(step=step):
                 tier = re.search(r"(?m)^reasoning: (\S+)$", read(f"agents/{role}.md")).group(1)
                 self.assertNotIn(tier, {"lens", "mechanical"})
@@ -398,6 +405,14 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                 with self.subTest(panels=panels, loop=loop, task=task[:3]):
                     self.assertEqual(bound(manifests[task[:3]]), expected)
 
+    def writers(self, entry: str, kind: str | None) -> set[str]:
+        """The step's writer roles as the package declares them, never as this test lists them."""
+        catalog = task_inputs.catalog()
+        read_only = set(catalog["read_only_roles"]) | set(catalog["read_only_entry_roles"].get(entry, []))
+        if kind is not None:
+            return {operation_compile.WRITER_ROLES[kind].replace("_", "-")}
+        return {role for role in catalog["entries"][entry]["roles"] if role not in read_only}
+
     def test_the_calibration_reader_is_a_fresh_read_only_non_writer(self):
         claims = write(self.root, ".agentrof/agent-marketplace/.runtime/review-loop/claims.md",
                        "| id | severity | evidence |\n|---|---|---|\n| F-3 | major | Scope repeats. |\n")
@@ -410,16 +425,34 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                              ("set", "--switch", "review_panels", "--value", "lens_panel"),
                              ("approve",)):
                     policy(self.docs, *step)
-            for step, (entry, role, skills, writers) in CALIBRATION_READERS.items():
-                result = task_inputs.manifest(entry=entry, role=role, mode="review",
-                                              project=self.root, skills=skills, findings=claims)
+            for step, (entry, role, skills, kind) in CALIBRATION_READERS.items():
+                derive = functools.partial(task_inputs.manifest, entry=entry, project=self.root,
+                                           skills=skills)
+                calibration = derive(role=role, mode="review", findings=claims)
+                claimant = derive(role=role, mode="review")
                 with self.subTest(panels=panels, step=step):
-                    self.assertNotIn(role, writers)
-                    self.assertEqual(result["write_boundary"], "read_only")
-                    self.assertEqual(result["write_scope"]["allowed_write_area"], [])
-                    self.assertEqual(result["open_findings"], claims)
+                    self.assertEqual(calibration["write_boundary"], "read_only")
+                    self.assertEqual(calibration["write_scope"]["allowed_write_area"], [])
+                    self.assertFalse(calibration["write_scope"]["writer_authority"])
+                    # Fresh: a task of its own that binds the claims record, which the
+                    # claiming reader's task never does.
+                    self.assertIsNone(claimant["open_findings"])
+                    self.assertEqual(calibration["open_findings"], claims)
+                    self.assertIn(claims, {record["path"] for record in calibration["project_inputs"]})
+                    self.assertNotEqual(calibration["source_hash"], claimant["source_hash"])
+                    # The claiming reviewer's own role, bound to its own agent file.
+                    self.assertEqual(calibration["role"], claimant["role"])
+                    self.assertIn(f"agents/{role}.md", calibration["required_reads"])
                     self.assertIn(CODE if step == "code_review" else DOCUMENT,
-                                  result["required_reads"])
+                                  calibration["required_reads"])
+                    # Never a writer: each writer's task of the step writes, and none is the
+                    # calibration reader's.
+                    writers = self.writers(entry, kind)
+                    self.assertTrue(writers)
+                    for writer in writers:
+                        task = derive(role=writer, mode="revise")
+                        self.assertEqual(task["write_boundary"], "named_owner_only")
+                        self.assertNotEqual(task["role"], calibration["role"])
 
     def test_re_review_task_binds_only_the_findings_the_diff_and_the_context(self):
         docs = "workspace/docs/"

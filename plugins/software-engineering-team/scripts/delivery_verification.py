@@ -26,6 +26,9 @@ import file_lock
 
 POLICY_PATH = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/delivery-verification-policy.json"
 ROLES = ("code_reviewer", "qa_engineer")
+# At review_loop blocking_delta a fresh code reviewer registers its rulings on
+# the claims of a code review in this mode, apart from the claiming result.
+CALIBRATION_MODE = "calibration"
 
 
 def policy() -> dict:
@@ -715,6 +718,65 @@ def calibration_problems(root: Path, current: dict, result: dict, ruled: set[str
     return problems
 
 
+def open_claims(findings: list[dict], ruled: set[str]) -> list[dict]:
+    """The open critical or major claims that no earlier calibration ruled, by id."""
+    return sorted((finding for finding in findings
+                   if finding["status"] == "open" and blocking(finding) and finding["id"] not in ruled),
+                  key=lambda finding: finding["id"])
+
+
+def register_calibration(root: Path, result: dict) -> dict:
+    """Register a calibration reader's rulings as a result of their own.
+
+    At review_loop blocking_delta a fresh code reviewer, never the reviewer that
+    returned the claims, rules each open critical or major claim before the
+    claiming result is registered, so the implementation writer stays idle.
+    Its rows bind the exact claims it ruled, and they reach the claiming
+    result only through this registration: register_result refuses a claiming
+    result that carries rows of its own.
+    """
+    root = root.resolve()
+    with locked(root):
+        if command_active(root):
+            raise RuntimeError("wait for the verification command to exit before registering a calibration")
+        value = read_session(root)
+        current = require_current(root, value, allow_evidence=True)
+        if review_loop(root, current["delivery"]) != "blocking_delta":
+            raise RuntimeError("severity calibration runs only at review_loop blocking_delta")
+        if result.get("role") != "code_reviewer" or result.get("mode") != CALIBRATION_MODE:
+            raise RuntimeError(f"a calibration result names role code_reviewer and mode {CALIBRATION_MODE}")
+        if result.get("candidate_hash") != current["candidate_hash"] or result.get("session_id") != value["session_id"]:
+            raise RuntimeError("calibration does not bind this candidate and reader session")
+        if value["workers"]["code_reviewer"]["state"] != "running":
+            raise RuntimeError("calibrate the claims before the claiming code review result is registered")
+        if value.get("calibration"):
+            raise RuntimeError("this session's claims are already calibrated; each claim is ruled once")
+        if not isinstance(result.get("report"), str) or not result["report"].strip():
+            raise RuntimeError("calibration requires its independent report")
+        claims = result.get("claims")
+        if (not isinstance(claims, list) or not claims
+                or any(not isinstance(claim, dict) or not isinstance(claim.get("id"), str)
+                       or not isinstance(claim.get("severity"), str) or claim.get("status") != "open"
+                       or not blocking(claim) for claim in claims)
+                or len({claim["id"] for claim in claims}) != len(claims)):
+            raise RuntimeError("calibration claims must list each open critical or major claim once, as returned")
+        ruled = sorted({finding["id"] for finding in value.get("unresolved_findings", [])
+                        if finding["role"] == "code_reviewer" and "calibrated_severity" in finding}
+                       & {claim["id"] for claim in claims})
+        if ruled:
+            raise RuntimeError(f"an earlier calibration already ruled {', '.join(ruled)}")
+        item = item_record(root, current["delivery"], current["story"])
+        problems = calibration_problems(root, current, {"findings": claims, "calibration": result.get("calibration")},
+                                        set(), follow_up_roles(item))
+        if problems:
+            raise RuntimeError("severity calibration is incomplete: " + "; ".join(problems))
+        stored = dict(result)
+        stored["result_hash"] = digest(result)
+        value["calibration"] = {"state": "settled", "result": stored, "completed_at": time.time()}
+        write_session(root, value)
+        return value
+
+
 def follow_up_roles(item: dict) -> list[str]:
     """The Item's implementation roles, which own its code review follow-ups."""
     roles = item.get("role_sequence")
@@ -818,8 +880,20 @@ def register_result(root: Path, result: dict) -> dict:
             raise RuntimeError("final result must explicitly disposition every inherited finding and resolve blocking findings")
         if (role == "code_reviewer" and verdict != "cancelled"
                 and review_loop(root, current["delivery"]) == "blocking_delta"):
+            if "calibration" in result:
+                raise RuntimeError("calibration rows come only from the calibration reader's own result,"
+                                   " registered with calibrate; the claiming result carries none")
             item = item_record(root, current["delivery"], current["story"])
             ruled = {identifier for identifier, finding in inherited.items() if "calibrated_severity" in finding}
+            claims = open_claims(findings, ruled)
+            registered = (value.get("calibration") or {}).get("result")
+            if claims or registered:
+                if registered is None or sorted(registered["claims"], key=lambda claim: claim["id"]) != claims:
+                    raise RuntimeError("register the calibration reader's result with calibrate for exactly the"
+                                       " open critical or major claims no earlier calibration ruled, as returned: "
+                                       + (", ".join(claim["id"] for claim in claims) or "none"))
+                result = {**result, "calibration": registered["calibration"],
+                          "calibration_result_hash": registered["result_hash"]}
             problems = calibration_problems(root, current, result, ruled, follow_up_roles(item))
             if problems:
                 raise RuntimeError("severity calibration is incomplete: " + "; ".join(problems))
@@ -1234,6 +1308,8 @@ def main(argv=None) -> int:
         subs.choices[name].add_argument("--mode", required=True)
     result = subs.add_parser("result")
     result.add_argument("--file", required=True)
+    calibrate = subs.add_parser("calibrate")
+    calibrate.add_argument("--file", required=True)
     run = subs.add_parser("run")
     run.add_argument("--kind", choices=("test", "mutation", "dependency_audit", "diagnostic_test"), required=True)
     run.add_argument("--selection-file", type=Path)
@@ -1264,6 +1340,8 @@ def main(argv=None) -> int:
             value = freeze(root, args.delivery, args.story, fresh=args.fresh)
         elif args.command == "result":
             value = register_result(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
+        elif args.command == "calibrate":
+            value = register_calibration(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "validate":
             value = validate(root, args.delivery, args.story)
         elif args.command == "environment":

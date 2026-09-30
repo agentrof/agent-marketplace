@@ -4370,10 +4370,12 @@ class DeliveryGitTests(unittest.TestCase):
         dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
         self.assertEqual(delivery_compile.init_dod(dod), 0)
         self.assertEqual(delivery_compile.approve_dod(dod), 0)
-        for argv in (["init"], ["set", "--switch", "execution_planning", "--value", "single_source_bundle"],
-                     ["approve"]):
+        def policy(*argv):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+        policy("init")
+        policy("set", "--switch", "execution_planning", "--value", "single_source_bundle")
+        policy("approve")
         delivery_git.run_git(project, "add", "workspace")
         delivery_git.run_git(project, "commit", "-qm", "approved backlog, DoD and Process Policy")
         delivery_git.run_git(project, "push", "-q")

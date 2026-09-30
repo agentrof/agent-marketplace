@@ -1731,6 +1731,23 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertIn("start it as soon as every producer it names has finished, without waiting for"
                       " any other lane", reference)
 
+    def test_only_the_coordinator_writes_the_shared_git_index(self):
+        """Lanes share one Git index, so a lane never runs git add -N; it reports each new file and
+        the coordinator adds it, one Git command at a time (rv-accept-ideas-28)."""
+        reference = " ".join((SCRIPTS.parent / "skill-content/deliver/references"
+                              / "switch-implementation_schedule-parallel_lanes_v1.md")
+                             .read_text(encoding="utf-8").split())
+        self.assertIn("A lane makes no Git writes: no add, commit,", reference)
+        self.assertIn("That includes `git add -N`", reference)
+        self.assertIn("A lane reports each file it creates, and the coordinator runs `git add -N <path>`"
+                      " for it, one Git command at a time", reference)
+        self.assertNotIn("The one exception is `git add -N", reference)
+        for doc in ("docs/orchestration.md", "docs/requirement-delivery-protocol.md"):
+            text = " ".join((ROOT / doc).read_text(encoding="utf-8").split())
+            with self.subTest(doc=doc):
+                self.assertIn("the coordinator runs intent-to-add for the new files they report", text)
+                self.assertNotIn("no Git writes except intent-to-add", text)
+
     def test_items_without_a_schedule_keep_their_phases(self):
         roles = ["software_architect", "backend_developer", "devops_engineer", "code_reviewer", "qa_engineer"]
         self.assertEqual(delivery_compile.execution_phases({"role_sequence": roles}),

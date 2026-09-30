@@ -364,8 +364,9 @@ its own producers finish and waits for no other lane.
 `item_plan_hash` and the plan hash cover the schedule, the scopes and the
 seams. The Item keeps one worktree, Item ref, Slot and writer receipt epoch:
 each lane role's task manifest bounds its write scope to its lane, lanes make
-no Git writes except intent-to-add, and the coordinator alone commits the
-combined change before the freeze. A schedule change follows normal execution
+no Git writes, the coordinator runs intent-to-add for the new files they
+report, and the coordinator alone commits the combined change before the
+freeze. A schedule change follows normal execution
 revision, approval and publication.
 
 Process switch `execution_planning` decides how the facts a plan needs are

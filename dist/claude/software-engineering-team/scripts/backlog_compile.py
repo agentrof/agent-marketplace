@@ -27,7 +27,8 @@ import requirement_route
 import stage_package
 import backlog_input_policy
 from ba_compile import (
-    frontmatter_item, frontmatter_scalar, frontmatter_value, without_generated_relations,
+    INLINE_CODE_RE, frontmatter_item, frontmatter_scalar, frontmatter_value,
+    without_generated_relations,
 )
 
 
@@ -337,8 +338,8 @@ def valid_target(target: str) -> bool:
     return all(part not in {"", ".", ".."} for part in target.split("/"))
 
 
-def read_link(docs: Path, value: str, label: str,
-              errors: list[str]) -> tuple[str, str, str] | None:
+def read_link(docs: Path, value: str, label: str, errors: list[str], *,
+              require_alias: bool = True) -> tuple[str, str, str] | None:
     parsed = split_wikilink(value)
     if parsed is None:
         errors.append(f"{label} must be a quoted vault-absolute wikilink: {value}")
@@ -347,7 +348,7 @@ def read_link(docs: Path, value: str, label: str,
     if not valid_target(target):
         errors.append(f"{label} has invalid vault target: {target or value}")
         return None
-    if not alias:
+    if require_alias and not alias:
         errors.append(f"{label} must have a display alias: {value}")
     if anchor and not anchor.startswith("^"):
         errors.append(f"{label} may use only a stable block anchor: {value}")
@@ -985,7 +986,7 @@ def review_section_findings(body: str, required: list[str], path: str,
                 f"Evidence [{title}]"
             )
         else:
-            links = re.findall(r"\[\[[^\[\]\n]+\]\]", evidence.group(1))
+            links = re.findall(r"\[\[[^\[\]\n]+\]\]", INLINE_CODE_RE.sub("", evidence.group(1)))
             if not links:
                 errors.append(
                     f"{path} review Evidence must cite a vault note: {title}"
@@ -1167,7 +1168,7 @@ def accepted_minor_findings(docs: Path, body: str, path: str,
     seen: set[str] = set()
     for number, row in enumerate(rows, 1):
         label = f"{path} accepted minor finding {number}"
-        links = re.findall(r"\[\[[^\[\]\n]+\]\]", row["finding"])
+        links = re.findall(r"\[\[[^\[\]\n]+\]\]", INLINE_CODE_RE.sub("", row["finding"]))
         if not links:
             errors.append(f"{label} must cite the affected vault note")
         for value in links:
@@ -3070,6 +3071,10 @@ def stub_story(args) -> int:
             "derives_from": [epic_link],
             "tags": ["doc/story", "status/planned"], "aliases": [story_id],
         }
+        # The vault relation contract refuses an empty typed relation list.
+        for key in ("uses_design", "constrained_by"):
+            if not story_props[key]:
+                del story_props[key]
         if implements:
             story_props["implements"] = implements
         if evidence:

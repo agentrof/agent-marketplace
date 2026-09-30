@@ -8,6 +8,7 @@ from pathlib import Path
 
 import landscape_check
 import requirement_compile
+from ba_compile import without_code
 
 
 def absence_findings(docs: Path, props: dict, requirement: Path | None,
@@ -88,7 +89,7 @@ def absence_findings(docs: Path, props: dict, requirement: Path | None,
             continue
         body = re.sub(
             r"(?m)^(?:##[^\n]*)?<!-- sec: nav -->[^\n]*(?:\n|$).*?(?=^## |\Z)",
-            "", note.read_text(encoding="utf-8"), flags=re.S,
+            "", without_code(note.read_text(encoding="utf-8")), flags=re.S,
         )
         for stage in sorted(set(declared) & allowed):
             if re.search(r"\[\[" + re.escape(stage) + r"/", body):

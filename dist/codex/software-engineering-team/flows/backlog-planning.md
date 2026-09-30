@@ -211,7 +211,9 @@ backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID>
 Give one fresh `backlog-reviewer` the returned manifest and every named path:
 the root backlog, that epic, its child stories and test plans, and the incoming
 and outgoing dependency closure with shared contract/source context. Include
-the expected `derives_from` and `verifies` sets. The manifest is disposable
+the expected `derives_from` and `verifies` sets and any `unparsed_link_sources`:
+approved upstream notes whose link text does not parse, which the reader checks
+for a missed source instead of failing dispatch. The manifest is disposable
 review input, never a second backlog or approval record. Unresolved closure
 fails before dispatch; evidence outside the manifest requires an expanded
 input set. Independent epic reviewers may run in parallel against unchanged
@@ -240,8 +242,9 @@ reader returns; they do not authorize ignoring any source finding.
 Only after every epic package and review is green, run
 `backlog_review_inputs.py --docs <workspace>/docs --root`. Invoke one fresh
 `backlog-reviewer` with that manifest: the root backlog, every epic, every
-story and every test plan, its declared context, and the exact expected
-`derives_from` and `related_to` sets. Wait for its return. Recompute the root
+story and every test plan, its declared context, any `unparsed_link_sources`
+and the exact expected `derives_from` and `related_to` sets. Wait for its
+return. Recompute the root
 manifest with `--expected-hash <source_hash>` before accepting its findings;
 a changed input requires a fresh affected review. The Product Owner then
 writes the root review note and any source fixes. The root review covers

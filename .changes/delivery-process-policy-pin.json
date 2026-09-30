@@ -1,0 +1,6 @@
+{
+  "summary": "When the project has an approved Process Policy, `delivery_compile.py approve-scope` pins its path, revision and source hash in `delivery.md`, inside the scope hash, so each Delivery names the process switch values it ran under; a draft or invalid policy refuses scope approval. Without a policy nothing is pinned and every Delivery compiler output stays byte-identical, which a golden all-default run now proves. The pin drifts like the Definition of Done's while an execution approval can still re-pin it: for a scope- or execution-approved Delivery, a policy revised, created or removed since the pin makes `check` and the coordinator verbs that run it refuse the Delivery until `approve-execution` re-pins the current policy and lists the changed fields in `refreshed_delivery_pins`. From the Delivery Review on, and for a merged or cancelled Delivery, the pin is kept as the record of what the Delivery ran under. `process_policy.py value --delivery DLV-###` refuses a drifted pin instead of reading the new value. Setup's project refresh declares the new `delivery.md` properties in `.obsidian/types.json`.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

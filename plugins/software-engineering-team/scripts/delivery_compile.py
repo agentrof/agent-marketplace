@@ -77,6 +77,7 @@ DOD_SOURCE_FIELDS = (
     "definition_of_done_path", "definition_of_done_revision",
     "definition_of_done_source_hash",
 )
+PROCESS_POLICY_SOURCE_FIELDS = process_policy.PIN_FIELDS
 GIT_OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
 # The record of the "Record PR" commit that delivery_git writes as the PR head.
 PR_RECORDED = "pr-url-recorded-v1"
@@ -311,6 +312,26 @@ def approved_dod_source(docs: Path) -> tuple[dict, list[str]]:
     }, []
 
 
+def with_process_policy_pin(props: dict, policy: dict) -> dict:
+    """Return the Delivery front matter pinned to the Process Policy snapshot.
+
+    Without a policy the front matter keeps its bytes: no key is added. The
+    pin sits before the aliases and tags, beside the other source pins.
+    """
+    pinned = {key: value for key, value in props.items() if key not in PROCESS_POLICY_SOURCE_FIELDS}
+    if not policy:
+        return pinned
+    anchor = next((key for key in ("aliases", "tags") if key in pinned), None)
+    result: dict = {}
+    for key, value in pinned.items():
+        if key == anchor:
+            result.update(policy)
+        result[key] = value
+    if anchor is None:
+        result.update(policy)
+    return result
+
+
 def operation_contract_snapshot(docs: Path, kind: str) -> tuple[dict, list[str]]:
     """Resolve one approved Operation Contract without trusting caller input.
 
@@ -410,6 +431,14 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
     for key in DOD_SOURCE_FIELDS:
         if delivery_props.get(key) != dod[key]:
             errors.append(f"Delivery {key} is stale against the approved Definition of Done")
+    # Scope approval writes the pin, and only a new execution approval can
+    # re-pin it; outside those phases the pin is the Delivery's record.
+    status = delivery_props.get("status")
+    if status == "scope_proposed" or status in process_policy.PIN_ENFORCED_STATUSES:
+        policy, policy_errors = process_policy.approved_snapshot(docs)
+        errors.extend(policy_errors)
+        if not policy_errors and status in process_policy.PIN_ENFORCED_STATUSES:
+            errors.extend(process_policy.pin_findings(delivery_props, policy))
 
     for item_path, item_props in item_records:
         story_id = str(item_props["story_id"])
@@ -978,6 +1007,8 @@ def approve_scope(args) -> int:
             docs, {str(item["story_id"]): str(item["story_path"]) for item in items}))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
+    # delivery_findings above already refused a draft or invalid policy.
+    props = with_process_policy_pin(props, process_policy.approved_snapshot(docs)[0])
     props["status"] = "scope_approved"
     props["scope_hash"] = content_hash(props, body, exclude=MUTABLE | {"scope_hash"})
     props["approved_at_utc"] = utc_now()
@@ -1416,7 +1447,8 @@ def approve_execution(args) -> int:
         print(json.dumps({"ok": False, "errors": ["Execution Plan requires at least one Item"]}, indent=2)); return 1
     item_records, sources, backlog_snapshot, dod, source_errors = delivery_source_snapshots(docs, root)
     reopen = sorted(set(str(story) for story in (getattr(args, "reopen", None) or [])))
-    plan_errors = source_errors + reopen_findings(reopen, item_records)
+    policy, policy_errors = process_policy.approved_snapshot(docs)
+    plan_errors = source_errors + policy_errors + reopen_findings(reopen, item_records)
     if not plan_errors:
         plan_errors = execution_plan_findings(root, sources, docs)
     pull_request_checks = approved_pull_request_checks(docs)
@@ -1517,8 +1549,11 @@ def approve_execution(args) -> int:
     plan_props["source_hash"] = content_hash(plan_props, plan_body)
     atomic_text(plan_path, frontmatter(plan_props, plan_body))
     delivery_pins = {**backlog_snapshot, **{key: dod[key] for key in DOD_SOURCE_FIELDS}}
-    refreshed_delivery_pins = sorted(key for key, value in delivery_pins.items() if props.get(key) != value)
+    refreshed_delivery_pins = sorted(
+        [key for key, value in delivery_pins.items() if props.get(key) != value]
+        + [key for key in PROCESS_POLICY_SOURCE_FIELDS if props.get(key) != policy.get(key)])
     props.update(delivery_pins)
+    props = with_process_policy_pin(props, policy)
     props["status"] = "execution_approved"
     props["plan_hash"] = plan_props["plan_hash"]
     props["source_hash"] = content_hash(props, body)

@@ -26,6 +26,7 @@ import backlog_compile  # noqa: E402
 import design_system_compile  # noqa: E402
 import experience_application_check  # noqa: E402
 import operation_compile  # noqa: E402
+import process_policy  # noqa: E402
 import requirement_compile  # noqa: E402
 import requirement_route  # noqa: E402
 import stage_package  # noqa: E402
@@ -462,6 +463,173 @@ class DeliveryCompilerTests(unittest.TestCase):
         delivery_compile.atomic_text(item, delivery_compile.frontmatter(rebound, body))
         _root, stale = delivery_compile.delivery_findings(self.docs, "DLV-001")
         self.assertTrue(any("Verification Contract binding" in finding for finding in stale), stale)
+
+    def policy(self, *argv: str) -> dict:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = process_policy.main([argv[0], "--docs", str(self.docs), *argv[1:]])
+        result = json.loads(output.getvalue())
+        self.assertEqual(code, 0, result)
+        return result
+
+    def approve_policy(self) -> dict:
+        path = process_policy.path_for(self.docs)
+        self.policy("begin-revision" if path.exists() else "init")
+        self.policy("approve")
+        return process_policy.approved_snapshot(self.docs)[0]
+
+    def test_scope_approval_pins_the_approved_process_policy(self):
+        self.approve_verification_contract()
+        self.approve_dod()
+        init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None,
+                                 "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        proposal, _ = delivery_compile.split_note(root / "delivery.md")
+        snapshot = self.approve_policy()
+        # A proposal carries no pin, and a policy approved after it is not drift.
+        self.assertFalse(set(process_policy.PIN_FIELDS) & set(proposal))
+        self.assertEqual(delivery_compile.delivery_findings(self.docs, "DLV-001")[1], [])
+        plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_scope(plan_args), 0)
+        props, body = delivery_compile.split_note(root / "delivery.md")
+        self.assertEqual({key: props[key] for key in process_policy.PIN_FIELDS}, snapshot)
+        self.assertEqual(snapshot["process_policy_revision"], 1)
+        keys = list(props)
+        self.assertEqual(keys.index("process_policy_source_hash") + 1, keys.index("aliases"))
+        # The scope hash covers the pin, so the approved scope names its policy.
+        self.assertEqual(props["scope_hash"], delivery_compile.content_hash(
+            props, body, exclude=delivery_compile.MUTABLE | {"scope_hash"}))
+        self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
+        self.assert_delivery_vault_contract()
+
+    def test_without_a_process_policy_no_pin_is_written(self):
+        plan_args = self.scope_ready_for_execution()
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["refreshed_delivery_pins"], [])
+        props, _ = delivery_compile.split_note(
+            delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md")
+        self.assertFalse(set(process_policy.PIN_FIELDS) & set(props))
+
+    def test_a_draft_or_invalid_process_policy_refuses_scope_approval(self):
+        self.approve_dod()
+        init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None,
+                                 "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        self.policy("init")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.approve_scope(plan_args), 1)
+        self.assertIn("Process Policy revision 1 is a draft", output.getvalue())
+        self.policy("approve")
+        path = process_policy.path_for(self.docs)
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "Each row is an explicit", "Each row is one explicit"), encoding="utf-8")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.approve_scope(plan_args), 1)
+        self.assertIn("approved Process Policy source_hash is stale", output.getvalue())
+        props, _ = delivery_compile.split_note(
+            delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md")
+        self.assertEqual(props["status"], "scope_proposed")
+
+    def test_process_policy_drift_blocks_a_delivery_until_execution_reapproval(self):
+        plan_args = self.scope_ready_for_execution()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+
+        def findings():
+            return delivery_compile.delivery_findings(self.docs, "DLV-001")[1]
+
+        def reapprove() -> list[str]:
+            code, result = self.approve_execution_result(plan_args)
+            self.assertEqual(code, 0, result)
+            self.assertEqual(findings(), [])
+            return result["refreshed_delivery_pins"]
+
+        first = self.approve_policy()
+        self.assertEqual(len(findings()), 1)
+        self.assertIn("Delivery pins no Process Policy, but one is approved now", findings()[0])
+        self.assertIn("begin-plan-revision, approve-execution", findings()[0])
+        self.assertEqual(delivery_compile.check_delivery(plan_args), 1)
+        self.assertEqual(reapprove(), sorted(process_policy.PIN_FIELDS))
+
+        second = self.approve_policy()
+        self.assertEqual(second["process_policy_revision"], 2)
+        self.assertNotEqual(second["process_policy_source_hash"], first["process_policy_source_hash"])
+        self.assertEqual(sorted(finding.split(" is stale")[0] for finding in findings()), [
+            "Delivery process_policy_revision", "Delivery process_policy_source_hash"])
+        self.assertEqual(reapprove(), ["process_policy_revision", "process_policy_source_hash"])
+        props, _ = delivery_compile.split_note(root / "delivery.md")
+        self.assertEqual({key: props[key] for key in process_policy.PIN_FIELDS}, second)
+
+        self.policy("begin-revision")
+        self.assertIn("Process Policy revision 3 is a draft", " ".join(findings()))
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertIn("Process Policy revision 3 is a draft", " ".join(result["errors"]))
+
+        process_policy.path_for(self.docs).unlink()
+        self.assertIn("Delivery pins a Process Policy that no longer exists", findings()[0])
+        self.assertEqual(reapprove(), sorted(process_policy.PIN_FIELDS))
+        props, _ = delivery_compile.split_note(root / "delivery.md")
+        self.assertFalse(set(process_policy.PIN_FIELDS) & set(props))
+
+    def test_a_reviewed_or_closed_delivery_keeps_its_process_policy_pin_as_history(self):
+        # From the Delivery Review on no execution approval can re-pin the
+        # Delivery, so a later policy revision must not strand it.
+        self.approve_policy()
+        plan_args = self.scope_ready_for_execution()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        original = (root / "delivery.md").read_bytes()
+        pinned = {key: delivery_compile.split_note(root / "delivery.md")[0][key]
+                  for key in process_policy.PIN_FIELDS}
+        self.approve_policy()
+        self.assertTrue(delivery_compile.delivery_findings(self.docs, "DLV-001")[1])
+        for status in ("review", "pr_handoff", "awaiting_merge", "cancelled"):
+            with self.subTest(status=status):
+                (root / "delivery.md").write_bytes(original)
+                props, body = delivery_compile.split_note(root / "delivery.md")
+                props["status"] = status
+                delivery_compile.atomic_text(root / "delivery.md",
+                                             delivery_compile.frontmatter(props, body))
+                self.assertEqual(delivery_compile.delivery_findings(self.docs, "DLV-001")[1], [])
+                self.assertEqual(self.policy("value", "--switch", "review_panels", "--delivery",
+                                             "DLV-001")["value"], "single_reader")
+                props, _ = delivery_compile.split_note(root / "delivery.md")
+                self.assertEqual({key: props[key] for key in process_policy.PIN_FIELDS}, pinned)
+        self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
+
+    def test_switch_readers_refuse_a_delivery_whose_pin_drifted(self):
+        package = self.root / "fixture-package"
+        registry = package / process_policy.REGISTRY
+        registry.parent.mkdir(parents=True)
+        registry.write_text(json.dumps({"schema_version": 1, "switches": {"fixture_mode": {
+            "values": [{"id": "current", "tradeoffs": "Today."}, {"id": "fast", "tradeoffs": "New."}],
+            "default": "current"}}}), encoding="utf-8")
+        with mock.patch.object(process_policy, "PACKAGE", package):
+            self.policy("init")
+            self.policy("set", "--switch", "fixture_mode", "--value", "fast")
+            self.policy("approve")
+            self.scope_ready_for_execution()
+            result = self.policy("value", "--switch", "fixture_mode", "--delivery", "DLV-001")
+            self.assertEqual((result["value"], result["source"]), ("fast", "policy"))
+            self.policy("begin-revision")
+            self.policy("set", "--switch", "fixture_mode", "--default")
+            self.policy("approve")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = process_policy.main(["value", "--docs", str(self.docs), "--switch",
+                                            "fixture_mode", "--delivery", "DLV-001"])
+            self.assertEqual(code, 1)
+            self.assertIn("Delivery process_policy_revision is stale", output.getvalue())
+            # Outside a Delivery the project's approved value is in force.
+            self.assertEqual(self.policy("value", "--switch", "fixture_mode")["value"], "current")
 
     def test_scope_then_execution_creates_exact_item_evidence_files(self):
         self.approve_verification_contract()

@@ -33,6 +33,10 @@ STATUSES = ("draft", "approved")
 SECTIONS = ("Switches", "Navigation")
 MUTABLE = {"status", "approved_at_utc", "source_hash"}
 PIN_FIELDS = ("process_policy_path", "process_policy_revision", "process_policy_source_hash")
+# A Delivery re-pins only through a new execution approval, so its pin must be
+# current exactly while that approval is still possible. From the Delivery
+# Review on, the pin records the policy the Delivery ran under.
+PIN_ENFORCED_STATUSES = ("scope_approved", "execution_approved")
 TABLE_HEADER = ("Switch", "Value")
 TABLE_SEPARATOR_RE = re.compile(r"^\|\s*:?-{3,}:?\s*\|\s*:?-{3,}:?\s*\|$")
 NAME_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
@@ -412,7 +416,7 @@ def delivery_pin_findings(docs: Path, delivery: str, snapshot: dict) -> list[str
     if root is None:
         return [f"Delivery not found: {delivery}"]
     props, _body = delivery_compile.split_note(root / "delivery.md")
-    if props.get("status") in {"scope_proposed", "merged", "cancelled"}:
+    if props.get("status") not in PIN_ENFORCED_STATUSES:
         return []
     return pin_findings(props, snapshot)
 

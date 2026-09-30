@@ -185,8 +185,12 @@ Delivery is `scope_approved` or `execution_approved`: a policy revised,
 created or removed since the pin makes `delivery_compile.py check`, and the
 coordinator verbs that run it, refuse the Delivery until its execution plan is
 revised and approved again, which pins the current policy and lists the
-changed pin fields in `refreshed_delivery_pins`. An Integration that lacks the
-approved policy takes it from the target with `refresh-target` first. From the
+changed pin fields in `refreshed_delivery_pins`. In those phases
+`refresh-target` treats the policy as a pinned input, like the Definition of
+Done: it refuses with `DELIVERY_TARGET_SOURCE_VIOLATION` a target whose policy
+differs from the Integration's pin, including one created or removed since.
+Revise, approve and publish the execution plan first, which pins the target's
+policy; the refresh then carries that policy into the Integration. From the
 Delivery Review on, and for a merged or cancelled Delivery, the pin is the
 record of the policy the Delivery ran under and is no longer compared, so a
 policy set for the next Delivery never strands one that can no longer re-pin.

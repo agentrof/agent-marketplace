@@ -2555,6 +2555,7 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
     """Reject changed pinned inputs while leaving unchanged target drafts alone."""
     import backlog_compile
     import operation_compile
+    import process_policy
     from delivery_compile import OPERATION_BINDING_FIELDS, split_note, content_hash, _is_normalized_claim
 
     def backlog_record(path):
@@ -2591,6 +2592,26 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
         props, digest = split_remote_note(root, target, path, reader)
         if props.get("status") != status or props.get("source_hash") != expected or digest != expected:
             raise RuntimeError("DELIVERY_TARGET_SOURCE_VIOLATION: target changed a pinned source or Operation receipt: " + path)
+    # The Process Policy pin is compared only while a new execution approval can
+    # re-pin it. From the Delivery Review on it records the policy the Delivery
+    # ran under, so a policy set for the next Delivery never strands this one.
+    if delivery.get("status") in process_policy.PIN_ENFORCED_STATUSES:
+        relative = str(delivery.get("process_policy_path") or process_policy.RELATIVE)
+        if not _is_normalized_claim(relative):
+            raise RuntimeError("target refresh contains an invalid pinned input path")
+        path = "workspace/docs/" + relative
+        if path in changed:
+            pinned = delivery.get("process_policy_source_hash")
+            present = subprocess.run(["git", "cat-file", "-e", f"{target}:{path}"], cwd=root,
+                                     capture_output=True, check=False).returncode == 0
+            if present:
+                props, body = split_remote_note(root, target, path, process_policy.parse)
+                current = (props.get("status") == "approved" and pinned is not None
+                           and props.get("source_hash") == pinned == process_policy.policy_hash(props, body))
+            else:
+                current = pinned is None
+            if not current:
+                raise RuntimeError("DELIVERY_TARGET_SOURCE_VIOLATION: target changed a pinned source or Operation receipt: " + path)
     return bindings
 
 

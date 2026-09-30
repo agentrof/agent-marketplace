@@ -30,6 +30,7 @@ import delivery_provider  # noqa: E402
 import delivery_result  # noqa: E402
 import file_lock  # noqa: E402
 import operation_compile  # noqa: E402
+import process_policy  # noqa: E402
 import architecture_compile  # noqa: E402
 import setup_check  # noqa: E402
 import stage_package  # noqa: E402
@@ -3706,6 +3707,72 @@ class DeliveryGitTests(unittest.TestCase):
                 refs = delivery_git.canonical_refs("DLV-001")
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
+
+    def change_process_policy(self, docs: Path, *changes: tuple[str, str]) -> None:
+        """Approve a new Process Policy revision that sets each (switch, value)."""
+        commands = [["begin-revision" if process_policy.path_for(docs).exists() else "init"],
+                    *(["set", "--switch", switch, "--value", value] for switch, value in changes),
+                    ["approve"]]
+        for argv in commands:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = process_policy.main([argv[0], "--docs", str(docs), *argv[1:]])
+            self.assertEqual(code, 0, output.getvalue())
+
+    def test_target_refresh_treats_a_changed_process_policy_as_a_pinned_input(self):
+        """refresh-target merged a target policy that the Integration's Delivery does not pin, and
+        only the next check reported the drift. While the pin is enforced the policy is a pinned
+        input, as the Definition of Done is: the refresh refuses a target policy that differs from
+        the pin and carries one that matches it (#332)."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-001")
+        policy = process_policy.path_for(docs).relative_to(project).as_posix()
+        refused = ("^DELIVERY_TARGET_SOURCE_VIOLATION: target changed a pinned source or Operation receipt: "
+                   + policy.replace(".", "\\.") + "$")
+        carrier = "refs/heads/governance-input"
+
+        def hand_policy_to_target() -> str:
+            previous = delivery_git.remote_ref_oids(project, "origin", [carrier])[carrier]
+            if previous:
+                delivery_git.atomic_push(project, "origin", [(carrier, previous, "")])
+            return self.governance_target_handoff(project, docs, [policy])[1]
+
+        # The Delivery pins no policy, and the target creates one.
+        self.change_process_policy(docs)
+        fence = hand_policy_to_target()
+        with self.assertRaisesRegex(RuntimeError, refused):
+            delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
+        # A revised plan pins the target's policy, and the refresh then carries it.
+        plan = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(plan), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        refreshed = delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "show", f"{refreshed['integration']}:{policy}") + "\n",
+                         process_policy.path_for(docs).read_text(encoding="utf-8"))
+        # A revision the pin does not name is refused again.
+        self.change_process_policy(docs, ("implementation_schedule", "parallel_lanes_v1"))
+        hand_policy_to_target()
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        with self.assertRaisesRegex(RuntimeError, refused):
+            delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        # From the Delivery Review on the pin records what the Delivery ran under, so a
+        # policy set for the next Delivery never strands it.
+        integration = delivery_git.remote_oid(project, "origin", refs["integration"])
+        relative = (directory / "delivery.md").relative_to(project).as_posix()
+        props, body = delivery_git.split_remote_note(project, integration, relative, delivery_compile.split_note)
+        props["status"] = "review"
+        reviewed = delivery_git.commit_replacements(
+            project, integration, {relative: delivery_compile.frontmatter(props, body)},
+            "Fixture: the Delivery reached its Review", {})
+        delivery_git.atomic_push(project, "origin", [(refs["integration"], integration, reviewed)])
+        refreshed = delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "show", f"{refreshed['integration']}:{policy}") + "\n",
+                         process_policy.path_for(docs).read_text(encoding="utf-8"))
 
     def test_target_refresh_preserves_legacy_operation_pins_after_relation_rendering(self):
         project, docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(

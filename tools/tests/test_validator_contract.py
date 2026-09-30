@@ -1012,6 +1012,9 @@ VALIDATOR_BUILDERS = {
         root, PANELS, lambda value: value["review_steps"]["design_system"].update(lenses=[])),
     "process_switches": lambda root: edit_json(
         root, SWITCHES, lambda value: value["switches"]["review_panels"].update(default="ghost")),
+    "switch_variant_references": lambda root: edit_json(
+        root, SWITCHES, lambda value: value["switches"]["mechanical_pass_tier"]["agent_variants"]
+        ["mechanical"]["agents"].remove("devops-engineer")),
     "story_size_measures": lambda root: edit_json(
         root, MEASURES,
         lambda value: value["measures"]["acceptance_criteria"].update(derivation="ghost_count")),

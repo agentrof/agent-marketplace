@@ -262,6 +262,23 @@ class ValidatorTests(unittest.TestCase):
                     " its reviews, re-checks and calibrations keep their tier"),
                     {(finding.check, finding.message) for finding in findings})
 
+    def test_every_variant_a_switch_reference_names_is_declared(self):
+        # The reference routes an Environment Contract fix pass to
+        # devops-engineer-mechanical; a build that stops shipping it must fail.
+        findings = self.variants(lambda spec: spec["agent_variants"]["mechanical"]["agents"]
+                                 .remove("devops-engineer"))
+        self.assertIn((
+            f"plugins/{fixtures.PLUGIN}/{REFERENCE}", "switch_variant_references",
+            "switch reference names agent variant 'devops-engineer-mechanical', which switch"
+            " 'mechanical_pass_tier' at 'mechanical' does not declare"),
+            {(finding.path, finding.check, finding.message) for finding in findings})
+        lens = self.edit_json(f"plugins/{fixtures.PLUGIN}/{REGISTRY}", lambda data: data[
+            "switches"]["review_panels"]["agent_variants"]["lens_panel"].update(suffix="panel"))
+        self.assertTrue(any(
+            finding.check == "switch_variant_references"
+            and "'solution-reviewer-lens', which switch 'review_panels' at 'lens_panel'"
+            in finding.message for finding in lens), lens)
+
     def test_the_switch_must_declare_its_writer_variants(self):
         for mutate in (lambda spec: spec.pop("agent_variants"),
                        lambda spec: spec["agent_variants"].pop("mechanical")):

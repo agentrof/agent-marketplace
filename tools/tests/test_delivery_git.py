@@ -3937,6 +3937,65 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(project, "show", f"{refreshed['integration']}:{policy}") + "\n",
                          process_policy.path_for(docs).read_text(encoding="utf-8"))
 
+    def test_reservation_carries_the_process_policy_its_scope_pinned(self):
+        """An Item worktree reads the switch values from its own tree, so reservation carries the
+        policy scope approval pinned onto the Integration, as publication carries a pinned Operation
+        contract, before the policy's own commit reaches the target (#332)."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve the backlog")
+        delivery_git.run_git(project, "push", "-q")
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        self.change_process_policy(docs, ("review_panels", "lens_panel"))
+        self.assertEqual(delivery_compile.init_delivery(type("Args", (), {
+            "docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication", "outcome": None,
+            "target_branch": "main", "story": ["AUTH-01"]})), 0)
+        self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        policy = process_policy.path_for(docs)
+        relative = policy.relative_to(project).as_posix()
+        # Everything the scope needs reaches the target except the policy.
+        delivery_git.run_git(project, "add", "workspace/docs")
+        delivery_git.run_git(project, "reset", "-q", "--", relative)
+        delivery_git.run_git(project, "commit", "-qm", "Approve the scope")
+        delivery_git.run_git(project, "push", "-q")
+        self.assertEqual(delivery_git.run_git(project, "ls-tree", "origin/main", "--", relative), "")
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        self.assertEqual(delivery_git.published_plan_blobs(project, reserved["integration"], [relative]),
+                         {relative: policy.read_text(encoding="utf-8")})
+
+    def test_an_item_worktree_holds_the_process_policy_its_delivery_pinned(self):
+        """A policy pinned by execution approval reaches the Integration with the plan, so the Item
+        worktree holds the pinned bytes, reads the switch values from them, and a code reviewer's
+        result registers and its evidence is approved there under that policy (#332)."""
+        import delivery_verification
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        self.change_process_policy(docs, ("review_panels", "lens_panel"))
+        policy = process_policy.path_for(docs)
+        relative = policy.relative_to(project).as_posix()
+        self.assertEqual(delivery_git.run_git(project, "ls-tree", "origin/main", "--", relative), "")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(
+                type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(delivery_git.published_plan_blobs(project, published["integration"], [relative]),
+                         {relative: policy.read_text(encoding="utf-8")})
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        worktree = Path(active["worktree"])
+        self.assertEqual((worktree / relative).read_text(encoding="utf-8"), policy.read_text(encoding="utf-8"))
+        self.assertEqual(delivery_compile.delivery_switch_value(worktree / "workspace/docs", "DLV-001",
+                                                                "review_panels"), "lens_panel")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        reviewer = delivery_verification.read_session(worktree)["workers"]["code_reviewer"]
+        self.assertEqual((reviewer["state"], reviewer["result"]["verdict"]), ("settled", "passed"))
+
     def test_target_refresh_preserves_legacy_operation_pins_after_relation_rendering(self):
         project, docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
             runtime=True, legacy_operation_receipts=True)

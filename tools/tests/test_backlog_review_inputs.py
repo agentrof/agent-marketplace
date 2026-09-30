@@ -502,14 +502,50 @@ class BacklogReviewInputTests(unittest.TestCase):
         self.assertFalse([finding for finding in root["review_note"]["pending_findings"]
                           if "/reviews/round-1-epic-review.md" in finding])
 
-    def stub_story(self):
+    def stub_story(self, epic="delivery-fixture"):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(backlog.stub_story(SimpleNamespace(
-                docs=str(self.docs), epic="delivery-fixture", slug="job-worker", id="ST-005",
+                docs=str(self.docs), epic=epic, slug="job-worker", id="ST-005",
                 title="Job worker", scope=None, work_kind="technical", criterion_ref=[],
                 experience_ref=[], evidence_ref=["[[solution-design/decisions/fixture-api|Fixture API]]"],
                 uses_design=[], constrained_by=[], implements=[])), 0)
-        return self.docs / "backlog/epics/delivery-fixture/stories/job-worker"
+        return self.docs / f"backlog/epics/{epic}/stories/job-worker"
+
+    def test_an_epic_reader_lists_a_stub_outside_its_paths_without_failing(self):
+        folder = self.stub_story("second")
+        story, plan = (path.relative_to(self.docs).as_posix()
+                       for path in (folder / "story.md", folder / "test-plan.md"))
+        value = inputs.manifest(self.docs, epic="EP-001")
+        carried = value["check"]["scaffold_findings"]
+        self.assertTrue(carried)
+        self.assertTrue(all(finding.startswith((story + " ", plan + " ")) for finding in carried))
+        self.assertNotIn(story, value["paths"])
+        self.assertNotIn(plan, value["paths"])
+        self.assertEqual(value["check"]["source_errors"], [])
+        self.assertEqual(inputs.manifest(self.docs, epic="EP-001", expected_hash=value["source_hash"]), value)
+        # The epic that holds the stub, the root package and approval still wait for it.
+        for scope in ("EP-002", None):
+            with self.assertRaisesRegex(inputs.InputError, "untouched"):
+                inputs.manifest(self.docs, epic=scope)
+        _, errors = backlog.collect(self.docs)
+        self.assertLessEqual(set(carried), set(errors))
+        # An authored finding outside the epic's paths still fails it.
+        props, body = backlog.parse_front_matter(self.story(3))
+        props["constrained_by"] = ["[[solution-design/missing|Missing]]"]
+        self.story(3).write_text(backlog.front_matter(props, body), encoding="utf-8")
+        with self.assertRaisesRegex(inputs.InputError, "targets missing note: solution-design/missing"):
+            inputs.manifest(self.docs, epic="EP-001")
+
+    def test_a_stub_in_an_epic_readers_dependency_closure_still_fails_it(self):
+        self.stub_story("second")
+        path = self.story(1)
+        props, body = backlog.parse_front_matter(path)
+        link = "[[backlog/epics/second/stories/job-worker/story|ST-005]]"
+        props["depends_on"] = [link]
+        body = body.replace("## Dependencies\n\nNone.", "## Dependencies\n\n- " + link + ": Supplies the job input.")
+        path.write_text(backlog.front_matter(props, body), encoding="utf-8")
+        with self.assertRaisesRegex(inputs.InputError, "job-worker/story.md has an untouched"):
+            inputs.manifest(self.docs, epic="EP-001")
 
     def test_writer_manifest_carries_the_stubs_a_reader_refuses(self):
         self.assertNotIn("scaffold_findings", inputs.manifest(self.docs, epic="EP-001")["check"])

@@ -2470,12 +2470,21 @@ def table_block(marker: str, columns: tuple[str, ...], rows: list[str]) -> str:
 
 
 def block_rows(text: str, marker: str) -> list[str]:
-    """The rows of the table that follows ``marker`` in a compiler-owned block."""
+    """The rows of the table that follows ``marker`` in a compiler-owned block.
+
+    The block ends with its own table. A block whose marker line says
+    ``none.`` has no table, so a later block's table never becomes its rows.
+    """
+    if marker not in text:
+        return []
+    remainder, *lines = text.split(marker, 1)[1].splitlines() or [""]
+    if remainder.strip():
+        return []
     rows: list[str] = []
-    for line in text.split(marker, 1)[1].splitlines() if marker in text else []:
+    for line in lines:
         if line.strip().startswith("|"):
             rows.append(line.strip())
-        elif rows:
+        elif rows or line.strip():
             break
     return rows[2:]
 

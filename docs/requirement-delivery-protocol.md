@@ -87,6 +87,7 @@ workspace/docs/
 └── delivery/
     ├── governance/governance.md
     ├── definition-of-done.md
+    ├── process-policy.md
     └── deliveries/dlv-<digits>-<slug>/
         ├── delivery.md
         ├── execution-plan.md
@@ -173,6 +174,25 @@ application receipt.
 binds the goal, exact Story set, dependency facts, Definition of Done and
 target branch. The Git coordinator then reserves the Delivery by atomically
 creating its Integration ref with the project Fence lease.
+
+When the project has a Process Policy, scope approval also pins its path,
+revision and source hash in `delivery.md`, inside the scope hash, so every
+Delivery names the process switch values it ran under. Without a policy
+nothing is pinned and every compiler output is unchanged. A draft or invalid
+policy refuses scope approval. The pin drifts like the Definition of Done's
+while a new execution approval can still re-pin it, that is while the
+Delivery is `scope_approved` or `execution_approved`: a policy revised,
+created or removed since the pin makes `delivery_compile.py check`, and the
+coordinator verbs that run it, refuse the Delivery until its execution plan is
+revised and approved again, which pins the current policy and lists the
+changed pin fields in `refreshed_delivery_pins`. An Integration that lacks the
+approved policy takes it from the target with `refresh-target` first. From the
+Delivery Review on, and for a merged or cancelled Delivery, the pin is the
+record of the policy the Delivery ran under and is no longer compared, so a
+policy set for the next Delivery never strands one that can no longer re-pin.
+Inside a Delivery a flow reads a switch with
+`process_policy.py value --switch <id> --delivery DLV-###`, which refuses a
+drifted pin instead of reading the new value.
 
 Scope approval is the handoff check for upstream bindings, and `init` runs the
 same check before it renders the proposal, so a selection that cannot be handed

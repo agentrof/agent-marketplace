@@ -282,11 +282,15 @@ class ConfigureProcessContractTests(unittest.TestCase):
                 "the question names the switch's metric and promotion unit",
                 "Never choose for the user and never skip a switch",
                 "When no answer changes a value in force, write nothing and stop",
-                "ask the approval choice gate. On rejection write nothing",
+                "Ask the approval choice gate. On rejection write nothing",
                 "Choosing the default removes the switch's row",
                 "`workspace/config.json` never holds a process choice",
                 "never hand-edit the Switches table or the lifecycle fields",
-                "a project row is never a promotion"):
+                "a project row is never a promotion",
+                "name every Delivery that is scope- or execution-approved",
+                "its checks refuse it until its execution plan is revised and approved again",
+                "A Delivery in review or later keeps its pin",
+                "inside a Delivery with `--delivery DLV-###`, which refuses a drifted pin"):
             with self.subTest(rule=rule):
                 self.assertIn(rule, reference)
         order = [reference.index(verb) for verb in (

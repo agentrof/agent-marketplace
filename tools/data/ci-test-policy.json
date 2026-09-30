@@ -181,6 +181,7 @@
         "tools.tests.test_validator_contract.*",
         "tools.tests.test_review_panels.*",
         "tools.tests.test_process_policy.*",
+        "tools.tests.test_default_equivalence.*",
         "tools.tests.test_counts.*",
         "tools.tests.test_task_inputs.*",
         "tools.tests.test_ci_*.*"
@@ -404,6 +405,7 @@
     "tools.tests.test_ci_release",
     "tools.tests.test_ci_tests",
     "tools.tests.test_counts",
+    "tools.tests.test_default_equivalence",
     "tools.tests.test_delivery_compile",
     "tools.tests.test_delivery_git",
     "tools.tests.test_delivery_protocol",

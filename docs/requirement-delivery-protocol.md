@@ -178,6 +178,16 @@ approved backlog package and selected Story/Test Plan bytes historically; it
 does not silently adopt or become blocked by a later unrelated upstream
 application receipt.
 
+When the project has a Process Policy, backlog approval records the pin a
+Delivery takes at scope approval, the policy's path, revision and source hash,
+in `backlog.md` and in each review note it approves, so a backlog revision and
+its reviews name the process switch values they ran under outside any
+Delivery. The pin is a record and is never compared: a later policy revision
+leaves the approved backlog current, a review approved earlier keeps its own
+pin, and `begin-revision` drops the pin from the new draft until its own
+approval. Without a policy nothing is recorded and the approval writes the
+bytes it wrote before; a draft or invalid policy refuses the approval.
+
 ## Delivery Planning
 
 `/delivery-plan "<goal>"` creates a disposable local proposal.

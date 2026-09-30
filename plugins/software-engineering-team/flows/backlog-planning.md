@@ -339,9 +339,14 @@ backlog_compile.py check --docs <workspace>/docs --approved --render --json
 ```
 
 Approval stamps the package, root backlog, epics, reviews and test plans while
-stories remain `planned`. Existing valid unchanged source approvals retain
-their timestamps, hashes and bytes; previously approved reviews are immutable
-and changes require a new review round. Setup's managed `.gitattributes` rule
+stories remain `planned`. When the project has a Process Policy, the approval
+also records the pin a Delivery takes at scope approval, that policy's path,
+revision and source hash, in the root backlog and in each review it approves,
+so a revision and its reviews name the switch values they ran under. Without a
+policy nothing is recorded; a draft or invalid policy refuses the approval.
+Existing valid unchanged source approvals retain their timestamps, hashes and
+bytes; previously approved reviews are immutable and changes require a new
+review round. Setup's managed `.gitattributes` rule
 checks `workspace/docs/` out without line-ending conversion, which keeps these
 bytes exact on Windows. Commit `workspace/docs/backlog/` and the updated
 `workspace/config.json` in the same project change. Report the package hash

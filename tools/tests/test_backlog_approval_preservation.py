@@ -15,6 +15,8 @@ from unittest import mock
 from tools.tests import backlog_fixture
 from tools.tests.git_fixture import init_repository, remove_temporary
 
+import process_policy
+
 compiler = backlog_fixture.backlog_compile
 
 
@@ -407,6 +409,99 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
             result, output = self.approve()
         self.assertEqual(result, 1, output)
         self.assertIn("unchanged approved source was modified", output)
+        self.assertEqual(compiler.snapshot_tree(self.docs), before)
+
+    def policy(self, *argv):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = process_policy.main([argv[0], "--docs", str(self.docs), *argv[1:]])
+        self.assertEqual(code, 0, output.getvalue())
+
+    def pin_of(self, path):
+        props, _body = compiler.parse_front_matter(path)
+        return {key: props[key] for key in process_policy.PIN_FIELDS if key in props}
+
+    def new_epic_review_round(self):
+        props, body = compiler.parse_front_matter(self.epic_review)
+        props["round"] = 2
+        props["aliases"] = ["EP-001-REVIEW-002"]
+        compiler.status_tag(props, "draft")
+        for key in ("approved_at_utc", "source_hash"):
+            props.pop(key, None)
+        review = self.epic_review.with_name("round-2-epic-review.md")
+        review.write_text(compiler.front_matter(props, body))
+        return review
+
+    def approve_under_policy(self):
+        """Approve a revision with a new root and epic review under an approved policy."""
+        self.policy("init")
+        self.policy("set", "--switch", "review_panels", "--value", "lens_panel")
+        self.policy("approve")
+        self.commit()
+        pin, errors = process_policy.approved_snapshot(self.docs)
+        self.assertEqual(errors, [])
+        self.assertEqual(pin["process_policy_revision"], 1)
+        reviews = [self.revise(), self.new_epic_review_round()]
+        result, output = self.approve()
+        self.assertEqual(result, 0, output)
+        return pin, reviews
+
+    def test_approval_records_the_process_policy_pin_in_the_root_and_each_review_it_approves(self):
+        previous = self.source_bytes()
+        # The fixture was approved without a policy, so nothing records one.
+        self.assertEqual([path for path in previous if self.pin_of(path)], [])
+        pin, reviews = self.approve_under_policy()
+        record = self.assert_full_gate()
+        for path in [self.root, *reviews]:
+            self.assertEqual(self.pin_of(path), pin, path)
+        props = list(compiler.parse_front_matter(self.root)[0])
+        start = props.index("approved_at_utc") + 1
+        self.assertEqual(props[start:start + 3], list(process_policy.PIN_FIELDS))
+        # The vault already declares the pin properties a Delivery records.
+        vault = compiler.vault_check.build_vault(self.docs, compiler.vault_check.load_policy(compiler.POLICY_PATH))
+        findings = []
+        compiler.vault_check.check_frontmatter_props(vault, findings)
+        self.assertEqual([finding for finding in findings
+                          if any(key in finding.message for key in process_policy.PIN_FIELDS)], [])
+        # Epics, stories and test plans record none; the reviews approved
+        # before the policy keep their bytes and their record of no policy.
+        for path in compiler.package_paths(record, self.docs):
+            if path not in {self.root, *reviews}:
+                self.assertEqual(self.pin_of(path), {}, path)
+        for path in (self.old_review, self.epic_review):
+            self.assertEqual(path.read_bytes(), previous[path])
+        # The pin records what the revision ran under; a later policy never stales it.
+        self.policy("begin-revision")
+        self.policy("set", "--switch", "review_panels", "--default")
+        self.policy("approve")
+        self.assert_full_gate()
+        self.assertEqual(self.pin_of(self.root), pin)
+
+    def test_a_new_revision_drops_the_pin_until_its_own_approval(self):
+        self.approve_under_policy()
+        self.commit()
+        output = io.StringIO()
+        with self.fixture_input_selection(), contextlib.redirect_stdout(output):
+            code = compiler.begin_revision(SimpleNamespace(
+                docs=str(self.docs), delivery_snapshot="", planning_mode="manual",
+                requirement_ref="", input_ref=["ba", "solution", "design", "application"],
+            ))
+        self.assertEqual(code, 0, output.getvalue())
+        self.assertEqual(self.pin_of(self.root), {})
+        self.assertEqual(self.pin_of(self.docs / "backlog/reviews/round-3-backlog-review.md"), {})
+
+    def test_a_draft_process_policy_refuses_a_new_approval_before_any_write(self):
+        self.policy("init")
+        # Re-approving the approved revision records nothing new, so it still passes.
+        before = compiler.snapshot_tree(self.docs)
+        result, output = self.approve()
+        self.assertEqual(result, 0, output)
+        self.assertEqual(compiler.snapshot_tree(self.docs), before)
+        self.revise()
+        before = compiler.snapshot_tree(self.docs)
+        result, output = self.approve()
+        self.assertEqual(result, 1, output)
+        self.assertIn("Process Policy revision 1 is a draft", output)
         self.assertEqual(compiler.snapshot_tree(self.docs), before)
 
     def test_begin_revision_requires_the_approved_head_preimage(self):

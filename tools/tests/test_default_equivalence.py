@@ -12,11 +12,13 @@ upstream notes and Verification Contract from the frozen
 backlog and Operation compilers, whose own fixes would otherwise move every
 Delivery hash that covers them; the Operation run checks the same contract,
 and the backlog run checks the same backlog and derives its review manifests.
-``--harness inputs`` rebuilds that file. Only the backlog golden hides a
-field: a review manifest's contract_hash hashes the package scripts, and its
-source_hash covers that hash. No Delivery record or Operation receipt carries
-a package script or instruction hash, and the task manifest run hashes a
-package the harness writes byte for byte, so release changes to scripts and
+``--harness inputs`` rebuilds that file. The approval run builds and approves
+the fixture backlog with ``root``'s own fixture and compiler, as the input
+harness does, and seals every backlog file it writes. Only the backlog golden
+hides a field: a review manifest's contract_hash hashes the package scripts,
+and its source_hash covers that hash. No Delivery record or Operation receipt
+carries a package script or instruction hash, and the task manifest run hashes
+a package the harness writes byte for byte, so release changes to scripts and
 contracts reach no other golden.
 """
 
@@ -143,6 +145,33 @@ BACKLOG_GOLDEN = {
     "root_manifest": "sha256:1a241a2cb7dc052d494515fc11339337740f5d202cd13efb88543fe785927030",
 }
 
+# Taken at program tip b83c1ba: every backlog file the fixture's approval
+# writes without a Process Policy. main e47dbe0 differs only in the story,
+# the registry and the package hash, where #306 stopped stub-story writing an
+# empty origin_mode into a legacy backlog.
+APPROVAL_GOLDEN = {
+    "backlog/_generated/board.md":
+        "sha256:ff176d94f2480cab35a308d85d448fc30f1d359df2d1c0cc1ced15bbca8bd20b",
+    "backlog/_generated/dependency-map.md":
+        "sha256:8d612f10319a41282d6e5f2bd220f0a7c69e194b5dfb7beb591d94fbe03684a3",
+    "backlog/_generated/registry.json":
+        "sha256:7d63be2c3e3a97e2836ee9e2ed8611b9ba5e4f94793b9b7a78258b8b4b267e55",
+    "backlog/_generated/test-coverage.md":
+        "sha256:33b9e6db44f8b6c5eb1a55144e86fb45f8cd5f3de7c0c9281726462f14eeabe9",
+    "backlog/backlog.md":
+        "sha256:1101f9fdf12d5758a2ec64691b222bdf63c1e8852761bcb1d49c3bbf7fc15278",
+    "backlog/epics/delivery-fixture/epic.md":
+        "sha256:fb807f9a658b8726e0802aae30d79b145f2302246ccbd12449d76458dc240095",
+    "backlog/epics/delivery-fixture/reviews/round-1-epic-review.md":
+        "sha256:bd8f795acddc4dbdc9c7439d9150d1e0032b7d94efc6fed2ef715d84479cfbc9",
+    "backlog/epics/delivery-fixture/stories/auth-01/story.md":
+        "sha256:c579d6ff5a1e1ab0d167f2828397f9cc2a8a770e2f3d8ea3e347793ea05419f0",
+    "backlog/epics/delivery-fixture/stories/auth-01/test-plan.md":
+        "sha256:de120945533d021dc49d5f2f12598a460d37235e4d4d6244baa867ed866a656b",
+    "backlog/reviews/round-1-backlog-review.md":
+        "sha256:ad38462e118bc1181066a5af8cd4bc9621f5efdb5bb290c63868827f2bec89a6",
+}
+
 # Taken at program tip 95298e5; 679de01 and e56acfb produce the same digests.
 # The implementer digest was taken at program tip 0ffe0fb and matches e56acfb.
 MANIFEST_GOLDEN = {
@@ -212,6 +241,11 @@ class DefaultEquivalenceTests(unittest.TestCase):
         # An approved policy that leaves story_size_budget at off reads the same.
         self.assertEqual({name.split(":", 1)[1]: value for name, value in actual.items()
                           if name.startswith("off:")}, BACKLOG_GOLDEN)
+
+    def test_backlog_approval_without_a_policy_writes_the_base_bytes(self):
+        # An approval records a Process Policy pin only when a policy exists.
+        self.assertEqual(run_harness("approval"), APPROVAL_GOLDEN,
+                         "run this file with --harness approval --raw to read the files")
 
     def test_task_manifests_match_the_base_without_a_policy(self):
         actual = run_harness("manifests")
@@ -387,6 +421,22 @@ def _operation_harness(root: Path, raw_output: bool = False) -> dict:
             text = f"{code}\n" + text.replace(str(project), "<project>").replace(raw, "<project>")
             outputs[kind] = text if raw_output else digest(text)
     return outputs
+
+
+def _approval_harness(root: Path, raw_output: bool = False) -> dict:
+    """Approve the fixture backlog with ``root``'s compiler and no Process Policy."""
+    sys.path[:0] = [str(root / PLUGIN / "scripts"), str(root / "tools/tests")]
+    import backlog_compile
+    from backlog_fixture import make_approved_backlog
+
+    _freeze_clocks(backlog_compile)
+    seal = (lambda data: data.decode("utf-8")) if raw_output else digest
+    with tempfile.TemporaryDirectory() as raw:
+        docs = Path(raw).resolve() / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True)
+        make_approved_backlog(docs)
+        return {path.relative_to(docs).as_posix(): seal(path.read_bytes())
+                for path in sorted((docs / "backlog").rglob("*")) if path.is_file()}
 
 
 def _backlog_harness(root: Path, raw_output: bool = False) -> dict:
@@ -592,7 +642,8 @@ def _shipped_harness(root: Path, raw_output: bool = False) -> dict:
     return {"tasks": text if raw_output else digest(text)}
 
 
-HARNESSES = {"backlog": _backlog_harness, "delivery": _delivery_harness,
+HARNESSES = {"approval": _approval_harness, "backlog": _backlog_harness,
+             "delivery": _delivery_harness,
              "delivery_policy": lambda root, raw_output=False: _delivery_harness(root, raw_output, True),
              "inputs": _input_harness, "manifests": _manifest_harness,
              "operation": _operation_harness, "shipped": _shipped_harness}

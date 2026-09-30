@@ -2900,6 +2900,38 @@ def restore_tree(root: Path, snapshot: tuple[dict[Path, bytes], set[Path]]) -> N
                 pass
 
 
+def policy_pin(docs: Path) -> tuple[dict, list[str]]:
+    """Return the Process Policy pin an approval records, the one a Delivery takes.
+
+    Outside a Delivery nothing else records the switch values a backlog
+    revision and its reviews ran under. No policy means no pin; a draft or
+    invalid policy is refused, never recorded.
+    """
+    import process_policy
+
+    return process_policy.approved_snapshot(docs)
+
+
+def without_policy_pin(props: dict) -> dict:
+    import process_policy
+
+    return {key: value for key, value in props.items() if key not in process_policy.PIN_FIELDS}
+
+
+def with_policy_pin(props: dict, pin: dict) -> dict:
+    """Return approval front matter that records ``pin`` after approved_at_utc.
+
+    An earlier pin is dropped first, so an empty pin leaves the bytes the
+    note had before approvals recorded a pin.
+    """
+    result = {}
+    for key, value in without_policy_pin(props).items():
+        result[key] = value
+        if key == "approved_at_utc":
+            result.update(pin)
+    return result
+
+
 def approve(args) -> int:
     docs = docs_root(args.docs)
     # Experience receipt validation is expensive but immutable during this
@@ -2910,7 +2942,7 @@ def approve(args) -> int:
         record, errors = collect(docs)
     errors.extend(approval_readiness_findings(record))
     already_approved = record.get("backlog", {}).get("props", {}).get("status") == "approved"
-    preserved = {}
+    preserved, pin = {}, {}
     if not errors:
         if already_approved:
             errors.extend(approval_findings(record, docs))
@@ -2921,6 +2953,8 @@ def approve(args) -> int:
         else:
             preserved, preserve_errors = preserved_approval_sources(record, docs)
             errors.extend(preserve_errors)
+            pin, pin_errors = policy_pin(docs)
+            errors.extend(pin_errors)
     errors = sorted(set(errors))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2,
@@ -2936,11 +2970,12 @@ def approve(args) -> int:
     snapshot = snapshot_tree(docs)
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     try:
+        reviews = [docs / latest(record["backlog_reviews"])["path"]]
+        reviews += [docs / latest(epic["reviews"])["path"] for epic in record["epics"]]
+        pinned = {docs / record["backlog"]["path"], *reviews}
         transition_paths = [docs / record["backlog"]["path"]]
         transition_paths += [docs / epic["path"] for epic in record["epics"]]
-        transition_paths += [docs / latest(record["backlog_reviews"])["path"]]
-        transition_paths += [docs / latest(epic["reviews"])["path"]
-                             for epic in record["epics"]]
+        transition_paths += reviews
         transition_paths += [docs / story["test_plan"]
                              for story in record["stories"]]
         for path in sorted(set(transition_paths)):
@@ -2951,6 +2986,8 @@ def approve(args) -> int:
             props["approved_at_utc"] = now
             props.pop("source_hash", None)
             props.pop("package_hash", None)
+            if path in pinned:
+                props = with_policy_pin(props, pin)
             path.write_bytes(front_matter(props, body).encode("utf-8"))
 
         with stage_package.candidate_session(), experience_validation_session():
@@ -3112,10 +3149,12 @@ def begin_revision(args) -> int:
     root_props["input_bindings"] = input_bindings
     for key in ("approved_at_utc", "source_hash", "package_hash"):
         root_props.pop(key, None)
+    # The Process Policy pin belongs to the approval stamp it follows.
+    root_props = without_policy_pin(root_props)
 
     latest_review = latest(record["backlog_reviews"])
     next_round = int(latest_review["props"].get("round", 0) or 0) + 1
-    review_props = dict(latest_review["props"])
+    review_props = without_policy_pin(latest_review["props"])
     backlog_title = str(root_props.get("title", DEFAULT_BACKLOG_TITLE))
     review_title = f"Backlog review round {next_round} for {backlog_title}"
     review_props["title"] = review_title

@@ -1219,7 +1219,8 @@ def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
         for scripts in script_dirs:
             if not scripts.is_dir():
                 continue
-            local = {p.stem for p in scripts.glob("*.py")}
+            # A skill script may import the runtime scripts its own package ships.
+            local = {p.stem for p in (*scripts.glob("*.py"), *(plugin / "scripts").glob("*.py"))}
             shared_scripts = (
                 tree.root / "platforms" / "shared" / plugin.name
                 / "overlay" / "scripts"
@@ -2825,16 +2826,17 @@ STORY_SIZE_MEASURES_RELPATH = "skill-content/product-planning/data/story-size-me
 BACKLOG_COMPILER_RELPATH = "scripts/backlog_compile.py"
 
 
-def implemented_derivations(source: str) -> set[str] | None:
-    """Return the keys of the backlog compiler's STORY_SIZE_DERIVATIONS, read
-    from its source so the validator never imports a plugin script."""
+def implemented_derivations(source: str, registry: str = "STORY_SIZE_DERIVATIONS") -> set[str] | None:
+    """Return the keys of a script's module-level registry dict, by default the
+    backlog compiler's STORY_SIZE_DERIVATIONS, read from its source so the
+    validator never imports a plugin script."""
     try:
         module = ast.parse(source)
     except SyntaxError:
         return None
     for node in module.body:
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict) and any(
-                isinstance(target, ast.Name) and target.id == "STORY_SIZE_DERIVATIONS"
+                isinstance(target, ast.Name) and target.id == registry
                 for target in node.targets):
             return {key.value for key in node.value.keys
                     if isinstance(key, ast.Constant) and isinstance(key.value, str)}
@@ -3060,6 +3062,104 @@ def check_owner_decision_classes(tree: Tree, findings: list[Finding]) -> None:
             findings.append(Finding(
                 "error", rel(tree, path), 1, "owner_decision_classes", problem,
                 "declare each at-once class once with an id and a description"))
+
+
+AUTOPILOT_POLICY_RELPATH = "skill-content/autopilot/data/autopilot-policy.json"
+AUTOPILOT_SCRIPT_RELPATH = "skill-content/autopilot/scripts/autopilot.py"
+AUTOPILOT_NUMBERS = ("default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
+                     "arming_ttl_minutes")
+AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", *AUTOPILOT_NUMBERS}
+AUTOPILOT_DEFAULTS = ("allowed", "excluded", "never")
+
+
+def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
+    """Return the problems of the autopilot entry's classes, goal kinds and durations."""
+    if not isinstance(data, dict) or set(data) != AUTOPILOT_KEYS or data.get("schema_version") != 1:
+        return [f"policy must hold exactly {', '.join(sorted(AUTOPILOT_KEYS))},"
+                " with schema_version 1"]
+    problems: list[str] = []
+    numbers = {key: data[key] for key in AUTOPILOT_NUMBERS
+               if isinstance(data[key], int) and not isinstance(data[key], bool) and data[key] > 0}
+    problems += [f"{key} must be a positive whole number"
+                 for key in AUTOPILOT_NUMBERS if key not in numbers]
+    maximum = numbers.get("max_duration_hours")
+    problems += [f"{key} {numbers[key]} is above max_duration_hours {maximum}"
+                 for key in ("default_duration_hours", "default_goal_cap_hours")
+                 if maximum and key in numbers and numbers[key] > maximum]
+    ids: dict[str, list[str]] = {"class": [], "goal kind": []}
+    classes = data["classes"] if isinstance(data["classes"], list) else []
+    for entry in classes:
+        if not isinstance(entry, dict) or set(entry) != {"id", "description", "default"} \
+                or not _nonblank(entry.get("id")) or not _nonblank(entry.get("description")):
+            problems.append("every class holds exactly an id, a description and a default")
+            continue
+        ids["class"].append(entry["id"])
+        if entry["default"] not in AUTOPILOT_DEFAULTS:
+            problems.append(f"class {entry['id']!r} has unknown default {entry['default']!r}")
+    if not any(isinstance(entry, dict) and entry.get("default") == "never" for entry in classes):
+        problems.append("the never set is empty: at least one class is never delegated")
+    script = plugin / AUTOPILOT_SCRIPT_RELPATH
+    readers = implemented_derivations(read_text(script), "GOAL_READERS") if script.is_file() else None
+    if readers is None:
+        problems.append(f"{AUTOPILOT_SCRIPT_RELPATH} declares no GOAL_READERS registry")
+        readers = set()
+    kinds = data["goal_kinds"] if isinstance(data["goal_kinds"], list) else []
+    if not kinds:
+        problems.append("goal_kinds must declare at least one goal kind")
+    for entry in kinds:
+        if not isinstance(entry, dict) or set(entry) != {"id", "description", "end"} \
+                or not _nonblank(entry.get("id")) or not _nonblank(entry.get("description")):
+            problems.append("every goal kind holds exactly an id, a description and its end")
+            continue
+        ids["goal kind"].append(entry["id"])
+        end = entry["end"]
+        if end == "none":
+            continue
+        if not isinstance(end, dict) or set(end) != {"compiler", "terminal_statuses"}:
+            problems.append(f"goal kind {entry['id']!r} end is none or holds exactly a compiler"
+                            " and terminal_statuses")
+            continue
+        statuses = end["terminal_statuses"]
+        if not isinstance(statuses, list) or not statuses \
+                or not all(_nonblank(status) for status in statuses) \
+                or len(set(statuses)) != len(statuses):
+            problems.append(f"readable goal kind {entry['id']!r} declares no distinct terminal"
+                            " statuses")
+        if end["compiler"] not in readers or not (plugin / str(end["compiler"])).is_file():
+            problems.append(f"goal kind {entry['id']!r} names compiler {end['compiler']!r},"
+                            " which is no package script autopilot.py reads")
+    for label, values in ids.items():
+        problems += [f"{label} id {value!r} must be lowercase snake_case"
+                     for value in values if not REVIEW_STEP_ID_RE.match(value)]
+        problems += [f"duplicate {label} {value!r}"
+                     for value in sorted({value for value in values if values.count(value) > 1})]
+    return problems
+
+
+def check_autopilot_policy(tree: Tree, findings: list[Finding]) -> None:
+    """The autopilot entry's classes, goal kinds and durations are validated
+    data, and each readable goal ends at statuses its owning compiler reads."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / AUTOPILOT_POLICY_RELPATH
+        if not path.is_file():
+            if path.parents[1].is_dir():
+                findings.append(Finding(
+                    "error", rel(tree, path.parents[1]), 1, "autopilot_policy",
+                    "the autopilot entry has no data/autopilot-policy.json",
+                    "declare its classes, goal kinds and durations"))
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "autopilot_policy",
+                f"autopilot policy is not valid unique-key JSON: {exc}", "fix the syntax"))
+            continue
+        for problem in autopilot_policy_problems(data, plugin):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "autopilot_policy", problem,
+                "declare each class and goal kind once, with a known default, a readable"
+                " end and durations within the maximum"))
 
 
 def _limits_shape_errors(config: dict) -> list[str]:
@@ -3332,6 +3432,7 @@ CHECKS = {
     "story_size_measures": check_story_size_measures,
     "fact_ownership": check_fact_ownership,
     "owner_decision_classes": check_owner_decision_classes,
+    "autopilot_policy": check_autopilot_policy,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,

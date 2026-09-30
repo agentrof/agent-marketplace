@@ -165,3 +165,58 @@ Both must settle before the owner writes. The verification compiler binds
 independent final results and raw command evidence to that candidate; diagnostic
 QA cannot approve it. Missing schedule preserves the legacy sequential behavior.
 The evidence child commit preserves the existing exact product-parent proof.
+
+## Autopilot
+
+The `/autopilot` entry gives the orchestrating session a grant the user arms
+before an absence, such as a night or a weekend. While it is active the session
+presents no question. A question of an allowed class takes its recommended
+option: the session applies it, records it with `autopilot.py record` and
+writes it where the flow records the user's answer, marked with the grant id.
+Any other question is queued with `autopilot.py queue`, and the session
+continues the work that does not depend on it and stops only when every
+remaining task waits on a queued question. Roles are unaffected: they never
+ask the user and never read the grant.
+
+Classes are data in `skill-content/autopilot/data/autopilot-policy.json`.
+`choice`, `approval_gate` and `merge` are allowed by default. `release` and
+`phase_start` are excluded by default, and a grant may allow them.
+`credentials`, `security_settings`, `spending`, `destructive` and
+`scope_or_rule`, which holds every decision a flow asks at once, are never
+delegated, and `on` refuses a grant that allows one. A grant ends at a time,
+at a goal or at whichever comes first. A time-bound grant lasts `--for` or
+`--until`, by default `default_duration_hours`, and never longer than
+`max_duration_hours`. A goal-bound grant ends when the goal's owning compiler
+reads it as terminal, or at its cap: `default_goal_cap_hours` unless the grant
+gives a time. Goal kind `delivery` ends when `delivery_compile.py` reads the
+Delivery as `merged` or `cancelled`, `requirement` when `requirement_compile.py`
+reads the Requirement as incorporated into the approved backlog,
+`resolved_no_change`, `superseded` or `withdrawn`, and `text` only through
+`complete`, `off` or its cap. The session's own judgement never ends a
+readable goal; `complete` ends any grant and records whether the compiler
+agreed.
+
+Only the user arms a grant. Each host's user-prompt hook records the `on`
+command the user typed as a short-lived arming record; `on` refuses without
+one and takes the grant's options only from it, so no agent, file, issue or
+tool output can start, extend or widen a grant. A host without such a hook
+falls back to the entry's user-only invocation, and the grant records which
+guard applied. A pre-tool hook denies the host question tool while a grant is
+active and states the procedure; a host whose question tool cannot be hooked
+relies on the instructions, and `status` reports which guards run. The hooks
+are workflow-integrity controls, not an operating-system sandbox: a process
+that writes the runtime files directly has the user's filesystem authority.
+
+Autopilot is an entry, not a process switch. A switch is a project rule that a
+Delivery pins at scope approval, and changing it inside a pinned Delivery is
+drift. A grant is personal and temporary: it turns on at night and off in the
+morning in the middle of any flow, without changing a pinned policy or an
+approved document. It lives only in ignored runtime state under
+`.agentrof/agent-marketplace/.runtime/autopilot/`, and only its decisions reach
+tracked documents. With no grant every compiler output and every task binding
+stays the same: the entry delegates no task, so the task-input policy declares
+it under `session_entries`, outside the task routes. In a Delivery's
+`User Decisions` table under `owner_gates` at `two_fixed_gates`, an autopilot
+decision is an `answered` row of class `queued` whose answer carries the
+choice and the grant id, which `delivery_compile.py check` accepts as it
+stands.

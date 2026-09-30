@@ -418,5 +418,8 @@
     "docker-compose",
     "sql-database-design",
     "nosql-database-design"
+  ],
+  "session_entries": [
+    "autopilot"
   ]
 }

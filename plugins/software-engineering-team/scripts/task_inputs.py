@@ -124,10 +124,16 @@ def catalog(package: Path = PACKAGE) -> dict:
     entries = {path.parent.name for path in (package / "skill-content").glob("*/SKILL.md")
                if re.search(r"^exposure: entry$", path.read_text(encoding="utf-8"), re.M)}
     flows = {path.stem for path in (package / "flows").glob("*.md")}
+    # A session entry changes only the orchestrating session and delegates no task.
+    session = policy.get("session_entries", [])
+    if (not isinstance(session, list) or len(session) != len(set(session))
+            or set(session) & set(policy["entries"])):
+        raise ValueError("session entries must be a unique list outside the task routes")
     if (set(policy["role_skills"]) != agents or set(policy["required_role_skills"]) != agents
-            or set(policy["entries"]) != entries):
+            or set(policy["entries"]) | set(session) != entries):
         raise ValueError("task input policy must cover every current role and entry exactly")
-    mapped_skills = set(policy["entries"]) | {skill for bound in policy["role_skills"].values() for skill in bound}
+    mapped_skills = set(policy["entries"]) | set(session) | {
+        skill for bound in policy["role_skills"].values() for skill in bound}
     mapped_flows = {flow for entry in policy["entries"].values() for flow in entry["flows"]}
     if mapped_skills != skills or mapped_flows != flows:
         raise ValueError("task input policy has missing or unknown skills or flows")

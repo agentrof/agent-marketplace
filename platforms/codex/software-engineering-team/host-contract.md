@@ -34,6 +34,10 @@
 - Under switch `review_panels` at `lens_panel`, run a review panel's lens
   readers in parallel: start every reader of the panel before waiting on any
   of them, then wait for all of them before triage.
+- Under switch `implementation_schedule` at `parallel_lanes_v1`, writers
+  overlap only when their approved lane scopes intersect. Start every lane of
+  an Item phase before waiting on any of them, then wait for all of them
+  before the next phase.
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.

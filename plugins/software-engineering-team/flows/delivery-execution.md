@@ -17,6 +17,10 @@ claimed, or one its Delivery cancelled, refuses the start with
 `DELIVERY_DEPENDENCY_UNMET` and names a backlog revision as the way out.
 Product and test changes stay on the Item worktree; Integration accepts only
 reviewed, verified Item handoffs and compiler-owned projections.
+Switch `implementation_schedule`: at `parallel_lanes_v1`, an Item whose approved
+plan declares it runs its implementation roles in parallel lanes, as
+`skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md`
+defines.
 
 ## Parallel verification
 

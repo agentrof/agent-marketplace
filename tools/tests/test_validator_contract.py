@@ -248,6 +248,27 @@ class ValidatorContractTests(unittest.TestCase):
                 path.write_text(json.dumps(value))
                 self.assertIn("delivery_contract_shape", self.checks(root))
 
+    def test_item_implementation_schedules_follow_the_switch_registry(self):
+        """An Item records an implementation_schedule switch value, and one without reads as today's order."""
+        document = "plugins/software-engineering-team/skill-content/deliver/data/delivery-document-contract.json"
+        registry = "plugins/software-engineering-team/skill-content/configure/data/process-switches.json"
+        for relative, mutate in (
+                (document, lambda value: value["document_types"]["delivery_item"].update(
+                    implementation_schedules=["sequential_v1"])),
+                (document, lambda value: value["document_types"]["delivery_item"].update(
+                    missing_implementation_schedule="parallel_lanes_v1")),
+                (registry, lambda value: value["switches"]["implementation_schedule"]["values"].append(
+                    {"id": "parallel_lanes_v2", "tradeoffs": "Unmeasured."}))):
+            with self.subTest(path=relative), tempfile.TemporaryDirectory() as temporary:
+                root = self.fixture(temporary)
+                path = root / relative
+                value = json.loads(path.read_text(encoding="utf-8"))
+                mutate(value)
+                path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+                self.assertTrue(any(finding.check == "delivery_contract_shape"
+                                    and "implementation schedules" in finding.message
+                                    for finding in validate.run(root)))
+
 
 PLUGIN_ROOT = "plugins/software-engineering-team"
 PANELS = f"{PLUGIN_ROOT}/skill-content/challenge-review/data/review-panels.json"

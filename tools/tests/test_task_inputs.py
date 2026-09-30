@@ -170,6 +170,75 @@ class TaskInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stale"):
                 task_inputs.manifest(**kwargs, expected_hash=result["source_hash"])
 
+    def test_lane_roles_bind_only_their_lane_scope_while_the_architect_keeps_every_claim(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            lanes = ("implementation_schedule: parallel_lanes_v1\nrole_sequence:\n  - software_architect\n"
+                     "  - backend_developer\n  - devops_engineer\n  - code_reviewer\n  - qa_engineer\n"
+                     "path_claims:\n  - deploy\n  - src/api\n  - workspace/docs\n"
+                     "lane_scopes:\n  - backend_developer:src/api\n  - devops_engineer:deploy\n"
+                     "lane_seams:\n")
+            item = self.note(root, "workspace/docs/delivery/deliveries/one/items/st-001/item.md",
+                             "delivery-item", "backend_developer", lanes)
+            self.commit(root)
+            kwargs = dict(entry="deliver", mode="create", project=root, inputs=[item])
+
+            def scope(role):
+                return task_inputs.manifest(role=role, **kwargs)["write_scope"]
+
+            lane_note = [constraint for constraint in scope("backend-developer")["constraints"]
+                         if constraint.startswith("parallel lane:")]
+            self.assertEqual(len(lane_note), 1)
+            for role, paths in (("backend-developer", ["src/api"]), ("devops-engineer", ["deploy"])):
+                with self.subTest(role=role):
+                    self.assertEqual(scope(role)["allowed_write_area"], [
+                        {"path": path, "coverage": "path_and_descendants", "source": item} for path in paths])
+                    self.assertIn(lane_note[0], scope(role)["constraints"])
+            # The architect runs alone before the lanes, so its area is the Item's claims.
+            architect = scope("software-architect")
+            self.assertEqual([area["path"] for area in architect["allowed_write_area"]], ["deploy", "src/api"])
+            self.assertNotIn(lane_note[0], architect["constraints"])
+            content = (root / item).read_text(encoding="utf-8")
+            for broken in (content.replace("backend_developer:src/api", "backend_developer:src\\api"),
+                           content.replace("backend_developer:src/api", "backend_developer:elsewhere"),
+                           content.replace("parallel_lanes_v1", "parallel_lanes_v2")):
+                with self.subTest(broken=broken):
+                    (root / item).write_text(broken, encoding="utf-8")
+                    self.assertEqual(scope("backend-developer")["status"], "unresolved")
+            # Without the schedule every implementation role holds every claim, as before.
+            (root / item).write_text(content.replace("implementation_schedule: parallel_lanes_v1\n", ""),
+                                     encoding="utf-8")
+            self.assertEqual([area["path"] for area in scope("backend-developer")["allowed_write_area"]],
+                             ["deploy", "src/api"])
+
+    def test_parallel_lane_instructions_are_bound_only_at_parallel_lanes(self):
+        planning = "skill-content/execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md"
+        execution = "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            tasks = (("execution-plan", "software-architect", planning),
+                     ("deliver", "backend-developer", execution),
+                     ("deliver", "code-reviewer", execution),
+                     ("deliver", None, execution))
+
+            def bound(entry, role):
+                result = task_inputs.manifest(entry=entry, role=role, mode="review", project=root)
+                return set(result["required_reads"]) | {item["path"] for item in result["instructions"]}
+
+            for entry, role, reference in tasks:
+                with self.subTest(entry=entry, role=role, policy=False):
+                    self.assertFalse({planning, execution} & bound(entry, role))
+            docs = root / "workspace/docs"
+            for argv in (["init"], ["set", "--switch", "implementation_schedule", "--value", "parallel_lanes_v1"],
+                         ["approve"]):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+            for entry, role, reference in tasks:
+                with self.subTest(entry=entry, role=role, policy=True):
+                    self.assertEqual({planning, execution} & bound(entry, role), {reference})
+
     def test_unknown_write_scope_remains_empty_with_unresolved_transition_condition(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()

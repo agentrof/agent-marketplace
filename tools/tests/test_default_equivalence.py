@@ -87,9 +87,12 @@ OPERATION_GOLDEN = {
 }
 
 # Taken at program tip 95298e5; 679de01 and e56acfb produce the same digests.
+# The implementer digest was taken at program tip 0ffe0fb and matches e56acfb.
 MANIFEST_GOLDEN = {
     "entry:without_switch_files":
         "sha256:e0ca7b6f1cf42fd533887f93ac2591a4ba5de7ee44756e95eaadbe69614fc7de",
+    "implementer:without_switch_files":
+        "sha256:ee2fe615cda5cb36cd17a2c6f9d77a2140da5ab00dda16f202aba89f2387f9db",
     "package_only:without_switch_files":
         "sha256:28680561f56b2f8dce1a5787c527d68f53a466e561da5e25622ff06e6d9b51be",
     "reader:without_switch_files":
@@ -306,9 +309,17 @@ TASKS = {
     "package_only": {"entry": "fixture-entry", "role": "fixture-reader", "mode": "review",
                      "project": None},
 }
+# An implementation role on an approved Item without a lane plan: the
+# item_claims resolver grants it every product path the Item claims.
+ITEM_RECORD = "workspace/docs/delivery/deliveries/dlv-001-fixture/items/fix-01/item.md"
+ITEM_TEXT = ("---\ntype: delivery-item\nstory_id: FIX-01\nstatus: active\nrole_sequence:\n"
+             "  - fixture_writer\n  - code_reviewer\n  - qa_engineer\npath_claims:\n  - src\n"
+             "  - tests\n  - workspace/docs\n---\n\n# Item\n")
+IMPLEMENTER = {"entry": "fixture-entry", "role": "fixture-writer", "mode": "create",
+               "inputs": [ITEM_RECORD]}
 
 
-def build_task_package(package: Path, *, switch_files: bool) -> None:
+def build_task_package(package: Path, *, switch_files: bool, resolver: str = "unresolved") -> None:
     """Write the smallest package the task-input catalog accepts."""
     catalog = {
         "schema_version": 1, "modes": ["create", "revise", "consume", "review", "repair"],
@@ -319,7 +330,8 @@ def build_task_package(package: Path, *, switch_files: bool) -> None:
         "entries": {"fixture_entry": {
             "flows": ["fixture-flow"], "roles": ["fixture-writer", "fixture-reader"],
             "scope_kind": "fixture", "project_state": True,
-            "write_scope": {"resolver": "unresolved", "roles": []},
+            "write_scope": {"resolver": resolver,
+                            "roles": [] if resolver == "unresolved" else ["fixture-writer"]},
             "next_transition": "The fixture compiler approves the exact result."}},
         "read_only_roles": ["fixture-reader"], "required_references": {},
         "stack_reference_by_role": {}, "repair_policy": "Preserve finding ids.",
@@ -353,7 +365,7 @@ def build_task_package(package: Path, *, switch_files: bool) -> None:
         path.write_bytes(text.encode("utf-8"))
 
 
-def build_task_project(project: Path) -> None:
+def build_task_project(project: Path, extra: dict | None = None) -> None:
     """Write and commit one project whose Git identity is fixed by GIT_ENV."""
     from git_fixture import init_repository
 
@@ -361,6 +373,9 @@ def build_task_project(project: Path) -> None:
     brief = project / "workspace" / "docs" / "brief.md"
     brief.parent.mkdir(parents=True)
     brief.write_bytes(b"---\ntype: note\n---\n\n# Brief\n")
+    for relative, text in (extra or {}).items():
+        (project / relative).parent.mkdir(parents=True, exist_ok=True)
+        (project / relative).write_bytes(text.encode("utf-8"))
     for args in (("config", "core.autocrlf", "false"), ("add", "--all"),
                  ("commit", "-q", "-m", "fixture")):
         subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True,
@@ -381,13 +396,20 @@ def _manifest_harness(root: Path, raw_output: bool = False) -> dict:
         base = Path(raw).resolve()
         project = base / "project"
         build_task_project(project)
+        item_project = base / "item-project"
+        build_task_project(item_project, {ITEM_RECORD: ITEM_TEXT})
         # The base binds every file of a selected skill, so its golden is taken
         # without switch references; this tree must match it with them present.
         for switch_files in (False, True) if (root / PLUGIN / "scripts/process_policy.py").is_file() \
                 else (False,):
             package = base / f"package-{switch_files}"
             build_task_package(package, switch_files=switch_files)
-            for name, manifest in task_manifests(task_inputs, package, project).items():
+            manifests = task_manifests(task_inputs, package, project)
+            item_package = base / f"item-package-{switch_files}"
+            build_task_package(item_package, switch_files=switch_files, resolver="item_claims")
+            manifests["implementer"] = task_inputs.manifest(
+                package=item_package, project=item_project, **IMPLEMENTER)
+            for name, manifest in manifests.items():
                 text = json.dumps(manifest, indent=2, sort_keys=True)
                 result[f"{name}:{'with' if switch_files else 'without'}_switch_files"] = \
                     text if raw_output else digest(text)

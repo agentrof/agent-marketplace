@@ -2861,6 +2861,18 @@ def check_delivery_contract_shape(
             or any(not isinstance(scope.get(key), list) or any(not isinstance(item, str) or not item for item in scope[key])
                    for key in ("non_code_suffixes", "test_path_segments", "test_name_patterns"))):
         problems.append("verification mutation scope must exclude environment and docs, include unknown code and support approved expansion")
+    # An Item records the implementation_schedule switch value it runs under;
+    # an Item without one ran before the switch existed, so it reads as today's order.
+    item = (contracts["delivery-document-contract.json"].get("document_types") or {}).get("delivery_item") or {}
+    try:
+        registry = json.loads(read_text(root.parents[2] / PROCESS_SWITCHES_RELPATH))
+        switch_values = [value.get("id") for value in registry["switches"]["implementation_schedule"]["values"]]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        switch_values = None
+    if (switch_values is None or item.get("implementation_schedules") != switch_values
+            or item.get("missing_implementation_schedule") != "sequential_v1"):
+        problems.append("Item implementation schedules must equal the implementation_schedule switch values,"
+                        " and an Item without one must read as sequential_v1")
     codes = result.get("finding_codes", [])
     if not isinstance(codes, list) or len(codes) != len(set(codes)):
         problems.append("result finding-code registry is not a unique list")

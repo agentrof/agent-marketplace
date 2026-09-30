@@ -958,6 +958,8 @@ def delivery_findings(docs: Path, identifier: str, *,
         plan_props, plan_body = split_note(plan)
         if plan_props.get("type") != "execution-plan": errors.append("execution-plan.md type must be execution-plan")
         errors.extend(f"execution-plan.md missing section: {name}" for name in sorted(set(SECTIONS["execution-plan"]) - sections(plan_body)))
+    if records_bundle_rulings(docs, props):
+        errors.extend(ruling_id_findings(body))
     # Closed Deliveries preserve their pinned historical source baseline. Every
     # mutable Delivery phase must instead prove that its selected Story/Test
     # Plan and Definition of Done are still the exact approved source bytes.
@@ -2260,6 +2262,53 @@ EXECUTION_PLANNING = "execution_planning"
 SINGLE_SOURCE_BUNDLE = "single_source_bundle"
 # The bundle is reviewed while its execution plan can still be approved.
 BUNDLE_STATUSES = ("scope_proposed", "scope_approved", "execution_approved")
+# A ruling line of User Decisions starts with its id, after an optional list
+# marker or heading; a decision table row keeps it in its first cell.
+RULING_LINE_RE = re.compile(r"^(?:[-*+]\s+|[0-9]+[.)]\s+|#{3,6}\s+)?(?:\*\*)?(D-[0-9]+)\b")
+RULING_CELL_RE = re.compile(r"^D-[0-9]+$")
+
+
+def ruling_id_findings(body: str) -> list[str]:
+    """Refuse a malformed ruling id, and one id that starts two rulings.
+
+    Every document cites an owner ruling by its id, so an id names exactly one
+    ruling. A decision table row of switch owner_gates counts under its id
+    against the ruling lines; the table's own check validates its rows.
+    """
+    lines, rows = [], []
+    for line in section_bodies(body).get("User Decisions", "").splitlines():
+        text = line.strip()
+        if text.startswith("|"):
+            cell = text.strip("|").split("|", 1)[0].strip()
+            if RULING_CELL_RE.fullmatch(cell):
+                rows.append(cell)
+        elif match := RULING_LINE_RE.match(text):
+            lines.append(match.group(1))
+    errors = [f"delivery.md User Decisions ruling {ruling} needs an id of D- and at least two digits"
+              for ruling in lines if not USER_DECISION_ID_RE.fullmatch(ruling)]
+    for ruling in sorted(set(lines)):
+        count = lines.count(ruling) + rows.count(ruling)
+        if count > 1:
+            errors.append(f"delivery.md User Decisions gives id {ruling} to {count} rulings;"
+                          " every ruling keeps its own id")
+    return errors
+
+
+def records_bundle_rulings(docs: Path, props: dict) -> bool:
+    """Whether a Delivery records its owner rulings under execution_planning single_source_bundle.
+
+    Rulings are made while the owner's questions are logged, whatever
+    owner_gates is. A policy that cannot be read, or a pin that drifted,
+    decides nothing here: the source checks report it. A package that
+    declares no such switch runs none of its values.
+    """
+    if props.get("status") not in DECISION_LOG_STATUSES:
+        return False
+    try:
+        value = delivery_switch_value(docs, str(props.get("id", "")), EXECUTION_PLANNING)
+    except (KeyError, ValueError):
+        return False
+    return value == SINGLE_SOURCE_BUNDLE
 
 
 def _file_record(docs: Path, relative: str) -> dict:

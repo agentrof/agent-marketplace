@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -606,6 +607,54 @@ class BrokenGrantTests(unittest.TestCase):
         self.assertIn("grant state is unreadable", err)
         self.assertTrue((self.p.state / "arming.json").exists())
         self.assertEqual(self.p.run_verb("on")[0], 0)
+
+
+@contextlib.contextmanager
+def system_zone(name: str):
+    """Run under one system time zone, as the host's own clock would."""
+    saved = os.environ.get("TZ")
+    os.environ["TZ"] = name
+    time.tzset()
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = saved
+        time.tzset()
+
+
+@unittest.skipIf(os.name == "nt", "time.tzset sets the system zone only on POSIX hosts")
+class ClockTests(unittest.TestCase):
+    """--until reads the system zone across a daylight-saving change, from when the user typed it."""
+
+    def setUp(self) -> None:
+        self.p = Project(self, armed=True)
+
+    def test_a_clock_time_crosses_a_daylight_saving_change_in_the_system_zone(self):
+        cases = (("Europe/Berlin", datetime(2026, 3, 28, 22, 0, tzinfo=timezone.utc),
+                  "2026-03-29T05:00:00Z"),
+                 ("America/New_York", datetime(2026, 3, 8, 3, 0, tzinfo=timezone.utc),
+                  "2026-03-08T11:00:00Z"))
+        for zone, typed, expected in cases:
+            with self.subTest(zone=zone), system_zone(zone):
+                self.p.arm("on --until 07:00", now=typed)
+                code, _out, err = self.p.run_verb("on", now=typed + timedelta(minutes=1))
+                self.assertEqual(code, 0, err)
+                self.assertEqual(self.p.grant()["expires_at"], expected)
+
+    def test_a_clock_time_that_passed_after_it_was_typed_is_refused(self):
+        typed = datetime(2026, 10, 1, 6, 55, tzinfo=timezone.utc)
+        with system_zone("UTC"):
+            self.p.arm("on --until 07:00", now=typed)
+            self.p.assert_refused("--until 07:00 is in the past", "on",
+                                  now=typed + timedelta(minutes=6))
+        self.assertFalse((self.p.state / "grant.json").exists())
+
+    def test_a_huge_duration_is_refused_without_a_traceback(self):
+        self.p.arm("on --for 99999999999d")
+        self.p.assert_refused(f"is above the {POLICY['max_duration_hours']} h maximum", "on")
 
 
 class FailClosedTests(unittest.TestCase):

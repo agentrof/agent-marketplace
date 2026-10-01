@@ -189,8 +189,10 @@ The evidence child commit preserves the existing exact product-parent proof.
 The `/autopilot` entry gives the orchestrating session a grant the user arms
 before an absence, such as a night or a weekend. While it is active the session
 presents no question. A question of an allowed class takes its recommended
-option: the session applies it, records it with `autopilot.py record` and
-writes it where the flow records the user's answer, marked with the grant id.
+option: the session records it with `autopilot.py record` first, then applies
+it and writes it where the flow records the user's answer, marked with the
+grant id. `record` and `queue` apply the grant's end conditions first, its goal
+included, and refuse once it has ended.
 Any other question is queued with `autopilot.py queue`, and the session
 continues the work that does not depend on it and stops only when every
 remaining task waits on a queued question. Roles are unaffected: they never

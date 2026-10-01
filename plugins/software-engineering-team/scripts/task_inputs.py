@@ -816,7 +816,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     if epic:
         # The closure is bound as its own source_hash binds it: the stubs it
         # lists from notes outside its paths are information, never an input.
-        hashed = dict(result, backlog_scope=backlog_review_inputs.bound_view(closure, not read_only))
+        hashed = dict(result, backlog_scope=backlog_review_inputs.bound_view(closure))
     result["source_hash"] = digest(hashed)
     if expected_hash is not None and result["source_hash"] != expected_hash:
         raise ValueError("task inputs are stale; regenerate before persisting a result")

@@ -493,12 +493,12 @@ class BacklogReviewInputTests(unittest.TestCase):
         epic = inputs.manifest(self.docs, epic="EP-001")
         root = inputs.manifest(self.docs)
         # With no Process Policy a reader receives the manifest it received
-        # before review panels existed; a writer's check lists only stubs.
-        for value in (epic, root):
+        # before review panels existed, and so does a writer with no stub to
+        # carry: a check holds only what a switch or a stub puts there.
+        for value in (epic, root, inputs.manifest(self.docs, epic="EP-001", writer=True),
+                      inputs.manifest(self.docs, writer=True)):
             self.assertNotIn("check", value)
             self.assertNotIn("review_panels", value)
-        self.assertEqual(inputs.manifest(self.docs, epic="EP-001", writer=True)["check"],
-                         {"scaffold_findings": []})
         choose_panels(self.docs)
         facts = ["counts", "relation_audit", "review_note", "source_errors", "stories"]
         panel = inputs.manifest(self.docs, epic="EP-001")
@@ -506,7 +506,7 @@ class BacklogReviewInputTests(unittest.TestCase):
         self.assertEqual(sorted(panel["check"]), facts)
         self.assertEqual(sorted(inputs.manifest(self.docs)["check"]), facts)
         self.assertEqual(sorted(inputs.manifest(self.docs, epic="EP-001", writer=True)["check"]),
-                         sorted([*facts, "scaffold_findings"]))
+                         facts)
         # A switch change stales every manifest the other value derived.
         with self.assertRaisesRegex(inputs.InputError, "stale"):
             inputs.manifest(self.docs, epic="EP-001", expected_hash=epic["source_hash"])
@@ -743,9 +743,8 @@ class BacklogReviewInputTests(unittest.TestCase):
         self.assertEqual([error for error in errors if "untouched" in error], [])
         fresh = inputs.manifest(self.docs, epic="EP-001", expected_hash=reader["source_hash"])
         self.assertNotIn("check", fresh)
-        self.assertEqual(inputs.manifest(self.docs, epic="EP-001", writer=True,
-                                         expected_hash=writer["source_hash"])["check"]
-                         ["scaffold_findings"], [])
+        self.assertNotIn("check", inputs.manifest(self.docs, epic="EP-001", writer=True,
+                                                  expected_hash=writer["source_hash"]))
         # The epic that holds the story still reads every change to it.
         second = inputs.manifest(self.docs, epic="EP-002")
         story = folder / "story.md"

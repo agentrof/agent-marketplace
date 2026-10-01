@@ -383,14 +383,12 @@ def delivery_switch_value(docs: Path, delivery_id: str, switch: str) -> str:
     """Return the value of a process switch that a Delivery runs under.
 
     Without a Process Policy the switch is at its package default. A draft or
-    invalid policy, or a pin that drifted while the pin is enforced, raises
-    ValueError, as process_policy.py value --delivery refuses it.
+    invalid policy, or a pin whose value of the switch drifted while the pin is
+    enforced, raises ValueError, as process_policy.py value --delivery refuses
+    it. From the Delivery Review on, the value is the pinned revision's.
     """
-    values, snapshot = process_policy.effective_values(docs)
-    errors = process_policy.delivery_pin_findings(docs, delivery_id, snapshot)
-    if errors:
-        raise ValueError("; ".join(errors))
-    return values[switch]["value"]
+    state = process_policy.delivery_values(docs, delivery_id, switches={switch})
+    return state["values"][switch]["value"]
 
 
 def policy_owner_gates(docs: Path) -> str | None:
@@ -570,7 +568,7 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
         policy, policy_errors = process_policy.approved_snapshot(docs)
         errors.extend(policy_errors)
         if not policy_errors and status in process_policy.PIN_ENFORCED_STATUSES:
-            errors.extend(process_policy.pin_findings(delivery_props, policy))
+            errors.extend(process_policy.drift_findings(docs, delivery_props))
 
     for item_path, item_props in item_records:
         story_id = str(item_props["story_id"])

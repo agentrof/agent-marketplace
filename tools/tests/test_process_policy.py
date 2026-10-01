@@ -477,7 +477,11 @@ class ConfigureProcessContractTests(unittest.TestCase):
                 "name every Delivery that is scope- or execution-approved",
                 "its checks refuse it until its execution plan is revised and approved again",
                 "A Delivery in review or later keeps its pin",
-                "inside a Delivery with `--delivery DLV-###`, which refuses a drifted pin"):
+                "inside a Delivery with `--delivery DLV-###`, which refuses a drifted pin",
+                "reads the pinned revision's value from then on",
+                "`begin-plan-revision`, the execution-plan tasks, which bind the new revision"
+                " while that barrier is held, and the Item revisions they make,"
+                " `approve-execution`, `publish-execution-plan` and `finish-plan-revision`"):
             with self.subTest(rule=rule):
                 self.assertIn(rule, reference)
         order = [reference.index(verb) for verb in (

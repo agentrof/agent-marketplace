@@ -31,11 +31,17 @@ sets none.
 3. When no answer changes a value in force, write nothing and stop.
 4. Present the planned delta, each switch's value in force and the chosen
    value, each parameter set, changed or unset, and name every Delivery that
-   is scope- or execution-approved: it
-   pins the policy revision it runs under, so after the new revision is
-   approved its checks refuse it until its execution plan is revised and
-   approved again, which pins the new revision. A Delivery in review or later
-   keeps its pin. Ask the approval choice gate. On rejection write nothing.
+   is scope- or execution-approved whose pinned value of a switch its flows
+   own the delta changes: it runs under the values it pinned, so after the new
+   revision is approved its checks refuse it until its execution plan is
+   revised and approved again, which pins the new revision. Name that path in
+   order: `begin-plan-revision`, the execution-plan tasks, which bind the new
+   revision while that barrier is held, and the Item revisions they make,
+   `approve-execution`, `publish-execution-plan` and `finish-plan-revision`;
+   a scope-approved Delivery needs only its first `approve-execution`. The
+   other way out is a later revision that sets those values back. A Delivery
+   in review or later keeps its pin and reads its pinned revision's values.
+   Ask the approval choice gate. On rejection write nothing.
 5. On approval run `init` when the document is absent or `begin-revision`
    when it is approved, then `set --switch <id> --value <value>` for each
    changed switch and `set --switch <id> --parameter <id> --value <number>`,
@@ -54,5 +60,6 @@ sets none.
 - A default changes only in a package release, on the switch's promotion
   rule and the owner's approval; a project row is never a promotion.
 - Flows read a value with `process_policy.py value --switch <id>`, inside a
-  Delivery with `--delivery DLV-###`, which refuses a drifted pin. A draft or
-  invalid policy is refused, never read.
+  Delivery with `--delivery DLV-###`, which refuses a drifted pin until the
+  Delivery Review and reads the pinned revision's value from then on. A draft
+  or invalid policy is refused, never read.

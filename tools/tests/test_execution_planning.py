@@ -439,9 +439,15 @@ class BundleManifestTests(unittest.TestCase):
         code, result = self.run_bundle()
         self.assertEqual(code, 1)
         self.assertIn("DLV-001 runs switch execution_planning at per_document", result["errors"][0])
-        # A policy that selects the value later is drift until the plan pins it again.
+        # A policy that keeps the value agrees with the missing pin; one that
+        # selects the bundle later is drift until the plan pins it again.
         choose(self.docs, "per_document")
-        self.assertIn("Delivery pins no Process Policy", self.run_bundle()[1]["errors"][0])
+        self.assertIn("DLV-001 runs switch execution_planning at per_document",
+                      self.run_bundle()[1]["errors"][0])
+        choose(self.docs, "single_source_bundle")
+        self.assertIn("Delivery runs switch execution_planning at per_document under no Process"
+                      " Policy, as it pinned none, but the approved revision 2 sets"
+                      " single_source_bundle", self.run_bundle()[1]["errors"][0])
 
     def test_a_policy_with_an_unknown_value_refuses_the_bundle(self):
         choose(self.docs, "single_source_bundle")

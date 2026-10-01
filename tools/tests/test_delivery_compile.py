@@ -551,45 +551,68 @@ class DeliveryCompilerTests(unittest.TestCase):
             self.assertEqual(findings(), [])
             return result["refreshed_delivery_pins"]
 
-        first = self.approve_policy()
+        def revise(value: str | None) -> dict:
+            path = process_policy.path_for(self.docs)
+            self.policy("begin-revision" if path.exists() else "init")
+            self.policy("set", "--switch", "review_loop",
+                        *(["--value", value] if value else ["--default"]))
+            self.policy("approve")
+            self.git("add", "--all")
+            self.git("commit", "-q", "-m", "Approve the Process Policy")
+            return process_policy.approved_snapshot(self.docs)[0]
+
+        # A first policy that leaves every switch the Delivery reads at its
+        # default agrees with the Delivery's missing pin.
+        first = revise(None)
+        self.assertEqual(findings(), [])
+        second = revise("blocking_delta")
         self.assertEqual(len(findings()), 1)
-        self.assertIn("Delivery pins no Process Policy, but one is approved now", findings()[0])
-        self.assertIn("begin-plan-revision, approve-execution", findings()[0])
+        self.assertIn("Delivery runs switch review_loop at current under no Process Policy, as it"
+                      " pinned none, but the approved revision 2 sets blocking_delta", findings()[0])
+        self.assertIn("begin-plan-revision, the execution-plan tasks", findings()[0])
         self.assertEqual(delivery_compile.check_delivery(plan_args), 1)
         self.assertEqual(reapprove(), sorted(process_policy.PIN_FIELDS))
-
-        second = self.approve_policy()
-        self.assertEqual(second["process_policy_revision"], 2)
-        self.assertNotEqual(second["process_policy_source_hash"], first["process_policy_source_hash"])
-        self.assertEqual(sorted(finding.split(" is stale")[0] for finding in findings()), [
-            "Delivery process_policy_revision", "Delivery process_policy_source_hash"])
-        self.assertEqual(reapprove(), ["process_policy_revision", "process_policy_source_hash"])
         props, _ = delivery_compile.split_note(root / "delivery.md")
         self.assertEqual({key: props[key] for key in process_policy.PIN_FIELDS}, second)
+        self.assertNotEqual(second["process_policy_source_hash"], first["process_policy_source_hash"])
+
+        third = revise(None)
+        self.assertEqual(third["process_policy_revision"], 3)
+        self.assertIn("Delivery runs switch review_loop at blocking_delta under its pinned Process"
+                      " Policy revision 2, but the approved revision 3 sets current", findings()[0])
+        self.assertEqual(reapprove(), ["process_policy_revision", "process_policy_source_hash"])
+        props, _ = delivery_compile.split_note(root / "delivery.md")
+        self.assertEqual({key: props[key] for key in process_policy.PIN_FIELDS}, third)
 
         self.policy("begin-revision")
-        self.assertIn("Process Policy revision 3 is a draft", " ".join(findings()))
+        self.assertIn("Process Policy revision 4 is a draft", " ".join(findings()))
         code, result = self.approve_execution_result(plan_args)
         self.assertEqual(code, 1)
-        self.assertIn("Process Policy revision 3 is a draft", " ".join(result["errors"]))
+        self.assertIn("Process Policy revision 4 is a draft", " ".join(result["errors"]))
 
+        # Without a policy every switch is at its default, as revision 3 set it.
         process_policy.path_for(self.docs).unlink()
-        self.assertIn("Delivery pins a Process Policy that no longer exists", findings()[0])
+        self.assertEqual(findings(), [])
         self.assertEqual(reapprove(), sorted(process_policy.PIN_FIELDS))
         props, _ = delivery_compile.split_note(root / "delivery.md")
         self.assertFalse(set(process_policy.PIN_FIELDS) & set(props))
 
     def test_a_reviewed_or_closed_delivery_keeps_its_process_policy_pin_as_history(self):
         # From the Delivery Review on no execution approval can re-pin the
-        # Delivery, so a later policy revision must not strand it.
+        # Delivery, so a later policy revision must not strand it or change
+        # the values it reads.
         self.approve_policy()
+        self.git("add", "--all")
+        self.git("commit", "-q", "-m", "Approve Process Policy revision 1")
         plan_args = self.scope_ready_for_execution()
         self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
         root = delivery_compile.find_delivery(self.docs, "DLV-001")
         original = (root / "delivery.md").read_bytes()
         pinned = {key: delivery_compile.split_note(root / "delivery.md")[0][key]
                   for key in process_policy.PIN_FIELDS}
-        self.approve_policy()
+        self.policy("begin-revision")
+        self.policy("set", "--switch", "review_panels", "--value", "lens_panel")
+        self.policy("approve")
         self.assertTrue(delivery_compile.delivery_findings(self.docs, "DLV-001")[1])
         for status in ("review", "pr_handoff", "awaiting_merge", "cancelled"):
             with self.subTest(status=status):
@@ -627,6 +650,7 @@ class DeliveryCompilerTests(unittest.TestCase):
                 code = process_policy.main(["value", "--docs", str(self.docs), "--switch",
                                             "fixture_mode", "--delivery", "DLV-001"])
             self.assertEqual(code, 1)
+            # No commit holds the pinned revision, so the pin itself is compared.
             self.assertIn("Delivery process_policy_revision is stale", output.getvalue())
             # Outside a Delivery the project's approved value is in force.
             self.assertEqual(self.policy("value", "--switch", "fixture_mode")["value"], "current")
@@ -1435,11 +1459,27 @@ class DeliveryCompilerTests(unittest.TestCase):
                 self.assertEqual(delivery_compile.section_bodies(body)["Lessons and Follow-up"], expected)
                 self.assertEqual(props["approval_hash"], delivery_compile.content_hash(
                     props, body, exclude=delivery_compile.MUTABLE | {"approval_hash"}))
+        # From the Review on the Delivery reads the revision it pinned, so a
+        # revision begun for the next Delivery changes nothing here; a pinned
+        # revision that no commit holds cannot be read back.
+        path = process_policy.path_for(self.docs)
+        approved = path.read_bytes()
         self.policy("begin-revision")
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(delivery_compile.approve_review(review), 1)
-        self.assertIn("Process Policy revision 2 is a draft", output.getvalue())
+        self.assertIn("the pinned Process Policy revision 1", output.getvalue())
+        self.assertIn("is neither the current policy nor an approved file in the Git history",
+                      output.getvalue())
+        draft = path.read_bytes()
+        path.write_bytes(approved)
+        self.git("add", "--", path.relative_to(self.root).as_posix())
+        self.git("commit", "-q", "-m", "Approve Process Policy revision 1")
+        path.write_bytes(draft)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_review(review), 0)
+        props, body = delivery_compile.split_note(review_path)
+        self.assertEqual(delivery_compile.section_bodies(body)["Lessons and Follow-up"], expected)
 
     def test_vault_paths_stay_posix_on_a_host_with_backslash_separators(self):
         """A vault path uses forward slashes on every host (#228)."""

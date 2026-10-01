@@ -777,6 +777,24 @@ class SessionBindingTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {SESSION_ENV: "session-1"}):
             self.assertEqual(self.p.run_verb("on")[0], 0)
 
+    def test_any_session_may_end_the_grant(self):
+        with mock.patch.dict(os.environ, {SESSION_ENV: "session-2"}):
+            code, out, err = self.p.run_verb("complete", "--evidence", "back early")
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(self.p.grant()["state"], "completed")
+
+    def test_on_checks_the_binding_of_the_arming_it_consumes(self):
+        self.p.arm("on --for 1h")
+        record = json.loads((self.p.state / "arming.json").read_text(encoding="utf-8"))
+        swapped = dict(record, session_id="session-3")
+        reads = iter([record, swapped])
+        real = autopilot.fresh_arming
+        with mock.patch.object(autopilot, "fresh_arming",
+                               side_effect=lambda *args: real(*args) and next(reads)), \
+                mock.patch.dict(os.environ, {SESSION_ENV: "session-1"}):
+            self.p.assert_refused("typed in fixture session session-3", "on")
+        self.assertTrue((self.p.state / "arming.json").exists())
+
     def test_a_prompt_without_a_session_never_arms(self):
         (self.p.state / "arming.json").unlink(missing_ok=True)
         self.assertEqual(self.p.hook("user-prompt", expansion(self.p.root, "on", session_id="")),

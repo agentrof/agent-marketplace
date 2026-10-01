@@ -117,6 +117,43 @@ def declares_hook(verb: str) -> bool:
     return any(f"autopilot.py hook {verb}" in command for command in hook_commands() or [])
 
 
+def package_binding() -> dict:
+    """The host and the session variable the package's user-prompt hook declares."""
+    for command in hook_commands() or []:
+        if "autopilot.py hook user-prompt" in command:
+            try:
+                tokens = shlex.split(command)
+            except ValueError:
+                return {}
+            values = dict(zip(tokens, tokens[1:]))
+            return {"host": values.get("--host"), "session_env": values.get("--session-env")}
+    return {}
+
+
+def binding_problem(host: str | None, session: str | None, *, typed: bool = False) -> str | None:
+    """Why the running session is not the one a grant, or a typed command, belongs to.
+
+    A grant serves the session and host whose user typed it. The running
+    package names its host and the variable that holds its session id; a
+    variable that is not set compares nothing.
+    """
+    owner = "this arming record was typed in" if typed else "bound to"
+    binding = package_binding()
+    running = binding.get("host")
+    if host and running and host != running:
+        return f"{owner} a {host} session; this package runs {running}"
+    variable = binding.get("session_env")
+    here = os.environ.get(variable) if variable else None
+    if session and here and here != session:
+        return f"{owner} {host} session {session}; this session is {here}"
+    return None
+
+
+def bound_line(grant: dict) -> str:
+    session = grant.get("armed_by", {}).get("session_id")
+    return f"{grant.get('host')} session {session}" if session else "every session (no session bound)"
+
+
 def package_guard() -> tuple[str | None, str]:
     """How this package arms a grant, or None and why it can arm none.
 
@@ -629,7 +666,10 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
             raise Refusal("this host arms a grant from the entry command you type; run `on`"
                           " without options and it takes them from your typed command")
         # Refused before any write: no arming, no grant, no runtime file.
-        fresh_arming(directory, policy, now)
+        typed = fresh_arming(directory, policy, now)
+        problem = binding_problem(typed.get("host"), typed.get("session_id"), typed=True)
+        if problem:
+            raise Refusal(problem)
         with locked(directory):
             # The grant state is read first, so a failure leaves the typed arming in place.
             current(directory, now)
@@ -721,6 +761,10 @@ def cmd_check(args: argparse.Namespace, now: datetime) -> int:
     if reason:
         print(f"autopilot: inactive {grant['id']}: {reason}")
         return 1
+    problem = binding_problem(grant.get("host"), grant["armed_by"].get("session_id"))
+    if problem:
+        print(f"autopilot: active {grant['id']} is {problem}; this session asks as usual")
+        return 1
     print("\n".join(summary(grant, now, read)))
     return 0
 
@@ -733,11 +777,14 @@ def cmd_status(args: argparse.Namespace, now: datetime) -> int:
     counts = report_payload(directory, grant)["counts"] if grant else {"decisions": 0, "queued": 0}
     reason = inactive_reason(grant, now)
     active = reason is None
+    problem = binding_problem(grant.get("host"), grant["armed_by"].get("session_id")) \
+        if active else None
     if args.json:
         result = {"active": active, "grant": grant, "goal_read": read, "counts": counts,
                   "remaining_minutes": int((parse_stamp(grant["expires_at"]) - now).total_seconds()
                                            // 60) if active else 0,
-                  "inactive_reason": reason, **coverage}
+                  "inactive_reason": reason, "bound_to": bound_line(grant) if grant else None,
+                  "binding_problem": problem, **coverage}
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     if grant is None:
@@ -749,6 +796,8 @@ def cmd_status(args: argparse.Namespace, now: datetime) -> int:
     else:
         lines = [f"autopilot: inactive {grant['id']}: {reason}"]
     if grant:
+        lines.append(f"bound to: {bound_line(grant)}"
+                     + (f" ({problem}; this session asks as usual)" if problem else ""))
         lines.append(f"decisions: {counts['decisions']}, queued: {counts['queued']}")
     lines.append(f"arming: {coverage['arming']}; question guard: {coverage['question_guard']}")
     print("\n".join(lines))
@@ -762,10 +811,14 @@ def require_state(directory: Path, what: str) -> None:
 
 
 def active_grant(directory: Path, now: datetime) -> dict:
+    """The grant that governs this session, or a refusal that names why there is none."""
     grant = current(directory, now)
     reason = inactive_reason(grant, now)
     if reason:
         raise Refusal("no active grant" + (f"; {grant['id']} is inactive: {reason}" if grant else ""))
+    problem = binding_problem(grant.get("host"), grant["armed_by"].get("session_id"))
+    if problem:
+        raise Refusal(f"grant {grant['id']} is {problem}")
     return grant
 
 
@@ -897,8 +950,10 @@ def typed_arguments(payload: dict, entry: str) -> str | None:
 
 def hook_user_prompt(options: dict, payload: dict, now: datetime) -> None:
     entry = options.get("--entry")
-    # A subagent's prompt is written by an agent, never typed by the user.
-    if not entry or payload.get("agent_id"):
+    # A subagent's prompt is written by an agent, never typed by the user, and
+    # a grant needs the session it binds to.
+    session = payload.get("session_id")
+    if not entry or payload.get("agent_id") or not isinstance(session, str) or not session:
         return
     arguments = typed_arguments(payload, entry)
     if arguments is None or arguments.split()[:1] != ["on"]:
@@ -914,8 +969,9 @@ def denial(grant: dict, now: datetime) -> str:
     command = command_line()
     classes = ", ".join(grant.get("classes", [])) or "none"
     return (
-        f"Autopilot grant {grant['id']} is active until {grant['expires_at']}"
-        f" ({span(parse_stamp(grant['expires_at']) - now)} left) and allows: {classes}."
+        f"Autopilot grant {grant['id']}, armed in {bound_line(grant)}, is active until"
+        f" {grant['expires_at']} ({span(parse_stamp(grant['expires_at']) - now)} left) and"
+        f" allows: {classes}."
         f" Do not ask the user. Run `{command} check` first. If the question's class is"
         " allowed, take the recommended option (answer an open question with the"
         f" recommendation you would offer), apply it, run `{command} record` with --class,"
@@ -926,10 +982,17 @@ def denial(grant: dict, now: datetime) -> str:
         " when every remaining task waits on a queued question, then end with the queued list.")
 
 
-def hook_pre_question(payload: dict, now: datetime) -> None:
+def hook_pre_question(options: dict, payload: dict, now: datetime) -> None:
     directory = state_dir(Path(payload.get("cwd") or os.getcwd()))
     grant = read_json(directory / GRANT)
     if not is_active(grant, now):
+        return
+    # Another session, or a session of another host, is never governed by this grant.
+    session = grant["armed_by"].get("session_id")
+    if session and payload.get("session_id") != session:
+        return
+    host = options.get("--host")
+    if host and grant.get("host") and host != grant["host"]:
         return
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -946,7 +1009,7 @@ def run_hook(argv: list[str], stdin, now: datetime) -> int:
         if verb == "user-prompt":
             hook_user_prompt(options, payload, now)
         elif verb == "pre-question":
-            hook_pre_question(payload, now)
+            hook_pre_question(options, payload, now)
     except Exception:
         # An internal error allows the prompt or the question: the session asks as usual.
         pass

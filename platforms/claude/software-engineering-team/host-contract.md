@@ -104,6 +104,11 @@
   grant, and never retry a refused `on` with options of your own. `off` and
   `complete` may end a grant at any time. `autopilot.py` is the packaged
   `skill-content/autopilot/scripts/autopilot.py`.
+- A grant governs only the Claude Code session whose user typed it: the hook
+  records its session id, the question hook denies only that session, and
+  `on`, `record` and `queue` refuse when `CLAUDE_CODE_SESSION_ID` differs.
+  Every other session, and every Codex session on the same checkout, asks as
+  usual; `status` and the denial name the bound session.
 - While a grant is active, the plugin's `PreToolUse` hook on `AskUserQuestion`
   denies the call and states this procedure. Once the user started a grant or
   a question is denied that way, run `autopilot.py check` before every choice

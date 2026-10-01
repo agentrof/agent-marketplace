@@ -728,14 +728,19 @@ def settle(directory: Path, project: Path, now: datetime) -> tuple[dict | None, 
     if not (directory / GRANT).is_file():
         return None, None
     with locked(directory):
-        grant = current(directory, now)
-        if not grant or not grant.get("goal") or inactive_reason(grant, now) is not None:
-            return grant, None
-        read = read_goal(project, grant["goal"])
-        if read is not None and read["terminal"]:
-            end_grant(directory, now, grant, "completed", now, completion={
-                "by": "compiler", "goal_state": read["state"], "read_at": stamp(now),
-                "compiler": grant["goal"]["end"]["compiler"]})
+        return settle_locked(directory, project, now)
+
+
+def settle_locked(directory: Path, project: Path, now: datetime) -> tuple[dict | None, dict | None]:
+    """settle for a caller that holds the lock."""
+    grant = current(directory, now)
+    if not grant or not grant.get("goal") or inactive_reason(grant, now) is not None:
+        return grant, None
+    read = read_goal(project, grant["goal"])
+    if read is not None and read["terminal"]:
+        end_grant(directory, now, grant, "completed", now, completion={
+            "by": "compiler", "goal_state": read["state"], "read_at": stamp(now),
+            "compiler": grant["goal"]["end"]["compiler"]})
     return grant, read
 
 
@@ -810,9 +815,18 @@ def require_state(directory: Path, what: str) -> None:
         raise Refusal(what)
 
 
-def active_grant(directory: Path, now: datetime) -> dict:
-    """The grant that governs this session, or a refusal that names why there is none."""
-    grant = current(directory, now)
+def active_grant(directory: Path, now: datetime, project: Path | None = None) -> dict:
+    """The grant that governs this session, or a refusal that names why there is none.
+
+    Given the project, the grant's end conditions, its goal included, are
+    applied first, so a decision is never recorded after the goal is reached.
+    """
+    if project is None:
+        grant = current(directory, now)
+    else:
+        grant, _read = settle_locked(directory, project, now)
+    if grant and grant.get("state") != "active":
+        raise Refusal(f"no active grant: {ended_line(grant).removeprefix('autopilot: ')}")
     reason = inactive_reason(grant, now)
     if reason:
         raise Refusal("no active grant" + (f"; {grant['id']} is inactive: {reason}" if grant else ""))
@@ -839,7 +853,7 @@ def cmd_record(args: argparse.Namespace, now: datetime) -> int:
     options = split_options(args.options)
     require_state(directory, "no active grant")
     with locked(directory):
-        grant = active_grant(directory, now)
+        grant = active_grant(directory, now, Path(args.project_root))
         name = declared_class(policy, args.class_)
         if name not in grant["classes"]:
             raise Refusal(f"class {name!r} is not allowed by grant {grant['id']}; queue the question")
@@ -859,7 +873,7 @@ def cmd_queue(args: argparse.Namespace, now: datetime) -> int:
     options = split_options(args.options)
     require_state(directory, "no active grant")
     with locked(directory):
-        grant = active_grant(directory, now)
+        grant = active_grant(directory, now, Path(args.project_root))
         name = declared_class(policy, args.class_)
         if name in grant["classes"]:
             raise Refusal(f"class {name!r} is allowed by grant {grant['id']}; take the recommended"
@@ -972,12 +986,12 @@ def denial(grant: dict, now: datetime) -> str:
         f"Autopilot grant {grant['id']}, armed in {bound_line(grant)}, is active until"
         f" {grant['expires_at']} ({span(parse_stamp(grant['expires_at']) - now)} left) and"
         f" allows: {classes}."
-        f" Do not ask the user. Run `{command} check` first. If the question's class is"
-        " allowed, take the recommended option (answer an open question with the"
-        f" recommendation you would offer), apply it, run `{command} record` with --class,"
-        " --question, --options, --choice, --reason and --target, and write the decision into"
-        " the governing document where the flow records the user's answer, marked"
-        f" {grant['id']}. Otherwise run `{command} queue` with --class, --question, --options"
+        f" Do not ask the user. Run `{command} check` first; if it exits 1, ask the user as"
+        " usual. If the question's class is allowed, take the recommended option (answer an"
+        " open question with the recommendation you would offer), first run"
+        f" `{command} record` with --class, --question, --options, --choice, --reason and"
+        " --target, then apply it and write the decision into the governing document where"
+        f" the flow records the user's answer, marked {grant['id']}. Otherwise run `{command} queue` with --class, --question, --options"
         " and --recommendation, and continue the work that does not depend on it; stop only"
         " when every remaining task waits on a queued question, then end with the queued list.")
 

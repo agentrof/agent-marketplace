@@ -745,6 +745,23 @@ class GoalTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(self.p.grant()["state"], "expired")
 
+    def test_record_and_queue_refuse_once_the_goal_is_reached(self):
+        self.p.delivery("active")
+        self.p.run_verb("on", "--goal", "delivery:DLV-002")
+        self.p.delivery("cancelled")
+        later = NOW + timedelta(minutes=10)
+        code, _out, err = self.p.run_verb("record", "--class", "approval_gate", "--question",
+                                          "Approve the next plan?", "--choice", "Approve",
+                                          "--reason", "r", "--target", "t", now=later)
+        self.assertEqual(code, 1)
+        self.assertIn("scripts/delivery_compile.py read delivery DLV-002 as cancelled", err)
+        self.assertEqual(self.p.grant()["state"], "completed")
+        code, _out, err = self.p.run_verb("queue", "--class", "release", "--question", "Tag?",
+                                          "--recommendation", "Hold", now=later)
+        self.assertEqual(code, 1)
+        self.assertIn("completed", err)
+        self.assertEqual([event["event"] for event in self.p.events()], ["granted", "completed"])
+
     def test_complete_ends_any_grant_and_records_evidence_and_compiler_agreement(self):
         cases = (("delivery:DLV-002", False), ("delivery:DLV-003", True),
                  ("text:finish the migration", None), (None, None))
@@ -976,8 +993,10 @@ class DistributionTests(unittest.TestCase):
                 for fragment in (grant["id"], grant["expires_at"], ", ".join(grant["classes"]),
                                  "take the recommended option", " check`", " record`",
                                  "governing document", " queue`", "Do not ask the user",
+                                 "if it exits 1, ask the user as usual",
                                  "every remaining task waits on a queued question"):
                     self.assertIn(fragment, reason)
+                self.assertLess(reason.index(" record`"), reason.index("then apply it"))
                 self.assertEqual(self.run_verb(host, root, "off").returncode, 0)
                 result = self.run_hook(host, "pre-question", question, root)
                 self.assertEqual((result.returncode, result.stdout), (0, ""))
@@ -1019,6 +1038,17 @@ class ContractTests(unittest.TestCase):
                                  "autopilot.py queue", "continue the work that does not depend on it",
                                  "stop only when every remaining task waits on a queued question"):
                     self.assertIn(fragment.lower(), section)
+
+    def test_the_procedure_records_a_decision_before_it_applies_it(self):
+        for host in ("claude", "codex"):
+            with self.subTest(host=host):
+                text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
+                                 / "host-contract.md").read_text(encoding="utf-8").split())
+                section = text.split("## Autopilot", 1)[1]
+                self.assertIn("run `autopilot.py record` first, then apply it", section)
+                self.assertIn("when it exits 1, ask the user as usual", section)
+        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("recorded with `record` before it is applied", skill)
 
     def test_the_entry_skill_states_that_only_the_user_arms_a_grant(self):
         text = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())

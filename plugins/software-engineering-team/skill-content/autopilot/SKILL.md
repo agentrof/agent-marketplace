@@ -72,8 +72,10 @@ session to asking.
 2. Show the script's output as it prints it. A refusal names what is wrong;
    never retry `on` with options of your own.
 3. While a grant is active, the host contract's autopilot procedure governs
-   every question of the orchestrating session. Roles never read or use the
-   grant: they return questions to the orchestrating session as before.
+   every question of the orchestrating session. Each decision is recorded with
+   `record` before it is applied, and `record` and `queue` refuse once the
+   grant has ended, its goal included. Roles never read or use the grant: they
+   return questions to the orchestrating session as before.
 4. A readable goal ends only when its owning compiler reads a terminal state.
    `complete` ends any grant and records whether that compiler agreed; the
    session's own judgement never ends a readable goal otherwise.

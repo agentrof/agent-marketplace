@@ -112,11 +112,14 @@
 - While a grant is active, the plugin's `PreToolUse` hook on `AskUserQuestion`
   denies the call and states this procedure. Once the user started a grant or
   a question is denied that way, run `autopilot.py check` before every choice
-  gate. While it exits 0, present no question:
+  gate. While it exits 0, present no question; when it exits 1, ask the user
+  as usual:
   - For a question of an allowed class, take the recommended option, or for
-    an open question the recommendation you would offer, apply it, run
-    `autopilot.py record`, and write the decision into the governing document
-    where the flow records the user's answer, marked with the grant id.
+    an open question the recommendation you would offer, run
+    `autopilot.py record` first, then apply it and write the decision into the
+    governing document where the flow records the user's answer, marked with
+    the grant id. `record` refuses once the grant has ended, its goal
+    included; then ask as usual.
   - For any other class, run `autopilot.py queue` and continue the work that
     does not depend on it. An at-once owner decision and the Software
     Architect's escalation clause are never taken: queue them as

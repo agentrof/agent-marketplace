@@ -1306,6 +1306,11 @@ class ExecutionProfileTests(unittest.TestCase):
             encoding="utf-8").split())
         invariant = architecture.split(" 30. ", 1)[1].split(" 31. ", 1)[0]
         self.assertIn(exception, invariant)
+        # The rule names both of its exceptions in one place.
+        self.assertIn("Two exceptions stand outside this rule:", invariant)
+        self.assertIn("a user-armed session entry such as autopilot ships without a switch,"
+                      " because without an active grant its hooks exit silently, no task binds it",
+                      invariant)
         summary = json.loads((repository / ".changes/pinned-role-models.json").read_text(
             encoding="utf-8"))["summary"]
         self.assertIn(exception, summary)

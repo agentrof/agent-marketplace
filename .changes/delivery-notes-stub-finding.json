@@ -1,6 +1,0 @@
-{
-  "summary": "`backlog_compile.py` now reports a story whose `Delivery Notes` still holds the `stub-story` placeholder. The navigation links written under the last section, which has no heading of its own, made that untouched placeholder read as authored text, so a story could pass the backlog checks with its delivery constraints unwritten. Story stubs are now compared with the story text above its navigation block, and no story file changes. A story created or revised from now on fails with the stub as writer work. A story approved before, whose approval stamp still matches, keeps its approval: its untouched `Delivery Notes` stub is listed under `advisories` in `check --json`, and as an `ADVISORY` line in text mode, until the story is next revised, so an approved backlog stays readable by Delivery, `begin-revision` and approval.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "`backlog_review_inputs.py` validates and hashes each review manifest input once per run instead of on every visit of its closure walk, and backlog collection reuses the BA registry parse, the Application and process ledgers, stale-input Experience package compiles and each BA space scan within one read session. Manifest paths, file hashes and reasons are unchanged. On a backlog of about 1,000 paths an epic manifest took 126 to 157 s and the root 170 s; they now take 11 to 12 s.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -17,7 +17,7 @@
       "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474"
     ,
     ".codex-plugin/plugin.json":
-      "4c7ede7d11255f1319604bdaa75e70769054921ebbac28f5d19c2c67d1b63d4d"
+      "58cd7ed4dcc8f9c39818ad5d254801d7635a95aed01c5a5a808922bd9d6f6e0e"
     ,
     "agents/analysis-challenger.md":
       "03aaef2a63c2f15b12c4d3dd7143920086f44122ec1ffa76c3661f2238d01913"
@@ -923,8 +923,8 @@
       "6608e750755077fc1828b1fe40456f9828ca1fc1da82234c5864f5e996e41d77"
   },
   "host": "codex",
-  "marketplace_release": "0.6.0",
+  "marketplace_release": "0.7.0",
   "runtime_contracts": [],
   "schema_version": 4,
-  "version": "0.6.0"
+  "version": "0.7.0"
 }

@@ -1,6 +1,0 @@
-{
-  "summary": "Every build ships three generated agents, `backlog-reviewer-lens`, `solution-reviewer-lens` and `design-system-reviewer-lens`: the read-only reviewers' bodies and boundaries on a new `lens` execution tier (the `strong` model class at effort `high` on both hosts), which review panels spawn at `review_panels: lens_panel`. The reviewers themselves keep their tier. A process switch value declares such variants as `agent_variants` in the switch registry, and the build refuses an unknown agent or tier, a colliding name and a description that agent frontmatter would misread before it touches the generated tree. `task_inputs.py` leaves the variants out of its role catalog, so an installed package derives role tasks with the variants beside their base agents, and it refuses a variant as a task role, naming the base role to derive instead.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

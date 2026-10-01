@@ -1,6 +1,0 @@
-{
-  "summary": "The package declares every process switch once in `skill-content/configure/data/process-switches.json`: its owning flows, its allowed values with their tradeoffs, the default that keeps today's behaviour, its component metric, and its promotion unit and threshold. A switch value may also declare generated agent variants on another execution tier. `tools/validate.py` rejects a default outside the switch's values, a switch that an owning flow does not name as switch `<id>`, a flow that names an undeclared switch or a switch it does not own, and a switch without a component metric or a promotion rule.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

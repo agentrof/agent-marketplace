@@ -773,6 +773,10 @@ class BacklogReviewInputTests(unittest.TestCase):
                       " such a placeholder only in a note it reads", summary)
         self.assertIn("a read-only root closure still requires complete sources", summary)
         self.assertNotIn("included, still require complete sources", summary)
+        # An epic writer, too, only lists another epic's findings (rv-seams-12).
+        self.assertIn("Every other source, link, dependency or cycle finding inside the closure or about"
+                      " the backlog as a whole still fails, and so does a scenario inside the closure left"
+                      " unclassified once no stub coverage row remains.", summary)
 
     def test_writer_manifest_carries_the_stubs_a_reader_refuses(self):
         self.assertNotIn("check", inputs.manifest(self.docs, epic="EP-001"))

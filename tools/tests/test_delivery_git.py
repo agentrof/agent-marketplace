@@ -3809,8 +3809,8 @@ class DeliveryGitTests(unittest.TestCase):
             "lane:backend_developer": ["src/api/handler.py"], "lane:devops_engineer": [],
             "lanes_with_work": ["backend_developer"], "outside_lane_scopes": ["notes.txt"]})
         remote_before = delivery_git.run_git(project, "ls-remote", "origin")
-        work = (f": backend_developer: src/api/handler.py; devops_engineer: no work; outside every lane scope:"
-                f" notes.txt. ")
+        work = (": backend_developer: src/api/handler.py; devops_engineer: no work; outside every lane scope:"
+                " notes.txt. ")
         discard = (f"discard it with `git -C {worktree} reset --hard {active['item']}` and"
                    f" `git -C {worktree} clean -fd`, then run takeover-item again")
         with self.assertRaises(RuntimeError) as refused:

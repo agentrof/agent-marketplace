@@ -153,3 +153,17 @@ holds the table, whatever policy is in force later.
   never mark a row `answered` without the owner's answer, and run
   `delivery_compile.py check --delivery DLV-###` after each change.
 - Every other role returns a question the way the Software Architect does.
+
+## Under an autopilot grant
+
+An active autopilot grant is the owner's advance answer for its allowed
+classes, given before the owner left: an answer recorded under it counts as the
+owner's, so it closes a question, and an at-once class is never answered under
+a grant. Write such an answer as an `answered` row whose answer states the
+choice and is marked with the grant id, with the Items that waited for it in
+`blocks` by Story id and their wait in `wait_minutes`; an approval between the
+gates names its document in the answer as the refusals above require, for
+example `Verification Contract revision 6`. Every question the grant leaves to
+the owner, queued with `autopilot.py queue`, is also written as a `pending`
+row, of class `queued` or its at-once class, with the Items it holds in
+`blocks`, so the gates and the Item starts refuse while it is open.

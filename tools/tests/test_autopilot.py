@@ -1239,6 +1239,67 @@ class ContractTests(unittest.TestCase):
                                                                 ["AUTH-01"]))
 
 
+class DecisionLogTests(unittest.TestCase):
+    """Under owner_gates at two_fixed_gates the Delivery's decision log holds autopilot's work."""
+
+    HEADER = ("| id | class | question | options | recommendation | status | answer | blocks |"
+              " wait_minutes |\n|---|---|---|---|---|---|---|---|---|\n")
+    ANSWERED = ("| D-07 | queued | Approve Verification Contract revision 6? | Approve; Hold |"
+                " Approve | answered | Approve: Verification Contract revision 6 (autopilot"
+                " AP-20261001T210000Z-3f9a, class approval_gate) | AUTH-01 | 0 |\n")
+    QUEUED = ("| D-08 | rule_exception | Waive the coverage floor for AUTH-02? | Waive; Keep |"
+              " Keep | pending |  | AUTH-02 |  |\n")
+
+    def body(self) -> str:
+        return "## User Decisions\n\n" + self.HEADER + self.ANSWERED + self.QUEUED
+
+    def test_an_answered_autopilot_row_and_a_queued_pending_row_follow_the_table_rules(self):
+        stories = ["AUTH-01", "AUTH-02"]
+        self.assertEqual(delivery_compile.user_decision_findings(self.body(), stories), [])
+        self.assertEqual(delivery_compile.pending_decisions(self.body(), ["AUTH-02"]), ["D-08"])
+        self.assertEqual(delivery_compile.pending_decisions(self.body(), ["AUTH-01"]), [])
+        unwaited = self.body().replace("| AUTH-01 | 0 |", "| AUTH-01 |  |")
+        self.assertTrue(any("wait_minutes" in finding for finding
+                            in delivery_compile.user_decision_findings(unwaited, stories)))
+        named = self.body().replace("| AUTH-01 | 0 |", "| Verification Contract | 0 |")
+        self.assertTrue(any("by Story id" in finding for finding
+                            in delivery_compile.user_decision_findings(named, stories)))
+
+    def test_between_the_gates_the_answer_names_the_document_revision(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            note = docs / "delivery/deliveries/dlv-002-night/delivery.md"
+            note.parent.mkdir(parents=True)
+            note.write_text("---\ntype: delivery\nid: DLV-002\ntitle: Night run\n"
+                            "status: active\n---\n\n# Night run\n\n" + self.body(),
+                            encoding="utf-8")
+            self.assertEqual(delivery_compile.between_gates_refusals(
+                docs, "Verification Contract revision 6", "DLV-002"), [])
+            self.assertTrue(delivery_compile.between_gates_refusals(
+                docs, "Environment Contract revision 2", "DLV-002"))
+
+    def test_every_autopilot_document_states_the_decision_log_rules(self):
+        rules = ("by story id", "`wait_minutes`", "`<document> revision n`",
+                 "`pending` row")
+        sources = {host: ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md"
+                   for host in ("claude", "codex")}
+        sources["orchestration"] = ROOT / "docs/orchestration.md"
+        for name, source in sources.items():
+            with self.subTest(source=name):
+                text = " ".join(source.read_text(encoding="utf-8").split())
+                section = text.split("## Autopilot", 1)[1].lower()
+                for rule in rules:
+                    self.assertIn(rule, section)
+        reference = " ".join((PACKAGE / "skill-content/deliver/references"
+                              "/switch-owner_gates-two_fixed_gates.md").read_text(
+            encoding="utf-8").split())
+        section = reference.split("## Under an autopilot grant", 1)[1]
+        for rule in ("is the owner's advance answer for its allowed classes",
+                     "counts as the owner's", "marked with the grant id",
+                     "is also written as a `pending` row"):
+            self.assertIn(rule, section)
+
+
 class ValidatorTests(unittest.TestCase):
     """tools/validate.py rejects every malformed autopilot policy."""
 

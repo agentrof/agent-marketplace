@@ -589,6 +589,41 @@ class BacklogReviewInputTests(unittest.TestCase):
         self.assertFalse([finding for finding in root["review_note"]["pending_findings"]
                           if "/reviews/round-1-epic-review.md" in finding])
 
+    def test_a_lens_panel_reads_the_review_record_findings_the_final_gate_reports(self):
+        # At review_loop blocking_delta the final gate also refuses a note's
+        # review record; the panel takes its pending findings as given.
+        choose_panels(self.docs)
+        policy(self.docs, "begin-revision")
+        policy(self.docs, "set", "--switch", "review_loop", "--value", "blocking_delta")
+        policy(self.docs, "approve")
+        story = "[[backlog/epics/delivery-fixture/stories/st-001/story\\|ST-001]]"
+        record = "\n".join([
+            "## Returned Findings", "", "| finding | severity | description |", "|---|---|---|",
+            f"| F-1 | major | {story} Scope states the lockout rule twice, with five and with six"
+            " attempts. |", "",
+            "## Severity Calibration", "", "| finding | claimed_severity | calibrated_severity | reason |",
+            "|---|---|---|---|",
+            f"| F-1 | major | major | {story} Scope and Acceptance name different attempt counts,"
+            " so the tests disagree. |", "",
+            "## Accepted Minor Findings", "", "| finding | owner_role | reason | revisit_trigger |",
+            "|---|---|---|---|",
+            f"| F-1 {story} Scope names the attempts in two sentences. | product_owner | Both name five"
+            " attempts, so behavior and tests stay the same. | Revisit at the next revision of ST-001. |",
+            "", ""])
+        for scope, path in (("EP-001", "backlog/epics/delivery-fixture/reviews/round-1-epic-review.md"),
+                            (None, "backlog/reviews/round-1-backlog-review.md")):
+            with self.subTest(note=path):
+                note = self.docs / path
+                original = note.read_text(encoding="utf-8")
+                self.addCleanup(note.write_text, original, encoding="utf-8")
+                note.write_text(original.replace("## Verdict", record + "## Verdict", 1), encoding="utf-8")
+                gate = [finding for finding in backlog.collect(self.docs)[1] if finding.startswith(path + " ")]
+                self.assertIn(f"{path} accepted minor finding 1 names F-1, which calibration ruled major;"
+                              " only a minor finding is accepted", gate)
+                check = inputs.manifest(self.docs, epic=scope)["check"]
+                self.assertEqual(check["review_note"], {"path": path, "pending_findings": gate})
+                note.write_text(original, encoding="utf-8")
+
     def stub_story(self, epic="delivery-fixture"):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(backlog.stub_story(SimpleNamespace(

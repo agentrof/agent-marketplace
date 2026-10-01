@@ -372,6 +372,12 @@ def approve(args) -> int:
     value, errors = check_contract(docs, args.kind, text)
     if errors:
         raise ValueError("approval check failed: " + "; ".join(errors))
+    # A Delivery between its two fixed owner gates takes a revision only by an owner ruling.
+    import delivery_compile
+    refusals = delivery_compile.between_gates_refusals(
+        docs, f"{TYPE_FOR[args.kind].replace('-', ' ').title()} revision {value['revision']}")
+    if refusals:
+        raise ValueError("; ".join(refusals))
     contract_path(docs, args.kind).write_bytes(text.encode("utf-8"))
     print(json.dumps(value, sort_keys=True))
     return 0

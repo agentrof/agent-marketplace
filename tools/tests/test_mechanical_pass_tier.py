@@ -133,7 +133,11 @@ class InstructionTests(unittest.TestCase):
                 "The flow's re-check is unchanged",
                 "Every gate before a stamp stays, including the reader barrier, the"
                 " `--expected-hash` recheck and the owner's approval.",
-                "`--mode revise` and `--skill challenge-review`"):
+                "`--mode revise` and `--skill challenge-review`",
+                "add `--pass-kind apply_findings`, `--findings <record>` and one `--input` per"
+                " document the findings change",
+                "`task_inputs.py` refuses the kind for a review, re-check, calibration, triage or"
+                " repair task"):
             self.assertIn(fragment, text)
 
     def test_only_the_switch_reference_names_a_variant(self):
@@ -311,6 +315,119 @@ class TaskBindingTests(unittest.TestCase):
             with self.subTest(task=task, policy="role_tier"):
                 self.assertEqual(result["required_reads"], plain[task]["required_reads"])
                 self.assertEqual(result["instructions"], plain[task]["instructions"])
+
+
+class PassKindTests(unittest.TestCase):
+    """The task input policy declares the pass kinds, and task_inputs.py keeps
+    every review, re-check, calibration, triage and code repair off them."""
+
+    CONTRACT = "workspace/docs/operation/verification-contract.md"
+    FINDINGS = "workspace/findings.json"
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.project = Path(self.temporary.name).resolve()
+        init_repository(self.project)
+        subprocess.run(["git", "-C", str(self.project), "config", "core.autocrlf", "false"],
+                       check=True, capture_output=True)
+        self.docs = self.project / "workspace" / "docs"
+        (self.project / self.CONTRACT).parent.mkdir(parents=True)
+        (self.project / self.CONTRACT).write_text("---\ntype: verification-contract\n---\n\n# VC\n",
+                                                  encoding="utf-8")
+        self.write_findings([{"id": "OP-1", "severity": "minor", "anchor": "Scope",
+                              "repair": "Replace 'the tests' with 'make test'."}])
+        self.policy("init")
+        self.policy("set", "--switch", SWITCH, "--value", "mechanical")
+        self.policy("approve")
+        self.commit()
+
+    def policy(self, command: str, *argv: str) -> None:
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(process_policy.main([command, "--docs", str(self.docs), *argv]), 0)
+
+    def commit(self) -> None:
+        subprocess.run(["git", "-C", str(self.project), "add", "."], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.project), "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                        "commit", "-qm", "Fixture"], check=True, capture_output=True)
+
+    def write_findings(self, findings) -> None:
+        (self.project / self.FINDINGS).write_text(json.dumps({"findings": findings}), encoding="utf-8")
+
+    def task(self, **changes) -> dict:
+        kwargs = {"entry": "configure", "role": "qa-engineer", "mode": "revise",
+                  "project": self.project, "skills": ["challenge-review"],
+                  "inputs": [self.CONTRACT], "findings": self.FINDINGS,
+                  "pass_kind": "apply_findings", **changes}
+        return task_inputs.manifest(**kwargs)
+
+    def test_the_policy_declares_the_pass_kinds_for_the_mechanical_value(self):
+        policy = task_inputs.catalog()
+        self.assertEqual(sorted(policy["pass_kinds"]), ["apply_findings", "check", "render", "stamp"])
+        apply = policy["pass_kinds"]["apply_findings"]
+        self.assertEqual((apply["switch"], apply["value"], apply["modes"]),
+                         (SWITCH, "mechanical", ["revise"]))
+        # The writers whose documents apply_findings changes are the switch's variants.
+        self.assertEqual(sorted(apply["documents"]), sorted(WRITERS))
+        for kind in ("render", "stamp", "check"):
+            self.assertEqual(policy["pass_kinds"][kind]["runs_as"], "entry_command")
+
+    def test_apply_findings_writes_only_the_owning_writers_document(self):
+        result = self.task()
+        self.assertEqual(result["pass_kind"], "apply_findings")
+        self.assertEqual(result["open_findings"], self.FINDINGS)
+        self.assertIn(self.FINDINGS, [record["path"] for record in result["project_inputs"]])
+        scope = result["write_scope"]
+        self.assertEqual(scope["status"], "resolved")
+        self.assertEqual(scope["allowed_write_area"], [
+            {"path": self.CONTRACT, "coverage": "exact_file", "source": self.CONTRACT}])
+        self.assertEqual(scope["source_records"], [self.CONTRACT])
+        # Without a pass kind the writer task reads as before.
+        plain = self.task(pass_kind=None)
+        self.assertNotIn("pass_kind", plain)
+        self.assertEqual(plain["write_scope"]["status"], "unresolved")
+
+    def test_a_mechanical_kind_never_serves_a_review_triage_or_repair(self):
+        refused = {
+            "a review, re-check or calibration": dict(mode="review"),
+            "a read-only reviewer": dict(entry="backlog-plan", role="backlog-reviewer",
+                                         inputs=["brief.md"]),
+            "a code repair": dict(entry="deliver", role="backend-developer", mode="repair",
+                                  skills=[]),
+            "a repair pass": dict(mode="repair"),
+            "a writer without a variant": dict(role="delivery-coordinator"),
+            "the owning writer's document": dict(inputs=["brief.md"]),
+            "the verdict's findings": dict(findings=None),
+            "an entry command": dict(pass_kind="render"),
+            "an unknown kind": dict(pass_kind="rewrite"),
+        }
+        (self.project / "brief.md").write_text("Accepted intent.\n", encoding="utf-8")
+        self.commit()
+        for case, changes in refused.items():
+            with self.subTest(case=case), self.assertRaisesRegex(ValueError, "pass kind"):
+                self.task(**changes)
+        # A finding without its exact repair needs the base writer's triage.
+        self.write_findings([{"id": "OP-1", "severity": "minor", "anchor": "Scope", "repair": ""}])
+        with self.assertRaisesRegex(ValueError, "OP-1 names no exact repair"):
+            self.task()
+        self.write_findings([{"id": "OP-1", "severity": "minor", "anchor": "Scope",
+                              "repair": "Replace 'the tests' with 'make test'."}])
+        # At role_tier no pass is mechanical.
+        self.policy("begin-revision")
+        self.policy("set", "--switch", SWITCH, "--default")
+        self.policy("approve")
+        with self.assertRaisesRegex(ValueError, "runs only at switch mechanical_pass_tier mechanical"):
+            self.task()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = task_inputs.main([
+                "--entry", "configure", "--role", "qa-engineer", "--mode", "revise",
+                "--project-root", str(self.project), "--skill", "challenge-review",
+                "--input", self.CONTRACT, "--findings", self.FINDINGS,
+                "--pass-kind", "apply_findings"])
+        self.assertEqual(code, 1)
+        self.assertIn("runs only at switch mechanical_pass_tier mechanical", output.getvalue())
 
 
 if __name__ == "__main__":

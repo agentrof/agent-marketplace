@@ -336,8 +336,14 @@ backlog, Operation contract and Solution Design reviews. At `role_tier`, the
 default, every writer pass runs on its role's own tier. At `mechanical`, a
 pass whose returned findings each name their exact fix (`apply_findings`)
 runs on the owning writer's `-mechanical` variant, and `render`, `stamp` and
-`check` steps run as direct entry commands with no role pass. The pass kinds,
-their eligibility and the frozen-task A/B that sets the tier's host values
+`check` steps run as direct entry commands with no role pass.
+`templates/task-input-policy.json` declares the pass kinds under `pass_kinds`,
+with the documents each writer's `apply_findings` pass may change, and
+`task_inputs.py --pass-kind` refuses a mechanical kind for a review, re-check,
+calibration, triage or repair task, for a role without a writer variant and
+outside that value, binds the verdict's findings with their exact repairs and
+narrows the write scope to the owning writer's documents among the inputs.
+Their eligibility and the frozen-task A/B that sets the tier's host values
 live in
 `challenge-review/references/switch-mechanical_pass_tier-mechanical.md`.
 The switch's `agent_variants` make every build ship `product-owner-mechanical`,

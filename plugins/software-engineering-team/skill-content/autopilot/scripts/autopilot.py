@@ -132,23 +132,31 @@ def package_binding() -> dict:
     return {}
 
 
-def binding_problem(host: str | None, session: str | None, *, typed: bool = False) -> str | None:
-    """Why the running session is not the one a grant, or a typed command, belongs to.
+def binding_mismatch(host: str | None, session: str | None) -> tuple[str, str] | None:
+    """What a grant, or a typed command, is bound to, and how the running one differs.
 
     A grant serves the session and host whose user typed it. The running
     package names its host and the variable that holds its session id; a
     variable that is not set compares nothing.
     """
-    owner = "this arming record was typed in" if typed else "bound to"
     binding = package_binding()
     running = binding.get("host")
     if host and running and host != running:
-        return f"{owner} a {host} session; this package runs {running}"
+        return f"a {host} session", f"this package runs {running}"
     variable = binding.get("session_env")
     here = os.environ.get(variable) if variable else None
     if session and here and here != session:
-        return f"{owner} {host} session {session}; this session is {here}"
+        return f"{host} session {session}", f"this session is {here}"
     return None
+
+
+def binding_problem(host: str | None, session: str | None, *, typed: bool = False) -> str | None:
+    """Why the running session is not the one a grant, or a typed command, belongs to."""
+    mismatch = binding_mismatch(host, session)
+    if mismatch is None:
+        return None
+    owner = "this arming record was typed in" if typed else "bound to"
+    return f"{owner} {mismatch[0]}; {mismatch[1]}"
 
 
 def bound_line(grant: dict) -> str:
@@ -845,8 +853,9 @@ def cmd_status(args: argparse.Namespace, now: datetime) -> int:
     counts = report_payload(directory, grant)["counts"] if grant else {"decisions": 0, "queued": 0}
     reason = inactive_reason(grant, now)
     active = reason is None
-    problem = binding_problem(grant.get("host"), grant["armed_by"].get("session_id")) \
-        if active else None
+    bound = (grant.get("host"), grant["armed_by"].get("session_id")) if active else None
+    mismatch = binding_mismatch(*bound) if bound else None
+    problem = binding_problem(*bound) if bound else None
     if args.json:
         result = {"active": active, "grant": grant, "goal_read": read, "counts": counts,
                   "remaining_minutes": int((parse_stamp(grant["expires_at"]) - now).total_seconds()
@@ -865,7 +874,7 @@ def cmd_status(args: argparse.Namespace, now: datetime) -> int:
         lines = [f"autopilot: inactive {grant['id']}: {reason}"]
     if grant:
         lines.append(f"bound to: {bound_line(grant)}"
-                     + (f" ({problem}; this session asks as usual)" if problem else ""))
+                     + (f"; {mismatch[1]}; this session asks as usual" if mismatch else ""))
         lines.append(f"decisions: {counts['decisions']}, queued: {counts['queued']}")
     lines.append(f"declared guards: arming {coverage['arming']}, question guard"
                  f" {coverage['question_guard']}; a host can skip a declared hook it has not"

@@ -769,6 +769,13 @@ class SessionBindingTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("bound to a fixture session; this package runs other", err)
 
+    def test_status_names_the_bound_session_once(self):
+        with mock.patch.dict(os.environ, {SESSION_ENV: "session-2"}):
+            out = self.p.run_verb("status")[1]
+        self.assertIn("bound to: fixture session session-1; this session is session-2;"
+                      " this session asks as usual\n", out)
+        self.assertEqual(out.count("session-1"), 1)
+
     def test_on_refuses_an_arming_typed_in_another_session_and_keeps_it(self):
         self.p.arm("on --for 1h")
         with mock.patch.dict(os.environ, {SESSION_ENV: "session-2"}):

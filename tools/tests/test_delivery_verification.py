@@ -784,6 +784,47 @@ print(sys.argv[1])
         self.assertEqual(self.lane("backend_developer", "test")["interrupted_holder"], record)
         self.assert_environment_free()
 
+    def test_lane_commands_drop_interpreter_search_paths_outside_the_item_worktree(self):
+        """A lane command never inherits a search path that names another checkout, so a fixture run
+        cannot import that checkout's code; entries inside the Item worktree stay (#327)."""
+        self.lane_fixture()
+        names = ("PYTHONPATH", "PYTHONHOME", "NODE_PATH")
+        script = self.markers / "search_paths.py"
+        script.write_text(f"import json, os\nprint(json.dumps({{name: os.environ.get(name) for name in {names!r}}}))\n",
+                          encoding="utf-8")
+        arguments = [sys.executable, str(script)]
+        contract_path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(contract_path)
+        contract["test_command"] = subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
+        self.write(contract_path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
+        self.commit()
+        outside = self.markers / "other-checkout"
+        outside.mkdir()
+        inside = [str(self.root / "src"), "src"]
+        escaping = [str(outside / "scripts"), os.path.join("..", "escape")]
+        try:
+            (self.root / "linked").symlink_to(outside, target_is_directory=True)
+            escaping.append("linked")
+        except OSError:
+            pass  # A host without symlinks still checks every other entry.
+        inherited = {"PYTHONPATH": os.pathsep.join([*escaping[:1], *inside, *escaping[1:]]),
+                     "PYTHONHOME": str(outside), "NODE_PATH": str(outside / "node_modules")}
+        with mock.patch.dict(os.environ, inherited):
+            result = self.lane("backend_developer", "test")
+        output = Path(result["output_file"]).read_text(encoding="utf-8")
+        self.assertEqual(result["exit_code"], 0, output)
+        self.assertEqual(json.loads(output), {"PYTHONPATH": os.pathsep.join(inside), "PYTHONHOME": None,
+                                              "NODE_PATH": None})
+        self.assertEqual(result["dropped_search_paths"], {
+            "PYTHONPATH": escaping, "PYTHONHOME": [str(outside)], "NODE_PATH": [str(outside / "node_modules")]})
+        reference = " ".join((ROOT / "plugins/software-engineering-team/skill-content/deliver/references"
+                              / "switch-implementation_schedule-parallel_lanes_v1.md")
+                             .read_text(encoding="utf-8").split())
+        self.assertEqual(verification.LANE_SEARCH_PATH_VARIABLES, names)
+        self.assertIn("The interpreter search paths `PYTHONPATH`, `PYTHONHOME` and `NODE_PATH` are unset or"
+                      " point only inside the Item worktree.", reference)
+        self.assertIn("keeps every entry inside the worktree", reference)
+
     def test_runtime_evidence_requires_unchanged_environment_and_fresh_events(self):
         item, body = delivery.split_note(self.root / self.item_path)
         item.update(runtime_required=True, environment_contract_ref="operation/environment-contract")

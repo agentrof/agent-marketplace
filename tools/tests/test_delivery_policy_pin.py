@@ -193,6 +193,23 @@ class DeliveryPolicyPinTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "neither the current policy nor an approved file"):
             self.task("deliver", "code-reviewer", "review", delivery=DELIVERY)
 
+    def test_a_malformed_git_batch_reads_as_no_pinned_revision(self):
+        self.revise_policy(review_loop="blocking_delta")
+        self.commit("Approve Process Policy revision 1")
+        pin = process_policy.approved_snapshot(self.docs)[0]
+        found = process_policy.history_revision(self.docs, pin)
+        self.assertIsNotNone(found)
+        real = subprocess.run
+
+        def truncated(command, *args, **kwargs):
+            result = real(command, *args, **kwargs)
+            if "cat-file" in command:
+                result = subprocess.CompletedProcess(result.args, 0, result.stdout[:20], b"")
+            return result
+
+        with mock.patch.object(process_policy.subprocess, "run", side_effect=truncated):
+            self.assertIsNone(process_policy.history_revision(self.docs, pin))
+
     def test_a_policy_at_every_default_is_no_drift_for_a_delivery_that_pinned_none(self):
         # A Delivery execution-approved before any Process Policy existed pins none.
         self.propose_and_approve_scope()

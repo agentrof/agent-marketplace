@@ -521,10 +521,12 @@ def history_revision(docs: Path, pin: dict) -> tuple[str, str] | None:
         return None
     offset = 0
     for oid in oids:
-        end = batch.index(b"\n", offset)
+        end = batch.find(b"\n", offset)
+        if end < 0:
+            return None
         header = batch[offset:end].split()
         offset = end + 1
-        if len(header) != 3 or header[1] != b"blob":
+        if len(header) != 3 or header[1] != b"blob" or not header[2].isdigit():
             continue
         size = int(header[2])
         blob, offset = batch[offset:offset + size], offset + size + 1

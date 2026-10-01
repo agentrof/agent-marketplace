@@ -631,24 +631,41 @@ class BundleManifestTests(unittest.TestCase):
         self.assertIn("bundle manifest is stale", result["errors"][0])
 
     def test_the_manifest_binds_the_owner_rulings_and_a_changed_ruling_makes_it_stale(self):
-        """Every reader reads User Decisions, which owns each ruling (rv-accept-ideas-09)."""
+        """Every reader reads User Decisions, which owns each ruling (rv-accept-ideas-09). Only the
+        rulings bind the manifest: a queued question, the Delivery path line and other text leave it
+        fresh, and an answer or a changed ruling line stales it (rr-delivery-03)."""
         choose(self.docs, "single_source_bundle")
         self.scope()
-        self.section("User Decisions", "D-01 Verification caches live under one fixed root.")
+        ruling = "D-01 Verification caches live under one fixed root."
+        self.section("User Decisions", ruling)
         first = self.run_bundle()[1]
         delivery = (delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md"
                     ).relative_to(self.docs).as_posix()
         self.assertEqual(first["user_decisions"], {
             "path": delivery, "section": "User Decisions",
-            "sha256": "sha256:" + hashlib.sha256(self.decisions().encode("utf-8")).hexdigest()})
+            "sha256": "sha256:" + hashlib.sha256(json.dumps(
+                {"answers": [], "lines": [ruling]}, sort_keys=True,
+                separators=(",", ":")).encode("utf-8")).hexdigest()})
         self.assertIn(f"workspace/docs/{delivery}", first["inputs"])
-        # Only the section binds: other delivery.md text is no bundle input.
+
+        def fresh(expected: bool, decisions: str) -> None:
+            self.section("User Decisions", decisions)
+            code, result = self.run_bundle(first["source_hash"])
+            self.assertEqual(code, 0 if expected else 1, result)
+            if not expected:
+                self.assertIn("bundle manifest is stale", result["errors"][0])
+
+        # Other delivery.md text is no bundle input.
         self.section("Exclusions", "No release management, no unrelated work.")
         self.assertEqual(self.run_bundle(first["source_hash"])[0], 0)
-        self.section("User Decisions", "D-01 Verification caches live under one root per run.")
-        code, result = self.run_bundle(first["source_hash"])
-        self.assertEqual(code, 1)
-        self.assertIn("bundle manifest is stale", result["errors"][0])
+        table = ("| id | class | question | options | recommendation | status | answer | blocks |"
+                 " wait_minutes |\n|---|---|---|---|---|---|---|---|---|\n")
+        question = ("| D-02 | queued | Which session store does the Item reuse? | The current store; a new"
+                    " store | The current store | pending |  |  |  |")
+        path_line = "Delivery path: standard. A Delivery path line is the compiler's record, no ruling."
+        fresh(True, f"{path_line}\n\n{ruling}\n\n{table}{question}")
+        fresh(False, f"{ruling}\n\n{table}" + question.replace("| pending |  |", "| answered | The current store. |"))
+        fresh(False, "D-01 Verification caches live under one root per run.")
 
     def test_each_reader_derives_its_task_with_the_documented_command(self):
         """`readers` holds the role names task_inputs.py --role takes (rv-accept-ideas-12)."""

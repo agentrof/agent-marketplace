@@ -588,6 +588,8 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
             (switch(summary=None), "needs a summary of what it decides"),
             (switch(owner="qa"), "unknown keys ['owner']"),
             (switch(issue=0), "issue must be a positive issue number"),
+            (switch(reference_scope="every_task"),
+             "reference_scope must be one of ['owning_flows']"),
         )
         self.anchor()
         for spec, fragment in cases:

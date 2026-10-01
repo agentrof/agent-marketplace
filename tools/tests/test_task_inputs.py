@@ -541,6 +541,38 @@ class TaskInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Delivery not found: DLV-404"):
                 bound(delivery="DLV-404")
 
+    def test_a_switch_reference_binds_only_for_tasks_of_its_owning_flows(self):
+        values = {"review_panels": "lens_panel", "review_loop": "blocking_delta",
+                  "mechanical_pass_tier": "mechanical"}
+        references = {switch: f"skill-content/challenge-review/references/switch-{switch}-{value}.md"
+                      for switch, value in values.items()}
+        # Every task below selects challenge-review; only the switches whose
+        # owning flows its entry runs reach it.
+        tasks = {("business-analysis", "analysis-challenger"): set(),
+                 ("experience-design", "experience-reviewer"): set(),
+                 ("backlog-plan", "backlog-reviewer"): set(references),
+                 ("solution-design", "solution-reviewer"): set(references),
+                 ("design-system", "design-system-reviewer"): {"review_panels", "review_loop"}}
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            docs = root / "workspace/docs"
+
+            def policy(command, *argv):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(process_policy.main([command, "--docs", str(docs), *argv]), 0)
+
+            policy("init")
+            for switch, value in values.items():
+                policy("set", "--switch", switch, "--value", value)
+            policy("approve")
+            for (entry, role), owned in tasks.items():
+                with self.subTest(entry=entry, role=role):
+                    result = task_inputs.manifest(entry=entry, role=role, mode="review", project=root)
+                    self.assertIn("skill-content/challenge-review/SKILL.md", result["required_reads"])
+                    self.assertEqual({switch for switch, path in references.items()
+                                      if path in result["required_reads"]}, owned)
+
     def test_no_shipped_manifest_binds_a_switch_reference_without_a_policy(self):
         policy = task_inputs.catalog()
         for entry, route in policy["entries"].items():

@@ -1972,8 +1972,11 @@ def pending_operation_revisions(docs: Path, root: Path) -> tuple[list[dict], dic
         receipt, errors = operation_compile.check_contract(docs, kind)
         if receipt.get("status") != "draft" or errors:
             continue
-        approved, errors = operation_compile.check_contract(
-            docs, kind, operation_compile.approval_text(docs, kind))
+        try:
+            approved, errors = operation_compile.check_contract(
+                docs, kind, operation_compile.approval_text(docs, kind))
+        except ValueError as exc:
+            approved, errors = {}, [str(exc)]
         if errors:
             refused[kind] = (f"approved current {kind} contract is required: revision {receipt['revision']} is"
                              " open and its approval would refuse it: " + "; ".join(errors))

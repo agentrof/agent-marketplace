@@ -355,7 +355,7 @@ def approval_text(docs: Path, kind: str) -> str:
         raise ValueError("approve requires a draft contract")
     # The review record binds the draft its review read, before the stamp
     # makes the contract one that was approved.
-    record_errors = review_record_findings(docs, args.kind, props, body)
+    record_errors = review_record_findings(docs, kind, props, body)
     if record_errors:
         raise ValueError("approval check failed: " + "; ".join(record_errors))
     props["status"] = "approved"

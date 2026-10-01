@@ -221,10 +221,12 @@ still contain their initialized placeholders: requiring completed reviews
 before their readers run would prevent the first review. For each epic, run
 the packaged read-only manifest helper; it validates source, coverage and
 dependency inputs while leaving review-completion checks to the final gate.
-An epic's manifest fails on a `stub-epic` or `stub-story` placeholder only in
-a path it names and lists the others in `check.scaffold_findings`, so a
-finished epic's review can start while another epic's writer still works. The
-root manifest and approval still need every source finished:
+An epic's manifest fails on a source finding, a `stub-epic` or `stub-story`
+placeholder included, only in a path it names or when the finding concerns the
+backlog as a whole, such as a dependency cycle; it lists the findings of other
+backlog notes in `check.scaffold_findings`, so a finished epic's review can
+start while another epic's writer still works. The root manifest and approval
+still need every source finished:
 
 ```text
 backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID>
@@ -269,9 +271,10 @@ design, intra-epic dependencies, role ownership, findings and verdict. Run
 writes and resolve all source and completed epic-review findings. Only the
 still-unwritten root review's completion findings remain pending until its
 reader returns; they do not authorize ignoring any source finding. An entry
-in `advisories` names an empty last section of a story approved before the
-compiler read that section above the navigation; it never fails the check,
-and the Product Owner fills the section whenever that story is revised.
+in `advisories` names an empty last section, or an untouched Delivery Notes
+stub, of a story approved before the compiler read that section above the
+navigation; it never fails the check, and the Product Owner fills the section
+whenever that story is revised.
 
 Only after every epic package and review is green, run
 `backlog_review_inputs.py --docs <workspace>/docs --root`. Invoke one fresh
@@ -339,11 +342,17 @@ backlog_compile.py check --docs <workspace>/docs --approved --render --json
 ```
 
 Approval stamps the package, root backlog, epics, reviews and test plans while
-stories remain `planned`. When the project has a Process Policy, the approval
-also records the pin a Delivery takes at scope approval, that policy's path,
-revision and source hash, in the root backlog and in each review it approves,
-so a revision and its reviews name the switch values they ran under. Without a
-policy nothing is recorded; a draft or invalid policy refuses the approval.
+stories remain `planned`. When the project has a Process Policy, each review
+round records the pin a Delivery takes at scope approval, that policy's path,
+revision and source hash, as the policy in force when the round is written:
+`init`, `stub-epic` and `begin-revision` write their rounds with it, and
+`check` pins a round the Product Owner writes the first time it sees it. The
+approval records the same pin in the root backlog and refuses a review it
+approves whose round records another policy, naming the remedy: a new review
+round rerun under the current policy, or the restored policy the review ran
+under. An earlier round keeps its own pin, so a revision and its reviews name
+the switch values they ran under. Without a policy nothing is recorded; a draft
+or invalid policy refuses the approval.
 Existing valid unchanged source approvals retain their timestamps, hashes and
 bytes; previously approved reviews are immutable and changes require a new
 review round. Setup's managed `.gitattributes` rule

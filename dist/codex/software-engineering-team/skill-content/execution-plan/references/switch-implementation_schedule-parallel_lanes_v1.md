@@ -7,11 +7,11 @@ implementation roles are planned; the rest of the execution plan is unchanged.
 ## Which Items run lanes
 
 `delivery_compile.py init` writes `implementation_schedule: parallel_lanes_v1`
-with empty `lane_scopes` and `lane_seams` on each new Item that has two or more
-implementation roles besides the Software Architect. Every other Item carries
-no field and runs its roles one after another. Declare
+with empty `lane_scopes` and `lane_seams` on every new Item. An Item with one
+lane keeps the schedule and gives that lane every path claim. Declare
 `implementation_schedule: sequential_v1` on an Item whose roles cannot own
-separate files, such as one that claims contracts but no product paths.
+separate files, such as one that claims contracts but no product paths, and on
+an Item that only the Software Architect implements.
 
 ## Lane scopes
 
@@ -35,8 +35,8 @@ one lane.
 - `lane_seams` lists `<producer> -> <consumer> via <interface>` entries, for
   example `devops_engineer -> backend_developer via IFC-004`. A seam means the
   consumer needs the producer's finished work, so the consumer's lane starts
-  only after the producer's lane has finished. Lanes without a seam between
-  them start together.
+  as soon as every producer its seams name has finished, and waits for no
+  other lane. Lanes that wait for no producer start together.
 - `<interface>` is one of the Item's `contract_claims`, or the id of an
   architecture record whose kind the Item claims in `architecture_record_kinds`,
   such as `IFC-004` with `interface-contract`.
@@ -53,8 +53,8 @@ Item claims already fixes the interface completely.
 `approve-execution` rejects an unknown schedule, lane scopes or seams that break
 these rules, lane fields on a sequential Item, and an Item that still declares
 `parallel_lanes_v1` once the Process Policy no longer selects it. The Execution
-Plan's Role Sequences render the phases: the Software Architect alone, the
-lanes grouped by seam order, then Code Review and QA as the verification
-schedule sets. `item_plan_hash` and the plan hash cover the schedule, the
-scopes and the seams, so changing any of them follows the normal plan
-revision, approval and publication.
+Plan's Role Sequences render the phases: the Software Architect alone, then
+every lane, each consumer rendered `(after <producers>)`, then Code Review and
+QA as the verification schedule sets. `item_plan_hash` and the plan hash cover
+the schedule, the scopes and the seams, so changing any of them follows the
+normal plan revision, approval and publication.

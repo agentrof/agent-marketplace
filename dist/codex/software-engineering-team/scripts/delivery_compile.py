@@ -383,14 +383,12 @@ def delivery_switch_value(docs: Path, delivery_id: str, switch: str) -> str:
     """Return the value of a process switch that a Delivery runs under.
 
     Without a Process Policy the switch is at its package default. A draft or
-    invalid policy, or a pin that drifted while the pin is enforced, raises
-    ValueError, as process_policy.py value --delivery refuses it.
+    invalid policy, or a pin whose value of the switch drifted while the pin is
+    enforced, raises ValueError, as process_policy.py value --delivery refuses
+    it. From the Delivery Review on, the value is the pinned revision's.
     """
-    values, snapshot = process_policy.effective_values(docs)
-    errors = process_policy.delivery_pin_findings(docs, delivery_id, snapshot)
-    if errors:
-        raise ValueError("; ".join(errors))
-    return values[switch]["value"]
+    state = process_policy.delivery_values(docs, delivery_id, switches={switch})
+    return state["values"][switch]["value"]
 
 
 def policy_owner_gates(docs: Path) -> str | None:
@@ -428,11 +426,55 @@ def owner_decision_classes() -> set[str]:
     return {entry["id"] for entry in (*data["agent_clauses"], *data["classes"])}
 
 
-def user_decision_findings(body: str) -> list[str]:
-    """Validate the User Decisions table a Delivery keeps under two fixed owner gates."""
-    rows, errors = backlog_compile.structured_table(
-        section_bodies(body).get("User Decisions", ""), USER_DECISION_COLUMNS,
-        "delivery.md", "User Decisions")
+def decision_rows(body: str) -> tuple[list[dict[str, str]], list[str]]:
+    """Read the User Decisions table as rows, with what keeps it from being read."""
+    return backlog_compile.structured_table(section_bodies(body).get("User Decisions", ""),
+                                            USER_DECISION_COLUMNS, "delivery.md", "User Decisions")
+
+
+def holds_decision_log(body: str) -> bool:
+    """Whether the User Decisions section holds the table two fixed owner gates keep."""
+    lines = [line for line in section_bodies(body).get("User Decisions", "").splitlines()
+             if line.strip().startswith("|")]
+    return bool(lines) and tuple(cell.casefold().replace(" ", "_")
+                                 for cell in backlog_compile.table_cells(lines[0])) == USER_DECISION_COLUMNS
+
+
+def keeps_decision_log(docs: Path, props: dict, body: str) -> bool:
+    """Whether a Delivery keeps the owner's questions in its User Decisions table.
+
+    Its owner_gates value keeps the log from the proposal through gate B. A
+    section that holds the log's table keeps it whatever policy is in force
+    now, so a policy set for the next Delivery never turns this one's log off.
+    """
+    return holds_decision_log(body) or delivery_owner_gates(docs, props) == TWO_FIXED_GATES
+
+
+def decision_blocks(row: dict[str, str]) -> list[str]:
+    """The Story ids of the Items a decision row blocks."""
+    return [story.strip() for story in row["blocks"].split(";") if story.strip()]
+
+
+def pending_decisions(body: str, stories=None) -> list[str]:
+    """The ids of the pending decision rows, or of those that block an Item of *stories*."""
+    rows, _errors = decision_rows(body)
+    wanted = None if stories is None else {str(story).casefold() for story in stories}
+    return [row["id"] for row in rows if row["status"] == "pending"
+            and (wanted is None or wanted & {story.casefold() for story in decision_blocks(row)})]
+
+
+def pending_rows_text(ids: list[str]) -> str:
+    return f"User Decisions {'row' if len(ids) == 1 else 'rows'} {', '.join(ids)}" \
+           f" {'is' if len(ids) == 1 else 'are'} pending"
+
+
+def user_decision_findings(body: str, stories: list[str]) -> list[str]:
+    """Validate the User Decisions table a Delivery keeps under two fixed owner gates.
+
+    A row names the Items that wait for its answer in blocks, by the Story ids
+    of this Delivery's Items, and once answered records how long they waited.
+    """
+    rows, errors = decision_rows(body)
     classes = {QUEUED_DECISION_CLASS, *owner_decision_classes()}
     seen: set[str] = set()
     for number, row in enumerate(rows, 1):
@@ -452,6 +494,11 @@ def user_decision_findings(body: str) -> list[str]:
             errors.append(f"{label} needs at least two options separated by semicolons")
         if row["recommendation"] not in options:
             errors.append(f"{label} recommendation must be one of its options")
+        blocked = decision_blocks(row)
+        unknown = [story for story in blocked if story not in stories]
+        if unknown:
+            errors.append(f"{label} blocks must name Items of this Delivery by Story id, separated by"
+                          f" semicolons, not {', '.join(unknown)}")
         if row["status"] not in USER_DECISION_STATUSES:
             errors.append(f"{label} status must be {' or '.join(USER_DECISION_STATUSES)}")
         elif row["status"] == "answered" and not row["answer"]:
@@ -461,6 +508,9 @@ def user_decision_findings(body: str) -> list[str]:
                           " closes a question")
         if row["wait_minutes"] and not re.fullmatch(r"[0-9]+", row["wait_minutes"]):
             errors.append(f"{label} wait_minutes must be a whole number of minutes")
+        elif row["status"] == "answered" and blocked and not row["wait_minutes"]:
+            errors.append(f"{label} is answered after {', '.join(blocked)} waited for it, so it records"
+                          " that wait in wait_minutes")
     return errors
 
 
@@ -570,7 +620,7 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
         policy, policy_errors = process_policy.approved_snapshot(docs)
         errors.extend(policy_errors)
         if not policy_errors and status in process_policy.PIN_ENFORCED_STATUSES:
-            errors.extend(process_policy.pin_findings(delivery_props, policy))
+            errors.extend(process_policy.drift_findings(docs, delivery_props))
 
     for item_path, item_props in item_records:
         story_id = str(item_props["story_id"])
@@ -788,7 +838,7 @@ def init_delivery(args) -> int:
                       "architecture_record_kinds": [], "architecture_reason": NO_ARCHITECTURE_REASON,
                       "role_sequence": execution_roles(source),
                       "verification_schedule": verification_policy()["new_schedule"],
-                      **new_item_lane_fields(source, schedule),
+                      **new_item_lane_fields(schedule),
                       "tags": ["doc/delivery-item", "status/in-scope"]}
         atomic_text(item, frontmatter(item_props, body_for("item", item_props["title"], {
             "Delivery Scope": identifier, "Navigation": link(f"delivery/deliveries/{root.name}/delivery", identifier),
@@ -943,8 +993,10 @@ def delivery_findings(docs: Path, identifier: str, *,
     elif split_note(dod)[0].get("status") != "approved": errors.append("Definition of Done must be approved")
     item_paths = sorted(root.glob("items/*/item.md"))
     if not item_paths: errors.append("Delivery must contain at least one Item")
+    stories: list[str] = []
     for item_path in item_paths:
         item_props, item_body = split_note(item_path)
+        stories.append(str(item_props.get("story_id", "")))
         if item_props.get("type") != "delivery-item": errors.append(f"{item_path} type must be delivery-item")
         if item_props.get("status") not in ITEM_STATUSES: errors.append(f"{item_path} invalid Item status")
         for read_schedule in (verification_schedule, implementation_schedule):
@@ -953,13 +1005,15 @@ def delivery_findings(docs: Path, identifier: str, *,
             except ValueError as exc:
                 errors.append(f"{item_path}: {exc}")
         errors.extend(f"{item_path} missing section: {name}" for name in sorted(set(SECTIONS["item"]) - sections(item_body)))
-    if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
-        errors.extend(user_decision_findings(body))
+    if keeps_decision_log(docs, props, body):
+        errors.extend(user_decision_findings(body, stories))
     plan = root / "execution-plan.md"
     if plan.exists():
         plan_props, plan_body = split_note(plan)
         if plan_props.get("type") != "execution-plan": errors.append("execution-plan.md type must be execution-plan")
         errors.extend(f"execution-plan.md missing section: {name}" for name in sorted(set(SECTIONS["execution-plan"]) - sections(plan_body)))
+    if records_bundle_rulings(docs, props):
+        errors.extend(ruling_id_findings(body))
     # Closed Deliveries preserve their pinned historical source baseline. Every
     # mutable Delivery phase must instead prove that its selected Story/Test
     # Plan and Definition of Done are still the exact approved source bytes.
@@ -1158,6 +1212,11 @@ def approve_scope(args) -> int:
     dod = delivery_root(docs) / "definition-of-done.md"
     if not dod.exists() or split_note(dod)[0].get("status") != "approved":
         errors.append("Definition of Done must be approved before scope approval")
+    # Gate A asks every queued question, and its approval runs this write first.
+    pending = pending_decisions(body) if keeps_decision_log(docs, props, body) else []
+    if pending:
+        errors.append(f"{pending_rows_text(pending)}; gate A asks every queued question, so record the"
+                      " owner's answers before approve-scope")
     # Scope approval is the handoff: the selected Stories' upstream bindings must
     # be current now, while every later phase keeps the historical read above.
     if not errors:
@@ -1278,27 +1337,45 @@ def lane_seam_edges(props: dict) -> tuple[list[tuple[str, str, str]], list[str]]
     return edges, unreadable
 
 
-def lane_phases(props: dict) -> list[list[str]]:
-    """Group implementation roles: the Software Architect alone first, then lanes by seam order.
+def lane_dependencies(props: dict) -> dict[str, list[str]]:
+    """Map each lane role to the producer lanes its seams name, in role order.
 
-    A lane starts once every producer its seams name has finished; lanes
-    without such a producer between them share a phase.
+    A consumer lane starts as soon as these producers have finished; a lane
+    that no seam of it names never holds it back.
     """
     lanes = lane_roles(props)
     edges, unreadable = lane_seam_edges(props)
     if unreadable:
         raise ValueError("lane_seams cannot be read: " + ", ".join(unreadable))
-    producers = {role: {producer for producer, consumer, _interface in edges if consumer == role}
-                 for role in lanes}
-    phases = [["software_architect"]] if "software_architect" in (props.get("role_sequence") or []) else []
+    named = {role: {producer for producer, consumer, _interface in edges if consumer == role}
+             for role in lanes}
     finished: set[str] = set()
     while len(finished) < len(lanes):
-        ready = [role for role in lanes if role not in finished and producers[role] <= finished]
+        ready = {role for role in lanes if role not in finished and named[role] <= finished}
         if not ready:
             raise ValueError("lane_seams contain a cycle or name a role without a lane")
-        phases.append(ready)
-        finished.update(ready)
-    return phases
+        finished |= ready
+    return {role: [lane for lane in lanes if lane in named[role]] for role in lanes}
+
+
+def lane_phases(props: dict) -> list[list[str]]:
+    """Group implementation roles: the Software Architect alone first, then every lane together.
+
+    Inside the lane phase each lane waits only for the producers that
+    lane_dependencies names for it.
+    """
+    lane_dependencies(props)
+    lanes = lane_roles(props)
+    phases = [["software_architect"]] if "software_architect" in (props.get("role_sequence") or []) else []
+    return phases + ([lanes] if lanes else [])
+
+
+def role_sequence_text(props: dict) -> str:
+    """Render an Item's phases for Role Sequences; a consumer lane names the producers it waits for."""
+    waits = lane_dependencies(props) if implementation_schedule(props) == "parallel_lanes_v1" else {}
+    return " -> ".join(" + ".join(
+        role + (f" (after {', '.join(waits[role])})" if waits.get(role) else "") for role in phase)
+        for phase in execution_phases(props))
 
 
 def execution_phases(props: dict) -> list[list[str]]:
@@ -1332,6 +1409,9 @@ def lane_plan_findings(story_id: str, props: dict, paths: list[str], contracts: 
         return []
     errors: list[str] = []
     lanes = lane_roles(props)
+    if not lanes:
+        return [f"{story_id} has no implementation role besides the Software Architect to run as a lane;"
+                " declare implementation_schedule sequential_v1"]
     scopes, unreadable = lane_scope_map(props)
     errors.extend(f"{story_id} lane_scope must be <role>:<normalized path>: {entry}" for entry in unreadable)
     for role in sorted(set(scopes) - set(lanes)):
@@ -1377,7 +1457,7 @@ def lane_plan_findings(story_id: str, props: dict, paths: list[str], contracts: 
                           " architecture record id of a claimed record kind")
     if not errors:
         try:
-            lane_phases(props)
+            lane_dependencies(props)
         except ValueError as exc:
             errors.append(f"{story_id} {exc}")
     return errors
@@ -1394,13 +1474,10 @@ def policy_implementation_schedule(docs: Path) -> tuple[str | None, list[str]]:
     return values.get("implementation_schedule", {}).get("value", missing), []
 
 
-def new_item_lane_fields(source: dict, schedule: str | None) -> dict:
-    """Return the lane fields a new Item declares; none keeps today's Item bytes.
-
-    Only an Item with two or more lane roles has lanes to run in parallel.
-    """
+def new_item_lane_fields(schedule: str | None) -> dict:
+    """Return the lane fields every new Item declares; none keeps today's Item bytes."""
     missing = document_contract()["document_types"]["delivery_item"]["missing_implementation_schedule"]
-    if schedule in {None, missing} or len(lane_roles({"role_sequence": execution_roles(source)})) < 2:
+    if schedule in {None, missing}:
         return {}
     return {"implementation_schedule": schedule, "lane_scopes": [], "lane_seams": []}
 
@@ -1584,6 +1661,56 @@ def superseded_plan_approvals(root: Path, delivery_props: dict) -> list[str]:
     approval, earlier = previous.get("source_hash"), previous.get("superseded_plan_approvals")
     return ([approval] if isinstance(approval, str) and approval else []) + (
         [str(value) for value in earlier] if isinstance(earlier, list) else [])
+
+
+# Gate A's writes end with the Delivery's first execution approval and gate B's
+# begin with approve-review, so a Delivery that keeps a decision log is between
+# its two owner gates while it is execution_approved.
+BETWEEN_GATES_STATUSES = ("execution_approved", "active")
+
+
+def names_document(answer: str, document: str) -> bool:
+    """Whether an answer names *document*, such as Verification Contract revision 6, as a whole phrase."""
+    return re.search(rf"(?<![0-9A-Za-z]){re.escape(document)}(?![0-9A-Za-z])", answer,
+                     re.IGNORECASE) is not None
+
+
+def between_gates_refusals(docs: Path, document: str, delivery_id: str | None = None) -> list[str]:
+    """Refuse an approval of *document* while a Delivery is between its two fixed owner gates.
+
+    No approved document changes between gate A and gate B unless an answered
+    User Decisions row names it in its answer. An Operation contract and the
+    Delivery Governance serve every Delivery, so their approvals ask each one
+    between its gates; an execution plan asks only its own Delivery.
+    """
+    errors = []
+    for directory in delivery_dirs(docs):
+        try:
+            props, body = split_note(directory / "delivery.md")
+        except (OSError, ValueError):
+            continue
+        if delivery_id is not None and props.get("id") != delivery_id:
+            continue
+        if props.get("status") not in BETWEEN_GATES_STATUSES or not keeps_decision_log(docs, props, body):
+            continue
+        rows, _errors = decision_rows(body)
+        if not any(row["status"] == "answered" and names_document(row["answer"], document) for row in rows):
+            errors.append(f"{props.get('id')} is between its two owner gates, where {document} is approved only"
+                          " once an answered User Decisions row names it in its answer; queue the question and"
+                          f" record the owner's answer naming {document} first")
+    return errors
+
+
+def plan_approval_refusals(docs: Path, root: Path, props: dict) -> list[str]:
+    """Refuse an execution approval between the two fixed owner gates that no answered row names.
+
+    Gate A covers the first execution approval of the approved scope. Each later
+    approval is named by its number: the approvals it supersedes, plus one.
+    """
+    if props.get("status") not in BETWEEN_GATES_STATUSES:
+        return []
+    approval = len(superseded_plan_approvals(root, props)) + 1
+    return between_gates_refusals(docs, f"execution plan approval {approval}", str(props.get("id")))
 
 
 # merge-pr merges a Delivery PR only on green provider checks, so execution
@@ -1820,46 +1947,70 @@ def execution_approval_refusals(docs: Path, delivery_id: str, reopen: list[str] 
     if not any(root.glob("items/*/item.md")):
         return None, ["Execution Plan requires at least one Item"]
     inputs, errors = execution_approval_findings(docs, root, delivery_id, reopen, remote, pending)
+    errors = [*light_record_findings(docs, root, body, delivery_id), *errors]
     if errors:
         return None, errors
     return {"root": root, "props": props, "body": body, "inputs": inputs}, []
 
 
-def pending_operation_revisions(docs: Path, root: Path) -> list[dict]:
-    """Return each open Operation revision the plan binds that passes its own check.
+def pending_operation_revisions(docs: Path, root: Path) -> tuple[list[dict], dict[str, str]]:
+    """Return each open Operation revision the plan binds that its approval takes, and why it refuses the rest.
 
     Under two fixed owner gates, gate A approves such a revision before
     execution approval runs, so the gate may show the plan while it is open.
+    Each revision is checked as its approval renders it, and its entry names
+    the receipt that approval stamps, so gate A approves exact bytes. An open
+    revision that passes its own check but not its approval's is refused by
+    kind with what the approval finds.
     """
     runtime = any(split_note(path)[0].get("runtime_required", False)
                   for path in sorted(root.glob("items/*/item.md")))
-    pending = []
+    pending, refused = [], {}
     for kind in ("verification", "environment") if runtime else ("verification",):
         if not operation_compile.contract_path(docs, kind).is_file():
             continue
         receipt, errors = operation_compile.check_contract(docs, kind)
-        if receipt.get("status") == "draft" and not errors:
-            pending.append({"kind": kind, "revision": receipt["revision"]})
-    return pending
+        if receipt.get("status") != "draft" or errors:
+            continue
+        try:
+            approved, errors = operation_compile.check_contract(
+                docs, kind, operation_compile.approval_text(docs, kind))
+        except ValueError as exc:
+            approved, errors = {}, [str(exc)]
+        if errors:
+            refused[kind] = (f"approved current {kind} contract is required: revision {receipt['revision']} is"
+                             " open and its approval would refuse it: " + "; ".join(errors))
+        else:
+            pending.append({"kind": kind, "revision": approved["revision"],
+                            "source_hash": approved["source_hash"]})
+    return pending, refused
 
 
 def check_plan(args) -> int:
     """Report everything execution approval would refuse, before an owner gate shows the plan."""
     docs = docs_root(args.docs)
     root = find_delivery(docs, args.delivery)
-    status, pending = None, []
+    status, pending, refused, decisions = None, [], {}, None
     if root is not None:
-        props, _body = split_note(root / "delivery.md")
+        props, body = split_note(root / "delivery.md")
         status = props.get("status")
         if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
-            pending = pending_operation_revisions(docs, root)
+            pending, refused = pending_operation_revisions(docs, root)
+        # The queued questions the gate asks; the gate's writes refuse while one is pending.
+        if keeps_decision_log(docs, props, body):
+            decisions = pending_decisions(body)
     reopen = sorted(set(str(story) for story in (args.reopen or [])))
     with stage_package.candidate_session():
+        # A refused revision is reported once, with what its approval finds.
         _approval, errors = execution_approval_refusals(
             docs, args.delivery, reopen, args.remote, PLAN_GATE_STATUSES,
-            frozenset(revision["kind"] for revision in pending))
-    print(json.dumps({"ok": not errors, "id": args.delivery, "status": status, "errors": errors,
-                      "pending_operation_revisions": pending}, indent=2))
+            frozenset(revision["kind"] for revision in pending) | frozenset(refused))
+    errors = [*refused.values(), *errors, *(plan_approval_refusals(docs, root, props) if root else [])]
+    result = {"ok": not errors, "id": args.delivery, "status": status, "errors": errors,
+              "pending_operation_revisions": pending}
+    if decisions is not None:
+        result["pending_decisions"] = decisions
+    print(json.dumps(result, indent=2))
     return 0 if not errors else 1
 
 
@@ -1868,7 +2019,9 @@ def approve_execution(args) -> int:
     reopen = sorted(set(str(story) for story in (getattr(args, "reopen", None) or [])))
     remote = getattr(args, "remote", "origin")
     approval, errors = execution_approval_refusals(docs, args.delivery, reopen, remote)
-    if approval is None:
+    if approval is not None:
+        errors = plan_approval_refusals(docs, approval["root"], approval["props"])
+    if approval is None or errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
     root, props, body = approval["root"], approval["props"], approval["body"]
     path = root / "delivery.md"
@@ -1920,8 +2073,7 @@ def approve_execution(args) -> int:
         item_graph.append(
             f"{story} after " + (", ".join(item_props["execution_after"]) or "none")
         )
-        role_sequences.append(f"{story}: " + " -> ".join(
-            " + ".join(phase) for phase in execution_phases(item_props)))
+        role_sequences.append(f"{story}: " + role_sequence_text(item_props))
         path_claims.extend(f"{story}: {claim}" for claim in item_props["path_claims"])
         contract_claims.extend(f"{story}: {claim}" for claim in item_props["contract_claims"])
         operation_hashes.append(
@@ -2169,15 +2321,23 @@ def with_delivery_path_line(body: str, line: str) -> str:
     return replace_section(body, "User Decisions", line + ("\n\n" + rest if rest else ""))
 
 
+def standard_path_line(step: str, left: bool, failed: list[dict]) -> str:
+    """The Delivery path line that records the standard path and each failed condition."""
+    reason = "the Delivery left the light path" if left else "the light path does not hold"
+    return (f"Delivery path: standard. {step} recorded that {reason}: "
+            + "; ".join(f"{failure['condition']}: {failure['finding']}" for failure in failed) + ".")
+
+
 def delivery_path_record(docs: Path, root: Path, body: str, step: str,
                          remote: str = "origin") -> tuple[str, dict] | None:
     """Record in User Decisions the path an approval finds, or None when switch delivery_path takes no part.
 
     Scope approval records light when every condition holds, with the Item
     topology and the contract receipts it approves, and standard otherwise.
-    Execution approval keeps a light record only while every condition holds
-    and the plan binds that topology and those receipts, and records standard
-    for a scope approved without one. A standard record never turns light.
+    Execution approval refuses a plan whose topology or receipts differ from a
+    light record, so here it keeps the record while every other condition
+    holds, and records standard otherwise or for a scope approved without one.
+    A standard record never turns light.
     """
     value = policy_delivery_path(docs)
     recorded = recorded_delivery_path(body)
@@ -2198,45 +2358,130 @@ def delivery_path_record(docs: Path, root: Path, body: str, step: str,
             f"Delivery path: light. {step} approved the scope with the Item topology"
             f" {state['topology_hash']} and the reused contract receipts {receipt_text(state['receipts'])}.")
     else:
-        reason = "the Delivery left the light path" if recorded is not None else "the light path does not hold"
-        line = (f"Delivery path: standard. {step} recorded that {reason}: "
-                + "; ".join(f"{failure['condition']}: {failure['finding']}" for failure in state["failed"]) + ".")
+        line = standard_path_line(step, recorded is not None, state["failed"])
     return (with_delivery_path_line(body, line),
             {"path": "light" if state["eligible"] else "standard", "failed": state["failed"], "line": line})
 
 
+def light_record_findings(docs: Path, root: Path, body: str, delivery_id: str) -> list[str]:
+    """Refuse a plan other than the one the light path's one owner gate approved.
+
+    Scope approval records the Item topology and the contract receipts that gate
+    approved. Until the Delivery records its fallback, execution approval takes
+    only that plan, since the owner saw no other: a changed one goes to the
+    owner gate of /execution-plan.
+    """
+    recorded = recorded_delivery_path(body)
+    if recorded is None or recorded["path"] != "light":
+        return []
+    items: dict[str, tuple[dict, str]] = {}
+    for item_path in sorted(root.glob("items/*/item.md")):
+        props, item_body = split_note(item_path)
+        items[str(props.get("story_id", ""))] = (props, item_body)
+    failed = []
+    if light_topology_hash(items) != recorded["topology"]:
+        failed.append("topology_unchanged: the Item topology differs from the one scope approval recorded")
+    runtime = any(props.get("runtime_required") is True for props, _body in items.values())
+    receipts: list[dict] | None = []
+    for kind in ("verification", "environment") if runtime else ("verification",):
+        receipt, errors = operation_compile.check_contract(docs, kind)
+        if errors or not receipt.get("current"):
+            # The plan's own checks refuse a contract that is not approved and current.
+            receipts = None
+            break
+        receipts.append({"kind": kind, "revision": receipt["revision"], "source_hash": receipt["source_hash"]})
+    if receipts is not None and receipt_text(receipts) != receipt_text(recorded["receipts"]):
+        failed.append(f"operation_contracts_unchanged: the plan binds {receipt_text(receipts)}, not"
+                      f" {receipt_text(recorded['receipts'])} that scope approval recorded")
+    if not failed:
+        return []
+    return [f"{delivery_id} left the light path after its one owner gate: {'; '.join(failed)}; the owner has"
+            " not seen this plan, so run light-path-check, which records the fallback, and take the plan to"
+            f" the owner gate of /execution-plan {delivery_id}"]
+
+
+def record_delivery_path_line(path: Path, props: dict, body: str, line: str) -> None:
+    """Write the Delivery path line into delivery.md, keeping an approved record's source_hash current."""
+    body = with_delivery_path_line(body, line)
+    if "source_hash" in props:
+        props = {**props, "source_hash": content_hash(props, body)}
+    atomic_text(path, frontmatter(props, body))
+
+
+# The steps the light path's one owner gate authorizes, in their order.
+LIGHT_SEQUENCE = ("approve-scope", "reserve-delivery", "approve-execution", "publish-execution-plan",
+                  "claim-items")
+
+
 def light_path_check(args) -> int:
-    """Repeat the light-path conditions and the plan's approval checks before a light step."""
+    """Repeat the light-path conditions and the plan's approval checks before a light step.
+
+    The first check that fails ends the light path for good. It records the
+    fallback as the Delivery's path line, so a later check or approval that
+    finds every condition met again keeps the standard path. A step of the
+    light sequence that was refused, named with --refused, records it the same way.
+    """
     docs = docs_root(args.docs)
     root = find_delivery(docs, args.delivery)
+    refused = getattr(args, "refused", None)
 
-    def refuse(error: str) -> int:
-        print(json.dumps({"ok": False, "errors": [error]}, indent=2)); return 1
+    def refuse(error: str, fallback: str | None = None) -> int:
+        result = {"ok": False, "errors": [error]}
+        if fallback is not None:
+            result["fallback"] = fallback
+        print(json.dumps(result, indent=2)); return 1
 
     if root is None:
         return refuse("Delivery not found")
-    try:
-        value = delivery_switch_value(docs, args.delivery, DELIVERY_PATH_SWITCH)
-    except ValueError as exc:
-        return refuse(str(exc))
-    if value != LIGHT_WHEN_ELIGIBLE:
-        return refuse(f"{args.delivery} runs switch {DELIVERY_PATH_SWITCH} at {value}; only"
-                      f" {LIGHT_WHEN_ELIGIBLE} plans a Delivery on the light path")
     props, body = split_note(root / "delivery.md")
     status = props.get("status")
     if status not in LIGHT_PATH_STATUSES:
         return refuse(f"{args.delivery} is {status}; the light path ends once its Items are claimed")
     recorded = recorded_delivery_path(body)
     light = recorded if recorded is not None and recorded["path"] == "light" else None
+    on_light_path = recorded is None or light is not None
+
+    def fall_back(failed: list[dict]) -> str:
+        line = standard_path_line("light-path-check", light is not None, failed)
+        record_delivery_path_line(root / "delivery.md", props, body, line)
+        return line
+
+    if refused is not None:
+        # A proposal is on the light path while the policy selects it; an approved scope records its path.
+        proposed = (recorded is None and status == "scope_proposed"
+                    and policy_delivery_path(docs) == LIGHT_WHEN_ELIGIBLE)
+        fallback = fall_back([{"condition": DELIVERY_PATH_SWITCH, "finding": f"{refused} was refused"}]) \
+            if light is not None or proposed else None
+        result = {"ok": False, "delivery": args.delivery, "status": status, "path": "standard",
+                  "recorded": "standard" if fallback is not None or recorded is not None else None}
+        if fallback is not None:
+            result["fallback"] = fallback
+        print(json.dumps(result, indent=2, sort_keys=True)); return 1
+    try:
+        value = delivery_switch_value(docs, args.delivery, DELIVERY_PATH_SWITCH)
+    except ValueError as exc:
+        # A light record whose pinned policy no longer holds ends the light path.
+        return refuse(str(exc), fall_back([{"condition": DELIVERY_PATH_SWITCH, "finding": str(exc)}])
+                      if light is not None else None)
+    if value != LIGHT_WHEN_ELIGIBLE:
+        return refuse(f"{args.delivery} runs switch {DELIVERY_PATH_SWITCH} at {value}; only"
+                      f" {LIGHT_WHEN_ELIGIBLE} plans a Delivery on the light path",
+                      fall_back([{"condition": DELIVERY_PATH_SWITCH,
+                                  "finding": f"the Process Policy sets it to {value}"}])
+                      if light is not None else None)
     with stage_package.candidate_session():
         state = light_path_evaluation(docs, root, light, args.remote)
+        fallback = fall_back(state["failed"]) if on_light_path and not state["eligible"] else None
         _approval, plan_findings = execution_approval_refusals(docs, args.delivery, remote=args.remote,
                                                                statuses=PLAN_GATE_STATUSES)
-    path = "light" if state["eligible"] and (recorded is None or light is not None) else "standard"
+    path = "light" if state["eligible"] and on_light_path else "standard"
     result = {"ok": path == "light" and not plan_findings, "delivery": args.delivery, "status": status,
-              "value": value, "path": path, "recorded": recorded["path"] if recorded else None,
+              "value": value, "path": path,
+              "recorded": "standard" if fallback else recorded["path"] if recorded else None,
               "eligible": state["eligible"], "failed": state["failed"], "receipts": state["receipts"],
               "topology_hash": state["topology_hash"], "plan_findings": plan_findings}
+    if fallback is not None:
+        result["fallback"] = fallback
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["ok"] else 1
 
@@ -2245,6 +2490,53 @@ EXECUTION_PLANNING = "execution_planning"
 SINGLE_SOURCE_BUNDLE = "single_source_bundle"
 # The bundle is reviewed while its execution plan can still be approved.
 BUNDLE_STATUSES = ("scope_proposed", "scope_approved", "execution_approved")
+# A ruling line of User Decisions starts with its id, after an optional list
+# marker or heading; a decision table row keeps it in its first cell.
+RULING_LINE_RE = re.compile(r"^(?:[-*+]\s+|[0-9]+[.)]\s+|#{3,6}\s+)?(?:\*\*)?(D-[0-9]+)\b")
+RULING_CELL_RE = re.compile(r"^D-[0-9]+$")
+
+
+def ruling_id_findings(body: str) -> list[str]:
+    """Refuse a malformed ruling id, and one id that starts two rulings.
+
+    Every document cites an owner ruling by its id, so an id names exactly one
+    ruling. A decision table row of switch owner_gates counts under its id
+    against the ruling lines; the table's own check validates its rows.
+    """
+    lines, rows = [], []
+    for line in section_bodies(body).get("User Decisions", "").splitlines():
+        text = line.strip()
+        if text.startswith("|"):
+            cell = text.strip("|").split("|", 1)[0].strip()
+            if RULING_CELL_RE.fullmatch(cell):
+                rows.append(cell)
+        elif match := RULING_LINE_RE.match(text):
+            lines.append(match.group(1))
+    errors = [f"delivery.md User Decisions ruling {ruling} needs an id of D- and at least two digits"
+              for ruling in lines if not USER_DECISION_ID_RE.fullmatch(ruling)]
+    for ruling in sorted(set(lines)):
+        count = lines.count(ruling) + rows.count(ruling)
+        if count > 1:
+            errors.append(f"delivery.md User Decisions gives id {ruling} to {count} rulings;"
+                          " every ruling keeps its own id")
+    return errors
+
+
+def records_bundle_rulings(docs: Path, props: dict) -> bool:
+    """Whether a Delivery records its owner rulings under execution_planning single_source_bundle.
+
+    Rulings are made while the owner's questions are logged, whatever
+    owner_gates is. A policy that cannot be read, or a pin that drifted,
+    decides nothing here: the source checks report it. A package that
+    declares no such switch runs none of its values.
+    """
+    if props.get("status") not in DECISION_LOG_STATUSES:
+        return False
+    try:
+        value = delivery_switch_value(docs, str(props.get("id", "")), EXECUTION_PLANNING)
+    except (KeyError, ValueError):
+        return False
+    return value == SINGLE_SOURCE_BUNDLE
 
 
 def _file_record(docs: Path, relative: str) -> dict:
@@ -2254,14 +2546,69 @@ def _file_record(docs: Path, relative: str) -> dict:
     return {"path": relative, "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
-def bundle_manifest(docs: Path, delivery_id: str) -> dict:
+def operation_holder(docs: Path, delivery_id: str, remote: str) -> tuple[Path, str | None] | None:
+    """Name the checkout and the ref whose Operation contracts a Delivery's publication meets.
+
+    Publication refuses an approved contract that no Item pins while the
+    Integration lacks it, so the Integration's remote-tracking ref answers once
+    reservation has cut it. Before that the target's does, since reservation
+    cuts the Integration from it, and HEAD stands in for a target without one.
+    Only local refs are read, as current as the last fetch or push. None
+    outside a Git checkout.
+    """
+    checkout = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), None)
+    if checkout is None:
+        return None
+    from delivery_git import resolve_target_branch, short_refs
+    refs = [f"refs/remotes/{remote}/{short_refs(delivery_id)['integration']}"]
+    try:
+        refs.append(f"refs/remotes/{remote}/{resolve_target_branch(checkout, remote)}")
+    except RuntimeError:
+        pass
+    for ref in (*refs, "HEAD"):
+        if not subprocess.run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet",
+                               ref + "^{commit}"], capture_output=True, check=False).returncode:
+            return checkout, ref
+    return checkout, None
+
+
+def operation_held(holder: tuple[Path, str | None], path: Path, text: str) -> bool:
+    """Whether the holder's copy of a contract has the local authored text.
+
+    As publication compares them, the generated relation block and line
+    endings do not count.
+    """
+    checkout, ref = holder
+    if ref is None:
+        return False
+    relative = path.resolve().relative_to(checkout.resolve()).as_posix()
+    shown = subprocess.run(["git", "--no-replace-objects", "-C", str(checkout), "cat-file", "blob",
+                            f"{ref}:{relative}"], capture_output=True, check=False)
+    if shown.returncode:
+        return False
+
+    def authored(value: str) -> str:
+        return without_generated_relations(value.replace("\r\n", "\n")).rstrip()
+
+    try:
+        return authored(shown.stdout.decode("utf-8")) == authored(text)
+    except UnicodeDecodeError:
+        return False
+
+
+def bundle_manifest(docs: Path, delivery_id: str, remote: str = "origin") -> dict:
     """Return the contract and topology bundle one execution plan is reviewed on.
 
     Only a Delivery that runs switch execution_planning at single_source_bundle
-    has one. It lists every Operation contract the plan revises or pins, every
-    Item record with its Story and Test Plan and the switch value's package
-    data, each with the hash of its bytes, and names the counterpart reader of
-    every revised contract. It changes nothing.
+    has one. It lists every Operation contract the plan revises, pins or has
+    to carry, every Item record with its Story and Test Plan and the switch
+    value's package data, each with the hash of its bytes, and the Delivery's
+    User Decisions section, which owns every owner ruling, with the hash of its
+    text. It names the counterpart reader of every revised contract as
+    task_inputs.py --role takes it. An unpinned revision is one no open Item
+    pins that the Integration, or before reservation the target, does not hold:
+    approval does not end it, only the target and refresh-target do. It
+    changes nothing.
     """
     root = find_delivery(docs, delivery_id)
     if root is None:
@@ -2270,10 +2617,16 @@ def bundle_manifest(docs: Path, delivery_id: str) -> dict:
     if value != SINGLE_SOURCE_BUNDLE:
         raise ValueError(f"{delivery_id} runs switch {EXECUTION_PLANNING} at {value}; only"
                          f" {SINGLE_SOURCE_BUNDLE} reviews an execution-plan bundle")
-    props, _body = split_note(root / "delivery.md")
+    props, body = split_note(root / "delivery.md")
     if props.get("status") not in BUNDLE_STATUSES:
         raise ValueError(f"{delivery_id} is {props.get('status')}; its bundle is reviewed"
                          " during execution planning")
+    delivery = (root / "delivery.md").relative_to(docs).as_posix()
+    rulings = section_bodies(body).get("User Decisions")
+    if rulings is None:
+        raise ValueError(f"bundle input is missing: {delivery} User Decisions")
+    decisions = {"path": delivery, "section": "User Decisions",
+                 "sha256": "sha256:" + hashlib.sha256(rulings.encode("utf-8")).hexdigest()}
     items, sources = [], []
     for item_path in sorted(root.glob("items/*/item.md")):
         item, _item_body = split_note(item_path)
@@ -2285,6 +2638,7 @@ def bundle_manifest(docs: Path, delivery_id: str) -> dict:
         raise ValueError("Delivery must contain at least one Item")
     # A sealed Item keeps the bindings its evidence was produced against.
     open_items = [item for item in items if item["status"] not in TERMINAL_ITEM_STATUSES]
+    holder = operation_holder(docs, delivery_id, remote)
     contracts = []
     for kind in ("verification", "environment"):
         path = operation_compile.contract_path(docs, kind)
@@ -2292,29 +2646,33 @@ def bundle_manifest(docs: Path, delivery_id: str) -> dict:
             if kind == "verification":
                 raise ValueError("bundle input is missing: operation/verification-contract.md")
             continue
-        contract, _contract_body = operation_compile.parse(path)
+        text = path.read_text(encoding="utf-8")
+        contract, _contract_body = operation_compile.parse_text(text, path)
         pinned = bool(open_items) and (kind == "verification"
                                        or any(item["runtime_required"] for item in open_items))
         revised = contract.get("status") == "draft"
-        if pinned or revised:
+        # Outside Git only the draft status tells a revision apart.
+        held = operation_held(holder, path, text) if holder is not None else not revised
+        if pinned or revised or not held:
             writer = operation_compile.WRITER_ROLES[kind]
+            counterpart = next(role for role in operation_compile.WRITER_ROLES.values() if role != writer)
             contracts.append({**_file_record(docs, path.relative_to(docs).as_posix()),
                               "kind": kind, "status": contract.get("status"),
                               "revision": contract.get("revision"), "revised": revised,
-                              "pinned": pinned, "writer": writer,
-                              "counterpart": next(role for role in operation_compile.WRITER_ROLES.values()
-                                                  if role != writer)})
+                              "pinned": pinned, "held": held, "writer": writer.replace("_", "-"),
+                              "counterpart": counterpart.replace("_", "-")})
     package = Path(__file__).resolve().parents[1]
     spec = process_policy.load_registry()[EXECUTION_PLANNING]["spec"]
     data = [{"path": relative, "sha256": "sha256:" + hashlib.sha256(
         (package / relative).read_bytes()).hexdigest()}
         for relative in spec.get("value_data", {}).get(SINGLE_SOURCE_BUNDLE, [])]
-    files = [record["path"] for record in (*contracts, *items, *sources)]
+    files = [record["path"] for record in (*contracts, *items, *sources, decisions)]
     result = {"delivery": delivery_id, "contracts": contracts, "items": items,
-              "sources": sources, "data": data,
+              "sources": sources, "user_decisions": decisions, "data": data,
+              "held_by": holder[1] if holder is not None else None,
               "readers": [contract["counterpart"] for contract in contracts if contract["revised"]],
               "unpinned_revisions": [contract["path"] for contract in contracts
-                                     if contract["revised"] and not contract["pinned"]],
+                                     if not contract["pinned"] and not contract["held"]],
               "inputs": sorted(dict.fromkeys(f"workspace/docs/{path}" for path in files))}
     result["source_hash"] = "sha256:" + hashlib.sha256(json.dumps(
         result, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
@@ -2324,7 +2682,7 @@ def bundle_manifest(docs: Path, delivery_id: str) -> dict:
 def bundle(args) -> int:
     docs = docs_root(args.docs)
     try:
-        result = bundle_manifest(docs, args.delivery)
+        result = bundle_manifest(docs, args.delivery, getattr(args, "remote", "origin"))
     except (OSError, ValueError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
     expected = getattr(args, "expected_hash", None)
@@ -2455,12 +2813,21 @@ def table_block(marker: str, columns: tuple[str, ...], rows: list[str]) -> str:
 
 
 def block_rows(text: str, marker: str) -> list[str]:
-    """The rows of the table that follows ``marker`` in a compiler-owned block."""
+    """The rows of the table that follows ``marker`` in a compiler-owned block.
+
+    The block ends with its own table. A block whose marker line says
+    ``none.`` has no table, so a later block's table never becomes its rows.
+    """
+    if marker not in text:
+        return []
+    remainder, *lines = text.split(marker, 1)[1].splitlines() or [""]
+    if remainder.strip():
+        return []
     rows: list[str] = []
-    for line in text.split(marker, 1)[1].splitlines() if marker in text else []:
+    for line in lines:
         if line.strip().startswith("|"):
             rows.append(line.strip())
-        elif rows:
+        elif rows or line.strip():
             break
     return rows[2:]
 
@@ -2623,11 +2990,21 @@ def approve_review(args) -> int:
             "review approval requires exact reviewed_commit and reviewed_integration_commit Git OIDs"
         ]}, indent=2)); return 2
     delivery_path_value = root / "delivery.md"
-    delivery_props, _ = split_note(delivery_path_value)
+    delivery_props, delivery_body = split_note(delivery_path_value)
     try:
         review_loop = delivery_switch_value(docs, args.delivery, REVIEW_LOOP)
     except ValueError as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
+    # Gate B presents the decision log and asks every queued question before this write.
+    if keeps_decision_log(docs, delivery_props, delivery_body):
+        errors = user_decision_findings(delivery_body, [
+            str(split_note(item)[0].get("story_id", "")) for item in sorted(root.glob("items/*/item.md"))])
+        pending = pending_decisions(delivery_body)
+        if pending:
+            errors.append(f"{pending_rows_text(pending)}; gate B asks every queued question, so record the"
+                          " owner's answers before approve-review")
+        if errors:
+            print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
     review_path = root / "delivery-review.md"
     review_subject = str(delivery_props.get("goal", args.delivery)).strip()
     review_props = {"type": "delivery-review", "id": f"{args.delivery}-REVIEW",
@@ -2730,9 +3107,14 @@ def main(argv=None) -> int:
     light.add_argument("--delivery", required=True)
     light.add_argument("--remote", default="origin",
                        help="the Git remote whose local remote-tracking refs hold the target branch")
+    light.add_argument("--refused", choices=LIGHT_SEQUENCE,
+                       help="record that this step of the light sequence was refused, which ends the light path")
     light.set_defaults(func=light_path_check)
     bundle_cmd = sub.add_parser("bundle-manifest")
     bundle_cmd.add_argument("--delivery", required=True); bundle_cmd.add_argument("--expected-hash")
+    bundle_cmd.add_argument("--remote", default="origin",
+                            help="the Git remote whose local remote-tracking refs hold the target and"
+                                 " Integration branches")
     bundle_cmd.set_defaults(func=bundle)
     transition = sub.add_parser("prepare-item-transition")
     transition.add_argument("--delivery", required=True); transition.add_argument("--story", required=True)

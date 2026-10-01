@@ -5,7 +5,9 @@ Planned identities come from one of two inputs. ``--plan`` reads approved
 story Test Plans: each scenario a plan defines under a ``<story-id>-TS-###``
 heading, followed by the qualified BA identities its ``source_refs`` cite. An
 identity a plan only mentions, such as another story's scenario named in a
-Given clause, is not planned. ``--brief`` reads an explicit id list and takes
+Given clause, is not planned. The first ``--plan`` is the Item's own Test
+Plan and any further one a dependency's, so ``--superseded`` names only
+dependency scenarios. ``--brief`` reads an explicit id list and takes
 every canonical qualified or unqualified BA identity and story-scenario
 identity in its text, so a Test Plan never goes through it.
 
@@ -208,7 +210,12 @@ def print_matrix(rows) -> None:
 
 
 def plan_ids(paths: list[Path], superseded: list[str]) -> tuple[list[str], str]:
-    """Return the planned identities of ``--plan``, or an input error."""
+    """Return the planned identities of ``--plan``, or an input error.
+
+    The first plan is the Item's own. Only a dependency's scenario can be
+    superseded, so an id the own plan defines is refused rather than dropped
+    with the BA identities only it traces.
+    """
     plans = []
     for path in paths:
         scenarios = plan_scenarios(
@@ -222,8 +229,11 @@ def plan_ids(paths: list[Path], superseded: list[str]) -> tuple[list[str], str]:
     if unknown:
         return [], ("superseded ids are not scenarios the plans define: "
                     + ", ".join(unknown))
-    ids = extract_plan_ids(plans, dropped)
-    return ids, "" if ids else "the plans define no scenario that is not superseded"
+    own = sorted(dropped & {scenario_id for scenario_id, _ in plans[0]})
+    if own:
+        return [], ("superseded ids are scenarios of the Item's own Test Plan, the first"
+                    " --plan: " + ", ".join(own))
+    return extract_plan_ids(plans, dropped), ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -233,8 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     planned = parser.add_mutually_exclusive_group(required=True)
     planned.add_argument(
         "--plan", nargs="+", type=Path, metavar="MD",
-        help="approved story Test Plan(s): the scenarios each defines and the"
-             " qualified AC/BR ids their source_refs cite",
+        help="approved story Test Plan(s), the Item's own first: the scenarios each"
+             " defines and the qualified AC/BR ids their source_refs cite",
     )
     planned.add_argument(
         "--brief", nargs="+", type=Path, metavar="MD",
@@ -243,8 +253,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--superseded", nargs="+", default=[], metavar="ID",
-        help="with --plan: scenario ids a dependent Test Plan supersedes; they"
-             " and the BA ids only they cite leave the audit",
+        help="with --plan: dependency scenario ids the Item's own Test Plan, the"
+             " first --plan, supersedes; they and the BA ids only they cite leave"
+             " the audit",
     )
     parser.add_argument(
         "--junit", nargs="+", required=True, type=Path, metavar="XML",

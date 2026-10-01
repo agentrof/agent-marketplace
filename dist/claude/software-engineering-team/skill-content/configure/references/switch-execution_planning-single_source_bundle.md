@@ -28,8 +28,9 @@ orders the plan's steps.
 
 You read the whole bundle as the counterpart of each revised contract you are
 given: the DevOps Engineer for the Verification Contract and the QA Engineer
-for the Environment Contract. Read every file the bundle manifest names, and
-judge the bundle through every lens of review panel `execution_bundle` in
+for the Environment Contract. Read every file the bundle manifest names, the
+owner rulings in the Delivery's `User Decisions` included, and judge the
+bundle through every lens of review panel `execution_bundle` in
 `skill-content/challenge-review/data/review-panels.json`. These contracts are
 project-global, so judge a change's fit for every Delivery that pins them, not
 only this one.

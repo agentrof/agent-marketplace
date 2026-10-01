@@ -4,7 +4,8 @@ These are the instructions of process switch `owner_gates` at
 `two_fixed_gates`. A task binds this file only when the project's Process
 Policy selects that value; at the default, `per_step`, the owner answers each
 question when it comes up, as the flows describe. Where this file and a flow
-differ on when the owner is asked, this file governs.
+differ on when the owner is asked or on what a declined proposal leaves
+behind, this file governs.
 
 The switch changes when a question is asked, never who decides it. Nothing is
 decided by default: a recommendation is never an answer, and the run never
@@ -17,6 +18,9 @@ approval and Requirement-flow gates keep their own gates.
    continues into execution planning on it without asking the scope decision.
    The Item topology, the Operation contract and Governance revisions the plan
    needs and their reviews run as their flows describe, up to their approval.
+   Execution planning thus runs before the reservation, so the proposal is
+   disposable only for its own package: a declined or interrupted proposal
+   leaves the drafts of those revisions to their own flows.
 2. When the plan and every revision it needs pass their checks
    (`delivery_compile.py check` and `check-plan`, `operation_compile.py
    check`, `delivery_governance.py check`), present gate A as one choice gate:
@@ -24,18 +28,34 @@ approval and Requirement-flow gates keep their own gates.
    sequence and schedules, every Operation revision and Governance change the
    plan needs, the decision log so far and every queued question.
    `check-plan` reports every refusal execution approval would raise on the
-   plan; an open Operation revision that passes its own check is listed under
-   `pending_operation_revisions` instead, since gate A approves it first.
-3. Group the questions in calls of at most four, with the recommended option
-   first and the tradeoffs in the option descriptions.
+   plan; an open Operation revision that its approval would take, checked as
+   that approval renders it, is listed under `pending_operation_revisions`
+   instead, with the `source_hash` the approval stamps, since gate A approves
+   it first. Gate A names that receipt, and an open revision its approval
+   would refuse is refused with what the approval finds. `check-plan` also
+   lists the `pending` rows of the decision log under `pending_decisions`, and
+   gate A asks each of them.
+3. Group the questions in host calls no larger than the per-call bound the
+   host contract names, with the recommended option first and the tradeoffs
+   in the option descriptions.
 4. Record every answer, then carry out what gate A approved without asking
-   again: approve each Operation revision, approve the Governance change and
-   apply it with `delivery_git.py apply-governance` before any Item starts,
-   run `approve-scope` and reserve the Delivery, run `approve-execution`,
-   publish the plan, claim the Items and start them. Gate A's approval is the
-   go for Item start.
+   again, in this order: run `approve-scope`, which refuses while a row of the
+   decision log is `pending`; approve the Governance change and apply it with
+   `delivery_git.py apply-governance` before any Item starts, and before the
+   reservation, which needs the Fence to carry the approved Governance;
+   reserve the Delivery; approve each Operation revision; run
+   `approve-execution`, publish the plan, claim the Items and start them. Gate
+   A's approval is the go for Item start.
 5. A rejection writes nothing that gate A would have authorized. Revise, then
    present gate A again.
+6. When `reserve-delivery` is refused after gate A, report the refusal and its
+   finding. A Governance change applied before it stays applied: it is a
+   project document, not part of the Delivery, and only a later Governance
+   revision changes it. No Operation revision is approved before the
+   reservation, so none stands for a Delivery that cannot start. Resolve what
+   the finding names, for example wait until another Delivery releases the
+   Fence, then reserve and continue with the next write; when the resolution
+   changes what gate A approved, present gate A again for that part.
 
 ## With delivery_path
 
@@ -56,14 +76,21 @@ log's table.
 - A question outside the at-once classes is queued: add a `pending` row to the
   Delivery's `User Decisions` table and continue. Work that does not depend on
   the question goes on; a task that depends on it waits, and only that task
-  waits.
+  waits. The row's `blocks` names the Items that wait: `claim-items`,
+  `start-item`, `resume-item` and `reopen-item` refuse an Item a `pending` row
+  blocks with `DELIVERY_DECISION_PENDING`.
 - When every remaining task depends on pending questions, ask the queued
   questions at once as an early gate, grouped as gate A groups them.
 - Only the owner's answer closes a question. Record it verbatim and set the
   row `answered` before the task that depends on it starts, and record in
   `wait_minutes` how long its dependent tasks waited.
 - No approved document changes between the gates unless an `answered` row
-  names it in its answer.
+  names it in its answer. From the Delivery's first execution approval to
+  `approve-review`, `operation_compile.py approve`, `delivery_governance.py
+  approve` and `delivery_compile.py approve-execution` refuse until an answer
+  names `Verification Contract revision N`, `Environment Contract revision N`,
+  `Delivery Governance revision N` or `execution plan approval N`, as the
+  refusal names it.
 
 ## At-once classes
 
@@ -83,20 +110,22 @@ answer, as it does at `per_step`.
 When every Item is integrated and the Delivery Review draft is ready, present
 gate B as one choice gate: the Delivery Review, its follow-ups, the decision
 log since gate A and the merge. Gate B's approval authorizes `approve-review`,
-the Review and PR publication and the merge once the provider checks pass. A
-failed check or a change after gate B returns to the Delivery flow, and the
-merge waits for a new gate B.
+the Review and PR publication and the merge once the provider checks pass.
+`approve-review` and `publish-delivery-review` refuse while a row is
+`pending`, since gate B asks every queued question. A failed check or a change
+after gate B returns to the Delivery flow, and the merge waits for a new gate B.
 
 ## Decision log
 
 The `User Decisions` section of `delivery.md` holds one table.
 `delivery_compile.py init` writes its header; `delivery_compile.py check`
-validates it while the Delivery runs under this value.
+validates it while the Delivery runs under this value and whenever the section
+holds the table, whatever policy is in force later.
 
 ```markdown
 | id | class | question | options | recommendation | status | answer | blocks | wait_minutes |
 |---|---|---|---|---|---|---|---|---|
-| D-01 | queued | Which cache root do parallel verification runs share? | One fixed root per checkout; one root per Item | One fixed root per checkout | answered | One fixed root per checkout. | Verification Contract revision 6 | 12 |
+| D-01 | queued | Which cache root do parallel verification runs share? | One fixed root per checkout; one root per Item | One fixed root per checkout | answered | One fixed root per checkout, recorded in Verification Contract revision 6. | AUTH-01 | 12 |
 ```
 
 - `id` is `D-` with at least two digits, unique and stable; other documents
@@ -106,8 +135,12 @@ validates it while the Delivery runs under this value.
   recommended one first, and `recommendation` is one of them.
 - `status` is `pending` or `answered`. An `answered` row records the owner's
   answer; a `pending` row records none.
-- `blocks` names the tasks that wait for the answer, and `wait_minutes` is the
-  whole number of minutes they waited.
+- `blocks` names the Items that wait for the answer by their Story ids,
+  separated by semicolons, or stays empty when no Item waits.
+- `wait_minutes` is the whole number of minutes the Items in `blocks` waited;
+  an `answered` row that blocked an Item records it.
+- An `answered` row names each approved document the answer lets change
+  between the gates in `answer`.
 
 ## Roles
 

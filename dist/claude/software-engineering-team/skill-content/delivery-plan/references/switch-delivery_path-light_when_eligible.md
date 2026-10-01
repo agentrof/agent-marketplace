@@ -53,8 +53,9 @@ is eligible only while every condition holds:
    create --delivery DLV-###`, the Item record and the selected Story and Test
    Plan as inputs. The architect runs the topology-only pass of
    `skill-content/execution-plan/references/switch-delivery_path-light_when_eligible.md`.
-3. Run `light-path-check`. A failed condition ends the light path: see
-   Fallback. Return any `plan_findings` to the topology pass and check again.
+3. Run `light-path-check`. A failed condition ends the light path, and the
+   check records it: see Fallback. Return any `plan_findings` to the topology
+   pass and check again.
 4. Present one owner gate as one choice gate: the scope proposal, the Item
    topology with its claims, role sequence and schedules, and the reused
    contract receipts and topology hash the check lists. It replaces both the
@@ -72,19 +73,24 @@ refs, and continue with the first step not yet done.
 
 ## Fallback
 
-The light path ends at the first failed `light-path-check`. Name each failed
-condition to the owner, keep every approval already made and continue on the
-standard path from where the sequence stopped. Before the gate, that is the
-scope gate. After it, the gate's approval of the scope stands: run
-`approve-scope` and `reserve-delivery` when they have not run, then
-`/execution-plan DLV-###` with its own owner gate for the plan when execution
-approval has not run, or the refused verb's own remedy after it. A Delivery
-never returns to the light path.
+The light path ends at the first failed `light-path-check` or refused step,
+whatever the refused step's remedy. The Delivery records the fallback: a failed
+check rewrites its `Delivery path:` line to `standard` itself, naming each
+failed condition, and a refused step is recorded with `delivery_compile.py
+light-path-check --delivery DLV-### --refused <step>`, which names it. The
+recorded fallback stands when the failure clears again. A Delivery never
+returns to the light path.
 
-A refused verb keeps its existing remedy. When the remedy changes neither the
-scope, the Item topology nor a contract receipt, `light-path-check` still
-passes and the sequence continues with the refused verb; otherwise the check
-fails and the Delivery falls back.
+Name each failed condition or refused step to the owner, keep every approval
+already made and continue on the standard path from where the sequence
+stopped. Before the gate, that is the scope gate. After it, the gate's
+approval of the scope stands: run `approve-scope` and `reserve-delivery` when
+they have not run, then `/execution-plan DLV-###` with its own owner gate for
+the plan when execution approval has not run, or the refused verb's own remedy
+after it. Until the fallback is recorded, `approve-execution` refuses a plan
+whose Item topology or bound contract receipts differ from the light line,
+since the owner never saw it, so a plan changed after the gate always takes
+the owner gate of `/execution-plan DLV-###`.
 
 A `DELIVERY_TRANSACTION_UNCERTAIN` from `reserve-delivery` or
 `publish-execution-plan` is no fallback: the refetched refs it names hold the
@@ -97,12 +103,15 @@ approval still covers the sequence, so the owner is not asked again.
 `approve-scope` writes one line that starts `Delivery path:` first in the
 Delivery's `User Decisions` section before it hashes the scope: `light`, with
 the Item topology hash and the reused contract receipts it approved, or
-`standard`, with each failed condition. `approve-execution` keeps a light line
-only while every condition holds and the plan binds that topology and those
-receipts, and otherwise rewrites it to `standard`, naming the conditions. A
-line names `delivery_path` in place of a condition when the policy or the scope
-record decides it: a policy revised to `standard`, or a scope approved without
-a light line. The pinned Process Policy names the switch value the Delivery ran
+`standard`, with each failed condition. `light-path-check` rewrites a light
+line to `standard` at the first failed check or recorded refusal.
+`approve-execution` refuses a plan that no longer binds that topology and
+those receipts, keeps a light line only while every other condition holds, and
+otherwise rewrites it to `standard`, naming the conditions. A line names
+`delivery_path` in place of a condition when the policy, the scope record or a
+refused step decides it: a policy revised to `standard` or no longer readable,
+a scope approved without a light line, or a step named with `--refused`. The
+pinned Process Policy names the switch value the Delivery ran
 under and the line the path it took. The line is compiler-owned and no owner
 ruling: whoever writes `User Decisions` records rulings beside it and leaves it
 as the compiler writes it.

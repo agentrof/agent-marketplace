@@ -6,6 +6,13 @@ value; at the default, `single_reader`, every review runs as its flow and role
 files describe. Where this file and a flow or role file differ on a review
 step that `data/review-panels.json` declares, this file governs.
 
+This file decides who reads and how their findings merge into one verdict.
+The review loop, meaning which findings start a writer pass, where a minor
+finding goes and what a re-review reads, is process switch `review_loop`'s:
+at its default, `current`, a panel keeps the step's own loop, and at
+`blocking_delta` the loop follows
+`skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+
 A review panel runs one fresh, read-only reader per lens assignment, in
 parallel, over the same inputs. It replaces a step's single reviewer and never
 runs beside one. A flow names its step as review panel `<step>`;
@@ -72,20 +79,18 @@ writer never lowers a returned severity.
 
 The panel verdict is approved only when every assignment has returned, no
 lens has an open critical or major finding and the owning compiler checks
-named by the flow are green. A minor finding never blocks and never starts a
-round; the step's own rule records or defers it.
+named by the flow are green. The merged findings then go to the step's writer
+exactly as a single reviewer's findings would, and the step's review loop
+decides what happens to each of them.
 
 ## Re-review
 
-After a writer pass fixes or disproves a critical or major finding,
-regenerate the step's inputs and rerun only the assignments that returned
-such a finding. Each rerun reader confirms that its findings are closed. The
-first rerun assignment in `default_panel` order also performs the
-changed-text check: it reads every changed path with its dependency context
-through all of the step's lenses and names the owning lens of any new
-finding. A newly exposed risk in a lens that did not rerun adds that lens's
-assignment. No other assignment reruns, and no clean extra round follows
-once no critical or major finding is open.
+A re-review follows the step's review loop. At `review_loop` `current` it
+runs as the step's flow describes, with the whole panel in place of the
+step's reviewer: regenerate the step's inputs and rerun every assignment of
+`default_panel`. At `blocking_delta`,
+`switch-review_loop-blocking_delta.md` selects the assignments that rerun and
+what each reads.
 
 ## Backlog epic and root review
 
@@ -97,24 +102,24 @@ once no critical or major finding is open.
   panel finding. The metadata-recovery root review is a `backlog_root`
   panel: each reader verifies the recovery conditions and the exact delta
   through its lens.
-- The manifest's `check` block carries the compiler facts readers would
-  otherwise re-derive: source errors, which are empty in any returned
-  manifest, the current review note's pending final-gate findings, the audit
-  of its declared against expected relations, counts and each story's
-  source-to-scenario map. Lens readers take these facts as given and never
-  recount them; a reader audits source membership through
-  `check.relation_audit`.
+- At this value the manifest names `review_panels: lens_panel`, so a
+  manifest derived under another value is stale, and its `check` block
+  carries the compiler facts readers would otherwise re-derive: source
+  errors, which are empty in any returned manifest, the current review note's
+  pending final-gate findings, the audit of its declared against expected
+  relations, counts and each story's source-to-scenario map. At the default,
+  `single_reader`, the manifest carries none of these facts. Lens readers take
+  them as given and never recount them; a reader audits source membership
+  through `check.relation_audit`.
 - The Product Owner merges findings that share one root cause as above. Each
   lens section of the review note takes its evidence and conclusion from the
   lens that covers it; Findings and Verdict come from the merged panel
   result. Wait for every epic panel before any epic write and for the root
   panel before the root review.
-- A re-review reruns only the lens assignments that returned the blocking
-  findings. Each reads the regenerated manifest with its findings, any cited
-  evidence and the changed paths, which are the manifest files whose
-  `sha256` changed; the first rerun assignment also reviews the changed text
-  with its dependency context. It does not re-audit unchanged text that an
-  earlier pass for the same review note already reviewed.
+- A re-review follows the Re-review section above. At `review_loop`
+  `current` every rerun lens reader receives what the step's rule gives its
+  reviewer: the regenerated manifest with the findings, any cited evidence
+  and the changed paths.
 
 ## Solution Design review
 
@@ -127,8 +132,8 @@ that loading both the entry skill and the plan could not start two full
 panels; that guard stays: run exactly one primary reviewer or one panel per
 review, never both. Risk-triggered specialists are still selected by the
 plan; each stays independent of the writer and of every panel reader, and a
-specialist is never a second panel. A re-review reruns the affected lens
-assignments with the changed-text check, and the affected specialists.
+specialist is never a second panel. A re-review follows the Re-review section
+above, and the plan reruns the affected specialists.
 
 ## Design System review
 
@@ -160,8 +165,8 @@ Verification Contract and `qa-engineer` for the Environment Contract. Its other
 assignments run once, as `devops-engineer`, or as `qa-engineer` when the bundle
 revises only the Environment Contract. Every reader stays on its role's own
 tier, receives the same bundle manifest and every path it names, and derives
-its task as the bundle's instructions say. A re-review reruns an assignment
-under the role that returned its blocking finding.
+its task as the bundle's instructions say. A rerun assignment runs under the
+role that ran it before.
 
 ## Lens reader output
 

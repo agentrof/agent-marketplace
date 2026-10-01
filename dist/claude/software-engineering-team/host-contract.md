@@ -28,7 +28,8 @@
 - A canonical entry with `project_scope: external` does not require project
   setup, workspace configuration or a Git repository.
 - Present canonical choice gates through `AskUserQuestion`, preserving options,
-  recommendation and tradeoffs.
+  recommendation and tradeoffs. `AskUserQuestion` takes at most four questions
+  per call.
 - Under switch `owner_gates` at `two_fixed_gates`, ask the owner inside a
   Delivery only at gate A, gate B, an early gate or for an at-once class, and
   queue every other question in the Delivery's `User Decisions`. Present each
@@ -41,9 +42,10 @@
   readers in parallel: spawn every reader of the panel in one message, then
   wait for all of them before triage.
 - Under switch `implementation_schedule` at `parallel_lanes_v1`, writers
-  overlap only when their approved lane scopes intersect. Spawn every lane of
-  an Item phase in one message, then wait for all of them before the next
-  phase.
+  overlap only when their approved lane scopes intersect. Spawn every lane
+  that waits for no producer in one message, spawn each consumer lane as soon
+  as every producer it waits for has finished, and wait for every lane before
+  the coordinator's commit.
 - Under switch `execution_planning` at `single_source_bundle`, start every
   reader of an execution-plan bundle together: spawn them in one message, then
   wait for all of them before triage.
@@ -59,7 +61,10 @@
   variants of the read-only document reviewers on the `lens` tier, the
   `strong` class (Sonnet) at effort `high`; only review panels under switch
   `review_panels` at `lens_panel` spawn them, and the reviewers themselves
-  keep their own tier. The package cannot switch the profile per user. To run
+  keep their own tier. The package cannot switch the profile per user.
+  The pinned models need Claude Code 2.1.284 or later: Sonnet 5.5 from
+  2.1.284, Opus 5.5 from 2.1.280 and Haiku 4.5 from 2.1.74, the first version
+  that honours a full model ID in agent frontmatter. To run
   every role on the main conversation's model, for example when this Claude
   Code version, the provider or the organization's model allowlist does not
   offer a pinned model, the user sets `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in
@@ -74,6 +79,13 @@
   Only switch `mechanical_pass_tier` at `mechanical` spawns them, for a pass
   that applies the fixes a review names; the writers themselves keep their
   own tier, and no review, re-check or calibration runs on a variant.
+  A variant runs its pass in a fresh context at that setting. It is a lower
+  model only for `solution-architect`, which runs Opus; `product-owner`,
+  `qa-engineer` and `devops-engineer` already run Sonnet at the session's
+  effort, so their variant is lower only when the session runs above effort
+  `high` and runs a higher effort at the `medium` default of Opus 5.5 and
+  Sonnet 5.5. These values are placeholders until the tier's frozen-task A/B
+  sets them.
 - Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
   is planned inside `/delivery-plan` with one owner gate, presented through
   `AskUserQuestion`, and handed over to `/deliver DLV-###`; `/execution-plan
@@ -81,3 +93,31 @@
   path, so the public entries do not change.
 - Delivery execution is available only through the exact public entries
   `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.
+
+## Autopilot
+
+- `/software-engineering-team:autopilot` is the user-invoked autopilot entry.
+  Only the user arms a grant: the plugin's `UserPromptExpansion` hook records
+  an `on` command the user typed as a short-lived arming record, and
+  `autopilot.py on`, run without options, refuses without that record and
+  takes the grant's options only from it. Never start, extend or widen a
+  grant, and never retry a refused `on` with options of your own. `off` and
+  `complete` may end a grant at any time. `autopilot.py` is the packaged
+  `skill-content/autopilot/scripts/autopilot.py`.
+- While a grant is active, the plugin's `PreToolUse` hook on `AskUserQuestion`
+  denies the call and states this procedure. Once the user started a grant or
+  a question is denied that way, run `autopilot.py check` before every choice
+  gate. While it exits 0, present no question:
+  - For a question of an allowed class, take the recommended option, or for
+    an open question the recommendation you would offer, apply it, run
+    `autopilot.py record`, and write the decision into the governing document
+    where the flow records the user's answer, marked with the grant id.
+  - For any other class, run `autopilot.py queue` and continue the work that
+    does not depend on it. An at-once owner decision and the Software
+    Architect's escalation clause are never taken: queue them as
+    `scope_or_rule` or as the never class they touch.
+  - Stop only when every remaining task waits on a queued question, then end
+    with the queued list of `autopilot.py report`.
+- When `check` reports the grant inactive, expired or completed, ask through
+  `AskUserQuestion` again, queued questions first. Roles never ask the user
+  and never read the grant.

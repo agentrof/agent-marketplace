@@ -147,6 +147,10 @@ STORY_SIZE_MEASURES_PATH = (Path(__file__).resolve().parent.parent / "skill-cont
 SIZE_EXCEPTIONS = "Size Exceptions"
 SIZE_EXCEPTION_COLUMNS = ("story", "measure", "reason")
 CHECKLIST_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\](?:\s|$)")
+# CommonMark: a fence of three or more backticks or tildes indented at most
+# three columns, and a list item marker at the same indentation.
+CODE_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+LIST_ITEM_RE = re.compile(r"^ {0,3}(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]|$)")
 EPIC_GOAL_STUB = "Define the customer outcome and boundary."
 STORY_STUBS = {
     "scope": "Describe the smallest valuable behavior.",
@@ -956,14 +960,19 @@ def headings(body: str) -> set[str]:
             re.finditer(r"^##\s+(.+?)\s*$", body, flags=re.MULTILINE)}
 
 
-def section(body: str, title: str) -> str:
+def raw_section(body: str, title: str) -> str:
+    """Return a section's text as written, its first line's indentation kept."""
     match = re.search(rf"^##\s+{re.escape(title)}\s*$", body,
                       flags=re.MULTILINE)
     if not match:
         return ""
     following = re.search(r"^##\s+", body[match.end():], flags=re.MULTILINE)
     end = match.end() + following.start() if following else len(body)
-    return body[match.end():end].strip()
+    return body[match.end():end]
+
+
+def section(body: str, title: str) -> str:
+    return raw_section(body, title).strip()
 
 
 def required_section_findings(body: str, required: list[str], path: str) -> list[str]:
@@ -1240,15 +1249,204 @@ def accepted_minor_findings(docs: Path, body: str, path: str,
     return errors
 
 
+# Switch review_loop at blocking_delta keeps a review record: the findings a
+# review returned with their ids and severities, the rulings of its calibration
+# reader and the finding id of each accepted minor finding.
+REVIEW_LOOP, RECORDING_LOOP = "review_loop", "blocking_delta"
+RETURNED_FINDINGS = "Returned Findings"
+RETURNED_FINDING_COLUMNS = ("finding", "severity", "description")
+SEVERITY_CALIBRATION = "Severity Calibration"
+SEVERITY_CALIBRATION_COLUMNS = ("finding", "claimed_severity", "calibrated_severity", "reason")
+REVIEW_RECORD_SECTIONS = (RETURNED_FINDINGS, SEVERITY_CALIBRATION, ACCEPTED_MINOR_FINDINGS)
+FINDING_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
+ACCEPTED_FINDING_ID_RE = re.compile(r"^([A-Z][A-Z0-9]*-[0-9]+)\s")
+FINDING_SEVERITIES = ("critical", "major", "minor")
+CLAIM_SEVERITIES = ("critical", "major")
+
+
+def review_loop_value(docs: Path) -> str:
+    """The review_loop value of the project's approved Process Policy.
+
+    Without a policy it is the package default. A draft or invalid policy
+    raises ValueError: it is refused, never read.
+    """
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    return values[REVIEW_LOOP]["value"]
+
+
+def cited_statement(docs: Path, value: str, label: str, what: str,
+                    errors: list[str]) -> None:
+    """Require a concrete statement that cites a vault note with a resolvable wikilink."""
+    links = re.findall(r"\[\[[^\[\]\n]+\]\]", INLINE_CODE_RE.sub("", value))
+    if not links:
+        errors.append(f"{label} {what} must cite a vault note")
+    for link in links:
+        read_link(docs, link, label, errors)
+    if not meaningful_text(re.sub(r"\[\[[^\[\]\n]+\]\]", " ", value)):
+        errors.append(f"{label} needs a concrete {what}")
+
+
+def returned_findings(docs: Path, body: str, path: str) -> tuple[dict[str, str], list[str]]:
+    """Read a review record's Returned Findings: each finding id with its returned severity."""
+    if RETURNED_FINDINGS not in headings(body):
+        return {}, []
+    rows, errors = structured_table(section(body, RETURNED_FINDINGS), RETURNED_FINDING_COLUMNS,
+                                    path, RETURNED_FINDINGS)
+    returned: dict[str, str] = {}
+    for number, row in enumerate(rows, 1):
+        label = f"{path} returned finding {number}"
+        identifier, severity = row["finding"], row["severity"].casefold()
+        if not FINDING_ID_RE.fullmatch(identifier):
+            errors.append(f"{label} finding must be an id such as F-3: {identifier or '(missing)'}")
+        elif identifier in returned:
+            errors.append(f"{path} returns finding {identifier} twice")
+        if severity not in FINDING_SEVERITIES:
+            errors.append(f"{label} severity must be critical, major or minor")
+        cited_statement(docs, row["description"], label, "description", errors)
+        if FINDING_ID_RE.fullmatch(identifier) and identifier not in returned:
+            returned[identifier] = severity
+    return returned, errors
+
+
+def severity_calibration(docs: Path, body: str, path: str,
+                         returned: dict[str, str] | None) -> tuple[dict[str, str], list[str]]:
+    """Read a review record's Severity Calibration: each ruled finding id with its ruling.
+
+    With ``returned``, the record's Returned Findings, every row rules a
+    finding returned at its claimed severity, and every critical or major
+    returned finding has exactly one row.
+    """
+    rows: list[dict[str, str]] = []
+    errors: list[str] = []
+    if SEVERITY_CALIBRATION in headings(body):
+        rows, errors = structured_table(section(body, SEVERITY_CALIBRATION),
+                                        SEVERITY_CALIBRATION_COLUMNS, path, SEVERITY_CALIBRATION)
+    ruled: dict[str, str] = {}
+    for number, row in enumerate(rows, 1):
+        label = f"{path} severity calibration {number}"
+        identifier = row["finding"]
+        claimed = row["claimed_severity"].casefold()
+        ruling = row["calibrated_severity"].casefold()
+        known = FINDING_ID_RE.fullmatch(identifier) is not None
+        if not known:
+            errors.append(f"{label} finding must be an id such as F-3: {identifier or '(missing)'}")
+        elif identifier in ruled:
+            errors.append(f"{path} calibrates finding {identifier} twice")
+        if claimed not in CLAIM_SEVERITIES:
+            errors.append(f"{label} claimed_severity must be critical or major")
+        elif ruling not in {claimed, "minor", "invalid"}:
+            errors.append(f"{label} calibrated_severity must confirm {claimed} or be minor or invalid")
+        cited_statement(docs, row["reason"], label, "reason", errors)
+        if known and returned is not None:
+            if identifier not in returned:
+                errors.append(f"{label} rules {identifier}, which Returned Findings does not list")
+            elif returned[identifier] != claimed:
+                errors.append(f"{label} claimed_severity must be {returned[identifier]},"
+                              f" the severity {identifier} was returned at")
+        if known and identifier not in ruled:
+            ruled[identifier] = ruling
+    for identifier, severity in sorted((returned or {}).items()):
+        if severity in CLAIM_SEVERITIES and identifier not in ruled:
+            errors.append(f"{path} returned {severity} finding {identifier} has no Severity Calibration row")
+    return ruled, errors
+
+
+def review_record_findings(docs: Path, body: str, path: str, *, approved: bool) -> list[str]:
+    """Validate the review record that the blocking_delta loop keeps in a document.
+
+    A critical or major finding never enters Accepted Minor Findings: each row
+    names the id of a finding the review returned as minor or its calibration
+    lowered to minor. An approved document without Returned Findings was
+    approved before its review kept a record, so it stays as it was.
+    """
+    present = headings(body)
+    if approved and RETURNED_FINDINGS not in present:
+        return []
+    returned, errors = returned_findings(docs, body, path)
+    ruled, calibration_errors = severity_calibration(docs, body, path, returned)
+    errors.extend(calibration_errors)
+    if ACCEPTED_MINOR_FINDINGS not in present:
+        return errors
+    # The table's own shape is reported by accepted_minor_findings.
+    rows, _table_errors = structured_table(section(body, ACCEPTED_MINOR_FINDINGS),
+                                           ACCEPTED_MINOR_COLUMNS, path, ACCEPTED_MINOR_FINDINGS)
+    accepted: set[str] = set()
+    for number, row in enumerate(rows, 1):
+        label = f"{path} accepted minor finding {number}"
+        match = ACCEPTED_FINDING_ID_RE.match(row["finding"])
+        if match is None:
+            errors.append(f"{label} must start with the id of the finding it accepts")
+            continue
+        identifier = match.group(1)
+        if identifier in accepted:
+            errors.append(f"{path} accepts finding {identifier} twice")
+        accepted.add(identifier)
+        if identifier not in returned:
+            errors.append(f"{label} names {identifier}, which Returned Findings does not list")
+        elif identifier in ruled and ruled[identifier] != "minor":
+            errors.append(f"{label} names {identifier}, which calibration ruled {ruled[identifier]};"
+                          " only a minor finding is accepted")
+        elif identifier not in ruled and returned[identifier] != "minor":
+            errors.append(f"{label} names {identifier}, which the review returned as"
+                          f" {returned[identifier]}; only a minor finding is accepted")
+    return errors
+
+
+def review_loop_record(docs: Path, body: str, path: str, props: dict) -> list[str]:
+    """Validate a review note's record when the project's review_loop keeps one.
+
+    A note without a record section never reads the Process Policy, and at
+    any value but blocking_delta a section of a record's name is authored text.
+    """
+    if not set(REVIEW_RECORD_SECTIONS) & headings(body):
+        return []
+    try:
+        loop = session_read(("review_loop", docs.resolve()), lambda: review_loop_value(docs))
+    except ValueError as exc:
+        return [f"{path} needs the review_loop value of the Process Policy: {exc}"]
+    if loop != RECORDING_LOOP:
+        return []
+    return review_record_findings(docs, body, path, approved=props.get("status") == "approved")
+
+
 def acceptance_checklist_lines(story: dict) -> int:
-    """Count the checklist criteria of the Acceptance section, outside code blocks."""
-    text = section(story["body"].split(NAV_MARKER, 1)[0], "Acceptance")
-    count, fenced = 0, False
-    for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-        elif not fenced and CHECKLIST_LINE_RE.match(line):
+    """Count the checklist criteria of the Acceptance section, outside code blocks.
+
+    A fenced block opens with three or more backticks or tildes and closes
+    only with a line of the same character at least as long. An indented
+    block is a line indented four or more columns after a blank line, or
+    after another such line, outside a list; inside a list the same line is
+    a nested item.
+    """
+    text = raw_section(story["body"].split(NAV_MARKER, 1)[0], "Acceptance")
+    count, fence, in_list, in_code, after_blank = 0, "", False, False, True
+    for raw in text.splitlines():
+        line = raw.expandtabs(4)
+        if fence:
+            if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", line):
+                fence = ""
+            continue
+        opened = CODE_FENCE_RE.match(line)
+        if opened:
+            fence, in_code = opened.group(1), False
+            continue
+        if not line.strip():
+            after_blank = True
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent >= 4 and not in_list and (after_blank or in_code):
+            in_code, after_blank = True, False
+            continue
+        in_code = False
+        if LIST_ITEM_RE.match(line):
+            in_list = True
+        elif indent == 0 and after_blank:
+            in_list = False
+        if CHECKLIST_LINE_RE.match(line):
             count += 1
+        after_blank = False
     return count
 
 
@@ -1289,7 +1487,8 @@ def story_size_measures() -> dict[str, dict]:
     except (OSError, KeyError, TypeError, AttributeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"story size measures are missing or invalid: {exc}") from exc
     unknown = sorted(name for name, derivation in derivations.items()
-                     if derivation not in STORY_SIZE_DERIVATIONS)
+                     if not isinstance(derivation, str)
+                     or derivation not in STORY_SIZE_DERIVATIONS)
     if not measures or unknown:
         raise RuntimeError("story size measures name no derivation this compiler implements: "
                            + ", ".join(unknown))
@@ -1354,6 +1553,21 @@ def size_exception_findings(record: dict, docs: Path) -> list[str]:
     return errors
 
 
+def size_exception_approval_findings(record: dict, docs: Path) -> list[str]:
+    """Validate the Size Exceptions an approval would seal while the budget is on.
+
+    An approved review is immutable, so a row check rejects must fail the
+    approval before any write, as collect() fails an invalid Accepted Minor
+    Findings row. At the default nothing is read.
+    """
+    try:
+        if story_size_budget(docs) is None:
+            return []
+        return size_exception_findings(record, docs)
+    except (ValueError, RuntimeError) as exc:
+        return [str(exc)]
+
+
 def story_size_entries(record: dict, docs: Path, budget: dict,
                        story_ids: set[str] | None = None) -> dict[str, dict]:
     """Measure each story against the limits; the result never fails a check."""
@@ -1361,8 +1575,9 @@ def story_size_entries(record: dict, docs: Path, budget: dict,
     limits = budget["limits"]
     kept: set[tuple[str, str]] = set()
     for epic in record["epics"]:
-        review = latest(epic["reviews"])
-        if review is not None:
+        # The owner's keep decision stands in every later review round, so
+        # no round has to repeat a row; only the current round is validated.
+        for review in epic["reviews"]:
             kept |= size_exception_rows(docs, epic, review)[0]
     entries = {}
     for story in record["stories"]:
@@ -1388,9 +1603,99 @@ def story_size_block(budget: dict, entries: dict[str, dict]) -> dict:
                                           if entry["over_budget"])}
 
 
+def delivered_stories(docs: Path) -> tuple[set[str], str | None]:
+    """Return the stories a merged Delivery records as integrated.
+
+    The second value says why a Delivery's merge state cannot be read, and
+    the set is then empty.
+    """
+    import delivery_compile
+
+    root = docs / "delivery" / "deliveries"
+    delivered: set[str] = set()
+    for path in sorted(root.glob("*/delivery.md")) if root.is_dir() else []:
+        try:
+            props, _body = delivery_compile.split_note(path)
+            status, unknown = delivery_compile.delivery_state(path.parent, props)
+            if unknown is not None:
+                return set(), unknown
+            if status != "merged":
+                continue
+            for item in sorted(path.parent.glob("items/*/item.md")):
+                item_props, _item_body = delivery_compile.split_note(item)
+                if item_props.get("status") == "integrated" \
+                        and isinstance(item_props.get("story_id"), str):
+                    delivered.add(item_props["story_id"])
+        except (OSError, ValueError) as exc:
+            return set(), f"{path.parent.relative_to(docs).as_posix()} cannot be read: {exc}"
+    return delivered, None
+
+
+def revision_changes(story: dict, record: dict, docs: Path) -> bool:
+    """Whether the current backlog revision changes the story: it is new,
+    revised since its approval, or approved together with this revision."""
+    if approval_stamp_findings(docs / story["path"], docs):
+        return True
+    root = record["backlog"]["props"]
+    return (root.get("status") == "approved"
+            and story["props"].get("approved_at_utc") == root.get("approved_at_utc"))
+
+
+def story_size_skips(record: dict, docs: Path) -> dict[str, str]:
+    """Return the stories the budget leaves out, each with its reason.
+
+    A story a merged Delivery records as integrated is delivered, so no split
+    applies to it. When a Delivery's merge state cannot be read, the budget
+    measures only the stories this revision changes instead.
+    """
+    delivered, unknown = delivered_stories(docs)
+    if unknown is None:
+        return {story["id"]: "integrated by a merged Delivery"
+                for story in record["stories"] if story["id"] in delivered}
+    return {story["id"]: f"unchanged in this revision while {unknown}"
+            for story in record["stories"] if not revision_changes(story, record, docs)}
+
+
+def story_size_advisories(record: dict, entries: dict[str, dict]) -> list[str]:
+    """Name each over-budget measure no row keeps and each criterion a new
+    story shares with another; neither ever fails a check."""
+    advisories = []
+    for story_id, entry in sorted(entries.items()):
+        unkept = [name for name in entry["over_budget"] if name not in entry["size_exceptions"]]
+        if unkept:
+            advisories.append(
+                f"{story_id} is over budget in {', '.join(unkept)} and no Size Exceptions row"
+                " keeps it: propose a split, or record the owner's decision to keep it")
+    revision = int(record["backlog"]["props"].get("revision", 1) or 1)
+    covering: dict[str, set[str]] = {}
+    for story in record["stories"]:
+        for value in story["criteria"]:
+            key = criterion_key(value)
+            if key:
+                covering.setdefault(key, set()).add(story["id"])
+    new = {story["id"] for story in record["stories"] if story["id"] in entries
+           and int(story["props"].get("introduced_in_revision", 0) or 0) == revision}
+    for key, stories in sorted(covering.items()):
+        added = sorted(stories & new)
+        if len(stories) > 1 and added:
+            advisories.append(
+                f"{key} is covered by {', '.join(sorted(stories))}; new in this revision:"
+                f" {', '.join(added)}. A split moves a criterion to one story, so keep it in"
+                " several only when each delivers a distinct slice")
+    return advisories
+
+
 def story_size_report(record: dict, docs: Path, budget: dict,
                       story_ids: set[str] | None = None) -> dict:
-    return story_size_block(budget, story_size_entries(record, docs, budget, story_ids))
+    """Measure the backlog's stories in scope, as check and review manifests show them."""
+    skipped = story_size_skips(record, docs)
+    wanted = {story["id"] for story in record["stories"]} if story_ids is None else set(story_ids)
+    entries = story_size_entries(record, docs, budget, wanted - set(skipped))
+    block = story_size_block(budget, entries)
+    block["skipped_stories"] = {story_id: reason for story_id, reason in sorted(skipped.items())
+                                if story_id in wanted}
+    block["advisories"] = story_size_advisories(record, entries)
+    return block
 
 
 def status_tag_name(status: str) -> str:
@@ -1740,6 +2045,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
             errors.extend(review_section_findings(
                 body, contract["required_backlog_review_sections"], rel, docs))
             errors.extend(accepted_minor_findings(docs, body, rel, contract))
+            errors.extend(review_loop_record(docs, body, rel, review_props))
         record["backlog_reviews"].append({"path": rel, "props": review_props,
                                           "body": body,
                                           "id": note_id(review_props, path.stem),
@@ -1798,6 +2104,8 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                     review_rel, docs))
                 errors.extend(accepted_minor_findings(
                     docs, review_body_text, review_rel, contract))
+                errors.extend(review_loop_record(docs, review_body_text, review_rel,
+                                                 review_props))
             item = {"path": review_rel, "props": review_props,
                     "body": review_body_text,
                     "id": note_id(review_props, review.stem),
@@ -1850,9 +2158,15 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                     "scope", "priority_reason"
                 } else section(authored_body, key)
                 if normalized_text(actual) == normalized_text(sentinel):
-                    scaffolds.append(
-                        f"{story_rel} has an untouched {key} stub"
-                    )
+                    finding = f"{story_rel} has an untouched {key} stub"
+                    # The navigation once hid this stub from the check, so a
+                    # story approved before keeps its approval: the stub is
+                    # advisory until the story is revised, as an empty last
+                    # section is.
+                    if key == "Delivery Notes" and not approval_stamp_findings(story_path, docs):
+                        advisories.append(f"{finding}; advisory until the approved story is revised")
+                    else:
+                        scaffolds.append(finding)
 
             owner = str(story_props.get("owner_role", ""))
             owners = set(contract["story_owner_roles"])
@@ -2762,7 +3076,7 @@ def init(args) -> int:
              "status": "draft", "owner_role": "product_owner", "round": 1,
              "derives_from": [f"[[backlog/backlog|{backlog_title}]]"],
              "tags": ["doc/backlog-review", "status/draft"],
-             "aliases": ["BACKLOG-REVIEW-001"]},
+             "aliases": ["BACKLOG-REVIEW-001"], **round_pin(docs)},
             review_body(review_title,
                         backlog_contract()["required_backlog_review_sections"])),
     }
@@ -2820,6 +3134,10 @@ def check(args) -> int:
         record = {"epics": [], "stories": [], "test_plans": [],
                   "backlog_reviews": [], "epic_reviews": [], "backlog": None}
         errors = [str(exc)]
+    # A review round the Product Owner wrote records the Process Policy in
+    # force the first time the compiler sees it.
+    pinned_reviews = (pin_first_seen_reviews(docs, record)
+                      if record["backlog"] and getattr(args, "pin_reviews", True) else [])
     if args.approved and record["backlog"]:
         errors.extend(approval_findings(record, docs))
     # A story over budget is advisory: the block adds no error of its own.
@@ -2844,6 +3162,8 @@ def check(args) -> int:
     }
     if story_size is not None:
         result["story_size"] = story_size
+    if pinned_reviews:
+        result["pinned_reviews"] = pinned_reviews
     # Only a backlog that has one gains the key, so every other output is unchanged.
     advisories = record.get("advisory_findings", [])
     if advisories:
@@ -2901,7 +3221,8 @@ def restore_tree(root: Path, snapshot: tuple[dict[Path, bytes], set[Path]]) -> N
 
 
 def policy_pin(docs: Path) -> tuple[dict, list[str]]:
-    """Return the Process Policy pin an approval records, the one a Delivery takes.
+    """Return the Process Policy pin a review round and an approval record,
+    the one a Delivery takes.
 
     Outside a Delivery nothing else records the switch values a backlog
     revision and its reviews ran under. No policy means no pin; a draft or
@@ -2910,6 +3231,104 @@ def policy_pin(docs: Path) -> tuple[dict, list[str]]:
     import process_policy
 
     return process_policy.approved_snapshot(docs)
+
+
+def round_pin(docs: Path) -> dict:
+    """Return the pin a review round records as it is written, or none.
+
+    A round written while the policy is a draft or invalid records nothing;
+    no review can run until the policy is approved, and the first check
+    after that pins the round.
+    """
+    pin, errors = policy_pin(docs)
+    return {} if errors else pin
+
+
+def recorded_pin(props: dict) -> dict:
+    import process_policy
+
+    return {key: props[key] for key in process_policy.PIN_FIELDS if key in props}
+
+
+def pin_label(pin: dict) -> str:
+    if not pin:
+        return "no Process Policy"
+    return f"Process Policy revision {pin.get('process_policy_revision')}"
+
+
+def draft_review_rounds(record: dict) -> list[dict]:
+    """Return every review round that no approval has stamped."""
+    return [review for review in (*record["backlog_reviews"], *record["epic_reviews"])
+            if not (review["props"].get("approved_at_utc") or review["props"].get("source_hash"))]
+
+
+class RoundChanged(RuntimeError):
+    """Raised when a review round changes while the compiler pins it."""
+
+
+def pin_first_seen_reviews(docs: Path, record: dict) -> list[str]:
+    """Pin each draft review round that records no Process Policy yet.
+
+    A round records the policy in force when it is written: init, stub-epic
+    and begin-revision write theirs with it, and a round the Product Owner
+    writes is pinned here, the first time the compiler sees it. A pinned or
+    approved round is never touched, and without an approved policy nothing
+    is written. A round that changes while it is pinned is left for the next
+    check.
+    """
+    import atomic_file
+
+    pin = round_pin(docs)
+    if not pin:
+        return []
+    pinned = []
+    for review in draft_review_rounds(record):
+        if recorded_pin(review["props"]):
+            continue
+        path = docs / review["path"]
+        original = path.read_bytes()
+        props, body = parse_front_matter_text(original.decode("utf-8"))
+        if recorded_pin(props) or props.get("approved_at_utc") or props.get("source_hash"):
+            continue
+
+        def unchanged(path: Path = path, original: bytes = original) -> None:
+            if path.read_bytes() != original:
+                raise RoundChanged(path)
+
+        try:
+            atomic_file.replace_bytes(
+                path, front_matter({**props, **pin}, body).encode("utf-8"), unchanged)
+        except RoundChanged:
+            continue
+        review["props"].update(pin)
+        pinned.append(review["path"])
+    return pinned
+
+
+def review_pin_findings(record: dict, docs: Path, pin: dict,
+                        preserved: dict[Path, bytes]) -> list[str]:
+    """Refuse a review the approval stamps whose round records another policy.
+
+    The root backlog records the policy in force at approval, so every review
+    the approval stamps must have run under it. A round that records no
+    policy is pinned by this approval, the first compiler step to see it
+    under one. A review approved in an earlier revision keeps its own pin and
+    is not compared.
+    """
+    findings = []
+    reviews = [latest(record["backlog_reviews"])] + [latest(epic["reviews"])
+                                                      for epic in record["epics"]]
+    for review in reviews:
+        if review is None or docs / review["path"] in preserved:
+            continue
+        recorded = recorded_pin(review["props"])
+        if recorded and recorded != pin:
+            findings.append(
+                f"{review['path']} records {pin_label(recorded)}, but the approval runs under"
+                f" {pin_label(pin)}; write a new review round and rerun its review under the"
+                f" current Process Policy, or restore {pin_label(recorded)} if that review"
+                " ran under it")
+    return findings
 
 
 def without_policy_pin(props: dict) -> dict:
@@ -2955,6 +3374,9 @@ def approve(args) -> int:
             errors.extend(preserve_errors)
             pin, pin_errors = policy_pin(docs)
             errors.extend(pin_errors)
+            if not pin_errors:
+                errors.extend(review_pin_findings(record, docs, pin, preserved))
+                errors.extend(size_exception_approval_findings(record, docs))
     errors = sorted(set(errors))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2,
@@ -2973,6 +3395,10 @@ def approve(args) -> int:
         reviews = [docs / latest(record["backlog_reviews"])["path"]]
         reviews += [docs / latest(epic["reviews"])["path"] for epic in record["epics"]]
         pinned = {docs / record["backlog"]["path"], *reviews}
+        # A round no compiler step has seen under the policy is pinned now;
+        # every other round keeps the pin it recorded when it was written.
+        first_seen = {docs / review["path"] for review in draft_review_rounds(record)
+                      if not recorded_pin(review["props"])} if pin else set()
         transition_paths = [docs / record["backlog"]["path"]]
         transition_paths += [docs / epic["path"] for epic in record["epics"]]
         transition_paths += reviews
@@ -3008,6 +3434,8 @@ def approve(args) -> int:
             props["approved_at_utc"] = now
             props.pop("source_hash", None)
             props.pop("package_hash", None)
+            if path in first_seen and path not in pinned:
+                props = with_policy_pin(props, pin)
             path.write_bytes(front_matter(props, body).encode("utf-8"))
         for path in paths:
             if path in preserved:
@@ -3166,6 +3594,8 @@ def begin_revision(args) -> int:
     review_props["tags"] = [
         tag for tag in values(review_props, "tags") if not tag.startswith("status/")
     ] + ["status/draft"]
+    # The new round records the Process Policy in force as it is written.
+    review_props.update(round_pin(docs))
     review_body_text, headings_replaced = re.subn(
         r"^# [^\n]*$", lambda _match: f"# {review_title}",
         latest_review["body"], count=1, flags=re.MULTILINE,
@@ -3290,7 +3720,7 @@ def stub_epic(args) -> int:
              "round": 1, "owner_role": "product_owner",
              "derives_from": [f"[[backlog/epics/{args.slug}/epic|{epic_id}]]"],
              "tags": ["doc/epic-review", "status/draft"],
-             "aliases": [f"{epic_id}-REVIEW-001"]},
+             "aliases": [f"{epic_id}-REVIEW-001"], **round_pin(docs)},
             review_body(review_title,
                         backlog_contract()["required_epic_review_sections"])).encode("utf-8"))
     append_nav(path, [
@@ -3461,7 +3891,7 @@ def main(argv=None) -> int:
     command.add_argument("--docs", default=None)
     command.add_argument("--json", action="store_true")
     command.set_defaults(func=lambda args: check(argparse.Namespace(
-        docs=args.docs, approved=False, render=False, json=args.json)))
+        docs=args.docs, approved=False, render=False, json=args.json, pin_reviews=False)))
     command = sub.add_parser("approve")
     command.add_argument("--docs", default=None)
     command.set_defaults(func=approve)

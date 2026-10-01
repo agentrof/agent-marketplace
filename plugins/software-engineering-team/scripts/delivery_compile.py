@@ -1977,6 +1977,7 @@ def pending_operation_revisions(docs: Path, root: Path, approves: bool = True) -
         try:
             approved, errors = operation_compile.check_contract(
                 docs, kind, operation_compile.approval_text(docs, kind))
+        # Defensive: the draft check above already ran the record check approval_text runs.
         except ValueError as exc:
             approved, errors = {}, [str(exc)]
         if errors:

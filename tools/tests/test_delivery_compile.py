@@ -876,6 +876,60 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(delivery_compile.delivery_owner_gates(self.docs, props), "two_fixed_gates")
         self.assertEqual(self.check_plan_result(), gated)
 
+    def test_gate_a_checks_an_open_revisions_review_record_as_its_approval_does(self):
+        """Under owner_gates two_fixed_gates and review_loop blocking_delta, gate A refuses an open
+        Operation revision whose review record its approval would refuse, naming the record's
+        finding, and lists one with a complete record under the source_hash its approval stamps
+        (rr-delivery-04)."""
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.policy("init")
+        self.policy("set", "--switch", "owner_gates", "--value", "two_fixed_gates")
+        self.policy("set", "--switch", "review_loop", "--value", "blocking_delta")
+        self.policy("approve")
+        init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                      "goal": "Authenticate", "outcome": None,
+                                      "target_branch": "main", "story": ["AUTH-01"]})
+        contract = type("Args", (), {"docs": str(self.docs), "kind": "verification", "constrained_by": None})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+            self.author_item(path_claims=["src/auth.py"], contract_claims=["auth:session"])
+            self.assertEqual(operation_compile.revise(contract), 0)
+        path = operation_compile.contract_path(self.docs, "verification")
+        draft = path.read_text(encoding="utf-8")
+        cite = "[[operation/verification-contract\\|Verification Contract]]"
+
+        def record(*sections: tuple[str, str, tuple[str, ...]]) -> None:
+            text = "".join("\n".join([f"## {title}", "", header, "|" + "---|" * (header.count("|") - 1),
+                                       *rows, "", ""]) for title, header, rows in sections)
+            path.write_text(draft.replace("## Navigation", text + "## Navigation", 1), encoding="utf-8")
+
+        returned = ("Returned Findings", "| finding | severity | description |", (
+            f"| OP-1 | major | {cite} The Contract section never states where the test command runs. |",
+            f"| OP-2 | minor | {cite} The Contract section states the test workdir twice in different words. |"))
+        record(returned)
+        self.assertEqual(self.check_plan_result(), (1, {
+            "ok": False, "id": "DLV-001", "status": "scope_proposed",
+            "errors": ["approved current verification contract is required: operation/verification-contract.md"
+                       " returned major finding OP-1 has no Severity Calibration row"],
+            "pending_operation_revisions": [], "pending_decisions": []}))
+        record(returned,
+               ("Severity Calibration", "| finding | claimed_severity | calibrated_severity | reason |", (
+                   f"| OP-1 | major | invalid | {cite} The front matter sets test_workdir to the repository"
+                   " root, so the command runs from one directory. |",)),
+               ("Accepted Minor Findings", "| finding | owner_role | reason | revisit_trigger |", (
+                   f"| OP-2 {cite} The Contract section states the test workdir twice in different words."
+                   " | qa_engineer | Both sentences name one directory, so the test command runs the same"
+                   " way. | Revisit at the next revision of the Verification Contract. |",)))
+        code, checked = self.check_plan_result()
+        [pending] = checked["pending_operation_revisions"]
+        self.assertEqual((code, checked["errors"], pending["kind"], pending["revision"]),
+                         (0, [], "verification", 2))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(operation_compile.approve(contract), 0)
+        self.assertEqual(operation_compile.check_contract(self.docs, "verification")[0]["source_hash"],
+                         pending["source_hash"])
+
     def test_execution_approval_refuses_without_workflows_until_render_ci_adds_one(self):
         plan_args = self.scope_ready_for_execution()
         shutil.rmtree(self.root / ".github")

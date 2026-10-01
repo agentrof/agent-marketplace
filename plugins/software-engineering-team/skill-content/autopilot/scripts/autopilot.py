@@ -48,6 +48,7 @@ DURATION_RE = re.compile(r"^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$")
 CLOCK_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 # An arming record from a clock a little ahead of this one is still fresh.
 ARMING_SKEW = timedelta(seconds=60)
+GRANT_STATES = ("active", "expired", "completed", "revoked", "replaced")
 
 
 class Refusal(Exception):
@@ -224,10 +225,60 @@ def end_grant(directory: Path, now: datetime, grant: dict, state: str, ended_at:
     return grant
 
 
+def grant_problem(grant: dict) -> str | None:
+    """What keeps a grant record from being read, or None when its fields hold."""
+    for key in ("id", "state", "granted_at", "expires_at"):
+        if not isinstance(grant.get(key), str) or not grant[key]:
+            return f"grant.json has no {key}"
+    if grant["state"] not in GRANT_STATES:
+        return f"grant.json state {grant['state']!r} is unknown"
+    try:
+        parse_stamp(grant["granted_at"])
+        parse_stamp(grant["expires_at"])
+    except (TypeError, ValueError) as exc:
+        return f"grant.json holds an unreadable time: {exc}"
+    classes = grant.get("classes")
+    if not isinstance(classes, list) or not all(isinstance(name, str) for name in classes):
+        return "grant.json classes is not a list of class ids"
+    if not isinstance(grant.get("armed_by"), dict):
+        return "grant.json armed_by is not an object"
+    return None
+
+
+def move_aside(path: Path, now: datetime) -> Path:
+    stem = f"{path.name}.broken-{now.astimezone(timezone.utc):%Y%m%dT%H%M%SZ}"
+    target, number = path.with_name(stem), 1
+    while target.exists():
+        number += 1
+        target = path.with_name(f"{stem}-{number}")
+    os.replace(path, target)
+    os.chmod(target, 0o600)
+    return target
+
+
 def current(directory: Path, now: datetime) -> dict | None:
-    """The latest grant, marked expired once its time has passed. Call under the lock."""
-    grant = read_json(directory / GRANT)
-    if grant is not None and grant.get("state") == "active" and not is_active(grant, now):
+    """The latest grant, marked expired once its time has passed. Call under the lock.
+
+    A grant that cannot be read, or lacks a field, is moved aside as
+    grant.json.broken-<time> and logged, so the verbs go on and a new grant
+    can start.
+    """
+    path = directory / GRANT
+    try:
+        grant = read_json(path)
+        problem = None if grant is None else grant_problem(grant)
+    except ValueError as exc:
+        grant, problem = None, str(exc)
+    if problem:
+        moved = move_aside(path, now)
+        append_private(directory / LEDGER, {
+            "time": stamp(now), "grant": grant.get("id") if isinstance(grant, dict) else None,
+            "event": "broken", "moved_to": moved.name, "problem": problem})
+        print(f"autopilot: moved an unreadable grant aside to {moved.name} ({problem})",
+              file=sys.stderr)
+        return None
+    if grant is not None and grant["state"] == "active" \
+            and now >= parse_stamp(grant["expires_at"]):
         end_grant(directory, now, grant, "expired", parse_stamp(grant["expires_at"]))
     return grant
 
@@ -515,6 +566,8 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
         # Refused before any write: no arming, no grant, no runtime file.
         fresh_arming(directory, policy, now)
         with locked(directory):
+            # The grant state is read first, so a failure leaves the typed arming in place.
+            current(directory, now)
             arming = fresh_arming(directory, policy, now)
             (directory / ARMING).unlink()
         try:
@@ -588,11 +641,7 @@ def ended_line(grant: dict) -> str:
 
 def cmd_check(args: argparse.Namespace, now: datetime) -> int:
     project = Path(args.project_root)
-    try:
-        grant, read = settle(state_dir(project), project, now)
-    except ValueError as exc:
-        print(f"autopilot: inactive ({exc})")
-        return 1
+    grant, read = settle(state_dir(project), project, now)
     if grant is None:
         print("autopilot: inactive")
         return 1
@@ -607,11 +656,8 @@ def cmd_status(args: argparse.Namespace, now: datetime) -> int:
     project = Path(args.project_root)
     directory = state_dir(project)
     coverage = guards()
-    try:
-        grant, read = settle(directory, project, now)
-        problem = None
-    except ValueError as exc:
-        grant, read, problem = None, None, str(exc)
+    grant, read = settle(directory, project, now)
+    problem = None
     counts = report_payload(directory, grant)["counts"] if grant else {"decisions": 0, "queued": 0}
     active = is_active(grant, now)
     if args.json:
@@ -641,10 +687,7 @@ def require_state(directory: Path, what: str) -> None:
 
 
 def active_grant(directory: Path, now: datetime) -> dict:
-    try:
-        grant = current(directory, now)
-    except ValueError as exc:
-        raise Refusal(f"no active grant ({exc})") from None
+    grant = current(directory, now)
     if not is_active(grant, now):
         raise Refusal("no active grant" + (f"; {grant['id']} is {grant.get('state')}" if grant else ""))
     return grant
@@ -706,10 +749,7 @@ def cmd_off(args: argparse.Namespace, now: datetime) -> int:
     directory = state_dir(Path(args.project_root))
     require_state(directory, "no grant to revoke")
     with locked(directory):
-        try:
-            grant = current(directory, now)
-        except ValueError as exc:
-            raise Refusal(f"no grant to revoke ({exc})") from None
+        grant = current(directory, now)
         if grant is None:
             raise Refusal("no grant to revoke")
         if grant.get("state") == "active":
@@ -738,10 +778,7 @@ def cmd_report(args: argparse.Namespace, now: datetime) -> int:
     directory = state_dir(Path(args.project_root))
     require_state(directory, "no grant to report")
     with locked(directory):
-        try:
-            grant = current(directory, now)
-        except ValueError as exc:
-            raise Refusal(str(exc)) from None
+        grant = current(directory, now)
     if args.grant and (grant is None or grant.get("id") != args.grant):
         granted = [event for event in ledger(directory, args.grant) if event.get("event") == "granted"]
         if not granted:
@@ -890,8 +927,8 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None, stdin=No
     except Refusal as exc:
         print(f"autopilot: refused: {exc}", file=sys.stderr)
         return 1
-    except (OSError, RuntimeError, ValueError) as exc:
-        print(f"autopilot: {exc}", file=sys.stderr)
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+        print(f"autopilot: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
 

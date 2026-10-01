@@ -825,10 +825,10 @@ class ContractTests(unittest.TestCase):
         body = ("## User Decisions\n\n" + header
                 + "| D-07 | queued | Which cache root? | One per checkout; One per Item |"
                   " One per checkout | answered | One per checkout (autopilot"
-                  " AP-20261001T210000Z-3f9a, class choice) | Verification Contract | 0 |\n")
-        self.assertEqual(delivery_compile.user_decision_findings(body), [])
-        self.assertTrue(delivery_compile.user_decision_findings(body.replace("| queued |",
-                                                                             "| choice |")))
+                  " AP-20261001T210000Z-3f9a, class choice) | AUTH-01 | 0 |\n")
+        self.assertEqual(delivery_compile.user_decision_findings(body, ["AUTH-01"]), [])
+        self.assertTrue(delivery_compile.user_decision_findings(body.replace("| queued |", "| choice |"),
+                                                                ["AUTH-01"]))
 
 
 class ValidatorTests(unittest.TestCase):

@@ -806,7 +806,12 @@ barrier it did not install: while the Fence carries one, `cancel-delivery`
 refuses with `DELIVERY_BARRIER_ACTIVE` and names `finish-plan-revision` and
 `abort-plan-revision`, because a carried barrier would outlive the
 cancellation's merge and a release after it would bury the cancellation
-Review. End the plan revision first, then cancel.
+Review. End the plan revision first, then cancel. A barrier that a
+cancellation carried before this rule is released the same way: for a
+Delivery whose published status is `cancelled`, `finish-plan-revision` and
+`abort-plan-revision` release the Fence barrier alone and leave the
+cancellation Review at the Integration tip, also once its PR merged and the
+merge dropped the Integration ref, when the target records the cancellation.
 
 ## Setup and package upgrade
 

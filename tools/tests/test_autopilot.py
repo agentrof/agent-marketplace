@@ -501,6 +501,29 @@ class LifecycleTests(unittest.TestCase):
         lines = [line for line in out.splitlines() if line[:1].isdigit()]
         self.assertEqual([line.split(" ", 3)[2] for line in lines], ["queued", "decision", "queued"])
 
+    def test_the_report_follows_the_grants_the_current_one_replaced(self):
+        self.p.run_verb("on", "--for", "2h")
+        first = self.p.grant()["id"]
+        self.record(question="Merge PR 41 at 01:00?", options="", choice="Merge",
+                    now=NOW + timedelta(minutes=30))
+        self.p.run_verb("on", "--for", "9h", now=NOW + timedelta(hours=1))
+        second = self.p.grant()["id"]
+        self.record(question="Merge PR 42 at 03:00?", options="", choice="Merge",
+                    now=NOW + timedelta(hours=2))
+        code, out, _err = self.p.run_verb("status", now=NOW + timedelta(hours=3))
+        self.assertIn("decisions: 2, queued: 0", out)
+        code, out, err = self.p.run_verb("off", now=NOW + timedelta(hours=4))
+        self.assertEqual(code, 0, err)
+        self.assertIn(f"replaces: {first}", out)
+        self.assertLess(out.index("Merge PR 41 at 01:00?"), out.index("Merge PR 42 at 03:00?"))
+        self.assertIn(f"{first} decision [choice] Merge PR 41 at 01:00?", out)
+        self.assertIn(f"{second} decision [choice] Merge PR 42 at 03:00?", out)
+        self.assertIn("decisions: 2, queued: 0", out)
+        report = json.loads(self.p.run_verb("report", "--json")[1])
+        self.assertEqual(report["chain"], [second, first])
+        self.assertEqual([entry["question"] for entry in report["entries"]],
+                         ["Merge PR 41 at 01:00?", "Merge PR 42 at 03:00?"])
+
     def test_runtime_state_is_private_ignored_and_changes_no_tracked_file(self):
         self.assertEqual(git(self.p.root, "status", "--porcelain", "--ignored"), "")
         self.p.run_verb("on")
@@ -731,6 +754,16 @@ class GoalTests(unittest.TestCase):
         self.assertEqual((self.p.grant()["state"], completion["goal_state"], completion["read_at"]),
                          ("completed", "cancelled", stamp(NOW + timedelta(hours=2))))
         self.assertEqual(self.p.events()[-1]["event"], "completed")
+
+    def test_a_compiler_completion_names_the_compiler_and_the_state_it_read(self):
+        self.p.delivery("active")
+        self.p.run_verb("on", "--goal", "delivery:DLV-002")
+        self.p.delivery("cancelled")
+        self.check(NOW + timedelta(hours=2))
+        out = self.p.run_verb("report")[1]
+        self.assertIn("completed: scripts/delivery_compile.py read delivery DLV-002 as cancelled at"
+                      f" {stamp(NOW + timedelta(hours=2))}", out)
+        self.assertNotIn("compiler agreed: None", out)
 
     def test_a_merged_delivery_is_read_through_the_compiler_merge_derivation(self):
         self.p.delivery("awaiting_merge")

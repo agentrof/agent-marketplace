@@ -23,6 +23,9 @@ PLANNING_ENTRIES = frozenset({"delivery-plan", "execution-plan", "configure"})
 # A switch whose instructions every task of its owning flows follows declares
 # this reference_scope; its references bind whichever skill holds them.
 OWNING_FLOWS_SCOPE = "owning_flows"
+# How a declared pass kind runs: as the owning writer's generated variant, or
+# as a command of the entry itself with no role pass.
+PASS_KIND_RUNS = {"writer_variant", "entry_command"}
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
 SWITCH_REFERENCE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 DELIVERY_PACKAGE = re.compile(r"^workspace/docs/delivery/deliveries/([^/]+)/")
@@ -198,7 +201,102 @@ def catalog(package: Path = PACKAGE) -> dict:
             raise ValueError("task input policy names an unknown skill")
         for reference in references:
             regular(package, f"skill-content/{skill}/{reference}")
+    policy["pass_kinds"] = pass_kind_catalog(policy, agents, package)
     return policy
+
+
+def pass_kind_catalog(policy: dict, agents: set[str], package: Path) -> dict:
+    """Validate the declared mechanical pass kinds, with each writer's documents by role."""
+    kinds = policy.get("pass_kinds", {})
+    if not isinstance(kinds, dict):
+        raise ValueError("task input pass kinds must map a kind to its declaration")
+    registry = registry_switches(package)
+    for kind, spec in kinds.items():
+        if (not re.fullmatch(r"[a-z][a-z0-9_]*", kind) or not isinstance(spec, dict)
+                or spec.get("runs_as") not in PASS_KIND_RUNS
+                or not all(isinstance(spec.get(key), str) for key in ("switch", "value"))):
+            raise ValueError("a task input pass kind needs runs_as, switch and value")
+        if spec["runs_as"] != "writer_variant":
+            continue
+        documents = spec.get("documents")
+        if (not isinstance(spec.get("modes"), list) or not spec["modes"]
+                or set(spec["modes"]) - set(policy["modes"]) or not isinstance(documents, dict)
+                or any(not isinstance(patterns, list) or not patterns
+                       or not all(isinstance(item, str) and item and not item.startswith("/")
+                                  and ".." not in item.split("/") for item in patterns)
+                       for patterns in documents.values())):
+            raise ValueError(f"pass kind {kind} needs its modes and each writer's documents")
+        spec["documents"] = {role.replace("_", "-"): patterns for role, patterns in documents.items()}
+        variants = (registry.get(spec["switch"], {}).get("agent_variants") or {}).get(spec["value"])
+        if set(spec["documents"]) - agents or (registry and (
+                not isinstance(variants, dict)
+                or set(spec["documents"]) != set(variants.get("agents") or []))):
+            raise ValueError(f"pass kind {kind} must name exactly the writers whose variants"
+                             f" switch {spec['switch']} declares at {spec['value']}")
+    return kinds
+
+
+def document_pattern(pattern: str) -> re.Pattern:
+    return re.compile("workspace/docs/" + re.escape(pattern).replace(r"\*", "[^/]+"))
+
+
+def mechanical_pass(policy: dict, registry: dict[str, dict], kind: str, *, entry: str,
+                    role: str | None, mode: str, route: dict, read_only: bool, chosen: set,
+                    findings: str | None, inputs: list[str], project: Path | None) -> list[str]:
+    """Check that a task may run as mechanical pass *kind*; return the documents it writes.
+
+    A mechanical pass decides nothing, so a review, re-check, calibration,
+    triage or repair task, and every role without a writer variant, keeps its
+    role's tier.
+    """
+    kinds = policy["pass_kinds"]
+    spec = kinds.get(kind)
+    if spec is None:
+        raise ValueError(f"unknown pass kind {kind!r}; the task input policy declares {sorted(kinds)}")
+    if spec["runs_as"] == "entry_command":
+        if role is not None:
+            raise ValueError(f"pass kind {kind} runs as a direct entry command; derive no role"
+                             " task for it")
+        return []
+    owners = set(registry.get(spec["switch"], {}).get("flows") or [])
+    if not owners & set(route["flows"]):
+        raise ValueError(f"pass kind {kind} belongs to the flows switch {spec['switch']} owns;"
+                         f" a {entry} task, a code repair included, keeps its role's tier")
+    if read_only:
+        raise ValueError(f"pass kind {kind} never serves a review, re-check or calibration: this"
+                         f" {mode} task of {role} keeps its role's tier")
+    if mode not in spec["modes"]:
+        raise ValueError(f"pass kind {kind} runs in mode {' or '.join(spec['modes'])}; a {mode}"
+                         " task, authoring or repair, keeps its role's tier")
+    if role not in spec["documents"]:
+        raise ValueError(f"pass kind {kind} runs only as a writer whose variant switch"
+                         f" {spec['switch']} declares ({', '.join(sorted(spec['documents']))});"
+                         f" {role} keeps its tier")
+    if (spec["switch"], spec["value"]) not in chosen:
+        raise ValueError(f"pass kind {kind} runs only at switch {spec['switch']} {spec['value']}")
+    if findings is None or project is None:
+        raise ValueError(f"pass kind {kind} binds the verdict's findings; pass --findings <record>")
+    try:
+        record = json.loads(regular(project, findings).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError(f"pass kind {kind} reads its findings as JSON: {exc}") from exc
+    listed = record.get("findings") if isinstance(record, dict) else record
+    if not isinstance(listed, list) or not listed:
+        raise ValueError(f"pass kind {kind} needs at least one returned finding")
+    for finding in listed:
+        name = finding.get("id") if isinstance(finding, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"pass kind {kind} needs a stable id on every finding")
+        repair = finding.get("repair")
+        if not isinstance(repair, str) or not repair.strip():
+            raise ValueError(f"pass kind {kind}: finding {name} names no exact repair; the base"
+                             " writer triages it")
+    patterns = [document_pattern(pattern) for pattern in spec["documents"][role]]
+    documents = sorted(path for path in set(inputs)
+                       if any(pattern.fullmatch(path) for pattern in patterns))
+    if not documents:
+        raise ValueError(f"pass kind {kind} needs the {role} document it changes as an --input")
+    return documents
 
 
 def switch_reference(package: Path, path: Path) -> tuple[str, str] | None:
@@ -499,7 +597,8 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
              inputs: list[str] | None = None, skills: list[str] | None = None,
              findings: str | None = None, base: str | None = None, epic: str | None = None,
              expected_hash: str | None = None, package: Path = PACKAGE,
-             delivery: str | None = None, remote: str = "origin") -> dict:
+             delivery: str | None = None, remote: str = "origin",
+             pass_kind: str | None = None) -> dict:
     policy = catalog(package)
     package = package.resolve()
     project = project.resolve() if project is not None else None
@@ -594,6 +693,10 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     read_only = (role in policy["read_only_roles"]
                  or role in policy["read_only_entry_roles"].get(entry, [])
                  or mode in {"review", "consume"})
+    documents = None if pass_kind is None else mechanical_pass(
+        policy, registry, pass_kind, entry=entry, role=role, mode=mode, route=route,
+        read_only=read_only, chosen=chosen, findings=findings, inputs=list(inputs or []),
+        project=project)
     closure = None
     if epic is not None:
         if entry != "backlog-plan" or project is None:
@@ -632,6 +735,14 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     scope = write_scope(project, set(inputs or []) | ({"workspace/docs/" + path for path in closure["paths"]}
                                                     if closure else set()),
                         role, route, read_only, closure, package)
+    if documents:
+        scope.update(status="resolved", source_records=documents,
+                     allowed_write_area=[{"path": path, "coverage": "exact_file", "source": path}
+                                         for path in documents],
+                     reason=f"{pass_kind} writes only the owning writer's documents that the bound"
+                            " findings change; no new writer authority",
+                     constraints=[*scope["constraints"],
+                                  f"{pass_kind}: apply exactly the repairs the bound findings name"])
     transitions = [
         {"condition": "source_identity", "status": "required",
          "detail": "Rerun this invocation with --expected-hash before returning or persisting the result."},
@@ -696,6 +807,8 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
               "output_contract": policy["output_contract"], "approval_authority": False,
               "available_method_skills": policy["role_skills"].get(role, []),
               "selected_method_skills": sorted(skills or [])}
+    if pass_kind is not None:
+        result["pass_kind"] = pass_kind
     hashed = result
     if epic:
         # The closure is bound as its own source_hash binds it: the stubs it
@@ -723,13 +836,16 @@ def main(argv=None) -> int:
     parser.add_argument("--delivery")
     parser.add_argument("--remote", default="origin",
                         help="the Delivery remote whose Fence shows a held plan-revision barrier")
+    parser.add_argument("--pass-kind",
+                        help="a mechanical pass kind that templates/task-input-policy.json declares")
     args = parser.parse_args(argv)
     try:
         result = ({"ok": True, "entries": sorted(catalog()["entries"])} if args.check_catalog else
                   manifest(entry=args.entry, role=args.role, mode=args.mode, project=args.project_root,
                            inputs=args.input, skills=args.skill, findings=args.findings, base=args.base,
                            epic=args.epic, expected_hash=args.expected_hash,
-                           delivery=args.delivery, remote=args.remote))
+                           delivery=args.delivery, remote=args.remote,
+                           pass_kind=args.pass_kind))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError, KeyError, TypeError) as exc:

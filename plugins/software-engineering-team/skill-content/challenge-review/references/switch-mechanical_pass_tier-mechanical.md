@@ -51,11 +51,18 @@ counterpart that reviews the other contract runs as its base role.
    the whole pass as the flow describes.
 2. Derive the variant's manifest exactly as the flow derives the writer's,
    with the base role, `--mode revise` and `--skill challenge-review`, so the
-   task binds this file. Give the variant that manifest, the constitution, the
-   returned findings verbatim with their ids, severities, anchors and fixes,
-   and the exact documents they change. Pass no conversation history and no
-   earlier writer transcript. Name the pass kind first in the task
-   description, for example `apply_findings Verification Contract`.
+   task binds this file, and add `--pass-kind apply_findings`,
+   `--findings <record>` and one `--input` per document the findings change.
+   The record is JSON: a
+   `findings` list, each finding with its `id`, `severity`, `anchor` and exact
+   `repair`. `task_inputs.py` refuses the kind for a review, re-check,
+   calibration, triage or repair task, for a role that has no variant and for
+   a finding without its repair, and its write scope holds only the owning
+   writer's documents among the inputs. Give the variant that manifest, the
+   constitution, the returned findings verbatim and the exact documents they
+   change. Pass no conversation history and no earlier writer transcript.
+   Name the pass kind first in the task description, for example
+   `apply_findings Verification Contract`.
 3. The variant applies each named fix as written, takes the disposition `fix`
    for it where the flow records dispositions, runs the owning compiler check
    and fixes only the compiler findings its own edits caused. It returns the

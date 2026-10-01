@@ -421,5 +421,52 @@
   ],
   "session_entries": [
     "autopilot"
-  ]
+  ],
+  "pass_kinds": {
+    "apply_findings": {
+      "runs_as": "writer_variant",
+      "switch": "mechanical_pass_tier",
+      "value": "mechanical",
+      "modes": [
+        "revise"
+      ],
+      "documents": {
+        "devops_engineer": [
+          "operation/environment-contract.md"
+        ],
+        "product_owner": [
+          "backlog/backlog.md",
+          "backlog/reviews/*.md",
+          "backlog/epics/*/epic.md",
+          "backlog/epics/*/reviews/*.md",
+          "backlog/epics/*/stories/*/story.md",
+          "backlog/epics/*/stories/*/test-plan.md"
+        ],
+        "qa_engineer": [
+          "operation/verification-contract.md"
+        ],
+        "solution_architect": [
+          "solution-design/landscape.md",
+          "solution-design/components/*/component.md",
+          "solution-design/decisions/*.md",
+          "solution-design/engagements/*.md"
+        ]
+      }
+    },
+    "render": {
+      "runs_as": "entry_command",
+      "switch": "mechanical_pass_tier",
+      "value": "mechanical"
+    },
+    "stamp": {
+      "runs_as": "entry_command",
+      "switch": "mechanical_pass_tier",
+      "value": "mechanical"
+    },
+    "check": {
+      "runs_as": "entry_command",
+      "switch": "mechanical_pass_tier",
+      "value": "mechanical"
+    }
+  }
 }

@@ -1413,8 +1413,9 @@ def story_size_entries(record: dict, docs: Path, budget: dict,
     limits = budget["limits"]
     kept: set[tuple[str, str]] = set()
     for epic in record["epics"]:
-        review = latest(epic["reviews"])
-        if review is not None:
+        # The owner's keep decision stands in every later review round, so
+        # no round has to repeat a row; only the current round is validated.
+        for review in epic["reviews"]:
             kept |= size_exception_rows(docs, epic, review)[0]
     entries = {}
     for story in record["stories"]:
@@ -1440,9 +1441,99 @@ def story_size_block(budget: dict, entries: dict[str, dict]) -> dict:
                                           if entry["over_budget"])}
 
 
+def delivered_stories(docs: Path) -> tuple[set[str], str | None]:
+    """Return the stories a merged Delivery records as integrated.
+
+    The second value says why a Delivery's merge state cannot be read, and
+    the set is then empty.
+    """
+    import delivery_compile
+
+    root = docs / "delivery" / "deliveries"
+    delivered: set[str] = set()
+    for path in sorted(root.glob("*/delivery.md")) if root.is_dir() else []:
+        try:
+            props, _body = delivery_compile.split_note(path)
+            status, unknown = delivery_compile.delivery_state(path.parent, props)
+            if unknown is not None:
+                return set(), unknown
+            if status != "merged":
+                continue
+            for item in sorted(path.parent.glob("items/*/item.md")):
+                item_props, _item_body = delivery_compile.split_note(item)
+                if item_props.get("status") == "integrated" \
+                        and isinstance(item_props.get("story_id"), str):
+                    delivered.add(item_props["story_id"])
+        except (OSError, ValueError) as exc:
+            return set(), f"{path.parent.relative_to(docs).as_posix()} cannot be read: {exc}"
+    return delivered, None
+
+
+def revision_changes(story: dict, record: dict, docs: Path) -> bool:
+    """Whether the current backlog revision changes the story: it is new,
+    revised since its approval, or approved together with this revision."""
+    if approval_stamp_findings(docs / story["path"], docs):
+        return True
+    root = record["backlog"]["props"]
+    return (root.get("status") == "approved"
+            and story["props"].get("approved_at_utc") == root.get("approved_at_utc"))
+
+
+def story_size_skips(record: dict, docs: Path) -> dict[str, str]:
+    """Return the stories the budget leaves out, each with its reason.
+
+    A story a merged Delivery records as integrated is delivered, so no split
+    applies to it. When a Delivery's merge state cannot be read, the budget
+    measures only the stories this revision changes instead.
+    """
+    delivered, unknown = delivered_stories(docs)
+    if unknown is None:
+        return {story["id"]: "integrated by a merged Delivery"
+                for story in record["stories"] if story["id"] in delivered}
+    return {story["id"]: f"unchanged in this revision while {unknown}"
+            for story in record["stories"] if not revision_changes(story, record, docs)}
+
+
+def story_size_advisories(record: dict, entries: dict[str, dict]) -> list[str]:
+    """Name each over-budget measure no row keeps and each criterion a new
+    story shares with another; neither ever fails a check."""
+    advisories = []
+    for story_id, entry in sorted(entries.items()):
+        unkept = [name for name in entry["over_budget"] if name not in entry["size_exceptions"]]
+        if unkept:
+            advisories.append(
+                f"{story_id} is over budget in {', '.join(unkept)} and no Size Exceptions row"
+                " keeps it: propose a split, or record the owner's decision to keep it")
+    revision = int(record["backlog"]["props"].get("revision", 1) or 1)
+    covering: dict[str, set[str]] = {}
+    for story in record["stories"]:
+        for value in story["criteria"]:
+            key = criterion_key(value)
+            if key:
+                covering.setdefault(key, set()).add(story["id"])
+    new = {story["id"] for story in record["stories"] if story["id"] in entries
+           and int(story["props"].get("introduced_in_revision", 0) or 0) == revision}
+    for key, stories in sorted(covering.items()):
+        added = sorted(stories & new)
+        if len(stories) > 1 and added:
+            advisories.append(
+                f"{key} is covered by {', '.join(sorted(stories))}; new in this revision:"
+                f" {', '.join(added)}. A split moves a criterion to one story, so keep it in"
+                " several only when each delivers a distinct slice")
+    return advisories
+
+
 def story_size_report(record: dict, docs: Path, budget: dict,
                       story_ids: set[str] | None = None) -> dict:
-    return story_size_block(budget, story_size_entries(record, docs, budget, story_ids))
+    """Measure the backlog's stories in scope, as check and review manifests show them."""
+    skipped = story_size_skips(record, docs)
+    wanted = {story["id"] for story in record["stories"]} if story_ids is None else set(story_ids)
+    entries = story_size_entries(record, docs, budget, wanted - set(skipped))
+    block = story_size_block(budget, entries)
+    block["skipped_stories"] = {story_id: reason for story_id, reason in sorted(skipped.items())
+                                if story_id in wanted}
+    block["advisories"] = story_size_advisories(record, entries)
+    return block
 
 
 def status_tag_name(status: str) -> str:

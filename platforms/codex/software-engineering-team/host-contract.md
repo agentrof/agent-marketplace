@@ -131,3 +131,11 @@
 - When `check` reports the grant inactive, expired or completed, ask through
   `request_user_input` again, queued questions first. Roles never ask the user
   and never read the grant.
+- Inside a Delivery that keeps a `User Decisions` table, write an autopilot
+  decision as an `answered` row whose answer states the choice and is marked
+  with the grant id: `blocks` names the Items that waited by Story id,
+  `wait_minutes` records how long they waited, and an approval between the
+  gates names its document as `<document> revision N` in the answer. Write
+  every queued question there too, as a `pending` row of class `queued` or its
+  at-once class with the Items it holds in `blocks`, so the Delivery's
+  refusals apply.

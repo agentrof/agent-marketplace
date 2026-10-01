@@ -242,8 +242,15 @@ approved document. It lives only in ignored runtime state under
 `.agentrof/agent-marketplace/.runtime/autopilot/`, and only its decisions reach
 tracked documents. With no grant every compiler output and every task binding
 stays the same: the entry delegates no task, so the task-input policy declares
-it under `session_entries`, outside the task routes. In a Delivery's
-`User Decisions` table under `owner_gates` at `two_fixed_gates`, an autopilot
-decision is an `answered` row of class `queued` whose answer carries the
-choice and the grant id, which `delivery_compile.py check` accepts as it
-stands.
+it under `session_entries`, outside the task routes.
+
+Under `owner_gates` at `two_fixed_gates`, the grant is the owner's advance
+answer for its allowed classes, as the switch reference states. In the
+Delivery's `User Decisions` table an autopilot decision is an `answered` row
+whose answer carries the choice and the grant id; `blocks` names the Items that
+waited by Story id, `wait_minutes` records their wait, and an approval between
+the gates names its document as `<document> revision N` in the answer. Every
+question autopilot queues is also a `pending` row, of class `queued` or its
+at-once class, with the Items it holds in `blocks`, so gate A, gate B and the
+Item starts refuse while it is open. `delivery_compile.py check` accepts both
+rows.

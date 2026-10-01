@@ -478,7 +478,8 @@ class LifecycleTests(unittest.TestCase):
                       " cancelled; current state: active", out)
         self.assertIn("allowed classes: choice, approval_gate, merge", out)
         self.assertIn("decisions: 1, queued: 2", out)
-        self.assertIn("arming: user_only_entry; question guard: instructions", out)
+        self.assertIn("declared guards: arming user_only_entry, question guard instructions;"
+                      " a host can skip a declared hook it has not enabled or trusted", out)
         code, out, _err = self.p.run_verb("status", "--json", now=NOW + timedelta(hours=1))
         status = json.loads(out)
         self.assertEqual((status["active"], status["remaining_minutes"], status["counts"],
@@ -1196,6 +1197,19 @@ class ContractTests(unittest.TestCase):
         changes = ROOT / ".changes/autopilot-entry.json"
         if changes.is_file():
             self.assertIn(limit, json.loads(changes.read_text(encoding="utf-8"))["summary"])
+
+    def test_status_and_the_docs_report_declared_guards_and_codex_trust(self):
+        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("the guards this package declares", skill)
+        docs = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
+        self.assertIn("`status` reports which guards the package declares", docs)
+        codex = " ".join((ROOT / "platforms/codex/software-engineering-team/host-contract.md")
+                         .read_text(encoding="utf-8").split())
+        for fragment in ("both the `UserPromptSubmit` arming hook and the `PreToolUse` question"
+                         " hook need that trust",
+                         "`send_user_message_async`", "`request_user_input_async`",
+                         "`send_message_to_user_async`"):
+            self.assertIn(fragment, codex)
 
     def test_the_entry_skill_states_that_only_the_user_arms_a_grant(self):
         text = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())

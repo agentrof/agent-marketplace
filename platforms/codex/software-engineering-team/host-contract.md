@@ -95,9 +95,13 @@
   prompt that starts with that mention and an `on` command as a short-lived
   arming record, never a subagent's prompt, and `autopilot.py on`, run
   without options, refuses without that record and takes the grant's options
-  only from it. Codex runs plugin hooks only after the user trusts them in
-  `/hooks`; until then `on` refuses. Never start, extend or widen a grant, and
-  never retry a refused `on` with options of your own. `off` and `complete`
+  only from it. Codex runs each plugin hook only after the user trusts it in
+  `/hooks`: both the `UserPromptSubmit` arming hook and the `PreToolUse`
+  question hook need that trust, again after an update changes them. Until
+  the arming hook is trusted `on` refuses; until the question hook is, nothing
+  denies `request_user_input`, and `status` still shows both as declared.
+  Never start, extend or widen a grant, and never retry a refused `on` with
+  options of your own. `off` and `complete`
   may end a grant at any time. `autopilot.py` is the packaged
   `skill-content/autopilot/scripts/autopilot.py`.
 - The guard stops an agent that runs the packaged script, not a process that
@@ -147,3 +151,9 @@
   every queued question there too, as a `pending` row of class `queued` or its
   at-once class with the Items it holds in `blocks`, so the Delivery's
   refusals apply.
+- The question matcher covers `request_user_input` and
+  `request_user_input_async`. In Codex 0.159.x, `send_user_message_async`,
+  which persistent-mode instructions name, is an older model-catalog name that
+  only switches on `request_user_input_async`; no tool of that name runs.
+  `send_message_to_user_async` sends the user a message without waiting for an
+  answer and is not guarded: never ask a question through it under a grant.

@@ -863,7 +863,9 @@ def cmd_status(args: argparse.Namespace, now: datetime) -> int:
         lines.append(f"bound to: {bound_line(grant)}"
                      + (f" ({problem}; this session asks as usual)" if problem else ""))
         lines.append(f"decisions: {counts['decisions']}, queued: {counts['queued']}")
-    lines.append(f"arming: {coverage['arming']}; question guard: {coverage['question_guard']}")
+    lines.append(f"declared guards: arming {coverage['arming']}, question guard"
+                 f" {coverage['question_guard']}; a host can skip a declared hook it has not"
+                 " enabled or trusted")
     print("\n".join(lines))
     return 0
 

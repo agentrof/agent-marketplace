@@ -231,7 +231,9 @@ denies only that session, and `on`, `record` and `queue` refuse a session whose
 host or session variable differs, so a parallel session of either host asks as
 usual. A pre-tool hook denies the host question tool while a grant is
 active and states the procedure; a host whose question tool cannot be hooked
-relies on the instructions, and `status` reports which guards run. The guard
+relies on the instructions, and `status` reports which guards the package
+declares, since a host can skip a declared hook it has not enabled or
+trusted. The guard
 stops an agent that runs the packaged script, not a process that writes the
 runtime files with the user's filesystem authority: the hooks are
 workflow-integrity controls, not an operating-system sandbox. `vault_hook.py`

@@ -41,10 +41,10 @@
   readers in parallel: start every reader of the panel before waiting on any
   of them, then wait for all of them before triage.
 - Under switch `implementation_schedule` at `parallel_lanes_v1`, writers
-  overlap only when their approved lane scopes intersect. Start every lane
-  that waits for no producer before waiting on any of them, start each
-  consumer lane as soon as every producer it waits for has finished, and wait
-  for every lane before the coordinator's commit.
+  run at the same time only when their approved lane scopes are disjoint.
+  Start every lane that waits for no producer before waiting on any of them,
+  start each consumer lane as soon as every producer it waits for has
+  finished, and wait for every lane before the coordinator's commit.
 - Under switch `execution_planning` at `single_source_bundle`, start every
   reader of an execution-plan bundle before waiting on any of them, then wait
   for all of them before triage.

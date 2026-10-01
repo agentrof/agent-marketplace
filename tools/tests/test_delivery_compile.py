@@ -1859,6 +1859,10 @@ class DeliveryCompilerTests(unittest.TestCase):
                 self.assertIn(start, bullet)
                 self.assertIn("each consumer lane as soon as every producer it waits for has finished", bullet)
                 self.assertNotIn("next phase", bullet)
+                # Approval refuses intersecting lane scopes, so lanes overlap only when disjoint (rr-seams-09).
+                self.assertIn("writers run at the same time only when their approved lane scopes are disjoint",
+                              bullet)
+                self.assertNotIn("intersect", bullet)
         reference = " ".join((SCRIPTS.parent / "skill-content/deliver/references"
                               / "switch-implementation_schedule-parallel_lanes_v1.md")
                              .read_text(encoding="utf-8").split())

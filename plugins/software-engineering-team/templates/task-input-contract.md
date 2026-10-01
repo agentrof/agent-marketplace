@@ -28,10 +28,16 @@ draft or invalid policy fails the derivation. Before the flow step that names
 switch `<id>`, the entry reads its value with
 `process_policy.py value --switch <id>`, adding `--delivery DLV-###` inside a
 Delivery. Derive a Delivery's tasks with `--delivery DLV-###` too: a task that
-names a Delivery, or reads a file of its package, binds only the policy that
-Delivery pinned. Until the Delivery Review, a policy changed since the pin
-refuses the derivation, as the switch read does, until a new execution approval
-pins it or the pinned policy is restored.
+names a Delivery, or reads a file of its package, binds the switch values that
+Delivery pinned. Until the Delivery Review, an approved policy that changed
+the value of a switch the task's flows own refuses the derivation, as the
+switch read does, until a new execution approval pins it or a later revision
+sets the value back; a `/delivery-plan`, `/execution-plan` or `/configure` task
+binds the approved policy instead before the first execution approval and
+while the Delivery's plan-revision barrier is held, since that approval pins
+it. From the Review on, the task binds the values of the revision the
+Delivery pinned, read from Git history when the policy moved on, and a pin
+that cannot be read back refuses the derivation.
 
 Use the owning compiler's resolved source set. For Backlog review,
 `--epic <exact-epic>` derives the existing scoped dependency and source

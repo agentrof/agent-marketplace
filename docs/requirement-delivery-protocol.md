@@ -206,29 +206,43 @@ creating its Integration ref with the project Fence lease.
 When the project has a Process Policy, scope approval also pins its path,
 revision and source hash in `delivery.md`, inside the scope hash, so every
 Delivery names the process switch values it ran under. Without a policy
-nothing is pinned and every compiler output is unchanged. A draft or invalid
-policy refuses scope approval. The pin drifts like the Definition of Done's
-while a new execution approval can still re-pin it, that is while the
-Delivery is `scope_approved` or `execution_approved`: a policy revised,
-created or removed since the pin makes `delivery_compile.py check`, and the
-coordinator verbs that run it, refuse the Delivery until its execution plan is
-revised and approved again, which pins the current policy and lists the
-changed pin fields in `refreshed_delivery_pins`. In those phases
-`refresh-target` treats the policy as a pinned input, like the Definition of
-Done: it refuses with `DELIVERY_TARGET_SOURCE_VIOLATION` a target whose policy
-differs from the Integration's pin, including one created or removed since.
-Revise, approve and publish the execution plan first, which pins the target's
-policy; the refresh then carries that policy into the Integration. From the
-Delivery Review on, and for a merged or cancelled Delivery, the pin is the
-record of the policy the Delivery ran under and is no longer compared, so a
-policy set for the next Delivery never strands one that can no longer re-pin.
+nothing is pinned and every compiler output is unchanged; such a Delivery runs
+with every switch at its default. A draft or invalid policy refuses scope
+approval. The pin is compared by value: each value, with its parameters, of
+the switches a Delivery flow owns, so a later policy that sets none of them to
+another value, one with every switch at its default included, agrees with the
+pin. While a new execution approval can still re-pin the Delivery, that is
+while it is `scope_approved` or `execution_approved`, a policy that changes
+one of those values makes `delivery_compile.py check`, and the coordinator
+verbs that run it, refuse the Delivery, naming each changed switch, until its
+execution plan is revised and approved again, which pins the current policy
+and lists the changed pin fields in `refreshed_delivery_pins`. The revision
+runs in order: `begin-plan-revision`, the execution-plan tasks and the Item
+revisions they make, `approve-execution`, `publish-execution-plan` and
+`finish-plan-revision`. Before the first execution approval, and while the
+plan-revision barrier is held, a task of `/delivery-plan`, `/execution-plan`
+or `/configure` inside the Delivery binds the approved policy that the next
+approval pins, while its implementation tasks wait for that approval; a later
+policy revision that sets the values back is the other way out. In those
+phases `refresh-target` treats the policy as a pinned input, like the
+Definition of Done: it refuses with `DELIVERY_TARGET_SOURCE_VIOLATION` a
+target whose policy differs from the Integration's pin, including one created
+or removed since. Revise, approve and publish the execution plan first, which
+pins the target's policy; the refresh then carries that policy into the
+Integration. From the Delivery Review on, for a merged or cancelled Delivery
+and for an Item reopened after the Review, the pin is the record of the policy
+the Delivery ran under and its revision's values are read back: from the
+current policy when it is that revision, or else from the Git history of the
+policy file by the pinned source hash, and a pin that neither holds is refused
+with how to restore it. A policy set for the next Delivery therefore never
+strands one that can no longer re-pin, nor changes the values it runs under.
 Inside a Delivery a flow reads a switch with
-`process_policy.py value --switch <id> --delivery DLV-###`, which refuses a
-drifted pin instead of reading the new value. Task derivation follows the same
-pin: `task_inputs.py` refuses a task that names the Delivery with `--delivery`,
-or reads a file of its package, while that pin has drifted, so a Delivery's
-tasks never bind the switch references of a policy it did not pin. The
-Delivery stays `execution_approved` while its Items run, so the pin holds
+`process_policy.py value --switch <id> --delivery DLV-###`, which applies that
+rule to the switch it reads. Task derivation follows the same pin:
+`task_inputs.py` applies it to the switches the task's flows own for a task
+that names the Delivery with `--delivery` or reads a file of its package, so
+a Delivery's tasks never bind the switch references of values it did not pin.
+The Delivery stays `execution_approved` while its Items run, so the pin holds
 through Item execution.
 
 Process switch `owner_gates` decides when the owner answers a Delivery's

@@ -503,11 +503,12 @@ class TaskInputTests(unittest.TestCase):
             policy("begin-revision")
             policy("set", "--switch", "implementation_schedule", "--value", "parallel_lanes_v1")
             policy("approve")
-            # The Delivery runs under the policy it pinned; its tasks never bind a later one.
+            # The Delivery runs under the values it pinned; its tasks never bind a later one.
+            drift = ("process policy cannot bind switch instructions: DLV-001: Delivery runs switch"
+                     " implementation_schedule at sequential_v1 under its pinned Process Policy"
+                     " revision 1, but the approved revision 2 sets parallel_lanes_v1")
             for kwargs in inside:
-                with self.subTest(context=kwargs), self.assertRaisesRegex(
-                        ValueError, "process policy cannot bind switch instructions: DLV-001:"
-                        " Delivery process_policy_revision is stale"):
+                with self.subTest(context=kwargs), self.assertRaisesRegex(ValueError, drift):
                     bound(**kwargs)
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
@@ -515,7 +516,8 @@ class TaskInputTests(unittest.TestCase):
                                          "--mode", "create", "--project-root", str(root),
                                          "--delivery", "DLV-001"])
             self.assertEqual(code, 1)
-            self.assertIn("Delivery process_policy_revision is stale", output.getvalue())
+            self.assertIn("Delivery runs switch implementation_schedule at sequential_v1",
+                          output.getvalue())
             # A task outside any Delivery follows the project's current policy.
             self.assertIn(lanes, bound())
             # Restoring the pinned policy, or re-pinning through a new execution
@@ -524,19 +526,18 @@ class TaskInputTests(unittest.TestCase):
             process_policy.path_for(docs).write_bytes(pinned)
             for kwargs in inside:
                 self.assertNotIn(lanes, bound(**kwargs))
+            # Without a policy every switch is at its default, as the pinned revision sets it.
             process_policy.path_for(docs).unlink()
             for kwargs in inside:
-                with self.subTest(context=kwargs), self.assertRaisesRegex(
-                        ValueError, "Delivery pins a Process Policy that no longer exists"):
-                    bound(**kwargs)
-            # From the Delivery Review on the pin is the record of the policy it ran
-            # under, so a policy set for the next Delivery never strands it.
+                self.assertNotIn(lanes, bound(**kwargs))
+            # From the Delivery Review on the Delivery reads the revision it pinned,
+            # so a policy set for the next Delivery never changes what its tasks bind.
             process_policy.path_for(docs).write_bytes(current)
             path = docs / "delivery/deliveries/dlv-001-auth/delivery.md"
             props, body = delivery_compile.split_note(path)
             props["status"] = "review"
             delivery_compile.atomic_text(path, delivery_compile.frontmatter(props, body))
-            self.assertIn(lanes, bound(inputs=[item]))
+            self.assertNotIn(lanes, bound(inputs=[item]))
             with self.assertRaisesRegex(ValueError, "Delivery not found: DLV-404"):
                 bound(delivery="DLV-404")
 

@@ -682,10 +682,16 @@ class LightPathCompilerTests(unittest.TestCase):
         self.propose(docs)
         author_topology(docs)
         self.assertEqual(run(delivery_compile.approve_scope, plan_args(docs))[0], 0)
+        commit(docs.parents[1], "Approve the scope")
+        # A policy that keeps the light path leaves it to the first execution
+        # approval, which pins that policy; one that ends it is drift.
         set_policy(docs, {**LIGHT, "review_panels": "lens_panel"}, LIMITS)
+        self.assertEqual(self.check(docs)[0], 0)
+        set_policy(docs, {**LIGHT, SWITCH: "standard"}, LIMITS)
         code, refused = self.check(docs)
         self.assertEqual(code, 1)
-        self.assertIn("Delivery process_policy_source_hash is stale against the approved Process Policy",
+        self.assertIn(f"Delivery runs switch {SWITCH} at light_when_eligible under its pinned Process"
+                      " Policy revision 1, but the approved revision 3 sets standard",
                       refused["errors"][0])
         path = delivery_compile.find_delivery(docs, DELIVERY) / "delivery.md"
         props, body = delivery_compile.split_note(path)

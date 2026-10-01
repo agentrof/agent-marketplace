@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,10 +40,15 @@ STATUSES = ("draft", "approved")
 SECTIONS = ("Switches", "Navigation")
 MUTABLE = {"status", "approved_at_utc", "source_hash"}
 PIN_FIELDS = ("process_policy_path", "process_policy_revision", "process_policy_source_hash")
-# A Delivery re-pins only through a new execution approval, so its pin must be
-# current exactly while that approval is still possible. From the Delivery
-# Review on, the pin records the policy the Delivery ran under.
+# A Delivery re-pins only through a new execution approval, so the approved
+# policy must keep its pinned values exactly while that approval is still
+# possible. From the Delivery Review on, the pin records the policy the Delivery
+# ran under, and its values are read back from the pinned revision.
 PIN_ENFORCED_STATUSES = ("scope_approved", "execution_approved")
+REVIEWED_STATUSES = ("review", "pr_handoff", "awaiting_merge", "merged", "cancelled")
+TASK_INPUT_POLICY = "templates/task-input-policy.json"
+# The task entries scoped to one Delivery; their flows are the Delivery's flows.
+DELIVERY_SCOPE = "delivery"
 TABLE_HEADER = ("Switch", "Value")
 TABLE_SEPARATOR_RE = re.compile(r"^\|\s*:?-{3,}:?\s*\|\s*:?-{3,}:?\s*\|$")
 NAME_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
@@ -396,10 +402,15 @@ def effective_values(docs: Path | None, package: Path | None = None) -> tuple[di
     if errors:
         raise ValueError("; ".join(errors))
     state = read_state(docs, registry)[0] if snapshot else {}
-    rows = state.get("rows", {})
     parameters = {(switch, parameter): raw
                   for switch, named in state.get("parameters", {}).items()
                   for parameter, raw in named.items()}
+    return resolved_values(state.get("rows", {}), parameters, registry), snapshot
+
+
+def resolved_values(rows: dict[str, str], parameters: dict[tuple[str, str], str],
+                    registry: dict[str, dict]) -> dict[str, dict]:
+    """Return every declared switch's value under a policy's rows and parameters."""
     values = {}
     for switch, spec in sorted(registry.items()):
         values[switch] = {"value": rows.get(switch, spec["default"]),
@@ -409,7 +420,7 @@ def effective_values(docs: Path | None, package: Path | None = None) -> tuple[di
         # switch reads exactly as before parameters existed.
         if "parameters" in spec:
             values[switch]["parameters"] = typed_parameters(switch, spec, parameters)
-    return values, snapshot
+    return values
 
 
 def pin_findings(props: dict, snapshot: dict) -> list[str]:
@@ -428,6 +439,216 @@ def pin_findings(props: dict, snapshot: dict) -> list[str]:
         return ["Delivery pins no Process Policy, but one is approved now" + remedy]
     return [f"Delivery {key} is stale against the approved Process Policy" + remedy
             for key in PIN_FIELDS if props.get(key) != snapshot[key]]
+
+
+class PinDrift(ValueError):
+    """The approved policy sets another value than a Delivery's pin while a new
+    execution approval can still re-pin it."""
+
+    def __init__(self, message: str, status: str):
+        super().__init__(message)
+        self.status = status
+
+
+def delivery_flows(package: Path | None = None) -> set[str]:
+    """Return the flows a Delivery runs: those of the task entries scoped to one Delivery."""
+    path = (package or PACKAGE) / TASK_INPUT_POLICY
+    try:
+        entries = json.loads(path.read_text(encoding="utf-8"))["entries"]
+        return {flow for entry in entries.values() if entry.get("scope_kind") == DELIVERY_SCOPE
+                for flow in entry["flows"]}
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"task input policy cannot be read: {exc}") from exc
+
+
+def delivery_switches(registry: dict[str, dict], package: Path | None = None) -> set[str]:
+    """Return the switches a Delivery's flows read: those an owning flow of which a Delivery runs."""
+    flows = delivery_flows(package)
+    return {switch for switch, entry in registry.items()
+            if flows & set(entry["spec"].get("flows") or [])}
+
+
+def pinned_revision(props: dict, body: str, pin: dict) -> bool:
+    """Whether a policy file is the approved revision a Delivery pinned."""
+    return (props.get("status") == "approved"
+            and props.get("revision") == pin["process_policy_revision"]
+            and props.get("source_hash") == pin["process_policy_source_hash"]
+            == policy_hash(props, body))
+
+
+def history_revision(docs: Path, pin: dict) -> tuple[str, str] | None:
+    """Find the approved policy a Delivery pinned in the Git history of the policy's path.
+
+    Returns the commit that holds it and its body, or None when no commit on any
+    ref does, the checkout is no Git worktree or its history is incomplete.
+    """
+    def git(*args: str, data: bytes | None = None) -> bytes | None:
+        result = subprocess.run(["git", "--no-replace-objects", "-C", str(docs), *args],
+                                input=data, capture_output=True, check=False)
+        return None if result.returncode else result.stdout
+
+    top = git("rev-parse", "--show-toplevel")
+    if top is None:
+        return None
+    try:
+        relative = (docs / RELATIVE).resolve().relative_to(
+            Path(top.decode("utf-8").strip()).resolve()).as_posix()
+    except ValueError:
+        return None
+    commits = git("log", "--all", "--format=%H", "--no-renames", "--", ":(top,literal)" + relative)
+    if not commits:
+        return None
+    oids = commits.decode("ascii").split()
+    batch = git("cat-file", "--batch",
+                data="".join(f"{oid}:{relative}\n" for oid in oids).encode("utf-8"))
+    if batch is None:
+        return None
+    offset = 0
+    for oid in oids:
+        end = batch.index(b"\n", offset)
+        header = batch[offset:end].split()
+        offset = end + 1
+        if len(header) != 3 or header[1] != b"blob":
+            continue
+        size = int(header[2])
+        blob, offset = batch[offset:offset + size], offset + size + 1
+        try:
+            props, body = parse_text(blob.decode("utf-8"), docs / RELATIVE)
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if pinned_revision(props, body, pin):
+            return oid, body
+    return None
+
+
+def pinned_values(docs: Path, pin: dict, registry: dict[str, dict]) -> tuple[dict[str, dict], str]:
+    """Return the switch values of the policy a Delivery pinned and where they were read.
+
+    A Delivery without a pin ran with no Process Policy, so with every switch at
+    its default. Otherwise the pinned revision is read from the current policy
+    when it is that revision, or from the Git history of the policy's path by
+    its source hash. Raises ValueError, naming the remedy, when neither holds it.
+    """
+    if not pin:
+        return resolved_values({}, {}, registry), "defaults"
+    if set(pin) != set(PIN_FIELDS) or pin["process_policy_path"] != RELATIVE:
+        raise ValueError(f"Delivery pin {pin} does not name a Process Policy revision of {RELATIVE}")
+    path = path_for(docs)
+    source = None
+    if path.exists():
+        try:
+            props, body = parse(path)
+        except (OSError, ValueError):
+            props, body = {}, ""
+        if pinned_revision(props, body, pin):
+            source = "current"
+    if source is None:
+        found = history_revision(docs, pin)
+        if found is None:
+            raise ValueError(
+                f"the pinned Process Policy revision {pin['process_policy_revision']}"
+                f" ({pin['process_policy_source_hash']}) is neither the current policy nor an"
+                f" approved file in the Git history of workspace/docs/{RELATIVE}; fetch the history"
+                " that holds it, for example by unshallowing a shallow clone, or restore that"
+                " approved file from the commit or backup that holds it")
+        source, body = found
+    rows, parameters = table_rows(body)[0], parameter_rows(body)[0]
+    errors = registry_findings(rows, registry) + parameter_findings(rows, parameters, registry)
+    if errors:
+        raise ValueError(f"the pinned Process Policy revision {pin['process_policy_revision']} no"
+                         f" longer reads under this package: {'; '.join(errors)}")
+    return resolved_values(rows, parameters, registry), source
+
+
+def described(value: dict) -> str:
+    parameters = value.get("parameters")
+    return value["value"] + (f" with parameters {json.dumps(parameters, sort_keys=True)}"
+                             if parameters else "")
+
+
+def drift_messages(status: str, pin: dict, pinned: dict, values: dict, snapshot: dict,
+                   switches: set[str]) -> list[str]:
+    """Name each switch whose pinned value the approved policy changed, with the remedy in order."""
+    changed = [switch for switch in sorted(switches) if switch in values
+               and (pinned[switch]["value"], pinned[switch].get("parameters"))
+               != (values[switch]["value"], values[switch].get("parameters"))]
+    if not changed:
+        return []
+    under = (f"its pinned Process Policy revision {pin['process_policy_revision']}" if pin
+             else "no Process Policy, as it pinned none")
+    now = (f"the approved revision {snapshot['process_policy_revision']}" if snapshot
+           else "the project, which has no Process Policy now,")
+    if status == "scope_approved":
+        remedy = ("; its first execution approval pins the approved policy: derive its"
+                  " execution-plan tasks, which bind that policy, then run approve-execution")
+    else:
+        remedy = ("; to run it under the approved policy, revise its execution plan in order:"
+                  " begin-plan-revision, the execution-plan tasks, which bind that policy while"
+                  " the barrier is held, and the Item revisions they make, approve-execution,"
+                  " which pins it, publish-execution-plan, finish-plan-revision")
+    remedy += ("; to keep the pinned values instead, approve a Process Policy revision that sets"
+               " them back through /configure process")
+    return [f"Delivery runs switch {switch} at {described(pinned[switch])} under {under}, but"
+            f" {now} sets {described(values[switch])}" + remedy for switch in changed]
+
+
+def delivery_record(docs: Path, delivery: str) -> dict:
+    import delivery_compile
+
+    root = delivery_compile.find_delivery(docs, delivery)
+    if root is None:
+        raise ValueError(f"Delivery not found: {delivery}")
+    return delivery_compile.split_note(root / "delivery.md")[0]
+
+
+def drift_findings(docs: Path, props: dict, package: Path | None = None,
+                   switches: set[str] | None = None) -> list[str]:
+    """Compare a Delivery's pinned switch values with the approved policy.
+
+    The values of *switches*, by default every switch a Delivery flow owns,
+    are compared, not the revision or hash that names them, so a policy that
+    sets none of them to another value, one with every switch at its default
+    included, agrees with a Delivery that pinned no policy. A pinned revision
+    that cannot be read back is compared by what the pin names.
+    """
+    registry = load_registry(package)
+    values, snapshot = effective_values(docs, package)
+    pin = {key: props[key] for key in PIN_FIELDS if key in props}
+    if pin == snapshot:
+        return []
+    try:
+        pinned = pinned_values(docs, pin, registry)[0]
+    except ValueError:
+        return pin_findings(props, snapshot)
+    compared = delivery_switches(registry, package) if switches is None else switches
+    return drift_messages(str(props.get("status")), pin, pinned, values, snapshot, compared)
+
+
+def delivery_values(docs: Path, delivery: str, package: Path | None = None,
+                    switches: set[str] | None = None) -> dict:
+    """Return the switch values a Delivery runs under and the policy they come from.
+
+    Before scope approval, and for a record whose status the Delivery compiler
+    refuses, the current policy decides. From then on the Delivery runs under
+    its pin. While a new execution approval can still re-pin it, a
+    policy that changed one of *switches*, by default every switch a Delivery
+    flow owns, raises PinDrift, and otherwise the approved policy's values are
+    returned. From the Delivery Review on, and so for an Item reopened after it,
+    the pinned revision's own values are returned: a policy set for the next
+    Delivery never changes them, and a pin that cannot be read back is refused.
+    """
+    props = delivery_record(docs, delivery)
+    status = props.get("status")
+    if status in REVIEWED_STATUSES:
+        pin = {key: props[key] for key in PIN_FIELDS if key in props}
+        values, source = pinned_values(docs, pin, load_registry(package))
+        return {"values": values, "policy": pin, "source": source}
+    if status in PIN_ENFORCED_STATUSES:
+        errors = drift_findings(docs, props, package, switches)
+        if errors:
+            raise PinDrift("; ".join(errors), str(status))
+    values, snapshot = effective_values(docs, package)
+    return {"values": values, "policy": snapshot, "source": "current"}
 
 
 def emit(value: dict, code: int = 0) -> int:
@@ -626,32 +847,25 @@ def check(args) -> int:
     return emit({"ok": not errors, "exists": True, **state, "errors": errors}, 1 if errors else 0)
 
 
-def delivery_pin_findings(docs: Path, delivery: str, snapshot: dict) -> list[str]:
-    import delivery_compile
-
-    root = delivery_compile.find_delivery(docs, delivery)
-    if root is None:
-        return [f"Delivery not found: {delivery}"]
-    props, _body = delivery_compile.split_note(root / "delivery.md")
-    if props.get("status") not in PIN_ENFORCED_STATUSES:
-        return []
-    return pin_findings(props, snapshot)
-
-
 def value(args) -> int:
     docs = docs_root(args.docs)
-    try:
-        values, snapshot = effective_values(docs)
-    except ValueError as exc:
-        return emit({"ok": False, "errors": [str(exc)]}, 1)
-    if args.switch not in values:
+    if args.switch not in load_registry():
         return emit({"ok": False, "errors": [f"switch {args.switch!r} is not declared by this"
                                              " package"]}, 1)
-    errors = delivery_pin_findings(docs, args.delivery, snapshot) if args.delivery else []
-    if errors:
-        return emit({"ok": False, "errors": errors}, 1)
-    return emit({"ok": True, "switch": args.switch, **values[args.switch],
-                 "policy": snapshot or None})
+    try:
+        if args.delivery:
+            state = delivery_values(docs, args.delivery, switches={args.switch})
+        else:
+            values, snapshot = effective_values(docs)
+            state = {"values": values, "policy": snapshot, "source": "current"}
+    except ValueError as exc:
+        return emit({"ok": False, "errors": [str(exc)]}, 1)
+    result = {"ok": True, "switch": args.switch, **state["values"][args.switch],
+              "policy": state["policy"] or None}
+    # A Delivery past its Review reads the revision it pinned, which Git may hold.
+    if state["source"] not in {"current", "defaults"}:
+        result["pinned_revision_commit"] = state["source"]
+    return emit(result)
 
 
 def switches(args) -> int:

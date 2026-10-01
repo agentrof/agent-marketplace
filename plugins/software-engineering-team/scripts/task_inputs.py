@@ -17,6 +17,9 @@ PACKAGE = Path(__file__).resolve().parents[1]
 POLICY = "templates/task-input-policy.json"
 # process_policy.REGISTRY; the catalog reads it without importing the compiler.
 SWITCH_REGISTRY = "skill-content/configure/data/process-switches.json"
+# Entries whose tasks author what an execution approval then pins: the scope,
+# the Item topology and the Operation contracts a plan revises.
+PLANNING_ENTRIES = frozenset({"delivery-plan", "execution-plan", "configure"})
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
 SWITCH_REFERENCE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 DELIVERY_PACKAGE = re.compile(r"^workspace/docs/delivery/deliveries/([^/]+)/")
@@ -242,33 +245,94 @@ def task_deliveries(project: Path, delivery: str | None, inputs: list[str]) -> l
     return sorted(found)
 
 
+def registry_switches(package: Path) -> dict[str, dict]:
+    """Return the switch registry's declarations, or none when the package has no registry."""
+    path = package / SWITCH_REGISTRY
+    if not path.is_file():
+        return {}
+    try:
+        switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(f"process switch registry cannot be read: {exc}") from exc
+    if not isinstance(switches, dict) or not all(isinstance(spec, dict) for spec in switches.values()):
+        raise ValueError("process switch registry cannot be read: switches must map ids to objects")
+    return switches
+
+
+def plan_revision_held(project: Path, delivery: str, remote: str) -> bool:
+    """Whether the remote Fence holds a plan-revision barrier that this Delivery began."""
+    import delivery_git
+
+    try:
+        refs = delivery_git.canonical_refs(delivery)
+        tips = delivery_git.remote_ref_oids(project, remote, [refs["fence"], refs["integration"]])
+        if not all(tips.values()):
+            return False
+        fence = delivery_git.commit_message(project, tips[refs["fence"]])
+        epoch = delivery_git.trailer(fence, "Barrier-Epoch")
+        if delivery_git.trailer(fence, "Barrier-Kind") != "plan-revision" or epoch in {None, "none"}:
+            return False
+        # The barrier's own Integration record binds its epoch to this Delivery.
+        begun = delivery_git.run_git(project, "log", "--format=%H", "--fixed-strings",
+                                     f"--grep=Agentrof-Barrier-Epoch: {epoch}",
+                                     tips[refs["integration"]])
+        for oid in begun.split():
+            record = delivery_git.commit_message(project, oid)
+            if all(delivery_git.trailer(record, key) == expected for key, expected in (
+                    ("Record", "delivery-barrier-v1"), ("Delivery", delivery),
+                    ("Barrier-Kind", "plan-revision"), ("Barrier-Epoch", epoch))):
+                return True
+    except (RuntimeError, OSError, ValueError):
+        return False
+    return False
+
+
 def switch_choices(project: Path | None, route: dict, package: Path,
-                   deliveries: list[str] | None = None) -> tuple[set, list[str]]:
-    """Return the project's non-default switch values and its policy input.
+                   deliveries: list[str] | None = None, entry: str | None = None,
+                   remote: str = "origin") -> tuple[set, list[str]]:
+    """Return the non-default switch values a task runs under and its policy input.
 
     Without a Process Policy both are empty, so the manifest is unchanged. A
-    task inside a Delivery whose pin is still enforced binds only the policy
-    that Delivery pinned: one changed since refuses the derivation, as a switch
-    read of that Delivery does.
+    task inside a Delivery runs under the switch values that Delivery pinned:
+    while the pin is enforced, a policy that changed a value of a switch the
+    task's flows own refuses the derivation, as a switch read of that Delivery
+    does, and from the Delivery Review on the pinned revision's values are
+    bound. A planning task binds the approved policy instead where the next
+    execution approval pins it: before the first one, and while a
+    plan-revision barrier is held.
     """
     if project is None or not route["project_state"]:
         return set(), []
     import process_policy
     docs = project / "workspace" / "docs"
+    policy_input = (["workspace/docs/" + process_policy.RELATIVE]
+                    if process_policy.path_for(docs).exists() else [])
     if deliveries:
-        snapshot, errors = process_policy.approved_snapshot(docs, package)
-        if errors:
-            raise ValueError("; ".join(errors))
+        owned = {switch for switch, spec in registry_switches(package).items()
+                 if set(route["flows"]) & set(spec.get("flows") or [])}
+        chosen = None
         for delivery in deliveries:
-            drift = process_policy.delivery_pin_findings(docs, delivery, snapshot)
-            if drift:
-                raise ValueError(f"{delivery}: " + "; ".join(drift))
-    if not process_policy.path_for(docs).exists():
+            try:
+                values = process_policy.delivery_values(docs, delivery, package, owned)["values"]
+            except process_policy.PinDrift as drift:
+                if not (entry in PLANNING_ENTRIES and (drift.status == "scope_approved" or (
+                        drift.status == "execution_approved"
+                        and plan_revision_held(project, delivery, remote)))):
+                    raise ValueError(f"{delivery}: {drift}") from drift
+                values = process_policy.effective_values(docs, package)[0]
+            except ValueError as exc:
+                raise ValueError(f"{delivery}: {exc}") from exc
+            pairs = {(switch, value["value"]) for switch, value in values.items()
+                     if value["value"] != value["default"]}
+            if chosen is not None and pairs != chosen:
+                raise ValueError("the task's inputs span Deliveries that run different switch values")
+            chosen = pairs
+        return chosen, policy_input
+    if not policy_input:
         return set(), []
     values, _snapshot = process_policy.effective_values(docs, package)
     return ({(switch, value["value"]) for switch, value in values.items()
-             if value["value"] != value["default"]},
-            ["workspace/docs/" + process_policy.RELATIVE])
+             if value["value"] != value["default"]}, policy_input)
 
 
 def git_bytes(command: list[str], *args: str) -> bytes:
@@ -427,7 +491,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
              inputs: list[str] | None = None, skills: list[str] | None = None,
              findings: str | None = None, base: str | None = None, epic: str | None = None,
              expected_hash: str | None = None, package: Path = PACKAGE,
-             delivery: str | None = None) -> dict:
+             delivery: str | None = None, remote: str = "origin") -> dict:
     policy = catalog(package)
     package = package.resolve()
     project = project.resolve() if project is not None else None
@@ -457,7 +521,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     try:
         deliveries = task_deliveries(project, delivery, list(inputs or [])) \
             if project is not None and route["project_state"] else []
-        chosen, policy_inputs = switch_choices(project, route, package, deliveries)
+        chosen, policy_inputs = switch_choices(project, route, package, deliveries, entry, remote)
     except ValueError as exc:
         raise ValueError(f"process policy cannot bind switch instructions: {exc}") from exc
     value_data = switch_data(package)
@@ -639,13 +703,15 @@ def main(argv=None) -> int:
     parser.add_argument("--epic", nargs="?", const="")
     parser.add_argument("--expected-hash")
     parser.add_argument("--delivery")
+    parser.add_argument("--remote", default="origin",
+                        help="the Delivery remote whose Fence shows a held plan-revision barrier")
     args = parser.parse_args(argv)
     try:
         result = ({"ok": True, "entries": sorted(catalog()["entries"])} if args.check_catalog else
                   manifest(entry=args.entry, role=args.role, mode=args.mode, project=args.project_root,
                            inputs=args.input, skills=args.skill, findings=args.findings, base=args.base,
                            epic=args.epic, expected_hash=args.expected_hash,
-                           delivery=args.delivery))
+                           delivery=args.delivery, remote=args.remote))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError, KeyError, TypeError) as exc:

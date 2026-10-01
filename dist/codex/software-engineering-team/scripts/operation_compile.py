@@ -169,24 +169,25 @@ def review_record_findings(docs: Path, kind: str, props: dict, body: str) -> lis
     """Validate the review record that the blocking_delta review loop keeps in a contract.
 
     At any other review_loop value a section of a record's name is authored
-    text, as it was before the switch, and a contract without such a section
-    never reads the Process Policy. An approved contract without Returned
-    Findings was approved before its review kept a record and stays as it was.
+    text, as it was before the switch. A contract without such a section never
+    reads the Process Policy, nor does an approved contract without Returned
+    Findings, which was approved before its review kept a record and stays as
+    it was.
     """
     authored = without_generated_relations(body)
     if not any(re.search(rf"(?m)^##\s+{title}\s*$", authored) for title in REVIEW_RECORD_SECTIONS):
         return []
     import backlog_compile
 
+    approved = props.get("status") == "approved"
+    if approved and backlog_compile.RETURNED_FINDINGS not in backlog_compile.headings(authored):
+        return []
     try:
         if backlog_compile.review_loop_value(docs) != backlog_compile.RECORDING_LOOP:
             return []
     except ValueError as exc:
         return [f"the review record needs the review_loop value of the Process Policy: {exc}"]
     path = f"operation/{FILE_FOR[kind]}"
-    approved = props.get("status") == "approved"
-    if approved and backlog_compile.RETURNED_FINDINGS not in backlog_compile.headings(authored):
-        return []
     # The backlog review note records accepted minor findings in the same table.
     errors = backlog_compile.accepted_minor_findings(
         docs, authored, path, {"minor_finding_owner_roles": MINOR_FINDING_OWNER_ROLES})

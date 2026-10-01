@@ -705,8 +705,13 @@ def git_with_input(root: Path, args: list[str], data: str,
 
 def commit_tree(root: Path, base: str, paths: list[str], subject: str,
                 trailers: dict[str, str], *, delivery_projections: bool = False,
-                operation_bindings: dict[str, dict] | None = None) -> str:
-    """Create an unreferenced candidate tree from *base* plus exact paths."""
+                operation_bindings: dict[str, dict] | None = None,
+                blobs: dict[str, str] | None = None) -> str:
+    """Create an unreferenced candidate tree from *base* plus exact paths.
+
+    *blobs* maps further paths to the existing blob each one carries, whatever
+    the checkout holds there.
+    """
     trailers = _normalise_control_trailers(trailers)
     with tempfile.TemporaryDirectory(prefix="agentrof-index-") as temporary:
         index = Path(temporary) / "index"
@@ -721,6 +726,7 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
                                  encoding="utf-8", capture_output=True, check=False)
             if add.returncode:
                 raise RuntimeError(add.stderr.strip() or "cannot stage candidate package")
+        update_candidate_index(root, env, [("100644", oid, path) for path, oid in sorted((blobs or {}).items())])
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
                               encoding="utf-8", capture_output=True, check=False)
         if tree.returncode:
@@ -2178,13 +2184,14 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
         if values["Governance-Hash"] != governed_governance_hash(root):
             raise RuntimeError("DELIVERY_FENCE_GOVERNANCE: the Fence does not carry the approved Governance; "
                                "apply it with apply-governance before reserving")
-    package = package_paths(root, directory, docs, include_map=False) + carried_policy_paths(root, directory, docs)
+    package = package_paths(root, directory, docs, include_map=False)
+    policy = carried_policy_blobs(root, directory, docs)
     integration_oid = commit_tree(
         root, target_oid, sorted(set(package)),
         f"Reserve Delivery {delivery_id}",
         {"Record": "delivery-reservation-v1", "Protocol": "1", "Delivery": delivery_id,
          "Slug": directory.name.removeprefix(delivery_id.lower() + "-"), "Target": target_oid},
-        delivery_projections=True,
+        delivery_projections=True, blobs=policy,
     )
     if fence_exists:
         leased_fence = previous_fence
@@ -2244,21 +2251,47 @@ def pinned_policy_paths(root: Path, directory: Path, docs: Path) -> list[str]:
     return [rel_posix(root, process_policy.path_for(docs))]
 
 
-def carried_policy_paths(root: Path, directory: Path, docs: Path) -> list[str]:
-    """Select the pinned Process Policy that the Integration carries with the package.
+def carried_policy_blobs(root: Path, directory: Path, docs: Path) -> dict[str, str]:
+    """Select the blob of the pinned Process Policy revision that the Integration carries.
 
     An Item worktree reads the switch values from its own tree, which comes from
-    the Integration, so the pinned policy reaches the Integration with the
+    the Integration, so the pinned revision reaches the Integration with the
     package, as a pinned Operation contract does, even before its own commit
-    reaches the target. The package checks that run first prove the checkout's
-    file is the pinned revision.
+    reaches the target. The package checks that run first compare the pin by
+    value, so they also pass a later revision that sets every Delivery switch
+    the same way. The checkout's file is therefore carried only when it is the
+    pinned revision; otherwise the approved file that the Git history of the
+    policy holds under the pinned source hash is, and publication is refused
+    when neither holds it.
     """
+    import process_policy
+    from delivery_compile import split_note
+
     paths = pinned_policy_paths(root, directory, docs)
-    for relative in paths:
-        path = root / relative
-        if not path.is_file() or path.is_symlink() or path.parent.is_symlink():
-            raise RuntimeError("Delivery publication requires the pinned Process Policy as a regular file")
-    return paths
+    if not paths:
+        return {}
+    relative = paths[0]
+    path = root / relative
+    if path.is_symlink() or path.parent.is_symlink() or (path.exists() and not path.is_file()):
+        raise RuntimeError("Delivery publication requires the pinned Process Policy as a regular file")
+    props = split_note(directory / "delivery.md")[0]
+    pin = {key: props.get(key) for key in process_policy.PIN_FIELDS}
+    if path.is_file():
+        try:
+            current = process_policy.pinned_revision(*process_policy.parse(path), pin)
+        except (OSError, ValueError):
+            current = False
+        if current:
+            return {relative: run_git(root, "hash-object", "-w", "--", relative)}
+    found = process_policy.history_revision(docs, pin)
+    if found is None:
+        raise RuntimeError(
+            f"Delivery publication requires the pinned Process Policy revision"
+            f" {pin['process_policy_revision']} ({pin['process_policy_source_hash']}), which is neither"
+            f" the checkout's policy nor an approved file in the Git history of {relative}; fetch the"
+            " history that holds it, for example by unshallowing a shallow clone, or restore that"
+            " approved file from the commit or backup that holds it")
+    return {relative: run_git(root, "rev-parse", f"{found[0]}:{relative}")}
 
 
 def uncarried_operation_contracts(root: Path, docs: Path, integration_oid: str,
@@ -2426,7 +2459,8 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
         raise RuntimeError("DELIVERY_FENCE_MODE: publish-execution-plan requires an open Fence")
     refuse_cancelled_delivery(root, directory, integration_oid, "publish-execution-plan")
     refuse_reviewed_delivery(root, directory, integration_oid, delivery_id)
-    package = package_paths(root, directory, docs, include_map=False) + carried_policy_paths(root, directory, docs)
+    package = package_paths(root, directory, docs, include_map=False)
+    policy = carried_policy_blobs(root, directory, docs)
     operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
     refuse_superseded_approval(root, directory, docs, integration_oid, operation_paths)
     not_carried = uncarried_operation_contracts(root, docs, integration_oid, operation_paths)
@@ -2439,6 +2473,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
         delivery_projections=True,
         operation_bindings={relative: binding for relative, binding in operation_bindings.items()
                             if rel_posix(root, docs / relative) not in sealed},
+        blobs=policy,
     )
     epoch = trailer(fence_message, "Epoch") or epoch_token()
     fence_candidate = commit_tree(
@@ -3152,13 +3187,41 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
 BARRIER_BEGIN_VERBS = {"plan-revision": "begin-plan-revision", "upgrade": "quiesce-upgrade"}
 
 
+def published_cancellation(root: Path, remote: str, delivery_id: str) -> bool:
+    """Whether the Integration, or the target once the merge dropped it, records the Delivery cancelled.
+
+    A cancellation writes the cancelled status on the Integration alone, and its
+    PR carries it to the target.
+    """
+    from delivery_compile import docs_root, find_delivery, split_note
+    directory = find_delivery(docs_root(root), delivery_id)
+    if directory is None:
+        return False
+    ref = canonical_refs(delivery_id)["integration"]
+    try:
+        source = remote_ref_oids(root, remote, [ref])[ref] or fetch_target(root, remote)[1]
+        props, _body = split_remote_note(root, source, rel_posix(root, directory / "delivery.md"), split_note)
+    except RuntimeError:
+        return False
+    return props.get("status") == "cancelled"
+
+
 def _barrier_transition(project_root: Path, kind: str, action: str,
                         delivery_id: str | None = None, remote: str = "origin") -> dict:
-    """Install or release a lightweight barrier on existing coordination refs."""
+    """Install or release a lightweight barrier on existing coordination refs.
+
+    A cancellation is final and its Review stays at the Integration tip for its
+    PR, so a plan revision barrier that a cancellation carried, as one could
+    before cancel-delivery refused a barrier, is released on the Fence alone,
+    also once the merge dropped the Integration ref.
+    """
     root = main_worktree(project_root.resolve())
     validate_delivery_id(delivery_id or "DLV-000") if delivery_id else None
     fence_ref, fence_oid, values = _fence_context(root, remote)
     integration_ref = canonical_refs(delivery_id)["integration"] if delivery_id else None
+    if (action != "begin" and kind == "plan-revision" and integration_ref
+            and published_cancellation(root, remote, delivery_id)):
+        integration_ref = None
     integration_oid = remote_oid(root, remote, integration_ref) if integration_ref else None
     if action == "begin":
         if values["Mode"] != "open" or values["Barrier-Kind"] != "none":
@@ -3617,8 +3680,8 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     delivery_props, _ = split_note(directory / "delivery.md")
     if delivery_props.get("status") != "execution_approved":
         raise RuntimeError("claim-items requires an execution-approved Delivery")
-    refuse_pending_decisions(root, directory, "claim-items",
-                             [path.parent.name.upper() for path in sorted(directory.glob("items/*/item.md"))])
+    # A claim starts no work: start-item, resume-item and reopen-item hold an
+    # Item a pending User Decisions row blocks.
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
@@ -4518,7 +4581,13 @@ def lane_status(project_root: Path, delivery_id: str, story_id: str, remote: str
 
 def refuse_to_discard_lane_work(root: Path, delivery_id: str, story_id: str, worktree: Path,
                                 item_oid: str, slot_ref: str, item_props: dict) -> None:
-    """Refuse a takeover that would discard uncommitted lane work, naming it and the owner's choice."""
+    """Refuse a takeover that would discard uncommitted lane work, naming it and the owner's choice.
+
+    Item commits stay local until push-item, so a worktree ahead of the remote
+    Item tip holds committed work no ref holds. The discard commands then reset
+    to the worktree's own HEAD, which keeps those commits, and the refusal lists
+    them: dropping them is a separate choice.
+    """
     from delivery_compile import implementation_schedule
     if implementation_schedule(item_props) != "parallel_lanes_v1" or not worktree_pending_paths(root, worktree):
         return
@@ -4526,8 +4595,11 @@ def refuse_to_discard_lane_work(root: Path, delivery_id: str, story_id: str, wor
     report = "; ".join(f"{role}: {', '.join(paths) if paths else 'no work'}" for role, paths in lanes.items())
     if outside:
         report += "; outside every lane scope: " + ", ".join(outside)
-    discard = (f"discard it with `git -C {worktree} reset --hard {item_oid}` and `git -C {worktree} clean -fd`,"
-               " then run takeover-item again")
+    head = worktree_head(root, worktree)
+    diverged = head != item_oid
+    ahead = run_git(root, "-C", str(worktree), "log", "--format=%H %s", f"{item_oid}..{head}") if diverged else ""
+    discard = (f"discard it with `git -C {worktree} reset --hard {'HEAD' if diverged else item_oid}`"
+               f" and `git -C {worktree} clean -fd`, then run takeover-item again")
     if writer_receipt_state(root, delivery_id, story_id, item_oid, slot_ref) == "verified":
         choice = ("This host still holds the Item's verified writer receipt, so the choice is to keep it"
                   " without takeover: finish the lanes that have work and commit it as the coordinator in"
@@ -4535,6 +4607,11 @@ def refuse_to_discard_lane_work(root: Path, delivery_id: str, story_id: str, wor
     else:
         choice = ("This host holds no verified writer receipt for the Item, so it cannot commit and publish"
                   f" that work: copy out any path to keep and {discard}")
+    if ahead:
+        choice += (f". The worktree's HEAD also holds commits the remote Item tip {item_oid} does not, which no"
+                   f" ref holds: {'; '.join(ahead.splitlines())}. `reset --hard HEAD` keeps them, and takeover"
+                   " refuses while the worktree is ahead of the tip, since it would drop them: discarding them"
+                   " is a separate, explicit choice.")
     raise RuntimeError(f"DELIVERY_WORKTREE_UNSAFE: takeover would discard the uncommitted lane work in the Item"
                        f" worktree {worktree}: {report}. {choice}")
 

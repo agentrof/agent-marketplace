@@ -48,6 +48,11 @@ PIN_FIELDS = ("process_policy_path", "process_policy_revision", "process_policy_
 # ran under, and its values are read back from the pinned revision.
 PIN_ENFORCED_STATUSES = ("scope_approved", "execution_approved")
 REVIEWED_STATUSES = ("review", "pr_handoff", "awaiting_merge", "merged", "cancelled")
+# An execution-approved Delivery runs only its execution flow: its planning
+# flows run again only inside a plan revision, whose execution approval pins
+# the approved policy anew.
+EXECUTION_APPROVED = "execution_approved"
+EXECUTION_FLOWS = ("delivery-execution",)
 TASK_INPUT_POLICY = "templates/task-input-policy.json"
 # The task entries scoped to one Delivery; their flows are the Delivery's flows.
 DELIVERY_SCOPE = "delivery"
@@ -477,9 +482,16 @@ def delivery_flows(package: Path | None = None) -> set[str]:
         raise ValueError(f"task input policy cannot be read: {exc}") from exc
 
 
-def delivery_switches(registry: dict[str, dict], package: Path | None = None) -> set[str]:
-    """Return the switches a Delivery's flows read: those an owning flow of which a Delivery runs."""
+def delivery_switches(registry: dict[str, dict], package: Path | None = None,
+                      status: str | None = None) -> set[str]:
+    """Return the switches a Delivery's flows read: those an owning flow of which a Delivery runs.
+
+    With the *status* of an execution-approved Delivery, only those its
+    execution flow owns: the next execution approval pins the others anew.
+    """
     flows = delivery_flows(package)
+    if status == EXECUTION_APPROVED:
+        flows &= set(EXECUTION_FLOWS)
     return {switch for switch, entry in registry.items()
             if flows & set(entry["spec"].get("flows") or [])}
 
@@ -623,13 +635,21 @@ def drift_findings(docs: Path, props: dict, package: Path | None = None,
                    switches: set[str] | None = None) -> list[str]:
     """Compare a Delivery's pinned switch values with the approved policy.
 
-    The values of *switches*, by default every switch a Delivery flow owns,
-    are compared, not the revision or hash that names them, so a policy that
+    The values of the switches the Delivery still reads are compared, not the
+    revision or hash that names them: every switch a Delivery flow owns while
+    it is scope-approved, and once it is execution-approved only those its
+    execution flow owns. *switches* narrows them to the ones a caller reads,
+    and a switch no Delivery flow owns is never compared. So a policy that
     sets none of them to another value, one with every switch at its default
     included, agrees with a Delivery that pinned no policy. A pinned revision
     that cannot be read back is compared by what the pin names.
     """
     registry = load_registry(package)
+    compared = delivery_switches(registry, package, props.get("status"))
+    if switches is not None:
+        compared &= set(switches)
+    if not compared:
+        return []
     values, snapshot = effective_values(docs, package)
     pin = {key: props[key] for key in PIN_FIELDS if key in props}
     if pin == snapshot:
@@ -638,7 +658,6 @@ def drift_findings(docs: Path, props: dict, package: Path | None = None,
         pinned = pinned_values(docs, pin, registry)[0]
     except ValueError:
         return pin_findings(props, snapshot)
-    compared = delivery_switches(registry, package) if switches is None else switches
     return drift_messages(str(props.get("status")), pin, pinned, values, snapshot, compared)
 
 
@@ -648,20 +667,30 @@ def delivery_values(docs: Path, delivery: str, package: Path | None = None,
 
     Before scope approval, and for a record whose status the Delivery compiler
     refuses, the current policy decides. From then on the Delivery runs under
-    its pin. While a new execution approval can still re-pin it, a
-    policy that changed one of *switches*, by default every switch a Delivery
-    flow owns, raises PinDrift, and otherwise the approved policy's values are
-    returned. From the Delivery Review on, and so for an Item reopened after it,
-    the pinned revision's own values are returned: a policy set for the next
+    its pin, which covers only the switches a Delivery flow owns: a switch no
+    Delivery flow owns is read from the current policy. While a new execution
+    approval can still re-pin it, a policy that changed one of *switches*, by
+    default every switch a Delivery flow owns, that the Delivery still reads
+    raises PinDrift, and otherwise the approved policy's values are returned.
+    From the Delivery Review on, and so for an Item reopened after it, the
+    pinned revision's own values are returned: a policy set for the next
     Delivery never changes them, and a pin that cannot be read back is refused.
     """
     props = delivery_record(docs, delivery)
     status = props.get("status")
     if status in REVIEWED_STATUSES:
-        pin = {key: props[key] for key in PIN_FIELDS if key in props}
-        values, source = pinned_values(docs, pin, load_registry(package))
-        return {"values": values, "policy": pin, "source": source}
-    if status in PIN_ENFORCED_STATUSES:
+        registry = load_registry(package)
+        pinned_switches = delivery_switches(registry, package)
+        read = pinned_switches if switches is None else set(switches)
+        if read & pinned_switches:
+            pin = {key: props[key] for key in PIN_FIELDS if key in props}
+            values, source = pinned_values(docs, pin, registry)
+            unpinned = read - pinned_switches
+            if unpinned:
+                current = effective_values(docs, package)[0]
+                values.update({switch: current[switch] for switch in unpinned if switch in current})
+            return {"values": values, "policy": pin, "source": source}
+    elif status in PIN_ENFORCED_STATUSES:
         errors = drift_findings(docs, props, package, switches)
         if errors:
             raise PinDrift("; ".join(errors), str(status))
@@ -678,6 +707,20 @@ def render_delivery_map(docs: Path) -> None:
     import delivery_compile
 
     delivery_compile.render_map(docs)
+
+
+def pin_backlog_rounds(docs: Path) -> list[str]:
+    """Record the policy in force in the backlog's draft review rounds before it changes.
+
+    Only init and begin-revision change the policy in force, so each first
+    records it in every draft review round that records no policy yet, as
+    ``backlog_compile.pin_rounds_before_policy_change`` does.
+    """
+    if not (docs / "backlog").is_dir():
+        return []
+    import backlog_compile
+
+    return backlog_compile.pin_rounds_before_policy_change(docs)
 
 
 def write(path: Path, props: dict, body: str) -> None:
@@ -698,10 +741,14 @@ def init(args) -> int:
         "| Switch | Value |", "| --- | --- |", "",
         "## Navigation <!-- sec: nav -->", "", "[[maps/delivery|Delivery map]]",
     ])
+    pinned = pin_backlog_rounds(docs)
     path.parent.mkdir(parents=True, exist_ok=True)
     write(path, props, body)
     render_delivery_map(docs)
-    return emit({"ok": True, "path": RELATIVE, "status": "draft", "revision": 1})
+    result = {"ok": True, "path": RELATIVE, "status": "draft", "revision": 1}
+    if pinned:
+        result["pinned_reviews"] = pinned
+    return emit(result)
 
 
 def begin_revision(args) -> int:
@@ -717,6 +764,7 @@ def begin_revision(args) -> int:
         errors = ["Process Policy revision requires an approved current policy"]
     if errors:
         return emit({"ok": False, "errors": errors}, 1)
+    pinned = pin_backlog_rounds(docs)
     props["revision"] = int(props["revision"]) + 1
     props["status"] = "draft"
     for key in ("approved_at_utc", "source_hash"):
@@ -724,7 +772,10 @@ def begin_revision(args) -> int:
     props["tags"] = [tag for tag in props.get("tags", [])
                      if not str(tag).startswith("status/")] + ["status/draft"]
     write(path, props, body)
-    return emit({"ok": True, "path": RELATIVE, "status": "draft", "revision": props["revision"]})
+    result = {"ok": True, "path": RELATIVE, "status": "draft", "revision": props["revision"]}
+    if pinned:
+        result["pinned_reviews"] = pinned
+    return emit(result)
 
 
 def set_value(args) -> int:

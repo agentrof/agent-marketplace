@@ -42,10 +42,10 @@
   readers in parallel: spawn every reader of the panel in one message, then
   wait for all of them before triage.
 - Under switch `implementation_schedule` at `parallel_lanes_v1`, writers
-  overlap only when their approved lane scopes intersect. Spawn every lane
-  that waits for no producer in one message, spawn each consumer lane as soon
-  as every producer it waits for has finished, and wait for every lane before
-  the coordinator's commit.
+  run at the same time only when their approved lane scopes are disjoint.
+  Spawn every lane that waits for no producer in one message, spawn each
+  consumer lane as soon as every producer it waits for has finished, and wait
+  for every lane before the coordinator's commit.
 - Under switch `execution_planning` at `single_source_bundle`, start every
   reader of an execution-plan bundle together: spawn them in one message, then
   wait for all of them before triage.
@@ -104,16 +104,37 @@
   grant, and never retry a refused `on` with options of your own. `off` and
   `complete` may end a grant at any time. `autopilot.py` is the packaged
   `skill-content/autopilot/scripts/autopilot.py`.
+- The guard stops an agent that runs the packaged script, not a process that
+  writes the runtime files with the user's filesystem authority. `vault_hook.py`
+  narrows the gap: it denies `Write` and `Edit` into
+  `.agentrof/agent-marketplace/.runtime/autopilot/` and puts back what a `Bash`
+  command adds to the grant or the arming record there, while a command may
+  still end the grant or delete the files. A command that overlaps a run of
+  `autopilot.py` can undo that run's write, so run `autopilot.py` on its own,
+  never in a parallel batch.
+- A grant governs only the Claude Code session whose user typed it: the hook
+  records its session id, the question hook denies only that session, and
+  `on`, `record` and `queue` refuse when `CLAUDE_CODE_SESSION_ID` differs.
+  Every other session, and every Codex session on the same checkout, asks as
+  usual; `status` and the denial name the bound session.
 - While a grant is active, the plugin's `PreToolUse` hook on `AskUserQuestion`
   denies the call and states this procedure. Once the user started a grant or
   a question is denied that way, run `autopilot.py check` before every choice
-  gate. While it exits 0, present no question:
-  - For a question of an allowed class, take the recommended option, or for
-    an open question the recommendation you would offer, apply it, run
-    `autopilot.py record`, and write the decision into the governing document
-    where the flow records the user's answer, marked with the grant id.
-  - For any other class, run `autopilot.py queue` and continue the work that
-    does not depend on it. An at-once owner decision and the Software
+  gate. While it exits 0, present no question; when it exits 1, ask the user
+  as usual:
+  - Classify the question by every effect of its recommended option: any
+    never effect makes it never, an excluded effect the grant does not allow
+    queues it, and doubt queues it. `check` and the denial list each allowed
+    class with its description.
+  - For a question whose every class is allowed, take the recommended option,
+    or for an open question the recommendation you would offer, run
+    `autopilot.py record` first, then apply it and write the decision into the
+    governing document where the flow records the user's answer, marked with
+    the grant id. Give `record` `--class` once per class it touches; it
+    refuses one that is not allowed, and refuses once the grant has ended, its
+    goal included; then ask as usual.
+  - Otherwise run `autopilot.py queue` and continue the work that does not
+    depend on it. An at-once owner decision and the Software
     Architect's escalation clause are never taken: queue them as
     `scope_or_rule` or as the never class they touch.
   - Stop only when every remaining task waits on a queued question, then end
@@ -121,3 +142,11 @@
 - When `check` reports the grant inactive, expired or completed, ask through
   `AskUserQuestion` again, queued questions first. Roles never ask the user
   and never read the grant.
+- Inside a Delivery that keeps a `User Decisions` table, write an autopilot
+  decision as an `answered` row whose answer states the choice and is marked
+  with the grant id: `blocks` names the Items that waited by Story id,
+  `wait_minutes` records how long they waited, and an approval between the
+  gates names its document as `<document> revision N` in the answer. Write
+  every queued question there too, as a `pending` row of class `queued` or its
+  at-once class with the Items it holds in `blocks`, so the Delivery's
+  refusals apply.

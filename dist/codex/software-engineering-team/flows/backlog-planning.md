@@ -346,13 +346,20 @@ stories remain `planned`. When the project has a Process Policy, each review
 round records the pin a Delivery takes at scope approval, that policy's path,
 revision and source hash, as the policy in force when the round is written:
 `init`, `stub-epic` and `begin-revision` write their rounds with it, and
-`check` pins a round the Product Owner writes the first time it sees it. The
-approval records the same pin in the root backlog and refuses a review it
-approves whose round records another policy, naming the remedy: a new review
-round rerun under the current policy, or the restored policy the review ran
-under. An earlier round keeps its own pin, so a revision and its reviews name
-the switch values they ran under. Without a policy nothing is recorded; a draft
-or invalid policy refuses the approval.
+`check` pins a round the Product Owner writes the first time it sees it.
+Only `process_policy.py init` and `process_policy.py begin-revision` change
+the policy in force, and each first records the state it replaces in every
+draft round that records none yet: `init` records revision 0, no policy, and
+`begin-revision` the approved revision. The approval records its own pin in
+the root backlog and refuses a review it approves that ran with another value,
+parameters included, of a switch the backlog-planning flow owns, read from the
+current policy or its Git history, or whose pinned revision it cannot read
+back, naming the remedy: a new review round rerun under the current policy, or
+a policy revision that sets those values back. A revision that changes only
+other switches, such as a Delivery's, leaves the reviews valid. Each round
+keeps its own pin, so a revision and its reviews name the switch values they
+ran under. Without a policy nothing is recorded; a draft or invalid policy
+refuses the approval.
 Existing valid unchanged source approvals retain their timestamps, hashes and
 bytes; previously approved reviews are immutable and changes require a new
 review round. Setup's managed `.gitattributes` rule

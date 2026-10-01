@@ -49,7 +49,9 @@ Four deliberate rules stay exactly as they are:
    approved revision the plan still has to carry, every Item record with its
    Story and Test Plan, and the fact ownership data, each with the hash of its
    bytes. It also binds the Delivery's `User Decisions` section, which owns
-   every owner ruling, with the hash of its text. `readers` names the
+   every owner ruling, with the hash of its rulings alone: each ruling line and
+   the answer of each answered decision row, so a queued question or the
+   Delivery path line leaves the manifest fresh. `readers` names the
    counterpart of every revised contract as `task_inputs.py --role` takes it:
    `devops-engineer` for the Verification Contract and `qa-engineer` for the
    Environment Contract. When it names none, the plan revises no contract, no

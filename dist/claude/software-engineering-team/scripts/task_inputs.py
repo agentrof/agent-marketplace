@@ -404,11 +404,12 @@ def switch_choices(project: Path | None, route: dict, package: Path,
     Without a Process Policy both are empty, so the manifest is unchanged. A
     task inside a Delivery runs under the switch values that Delivery pinned:
     while the pin is enforced, a policy that changed a value of a switch the
-    task's flows own refuses the derivation, as a switch read of that Delivery
-    does, and from the Delivery Review on the pinned revision's values are
-    bound. A planning task binds the approved policy instead where the next
-    execution approval pins it: before the first one, and while a
-    plan-revision barrier is held.
+    task's flows own and the Delivery still reads refuses the derivation, as a
+    switch read of that Delivery does, and from the Delivery Review on the
+    pinned revision's values are bound. A switch no Delivery flow owns is
+    bound from the current policy. A planning task binds the approved policy
+    instead where the next execution approval pins it: before the first one,
+    and while a plan-revision barrier is held.
     """
     if project is None or not route["project_state"]:
         return set(), []
@@ -815,7 +816,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     if epic:
         # The closure is bound as its own source_hash binds it: the stubs it
         # lists from notes outside its paths are information, never an input.
-        hashed = dict(result, backlog_scope=backlog_review_inputs.bound_view(closure, not read_only))
+        hashed = dict(result, backlog_scope=backlog_review_inputs.bound_view(closure))
     result["source_hash"] = digest(hashed)
     if expected_hash is not None and result["source_hash"] != expected_hash:
         raise ValueError("task inputs are stale; regenerate before persisting a result")

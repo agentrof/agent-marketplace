@@ -188,7 +188,7 @@
         },
         {
           "id": "blocking_delta",
-          "tradeoffs": "Only a critical or major finding starts a round, and only once one fresh calibration reader of the claiming reviewer's role, on that role's own tier, confirms it. A minor finding becomes a follow-up with an owner role and a revisit trigger, and a re-review reads only the open blocking findings, the changed text and its dependency context. It applies to a single reader and a lens panel alike, and a panel's re-review reruns only the assignments that returned a blocking finding. Shorter review loops, while calibration adds a few minutes whenever a major is real, a wrong downgrade can hide a defect until the shadow judge audits it, and a changed-text re-review can miss a knock-on effect outside the dependency context it is given."
+          "tradeoffs": "Only a critical or major finding starts a round, and only once one fresh calibration reader of the claiming reviewer's role, or for an Operation contract or bundle claim the counterpart of the contract it concerns, on that role's own tier, confirms it. A minor finding becomes a follow-up with an owner role and a revisit trigger, and a re-review reads only the open blocking findings, the changed text and its dependency context. It applies to a single reader and a lens panel alike, and a panel's re-review reruns only the assignments that returned a blocking finding. Shorter review loops, while calibration adds a few minutes whenever a major is real, a wrong downgrade can hide a defect until the shadow judge audits it, and a changed-text re-review can miss a knock-on effect outside the dependency context it is given."
         }
       ],
       "default": "current",

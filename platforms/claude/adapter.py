@@ -2,28 +2,40 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
-# Documented subagent frontmatter values; per-tier choices are data in
-# execution-profiles.json beside this module.
-MODEL_ALIASES = ("opus", "sonnet", "haiku", "fable", "inherit")
+# Documented subagent effort values and model ID format; the pinned models
+# are data in model-catalog.json beside this module.
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+MODEL_ID_RE = re.compile(
+    r"claude-(?P<family>[a-z]+)-(?P<major>[0-9]+)(?:-(?P<minor>[0-9]{1,2}))?"
+    r"(?:-(?P<snapshot>[0-9]{8}))?"
+)
+# IDs are dateless snapshots from the 4.6 generation on and dated before it,
+# where the dateless form is an alias that is not pinned.
+DATELESS_SINCE = (4, 6)
+# This host's CLI in tools/data/host-cli-versions.json, the exact version CI
+# installs; no model class's min_cli_version may be newer.
+HOST_CLI_KEY = "claude_code"
+# How a frozen-task A/B runs every role on one candidate model.
+MODEL_TRIAL = (
+    "Claude Code: set `CLAUDE_CODE_SUBAGENT_MODEL=<model ID>` and"
+    " `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` for the session; a role's `effort`"
+    " still applies."
+)
 
 
-def execution_setting_problems(tier: str, setting: dict[str, str]) -> list[str]:
-    model = setting.get("model")
-    effort = setting.get("effort")
-    problems = []
-    if model not in MODEL_ALIASES:
-        problems.append(f"model must be one of {', '.join(MODEL_ALIASES)}")
-    if effort is not None and effort not in EFFORT_LEVELS:
-        problems.append(
-            f"effort must be one of {', '.join(EFFORT_LEVELS)} or absent"
-        )
-    if tier == "inherit" and (model != "inherit" or effort is not None):
-        problems.append("the inherit tier must use model inherit and no effort")
-    return problems
+def model_version(model_id: str) -> tuple[str, tuple[int, ...]] | None:
+    """Return the family and comparable version of a pinned model ID."""
+    match = MODEL_ID_RE.fullmatch(model_id)
+    if match is None:
+        return None
+    release = (int(match["major"]), int(match["minor"] or 0))
+    if (match["snapshot"] is None) != (release >= DATELESS_SINCE):
+        return None
+    return match["family"], (*release, int(match["snapshot"] or 0))
 
 
 def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, str, str]) -> list[tuple[str, str]]:
@@ -61,7 +73,7 @@ def agent_artifacts(context: dict, source) -> list[tuple[str, str]]:
         if not fields.get(key):
             raise ValueError(f"{source}: missing {key}")
         lines.append(f"{key}: {fields.pop(key)}")
-    lines.append(f"model: {setting['model']}")
+    lines.append(f"model: {setting.get('model', 'inherit')}")
     if "effort" in setting:
         lines.append(f"effort: {setting['effort']}")
     lines.extend(f"{key}: {value}" for key, value in fields.items())

@@ -1,0 +1,6 @@
+{
+  "summary": "`delivery_git.py refresh-target` now treats the Process Policy as a pinned input while a scope- or execution-approved Delivery can still re-pin it, as it treats the Definition of Done: a target policy that differs from the Integration's pin, including one created or removed since, is refused with `DELIVERY_TARGET_SOURCE_VIOLATION` and changes no ref. Before, the refresh merged the new policy into the Integration and only the next check reported the drift. Revising, approving and publishing the execution plan pins the target's policy, and the refresh then carries it. From the Delivery Review on the pin is the Delivery's record and a changed policy no longer stops the refresh.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

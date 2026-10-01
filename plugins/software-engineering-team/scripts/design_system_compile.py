@@ -73,6 +73,9 @@ V3_HEADINGS = (
     "style guidelines", "anti-patterns", "pre-delivery checklist", "navigation",
 )
 FORBIDDEN_TEMPLATE_TERMS = ("moneydorfin", "finance", "azure", "inter", "fluent")
+# Switch review_loop at blocking_delta records a Design System review's
+# calibration rows in this section of MASTER.md.
+SEVERITY_CALIBRATION = "Severity Calibration"
 
 
 def fail(message: str, code: int = 1) -> int:
@@ -402,7 +405,31 @@ def semantic_findings(root: Path) -> list[str]:
             result.append(f"{page.relative_to(root)} needs exact uses_design MASTER linkage")
     if version >= 3:
         result.extend(catalog_findings(root))
+    result.extend(calibration_findings(root))
     return result
+
+
+def calibration_findings(root: Path) -> list[str]:
+    """Validate the Severity Calibration rows MASTER.md records at blocking_delta.
+
+    At any other review_loop value a section of that name is authored text,
+    and a MASTER without it never reads the Process Policy.
+    """
+    master = root / "MASTER.md"
+    text = master.read_text(encoding="utf-8")
+    if not re.search(rf"(?m)^##\s+{SEVERITY_CALIBRATION}\s*$", text):
+        return []
+    import backlog_compile
+
+    docs = root.resolve().parent
+    path = master.resolve().relative_to(docs).as_posix()
+    try:
+        if backlog_compile.review_loop_value(docs) != backlog_compile.RECORDING_LOOP:
+            return []
+    except ValueError as exc:
+        return [f"{path} needs the review_loop value of the Process Policy: {exc}"]
+    return backlog_compile.severity_calibration(
+        docs, without_generated_relation_text(text), path, None)[1]
 
 
 def findings(root: Path) -> list[str]:

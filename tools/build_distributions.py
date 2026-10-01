@@ -9,6 +9,7 @@ Host manifests, contracts, overlays, and append-only fragments live under
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import importlib.util
 import json
@@ -24,10 +25,19 @@ from types import ModuleType
 
 ADAPTER_API_VERSION = 1
 FEATURE_BRANCH_PREFIX_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/")
-CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "inherit"}
+CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "lens", "mechanical", "inherit"}
 EXECUTION_PROFILE_FILE = "execution-profiles.json"
+EXECUTION_PROFILE_SCHEMA_VERSION = 2
 AUTO_EXECUTION_PROFILE = "auto"
-EXECUTION_SETTING_KEYS = {"model", "effort"}
+INHERIT_TIER = "inherit"
+EXECUTION_SETTING_KEYS = {"class", "effort"}
+MODEL_CATALOG_FILE = "model-catalog.json"
+MODEL_CLASS_KEYS = ("family", "id", "efforts", "min_cli_version", "sources", "verified")
+MODEL_CLASS_NAME_RE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
+VERIFIED_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+CLI_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+HOST_CLI_VERSIONS_RELPATH = "tools/data/host-cli-versions.json"
+PROCESS_SWITCHES_RELPATH = "skill-content/configure/data/process-switches.json"
 DELIVERY_PROTOCOL_CAPABILITY = {
     "read_min": 1,
     "read_max": 1,
@@ -291,11 +301,15 @@ def load_adapters(root: Path) -> dict[str, HostAdapter]:
             raise ValueError(f"{path}: adapter.py is missing")
         module = _load_adapter_module(module_path, host_id)
         required = ("skill_artifacts", "agent_artifacts", "native_manifest_directory",
-                    "instruction_surface", "runtime_contracts",
-                    "execution_setting_problems")
+                    "instruction_surface", "runtime_contracts", "model_version")
         missing = [name for name in required if not callable(getattr(module, name, None))]
         if missing:
             raise ValueError(f"{module_path}: missing adapter functions: {', '.join(missing)}")
+        efforts = getattr(module, "EFFORT_LEVELS", None)
+        if not isinstance(efforts, tuple) or not efforts \
+                or not all(isinstance(value, str) and value for value in efforts) \
+                or len(set(efforts)) != len(efforts):
+            raise ValueError(f"{module_path}: EFFORT_LEVELS must be distinct effort names")
         result[host_id] = HostAdapter(host_id, metadata, module)
     if set(result) != set(contract["hosts"]):
         raise ValueError(
@@ -433,13 +447,161 @@ def execution_profile_path(root: Path, host_id: str) -> Path:
     return root / "platforms" / host_id / EXECUTION_PROFILE_FILE
 
 
-def execution_profile_problems(
-    table: object, adapter: HostAdapter, tiers: set[str],
+def model_catalog_path(root: Path, host_id: str) -> Path:
+    return root / "platforms" / host_id / MODEL_CATALOG_FILE
+
+
+def _is_iso_date(value: object) -> bool:
+    if not isinstance(value, str) or VERIFIED_DATE_RE.fullmatch(value) is None:
+        return False
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def cli_version(value: object) -> tuple[int, ...] | None:
+    """Return an exact X.Y.Z host CLI release as a comparable tuple."""
+    if not isinstance(value, str) or CLI_VERSION_RE.fullmatch(value) is None:
+        return None
+    return tuple(int(part) for part in value.split("."))
+
+
+def host_cli_problems(
+    pins: object, catalogs: dict[str, object], adapters: dict[str, HostAdapter],
 ) -> list[str]:
-    """Return the shape and host-vocabulary problems of one profile table."""
+    """Return every host CLI that CI pins below a model class's minimum.
+
+    CI installs the pinned CLIs and starts no role, so a pin below a class's
+    ``min_cli_version`` would pass the host gates on a version whose roles
+    cannot run that class's model. A catalog with problems of its own is
+    skipped: they are reported against the catalog file.
+    """
+    if not isinstance(pins, dict):
+        return ["host CLI versions must be a JSON object"]
+    problems = []
+    for host, adapter in adapters.items():
+        key = getattr(adapter.module, "HOST_CLI_KEY", None)
+        pinned = pins.get(key) if isinstance(key, str) else None
+        version = cli_version(pinned)
+        if version is None:
+            problems.append(
+                f"{key!r} must pin the exact X.Y.Z {host} CLI version CI installs"
+                if isinstance(key, str) else
+                f"the {host} adapter must name its CLI's key as HOST_CLI_KEY"
+            )
+            continue
+        catalog = catalogs.get(host)
+        if model_catalog_problems(catalog, adapter):
+            continue
+        for name, entry in catalog["classes"].items():
+            minimum = entry["min_cli_version"]
+            if version < cli_version(minimum):
+                problems.append(
+                    f"{key} {pinned} is below {minimum}, the minimum of {host} class"
+                    f" {name!r} ({entry['id']}); CI would pass a host version on"
+                    " which that class's roles cannot run"
+                )
+    return problems
+
+
+def require_host_cli_versions(root: Path, adapters: dict[str, HostAdapter]) -> None:
+    """Refuse a build whose CI-pinned host CLI is below a class minimum."""
+    path = root / HOST_CLI_VERSIONS_RELPATH
+    pins = _read_table(path, "host CLI versions")
+    catalogs = {
+        host: load_model_tables(root, adapter)[0] for host, adapter in adapters.items()
+    }
+    problems = host_cli_problems(pins, catalogs, adapters)
+    if problems:
+        raise ValueError("\n".join(f"{path}: {problem}" for problem in problems))
+
+
+def model_class_problems(entry: object, adapter: HostAdapter) -> list[str]:
+    """Return the problems of one catalog class against the host vocabulary."""
+    if not isinstance(entry, dict) or set(entry) != set(MODEL_CLASS_KEYS):
+        return [f"must hold exactly {', '.join(MODEL_CLASS_KEYS)}"]
+    problems = []
+    family, model_id = entry["family"], entry["id"]
+    parsed = adapter.module.model_version(model_id) \
+        if isinstance(model_id, str) else None
+    if parsed is None:
+        problems.append(
+            f"id {model_id!r} is not a pinned model ID in the host's documented"
+            " format; aliases and unknown names are refused"
+        )
+    elif parsed[0] != family:
+        problems.append(f"id {model_id!r} belongs to family {parsed[0]!r}, not {family!r}")
+    efforts = entry["efforts"]
+    vocabulary = adapter.module.EFFORT_LEVELS
+    if not isinstance(efforts, list) \
+            or not all(effort in vocabulary for effort in efforts) \
+            or len(set(efforts)) != len(efforts):
+        problems.append(
+            f"efforts must list distinct values of {', '.join(vocabulary)};"
+            " an empty list means the model takes no effort"
+        )
+    if cli_version(entry["min_cli_version"]) is None:
+        problems.append(
+            "min_cli_version must be the exact X.Y.Z release of the oldest host"
+            " CLI that runs the id as a role's model"
+        )
+    sources = entry["sources"]
+    if not isinstance(sources, list) or not sources or not all(
+            isinstance(source, str) and source.startswith("https://")
+            for source in sources):
+        problems.append(
+            "sources must list the official https pages that document the id,"
+            " its efforts and its min_cli_version"
+        )
+    if not _is_iso_date(entry["verified"]):
+        problems.append("verified must be the YYYY-MM-DD date the sources were checked")
+    return problems
+
+
+def model_catalog_problems(catalog: object, adapter: HostAdapter) -> list[str]:
+    """Return the shape and host-vocabulary problems of one model catalog."""
+    if not isinstance(catalog, dict) or set(catalog) != {"schema_version", "classes"} \
+            or catalog.get("schema_version") != 1:
+        return ["catalog must hold exactly schema_version 1 and classes"]
+    classes = catalog["classes"]
+    if not isinstance(classes, dict) or not classes:
+        return ["classes must map at least one class name to its pinned model"]
+    problems: list[str] = []
+    pinned: dict[str, str] = {}
+    for name, entry in classes.items():
+        where = f"classes.{name}"
+        if MODEL_CLASS_NAME_RE.fullmatch(name) is None:
+            problems.append(f"{where}: class names are snake_case")
+        problems.extend(
+            f"{where}: {problem}" for problem in model_class_problems(entry, adapter)
+        )
+        model_id = entry.get("id") if isinstance(entry, dict) else None
+        if isinstance(model_id, str) and model_id in pinned:
+            problems.append(
+                f"{where}: pins {model_id!r} like classes.{pinned[model_id]};"
+                " one class per model keeps a bump to one edit"
+            )
+        elif isinstance(model_id, str):
+            pinned[model_id] = name
+    return problems
+
+
+def execution_profile_problems(
+    table: object, catalog: dict | None, adapter: HostAdapter, tiers: set[str],
+) -> list[str]:
+    """Return the shape and catalog problems of one profile table.
+
+    A ``None`` catalog skips the class checks: its own problems are reported
+    against the catalog file.
+    """
     if not isinstance(table, dict) or set(table) != {"schema_version", "profiles"} \
-            or table.get("schema_version") != 1:
-        return ["table must hold exactly schema_version 1 and profiles"]
+            or table.get("schema_version") != EXECUTION_PROFILE_SCHEMA_VERSION:
+        return [
+            "table must hold exactly schema_version"
+            f" {EXECUTION_PROFILE_SCHEMA_VERSION} and profiles"
+        ]
     profiles = table["profiles"]
     if not isinstance(profiles, dict) or set(profiles) != {AUTO_EXECUTION_PROFILE}:
         return [
@@ -452,6 +614,8 @@ def execution_profile_problems(
             f"{AUTO_EXECUTION_PROFILE} must map exactly the reasoning tiers"
             f" {sorted(tiers)}"
         ]
+    classes = catalog["classes"] if catalog is not None else None
+    vocabulary = adapter.module.EFFORT_LEVELS
     problems: list[str] = []
     for tier in sorted(tiers):
         setting = settings[tier]
@@ -461,35 +625,139 @@ def execution_profile_problems(
                 or not all(isinstance(value, str) and value
                            for value in setting.values()):
             problems.append(
-                f"{where} may hold only non-empty string model and effort values"
+                f"{where} may hold only non-empty string class and effort values"
             )
             continue
-        problems.extend(
-            f"{where}: {problem}"
-            for problem in adapter.module.execution_setting_problems(
-                tier, dict(setting)
+        if tier == INHERIT_TIER:
+            if setting:
+                problems.append(
+                    f"{where}: the inherit tier sets neither class nor effort,"
+                    " so its roles follow the session"
+                )
+            continue
+        name, effort = setting.get("class"), setting.get("effort")
+        if name is None:
+            problems.append(f"{where} must name a class of the host's model catalog")
+        if effort is not None and effort not in vocabulary:
+            problems.append(
+                f"{where}: effort must be one of {', '.join(vocabulary)} or absent"
             )
-        )
+        if name is None or classes is None:
+            continue
+        entry = classes.get(name)
+        if entry is None:
+            problems.append(
+                f"{where}: unknown model class {name!r}; classes are"
+                f" {', '.join(sorted(classes))}"
+            )
+        elif effort in vocabulary and effort not in entry["efforts"]:
+            supported = ", ".join(entry["efforts"]) or "no effort"
+            problems.append(
+                f"{where}: effort {effort!r} is not supported by {entry['id']},"
+                f" which takes {supported}"
+            )
     return problems
+
+
+def _read_table(path: Path, what: str) -> object:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{path}: missing or invalid {what}") from exc
+
+
+def load_model_tables(
+    root: Path, adapter: HostAdapter,
+    tiers: set[str] = CANONICAL_REASONING_LEVELS,
+) -> tuple[dict, dict]:
+    """Load one host's validated model catalog and execution profile table."""
+    catalog_path = model_catalog_path(root, adapter.host_id)
+    profile_path = execution_profile_path(root, adapter.host_id)
+    catalog = _read_table(catalog_path, "model catalog")
+    table = _read_table(profile_path, "execution profile table")
+    catalog_problems = model_catalog_problems(catalog, adapter)
+    problems = [f"{catalog_path}: {problem}" for problem in catalog_problems]
+    problems.extend(
+        f"{profile_path}: {problem}"
+        for problem in execution_profile_problems(
+            table, None if catalog_problems else catalog, adapter, set(tiers),
+        )
+    )
+    if problems:
+        raise ValueError("\n".join(problems))
+    return catalog, table
 
 
 def load_execution_profile(
     root: Path, adapter: HostAdapter,
     tiers: set[str] = CANONICAL_REASONING_LEVELS,
 ) -> dict[str, dict[str, str]]:
-    """Load one host's validated tier settings for the default profile."""
-    path = execution_profile_path(root, adapter.host_id)
+    """Resolve one host's default profile to each tier's model and effort."""
+    catalog, table = load_model_tables(root, adapter, tiers)
+    classes = catalog["classes"]
+    resolved = {}
+    for tier, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items():
+        value = {}
+        if "class" in setting:
+            value["model"] = classes[setting["class"]]["id"]
+        if "effort" in setting:
+            value["effort"] = setting["effort"]
+        resolved[tier] = value
+    return resolved
+
+
+def agent_variants(source: Path, tiers: set[str]) -> list[tuple[str, str, str, str]]:
+    """Return every generated agent variant the process switch registry declares.
+
+    Each entry is (canonical agent, variant name, tier, description suffix). A
+    variant exists in every build whether or not a project selects its switch
+    value; tools/validate.py reports the registry's full shape.
+    """
+    path = source / PROCESS_SWITCHES_RELPATH
+    if not path.is_file():
+        return []
     try:
-        table = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{path}: missing or invalid execution profile table") from exc
-    problems = execution_profile_problems(table, adapter, set(tiers))
-    if problems:
-        raise ValueError("\n".join(f"{path}: {problem}" for problem in problems))
-    return {
-        tier: dict(setting)
-        for tier, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items()
-    }
+        switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
+        declared = [
+            (agent, f"{agent}-{variant['suffix']}", variant["tier"], variant["description"])
+            for _switch, spec in sorted(switches.items())
+            for _value, variant in sorted((spec.get("agent_variants") or {}).items())
+            for agent in variant["agents"]
+        ]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"{path}: agent_variants must declare suffix, tier, description and agents") from exc
+    canonical = {agent.stem for agent in (source / "agents").glob("*.md")}
+    names = [name for _agent, name, _tier, _description in declared]
+    for agent, name, tier, description in declared:
+        if agent not in canonical:
+            raise ValueError(f"{path}: agent variant names unknown agent {agent!r}")
+        if tier not in tiers:
+            raise ValueError(f"{path}: agent variant {name!r} names unknown tier {tier!r}")
+        if name in canonical or names.count(name) > 1:
+            raise ValueError(f"{path}: agent variant {name!r} collides with another agent")
+        if not isinstance(description, str) or not description.strip() \
+                or ":" in description or "\n" in description:
+            raise ValueError(f"{path}: agent variant {name!r} needs a one-line description without a colon")
+    return declared
+
+
+def variant_source(path: Path, name: str, tier: str, description: str) -> str:
+    """Return a canonical agent's text renamed onto its variant's tier."""
+    text = path.read_text(encoding="utf-8")
+    match = FRONTMATTER_RE.match(text)
+    if match is None:
+        raise ValueError(f"{path}: missing YAML frontmatter")
+    lines = []
+    for line in match.group(1).splitlines():
+        key = line.split(":", 1)[0].strip()
+        if key == "name":
+            line = f"name: {name}"
+        elif key == "reasoning":
+            line = f"reasoning: {tier}"
+        elif key == "description":
+            line = f"{line.rstrip()} {description.strip()}"
+        lines.append(line)
+    return "---\n" + "\n".join(lines) + "\n---\n" + text[match.end():]
 
 
 def generate_agents(
@@ -505,6 +773,15 @@ def generate_agents(
     }
     for path in sorted(agents.glob("*.md")):
         write_artifacts(target, adapter.module.agent_artifacts(context, path))
+    variants = agent_variants(source, set(execution_profile))
+    if not variants:
+        return
+    with tempfile.TemporaryDirectory(prefix="agent-marketplace-variants-") as raw:
+        for agent, name, tier, description in variants:
+            variant = Path(raw) / f"{name}.md"
+            variant.write_bytes(variant_source(
+                agents / f"{agent}.md", name, tier, description).encode("utf-8"))
+            write_artifacts(target, adapter.module.agent_artifacts(context, variant))
 
 
 def compose_project_instructions(
@@ -703,13 +980,43 @@ def normalize_generated_text(root: Path) -> None:
             path.write_bytes(normalized)
 
 
+def render_provenance(payload: dict) -> str:
+    """Serialize package provenance so disjoint package changes merge cleanly.
+
+    Git reports changes to adjacent lines as a conflict. Each file hash
+    therefore has a line of its own between its key line and a separator
+    line, which change only when that file is added or removed. Changes to
+    different package files then merge into exactly the provenance a rebuild
+    of the merged sources writes, except adds at one sort position, an add
+    after a changed last entry, a removal next to another removal or an add,
+    and a removal of the last entry beside a change to the entry before it:
+    those conflict, because the identical separator lines let Git attach a
+    removal to a neighbour's lines.
+    """
+    keys = sorted(payload)
+    lines = []
+    for position, key in enumerate(keys):
+        value = payload[key]
+        if key == "files" and value:
+            entries = "\n    ,\n".join(
+                f"    {json.dumps(path)}:\n      {json.dumps(value[path])}"
+                for path in sorted(value)
+            )
+            text = "{\n" + entries + "\n  }"
+        else:
+            text = json.dumps(value, indent=2, sort_keys=True).replace("\n", "\n  ")
+        separator = "," if position + 1 < len(keys) else ""
+        lines.append(f"  {json.dumps(key)}: {text}{separator}")
+    return "{\n" + "\n".join(lines) + "\n}\n"
+
+
 def write_provenance(
     target: Path,
     component: str,
     adapter: HostAdapter,
     version: str,
     provenance_name: str,
-    snapshot: dict[str, str],
+    marketplace_release: str,
     executables: set[str],
 ) -> None:
     files = {}
@@ -723,22 +1030,26 @@ def write_provenance(
         files[relative] = hashlib.sha256(
             path.read_bytes()
         ).hexdigest()
-    payload = json.dumps({
-        "schema_version": 3,
+    payload = render_provenance({
+        "schema_version": 4,
         "component": component,
         "host": adapter.host_id,
         "version": version,
-        **snapshot,
+        "marketplace_release": marketplace_release,
         "files": files,
         "executables": sorted(executables),
         "runtime_contracts": adapter.module.runtime_contracts(),
         "delivery_protocol": DELIVERY_PROTOCOL_CAPABILITY,
-    }, indent=2, sort_keys=True) + "\n"
+    })
     (target / provenance_name).write_bytes(payload.encode("utf-8"))
 
 
 def marketplace_snapshot(root: Path) -> dict[str, str]:
-    """Return one deterministic identity shared by all host builds."""
+    """Return the deterministic source identity every host build shares.
+
+    Packages do not embed it: every source change would rewrite the same line
+    in each package. Release preparation records it in the release metadata.
+    """
     digest = hashlib.sha256()
     digest.update(b"agent-marketplace-snapshot-v2\0")
     for relative_root in ("plugins", "platforms"):
@@ -752,15 +1063,16 @@ def marketplace_snapshot(root: Path) -> dict[str, str]:
         update_snapshot_digest(
             digest, relative, snapshot_content(path),
         )
-    versions = json.loads((root / "versions.json").read_text(encoding="utf-8"))
-    build_id = "snapshot." + digest.hexdigest()
-    return {
-        "build_id": build_id,
-        "marketplace_release": str(versions["marketplace"]),
-        "source_channel": "snapshot",
-        "source_ref": build_id,
-        "source_commit": "",
-    }
+    return {"build_id": "snapshot." + digest.hexdigest()}
+
+
+def load_marketplace_release(root: Path) -> str:
+    path = root / "versions.json"
+    try:
+        release = json.loads(path.read_text(encoding="utf-8"))["marketplace"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(f"{path}: missing or invalid marketplace release") from exc
+    return str(release)
 
 
 def load_plugin_versions(root: Path) -> dict[str, str]:
@@ -791,7 +1103,7 @@ def build_plugin(
     version: str,
     marker_name: str,
     provenance_name: str,
-    snapshot: dict[str, str],
+    marketplace_release: str,
     adapters: dict[str, HostAdapter],
     execution_profile: dict[str, dict[str, str]],
 ) -> None:
@@ -845,8 +1157,8 @@ def build_plugin(
     executables = load_package_executables(root, source.name)
     apply_package_modes(target, executables)
     write_provenance(
-        target, source.name, adapter, version, provenance_name, snapshot,
-        executables,
+        target, source.name, adapter, version, provenance_name,
+        marketplace_release, executables,
     )
 
 
@@ -892,9 +1204,16 @@ def validate_canonical(root: Path) -> None:
         for agent in sorted((source / "agents").glob("*.md")):
             fields, _ = parse_frontmatter(agent)
             if fields.get("reasoning") not in CANONICAL_REASONING_LEVELS:
-                problems.append(f"{agent}: reasoning must be high/medium/low/inherit")
+                problems.append(
+                    f"{agent}: reasoning must be one of"
+                    f" {', '.join(sorted(CANONICAL_REASONING_LEVELS))}"
+                )
             if "model" in fields:
                 problems.append(f"{agent}: canonical agents use reasoning, not model")
+        try:
+            agent_variants(source, CANONICAL_REASONING_LEVELS)
+        except ValueError as exc:
+            problems.append(str(exc))
         for path in sorted(
             candidate for candidate in source.rglob("*")
             if candidate.is_file() and not candidate.is_symlink()
@@ -921,18 +1240,20 @@ def build(
         raise ValueError("trusted adapter set differs from the package host contract")
     marker_name, provenance_name = packaging_names(root)
     versions = load_plugin_versions(root)
-    snapshot = marketplace_snapshot(root)
+    marketplace_release = load_marketplace_release(root)
     profiles = {
         host: load_execution_profile(root, adapter)
         for host, adapter in adapters.items()
     }
+    require_host_cli_versions(root, adapters)
     for host, adapter in adapters.items():
         host_root = output / host
         host_root.mkdir(parents=True)
         for source in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
             build_plugin(
                 root, source, adapter, host_root / source.name, versions[source.name],
-                marker_name, provenance_name, snapshot, adapters, profiles[host],
+                marker_name, provenance_name, marketplace_release, adapters,
+                profiles[host],
             )
 
 

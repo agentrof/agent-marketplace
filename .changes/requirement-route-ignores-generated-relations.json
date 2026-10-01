@@ -1,0 +1,6 @@
+{
+  "summary": "An approved Requirement no longer reads as uncommitted after `vault_check.py render-relations` writes the Implemented by block that Requirement-mode `stub-story` stories cause, so `requirement_route.py` and `backlog_compile.py check` keep routing it to `backlog-plan` without a separate commit of that projection. Routing now ignores only the generated inverse-relation block, the rule strict-current stage package checks already apply; every other uncommitted byte, Stage Results included, still routes back to `requirement`, and draft withdraw and discard keep their byte-exact commit check.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

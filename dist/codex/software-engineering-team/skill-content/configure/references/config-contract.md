@@ -18,12 +18,14 @@ The other configuration targets are documents with their own lifecycle:
 | Runtime environment command and scenarios | `workspace/docs/operation/environment-contract.md` | DevOps Engineer |
 | Maximum active Delivery Items | `workspace/docs/delivery/governance/governance.md` | Delivery Governance compiler |
 | Role model and reasoning effort | the installed package's execution profile; a user override follows the host contract | User |
+| Process switch values | `workspace/docs/delivery/process-policy.md` over the package registry `data/process-switches.json` | Process Policy lifecycle, `/configure process` |
 
-No `scale`, `limits`, stack, source-directory or command field is accepted in
-config. Product capacity and performance are concrete BA/Solution requirements,
-not global configuration knobs. `max_parallel` remains a hard coordination
-guard, but only inside approved Governance; an existing Fence receives it via
-`delivery_git.py apply-governance`.
+No `scale`, `limits`, stack, source-directory, command or process switch field
+is accepted in config: the config stays closed, and the Process Policy is the
+one place for process choices. Product capacity and performance are concrete
+BA/Solution requirements, not global configuration knobs. `max_parallel`
+remains a hard coordination guard, but only inside approved Governance; an
+existing Fence receives it via `delivery_git.py apply-governance`.
 
 Before approving a change, show the exact consumer, lifecycle, downstream
 effect and whether active Delivery requires a Fence handoff. A config refresh

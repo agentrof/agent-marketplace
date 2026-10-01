@@ -8,7 +8,8 @@ findings. One error finding fails
 the run.
 
 Scope is an explicit allowlist; assets/, memory/, tools/ and .git/ are never
-scanned. Fixtures under tools/tests/fixtures/ exercise every check.
+scanned. VALIDATOR_BUILDERS in tools/tests/test_validator_contract.py breaks a
+valid fixture repository once per check, in lockstep with CHECKS.
 
 Stdlib only. Deterministic output: findings sorted by (path, line, check).
 """
@@ -16,6 +17,7 @@ Stdlib only. Deterministic output: findings sorted by (path, line, check).
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -37,7 +39,7 @@ LIMITS_CONFIG_RELPATH = "tools/data/limits.json"
 PRODUCT_CONFIG_RELPATH = "product.json"
 
 AGENT_REQUIRED_KEYS = {"name", "description", "reasoning", "output_contract"}
-AGENT_REASONING_ENUM = {"high", "medium", "low", "inherit"}
+AGENT_REASONING_ENUM = {"high", "medium", "low", "lens", "mechanical", "inherit"}
 # How the role hands results back. prose: findings/artifacts in the reply
 # text (every current persona). structured: a forced tool call. Declared so
 # a composer can refuse pairing a prose persona with schema forcing; the
@@ -325,8 +327,7 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                         " omit the key",
                     ))
             reasoning = fm.get("reasoning", "")
-            reasoning_enum = set((tree.config or {}).get("reasoning_levels")
-                                 or AGENT_REASONING_ENUM)
+            reasoning_enum = declared_tiers(tree)
             if reasoning and reasoning not in reasoning_enum:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
@@ -672,7 +673,7 @@ def check_content_bans(tree: Tree, findings: list[Finding]) -> None:
                         "error", rel(tree, path), lineno, "content_bans",
                         "model name outside agent frontmatter",
                         "host model names belong only in platforms/<host>/"
-                        "execution-profiles.json and generated distributions",
+                        "model-catalog.json and generated distributions",
                     ))
             if ABSOLUTE_PATH_RE.search(line):
                 findings.append(Finding(
@@ -750,6 +751,8 @@ def check_dead_links(tree: Tree, findings: list[Finding]) -> None:
             body = read_text(skill_md)
             for ref in sorted(refs.rglob("*.md")):
                 rel_ref = ref.relative_to(sdir).as_posix()
+                if ref.parent == refs and SWITCH_REFERENCE_RE.match(ref.name):
+                    continue  # the Process Policy binds it; check_switch_references owns it
                 if rel_ref not in body:
                     findings.append(Finding(
                         "warning", rel(tree, ref), 1, "dead_links",
@@ -1216,7 +1219,8 @@ def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
         for scripts in script_dirs:
             if not scripts.is_dir():
                 continue
-            local = {p.stem for p in scripts.glob("*.py")}
+            # A skill script may import the runtime scripts its own package ships.
+            local = {p.stem for p in (*scripts.glob("*.py"), *(plugin / "scripts").glob("*.py"))}
             shared_scripts = (
                 tree.root / "platforms" / "shared" / plugin.name
                 / "overlay" / "scripts"
@@ -2168,9 +2172,15 @@ def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
     let the enum silently fall back, so its shape is validated like any
     other policy artifact."""
     if tree.config is None:
+        try:
+            json.loads((tree.root / MODEL_CONFIG_RELPATH).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            problem = "model config is missing or not valid JSON"
+        else:
+            problem = ("model config must be a JSON object holding schema_version"
+                       " and reasoning_levels")
         findings.append(Finding(
-            "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape",
-            "model config is missing or not valid JSON",
+            "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape", problem,
             "restore tools/data/models.json; the agent reasoning enum"
             " lives there",
         ))
@@ -2195,36 +2205,1179 @@ def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
         ))
 
 
+def declared_tiers(tree: Tree) -> set[str]:
+    """Return the reasoning tiers tools/data/models.json declares."""
+    levels = (tree.config or {}).get("reasoning_levels")
+    return set(levels) if isinstance(levels, list) and levels and all(
+        isinstance(level, str) for level in levels
+    ) else set(AGENT_REASONING_ENUM)  # model_config_shape reports bad shapes
+
+
 def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
-    """Every host maps exactly the canonical reasoning tiers to its own
-    documented model and effort values; model names stay under platforms/."""
+    """Every host pins its model classes to documented exact IDs and maps
+    exactly the canonical reasoning tiers to a class and a supported effort;
+    model names stay under platforms/."""
     try:
         adapters = build_distributions.load_adapters(tree.root)
     except ValueError:
         return  # registration and product_namespace report adapter failures
-    levels = (tree.config or {}).get("reasoning_levels")
-    tiers = set(levels) if isinstance(levels, list) and levels and all(
-        isinstance(level, str) for level in levels
-    ) else set(AGENT_REASONING_ENUM)  # model_config_shape reports bad shapes
+    tiers = declared_tiers(tree)
     for host, adapter in adapters.items():
-        path = build_distributions.execution_profile_path(tree.root, host)
+        tables = {}
+        for kind, path, hint in (
+                ("catalog", build_distributions.model_catalog_path(tree.root, host),
+                 "pin each model class to an exact ID the host documents, with"
+                 " its supported efforts, sources and verified date"),
+                ("profile", build_distributions.execution_profile_path(tree.root, host),
+                 "map every reasoning tier in tools/data/models.json to a class"
+                 " of the host's model catalog and an effort that class supports")):
+            try:
+                tables[kind] = (path, json.loads(read_text(path)), hint)
+            except (OSError, json.JSONDecodeError):
+                findings.append(Finding(
+                    "error", rel(tree, path), 1, "execution_profiles",
+                    f"{path.name} is missing or not valid JSON", hint,
+                ))
+        catalog = None
+        if "catalog" in tables:
+            path, value, hint = tables["catalog"]
+            problems = build_distributions.model_catalog_problems(value, adapter)
+            findings.extend(Finding(
+                "error", rel(tree, path), 1, "execution_profiles", problem, hint,
+            ) for problem in problems)
+            catalog = None if problems else value
+        if "profile" in tables:
+            path, value, hint = tables["profile"]
+            findings.extend(Finding(
+                "error", rel(tree, path), 1, "execution_profiles", problem, hint,
+            ) for problem in build_distributions.execution_profile_problems(
+                value, catalog, adapter, tiers))
+
+
+def check_host_cli_versions(tree: Tree, findings: list[Finding]) -> None:
+    """The host CLIs CI installs are no older than any model class's
+    min_cli_version: the host gates start no role, so a lower pin would pass
+    on a version whose roles cannot run their pinned model."""
+    try:
+        adapters = build_distributions.load_adapters(tree.root)
+    except ValueError:
+        return  # registration and product_namespace report adapter failures
+    path = tree.root / build_distributions.HOST_CLI_VERSIONS_RELPATH
+    hint = ("pin in tools/data/host-cli-versions.json a host CLI no older than every"
+            " model class's min_cli_version")
+    try:
+        pins = json.loads(read_text(path))
+    except (OSError, json.JSONDecodeError):
+        findings.append(Finding("error", rel(tree, path), 1, "host_cli_versions",
+                                "host CLI versions are missing or not valid JSON", hint))
+        return
+    catalogs = {}
+    for host in adapters:
         try:
-            table = json.loads(read_text(path))
+            catalogs[host] = json.loads(read_text(
+                build_distributions.model_catalog_path(tree.root, host)))
         except (OSError, json.JSONDecodeError):
-            findings.append(Finding(
-                "error", rel(tree, path), 1, "execution_profiles",
-                "execution profile table is missing or not valid JSON",
-                "restore the host table that maps each reasoning tier to"
-                " model and effort",
-            ))
+            continue  # execution_profiles reports a missing or broken catalog
+    findings.extend(
+        Finding("error", rel(tree, path), 1, "host_cli_versions", problem, hint)
+        for problem in build_distributions.host_cli_problems(pins, catalogs, adapters))
+
+
+REVIEW_PANELS_RELPATH = "skill-content/challenge-review/data/review-panels.json"
+VAULT_POLICY_RELPATH = "skill-content/obsidian-vault/data/vault-policy.json"
+REVIEW_PANEL_ANCHOR_RE = re.compile(r"\breview\s+panel\s+`([a-z][a-z0-9_]*)`")
+LENS_REFERENCE_RE = re.compile(r"\blens\s+`([a-z][a-z0-9-]*)`")
+REVIEW_PANELS_SWITCH = "review_panels"
+REVIEW_PANELS_VALUE = "lens_panel"
+REVIEW_STEP_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+REVIEW_PANEL_DATA_KEYS = {"schema_version", "review_steps"}
+REVIEW_STEP_KEYS = {"reader_role", "lenses", "default_panel"}
+LENS_KEYS = {"id", "focus"}
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    keys = [key for key, _value in pairs]
+    duplicates = sorted({key for key in keys if keys.count(key) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate keys {duplicates}")
+    return dict(pairs)
+
+
+def _policy_list(policy: object, dotted: object) -> list[str] | None:
+    value = policy
+    for part in dotted.split(".") if isinstance(dotted, str) and dotted else [None]:
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    if isinstance(value, list) and value and all(isinstance(item, str) for item in value):
+        return value
+    return None
+
+
+def review_panel_problems(data: object, agents: set[str], policy: object) -> list[str]:
+    """Return the shape problems of one plugin's review-panel lens data."""
+    if not isinstance(data, dict) or set(data) != REVIEW_PANEL_DATA_KEYS \
+            or data.get("schema_version") != 1:
+        return ["data must hold exactly schema_version 1 and review_steps"]
+    problems: list[str] = []
+    steps = data["review_steps"]
+    if not isinstance(steps, dict) or not steps:
+        return problems + ["review_steps must declare at least one review step"]
+    for step, spec in sorted(steps.items()):
+        where = f"review step {step!r}"
+        if not REVIEW_STEP_ID_RE.match(step):
+            problems.append(f"{where}: id must be lowercase snake_case")
+        if not isinstance(spec, dict) or not REVIEW_STEP_KEYS <= set(spec) \
+                or not set(spec) <= REVIEW_STEP_KEYS | {"review_note"}:
+            problems.append(
+                f"{where}: must hold reader_role, lenses, default_panel and"
+                " optionally review_note")
             continue
-        for problem in build_distributions.execution_profile_problems(
-                table, adapter, tiers):
+        if spec["reader_role"] not in agents:
+            problems.append(f"{where}: unknown reader_role {spec['reader_role']!r}")
+        lenses = spec["lenses"]
+        if not isinstance(lenses, list) or not lenses:
+            problems.append(f"{where}: empty panel, lenses declares no lens")
+            continue
+        ids: list[str] = []
+        for lens in lenses:
+            if not isinstance(lens, dict) or not LENS_KEYS <= set(lens) \
+                    or not set(lens) <= LENS_KEYS | {"covers"} \
+                    or not isinstance(lens.get("id"), str) \
+                    or not isinstance(lens.get("focus"), str) \
+                    or not lens["focus"].strip():
+                problems.append(
+                    f"{where}: every lens holds an id, non-empty focus text and"
+                    " optionally covers")
+                continue
+            if not KEBAB_RE.match(lens["id"]):
+                problems.append(f"{where}: lens id {lens['id']!r} must be kebab-case")
+            ids.append(lens["id"])
+        for duplicate in sorted({lens for lens in ids if ids.count(lens) > 1}):
+            problems.append(f"{where}: duplicate lens id {duplicate!r}")
+        panel = spec["default_panel"]
+        if not isinstance(panel, list) or not panel:
+            problems.append(f"{where}: empty panel, default_panel has no assignment")
+        else:
+            assigned: list[str] = []
+            for assignment in panel:
+                if not isinstance(assignment, list) or not assignment \
+                        or not all(isinstance(lens, str) for lens in assignment):
+                    problems.append(
+                        f"{where}: empty panel assignment; each assignment lists"
+                        " one or more lens ids")
+                    continue
+                assigned.extend(assignment)
+            for lens in sorted(set(assigned) - set(ids)):
+                problems.append(f"{where}: default_panel names unknown lens id {lens!r}")
+            for lens in sorted({lens for lens in assigned if assigned.count(lens) > 1}):
+                problems.append(
+                    f"{where}: duplicate lens id {lens!r} across default_panel assignments")
+            for lens in sorted(set(ids) - set(assigned)):
+                problems.append(f"{where}: lens {lens!r} is in no default_panel assignment")
+        covers = {lens["id"]: lens["covers"] for lens in lenses
+                  if isinstance(lens, dict) and "covers" in lens and isinstance(lens.get("id"), str)}
+        note = spec.get("review_note")
+        if note is None:
+            if covers:
+                problems.append(f"{where}: covers needs a review_note declaration")
+            continue
+        sections = _policy_list(policy, note.get("sections")) \
+            if isinstance(note, dict) and set(note) == {"sections", "panel_sections"} else None
+        panel_sections = note.get("panel_sections") if isinstance(note, dict) else None
+        if sections is None or not isinstance(panel_sections, list) \
+                or not all(isinstance(item, str) for item in panel_sections):
+            problems.append(
+                f"{where}: review_note needs sections, a dotted vault-policy path to a"
+                " section list, and a panel_sections list")
+            continue
+        covered: list[str] = []
+        for lens in ids:
+            value = covers.get(lens)
+            if not isinstance(value, list) or not value \
+                    or not all(isinstance(item, str) for item in value):
+                problems.append(f"{where}: lens {lens!r} must list the note sections it covers")
+                continue
+            covered.extend(value)
+        for section in sorted(set(covered + panel_sections) - set(sections)):
+            problems.append(f"{where}: unknown review-note section {section!r}")
+        for section in sorted({item for item in covered if covered.count(item) > 1}
+                              | (set(covered) & set(panel_sections))):
+            problems.append(f"{where}: review-note section {section!r} has more than one owner")
+        for section in sorted(set(sections) - set(covered) - set(panel_sections)):
+            problems.append(f"{where}: no lens covers review-note section {section!r}")
+    return problems
+
+
+def lens_variant_problems(plugin: Path, steps: dict) -> list[str]:
+    """Every read-only panel reader runs as its lens_panel variant, and every
+    variant reads a declared review step."""
+    try:
+        registry = json.loads(read_text(plugin / PROCESS_SWITCHES_RELPATH))
+        variant = registry["switches"][REVIEW_PANELS_SWITCH]["agent_variants"][REVIEW_PANELS_VALUE]
+        variants = set(variant["agents"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return [f"switch {REVIEW_PANELS_SWITCH!r} must declare the {REVIEW_PANELS_VALUE!r}"
+                " agent variants of the read-only panel readers"]
+    readers = {spec.get("reader_role") for spec in steps.values() if isinstance(spec, dict)}
+    read_only = set()
+    for reader in readers:
+        path = plugin / "agents" / f"{reader}.md"
+        tools = parse_frontmatter(read_text(path))[0].get("tools", "") if path.is_file() else ""
+        if {tool.strip() for tool in str(tools).split(",") if tool.strip()} == AGENT_READONLY_TOOLS:
+            read_only.add(reader)
+    return ([f"read-only panel reader {reader!r} has no {REVIEW_PANELS_VALUE!r} agent variant"
+             for reader in sorted(read_only - variants)]
+            + [f"{REVIEW_PANELS_VALUE!r} agent variant {agent!r} reads no read-only review step"
+               for agent in sorted(variants - read_only)])
+
+
+def check_review_panels(tree: Tree, findings: list[Finding]) -> None:
+    """Review-panel lens sets are validated data. Every flow anchor names a
+    declared step, every declared step is wired into a flow that also names
+    switch `review_panels`, every read-only reader runs as its lens variant
+    and every lens a prose reference names is declared."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / REVIEW_PANELS_RELPATH
+        anchors: dict[str, list[Path]] = {}
+        lens_references: dict[str, list[Path]] = {}
+        for source in sorted(plugin.rglob("*.md")):
+            text = read_text(source)
+            for step in REVIEW_PANEL_ANCHOR_RE.findall(text):
+                anchors.setdefault(step, []).append(source)
+            for lens in LENS_REFERENCE_RE.findall(text):
+                lens_references.setdefault(lens, []).append(source)
+
+        def err(where: Path, message: str, fix: str) -> None:
+            findings.append(Finding("error", rel(tree, where), 1, "review_panels", message, fix))
+
+        if not path.is_file():
+            if anchors or lens_references:
+                err(path, "review panels are referenced but their lens data is missing",
+                    "restore the review-panel data file the flows anchor to")
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            err(path, f"review-panel data is not valid unique-key JSON: {exc}",
+                "fix the data file; every key and lens id is declared once")
+            continue
+        try:
+            policy = json.loads(read_text(plugin / VAULT_POLICY_RELPATH))
+        except (OSError, json.JSONDecodeError):
+            policy = None  # vault_policy_shape reports a broken policy
+        agents = {agent.stem for agent in agent_files(plugin)}
+        for problem in review_panel_problems(data, agents, policy):
+            err(path, problem, "declare each review step, lens and assignment once; a new"
+                " lens or step is a data change plus its flow anchor")
+        steps = data.get("review_steps") if isinstance(data, dict) else None
+        steps = steps if isinstance(steps, dict) else {}
+        for problem in lens_variant_problems(plugin, steps):
+            err(plugin / PROCESS_SWITCHES_RELPATH, problem,
+                "list every read-only panel reader, and only those, as a lens_panel"
+                " agent variant")
+        declared_lenses = {
+            lens["id"] for spec in steps.values() if isinstance(spec, dict)
+            for lens in spec.get("lenses", []) if isinstance(spec.get("lenses"), list)
+            and isinstance(lens, dict) and isinstance(lens.get("id"), str)
+        }
+        flows = plugin / "flows"
+        for step, sources in sorted(anchors.items()):
+            if step not in steps:
+                err(sources[0], f"review panel {step!r} is missing from the lens data",
+                    "declare the step in the review-panel data or fix the anchor")
+        for step in sorted(steps):
+            if not any(source.parent == flows for source in anchors.get(step, [])):
+                err(path, f"review step {step!r} is unknown to every flow",
+                    "anchor the step in its flow as review panel `<step>`")
+        for flow in sorted({source for sources in anchors.values() for source in sources
+                            if source.parent == flows}):
+            if REVIEW_PANELS_SWITCH not in SWITCH_ANCHOR_RE.findall(read_text(flow)):
+                err(flow, f"flow {flow.name} runs a review panel but never names switch"
+                    f" `{REVIEW_PANELS_SWITCH}`",
+                    "anchor the switch that selects the panel at the review step")
+        for lens, sources in sorted(lens_references.items()):
+            if lens not in declared_lenses:
+                err(sources[0], f"prose names unknown lens {lens!r}",
+                    "name a lens id the review-panel data declares")
+
+
+PROCESS_SWITCHES_RELPATH = build_distributions.PROCESS_SWITCHES_RELPATH
+SWITCH_ANCHOR_RE = re.compile(r"\b[Ss]witch\s+`([a-z][a-z0-9_]*)`")
+SWITCH_REFERENCE_RE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
+PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}
+PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants", "parameters", "value_data",
+                                "reference_scope"}
+# A switch whose references every task of its owning flows binds, whichever
+# skill holds them, declares this reference_scope.
+SWITCH_REFERENCE_SCOPES = {"owning_flows"}
+SWITCH_PARAMETER_KEYS = {"summary", "values", "declared_by", "type", "min_count"}
+SWITCH_PARAMETER_TYPES = {"positive_integer"}
+VALUE_DATA_RE = re.compile(r"^skill-content/[a-z0-9]+(?:-[a-z0-9]+)*/data/[a-z0-9]+(?:-[a-z0-9]+)*\.json$")
+AGENT_VARIANT_KEYS = {"suffix", "tier", "description", "agents"}
+MECHANICAL_PASS_SWITCH = "mechanical_pass_tier"
+MECHANICAL_PASS_VALUE = "mechanical"
+TASK_INPUT_POLICY_RELPATH = "templates/task-input-policy.json"
+
+
+def _nonblank(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def agent_variant_problems(where: str, variants: object, values: list[str], default: object,
+                           agents: set[str], tiers: set[str]) -> list[str]:
+    """Return the problems of one switch's generated agent variants."""
+    if not isinstance(variants, dict) or not variants:
+        return [f"{where}: agent_variants must map a switch value to its variant"]
+    problems: list[str] = []
+    for value, spec in sorted(variants.items()):
+        at = f"{where} value {value!r}"
+        if value not in values or value == default:
+            problems.append(f"{at}: agent variants belong to a declared value other than the default")
+        if not isinstance(spec, dict) or set(spec) != AGENT_VARIANT_KEYS:
+            problems.append(f"{at}: an agent variant holds exactly suffix, tier, description and agents")
+            continue
+        if not isinstance(spec["suffix"], str) or not KEBAB_RE.match(spec["suffix"]):
+            problems.append(f"{at}: variant suffix must be kebab-case")
+        if spec["tier"] not in tiers:
+            problems.append(f"{at}: variant tier {spec['tier']!r} is not a declared reasoning tier")
+        # The description is rendered into agent frontmatter as one plain scalar.
+        if not _nonblank(spec["description"]) or ":" in spec["description"] \
+                or "\n" in spec["description"]:
+            problems.append(f"{at}: variant description must be one non-empty line without a colon")
+        listed = spec["agents"]
+        if not isinstance(listed, list) or not listed \
+                or not all(isinstance(agent, str) for agent in listed):
+            problems.append(f"{at}: variant agents must list at least one canonical agent")
+            continue
+        for agent in sorted({agent for agent in listed if listed.count(agent) > 1}):
+            problems.append(f"{at}: duplicate variant agent {agent!r}")
+        for agent in sorted(set(listed) - agents):
+            problems.append(f"{at}: unknown variant agent {agent!r}")
+    return problems
+
+
+def value_data_problems(plugin: Path, switches: dict) -> list[str]:
+    """Package data that only non-default switch values read is bound with the
+    switch references of whichever of those values a project chose, so each
+    file is listed once per value that reads it, belongs to a value other than
+    the default and travels with at least one reference of each such value. A
+    file that several values read, of one switch or of several, is listed
+    under each of them."""
+    problems: list[str] = []
+    references = {SWITCH_REFERENCE_RE.match(path.name).groups()
+                  for skill in skill_dirs(plugin)
+                  for path in (skill / "references").glob("switch-*.md")
+                  if SWITCH_REFERENCE_RE.match(path.name)}
+    for switch, spec in sorted(switches.items()):
+        if not isinstance(spec, dict) or "value_data" not in spec:
+            continue
+        where = f"switch {switch!r}"
+        data = spec["value_data"]
+        values = [item.get("id") for item in spec.get("values", []) if isinstance(item, dict)] \
+            if isinstance(spec.get("values"), list) else []
+        if not isinstance(data, dict) or not data:
+            problems.append(f"{where}: value_data must map a switch value to its data files")
+            continue
+        for value, paths in sorted(data.items()):
+            at = f"{where} value {value!r}"
+            if value not in values or value == spec.get("default"):
+                problems.append(f"{at}: value data belongs to a declared value other than the default")
+            if not isinstance(paths, list) or not paths \
+                    or not all(isinstance(path, str) for path in paths):
+                problems.append(f"{at}: value data must list at least one data file")
+                continue
+            for path in paths:
+                if not VALUE_DATA_RE.match(path):
+                    problems.append(f"{at}: value data {path!r} is not a skill data JSON file")
+                elif not (plugin / path).is_file():
+                    problems.append(f"{at}: value data {path!r} does not exist")
+            for path in sorted({path for path in paths if paths.count(path) > 1}):
+                problems.append(f"{at}: value data {path!r} is listed more than once")
+            if (switch, value) not in references:
+                problems.append(f"{at}: value data needs a switch reference of that value to bind it")
+    return problems
+
+
+def mechanical_variant_problems(plugin: Path, switches: dict) -> list[str]:
+    """A mechanical pass applies fixes as its owning writer, so the switch
+    declares writer variants and never a read-only reviewer's or challenger's:
+    every review, re-check and calibration keeps its role's tier."""
+    spec = switches.get(MECHANICAL_PASS_SWITCH)
+    if not isinstance(spec, dict):
+        return []
+    variants = spec.get("agent_variants")
+    variant = variants.get(MECHANICAL_PASS_VALUE) if isinstance(variants, dict) else None
+    listed = variant.get("agents") if isinstance(variant, dict) else None
+    if not isinstance(listed, list) or not listed:
+        return [f"switch {MECHANICAL_PASS_SWITCH!r} must declare the {MECHANICAL_PASS_VALUE!r}"
+                " agent variants of the writers whose passes it moves"]
+    try:
+        policy = json.loads(read_text(plugin / TASK_INPUT_POLICY_RELPATH))
+        read_only = {role for role in policy["read_only_roles"] if isinstance(role, str)}
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        read_only = set()  # task_input_catalog reports a broken task input policy
+    problems = []
+    for agent in sorted({agent for agent in listed if isinstance(agent, str)}):
+        path = plugin / "agents" / f"{agent}.md"
+        tools = parse_frontmatter(read_text(path))[0].get("tools", "") if path.is_file() else ""
+        if agent in read_only or {tool.strip() for tool in tools.split(",") if tool.strip()}:
+            problems.append(
+                f"{MECHANICAL_PASS_VALUE!r} agent variant {agent!r} is a read-only reviewer or"
+                " challenger; its reviews, re-checks and calibrations keep their tier")
+    return problems
+
+
+def parameter_problems(where: str, parameters: object, values: list[str], default: object,
+                       plugin: Path | None) -> list[str]:
+    """Return the problems of one switch's owner-set parameter declaration."""
+    if not isinstance(parameters, dict) or not SWITCH_PARAMETER_KEYS <= set(parameters) \
+            or set(parameters) - SWITCH_PARAMETER_KEYS - {"package_limits"}:
+        return [f"{where}: parameters hold exactly summary, values, declared_by, type and"
+                " min_count, and package_limits once a promotion ships them"]
+    problems: list[str] = []
+    if not _nonblank(parameters["summary"]):
+        problems.append(f"{where}: parameters need a summary the choice gate shows")
+    taking = parameters["values"]
+    if not isinstance(taking, list) or not taking or len(taking) != len(set(map(str, taking))):
+        problems.append(f"{where}: parameters must list the values that take them, each once")
+    else:
+        for value in taking:
+            if value not in values or value == default:
+                problems.append(f"{where}: parameters belong to a declared value other than the"
+                                f" default, not {value!r}")
+    if parameters["type"] not in SWITCH_PARAMETER_TYPES:
+        problems.append(f"{where}: parameter type {parameters['type']!r} is not one of"
+                        f" {sorted(SWITCH_PARAMETER_TYPES)}")
+    source = parameters["declared_by"]
+    declared = None
+    if not isinstance(source, dict) or set(source) != {"path", "key"} \
+            or not all(_nonblank(source.get(key)) for key in ("path", "key")):
+        problems.append(f"{where}: declared_by must name the package data file and the key that"
+                        " declare the parameter ids")
+    elif plugin is not None:
+        relative = source["path"]
+        target = plugin / relative
+        if relative.startswith("/") or "\\" in relative or ".." in relative.split("/") \
+                or not target.is_file():
+            problems.append(f"{where}: declared_by path {relative!r} is not a file of the package")
+        else:
+            try:
+                declared = json.loads(read_text(target)).get(source["key"])
+            except (json.JSONDecodeError, AttributeError):
+                declared = None
+            if not isinstance(declared, dict) or not declared or not all(
+                    REVIEW_STEP_ID_RE.match(key) and isinstance(item, dict)
+                    and _nonblank(item.get("summary")) for key, item in declared.items()):
+                problems.append(f"{where}: declared_by {relative} key {source['key']!r} must map"
+                                " snake_case parameter ids to a summary")
+                declared = None
+    minimum = parameters["min_count"]
+    if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 0 \
+            or (declared is not None and minimum > len(declared)):
+        problems.append(f"{where}: min_count must be a whole number no larger than the declared"
+                        " parameters")
+    # A promoted value that takes parameters stays non-default and ships limits.
+    limits = parameters.get("package_limits", {})
+    if not isinstance(limits, dict) or any(
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
+            for limit in limits.values()) or (
+            declared is not None and set(limits) - set(declared)):
+        problems.append(f"{where}: package_limits must map declared parameter ids to"
+                        " positive whole numbers")
+    return problems
+
+
+def process_switch_problems(data: object, flows: set[str], agents: set[str],
+                            tiers: set[str], plugin: Path | None = None) -> list[str]:
+    """Return the shape problems of the package's process switch registry."""
+    if not isinstance(data, dict) or set(data) != {"schema_version", "switches"} \
+            or data.get("schema_version") != 1:
+        return ["registry must hold exactly schema_version 1 and switches"]
+    switches = data["switches"]
+    if not isinstance(switches, dict):
+        return ["switches must be an object keyed by switch id"]
+    problems: list[str] = []
+    generated: dict[str, str] = {}
+    for switch, spec in sorted(switches.items()):
+        where = f"switch {switch!r}"
+        if not REVIEW_STEP_ID_RE.match(switch):
+            problems.append(f"{where}: id must be lowercase snake_case")
+        if not isinstance(spec, dict):
+            problems.append(f"{where}: must be an object")
+            continue
+        unknown = sorted(set(spec) - PROCESS_SWITCH_KEYS - PROCESS_SWITCH_OPTIONAL_KEYS)
+        if unknown:
+            problems.append(f"{where}: unknown keys {unknown}")
+        if not _nonblank(spec.get("summary")):
+            problems.append(f"{where}: needs a summary of what it decides")
+        if not _nonblank(spec.get("metric")):
+            problems.append(f"{where}: needs a component metric")
+        promotion = spec.get("promotion")
+        if not isinstance(promotion, dict) or set(promotion) != {"unit", "threshold"} \
+                or not all(_nonblank(promotion.get(key)) for key in ("unit", "threshold")):
+            problems.append(f"{where}: needs a promotion rule with a unit and a threshold")
+        owners = spec.get("flows")
+        if not isinstance(owners, list) or not owners \
+                or not all(isinstance(flow, str) for flow in owners):
+            problems.append(f"{where}: flows must list at least one owning flow")
+        else:
+            for flow in sorted({flow for flow in owners if owners.count(flow) > 1}):
+                problems.append(f"{where}: duplicate owning flow {flow!r}")
+            for flow in sorted(set(owners) - flows):
+                problems.append(f"{where}: names unknown flow {flow!r}")
+        declared = spec.get("values")
+        ids: list[str] = []
+        if not isinstance(declared, list) or len(declared) < 2:
+            problems.append(f"{where}: values must list at least two values")
+        else:
+            for value in declared:
+                if not isinstance(value, dict) or set(value) != {"id", "tradeoffs"} \
+                        or not isinstance(value.get("id"), str) \
+                        or not _nonblank(value.get("tradeoffs")):
+                    problems.append(f"{where}: every value holds an id and non-empty tradeoffs")
+                    continue
+                if not REVIEW_STEP_ID_RE.match(value["id"]):
+                    problems.append(f"{where}: value id {value['id']!r} must be lowercase snake_case")
+                ids.append(value["id"])
+            for value in sorted({value for value in ids if ids.count(value) > 1}):
+                problems.append(f"{where}: duplicate value {value!r}")
+        default = spec.get("default")
+        if default not in ids:
+            problems.append(f"{where}: default {default!r} is not one of its values {ids}")
+        issue = spec.get("issue")
+        if "issue" in spec and (not isinstance(issue, int) or isinstance(issue, bool) or issue < 1):
+            problems.append(f"{where}: issue must be a positive issue number")
+        if "reference_scope" in spec and spec["reference_scope"] not in SWITCH_REFERENCE_SCOPES:
+            problems.append(f"{where}: reference_scope must be one of"
+                            f" {sorted(SWITCH_REFERENCE_SCOPES)}")
+        if "parameters" in spec:
+            problems.extend(parameter_problems(where, spec["parameters"], ids, default, plugin))
+        if "agent_variants" in spec:
+            variants = spec["agent_variants"]
+            problems.extend(agent_variant_problems(where, variants, ids, default, agents, tiers))
+            for variant in variants.values() if isinstance(variants, dict) else []:
+                if not isinstance(variant, dict) or not isinstance(variant.get("agents"), list):
+                    continue
+                for agent in variant["agents"]:
+                    name = f"{agent}-{variant.get('suffix')}"
+                    if name in agents or name in generated:
+                        problems.append(
+                            f"{where}: variant {name!r} collides with"
+                            f" {'a canonical agent' if name in agents else generated[name]}")
+                    generated.setdefault(name, where)
+    return problems
+
+
+def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
+    """Process switches are declared once in the package registry, and every
+    switch is anchored in each flow that owns it as switch `<id>`."""
+    tiers = declared_tiers(tree)
+    for plugin in plugin_dirs(tree):
+        path = plugin / PROCESS_SWITCHES_RELPATH
+        flows_dir = plugin / "flows"
+        flow_paths = sorted(flows_dir.glob("*.md")) if flows_dir.is_dir() else []
+        anchors: dict[str, dict[str, Path]] = {}
+        for flow in flow_paths:
+            for name in SWITCH_ANCHOR_RE.findall(read_text(flow)):
+                anchors.setdefault(name, {})[flow.stem] = flow
+
+        def err(where: Path, message: str, fix: str) -> None:
+            findings.append(Finding("error", rel(tree, where), 1, "process_switches", message, fix))
+
+        if not path.is_file():
+            if anchors or any((skill / "references").glob("switch-*.md")
+                              for skill in skill_dirs(plugin)):
+                err(path, "process switches are named but the switch registry is missing",
+                    "restore the registry the flows and switch references name")
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            err(path, f"switch registry is not valid unique-key JSON: {exc}",
+                "fix the registry; every key and switch is declared once")
+            continue
+        agents = {agent.stem for agent in agent_files(plugin)}
+        for problem in process_switch_problems(data, {flow.stem for flow in flow_paths},
+                                               agents, tiers, plugin):
+            err(path, problem, "declare each switch once with its owning flows, values,"
+                " default, component metric and promotion rule")
+        switches = data.get("switches") if isinstance(data, dict) else None
+        switches = switches if isinstance(switches, dict) else {}
+        for problem in value_data_problems(plugin, switches):
+            err(path, problem, "list each data file once under every non-default switch value"
+                " whose references read it")
+        for problem in mechanical_variant_problems(plugin, switches):
+            err(path, problem, "list only the writers whose fix passes the switch moves as"
+                " its mechanical agent variants")
+        for name, owners in sorted(anchors.items()):
+            spec = switches.get(name)
+            listed = spec.get("flows") if isinstance(spec, dict) else None
+            for stem, flow in sorted(owners.items()):
+                if not isinstance(spec, dict):
+                    err(flow, f"flow {flow.name} names undeclared switch {name!r}",
+                        "declare the switch in the registry or fix the anchor")
+                elif not isinstance(listed, list) or stem not in listed:
+                    err(flow, f"flow {flow.name} names switch {name!r} but is not one of"
+                        " its owning flows", "list the flow in the switch's flows or"
+                        " remove the anchor")
+        for name, spec in sorted(switches.items()):
+            listed = spec.get("flows") if isinstance(spec, dict) else None
+            for stem in listed if isinstance(listed, list) else []:
+                if isinstance(stem, str) and (flows_dir / f"{stem}.md").is_file() \
+                        and stem not in anchors.get(name, {}):
+                    err(path, f"switch {name!r} is not named by its owning flow {stem!r}",
+                        "anchor the switch as switch `<id>` at the flow step it changes")
+        check_switch_references(plugin, switches, err)
+
+
+def check_switch_references(plugin: Path, switches: dict, err) -> None:
+    """A switch reference holds the instructions of one non-default switch
+    value. The Process Policy binds it, so no SKILL.md links it, and an owning
+    flow names its path so the orchestrating entry finds it."""
+    flows_dir = plugin / "flows"
+    for skill in skill_dirs(plugin):
+        skill_md = skill / "SKILL.md"
+        if skill_md.is_file() and "](references/switch-" in read_text(skill_md):
+            err(skill_md, "SKILL.md links a switch reference",
+                "switch references are bound by the Process Policy; never link one from SKILL.md")
+        for reference in sorted((skill / "references").glob("switch-*.md")):
+            match = SWITCH_REFERENCE_RE.match(reference.name)
+            if match is None:
+                err(reference, "switch reference must be named switch-<switch>-<value>.md",
+                    "name the file for one declared switch and value")
+                continue
+            name, value = match.groups()
+            spec = switches.get(name)
+            ids = [item.get("id") for item in spec.get("values", []) if isinstance(item, dict)] \
+                if isinstance(spec, dict) and isinstance(spec.get("values"), list) else []
+            if not isinstance(spec, dict):
+                err(reference, f"switch reference names undeclared switch {name!r}",
+                    "declare the switch in the registry or rename the reference")
+            elif value not in ids:
+                err(reference, f"switch reference names undeclared value {value!r} of switch {name!r}",
+                    "name one of the switch's declared values")
+            elif value == spec.get("default"):
+                err(reference, f"switch reference names the default value {value!r} of switch {name!r}",
+                    "the default path keeps its instructions in the ordinary files")
+            else:
+                relative = reference.relative_to(plugin).as_posix()
+                owners = spec.get("flows") if isinstance(spec.get("flows"), list) else []
+                if not any(isinstance(flow, str) and (flows_dir / f"{flow}.md").is_file()
+                           and relative in read_text(flows_dir / f"{flow}.md") for flow in owners):
+                    err(reference, f"switch reference {relative} is named by no owning flow of"
+                        f" switch {name!r}", "name the reference in the owning flow step it replaces")
+
+
+VARIANT_TOKEN_RE = re.compile(r"`([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`")
+
+
+def check_switch_variant_references(tree: Tree, findings: list[Finding]) -> None:
+    """Every generated agent variant a switch reference routes work to is
+    declared by that reference's switch value, so every build ships it."""
+    for plugin in plugin_dirs(tree):
+        try:
+            switches = json.loads(read_text(plugin / PROCESS_SWITCHES_RELPATH))["switches"]
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            continue  # process_switches reports a missing or broken registry
+        if not isinstance(switches, dict):
+            continue
+        agents = {path.stem for path in agent_files(plugin)}
+        for skill in skill_dirs(plugin):
+            for reference in sorted((skill / "references").glob("switch-*.md")):
+                match = SWITCH_REFERENCE_RE.match(reference.name)
+                if match is None:
+                    continue  # process_switches reports the name
+                name, value = match.groups()
+                spec = switches.get(name)
+                variants = spec.get("agent_variants") if isinstance(spec, dict) else None
+                variant = variants.get(value) if isinstance(variants, dict) else None
+                listed = variant.get("agents") if isinstance(variant, dict) else None
+                declared = {f"{agent}-{variant.get('suffix')}" for agent in listed
+                            if isinstance(agent, str)} if isinstance(listed, list) else set()
+                text = read_text(reference)
+                for token in sorted(set(VARIANT_TOKEN_RE.findall(text)) - agents - declared):
+                    if not any(token.startswith(f"{agent}-") for agent in agents):
+                        continue
+                    line = text[:text.index(f"`{token}`")].count("\n") + 1
+                    findings.append(Finding(
+                        "error", rel(tree, reference), line, "switch_variant_references",
+                        f"switch reference names agent variant {token!r}, which switch"
+                        f" {name!r} at {value!r} does not declare",
+                        "declare the variant in the value's agent_variants, or route the"
+                        " work to a declared role"))
+
+
+STORY_SIZE_MEASURES_RELPATH = "skill-content/product-planning/data/story-size-measures.json"
+BACKLOG_COMPILER_RELPATH = "scripts/backlog_compile.py"
+
+
+def implemented_derivations(source: str, registry: str = "STORY_SIZE_DERIVATIONS") -> set[str] | None:
+    """Return the keys of a script's module-level registry dict, by default the
+    backlog compiler's STORY_SIZE_DERIVATIONS, read from its source so the
+    validator never imports a plugin script."""
+    try:
+        module = ast.parse(source)
+    except SyntaxError:
+        return None
+    for node in module.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict) and any(
+                isinstance(target, ast.Name) and target.id == registry
+                for target in node.targets):
+            return {key.value for key in node.value.keys
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str)}
+    return None
+
+
+def check_story_size_measures(tree: Tree, findings: list[Finding]) -> None:
+    """Each story size measure is declared once, with a derivation the backlog
+    compiler implements, so a limit the owner sets always has a count."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / STORY_SIZE_MEASURES_RELPATH
+        if not path.is_file():
+            continue
+
+        def err(message: str, fix: str) -> None:
+            findings.append(Finding("error", rel(tree, path), 1, "story_size_measures", message, fix))
+
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            err(f"story size measures are not valid unique-key JSON: {exc}",
+                "declare each measure once in valid JSON")
+            continue
+        if not isinstance(data, dict) or set(data) != {"schema_version", "measures"} \
+                or data.get("schema_version") != 1 or not isinstance(data.get("measures"), dict) \
+                or not data["measures"]:
+            err("story size measures must hold exactly schema_version 1 and a non-empty measures"
+                " object", "restore the measures object keyed by measure id")
+            continue
+        compiler = plugin / BACKLOG_COMPILER_RELPATH
+        derivations = implemented_derivations(read_text(compiler)) if compiler.is_file() else None
+        if derivations is None:
+            err(f"{BACKLOG_COMPILER_RELPATH} declares no STORY_SIZE_DERIVATIONS registry",
+                "keep the compiler's derivation registry beside the measures it counts")
+            derivations = set()
+        owners: dict[str, str] = {}
+        for name, spec in sorted(data["measures"].items()):
+            where = f"measure {name!r}"
+            if not REVIEW_STEP_ID_RE.match(name):
+                err(f"{where}: id must be lowercase snake_case", "rename the measure")
+            if not isinstance(spec, dict) or set(spec) != {"summary", "derivation"} \
+                    or not _nonblank(spec.get("summary")):
+                err(f"{where}: holds exactly a non-empty summary and a derivation",
+                    "state what the measure counts and how the compiler derives it")
+                continue
+            derivation = spec["derivation"]
+            if not isinstance(derivation, str):
+                err(f"{where}: derivation must be one derivation name, not"
+                    f" {type(derivation).__name__} {derivation!r}",
+                    "name one key of STORY_SIZE_DERIVATIONS in scripts/backlog_compile.py")
+            elif derivation not in derivations:
+                err(f"{where}: derivation {derivation!r} is not one the backlog compiler implements",
+                    "name a key of STORY_SIZE_DERIVATIONS in scripts/backlog_compile.py, or"
+                    " implement the derivation there first")
+            elif derivation in owners:
+                err(f"{where}: repeats the derivation of measure {owners[derivation]!r}",
+                    "give each measure its own derivation")
+            else:
+                owners[derivation] = name
+
+
+FACT_OWNERSHIP_RELPATH = "skill-content/execution-plan/data/fact-ownership.json"
+FACT_DOCUMENT_KEYS = {"type", "title", "flow"}
+# Where an owning document type declares what it carries: its scaffolded
+# sections, its front-matter keys, or both.
+FACT_ANCHOR_SOURCES = {"sections_from", "keys_from"}
+FACT_OWNER_KEYS = {"document", "writer"}
+# An owner holds its facts in exactly one of these: a section or front-matter keys.
+FACT_OWNER_ANCHORS = {"section", "keys"}
+# A plugin script and one of its module-level functions or constants; `.key`
+# selects one entry of a constant dict.
+FACT_ANCHOR_SOURCE_RE = re.compile(
+    r"^(scripts/[a-z0-9_]+\.py):([A-Za-z_][A-Za-z0-9_]*)(?:\.([a-z0-9][a-z0-9_-]*))?$")
+SCAFFOLD_HEADING_RE = re.compile(r"^## (.+?)\s*$")
+
+
+def flow_names_writer(flow_text: str, role: str, title: str) -> bool:
+    """The flow names the role as the document's writer in the form
+    flows/operation.md uses: "`<role>` is the only <title> writer", where one
+    role may name several titles before the next role's statement starts."""
+    for clause in re.split(r"[.;]\s", " ".join(flow_text.split())):
+        for part in re.split(r"(?=`[a-z][a-z0-9-]*` is the only )", clause):
+            if part.startswith(f"`{role}` is the only ") and f"{title} writer" in part:
+                return True
+    return False
+
+
+def fact_ownership_problems(data: object, plugin: Path, vault_types: set[str]) -> list[str]:
+    """Return the problems of the execution-planning fact ownership data."""
+    if not isinstance(data, dict) or set(data) != {"schema_version", "documents", "fact_classes"} \
+            or data.get("schema_version") != 1:
+        return ["data must hold exactly schema_version 1, documents and fact_classes"]
+    agents = {agent.stem for agent in agent_files(plugin)}
+    problems: list[str] = []
+    documents = data["documents"] if isinstance(data["documents"], dict) else {}
+    if not documents:
+        problems.append("documents must declare at least one owning document")
+    for key, spec in sorted(documents.items()):
+        where = f"document {key!r}"
+        sources = set(spec) - FACT_DOCUMENT_KEYS if isinstance(spec, dict) else set()
+        if not isinstance(spec, dict) or not FACT_DOCUMENT_KEYS <= set(spec) \
+                or not sources or not sources <= FACT_ANCHOR_SOURCES \
+                or not all(_nonblank(spec[field]) for field in spec):
+            problems.append(f"{where}: holds exactly a vault type, a title, the flow that"
+                            " names its writer, and where its sections or front-matter keys"
+                            " are declared")
+            continue
+        if spec["type"] not in vault_types:
+            problems.append(f"{where}: unknown vault document type {spec['type']!r}")
+        if not (plugin / "flows" / f"{spec['flow']}.md").is_file():
+            problems.append(f"{where}: unknown flow {spec['flow']!r}")
+    classes = data["fact_classes"]
+    if not isinstance(classes, dict) or not classes:
+        return problems + ["fact_classes must declare at least one fact class"]
+    for name, spec in sorted(classes.items()):
+        where = f"fact class {name!r}"
+        if not REVIEW_STEP_ID_RE.match(name):
+            problems.append(f"{where}: id must be lowercase snake_case")
+        if not isinstance(spec, dict) or not set(spec) <= {"facts", "owner"} \
+                or not _nonblank(spec.get("facts")):
+            problems.append(f"{where}: holds the facts it covers and its owner")
+            continue
+        owner = spec.get("owner")
+        if not owner:
+            problems.append(f"{where}: has no owner")
+            continue
+        if not isinstance(owner, dict) or any(isinstance(owner.get(field), list)
+                                              for field in (*FACT_OWNER_KEYS, "section")):
+            problems.append(f"{where}: has two owners; exactly one document, anchor and"
+                            " writer own a fact")
+            continue
+        anchors = set(owner) & FACT_OWNER_ANCHORS
+        if set(owner) - FACT_OWNER_ANCHORS != FACT_OWNER_KEYS or not anchors \
+                or not all(_nonblank(owner[field]) for field in (*FACT_OWNER_KEYS, "section")
+                           if field in owner):
+            problems.append(f"{where}: has no owner; its owner names one document, one section"
+                            " or its front-matter keys, and one writer")
+            continue
+        if len(anchors) > 1:
+            problems.append(f"{where}: names a section and front-matter keys; a fact is held"
+                            " in one of them")
+            continue
+        keys = owner.get("keys")
+        if "keys" in owner and (not isinstance(keys, list) or not keys
+                                or not all(_nonblank(item) for item in keys)
+                                or len(set(keys)) != len(keys)):
+            problems.append(f"{where}: front-matter keys must be a non-empty list of distinct"
+                            " key names")
+            continue
+        writer = owner["writer"].replace("_", "-")
+        if not REVIEW_STEP_ID_RE.match(owner["writer"]) or writer not in agents:
+            problems.append(f"{where}: names unknown writer role {owner['writer']!r}")
+            continue
+        document = documents.get(owner["document"])
+        if not isinstance(document, dict) or not FACT_DOCUMENT_KEYS <= set(document):
+            problems.append(f"{where}: names undeclared document {owner['document']!r}")
+            continue
+        flow = plugin / "flows" / f"{document['flow']}.md"
+        if flow.is_file() and not flow_names_writer(read_text(flow), writer, document["title"]):
+            problems.append(
+                f"{where}: flow {document['flow']!r} does not name `{writer}` as the"
+                f" {document['title']} writer")
+    return problems
+
+
+def check_fact_ownership(tree: Tree, findings: list[Finding]) -> None:
+    """Each execution-planning fact class has exactly one owning document,
+    section or set of front-matter keys, and writer, and the owning flow names
+    that writer."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / FACT_OWNERSHIP_RELPATH
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+            policy = json.loads(read_text(plugin / VAULT_POLICY_RELPATH))
+            vault_types = set(policy.get("type_path_patterns", {}))
+        except (OSError, json.JSONDecodeError, ValueError, AttributeError) as exc:
             findings.append(Finding(
-                "error", rel(tree, path), 1, "execution_profiles", problem,
-                "map every reasoning tier in tools/data/models.json to the"
-                " host's documented model and effort values",
-            ))
+                "error", rel(tree, path), 1, "fact_ownership",
+                f"fact ownership data is not valid unique-key JSON: {exc}",
+                "declare every fact class and document once"))
+            continue
+        for problem in fact_ownership_problems(data, plugin, vault_types):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "fact_ownership", problem,
+                "give every fact class one owning document, section or front-matter keys,"
+                " and writer that its flow names"))
+
+
+def declared_anchor_names(plugin: Path, source: object) -> tuple[set[str], str | None]:
+    """Return the names an anchor source declares, or why it declares none.
+
+    A function declares the `## ` headings its string literals scaffold, its
+    docstring aside; a constant declares its strings, or those of the one dict
+    entry that `.key` selects. The script's source is read, never imported.
+    """
+    match = FACT_ANCHOR_SOURCE_RE.fullmatch(source) if isinstance(source, str) else None
+    if match is None:
+        return set(), ("must name a plugin script and one of its module-level functions or"
+                       " constants, as scripts/<name>.py:<NAME>, with .<key> for a dict entry")
+    script, symbol, key = match.groups()
+    path = plugin / script
+    if not path.is_file():
+        return set(), f"names missing script {script}"
+    try:
+        module = ast.parse(read_text(path))
+    except SyntaxError:
+        return set(), f"names {script}, which does not parse"
+    for node in module.body:
+        if isinstance(node, ast.FunctionDef) and node.name == symbol and key is None:
+            docstring = node.body[0] if node.body and isinstance(node.body[0], ast.Expr) \
+                and isinstance(node.body[0].value, ast.Constant) else None
+            skipped = set(map(id, ast.walk(docstring))) if docstring is not None else set()
+            headings = {re.sub(r"(?s)\s*<!--.*?-->", "", found.group(1)).strip()
+                        for inner in ast.walk(node)
+                        if id(inner) not in skipped and isinstance(inner, ast.Constant)
+                        and isinstance(inner.value, str)
+                        for line in inner.value.splitlines()
+                        if (found := SCAFFOLD_HEADING_RE.match(line))}
+            return headings, None if headings else f"names {symbol}, which scaffolds no heading"
+        targets = node.targets if isinstance(node, ast.Assign) else \
+            [node.target] if isinstance(node, ast.AnnAssign) else []
+        if any(isinstance(target, ast.Name) and target.id == symbol for target in targets):
+            value = node.value
+            if key is not None:
+                value = next((item for name, item in zip(value.keys, value.values)
+                              if isinstance(name, ast.Constant) and name.value == key), None) \
+                    if isinstance(value, ast.Dict) else None
+            if isinstance(value, (ast.Tuple, ast.List, ast.Set)) and value.elts and all(
+                    isinstance(item, ast.Constant) and isinstance(item.value, str)
+                    for item in value.elts):
+                return {item.value for item in value.elts}, None
+            return set(), f"names {source.split(':', 1)[1]}, which lists no names"
+    return set(), f"names no module-level function or constant {symbol} of {script}"
+
+
+def fact_anchor_problems(data: dict, plugin: Path) -> list[str]:
+    """Return each owning section or key that its document type does not carry."""
+    problems: list[str] = []
+    declared: dict[tuple[str, str], set[str] | None] = {}
+    for key, spec in sorted(data["documents"].items()):
+        for source in sorted(FACT_ANCHOR_SOURCES & set(spec)):
+            names, problem = declared_anchor_names(plugin, spec[source])
+            declared[(key, source)] = None if problem else names
+            if problem:
+                problems.append(f"document {key!r}: {source} {spec[source]!r} {problem}")
+    for name, spec in sorted(data["fact_classes"].items()):
+        owner, where = spec["owner"], f"fact class {name!r}"
+        document = owner["document"]
+        source = "sections_from" if "section" in owner else "keys_from"
+        if (document, source) not in declared:
+            problems.append(f"{where}: document {document!r} declares no {source}, so its"
+                            f" {'section' if 'section' in owner else 'front-matter keys'}"
+                            " cannot be checked")
+            continue
+        names = declared[(document, source)]
+        if names is None:
+            continue
+        origin = data["documents"][document][source]
+        if "section" in owner and owner["section"] not in names:
+            problems.append(f"{where}: section {owner['section']!r} is not a heading that"
+                            f" {origin} scaffolds")
+        problems.extend(f"{where}: front-matter key {item!r} is not one that {origin} declares"
+                        for item in owner.get("keys", []) if item not in names)
+    return problems
+
+
+def check_fact_ownership_anchors(tree: Tree, findings: list[Finding]) -> None:
+    """Each owning section or front-matter key is one the owning document type
+    carries, as the plugin script that writes that document declares it."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / FACT_OWNERSHIP_RELPATH
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+            policy = json.loads(read_text(plugin / VAULT_POLICY_RELPATH))
+            vault_types = set(policy.get("type_path_patterns", {}))
+        except (OSError, json.JSONDecodeError, ValueError, AttributeError):
+            continue
+        # The shape check reports a malformed file first.
+        if fact_ownership_problems(data, plugin, vault_types):
+            continue
+        for problem in fact_anchor_problems(data, plugin):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "fact_ownership_anchors", problem,
+                "name a section the owning document's script scaffolds, or front-matter keys"
+                " it declares, and declare where they come from"))
+
+
+OWNER_DECISION_CLASSES_RELPATH = "skill-content/deliver/data/owner-decision-classes.json"
+# The User Decisions table marks a question that waits for the next gate with this class.
+QUEUED_DECISION_CLASS = "queued"
+
+
+def owner_decision_class_problems(data: object, plugin: Path) -> list[str]:
+    """Return the problems of the at-once owner decision classes."""
+    if not isinstance(data, dict) or set(data) != {"schema_version", "agent_clauses", "classes"} \
+            or data.get("schema_version") != 1:
+        return ["data must hold exactly schema_version 1, agent_clauses and classes"]
+    problems: list[str] = []
+    ids: list[str] = []
+    classes = data["classes"]
+    if not isinstance(classes, list) or not classes:
+        problems.append("classes must declare at least one at-once class")
+        classes = []
+    for entry in classes:
+        if not isinstance(entry, dict) or set(entry) != {"id", "description"} \
+                or not _nonblank(entry.get("id")) or not _nonblank(entry.get("description")):
+            problems.append("empty class: every class holds an id and a description")
+            continue
+        ids.append(entry["id"])
+    clauses = data["agent_clauses"] if isinstance(data["agent_clauses"], list) else None
+    if clauses is None:
+        problems.append("agent_clauses must list the agent clauses that are asked at once")
+        clauses = []
+    for entry in clauses:
+        if not isinstance(entry, dict) or set(entry) != {"id", "agent", "clause"} \
+                or not all(_nonblank(entry.get(key)) for key in ("id", "agent", "clause")):
+            problems.append("every agent clause holds an id, an agent and its clause text")
+            continue
+        ids.append(entry["id"])
+        path = plugin / "agents" / f"{entry['agent']}.md"
+        if not path.is_file():
+            problems.append(f"agent clause {entry['id']!r} names unknown agent {entry['agent']!r}")
+        elif " ".join(entry["clause"].split()) not in " ".join(read_text(path).split()):
+            problems.append(f"agent clause {entry['id']!r} is not in agents/{entry['agent']}.md;"
+                            " the clause stays as the agent file states it")
+    for identifier in ids:
+        if not REVIEW_STEP_ID_RE.match(identifier) or identifier == QUEUED_DECISION_CLASS:
+            problems.append(f"class id {identifier!r} must be lowercase snake_case other than"
+                            f" {QUEUED_DECISION_CLASS!r}")
+    for duplicate in sorted({identifier for identifier in ids if ids.count(identifier) > 1}):
+        problems.append(f"duplicate class {duplicate!r}")
+    return problems
+
+
+def check_owner_decision_classes(tree: Tree, findings: list[Finding]) -> None:
+    """The classes asked at once under two fixed owner gates are validated data,
+    and the agent clause they keep still reads as its agent file states it."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / OWNER_DECISION_CLASSES_RELPATH
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "owner_decision_classes",
+                f"owner decision classes are not valid unique-key JSON: {exc}",
+                "declare every class once"))
+            continue
+        for problem in owner_decision_class_problems(data, plugin):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "owner_decision_classes", problem,
+                "declare each at-once class once with an id and a description"))
+
+
+AUTOPILOT_POLICY_RELPATH = "skill-content/autopilot/data/autopilot-policy.json"
+AUTOPILOT_SCRIPT_RELPATH = "skill-content/autopilot/scripts/autopilot.py"
+AUTOPILOT_NUMBERS = ("default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
+                     "arming_ttl_minutes")
+AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", *AUTOPILOT_NUMBERS}
+AUTOPILOT_DEFAULTS = ("allowed", "excluded", "never")
+
+
+def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
+    """Return the problems of the autopilot entry's classes, goal kinds and durations."""
+    if not isinstance(data, dict) or set(data) != AUTOPILOT_KEYS or data.get("schema_version") != 1:
+        return [f"policy must hold exactly {', '.join(sorted(AUTOPILOT_KEYS))},"
+                " with schema_version 1"]
+    problems: list[str] = []
+    numbers = {key: data[key] for key in AUTOPILOT_NUMBERS
+               if isinstance(data[key], int) and not isinstance(data[key], bool) and data[key] > 0}
+    problems += [f"{key} must be a positive whole number"
+                 for key in AUTOPILOT_NUMBERS if key not in numbers]
+    maximum = numbers.get("max_duration_hours")
+    problems += [f"{key} {numbers[key]} is above max_duration_hours {maximum}"
+                 for key in ("default_duration_hours", "default_goal_cap_hours")
+                 if maximum and key in numbers and numbers[key] > maximum]
+    ids: dict[str, list[str]] = {"class": [], "goal kind": []}
+    classes = data["classes"] if isinstance(data["classes"], list) else []
+    for entry in classes:
+        if not isinstance(entry, dict) or set(entry) != {"id", "description", "default"} \
+                or not _nonblank(entry.get("id")) or not _nonblank(entry.get("description")):
+            problems.append("every class holds exactly an id, a description and a default")
+            continue
+        ids["class"].append(entry["id"])
+        if entry["default"] not in AUTOPILOT_DEFAULTS:
+            problems.append(f"class {entry['id']!r} has unknown default {entry['default']!r}")
+    if not any(isinstance(entry, dict) and entry.get("default") == "never" for entry in classes):
+        problems.append("the never set is empty: at least one class is never delegated")
+    script = plugin / AUTOPILOT_SCRIPT_RELPATH
+    readers = implemented_derivations(read_text(script), "GOAL_READERS") if script.is_file() else None
+    if readers is None:
+        problems.append(f"{AUTOPILOT_SCRIPT_RELPATH} declares no GOAL_READERS registry")
+        readers = set()
+    kinds = data["goal_kinds"] if isinstance(data["goal_kinds"], list) else []
+    if not kinds:
+        problems.append("goal_kinds must declare at least one goal kind")
+    for entry in kinds:
+        if not isinstance(entry, dict) or set(entry) != {"id", "description", "end"} \
+                or not _nonblank(entry.get("id")) or not _nonblank(entry.get("description")):
+            problems.append("every goal kind holds exactly an id, a description and its end")
+            continue
+        ids["goal kind"].append(entry["id"])
+        end = entry["end"]
+        if end == "none":
+            continue
+        if not isinstance(end, dict) or set(end) != {"compiler", "terminal_statuses"}:
+            problems.append(f"goal kind {entry['id']!r} end is none or holds exactly a compiler"
+                            " and terminal_statuses")
+            continue
+        statuses = end["terminal_statuses"]
+        if not isinstance(statuses, list) or not statuses \
+                or not all(_nonblank(status) for status in statuses) \
+                or len(set(statuses)) != len(statuses):
+            problems.append(f"readable goal kind {entry['id']!r} declares no distinct terminal"
+                            " statuses")
+        if end["compiler"] not in readers or not (plugin / str(end["compiler"])).is_file():
+            problems.append(f"goal kind {entry['id']!r} names compiler {end['compiler']!r},"
+                            " which is no package script autopilot.py reads")
+    for label, values in ids.items():
+        problems += [f"{label} id {value!r} must be lowercase snake_case"
+                     for value in values if not REVIEW_STEP_ID_RE.match(value)]
+        problems += [f"duplicate {label} {value!r}"
+                     for value in sorted({value for value in values if values.count(value) > 1})]
+    return problems
+
+
+def check_autopilot_policy(tree: Tree, findings: list[Finding]) -> None:
+    """The autopilot entry's classes, goal kinds and durations are validated
+    data, and each readable goal ends at statuses its owning compiler reads."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / AUTOPILOT_POLICY_RELPATH
+        if not path.is_file():
+            if path.parents[1].is_dir():
+                findings.append(Finding(
+                    "error", rel(tree, path.parents[1]), 1, "autopilot_policy",
+                    "the autopilot entry has no data/autopilot-policy.json",
+                    "declare its classes, goal kinds and durations"))
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "autopilot_policy",
+                f"autopilot policy is not valid unique-key JSON: {exc}", "fix the syntax"))
+            continue
+        for problem in autopilot_policy_problems(data, plugin):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "autopilot_policy", problem,
+                "declare each class and goal kind once, with a known default, a readable"
+                " end and durations within the maximum"))
 
 
 def _limits_shape_errors(config: dict) -> list[str]:
@@ -2284,6 +3437,7 @@ DELIVERY_CONTRACT_FILES = {
     "delivery-provider-contract.json",
     "delivery-receipt-contract.json",
     "delivery-result-contract.json",
+    "owner-decision-classes.json",
 }
 
 
@@ -2379,6 +3533,18 @@ def check_delivery_contract_shape(
             or any(not isinstance(scope.get(key), list) or any(not isinstance(item, str) or not item for item in scope[key])
                    for key in ("non_code_suffixes", "test_path_segments", "test_name_patterns"))):
         problems.append("verification mutation scope must exclude environment and docs, include unknown code and support approved expansion")
+    # An Item records the implementation_schedule switch value it runs under;
+    # an Item without one ran before the switch existed, so it reads as today's order.
+    item = (contracts["delivery-document-contract.json"].get("document_types") or {}).get("delivery_item") or {}
+    try:
+        registry = json.loads(read_text(root.parents[2] / PROCESS_SWITCHES_RELPATH))
+        switch_values = [value.get("id") for value in registry["switches"]["implementation_schedule"]["values"]]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        switch_values = None
+    if (switch_values is None or item.get("implementation_schedules") != switch_values
+            or item.get("missing_implementation_schedule") != "sequential_v1"):
+        problems.append("Item implementation schedules must equal the implementation_schedule switch values,"
+                        " and an Item without one must read as sequential_v1")
     codes = result.get("finding_codes", [])
     if not isinstance(codes, list) or len(codes) != len(set(codes)):
         problems.append("result finding-code registry is not a unique list")
@@ -2479,6 +3645,15 @@ CHECKS = {
     "vault_wiring": check_vault_wiring,
     "model_config_shape": check_model_config_shape,
     "execution_profiles": check_execution_profiles,
+    "host_cli_versions": check_host_cli_versions,
+    "review_panels": check_review_panels,
+    "process_switches": check_process_switches,
+    "switch_variant_references": check_switch_variant_references,
+    "story_size_measures": check_story_size_measures,
+    "fact_ownership": check_fact_ownership,
+    "fact_ownership_anchors": check_fact_ownership_anchors,
+    "owner_decision_classes": check_owner_decision_classes,
+    "autopilot_policy": check_autopilot_policy,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,
@@ -2494,8 +3669,10 @@ CHECKS = {
 def load_policy_json(root: Path, relpath: str) -> dict | None:
     try:
         config = json.loads((root / relpath).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None  # the owning *_config_shape check reports it
+    except (OSError, ValueError):
+        # ValueError covers JSONDecodeError and the UnicodeDecodeError of
+        # bytes that are not UTF-8; the owning *_config_shape check reports it.
+        return None
     return config if isinstance(config, dict) else None
 
 

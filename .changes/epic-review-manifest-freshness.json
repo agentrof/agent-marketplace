@@ -1,0 +1,6 @@
+{
+  "summary": "An epic review manifest from `backlog_review_inputs.py --epic <EP-ID>` no longer goes stale when another epic's writer finishes its stubs or edits its own notes. Its `structure_hash` covered the bytes of every backlog file, so any change anywhere failed the `--expected-hash` check before the review's findings could be accepted, which turned the parallel epic reviews of #336 back into reruns. An epic manifest's hash now binds the notes it names, the story identities and dependency edges that reach them, and its compiler facts; the stubs it lists from notes outside its paths are information and no longer part of the hash. A change inside its closure, including a new dependency edge from another epic, still makes it stale, and the root manifest and backlog approval keep binding every backlog note.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

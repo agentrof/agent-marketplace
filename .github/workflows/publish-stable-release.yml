@@ -254,4 +254,5 @@ jobs:
             --candidate-sha "$EXPECTED_MERGE_SHA" \
             --prior-stable-sha "$STABLE_BASE" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
-            --release-branch-sha "$RELEASE_HEAD_SHA"
+            --release-branch-sha "$RELEASE_HEAD_SHA" \
+            --require-immutable

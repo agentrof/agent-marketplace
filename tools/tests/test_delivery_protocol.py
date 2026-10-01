@@ -73,6 +73,7 @@ COORDINATOR_COMMANDS = {
     "pause-item",
     "resume-item",
     "takeover-item",
+    "lane-status",
     "push-item",
     "integrate-item",
     "publish-delivery-review",

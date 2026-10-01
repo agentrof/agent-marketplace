@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "agent_clauses": [
+    {
+      "id": "architect_escalation",
+      "agent": "software-architect",
+      "clause": "Escalates and halts, never guesses, when a change would break an external contract, alter existing stored data, touch the security or authorization model, exceed the stated scope, or need a non-functional budget the brief leaves absent or unquantified"
+    }
+  ],
+  "classes": [
+    {
+      "id": "rule_exception",
+      "description": "An exception to a project invariant or an approved rule, such as a contract rule an Item cannot meet as written."
+    },
+    {
+      "id": "scope_or_grant_change",
+      "description": "A change to the Delivery scope, or a grant the work needs that the owner has not given, such as access, a permission or a new external dependency."
+    },
+    {
+      "id": "credentials_spending_or_irreversible_action",
+      "description": "Credentials, spending, or an external action that cannot be undone, such as a publication, a deletion or a message to a third party."
+    }
+  ]
+}

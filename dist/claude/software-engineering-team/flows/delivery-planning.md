@@ -7,6 +7,10 @@ story set, checks current Requirement and Definition of Done evidence, renders a
 temporary proposal, obtains the Delivery Scope decision and then hands the
 approved files to the explicit Git coordinator. No timebox, slot, branch,
 worktree or release field belongs in this flow.
+Switch `owner_gates`: at `two_fixed_gates`, the scope decision moves into gate A
+at the end of execution planning, and questions before it are queued, as
+`skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
+defines.
 
 The proposal is disposable until reservation. A declined or interrupted
 proposal leaves the target checkout, refs and authored vault unchanged. After
@@ -29,3 +33,17 @@ through `/requirement REQ-###`, or, when that Requirement marks Experience
 revision, a requirement-mode backlog approved before it carried
 `input_bindings` binds through its root Requirement's Experience Stage Results
 instead. A reserved Delivery keeps verifying its pinned inputs historically.
+
+Switch `story_size_budget`: at `propose_split`, `init` also prints each
+selected Story's size measures and over-budget flags as `story_size`, which
+the proposal shows read-only, as
+`skill-content/product-planning/references/switch-story_size_budget-propose_split.md`
+defines.
+
+Switch `delivery_path`: at `light_when_eligible`, `init` also reports whether
+the selection may take the light path, and a Delivery the compiler finds
+eligible plans its scope and its Item topology in this flow with one owner
+gate, then runs scope approval, reservation, execution approval, publication
+and claims in order, as
+`skill-content/delivery-plan/references/switch-delivery_path-light_when_eligible.md`
+defines; every other Delivery follows this flow unchanged.

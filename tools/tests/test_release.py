@@ -81,6 +81,12 @@ class ReleaseRepositoryTests(unittest.TestCase):
             "components": components,
         }, indent=2))
 
+    def git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=self.root, capture_output=True, text=True,
+            check=True,
+        ).stdout.strip()
+
     def test_fixture_has_one_canonical_version_on_every_host_surface(self):
         self.assertEqual(release.validate_version_surfaces(self.root), [])
 
@@ -169,15 +175,38 @@ class ReleaseRepositoryTests(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseError, fixtures.PLUGIN):
                 release.check_pr_changeset(self.root, "origin/main")
 
-    def test_derived_provenance_only_change_is_release_free(self):
-        self.write_changeset("ci-hardening", {})
+    def test_runtime_contract_change_without_its_component_is_refused(self):
+        # A host runtime contract changes only the package provenance, yet it
+        # changes what the package declares, so it needs its impact (#343).
+        git_fixture.init_repository(self.root, initial_branch="main")
+        self.git("config", "user.name", "Release Test")
+        self.git("config", "user.email", "release@example.test")
+        self.git("add", "--all")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD")
+        adapter = self.root / "platforms" / "claude" / "adapter.py"
+        current = 'return ["in_use_pid_marker_v1"]'
+        self.assertIn(current, adapter.read_text(encoding="utf-8"))
+        adapter.write_text(adapter.read_text(encoding="utf-8").replace(
+            current, 'return ["in_use_pid_marker_v1", "future_marker_v2"]',
+        ), encoding="utf-8")
+        build_distributions.replace_generated(self.root, self.root / "dist")
+        self.write_changeset("runtime-contract", {})
+        self.git("add", "--all")
+        self.git("commit", "-qm", "change a runtime contract")
         provenance = build_distributions.packaging_names(self.root)[1]
-        with mock.patch.object(release, "changed_paths", return_value=[
-            ("A", ".changes/ci-hardening.json"),
-            ("M", f"dist/claude/{fixtures.PLUGIN}/{provenance}"),
-            ("M", f"dist/codex/{fixtures.PLUGIN}/{provenance}"),
-        ]):
-            release.check_pr_changeset(self.root, "origin/main")
+        self.assertEqual(
+            [path for _status, path in release.changed_paths(self.root, base)
+             if path.startswith("dist/")],
+            [f"dist/claude/{fixtures.PLUGIN}/{provenance}"],
+        )
+        with self.assertRaisesRegex(
+            release.ReleaseError, f"omits changed release components: {fixtures.PLUGIN}",
+        ):
+            release.check_pr_changeset(self.root, base)
+        self.write_changeset("runtime-contract", {fixtures.PLUGIN: "patch"})
+        self.git("commit", "-qam", "declare the package impact")
+        release.check_pr_changeset(self.root, base)
 
     def test_non_provenance_distribution_change_requires_component(self):
         self.write_changeset("ci-hardening", {})
@@ -399,8 +428,9 @@ class BootstrapCandidatePolicyTests(unittest.TestCase):
         self.git("add", str(adapter.relative_to(self.root)))
         self.git("commit", "-m", "restore trusted adapter")
 
-        with self.assertRaisesRegex(release.ReleaseError, "trusted replay"):
-            self.verify(candidate)
+        # The adapter is not packaged, so the candidate's packages still equal
+        # the trusted replay, which never imports the candidate's adapter.
+        self.assertEqual(self.verify(candidate)["candidate"], candidate)
         self.assertFalse(sentinel.exists())
 
     def test_candidate_distribution_rejects_force_tracked_python_cache(self):
@@ -441,46 +471,51 @@ class BootstrapCandidatePolicyTests(unittest.TestCase):
         self.assertNotIn("--no-hardlinks", clone_calls[0])
 
 
+def commit_release_fixture(case) -> None:
+    """Commit a stable baseline, one feature and its deterministic release."""
+    case.tmp = tempfile.TemporaryDirectory()
+    case.root = Path(case.tmp.name) / "repository"
+    case.root.mkdir()
+    fixtures.make_valid_root(case.root)
+    fixtures.copy("tools/release.py", case.root)
+    fixtures.copy("tools/build_distributions.py", case.root)
+    git_fixture.init_repository(case.root, initial_branch="main")
+    # Hosted runners may materialize text with a different checkout EOL.
+    case.git("config", "core.autocrlf", "true")
+    case.git("config", "user.name", "Release Policy Test")
+    case.git("config", "user.email", "release-policy@example.test")
+    case.git("add", "--all")
+    case.git("commit", "-m", "baseline")
+    case.stable_sha = case.git("rev-parse", "HEAD")
+    case.git("branch", "stable")
+
+    fixtures.write(
+        case.root / ".changes" / "candidate-patch.json",
+        json.dumps({
+            "summary": "Ship the candidate patch.",
+            "components": {fixtures.PLUGIN: "patch"},
+        }, indent=2) + "\n",
+    )
+    case.git("add", "--all")
+    case.git("commit", "-m", "feat: candidate change")
+    case.base_sha = case.git("rev-parse", "HEAD")
+    released = release.changeset_paths_at_ref(case.root, case.stable_sha)
+    metadata = release.prepare(
+        case.root,
+        case.stable_sha,
+        case.base_sha,
+        released_paths=released,
+    )
+    build_distributions.replace_generated(case.root, case.root / "dist")
+    case.git("add", "--all")
+    case.git("commit", "-m", f"chore: prepare stable v{metadata['version']}")
+    case.head_sha = case.git("rev-parse", "HEAD")
+    case.git("checkout", "--detach", case.base_sha)
+
+
 class ReleasePullRequestPolicyTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name) / "repository"
-        self.root.mkdir()
-        fixtures.make_valid_root(self.root)
-        fixtures.copy("tools/release.py", self.root)
-        fixtures.copy("tools/build_distributions.py", self.root)
-        git_fixture.init_repository(self.root, initial_branch="main")
-        # Hosted runners may materialize text with a different checkout EOL.
-        self.git("config", "core.autocrlf", "true")
-        self.git("config", "user.name", "Release Policy Test")
-        self.git("config", "user.email", "release-policy@example.test")
-        self.git("add", "--all")
-        self.git("commit", "-m", "baseline")
-        self.stable_sha = self.git("rev-parse", "HEAD")
-        self.git("branch", "stable")
-
-        fixtures.write(
-            self.root / ".changes" / "candidate-patch.json",
-            json.dumps({
-                "summary": "Ship the candidate patch.",
-                "components": {fixtures.PLUGIN: "patch"},
-            }, indent=2) + "\n",
-        )
-        self.git("add", "--all")
-        self.git("commit", "-m", "feat: candidate change")
-        self.base_sha = self.git("rev-parse", "HEAD")
-        released = release.changeset_paths_at_ref(self.root, self.stable_sha)
-        metadata = release.prepare(
-            self.root,
-            self.stable_sha,
-            self.base_sha,
-            released_paths=released,
-        )
-        build_distributions.replace_generated(self.root, self.root / "dist")
-        self.git("add", "--all")
-        self.git("commit", "-m", f"chore: prepare stable v{metadata['version']}")
-        self.head_sha = self.git("rev-parse", "HEAD")
-        self.git("checkout", "--detach", self.base_sha)
+        commit_release_fixture(self)
 
     def tearDown(self):
         git_fixture.remove_temporary(self.tmp)
@@ -645,6 +680,30 @@ class ReleasePullRequestPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "tree differs"):
             self.verify(tampered)
 
+    def test_release_records_the_build_identity_of_its_sources(self):
+        # Packages no longer carry the shared build identity (#311); the
+        # release metadata records it and release verification recomputes it.
+        self.git("checkout", "--detach", self.head_sha)
+        # Unlike the repository, the fixture keeps no .changes/README.md, so
+        # the release checkout drops the emptied directory.
+        (self.root / ".changes").mkdir(exist_ok=True)
+        path = self.root / ".release" / "stable.json"
+        metadata = release.read_json(path)
+        self.assertEqual(
+            metadata["build_id"],
+            build_distributions.marketplace_snapshot(self.root)["build_id"],
+        )
+        self.assertEqual(release.verify_release(self.root), metadata)
+        release.write_json(path, dict(metadata, build_id="snapshot." + "0" * 64))
+        with self.assertRaisesRegex(release.ReleaseError, "build identity"):
+            release.verify_release(self.root)
+        self.git("add", ".release/stable.json")
+        self.git("commit", "--amend", "--no-edit")
+        forged = self.git("rev-parse", "HEAD")
+        self.git("checkout", "--detach", self.base_sha)
+        with self.assertRaisesRegex(release.ReleaseError, "deterministic replay"):
+            self.verify(forged)
+
     def test_abbreviated_sha_and_wrong_checkout_are_rejected(self):
         with self.assertRaisesRegex(release.ReleaseError, "40-hex"):
             release.verify_release_pr(
@@ -656,6 +715,188 @@ class ReleasePullRequestPolicyTests(unittest.TestCase):
         self.git("checkout", "--detach", self.head_sha)
         with self.assertRaisesRegex(release.ReleaseError, "exact base SHA"):
             self.verify()
+
+
+class MergeQueueReleasePolicyTests(unittest.TestCase):
+    def setUp(self):
+        commit_release_fixture(self)
+
+    def tearDown(self):
+        git_fixture.remove_temporary(self.tmp)
+
+    def git(self, *args: str) -> str:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return completed.stdout.strip()
+
+    def feature(self, parent: str, name: str) -> str:
+        self.git("checkout", "--detach", parent)
+        fixtures.write(self.root / "notes" / f"{name}.md", f"{name}\n")
+        self.git("add", "--all")
+        self.git("commit", "-m", f"docs: {name}")
+        return self.git("rev-parse", "HEAD")
+
+    def queue(self, base: str, *heads: str) -> str:
+        """Merge each head onto the previous entry as the queue's MERGE method does."""
+        tip = base
+        for number, head in enumerate(heads, start=1):
+            self.git("checkout", "--detach", tip)
+            self.git(
+                "merge", "--no-ff", "-q", "-m", f"Merge pull request #{number}",
+                head,
+            )
+            tip = self.git("rev-parse", "HEAD")
+        return tip
+
+    def verify(
+        self, head: str, *, base: str | None = None, release_open: bool = True,
+    ) -> dict:
+        base = base or self.base_sha
+        self.git("checkout", "--detach", base)
+        return release.verify_merge_group(
+            self.root,
+            base_sha=base,
+            head_sha=head,
+            stable_sha=self.stable_sha,
+            release_sha=self.head_sha if release_open else None,
+        )
+
+    def edit_release_metadata(self, key: str, value: object) -> str:
+        self.git("checkout", "--detach", self.head_sha)
+        path = self.root / ".release" / "stable.json"
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+        metadata[key] = value
+        fixtures.write(path, json.dumps(metadata, indent=2) + "\n")
+        self.git("commit", "-qam", f"edit release {key}")
+        return self.git("rev-parse", "HEAD")
+
+    def test_group_without_a_release_entry_skips_the_release_replay(self):
+        head = self.queue(
+            self.base_sha,
+            self.feature(self.base_sha, "one"),
+            self.feature(self.base_sha, "two"),
+        )
+        with mock.patch.object(release, "verify_release_pr") as replay:
+            result = self.verify(head)
+        replay.assert_not_called()
+        self.assertEqual(result["entries"], 2)
+        self.assertIsNone(result["release_entry"])
+
+    def test_first_entry_release_merge_is_replayed_and_accepted(self):
+        head = self.queue(self.base_sha, self.head_sha)
+        result = self.verify(head)
+        self.assertEqual(result["release_entry"], head)
+        self.assertEqual(result["release"]["base"], self.base_sha)
+        self.assertEqual(result["release"]["head"], self.head_sha)
+
+    def test_entries_queued_after_the_release_entry_are_accepted(self):
+        release_entry = self.queue(self.base_sha, self.head_sha)
+        head = self.queue(release_entry, self.feature(self.base_sha, "later"))
+        result = self.verify(head)
+        self.assertEqual(result["entries"], 2)
+        self.assertEqual(result["release_entry"], release_entry)
+
+    def test_release_behind_another_entry_is_rejected(self):
+        head = self.queue(
+            self.base_sha, self.feature(self.base_sha, "ahead"), self.head_sha,
+        )
+        with self.assertRaisesRegex(release.ReleaseError, "first entry"):
+            self.verify(head)
+
+    def test_release_prepared_before_main_advanced_is_rejected(self):
+        advanced = self.queue(self.base_sha, self.feature(self.base_sha, "merged"))
+        head = self.queue(advanced, self.head_sha)
+        with self.assertRaisesRegex(release.ReleaseError, "prepare the release again"):
+            self.verify(head, base=advanced)
+
+    def test_squash_rebase_and_fast_forward_release_entries_are_rejected(self):
+        tree = self.git("rev-parse", f"{self.head_sha}^{{tree}}")
+        squash = self.git(
+            "commit-tree", tree, "-p", self.base_sha, "-m", "chore: squashed (#9)",
+        )
+        for head in (squash, self.head_sha):
+            with self.subTest(head=head):
+                with self.assertRaisesRegex(release.ReleaseError, "merge method to MERGE"):
+                    self.verify(head)
+
+    def test_release_change_without_an_open_release_branch_is_rejected(self):
+        head = self.queue(self.base_sha, self.head_sha)
+        with self.assertRaisesRegex(release.ReleaseError, "without a release/stable PR"):
+            self.verify(head, release_open=False)
+
+    def test_release_merge_with_extra_content_is_rejected(self):
+        self.git("checkout", "--detach", self.base_sha)
+        self.git("merge", "--no-ff", "--no-commit", self.head_sha)
+        fixtures.write(self.root / "extra.txt", "not in the release\n")
+        self.git("add", "extra.txt")
+        self.git("commit", "-qm", "Merge pull request #9")
+        head = self.git("rev-parse", "HEAD")
+        with self.assertRaisesRegex(release.ReleaseError, "tree differs from the release head"):
+            self.verify(head)
+
+    def test_only_the_release_entry_may_change_the_attested_release(self):
+        release_entry = self.queue(self.base_sha, self.head_sha)
+        pruned = self.queue(release_entry, self.edit_release_metadata("impacts", {}))
+        self.assertEqual(self.verify(pruned)["release_entry"], release_entry)
+        bumped = self.queue(release_entry, self.edit_release_metadata("version", "9.9.9"))
+        with self.assertRaisesRegex(release.ReleaseError, "more than one entry"):
+            self.verify(bumped)
+        rebuilt = self.queue(
+            release_entry,
+            self.edit_release_metadata("build_id", "snapshot." + "0" * 64),
+        )
+        with self.assertRaisesRegex(release.ReleaseError, "more than one entry"):
+            self.verify(rebuilt)
+
+    def test_group_must_extend_its_exact_base_checkout(self):
+        side = self.queue(self.stable_sha, self.feature(self.stable_sha, "side"))
+        for head, message in (
+            (self.base_sha, "first-parent commits"),
+            (self.stable_sha, "first-parent commits"),
+            (side, "one first-parent chain"),
+        ):
+            with self.subTest(head=head):
+                with self.assertRaisesRegex(release.ReleaseError, message):
+                    self.verify(head)
+        head = self.queue(self.base_sha, self.head_sha)
+        with self.assertRaisesRegex(release.ReleaseError, "40-hex"):
+            release.verify_merge_group(
+                self.root, base_sha=self.base_sha[:12], head_sha=head,
+                stable_sha=self.stable_sha,
+            )
+        with self.assertRaisesRegex(release.ReleaseError, "exact base SHA"):
+            release.verify_merge_group(
+                self.root, base_sha=self.base_sha, head_sha=head,
+                stable_sha=self.stable_sha, release_sha=self.head_sha,
+            )
+
+    def test_cli_reports_the_group_and_refuses_an_unverified_release(self):
+        feature_group = self.queue(self.base_sha, self.feature(self.base_sha, "cli"))
+        release_group = self.queue(self.base_sha, self.head_sha)
+        self.git("checkout", "--detach", self.base_sha)
+
+        def cli(head: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [
+                    sys.executable, str(self.root / "tools" / "release.py"),
+                    "--root", str(self.root), "verify-merge-group",
+                    "--base-sha", self.base_sha, "--head-sha", head,
+                    "--stable-sha", self.stable_sha,
+                ],
+                cwd=self.root, capture_output=True, text=True, check=False,
+            )
+
+        accepted = cli(feature_group)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIsNone(json.loads(accepted.stdout)["release_entry"])
+        refused = cli(release_group)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("without a release/stable PR", refused.stderr)
 
 
 class ReleaseFinalizeTests(unittest.TestCase):

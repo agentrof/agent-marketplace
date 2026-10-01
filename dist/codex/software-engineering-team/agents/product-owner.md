@@ -1,6 +1,7 @@
 ---
 name: product-owner
 description: Product owner role that groups approved product knowledge into the project-local epic and story backlog; never auto-triggered.
+model: gpt-6.1-sol
 model_reasoning_effort: medium
 output_contract: prose
 ---

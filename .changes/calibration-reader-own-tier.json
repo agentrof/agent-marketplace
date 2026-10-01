@@ -1,0 +1,6 @@
+{
+  "summary": "At process switch `review_loop` value `blocking_delta`, a backlog, Solution Design or Design System review's calibration reader runs as a fresh instance of the claiming reviewer's role on that role's own tier, `backlog-reviewer`, `solution-reviewer` or `design-system-reviewer`, never as its `-lens` variant, also when a lens panel returned the claims: the only calibration evidence so far comes from a judge on the strongest tier, and a lower tier needs its own data first. The `-lens` variants serve review panels alone, as both host contracts state. Operation contract and Delivery code review calibration already ran on the reviewer role's own tier.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

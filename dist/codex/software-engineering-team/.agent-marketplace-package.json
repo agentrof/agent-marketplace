@@ -1,5 +1,4 @@
 {
-  "build_id": "snapshot.1e85c8ab4212a321812588055da7e92e2e4affa3f6648e1ceecf75e0a425de6d",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -14,283 +13,918 @@
     "scripts/backlog_review_inputs.py"
   ],
   "files": {
-    ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".codex-plugin/plugin.json": "4c7ede7d11255f1319604bdaa75e70769054921ebbac28f5d19c2c67d1b63d4d",
-    "agents/analysis-challenger.md": "5a385e36ca007d9dd1d415199b7d443ffa0a6bf825b16d026d2b0ad1e73eac66",
-    "agents/backend-developer.md": "07cb0bc711e9882dfd5e53270067cec8a83f5a97e4d54bd575a83dad52a1037b",
-    "agents/backlog-reviewer.md": "0c8ca2cead7ac6d168652a8458bd3a88bbddc8323e740081aeb3ab3cc7de8a72",
-    "agents/business-analyst.md": "ab54262f22c0f30045db4c5d28abf2145a2603b32e706a743856192d18d77f97",
-    "agents/code-reviewer.md": "43612f68bc5b6594197707e6514733fbbaa3195c75e17ff70a567fd48fd41a4f",
-    "agents/delivery-coordinator.md": "e4e5348a2c7e90173bc013026804fdbaca441742198a5e4752660fe98a088917",
-    "agents/design-system-reviewer.md": "e3a83523589ed8be0f26e9d133f2ecc6303fc7001dfc7b849f220a186ce51aa3",
-    "agents/devops-engineer.md": "3f8b7566b39549da6bbb7211f1a8d8bf0e0373277c013b59690b29f57180d4b0",
-    "agents/domain-expert.md": "90664cd765281b60f71d5bb25f5c7410e15a14f1f8d9de511f00932e2f6e5feb",
-    "agents/experience-reviewer.md": "b1dc65f90e6d5b88dcf3d3176a175a1fe6e2d6311e7e247cd0e813b4a1b41c9f",
-    "agents/frontend-developer.md": "1838f6a3679c7deb70835d071c3d72b42ba1159877aad590b83cf24e5da4270b",
-    "agents/product-owner.md": "f82aea7d09bb4d6f61779d49f8de82fbfda3e4896ad4ee1517675a46ea232622",
-    "agents/qa-engineer.md": "01d37d59b91b224411980a453265d8660b7ec3513ab16a127040ffcfbe8288cf",
-    "agents/software-architect.md": "1c12ede942e667a6e89bfc855de6b152707d4f17945987f93de8f6f25d62caf0",
-    "agents/solution-architect.md": "4cbd2f57a874d85d9c379e3f0bc582c0f0f2b40913113c849cb15f758322b5ad",
-    "agents/solution-reviewer.md": "1cd85d725b22dbe1a4bc1aad0c2457022542077e4d2ea05b091fdbb5e3a862ae",
-    "agents/ux-designer.md": "3d29ed6d73c5a2a21f8cddae7853892fa428116be0c4221ea63e24cefd3c54f9",
-    "constitution.md": "61d151abb2ffc3a73fb444b1edb945adb9aff345f66515450b272e34082c4034",
-    "flows/backlog-planning.md": "26f78db315eaafc582fe84194baf35f46eb231afa7c4bfb63ca38deb604c7e56",
-    "flows/business-analysis.md": "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3",
-    "flows/delivery-execution.md": "e9ec8fbdbd84522874f78bf2f43447c9f30ec9ecf3b458346abe7f480fae3d3a",
-    "flows/delivery-governance.md": "35bb00cea1ad2a11cde0f522c3fcca117db74dc4dff3a314cd4bba45b8c37f2d",
-    "flows/delivery-planning.md": "32ed9912457b48aa1ac8043ddd54b06a2c3f764c238fa150609e8df8007e9a42",
-    "flows/design-system.md": "d8beee971392da1f39f91627999cbf0dbec948eb27947c1eb2aed3960c0e8773",
-    "flows/design.md": "5e87edb63497b9b06deff9bf210b6674bc7990245d70b4f7e2be1b1fad9dfbca",
-    "flows/execution-planning.md": "f4ff85cfc92ff1a3bb7704aefec1bbb1df7acca1968aa7dab867bb1e263493e7",
-    "flows/experience-design.md": "5a75a218158906de88db0791092079dc8ec9c29ab7c38804dc003411aa1848dc",
-    "flows/operation.md": "18ddbab42c4f2c099414fb5e05c018d38d503897a5c947b48601c72ab6b3d389",
-    "flows/requirement.md": "fc7930f17daf899ed2375d4c67bf0fefcc86be7894f0f8d02b276527e67a3c04",
-    "flows/solution-design.md": "4e4507da3b15f7765b5d2dc0548d676c81ec621e0918d7595d65c121b1fc3124",
-    "hooks/hooks.json": "2b8065a160260ad8fb772dd5b1b8aef5aadbf9b40afc0e62dcdd61e1ef3876d5",
-    "host-contract.md": "8a161bbda8af6de6a2b9fe06b5f2a8849b8f49fcb3655ec43dcd798189481c42",
-    "product.json": "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c",
-    "scripts/architecture_compile.py": "f806085ee543b7371bddd37e04a06687ba8d9a4897fe29ed36d6bd65fd6d3e84",
-    "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
-    "scripts/atomic_file.py": "91ff2cafb430fcf3e174f7310fb8eff2442fac334e27c3b2fbfc92b5b9f90c0c",
-    "scripts/ba_compile.py": "6097b5a504ee3c8e98a414cb7a81961069d7435f92ce15882803b7cbec6a9899",
-    "scripts/backlog_compile.py": "3613c1f82912e51e256a98d8716f50fa11c0b282f6387e99511a1ca0304a6545",
-    "scripts/backlog_input_policy.py": "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb",
-    "scripts/backlog_review_inputs.py": "64cf22f37686c3b91cd91c97e7b24d66907a656c109e27289f7b3b05de5db62f",
-    "scripts/delivery_compile.py": "f68f9101cda662e8da33b7c0bdfdf4263e947ed95adb7894499a2d146f596b0e",
-    "scripts/delivery_git.py": "12c7324c78ded216dd40b596561c9806b9c10268bfcc1b822b1a058e73fca64c",
-    "scripts/delivery_governance.py": "70939ac67c9ac359f00a5cc7cee25a84e0b724527b34b3f6e22243e5fb66ec27",
-    "scripts/delivery_provider.py": "ff5d20f83641ebd8aed44c106c00012326a7d210f1c30a64633fac169e23e37d",
-    "scripts/delivery_result.py": "758f908dcf3bbe19d2fbfedc84177a8e55c790734bb3cfa8f768bb5a2da837db",
-    "scripts/delivery_verification.py": "0a0df687b5b0d90e943ef222f2337e7f03a38f78911c08b3bd65852151a20e36",
-    "scripts/design_system_compile.py": "531d5bc5da139cc0e5fa614d518d6e66187b336c34b97a031074de862285f613",
-    "scripts/experience_application_check.py": "ca3f446000c03fd4e87be8591d17845278ef666de4f25bc796e5e136eba5860f",
-    "scripts/experience_compile.py": "1f41f12ce03a47bb73e7a7be662565a8dc21f9c859b5cb9bcf95498136578b2c",
-    "scripts/file_issue.py": "9dabf91796c416be8909e517f9a9859faff12c24c868c0c0e037739820bee02e",
-    "scripts/file_lock.py": "d7588927231905320708a1ea2e7fc9251dffdf6a66f4a49ff24a3f353b1cc066",
-    "scripts/generate_codex_project.py": "0f7a8687f7f396aa4e02e3c80f2a6c26d8859bf2b7c98fe01970a277181166fc",
-    "scripts/landscape_check.py": "9a499822a336b6c10566f9fcc1b3e4fbfcd4403934ab45e788a4844bea66a357",
-    "scripts/marketplace_paths.py": "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79",
-    "scripts/operation_compile.py": "f446d7d9f1dd1fbe0cbee5992055c3aabd52057736db26b73330852fae95f8c9",
-    "scripts/project_config.py": "4ab9e8ff72684ba9217f247e7778b3d43ac1ad8d10c537e633f3b6d08d1066cb",
-    "scripts/project_instructions.py": "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e",
-    "scripts/requirement_compile.py": "288489412c3503d53a043d99b35fc46ce539ef6c4a86ae7e3e974761381914f4",
-    "scripts/requirement_route.py": "df313a76c6d6028ba7ab261dc643f4ac9208e586b71475562dba72824dbfb55c",
-    "scripts/setup_check.py": "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025",
-    "scripts/setup_project.py": "b3c8da81a64ec8658a13724bb5e26790f20f186da30e2757aaba3986e64636d0",
-    "scripts/stage_package.py": "01a2f84e5e793715d1ff7e18aa79584690ec1ced820d87c5a226e42c4ce87b1e",
-    "scripts/task_inputs.py": "170575c91bbc5944fd05f61c78cea6528d91079a40eb086f64ef0cceeb338ecc",
-    "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
-    "scripts/vault_check.py": "7c7e0136437dbec5a5bc04c74da9202daabfe2a1e658330d70a8b589069bbec4",
-    "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
-    "scripts/vault_hook.py": "15a90b6ec6f7545c228b919308e8b03cdf63bba2ab6ced6703f0a4c010f803da",
-    "skill-content/backlog-plan/SKILL.md": "f4314b20877593f179f92b726b93dc88e82e33781603599db0af98fe43349643",
-    "skill-content/business-analysis/SKILL.md": "2847ac9940f93cac7fb9d045dcba0b7bdcff5162f40949fece8161de6c7d195c",
-    "skill-content/business-analysis/data/space-schema.json": "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936",
-    "skill-content/challenge-review/SKILL.md": "0ec0116e2f8cadd9fadc4d8f15e2c2301579718df61e7f6e3e072031a16113ec",
-    "skill-content/challenge-review/references/expert-casting.md": "c43557a3cd48d3734c614e8a78c8d94d18df37e5f0e5a56c610962ca89f86f02",
-    "skill-content/challenge-review/references/lens-bank.md": "468169da1c43ecca6f7a955383b5b85d9dd24efbc6734f480cb9ef26f4c53fd1",
-    "skill-content/challenge-review/references/triage.md": "f07174787b4ff740668c4a6a2e48ab99b0a6519dc51c9338f17671579dfaa0df",
-    "skill-content/code-review/SKILL.md": "a79a33bd4f7bb0b306a96ceed29dda63f5dbaa16ee076c75a0dc7e7a7be3809f",
-    "skill-content/code-review/references/passes.md": "ae3b80c20c98b7c11e4579eb6773c815a649d186bfc1107098d48d6a4aadd5bb",
-    "skill-content/code-review/references/pitfalls.md": "9e235a5582e48c9f33fe91d16f617c320c308d87ac964f7a25e90bd83f87023c",
-    "skill-content/code-review/references/smells.md": "83febb50fbca82cbe6915a3e005ec647b34b374e376deaff403897d38e579c92",
-    "skill-content/configure/SKILL.md": "66acc26b7e4e29a4d45f62bce42378aa6a674d9e0110aef8b59db9e4ddba88ab",
-    "skill-content/configure/references/config-contract.md": "9dc549a1484c8ea60ba17faf2166250ae89c1f568e994c88ef31f5e1f2f6368a",
-    "skill-content/deliver/SKILL.md": "e3c9fa9b293ef749cbc7b7cfa0e2310e8426c259a071c4b1e6404c9309c7de52",
-    "skill-content/deliver/data/delivery-control-record-contract.json": "035df8a2dd36543054ebf7138a94cb5a0f4bd75e7138dbd69852ea32985b430c",
-    "skill-content/deliver/data/delivery-document-contract.json": "a8dd89ea8cc4e00e61db26c31c567c598ff2558d20d048708b44f4a198c46eb9",
-    "skill-content/deliver/data/delivery-protocol-1.json": "448c7a970a9ae38bb9348b96a2cfa2f2833b895e28bc84c5a3c87e622ce5b0d9",
-    "skill-content/deliver/data/delivery-provider-contract.json": "c2bd8bf6db8515aee2dc3b857a644484c6b0f1eed0954f55884c466ee08a3035",
-    "skill-content/deliver/data/delivery-receipt-contract.json": "4b47d51cd4c24d0aa448c2ccd5aef23c48da807c226543b2868f8b0c86e6e731",
-    "skill-content/deliver/data/delivery-result-contract.json": "9bfb0b83b9162a92961dea1768521dd65b6fb4359208c7583118424bb0335160",
-    "skill-content/deliver/data/delivery-verification-policy.json": "838a04fc434cbab3063b0721237dbbcc25712f2ece4b345654cc248aee740f7c",
-    "skill-content/delivery-plan/SKILL.md": "bd1020b0afede9f2e7f28c47e49f9d28548ecc51d2ec84158c98a5dc360702fa",
-    "skill-content/demo/SKILL.md": "8cd155dfb8f548ae0716fba785f8df7733645a7c808d8b781dfd2f5fe2567e0d",
-    "skill-content/design-system/SKILL.md": "605b2a47c861b0f3fdd35202506582bfa7db8d1a55d45a4607b88129281d1aaa",
-    "skill-content/design-system/data/standalone-template.html": "13536cf36955facf8576d166d640ae13414f768720c1bed21263617426931b63",
-    "skill-content/docker-compose/SKILL.md": "758e65bc4bf542ed5be998718708e381b8bc3af79162faefbbc5afb2b9a5424b",
-    "skill-content/docker-compose/references/compose-patterns.md": "551c7bc29d1901bc6a6e1f881303d12bd107a3d0dadfd564aca27b2cee436c55",
-    "skill-content/docker-compose/references/image-build.md": "0d6247c2604a71054ceb04093a0395784a477003054fac52f5e895ee71e0eaca",
-    "skill-content/docker-compose/references/qa-checklist.md": "acb390d812b303bbdafff02a5826b7da64743333e16c4ff0a2cfa411cfc1656f",
-    "skill-content/docker-compose/references/review-checklist.md": "f511894d3d82cdfde197df18f1c791a1e520e680cd4818a3582c5a43318c738f",
-    "skill-content/docker-compose/references/seed-scenarios.md": "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106",
-    "skill-content/execution-plan/SKILL.md": "c71567da01a430880af21120c3fa7784c151a6f04edcdbb52497e3dab5737113",
-    "skill-content/experience-design/SKILL.md": "721a37f9c549e35afe63f9a4c3f871c11b179e176734fa020b09c41aa20b6698",
-    "skill-content/experience-modeling/SKILL.md": "74fb2f0add3d794dbe0b28cfde7446a5bf6fc90b0ceb07b9799cdfae103d365d",
-    "skill-content/experience-modeling/data/experience-schema.json": "b7b29849d61ebaf15a5ff53a74f849e65fb6093da7b3dfe5e495eba5a2d63a37",
-    "skill-content/experience-modeling/references/artifact-recovery.md": "6ac6c2f37d61267d9838e44f050af8673a5252866d7a6c451c30e1f4371faeb8",
-    "skill-content/issue-report/SKILL.md": "80e51a863d2ae6730ff09bf4d6beaf820b1dd45d3eb36e9a9a6bb15f4d501734",
-    "skill-content/nosql-database-design/SKILL.md": "ef96e517e938a477d77f63c7b9f8a59d5e52ad92c6d308bf83f581367c7e5d37",
-    "skill-content/nosql-database-design/references/aggregation.md": "b71d0d487664fb93a9be3989666aade9d90e47c0e59a6903df2060e90141ac41",
-    "skill-content/nosql-database-design/references/data-types.md": "78957c3a8bbeaf0f4beec0b21e32a30aa330d9bf82c7d67ba3d949c88ef405cc",
-    "skill-content/nosql-database-design/references/indexing.md": "c747d2e8cf51fa5728d7eeb79fc5977545fc17f6f699a6d509314031615b12d4",
-    "skill-content/nosql-database-design/references/performance.md": "19b702d9e0d8e947ce24862f2632d7ec97042edf2c29d25a43ceae996839c7c9",
-    "skill-content/nosql-database-design/references/qa-checklist.md": "0e31c3e53eea8790844f3d0cad4547dccc5beaab21201edb5dfd35e65c96e6c4",
-    "skill-content/nosql-database-design/references/review-checklist.md": "841e08f2b1afe09e23c1818197235a52b525b17dfd7426691109b2c0d3307d72",
-    "skill-content/nosql-database-design/references/scaling-consistency.md": "64005a574e0123a606257e0de6086c4086a6486327035b86449698823fed1e66",
-    "skill-content/nosql-database-design/references/schema-patterns.md": "ca2773d7964e43649926d0afe1dcc330f3d47a9a7f77eee19726995b3fe4fc81",
-    "skill-content/nosql-database-design/references/schema-validation.md": "4ebfa5db83ff108d0352bca68e8ea13d2c7c860f13d876bd0f1a49d03db0802e",
-    "skill-content/obsidian-vault/SKILL.md": "931c87622196a746700885aa5a78081954df37d0b6dc571ff54e70a93dcf9a05",
-    "skill-content/obsidian-vault/data/vault-policy.json": "4bb27f9bd0dba383255cc4eced61e24163fe7f7c53c2160fb9e65bab43a67717",
-    "skill-content/obsidian-vault/references/graph.md": "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e",
-    "skill-content/obsidian-vault/references/linking.md": "7cdd63dcd67ed3326765abe065744e1b39c189e5399f1dfe8baa62f786ca52e9",
-    "skill-content/obsidian-vault/references/metadata.md": "90d77814efbebff0828b0586cd270d1f4eeac8728cefb74a4c8e7ad0243015e6",
-    "skill-content/obsidian-vault/references/vault-structure.md": "ed6fb5780b0a0214a27cf448de91542edaf44622137ed097c9304d0190e98415",
-    "skill-content/organize-docs/SKILL.md": "3e162775f2d478a4e37a0c14974389cefff970ef26e65cf2701605f47856f878",
-    "skill-content/product-planning/SKILL.md": "1602c902dbb7fde9367edf34d41bc8ec3379d2063095b845672a82a6aa1185c4",
-    "skill-content/product-planning/references/flow-metrics.md": "891e42fcf0eb759a0307491ceca79e247bab0e1a81c4bcbade51c36ad621a2e0",
-    "skill-content/product-planning/references/living-experience-contract.md": "7f7985b91205870b18fee297b106f2eb05016a0c0e9e81ac801104d706326d3f",
-    "skill-content/product-planning/references/prioritization.md": "d3931963973a535ab15e4cda4b550271788b0717182742c91d6b0c93411b219e",
-    "skill-content/product-planning/references/slicing-patterns.md": "133710c7ea873588dab8559850ad3ac372dc8d2cd66d98bfe305ed82ad59226e",
-    "skill-content/product-planning/references/structured-records.md": "36c8d8889482e9f146f184bcd7e2becdda004bccc654b537196827c5e272ab66",
-    "skill-content/python-fastapi/SKILL.md": "b335164b3bc4bdc80be739b1a99606881577ae198307d0ce89c9a819e1d51421",
-    "skill-content/python-fastapi/references/patterns.md": "352007b984f1b4596e85a2c85ab7d343c7d80f5abbae49e4cd44526fc03d49ff",
-    "skill-content/python-fastapi/references/qa-checklist.md": "d1ee3c235e62d50261b4ef409a547b7030de215929e974d8c1f582f4eef67205",
-    "skill-content/python-fastapi/references/review-checklist.md": "ac56808afa550eada9c15099b4233ffa7456a42f9da23e3508f128a3e1b493c5",
-    "skill-content/qa-verification/SKILL.md": "7f33586ac20787d32ecd3ce9447593156def666051bc9f68a1efbaee1ae1762c",
-    "skill-content/qa-verification/references/coverage-audit.md": "0ad8ab806ea51eb133a68c201e7998b03ac4c2346568224f2ec219ea25d97a40",
-    "skill-content/qa-verification/references/exploratory.md": "43aad71b88ddcf23d2b53c4a268f057c4471fa7395c88b7cb4de728f686f0ca3",
-    "skill-content/qa-verification/references/mutation.md": "619d535ef451a5359c98c97ae321cb2999038446cd17228c0c3e6eb0abdbd488",
-    "skill-content/qa-verification/references/report-format.md": "661e7af531ff0cf84784c9833738bb62ce8631fa394e33e42fe4e24e2cbd56a6",
-    "skill-content/qa-verification/references/runtime-protocol.md": "7ddf13911059f2676d23cb1ae8a0e33e69f0f3cd7e2f2a9c3a7f4149761194d3",
-    "skill-content/qa-verification/references/test-design.md": "c8ef52eb9cbb30c14fcb905b49b92a9e88489ba9a842b75834da615d7fb330cd",
-    "skill-content/qa-verification/scripts/scenario_report.py": "a5bd9738abe8873b63c085d97107e59cdb2dea87eed47890bddaa97064a6de77",
-    "skill-content/react-typescript/SKILL.md": "ff247db8ea0452aa6c654fe970db48786ea52005528c1e9ee5ca4903b5cdd747",
-    "skill-content/react-typescript/references/accessibility.md": "bae66259020b2b669c23530bbe110171e3fef27148032fb0a1ffe3d7f4a7fe09",
-    "skill-content/react-typescript/references/conditional-capabilities.md": "418840327651026bb82d5b2a73ef56fd4f87b72e33cf94a042900eed5dc92ad9",
-    "skill-content/react-typescript/references/patterns.md": "79013fcfc4dffe851bf1b4f0d30a742627e1d890b5e25bacecd112a8b3f7b562",
-    "skill-content/react-typescript/references/performance.md": "c1f04f2bc1b85311aa4b000db81bf0efc3561c1ce3544257875135a6e87901aa",
-    "skill-content/react-typescript/references/qa-checklist.md": "b50e11c0d3ed0874040ac632cbea225c4e3806a7e1e0bb3e7e9ae0593f21a5a8",
-    "skill-content/react-typescript/references/review-checklist.md": "7668cc3b56313ab327ca1f262dfacd5c1ffc4fbc3c68ca8c537b4af9537685f0",
-    "skill-content/react-typescript/references/testing.md": "3fc1be0e89bd61b6aff4f0f7abc3174b2aeabb048765038566e96b2ea7ed0792",
-    "skill-content/react-typescript/references/tokens.md": "2d81af38678d1e5701ea3f3144c8261f06cf05accfb97474c087e25df245035a",
-    "skill-content/requirement/SKILL.md": "bcbc588c7690c4bd789d28c4cae0e9768e2a26c17f415d8dc99610c9ba7a4e0f",
-    "skill-content/requirements-analysis/SKILL.md": "67dca388f5ffb7212ba7d1ae5f3e2adaa9e211e2b082f28036a4066472e12452",
-    "skill-content/requirements-analysis/references/decomposition.md": "7159a25a15adcb103f327e5ee2e231546dbb750867ccbb16c0bb073903e0d03d",
-    "skill-content/requirements-analysis/references/elicitation.md": "f54269d3e32b41e53f8d85415d988236dc1b3304a4d89ff52604907327587d0f",
-    "skill-content/requirements-analysis/references/modeling.md": "9ec0d37ac04ddd74c10ce772e54ab1462c81619e7ac6277a632693ae8890e737",
-    "skill-content/requirements-analysis/references/nfr-elicitation.md": "154730b8b546e3e0e538e6eb3dab21b1304d5a2657148352cda02e19e0c2ecb8",
-    "skill-content/requirements-analysis/references/research-methods.md": "fa08b909a2863a7162a9199f21c234c3c58da40afb3cb31e5ad05a109fdc172f",
-    "skill-content/requirements-analysis/references/space-standard.md": "cc8eab275082721a22c16d4d0d545e62faefdab626e7cdfefffc899f8abb28c8",
-    "skill-content/setup/SKILL.md": "8e4b23fcbd1b4b9d7ab2cdaae4be3b9da390ceb1f7ac7fcb216badedd7a0a8b7",
-    "skill-content/setup/references/ci-bootstrap.md": "315956adbe1f396a7886d4fa2125a9fffc03259a3d3897bf4db435caa73bdb1e",
-    "skill-content/sketch/SKILL.md": "9a2a84b499d3f2632bde2e6ccb6c1e0f46887cdc4d644bb77181a11ebe7bd586",
-    "skill-content/software-architecture/SKILL.md": "5944f0a6c14b43a82ae5c9e212b8b2db9ca5607522533c3e6cddfbc947158564",
-    "skill-content/software-architecture/references/api-design.md": "b9d5f25154fd170da480ae40151db662edaa17b43afc07bc164f86f29c8c5055",
-    "skill-content/software-architecture/references/architecture-styles.md": "83f0dbd77e2b70a436518efc0162cd069dd345bdf921a446880ab2f747688cf7",
-    "skill-content/software-architecture/references/cross-cutting.md": "580608a33dc8e5392c7462ddde46600c9af88912b4cbaa150fe5730e3d38f83f",
-    "skill-content/software-architecture/references/decision-records.md": "c7a58d15cff6bb27ca100573de7930d186366a827a2429c9ac63f6971c80d044",
-    "skill-content/software-architecture/references/design-qualities.md": "53fd052b982c7085c089dfee7ad7c31ec660d3b790881fb16c0848e7423287bb",
-    "skill-content/software-architecture/references/nfr-budgets.md": "1c61dcee6970555a40c968988f98c074d10260ff8c9285533bae34e9c83e56a3",
-    "skill-content/software-architecture/references/service-boundaries.md": "cb1a7f5d9b887b6c1d7102451909efe59acb24b1ecc42bcf802bbdebc2294355",
-    "skill-content/solution-architecture/SKILL.md": "5f40e11f95bb8764e57cfb1f5f3d626620418daee739d70a579b31f562a7d5ba",
-    "skill-content/solution-architecture/references/challenge-lenses.md": "e3dbbf796d045221d66c57969571abdb58fb2bb0ca88cab23fb5f5c2baf83c84",
-    "skill-content/solution-architecture/references/evaluation-method.md": "4527cbb9c8a788830e3143c23d7362095a1f1dea82e0d33e49d98c989c747f4c",
-    "skill-content/solution-architecture/references/landscape-docs.md": "de227981e6ba33a906c37286efb853e718560ad9918ff511e96e705b422d5ceb",
-    "skill-content/solution-architecture/references/worked-engagement.md": "0fadb4587700c566b9e6738e79c194b4f86831a13e970ac354dc8fbb1c8fe1bf",
-    "skill-content/solution-design/SKILL.md": "f5e7a43f63c7c3ded8bcc54d6c8cf5cfa151bbaecdd36c00206cfc85179570bd",
-    "skill-content/solution-design/references/engagement-session.md": "5a97cbd36d89e6d45c6e03f9c2bfe3cc4c312bc123d7c491a36d9fe8ad777649",
-    "skill-content/sql-database-design/SKILL.md": "d0946aedfe3e4d8dc5a063cbba8df3be7c65b49882996491b03eac96d604a159",
-    "skill-content/sql-database-design/references/advanced-patterns.md": "e7f1be274a5edad05d60548ada0044173b05fdb831555e7d2927b1b7e3202352",
-    "skill-content/sql-database-design/references/data-types.md": "278ec401fd5117573c5b4c0f7cf1df7abced3978b4cc32098df5d0b2f66b54ce",
-    "skill-content/sql-database-design/references/examples.md": "e6b6c7b9e9ea72235e9664173865e8d766d7c4ae62d03ed58ddb5743f41730ca",
-    "skill-content/sql-database-design/references/indexing.md": "cb189199fc19f4286daa329c6e05a8255130de2b6b8183decc62fd5413afaeed",
-    "skill-content/sql-database-design/references/normalization.md": "25ca0ee856ff8a0c3e21a03f260f349afc0f852638630ac93aac6da7c5a9e7d7",
-    "skill-content/sql-database-design/references/partitioning.md": "e41b3b0d8ec1caf94159244ab7b138e3ea96dd95ab288afc15c75cbccb9c36f1",
-    "skill-content/sql-database-design/references/performance.md": "cd06c298470e5e7e2cb6a146cf33d752c335f7e75aeff367ddad6ac2df121caa",
-    "skill-content/sql-database-design/references/qa-checklist.md": "325ce7b1d1493e000b4fd6d192587689d50f5fd6da0d4a0635689284a424551f",
-    "skill-content/sql-database-design/references/review-checklist.md": "2a883309e014134ae221cc510074ddd4f115396ed042d95a3ff0db0447efdf8e",
-    "skill-content/ui-ux-design/SKILL.md": "8ade23b6f3103035b9958a23aa476446d537c9d44af9674f97aa50a8e32980b0",
-    "skill-content/ui-ux-design/data/charts.csv": "a7efabbc4134978ca452780e3603da87836d89f7cb614a840f4d0b43c044fdf7",
-    "skill-content/ui-ux-design/data/colors.csv": "5a6cb6c5d6f19b5f5e51865ae1e643e4baa05d04304d0bab976f064632149a6a",
-    "skill-content/ui-ux-design/data/icons.csv": "a1e15d32021b79c08da3d8acf675150aaeea4c5fe838efcd1c51a5c8a7584ee0",
-    "skill-content/ui-ux-design/data/landing.csv": "121a2cac7cf21050234b5f80e7b4e182f10123536032e0f9ad862ad3aec9677d",
-    "skill-content/ui-ux-design/data/products.csv": "50506839d8bacdb133d57ccdc8a4a668f9ac14ecfbeb8cf03a569e6d6cc0e135",
-    "skill-content/ui-ux-design/data/stacks/html-tailwind.csv": "d186b7caba84ed43a876c30718adee2369dc425fccbb1a64be140ed319d98704",
-    "skill-content/ui-ux-design/data/stacks/react.csv": "fa69e0adfc474c8e89baa78eb8c461919d8035dc5f8a59de9dfed56748b56f79",
-    "skill-content/ui-ux-design/data/stacks/shadcn.csv": "395c2e415ef6f48a474acccdc8eb2c7258a6ed751a5037ba171a2d8823e02ded",
-    "skill-content/ui-ux-design/data/styles.csv": "246d807aa70f7b46e2b79ebeeedefbf1c44f8b9a5f0c964f8f02db9e6e63f368",
-    "skill-content/ui-ux-design/data/typography.csv": "e5eb2efe5d6801223152e98759ba26e23002cd464617aeac83b6fabe53abc457",
-    "skill-content/ui-ux-design/data/ui-reasoning.csv": "06e4369445388ba9b7a57347510b125b7a2145bbf8546a327ba50292503b204a",
-    "skill-content/ui-ux-design/data/ux-guidelines.csv": "e01943c433b2cad3040f19389b3b0455673758a569b7a927b5bedf65c989cb96",
-    "skill-content/ui-ux-design/references/design-rationale-method.md": "8ef57c220ad22040fe2031094a965225b78f0f0dea328ace2ea7ef781b80be7f",
-    "skill-content/ui-ux-design/references/recipes.md": "a00e7194bc9b73e02598c0c1fa3226e454b6834cc28a9bce81419120d70e71b4",
-    "skill-content/ui-ux-design/references/token-architecture.md": "93d7f2d8cf242123528866c258441281a9e970f9184b8fc948da97df9e0a038b",
-    "skill-content/ui-ux-design/references/ux-quick-reference.md": "7d7ffaf6b4d0577cc557ce4d49201416809b5515d3551687c90ed2c494f443ee",
-    "skill-content/ui-ux-design/scripts/core.py": "9ac50d35986715b13539fc5361ddde3aa9cf1e4476ccedac7e164a94a01f1bba",
-    "skill-content/ui-ux-design/scripts/design_system.py": "f1a5542a935160e3e87c87e41170dc8c95c215f9c9c96ffd9bcf3f44eb7182a9",
-    "skill-content/ui-ux-design/scripts/search.py": "03e6a9afbb7c4d38dfe3434cba4750a6439e858d4aeea34e9810e8cca917f5cf",
-    "skills/backlog-plan/SKILL.md": "351a86df622b1a1027a3f1034071255d552281470b95eb0d7566134932daffb6",
-    "skills/backlog-plan/agents/openai.yaml": "c6248dabcc8c10e049664c290a10b39cff0e07a624ee24b6ef54d20deb3d75cc",
-    "skills/business-analysis/SKILL.md": "019f7c815203aa2a94d4e6398b051249f9a8f520889748d38d13177c782e5476",
-    "skills/business-analysis/agents/openai.yaml": "d465c4a5efd3d627233f727aaa1a6463c5c495393a5c4df63586137e0624eb52",
-    "skills/configure/SKILL.md": "3c5e573f4f194f70b8832a4474e9a00d1c8e9c6f148059972ae503ae82e2adfa",
-    "skills/configure/agents/openai.yaml": "b632fc369e53d7d3d008510ca4af2030917f85b2e1d6cc6c360eef6b74482b3b",
-    "skills/deliver/SKILL.md": "2bae182828407b90a206448b65b2eb5408e094e0dd8673c46042f37b9319e56a",
-    "skills/deliver/agents/openai.yaml": "49cf26cb9debf99968b30ec8d1635682aafa7bf50c02b5c6da1b3a157458a3b6",
-    "skills/delivery-plan/SKILL.md": "0523d6dd649a46c83a8d820d9f2c2642ddab457df2db5724d909253753793900",
-    "skills/delivery-plan/agents/openai.yaml": "e5c01a32fe893be4b0fa12435e22cddcff2f73df99b901c65471fae20dda7981",
-    "skills/demo/SKILL.md": "b9de8d7e51d3bb6ce77730dc72cea7261b3ddb9551e4623075f033a515ac5d57",
-    "skills/demo/agents/openai.yaml": "9ca2fd30a62b377fc0ade63a8482bdf2a8beaabf4330eb460bb0e809c1dc8bf0",
-    "skills/design-system/SKILL.md": "5825ed4144c88512b284074a0329e73c048c8d6dc6a05c33cb4938bd763d0231",
-    "skills/design-system/agents/openai.yaml": "ab9ab1c971b783cb963acfe8e96ddb51da3baf7384dba3bfcb6bf541dd3e48d8",
-    "skills/execution-plan/SKILL.md": "9322c7d0f04568a1bcfed73eb31ec01b30928eed7ffa42aecb7d8861e07c41a3",
-    "skills/execution-plan/agents/openai.yaml": "85e6c0e15b3d2dd9077860ac1361c98c0365a96ceee16f81c0d3d2163eaffd91",
-    "skills/experience-design/SKILL.md": "9c68d5bb4d4595c9375209b78828496c5baf65e91109e5e263b07adf20c94257",
-    "skills/experience-design/agents/openai.yaml": "017564b16299c2b2b681a4d0b9e1a0273d5601e301fa399c9f2e6b9f3a687825",
-    "skills/issue-report/SKILL.md": "6a735feeab64ebc57d64e9df188bfabe8f3f83bcc329ead86e08d37d6f58a747",
-    "skills/issue-report/agents/openai.yaml": "5bab1db53e224e3cb0d2c389a5ea09323e414f7fb48568cd01ccf527ebb80954",
-    "skills/organize-docs/SKILL.md": "45516844bae8ed1853481ce60d33470189d886cb8567f595c26a6ed860eb2971",
-    "skills/organize-docs/agents/openai.yaml": "12df6d837ff2676cb016ff5e7e25ae0b1f1ab63b34d4faaf52472a099e04019c",
-    "skills/requirement/SKILL.md": "63bf023a1e834aeab3c96897b236fd321c9ae2dfabbeb01653512ef81de113c8",
-    "skills/requirement/agents/openai.yaml": "1b9139db34b7c1d3be77cc195b50a038958dbef3a945529e33f3033e75931da6",
-    "skills/setup/SKILL.md": "94cd155b871f1f40d231d2a37ebc3f4dd7b2d74505d17caf17544054a85ae384",
-    "skills/setup/agents/openai.yaml": "13579189bbf7b1f7b9f48c9491883cee666d0f9e6b95cee54b9c2a2dda980914",
-    "skills/sketch/SKILL.md": "910138f1d015f071cc86ce36fc602224e057efd18375be5c5668fd69c5a15bcc",
-    "skills/sketch/agents/openai.yaml": "2c5a886e4b37ccc772a35c1c82c7a258f20017fd5828a668123c5bd35897af7c",
-    "skills/solution-design/SKILL.md": "7fa6cc24b057e2ff6a7c64c7f5ef52a140e5a81b922e861689718930757ac5cf",
-    "skills/solution-design/agents/openai.yaml": "4b42a50fb8966874cbd89a37253240fba87533496e8d0462c69a7745b874cfe9",
-    "templates/AGENTS.override.md": "b5ddeeed7bceb6cf9d88bafa94f1cd822a9ea094c21c4f768f99e07db7833c3a",
-    "templates/CLAUDE.md": "dc539ede3d5333d6c900bebae2c1ac612ac903803dc3915b4d742b785d3567ff",
-    "templates/ci-tests.yml": "1ba0c7a800f23c244710f538073f122d10d356be1ba652cfbef6c2844b49f588",
-    "templates/gitignore": "fa6da40c9313474f7d39f430d2311c2a6d646dfbceb5df566b454af6052d6a8e",
-    "templates/memory/agent-marketplace.md": "682fdb71b913a3eed47868304164ad1c7fc086e497a4e78e064cd59d111d5702",
-    "templates/memory/me.md": "707506fcae21f5bbcc3f14544cfda8369965dcfc40e808a48e94ab362658fa41",
-    "templates/memory/profile.md": "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5",
-    "templates/project-instruction-surfaces.json": "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c",
-    "templates/project-instructions/common.md": "501d3a934b917da1acb5fe07a6d0ea24ae5c53e919cf2ddceb403d653d014435",
-    "templates/project-instructions/host.md": "a3a7a5e62acc8feee66022cc43d9d4f1e201eb45a9954948e57d8686fbbe4afa",
-    "templates/project-instructions/team.md": "f2514f8c3b16405e1fb87671ebc12ddeaf4649af090ad3e7dbb121d562143d53",
-    "templates/task-input-contract.md": "a3c792688b1952f176db0ea58dedf234c04324a5b1e2f54fdb1ee6b0d24fa135",
-    "templates/task-input-policy.json": "2225a33796c951a1dcf1de9d26c71eebf5227cb5957f4f68e612f7c3320bd53e",
-    "templates/vault/.obsidian/app.json": "d81f5f2d2db5f65f24db5235301c5dffd41412e66db7202cf65f9f032cde078d",
-    "templates/vault/.obsidian/appearance.json": "208f3a78f0bc1d2209a4bd36e0dd05d875434e66bb3859deb3f7659bf4a49ed1",
-    "templates/vault/.obsidian/community-plugins.json": "065b2ec3606b793e7322744adc2e4143af53c72a2ef2c5a045d2b25676c7048c",
-    "templates/vault/.obsidian/core-plugins.json": "81afebcd42fe23baf54427e809ab4521be53884cc07085ee136f9c62e8187f36",
-    "templates/vault/.obsidian/graph.json": "3a568911f0730063d9bcb75319edb2726cdb69dcfbd103b52a75ebe84a485088",
-    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/LICENSE": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/data.json": "2381b820b8f3e929056b55f497fd2579765777b693c2c0762f995ef6bdff02fd",
-    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/main.js": "8a55ac74ea628a9db5b2fae5fd57031638c794279e24610efc19ad0f5a6fc444",
-    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/manifest.json": "a83265e1e8a0db3658d7121f8611650b74daa8b11760ead3579ad1953e71f136",
-    "templates/vault/.obsidian/snippets/brand.css": "46b840eaddc2c50abf29b4b0b145e1e0774c4760e89b4d09a7a9ce122b33bbbe",
-    "templates/vault/.obsidian/types.json": "7e2935e218d6974b3abef490b2fb23624f4a9eebcb355566a438e83e912754ff",
-    "templates/vault/home.md": "b62efb50cb11a9e14ea667a2e12cbff4789ec458c705cd226440c9d5d25b3397",
-    "templates/vault/maps/backlog.md": "b4e9c92f341ef5599bf8e6980856f6e8e74dd8e4effe01c0d8f8ec88eb4e2a7b",
-    "templates/vault/maps/business-analysis.md": "4401acf304330465362dc4888b0de2da5bf8088e107343f7ee7a0d639eb0a4fa",
-    "templates/vault/maps/delivery.md": "72f6669654bc129149b128ba104a9605c8d3d1e23e9411030b402cc9af667637",
-    "templates/vault/maps/design-system.md": "4ef95429c9d4bc7699db7b4f94adee0edc13a57c41ce5fbb770d956262c9da87",
-    "templates/vault/maps/experience-design.md": "58db39a90b479587a8aa12ede9eab7a9291591e79bc3a0138adf214edac389c3",
-    "templates/vault/maps/operation.md": "1f5d0ec5516fd60f48326cec634825406d8d8a7fc78e9076ec4934fd0d68ed38",
-    "templates/vault/maps/requirements.md": "6a8b9d9d5577cca9fa7f9c1cada975214c685b6091e02730e88ec810934ab295",
-    "templates/vault/maps/solution-design.md": "ca671249c77bfd95ed2bc57f65248a005f0d56c991c4de023be2e86843420682",
-    "templates/vault/maps/system-architecture.md": "6608e750755077fc1828b1fe40456f9828ca1fc1da82234c5864f5e996e41d77"
+    ".agent-marketplace-generated-distribution":
+      "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474"
+    ,
+    ".codex-plugin/plugin.json":
+      "4c7ede7d11255f1319604bdaa75e70769054921ebbac28f5d19c2c67d1b63d4d"
+    ,
+    "agents/analysis-challenger.md":
+      "03aaef2a63c2f15b12c4d3dd7143920086f44122ec1ffa76c3661f2238d01913"
+    ,
+    "agents/backend-developer.md":
+      "fd8681fbbc84b04cd394a4f7da1c26a131b6836a5921684b05b67f3e3759827f"
+    ,
+    "agents/backlog-reviewer-lens.md":
+      "eea5a0ba44908b24fd750192ff461d220cb65376f3dd9c71e66f57d38fb7213b"
+    ,
+    "agents/backlog-reviewer.md":
+      "70addf26e955bcfea759e6a4054de0f0684a67e9ab7ae0ff2472ee8133b495fc"
+    ,
+    "agents/business-analyst.md":
+      "2878504d82064e7219d115ab95f3bf5d1211f02e34a0fce14a93829e37e4fb49"
+    ,
+    "agents/code-reviewer.md":
+      "397008de7f378c6410db0cc1636fb58ea03e6f9aea449302ab4a8cd1e4f0dd4c"
+    ,
+    "agents/delivery-coordinator.md":
+      "6b111f8a9183db4ea44a681353a00d5a7eefaae4daae269e32d497531f81015f"
+    ,
+    "agents/design-system-reviewer-lens.md":
+      "93ad8579de2b67a0676b32ea0f3045e58c3c0d657fe8d27af3a95c7e1ac5c5c6"
+    ,
+    "agents/design-system-reviewer.md":
+      "03d123d5e24429d059eeda22118b8b55249517d4402ff9886002d461746d46bd"
+    ,
+    "agents/devops-engineer-mechanical.md":
+      "927957803e4b0980b50d0bfd603d006d256a5278d8eeaa2aa07a76bf8b4d8921"
+    ,
+    "agents/devops-engineer.md":
+      "7cf6c4552bb88dea74a3ce5cf7b5d1020b9f41090e048348ec8ce427ed68e14f"
+    ,
+    "agents/domain-expert.md":
+      "6169c7773142feada2930cac6abaa80c30ac9a5a058094e6c9cb8788272add5d"
+    ,
+    "agents/experience-reviewer.md":
+      "4f35c4b67b61a774fa2b7c8cf3cf61588943fcfbbaa76c632e073b12cad7c8cc"
+    ,
+    "agents/frontend-developer.md":
+      "c1a906186972f12ddad3a448e5b31a0fa9ff8edb587afe53b79f5b40d78ee8b2"
+    ,
+    "agents/product-owner-mechanical.md":
+      "b9cb1758043b61ed03697a00f036a5b60634419f1c33c8a760dc4ddf824e745e"
+    ,
+    "agents/product-owner.md":
+      "96a76d72e37e1fda56ab2a4a686c74afb4c9617530c910824d4afcc7fba6840d"
+    ,
+    "agents/qa-engineer-mechanical.md":
+      "5de2206d7f02b5b80f44d9fe33a9121e0ccc6455c0aa349666ff3f018d1db2eb"
+    ,
+    "agents/qa-engineer.md":
+      "1d316b89f24bc435c30c1e746c79f2f3eba097f1994145e153db3d9d0dea750f"
+    ,
+    "agents/software-architect.md":
+      "09e7b9c44d5116eaba3863683f0016fd96d8b5e34cddf2c03609e54c6ea6e7af"
+    ,
+    "agents/solution-architect-mechanical.md":
+      "81bd2c66ea64347bc637fb9a8d33d987bb2db3754c9673367dadaa070ce79926"
+    ,
+    "agents/solution-architect.md":
+      "1a7840ada15660691ee671124e23b677011375b8be3e2ce0708254a2337ea00d"
+    ,
+    "agents/solution-reviewer-lens.md":
+      "9631c0b4b3303682ba2cb093b3ef3d48fbb2ed7285b38217c57a956bf7c7790f"
+    ,
+    "agents/solution-reviewer.md":
+      "1d803752a0dcc4243e15215db80fbc3f637d8e2fbecbb125dab969537b6ec4b3"
+    ,
+    "agents/ux-designer.md":
+      "6f3d46e3c9b2caebbd63daa0df78bc25dfa64fcb7f2b1a9da3631bebbdcbd2f9"
+    ,
+    "constitution.md":
+      "61d151abb2ffc3a73fb444b1edb945adb9aff345f66515450b272e34082c4034"
+    ,
+    "flows/backlog-planning.md":
+      "437172477a147c181777552154ba985d1ceb5cd903ee4a064fc5372ba19ed80c"
+    ,
+    "flows/business-analysis.md":
+      "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3"
+    ,
+    "flows/delivery-execution.md":
+      "719818b7b1fb057501f0c851a15749290673e654290a9e6b5731ae86ee5418c0"
+    ,
+    "flows/delivery-governance.md":
+      "ef2fa67262e0f500ba49b80d2865af6038638327745b989303acfaf1b1446fb7"
+    ,
+    "flows/delivery-planning.md":
+      "8f4680d9e6b128dd725f2e616a132b478529379f8c80a118097448f3fb41ad7e"
+    ,
+    "flows/design-system.md":
+      "b2690f943def375af5410f258dd24ece27c28798c310f96c4991687f466fd5fd"
+    ,
+    "flows/design.md":
+      "5e87edb63497b9b06deff9bf210b6674bc7990245d70b4f7e2be1b1fad9dfbca"
+    ,
+    "flows/execution-planning.md":
+      "02b7f30335f435d7410d99b6ad1b630a245d67b786c12a0a83bf665cb0d4a153"
+    ,
+    "flows/experience-design.md":
+      "5a75a218158906de88db0791092079dc8ec9c29ab7c38804dc003411aa1848dc"
+    ,
+    "flows/operation.md":
+      "2588f5b48a578c60381da1fa42dd36422080a7e09c67855a08cb68efc592bf55"
+    ,
+    "flows/requirement.md":
+      "fc7930f17daf899ed2375d4c67bf0fefcc86be7894f0f8d02b276527e67a3c04"
+    ,
+    "flows/solution-design.md":
+      "d972c46964ec83c1387e656a4fa2d1c52e38bd92a90f26a90adbcd68652b856f"
+    ,
+    "hooks/hooks.json":
+      "5ddbd99f207c73d0ee3880b1324c6eb4b3532f15a9b65945384edf899680b1ba"
+    ,
+    "host-contract.md":
+      "93fce8e26f31ea28d071ab29428d87e6e37c0386136cee74203ad5c023f89d0f"
+    ,
+    "product.json":
+      "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
+    ,
+    "scripts/architecture_compile.py":
+      "dd7474c5bfa57e4a88d49bd15900902bd23630597533a10601b15ed2f06bfd6b"
+    ,
+    "scripts/artifact_check.py":
+      "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860"
+    ,
+    "scripts/atomic_file.py":
+      "91ff2cafb430fcf3e174f7310fb8eff2442fac334e27c3b2fbfc92b5b9f90c0c"
+    ,
+    "scripts/ba_compile.py":
+      "6097b5a504ee3c8e98a414cb7a81961069d7435f92ce15882803b7cbec6a9899"
+    ,
+    "scripts/backlog_compile.py":
+      "a2ab136a640a51427f97de032f04ed5b1de0f143f8c73639803fce07b52adf99"
+    ,
+    "scripts/backlog_input_policy.py":
+      "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
+    ,
+    "scripts/backlog_review_inputs.py":
+      "a66cae017eb2341b1134db8a36f91289a7aeed49547de1e13355d4332907c2a0"
+    ,
+    "scripts/delivery_compile.py":
+      "b7977ee3129636baf93c717cede18649898f00d15837d2dd1a54d11360fe6c5a"
+    ,
+    "scripts/delivery_git.py":
+      "e54facd7563bef9e8b79b804ae374515423ce6dcd5d3ed26027d5dd5b18189fd"
+    ,
+    "scripts/delivery_governance.py":
+      "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
+    ,
+    "scripts/delivery_provider.py":
+      "ff5d20f83641ebd8aed44c106c00012326a7d210f1c30a64633fac169e23e37d"
+    ,
+    "scripts/delivery_result.py":
+      "38ac440c9b3c666ce9d771205c6d980e6a00013b8c50e1b206cea30f6cfff6c6"
+    ,
+    "scripts/delivery_verification.py":
+      "73b5bfce7409db41332535a6046dd0733298da5f89a72982928cfa461c93cfd2"
+    ,
+    "scripts/design_system_compile.py":
+      "211998f0daad95f788eec1199d424ced2e2b8976f7763bad851d834f296db3e9"
+    ,
+    "scripts/experience_application_check.py":
+      "ca3f446000c03fd4e87be8591d17845278ef666de4f25bc796e5e136eba5860f"
+    ,
+    "scripts/experience_compile.py":
+      "1f41f12ce03a47bb73e7a7be662565a8dc21f9c859b5cb9bcf95498136578b2c"
+    ,
+    "scripts/file_issue.py":
+      "9dabf91796c416be8909e517f9a9859faff12c24c868c0c0e037739820bee02e"
+    ,
+    "scripts/file_lock.py":
+      "d7588927231905320708a1ea2e7fc9251dffdf6a66f4a49ff24a3f353b1cc066"
+    ,
+    "scripts/generate_codex_project.py":
+      "0f7a8687f7f396aa4e02e3c80f2a6c26d8859bf2b7c98fe01970a277181166fc"
+    ,
+    "scripts/landscape_check.py":
+      "afd0b167c4f8b2d685ed4e4041a66178a706cece248d19dcb566814e0f534c43"
+    ,
+    "scripts/marketplace_paths.py":
+      "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
+    ,
+    "scripts/operation_compile.py":
+      "30ca20a91cbb000c680d1dd49bc0355431e8cb944b655dc3beb09022b9511125"
+    ,
+    "scripts/process_policy.py":
+      "673e45268b8b1f8161ecb4f1d26a9d5c970049015022e804a70c84b7da87828a"
+    ,
+    "scripts/project_config.py":
+      "4ab9e8ff72684ba9217f247e7778b3d43ac1ad8d10c537e633f3b6d08d1066cb"
+    ,
+    "scripts/project_instructions.py":
+      "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
+    ,
+    "scripts/requirement_compile.py":
+      "288489412c3503d53a043d99b35fc46ce539ef6c4a86ae7e3e974761381914f4"
+    ,
+    "scripts/requirement_route.py":
+      "a6343f84ecec31095e660d4ea8cfde2711d859304c14fd1f0be04ad409f81131"
+    ,
+    "scripts/setup_check.py":
+      "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
+    ,
+    "scripts/setup_project.py":
+      "b3c8da81a64ec8658a13724bb5e26790f20f186da30e2757aaba3986e64636d0"
+    ,
+    "scripts/stage_package.py":
+      "e0d667a6012af3cc67afa787ebaa6d12a9b9bf87adc422cc70dcd4b61456427b"
+    ,
+    "scripts/task_inputs.py":
+      "f5e6ea74c63c0be44259129484c45e0e5f6f07455f930c3a697d54bf87e97911"
+    ,
+    "scripts/team_guard.py":
+      "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6"
+    ,
+    "scripts/vault_check.py":
+      "7c7e0136437dbec5a5bc04c74da9202daabfe2a1e658330d70a8b589069bbec4"
+    ,
+    "scripts/vault_gate.py":
+      "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2"
+    ,
+    "scripts/vault_hook.py":
+      "dcb640372b69ccd04252b8474aa5e0d9e0856bd17b7755757954522c945c3e29"
+    ,
+    "skill-content/autopilot/SKILL.md":
+      "9c89150e5a82e7e40cd318fd99a98d264e6e9bf96ed2a6e9a7246e029df25288"
+    ,
+    "skill-content/autopilot/data/autopilot-policy.json":
+      "e5ed2a98a3d59276df3a5f6f182495f516a7dbb6a76201b93568adce5c36fb9a"
+    ,
+    "skill-content/autopilot/scripts/autopilot.py":
+      "a4a19b12b4f796fa2a37ecd3a9182e7f7aba38547fcae23c150d34fc29c606ac"
+    ,
+    "skill-content/backlog-plan/SKILL.md":
+      "f4314b20877593f179f92b726b93dc88e82e33781603599db0af98fe43349643"
+    ,
+    "skill-content/backlog-plan/references/switch-review_manifest_scope-bounded.md":
+      "dc84f3e14ceda303a735f0394dfa7fb4c3f8a2ba5d94cca203bfec69495cec3c"
+    ,
+    "skill-content/business-analysis/SKILL.md":
+      "2847ac9940f93cac7fb9d045dcba0b7bdcff5162f40949fece8161de6c7d195c"
+    ,
+    "skill-content/business-analysis/data/space-schema.json":
+      "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936"
+    ,
+    "skill-content/challenge-review/SKILL.md":
+      "0ec0116e2f8cadd9fadc4d8f15e2c2301579718df61e7f6e3e072031a16113ec"
+    ,
+    "skill-content/challenge-review/data/review-panels.json":
+      "e09e6679dfb6dbd996b2460248a0b8d5cac1de87ff6c48d8570c40ccc10313a1"
+    ,
+    "skill-content/challenge-review/references/expert-casting.md":
+      "c43557a3cd48d3734c614e8a78c8d94d18df37e5f0e5a56c610962ca89f86f02"
+    ,
+    "skill-content/challenge-review/references/lens-bank.md":
+      "468169da1c43ecca6f7a955383b5b85d9dd24efbc6734f480cb9ef26f4c53fd1"
+    ,
+    "skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md":
+      "4cbf29000cf9a0f241a8d2ffaed90ae079a26e8683332bdd8a84e59e89a378ca"
+    ,
+    "skill-content/challenge-review/references/switch-review_loop-blocking_delta.md":
+      "2ba3bd1a00cb627cafdf9edf34c7aba411e4bb49b5f6e3fef5843f4513f05452"
+    ,
+    "skill-content/challenge-review/references/switch-review_panels-lens_panel.md":
+      "8f91439fca2962398a03e7521133189bf2bcdcc8c107e0d37afc89629285bd4d"
+    ,
+    "skill-content/challenge-review/references/triage.md":
+      "f07174787b4ff740668c4a6a2e48ab99b0a6519dc51c9338f17671579dfaa0df"
+    ,
+    "skill-content/code-review/SKILL.md":
+      "a79a33bd4f7bb0b306a96ceed29dda63f5dbaa16ee076c75a0dc7e7a7be3809f"
+    ,
+    "skill-content/code-review/references/passes.md":
+      "ae3b80c20c98b7c11e4579eb6773c815a649d186bfc1107098d48d6a4aadd5bb"
+    ,
+    "skill-content/code-review/references/pitfalls.md":
+      "9e235a5582e48c9f33fe91d16f617c320c308d87ac964f7a25e90bd83f87023c"
+    ,
+    "skill-content/code-review/references/smells.md":
+      "83febb50fbca82cbe6915a3e005ec647b34b374e376deaff403897d38e579c92"
+    ,
+    "skill-content/code-review/references/switch-review_loop-blocking_delta.md":
+      "21b36d1267253a8157f60046b6a66932b6db2ee7414788fa7179e464fb32ca36"
+    ,
+    "skill-content/configure/SKILL.md":
+      "3df25ade44dc31186fe452fb75d917c8b15dab4f34b303369cffbca9e7fe176c"
+    ,
+    "skill-content/configure/data/process-switches.json":
+      "b3eef6ace0af6bc3905d4a04e13adec0990cc455fc1b12d666aad848165c8972"
+    ,
+    "skill-content/configure/references/config-contract.md":
+      "a5e507262c4523750bfe885dfd3a7380763554001de0cbc0af0369f3c3d6d460"
+    ,
+    "skill-content/configure/references/process-policy.md":
+      "f83dca4c26ed91093860e79b6f3d633bcf4f8edf5b514572886b3aed557c08db"
+    ,
+    "skill-content/configure/references/switch-execution_planning-single_source_bundle.md":
+      "d9cd3b9a72a9831caa012d32f02553e4fe39976859b9e3d02bd3c8ab624b2c81"
+    ,
+    "skill-content/deliver/SKILL.md":
+      "a19dc712bd6e286adcabf5d67a7640cabe652a2f971da5a092b719d7a5a726bd"
+    ,
+    "skill-content/deliver/data/delivery-control-record-contract.json":
+      "035df8a2dd36543054ebf7138a94cb5a0f4bd75e7138dbd69852ea32985b430c"
+    ,
+    "skill-content/deliver/data/delivery-document-contract.json":
+      "3622f51af1377ecd8f7d189dde601b708fe51db5342490faf54d8821b1c60984"
+    ,
+    "skill-content/deliver/data/delivery-protocol-1.json":
+      "448c7a970a9ae38bb9348b96a2cfa2f2833b895e28bc84c5a3c87e622ce5b0d9"
+    ,
+    "skill-content/deliver/data/delivery-provider-contract.json":
+      "c2bd8bf6db8515aee2dc3b857a644484c6b0f1eed0954f55884c466ee08a3035"
+    ,
+    "skill-content/deliver/data/delivery-receipt-contract.json":
+      "4b47d51cd4c24d0aa448c2ccd5aef23c48da807c226543b2868f8b0c86e6e731"
+    ,
+    "skill-content/deliver/data/delivery-result-contract.json":
+      "0c14aff86c3d0fb4a8f3466a84f010cb70198a043939735c58a28e303f4c9d61"
+    ,
+    "skill-content/deliver/data/delivery-verification-policy.json":
+      "838a04fc434cbab3063b0721237dbbcc25712f2ece4b345654cc248aee740f7c"
+    ,
+    "skill-content/deliver/data/owner-decision-classes.json":
+      "ce9f4eb4c264c77cc1e80f949b6ba36444dd508f86d95edbbc30aa60e3e00495"
+    ,
+    "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md":
+      "c5236142872efae706e05030056e391aa5db968ed245ca16c2b4c3c7dd65c4cd"
+    ,
+    "skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md":
+      "9b18128e9329d69c9ecda42be3df30bb2f7861561c6c4293748c7e3b33c2b9c2"
+    ,
+    "skill-content/delivery-plan/SKILL.md":
+      "bd1020b0afede9f2e7f28c47e49f9d28548ecc51d2ec84158c98a5dc360702fa"
+    ,
+    "skill-content/delivery-plan/references/switch-delivery_path-light_when_eligible.md":
+      "98f5bfa8eab512f0e88598a6537a8b4c8c210cbf3e0feae2fd56a813d9f2de2d"
+    ,
+    "skill-content/demo/SKILL.md":
+      "8cd155dfb8f548ae0716fba785f8df7733645a7c808d8b781dfd2f5fe2567e0d"
+    ,
+    "skill-content/design-system/SKILL.md":
+      "605b2a47c861b0f3fdd35202506582bfa7db8d1a55d45a4607b88129281d1aaa"
+    ,
+    "skill-content/design-system/data/standalone-template.html":
+      "13536cf36955facf8576d166d640ae13414f768720c1bed21263617426931b63"
+    ,
+    "skill-content/docker-compose/SKILL.md":
+      "758e65bc4bf542ed5be998718708e381b8bc3af79162faefbbc5afb2b9a5424b"
+    ,
+    "skill-content/docker-compose/references/compose-patterns.md":
+      "551c7bc29d1901bc6a6e1f881303d12bd107a3d0dadfd564aca27b2cee436c55"
+    ,
+    "skill-content/docker-compose/references/image-build.md":
+      "0d6247c2604a71054ceb04093a0395784a477003054fac52f5e895ee71e0eaca"
+    ,
+    "skill-content/docker-compose/references/qa-checklist.md":
+      "acb390d812b303bbdafff02a5826b7da64743333e16c4ff0a2cfa411cfc1656f"
+    ,
+    "skill-content/docker-compose/references/review-checklist.md":
+      "f511894d3d82cdfde197df18f1c791a1e520e680cd4818a3582c5a43318c738f"
+    ,
+    "skill-content/docker-compose/references/seed-scenarios.md":
+      "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106"
+    ,
+    "skill-content/execution-plan/SKILL.md":
+      "8d19930ea054d8dae4fe49eb3189dd2b37bc57c9aad30fe8bdee9b793f7184aa"
+    ,
+    "skill-content/execution-plan/data/fact-ownership.json":
+      "119a6b31a052c0771671456b19b75d98a14a321773b8469b7d5678b0d142dc10"
+    ,
+    "skill-content/execution-plan/references/switch-delivery_path-light_when_eligible.md":
+      "8b1109f3cf7eb75520da15f07947aeb75e1e822f0334b632c48a64b86a457f49"
+    ,
+    "skill-content/execution-plan/references/switch-execution_planning-single_source_bundle.md":
+      "5a8883d7e6cc59096a0f5e3a2c477b094045af2fe075a59bbb94320f6cdb7786"
+    ,
+    "skill-content/execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md":
+      "de0d35734aa0f3af259cd6027e3fd691855d596ffdc8514de67a87dfdc3b69a9"
+    ,
+    "skill-content/experience-design/SKILL.md":
+      "721a37f9c549e35afe63f9a4c3f871c11b179e176734fa020b09c41aa20b6698"
+    ,
+    "skill-content/experience-modeling/SKILL.md":
+      "74fb2f0add3d794dbe0b28cfde7446a5bf6fc90b0ceb07b9799cdfae103d365d"
+    ,
+    "skill-content/experience-modeling/data/experience-schema.json":
+      "b7b29849d61ebaf15a5ff53a74f849e65fb6093da7b3dfe5e495eba5a2d63a37"
+    ,
+    "skill-content/experience-modeling/references/artifact-recovery.md":
+      "6ac6c2f37d61267d9838e44f050af8673a5252866d7a6c451c30e1f4371faeb8"
+    ,
+    "skill-content/issue-report/SKILL.md":
+      "80e51a863d2ae6730ff09bf4d6beaf820b1dd45d3eb36e9a9a6bb15f4d501734"
+    ,
+    "skill-content/nosql-database-design/SKILL.md":
+      "ef96e517e938a477d77f63c7b9f8a59d5e52ad92c6d308bf83f581367c7e5d37"
+    ,
+    "skill-content/nosql-database-design/references/aggregation.md":
+      "b71d0d487664fb93a9be3989666aade9d90e47c0e59a6903df2060e90141ac41"
+    ,
+    "skill-content/nosql-database-design/references/data-types.md":
+      "78957c3a8bbeaf0f4beec0b21e32a30aa330d9bf82c7d67ba3d949c88ef405cc"
+    ,
+    "skill-content/nosql-database-design/references/indexing.md":
+      "c747d2e8cf51fa5728d7eeb79fc5977545fc17f6f699a6d509314031615b12d4"
+    ,
+    "skill-content/nosql-database-design/references/performance.md":
+      "19b702d9e0d8e947ce24862f2632d7ec97042edf2c29d25a43ceae996839c7c9"
+    ,
+    "skill-content/nosql-database-design/references/qa-checklist.md":
+      "0e31c3e53eea8790844f3d0cad4547dccc5beaab21201edb5dfd35e65c96e6c4"
+    ,
+    "skill-content/nosql-database-design/references/review-checklist.md":
+      "841e08f2b1afe09e23c1818197235a52b525b17dfd7426691109b2c0d3307d72"
+    ,
+    "skill-content/nosql-database-design/references/scaling-consistency.md":
+      "64005a574e0123a606257e0de6086c4086a6486327035b86449698823fed1e66"
+    ,
+    "skill-content/nosql-database-design/references/schema-patterns.md":
+      "ca2773d7964e43649926d0afe1dcc330f3d47a9a7f77eee19726995b3fe4fc81"
+    ,
+    "skill-content/nosql-database-design/references/schema-validation.md":
+      "4ebfa5db83ff108d0352bca68e8ea13d2c7c860f13d876bd0f1a49d03db0802e"
+    ,
+    "skill-content/obsidian-vault/SKILL.md":
+      "931c87622196a746700885aa5a78081954df37d0b6dc571ff54e70a93dcf9a05"
+    ,
+    "skill-content/obsidian-vault/data/vault-policy.json":
+      "7172f13a07c25ca3c97d9517d639552e2511504b5269e9672ba97e5c21bd8b9f"
+    ,
+    "skill-content/obsidian-vault/references/graph.md":
+      "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e"
+    ,
+    "skill-content/obsidian-vault/references/linking.md":
+      "7cdd63dcd67ed3326765abe065744e1b39c189e5399f1dfe8baa62f786ca52e9"
+    ,
+    "skill-content/obsidian-vault/references/metadata.md":
+      "90d77814efbebff0828b0586cd270d1f4eeac8728cefb74a4c8e7ad0243015e6"
+    ,
+    "skill-content/obsidian-vault/references/vault-structure.md":
+      "ed6fb5780b0a0214a27cf448de91542edaf44622137ed097c9304d0190e98415"
+    ,
+    "skill-content/organize-docs/SKILL.md":
+      "3e162775f2d478a4e37a0c14974389cefff970ef26e65cf2701605f47856f878"
+    ,
+    "skill-content/product-planning/SKILL.md":
+      "1602c902dbb7fde9367edf34d41bc8ec3379d2063095b845672a82a6aa1185c4"
+    ,
+    "skill-content/product-planning/data/story-size-measures.json":
+      "18cb434508b69be2eafed6f61511dded52c299beafd8e6df782e86f944a3c578"
+    ,
+    "skill-content/product-planning/references/flow-metrics.md":
+      "891e42fcf0eb759a0307491ceca79e247bab0e1a81c4bcbade51c36ad621a2e0"
+    ,
+    "skill-content/product-planning/references/living-experience-contract.md":
+      "7f7985b91205870b18fee297b106f2eb05016a0c0e9e81ac801104d706326d3f"
+    ,
+    "skill-content/product-planning/references/prioritization.md":
+      "d3931963973a535ab15e4cda4b550271788b0717182742c91d6b0c93411b219e"
+    ,
+    "skill-content/product-planning/references/slicing-patterns.md":
+      "133710c7ea873588dab8559850ad3ac372dc8d2cd66d98bfe305ed82ad59226e"
+    ,
+    "skill-content/product-planning/references/structured-records.md":
+      "36c8d8889482e9f146f184bcd7e2becdda004bccc654b537196827c5e272ab66"
+    ,
+    "skill-content/product-planning/references/switch-story_size_budget-propose_split.md":
+      "71230e24282938dca8b661f27510258064fa7bb86504c2ee83d7bc201e3df9de"
+    ,
+    "skill-content/python-fastapi/SKILL.md":
+      "b335164b3bc4bdc80be739b1a99606881577ae198307d0ce89c9a819e1d51421"
+    ,
+    "skill-content/python-fastapi/references/patterns.md":
+      "352007b984f1b4596e85a2c85ab7d343c7d80f5abbae49e4cd44526fc03d49ff"
+    ,
+    "skill-content/python-fastapi/references/qa-checklist.md":
+      "d1ee3c235e62d50261b4ef409a547b7030de215929e974d8c1f582f4eef67205"
+    ,
+    "skill-content/python-fastapi/references/review-checklist.md":
+      "ac56808afa550eada9c15099b4233ffa7456a42f9da23e3508f128a3e1b493c5"
+    ,
+    "skill-content/qa-verification/SKILL.md":
+      "fc70e9fc72aaaff07b3735d95e6cdcc2265ad02f157fce180befd2ccd149c25e"
+    ,
+    "skill-content/qa-verification/references/coverage-audit.md":
+      "ba4abc9c13305ed09b51194b8ef5665ff946b99c13efcf04ac5537c8bf33fb11"
+    ,
+    "skill-content/qa-verification/references/exploratory.md":
+      "43aad71b88ddcf23d2b53c4a268f057c4471fa7395c88b7cb4de728f686f0ca3"
+    ,
+    "skill-content/qa-verification/references/mutation.md":
+      "619d535ef451a5359c98c97ae321cb2999038446cd17228c0c3e6eb0abdbd488"
+    ,
+    "skill-content/qa-verification/references/report-format.md":
+      "661e7af531ff0cf84784c9833738bb62ce8631fa394e33e42fe4e24e2cbd56a6"
+    ,
+    "skill-content/qa-verification/references/runtime-protocol.md":
+      "7ddf13911059f2676d23cb1ae8a0e33e69f0f3cd7e2f2a9c3a7f4149761194d3"
+    ,
+    "skill-content/qa-verification/references/test-design.md":
+      "c8ef52eb9cbb30c14fcb905b49b92a9e88489ba9a842b75834da615d7fb330cd"
+    ,
+    "skill-content/qa-verification/scripts/scenario_report.py":
+      "2818167bd6ad24a2b5a749d7ecaead0e3805351f4eaeac04e0905b3d652f96b6"
+    ,
+    "skill-content/react-typescript/SKILL.md":
+      "ff247db8ea0452aa6c654fe970db48786ea52005528c1e9ee5ca4903b5cdd747"
+    ,
+    "skill-content/react-typescript/references/accessibility.md":
+      "bae66259020b2b669c23530bbe110171e3fef27148032fb0a1ffe3d7f4a7fe09"
+    ,
+    "skill-content/react-typescript/references/conditional-capabilities.md":
+      "418840327651026bb82d5b2a73ef56fd4f87b72e33cf94a042900eed5dc92ad9"
+    ,
+    "skill-content/react-typescript/references/patterns.md":
+      "79013fcfc4dffe851bf1b4f0d30a742627e1d890b5e25bacecd112a8b3f7b562"
+    ,
+    "skill-content/react-typescript/references/performance.md":
+      "c1f04f2bc1b85311aa4b000db81bf0efc3561c1ce3544257875135a6e87901aa"
+    ,
+    "skill-content/react-typescript/references/qa-checklist.md":
+      "b50e11c0d3ed0874040ac632cbea225c4e3806a7e1e0bb3e7e9ae0593f21a5a8"
+    ,
+    "skill-content/react-typescript/references/review-checklist.md":
+      "7668cc3b56313ab327ca1f262dfacd5c1ffc4fbc3c68ca8c537b4af9537685f0"
+    ,
+    "skill-content/react-typescript/references/testing.md":
+      "3fc1be0e89bd61b6aff4f0f7abc3174b2aeabb048765038566e96b2ea7ed0792"
+    ,
+    "skill-content/react-typescript/references/tokens.md":
+      "2d81af38678d1e5701ea3f3144c8261f06cf05accfb97474c087e25df245035a"
+    ,
+    "skill-content/requirement/SKILL.md":
+      "bcbc588c7690c4bd789d28c4cae0e9768e2a26c17f415d8dc99610c9ba7a4e0f"
+    ,
+    "skill-content/requirements-analysis/SKILL.md":
+      "67dca388f5ffb7212ba7d1ae5f3e2adaa9e211e2b082f28036a4066472e12452"
+    ,
+    "skill-content/requirements-analysis/references/decomposition.md":
+      "7159a25a15adcb103f327e5ee2e231546dbb750867ccbb16c0bb073903e0d03d"
+    ,
+    "skill-content/requirements-analysis/references/elicitation.md":
+      "f54269d3e32b41e53f8d85415d988236dc1b3304a4d89ff52604907327587d0f"
+    ,
+    "skill-content/requirements-analysis/references/modeling.md":
+      "9ec0d37ac04ddd74c10ce772e54ab1462c81619e7ac6277a632693ae8890e737"
+    ,
+    "skill-content/requirements-analysis/references/nfr-elicitation.md":
+      "154730b8b546e3e0e538e6eb3dab21b1304d5a2657148352cda02e19e0c2ecb8"
+    ,
+    "skill-content/requirements-analysis/references/research-methods.md":
+      "fa08b909a2863a7162a9199f21c234c3c58da40afb3cb31e5ad05a109fdc172f"
+    ,
+    "skill-content/requirements-analysis/references/space-standard.md":
+      "cc8eab275082721a22c16d4d0d545e62faefdab626e7cdfefffc899f8abb28c8"
+    ,
+    "skill-content/setup/SKILL.md":
+      "8e4b23fcbd1b4b9d7ab2cdaae4be3b9da390ceb1f7ac7fcb216badedd7a0a8b7"
+    ,
+    "skill-content/setup/references/ci-bootstrap.md":
+      "315956adbe1f396a7886d4fa2125a9fffc03259a3d3897bf4db435caa73bdb1e"
+    ,
+    "skill-content/sketch/SKILL.md":
+      "9a2a84b499d3f2632bde2e6ccb6c1e0f46887cdc4d644bb77181a11ebe7bd586"
+    ,
+    "skill-content/software-architecture/SKILL.md":
+      "5944f0a6c14b43a82ae5c9e212b8b2db9ca5607522533c3e6cddfbc947158564"
+    ,
+    "skill-content/software-architecture/references/api-design.md":
+      "b9d5f25154fd170da480ae40151db662edaa17b43afc07bc164f86f29c8c5055"
+    ,
+    "skill-content/software-architecture/references/architecture-styles.md":
+      "83f0dbd77e2b70a436518efc0162cd069dd345bdf921a446880ab2f747688cf7"
+    ,
+    "skill-content/software-architecture/references/cross-cutting.md":
+      "580608a33dc8e5392c7462ddde46600c9af88912b4cbaa150fe5730e3d38f83f"
+    ,
+    "skill-content/software-architecture/references/decision-records.md":
+      "c7a58d15cff6bb27ca100573de7930d186366a827a2429c9ac63f6971c80d044"
+    ,
+    "skill-content/software-architecture/references/design-qualities.md":
+      "53fd052b982c7085c089dfee7ad7c31ec660d3b790881fb16c0848e7423287bb"
+    ,
+    "skill-content/software-architecture/references/nfr-budgets.md":
+      "1c61dcee6970555a40c968988f98c074d10260ff8c9285533bae34e9c83e56a3"
+    ,
+    "skill-content/software-architecture/references/service-boundaries.md":
+      "cb1a7f5d9b887b6c1d7102451909efe59acb24b1ecc42bcf802bbdebc2294355"
+    ,
+    "skill-content/software-architecture/references/switch-execution_planning-single_source_bundle.md":
+      "bc1c129c154a2b632af6b243c8661fccf73f96499bec9817dbfcf6e8261ac6cb"
+    ,
+    "skill-content/solution-architecture/SKILL.md":
+      "5f40e11f95bb8764e57cfb1f5f3d626620418daee739d70a579b31f562a7d5ba"
+    ,
+    "skill-content/solution-architecture/references/challenge-lenses.md":
+      "e3dbbf796d045221d66c57969571abdb58fb2bb0ca88cab23fb5f5c2baf83c84"
+    ,
+    "skill-content/solution-architecture/references/evaluation-method.md":
+      "4527cbb9c8a788830e3143c23d7362095a1f1dea82e0d33e49d98c989c747f4c"
+    ,
+    "skill-content/solution-architecture/references/landscape-docs.md":
+      "de227981e6ba33a906c37286efb853e718560ad9918ff511e96e705b422d5ceb"
+    ,
+    "skill-content/solution-architecture/references/worked-engagement.md":
+      "0fadb4587700c566b9e6738e79c194b4f86831a13e970ac354dc8fbb1c8fe1bf"
+    ,
+    "skill-content/solution-design/SKILL.md":
+      "f5e7a43f63c7c3ded8bcc54d6c8cf5cfa151bbaecdd36c00206cfc85179570bd"
+    ,
+    "skill-content/solution-design/references/engagement-session.md":
+      "5a97cbd36d89e6d45c6e03f9c2bfe3cc4c312bc123d7c491a36d9fe8ad777649"
+    ,
+    "skill-content/sql-database-design/SKILL.md":
+      "d0946aedfe3e4d8dc5a063cbba8df3be7c65b49882996491b03eac96d604a159"
+    ,
+    "skill-content/sql-database-design/references/advanced-patterns.md":
+      "e7f1be274a5edad05d60548ada0044173b05fdb831555e7d2927b1b7e3202352"
+    ,
+    "skill-content/sql-database-design/references/data-types.md":
+      "278ec401fd5117573c5b4c0f7cf1df7abced3978b4cc32098df5d0b2f66b54ce"
+    ,
+    "skill-content/sql-database-design/references/examples.md":
+      "e6b6c7b9e9ea72235e9664173865e8d766d7c4ae62d03ed58ddb5743f41730ca"
+    ,
+    "skill-content/sql-database-design/references/indexing.md":
+      "cb189199fc19f4286daa329c6e05a8255130de2b6b8183decc62fd5413afaeed"
+    ,
+    "skill-content/sql-database-design/references/normalization.md":
+      "25ca0ee856ff8a0c3e21a03f260f349afc0f852638630ac93aac6da7c5a9e7d7"
+    ,
+    "skill-content/sql-database-design/references/partitioning.md":
+      "e41b3b0d8ec1caf94159244ab7b138e3ea96dd95ab288afc15c75cbccb9c36f1"
+    ,
+    "skill-content/sql-database-design/references/performance.md":
+      "cd06c298470e5e7e2cb6a146cf33d752c335f7e75aeff367ddad6ac2df121caa"
+    ,
+    "skill-content/sql-database-design/references/qa-checklist.md":
+      "325ce7b1d1493e000b4fd6d192587689d50f5fd6da0d4a0635689284a424551f"
+    ,
+    "skill-content/sql-database-design/references/review-checklist.md":
+      "2a883309e014134ae221cc510074ddd4f115396ed042d95a3ff0db0447efdf8e"
+    ,
+    "skill-content/ui-ux-design/SKILL.md":
+      "8ade23b6f3103035b9958a23aa476446d537c9d44af9674f97aa50a8e32980b0"
+    ,
+    "skill-content/ui-ux-design/data/charts.csv":
+      "a7efabbc4134978ca452780e3603da87836d89f7cb614a840f4d0b43c044fdf7"
+    ,
+    "skill-content/ui-ux-design/data/colors.csv":
+      "5a6cb6c5d6f19b5f5e51865ae1e643e4baa05d04304d0bab976f064632149a6a"
+    ,
+    "skill-content/ui-ux-design/data/icons.csv":
+      "a1e15d32021b79c08da3d8acf675150aaeea4c5fe838efcd1c51a5c8a7584ee0"
+    ,
+    "skill-content/ui-ux-design/data/landing.csv":
+      "121a2cac7cf21050234b5f80e7b4e182f10123536032e0f9ad862ad3aec9677d"
+    ,
+    "skill-content/ui-ux-design/data/products.csv":
+      "50506839d8bacdb133d57ccdc8a4a668f9ac14ecfbeb8cf03a569e6d6cc0e135"
+    ,
+    "skill-content/ui-ux-design/data/stacks/html-tailwind.csv":
+      "d186b7caba84ed43a876c30718adee2369dc425fccbb1a64be140ed319d98704"
+    ,
+    "skill-content/ui-ux-design/data/stacks/react.csv":
+      "fa69e0adfc474c8e89baa78eb8c461919d8035dc5f8a59de9dfed56748b56f79"
+    ,
+    "skill-content/ui-ux-design/data/stacks/shadcn.csv":
+      "395c2e415ef6f48a474acccdc8eb2c7258a6ed751a5037ba171a2d8823e02ded"
+    ,
+    "skill-content/ui-ux-design/data/styles.csv":
+      "246d807aa70f7b46e2b79ebeeedefbf1c44f8b9a5f0c964f8f02db9e6e63f368"
+    ,
+    "skill-content/ui-ux-design/data/typography.csv":
+      "e5eb2efe5d6801223152e98759ba26e23002cd464617aeac83b6fabe53abc457"
+    ,
+    "skill-content/ui-ux-design/data/ui-reasoning.csv":
+      "06e4369445388ba9b7a57347510b125b7a2145bbf8546a327ba50292503b204a"
+    ,
+    "skill-content/ui-ux-design/data/ux-guidelines.csv":
+      "e01943c433b2cad3040f19389b3b0455673758a569b7a927b5bedf65c989cb96"
+    ,
+    "skill-content/ui-ux-design/references/design-rationale-method.md":
+      "8ef57c220ad22040fe2031094a965225b78f0f0dea328ace2ea7ef781b80be7f"
+    ,
+    "skill-content/ui-ux-design/references/recipes.md":
+      "a00e7194bc9b73e02598c0c1fa3226e454b6834cc28a9bce81419120d70e71b4"
+    ,
+    "skill-content/ui-ux-design/references/token-architecture.md":
+      "93d7f2d8cf242123528866c258441281a9e970f9184b8fc948da97df9e0a038b"
+    ,
+    "skill-content/ui-ux-design/references/ux-quick-reference.md":
+      "7d7ffaf6b4d0577cc557ce4d49201416809b5515d3551687c90ed2c494f443ee"
+    ,
+    "skill-content/ui-ux-design/scripts/core.py":
+      "9ac50d35986715b13539fc5361ddde3aa9cf1e4476ccedac7e164a94a01f1bba"
+    ,
+    "skill-content/ui-ux-design/scripts/design_system.py":
+      "f1a5542a935160e3e87c87e41170dc8c95c215f9c9c96ffd9bcf3f44eb7182a9"
+    ,
+    "skill-content/ui-ux-design/scripts/search.py":
+      "03e6a9afbb7c4d38dfe3434cba4750a6439e858d4aeea34e9810e8cca917f5cf"
+    ,
+    "skills/autopilot/SKILL.md":
+      "c910124577d8050e783c9a4091d30684942b6e0e457b61267e2fc8a72888ab07"
+    ,
+    "skills/autopilot/agents/openai.yaml":
+      "0f2bc579c6d541b0a3744be0898a672006bbc9e82c7e41d14c6b77c608b562e7"
+    ,
+    "skills/backlog-plan/SKILL.md":
+      "351a86df622b1a1027a3f1034071255d552281470b95eb0d7566134932daffb6"
+    ,
+    "skills/backlog-plan/agents/openai.yaml":
+      "c6248dabcc8c10e049664c290a10b39cff0e07a624ee24b6ef54d20deb3d75cc"
+    ,
+    "skills/business-analysis/SKILL.md":
+      "019f7c815203aa2a94d4e6398b051249f9a8f520889748d38d13177c782e5476"
+    ,
+    "skills/business-analysis/agents/openai.yaml":
+      "d465c4a5efd3d627233f727aaa1a6463c5c495393a5c4df63586137e0624eb52"
+    ,
+    "skills/configure/SKILL.md":
+      "3c5e573f4f194f70b8832a4474e9a00d1c8e9c6f148059972ae503ae82e2adfa"
+    ,
+    "skills/configure/agents/openai.yaml":
+      "b632fc369e53d7d3d008510ca4af2030917f85b2e1d6cc6c360eef6b74482b3b"
+    ,
+    "skills/deliver/SKILL.md":
+      "2bae182828407b90a206448b65b2eb5408e094e0dd8673c46042f37b9319e56a"
+    ,
+    "skills/deliver/agents/openai.yaml":
+      "49cf26cb9debf99968b30ec8d1635682aafa7bf50c02b5c6da1b3a157458a3b6"
+    ,
+    "skills/delivery-plan/SKILL.md":
+      "0523d6dd649a46c83a8d820d9f2c2642ddab457df2db5724d909253753793900"
+    ,
+    "skills/delivery-plan/agents/openai.yaml":
+      "e5c01a32fe893be4b0fa12435e22cddcff2f73df99b901c65471fae20dda7981"
+    ,
+    "skills/demo/SKILL.md":
+      "b9de8d7e51d3bb6ce77730dc72cea7261b3ddb9551e4623075f033a515ac5d57"
+    ,
+    "skills/demo/agents/openai.yaml":
+      "9ca2fd30a62b377fc0ade63a8482bdf2a8beaabf4330eb460bb0e809c1dc8bf0"
+    ,
+    "skills/design-system/SKILL.md":
+      "5825ed4144c88512b284074a0329e73c048c8d6dc6a05c33cb4938bd763d0231"
+    ,
+    "skills/design-system/agents/openai.yaml":
+      "ab9ab1c971b783cb963acfe8e96ddb51da3baf7384dba3bfcb6bf541dd3e48d8"
+    ,
+    "skills/execution-plan/SKILL.md":
+      "9322c7d0f04568a1bcfed73eb31ec01b30928eed7ffa42aecb7d8861e07c41a3"
+    ,
+    "skills/execution-plan/agents/openai.yaml":
+      "85e6c0e15b3d2dd9077860ac1361c98c0365a96ceee16f81c0d3d2163eaffd91"
+    ,
+    "skills/experience-design/SKILL.md":
+      "9c68d5bb4d4595c9375209b78828496c5baf65e91109e5e263b07adf20c94257"
+    ,
+    "skills/experience-design/agents/openai.yaml":
+      "017564b16299c2b2b681a4d0b9e1a0273d5601e301fa399c9f2e6b9f3a687825"
+    ,
+    "skills/issue-report/SKILL.md":
+      "6a735feeab64ebc57d64e9df188bfabe8f3f83bcc329ead86e08d37d6f58a747"
+    ,
+    "skills/issue-report/agents/openai.yaml":
+      "5bab1db53e224e3cb0d2c389a5ea09323e414f7fb48568cd01ccf527ebb80954"
+    ,
+    "skills/organize-docs/SKILL.md":
+      "45516844bae8ed1853481ce60d33470189d886cb8567f595c26a6ed860eb2971"
+    ,
+    "skills/organize-docs/agents/openai.yaml":
+      "12df6d837ff2676cb016ff5e7e25ae0b1f1ab63b34d4faaf52472a099e04019c"
+    ,
+    "skills/requirement/SKILL.md":
+      "63bf023a1e834aeab3c96897b236fd321c9ae2dfabbeb01653512ef81de113c8"
+    ,
+    "skills/requirement/agents/openai.yaml":
+      "1b9139db34b7c1d3be77cc195b50a038958dbef3a945529e33f3033e75931da6"
+    ,
+    "skills/setup/SKILL.md":
+      "94cd155b871f1f40d231d2a37ebc3f4dd7b2d74505d17caf17544054a85ae384"
+    ,
+    "skills/setup/agents/openai.yaml":
+      "13579189bbf7b1f7b9f48c9491883cee666d0f9e6b95cee54b9c2a2dda980914"
+    ,
+    "skills/sketch/SKILL.md":
+      "910138f1d015f071cc86ce36fc602224e057efd18375be5c5668fd69c5a15bcc"
+    ,
+    "skills/sketch/agents/openai.yaml":
+      "2c5a886e4b37ccc772a35c1c82c7a258f20017fd5828a668123c5bd35897af7c"
+    ,
+    "skills/solution-design/SKILL.md":
+      "7fa6cc24b057e2ff6a7c64c7f5ef52a140e5a81b922e861689718930757ac5cf"
+    ,
+    "skills/solution-design/agents/openai.yaml":
+      "4b42a50fb8966874cbd89a37253240fba87533496e8d0462c69a7745b874cfe9"
+    ,
+    "templates/AGENTS.override.md":
+      "b5ddeeed7bceb6cf9d88bafa94f1cd822a9ea094c21c4f768f99e07db7833c3a"
+    ,
+    "templates/CLAUDE.md":
+      "dc539ede3d5333d6c900bebae2c1ac612ac903803dc3915b4d742b785d3567ff"
+    ,
+    "templates/ci-tests.yml":
+      "1ba0c7a800f23c244710f538073f122d10d356be1ba652cfbef6c2844b49f588"
+    ,
+    "templates/gitignore":
+      "fa6da40c9313474f7d39f430d2311c2a6d646dfbceb5df566b454af6052d6a8e"
+    ,
+    "templates/memory/agent-marketplace.md":
+      "682fdb71b913a3eed47868304164ad1c7fc086e497a4e78e064cd59d111d5702"
+    ,
+    "templates/memory/me.md":
+      "707506fcae21f5bbcc3f14544cfda8369965dcfc40e808a48e94ab362658fa41"
+    ,
+    "templates/memory/profile.md":
+      "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
+    ,
+    "templates/project-instruction-surfaces.json":
+      "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c"
+    ,
+    "templates/project-instructions/common.md":
+      "501d3a934b917da1acb5fe07a6d0ea24ae5c53e919cf2ddceb403d653d014435"
+    ,
+    "templates/project-instructions/host.md":
+      "a3a7a5e62acc8feee66022cc43d9d4f1e201eb45a9954948e57d8686fbbe4afa"
+    ,
+    "templates/project-instructions/team.md":
+      "f2514f8c3b16405e1fb87671ebc12ddeaf4649af090ad3e7dbb121d562143d53"
+    ,
+    "templates/task-input-contract.md":
+      "61f528981276bf3fa4fee92584dd9912be8465a9af02ca6ab0971b16b52e3b26"
+    ,
+    "templates/task-input-policy.json":
+      "bb8be95ad4d5c83eb37415e512af5b7c1ec653edddcdc3e13fcf5d06e14adcb7"
+    ,
+    "templates/vault/.obsidian/app.json":
+      "d81f5f2d2db5f65f24db5235301c5dffd41412e66db7202cf65f9f032cde078d"
+    ,
+    "templates/vault/.obsidian/appearance.json":
+      "208f3a78f0bc1d2209a4bd36e0dd05d875434e66bb3859deb3f7659bf4a49ed1"
+    ,
+    "templates/vault/.obsidian/community-plugins.json":
+      "065b2ec3606b793e7322744adc2e4143af53c72a2ef2c5a045d2b25676c7048c"
+    ,
+    "templates/vault/.obsidian/core-plugins.json":
+      "81afebcd42fe23baf54427e809ab4521be53884cc07085ee136f9c62e8187f36"
+    ,
+    "templates/vault/.obsidian/graph.json":
+      "e2c33e1614ba56db8ec6bfacdc1d7c9b1bf7c7e11f0aad136e1d6c43ab9004c6"
+    ,
+    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/LICENSE":
+      "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    ,
+    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/data.json":
+      "2381b820b8f3e929056b55f497fd2579765777b693c2c0762f995ef6bdff02fd"
+    ,
+    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/main.js":
+      "8a55ac74ea628a9db5b2fae5fd57031638c794279e24610efc19ad0f5a6fc444"
+    ,
+    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/manifest.json":
+      "a83265e1e8a0db3658d7121f8611650b74daa8b11760ead3579ad1953e71f136"
+    ,
+    "templates/vault/.obsidian/snippets/brand.css":
+      "46b840eaddc2c50abf29b4b0b145e1e0774c4760e89b4d09a7a9ce122b33bbbe"
+    ,
+    "templates/vault/.obsidian/types.json":
+      "404d41063ecebdb63a2790e3f65de03d97df9b30faa5dd7a189a6eb6c031724a"
+    ,
+    "templates/vault/home.md":
+      "b62efb50cb11a9e14ea667a2e12cbff4789ec458c705cd226440c9d5d25b3397"
+    ,
+    "templates/vault/maps/backlog.md":
+      "b4e9c92f341ef5599bf8e6980856f6e8e74dd8e4effe01c0d8f8ec88eb4e2a7b"
+    ,
+    "templates/vault/maps/business-analysis.md":
+      "4401acf304330465362dc4888b0de2da5bf8088e107343f7ee7a0d639eb0a4fa"
+    ,
+    "templates/vault/maps/delivery.md":
+      "72f6669654bc129149b128ba104a9605c8d3d1e23e9411030b402cc9af667637"
+    ,
+    "templates/vault/maps/design-system.md":
+      "4ef95429c9d4bc7699db7b4f94adee0edc13a57c41ce5fbb770d956262c9da87"
+    ,
+    "templates/vault/maps/experience-design.md":
+      "58db39a90b479587a8aa12ede9eab7a9291591e79bc3a0138adf214edac389c3"
+    ,
+    "templates/vault/maps/operation.md":
+      "1f5d0ec5516fd60f48326cec634825406d8d8a7fc78e9076ec4934fd0d68ed38"
+    ,
+    "templates/vault/maps/requirements.md":
+      "6a8b9d9d5577cca9fa7f9c1cada975214c685b6091e02730e88ec810934ab295"
+    ,
+    "templates/vault/maps/solution-design.md":
+      "ca671249c77bfd95ed2bc57f65248a005f0d56c991c4de023be2e86843420682"
+    ,
+    "templates/vault/maps/system-architecture.md":
+      "6608e750755077fc1828b1fe40456f9828ca1fc1da82234c5864f5e996e41d77"
   },
   "host": "codex",
   "marketplace_release": "0.6.0",
   "runtime_contracts": [],
-  "schema_version": 3,
-  "source_channel": "snapshot",
-  "source_commit": "",
-  "source_ref": "snapshot.1e85c8ab4212a321812588055da7e92e2e4affa3f6648e1ceecf75e0a425de6d",
+  "schema_version": 4,
   "version": "0.6.0"
 }

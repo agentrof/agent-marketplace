@@ -336,7 +336,7 @@ def restore_timings(root: Path, api: GitHub, now: dt.datetime | None = None) -> 
                         "timing source run is invalid")
                 run = api.get(f"actions/runs/{candidate['id']}")
                 require(isinstance(run, dict) and run.get("event") in {
-                    "push", "pull_request", "workflow_dispatch", "schedule",
+                    "push", "pull_request", "workflow_dispatch", "schedule", "merge_group",
                 }, "timing source event is invalid")
                 validate_run(run, api.repository, run["event"], run["head_sha"], now)
                 payload, artifact_digest = read_run_artifact(api, run, "ci-durations", "ci-durations.json")

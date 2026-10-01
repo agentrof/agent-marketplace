@@ -6,25 +6,42 @@ import re
 from pathlib import Path
 
 
-# Documented custom-agent values; per-tier choices are data in
-# execution-profiles.json beside this module.
+# Documented custom-agent effort values; the pinned models are data in
+# model-catalog.json beside this module.
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
-MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*")
+# OpenAI publishes no ID grammar. Catalog slugs name a generation and a
+# family, such as gpt-6.1-sol, and a slug outside that form is refused.
+MODEL_ID_RE = re.compile(
+    r"gpt-(?P<major>[0-9]+)(?:\.(?P<minor>[0-9]+))?-(?P<family>[a-z]+(?:-[a-z]+)*)"
+)
+# This host's CLI in tools/data/host-cli-versions.json, the exact version CI
+# installs; no model class's min_cli_version may be newer.
+HOST_CLI_KEY = "codex"
+# The drift check reads the catalog bundled with the CLI, from `codex debug
+# models --bundled`. A pinned source of this form names the CLI release whose
+# bundled catalog the pins were verified against.
+BUNDLED_CATALOG_SOURCE_RE = re.compile(
+    r"https://github\.com/openai/codex/blob/rust-v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)"
+    r"/codex-rs/models-manager/models\.json"
+)
+# Entries whose inserted default prompt must itself be the command a hook
+# reads: the autopilot arming hook arms only on a prompt that starts with the
+# entry's mention and its on verb.
+DEFAULT_PROMPTS = {"autopilot": "${plugin}:{name} on"}
+# How a frozen-task A/B runs every role on one candidate model.
+MODEL_TRIAL = (
+    "Codex: in a scratch copy of the project, run `generate_codex_project.py"
+    " apply --scope local --execution-profile inherit`, then start the session"
+    " with `--model <model ID>` and `-c model_reasoning_effort=<tier effort>`."
+)
 
 
-def execution_setting_problems(tier: str, setting: dict[str, str]) -> list[str]:
-    model = setting.get("model")
-    effort = setting.get("effort")
-    problems = []
-    if model is not None and MODEL_RE.fullmatch(model) is None:
-        problems.append("model must be one model name without spaces or quotes")
-    if effort is not None and effort not in EFFORT_LEVELS:
-        problems.append(
-            f"effort must be one of {', '.join(EFFORT_LEVELS)} or absent"
-        )
-    if tier == "inherit" and setting:
-        problems.append("the inherit tier must set neither model nor effort")
-    return problems
+def model_version(model_id: str) -> tuple[str, tuple[int, ...]] | None:
+    """Return the family and comparable version of a pinned model slug."""
+    match = MODEL_ID_RE.fullmatch(model_id)
+    if match is None:
+        return None
+    return match["family"], (int(match["major"]), int(match["minor"] or 0))
 
 
 def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, str, str]) -> list[tuple[str, str]]:
@@ -52,11 +69,13 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
     short = f"Start the {visible} guided workflow"
     if len(short) > 64:
         short = f"Run {visible}"
+    prompt = DEFAULT_PROMPTS.get(name, "Use ${plugin}:{name} to start this workflow.").format(
+        plugin=source_name, name=name)
     metadata_text = (
         "interface:\n"
         f"  display_name: \"{visible}\"\n"
         f"  short_description: \"{short}\"\n"
-        f"  default_prompt: \"Use ${source_name}:{name} to start this workflow.\"\n"
+        f"  default_prompt: \"{prompt}\"\n"
         "policy:\n"
         "  allow_implicit_invocation: false\n"
     )

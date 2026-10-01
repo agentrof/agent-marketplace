@@ -1,0 +1,6 @@
+{
+  "summary": "`delivery_git.py start-item` and `resume-item` now refuse with `DELIVERY_FENCE_GOVERNANCE` and name `apply-governance` as the remedy when the approved Delivery Governance differs from the Governance the project Fence carries, where they reported the uncoded `Delivery Governance differs from the governed Fence baseline` as `DELIVERY_INPUT_INVALID`. The refusal still happens before any ref, writer receipt or worktree changes. `reopen-item` refuses the same way before any of them change: it read the limit from the approved Governance whether or not the Fence carried it, so it could take a Slot above the cap the Fence governs.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

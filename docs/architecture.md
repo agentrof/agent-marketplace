@@ -31,18 +31,47 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     overlap, cycles, ordering and coverage. The read-only
     `backlog_review_inputs.py` manifest narrows epic reading to that scope plus
     dependency and source closure; root review retains the complete package.
-    Its hash must be rechecked before persisting a review.
+    Process switch `review_manifest_scope` sets how far an epic reader's source
+    closure reaches: at the default, `transitive`, every included note expands
+    its own links; at `bounded`, only the epics, stories and test plans of the
+    scope and dependency closure do, each note they link to or cite adds its
+    front-matter relations one hop further, and the manifest's hash binds only
+    the story identities and dependency edges that reach that closure.
+    At `review_panels` `lens_panel` it names that value and its `check` block
+    carries the compiler facts for the current review note, which the panel's
+    lens readers take as given; at the default a reader's manifest has no
+    compiler facts. Its hash must be rechecked before
+    persisting a review. An epic manifest's hash binds the notes it reads and
+    the story identities and dependency edges that reach them, except that at
+    `bounded` an edge that reaches a story read only through a link leaves the
+    manifest fresh; the root manifest's binds every backlog note.
 12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
     scenarios; automation-required scenarios name an executable-test target.
 13. Every story has exactly one accountable implementation owner and may name
     supporting implementation roles with concrete body responsibilities.
-    Runtime identities are not backlog properties.
+    Runtime identities are not backlog properties. Process switch
+    `story_size_budget` at `propose_split` compares measures the compiler
+    derives from a story and its Test Plan with owner-set limits from the
+    Process Policy; it adds no story field, never fails a check and never
+    rewrites a criterion.
 14. Backlog approval checks structural coverage, exact relation sets and
     review approval. A review requests changes only for an open critical or
     major finding; an accepted minor finding is recorded in the review note's
     optional, compiler-validated `Accepted Minor Findings` table with an owner
     role and revisit trigger. Test execution, JUnit evidence and release
-    readiness are delivery concerns.
+    readiness are delivery concerns. Process switch `review_loop` sets how far
+    this rule reaches: at the default, `current`, every other review step keeps
+    its own loop; at `blocking_delta`, Operation contracts record accepted minor
+    findings in their own compiler-validated `Accepted Minor Findings` section,
+    Delivery code review minors carry an owner role and revisit trigger into the
+    Item's code review record and the Delivery Review, a re-review reads only
+    the open blocking findings, the changed text and its dependency context,
+    and a critical or major claim gates only once one fresh, read-only
+    calibration reader, never its writer or claimant, confirms it with a
+    citation of the text. Each review keeps its rulings where its compiler
+    reads them, and a review note or an Operation contract also records the
+    findings its review returned, so no finding that stays critical or major
+    enters `Accepted Minor Findings`.
 15. File names are stable slugs; membership is path-derived. A story does not
     duplicate its epic relationship in front matter.
 16. Authored titles are direct, natural phrases in the configured output
@@ -57,8 +86,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     `tools/build_distributions.py`.
 19. Every host is discovered through `platforms/<host>/adapter.json` and its
     adapter module. Host-specific path names, manifests, permissions, hooks,
-    per-tier model and effort profiles and runtime behavior remain in that
-    platform directory; central tooling
+    the pinned model catalog and the per-tier model and effort profiles,
+    including the `lens` and `mechanical` tiers that only generated agent
+    variants use, and runtime behavior remain in that platform directory;
+    central tooling
     only orchestrates registry discovery, canonical copying, provenance, and
     owned generated-tree replacement.
 20. Requirement Flow ends at a committed, approved backlog. Delivery Flow owns
@@ -134,9 +165,48 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     replacement refs and graph overlays. Snapshot records are prefix-free;
     generated text uses LF, unknown/binary payloads remain byte-exact, and the
     tracked `package-modes.json` contract supplies platform-neutral executable
-    modes. Schema-v3 package provenance binds the closed file inventory, hashes
-    and executable set. Public stable installs, exact-lease ref transactions,
-    immutable Release reconciliation and clean-ref completion remain mandatory.
+    modes. Schema-v4 package provenance binds the closed file inventory, hashes
+    and executable set, one hash line per file, and carries no per-commit
+    source identity; the release metadata records the source snapshot
+    `build_id` and verification recomputes it. Public stable installs,
+    exact-lease ref transactions, immutable Release reconciliation and
+    clean-ref completion remain mandatory.
+29. Backlog, Solution Design, Design System and Operation contract reviews
+    run as process switch `review_panels` selects in the project's Process
+    Policy: one reviewer per step at the default, `single_reader`, or at
+    `lens_panel` a review panel of parallel, read-only lens readers. Lens sets
+    are validated data in `challenge-review/data/review-panels.json`; a panel
+    replaces a step's single reviewer and never stacks on top of it, and it
+    keeps the step's review loop, which process switch `review_loop` sets. The
+    read-only document reviewers keep their own tier, and every build ships
+    their generated `-lens` variants on the `lens` tier for panel readers.
+    Review steps whose machine interface accepts one result per role keep one
+    reader until a merge step exists.
+30. Every new process behaviour ships behind a process switch declared in
+    `configure/data/process-switches.json` whose default is the behaviour it
+    changes. With every switch at its default, every compiler and coordinator
+    output is byte-identical to the previous release on the same inputs and
+    every task binds the same instructions, apart from the defect fixes that
+    `EXPECTED_DIFFERENCES` in `tools/tests/test_default_equivalence.py` lists,
+    each with the issue whose fix made it, and the instruction files its
+    `SHIPPED_ADDITIONS` lists, each with the issue that makes default tasks
+    bind it; otherwise only script and contract hashes change, and golden
+    all-default runs prove it. Two exceptions stand outside this rule: the
+    model and effort lines of rendered agents follow each host's model
+    catalog and execution profile, not default
+    equivalence, so a catalog change reaches every role under any policy;
+    and a user-armed session entry such as autopilot ships without a switch,
+    because without an active grant its hooks exit silently, no task binds
+    it and every output stays byte-identical. A non-default value's
+    instructions live in switch references that `task_inputs.py` binds only
+    when the project's Process Policy selects that value, together with the
+    package data only that value reads. Project values live in
+    `workspace/docs/delivery/process-policy.md`, never in
+    `workspace/config.json`, and each Delivery pins the policy revision it ran
+    under. Outside a Delivery, a backlog approval records its pin in the root
+    backlog, and each review it approves keeps the pin of the policy it ran
+    under, which must set the approval's values for every switch the
+    backlog-planning flow owns.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

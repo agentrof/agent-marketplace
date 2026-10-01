@@ -100,12 +100,21 @@
     },
     {
       "paths": [
+        "tools/model_drift.py"
+      ],
+      "groups": [
+        "contracts"
+      ]
+    },
+    {
+      "paths": [
         "plugins/software-engineering-team/scripts/delivery_compile.py",
         "plugins/software-engineering-team/scripts/delivery_git.py",
         "plugins/software-engineering-team/scripts/delivery_governance.py",
         "plugins/software-engineering-team/scripts/delivery_provider.py",
         "plugins/software-engineering-team/scripts/delivery_result.py",
-        "plugins/software-engineering-team/scripts/delivery_verification.py"
+        "plugins/software-engineering-team/scripts/delivery_verification.py",
+        "plugins/software-engineering-team/scripts/process_policy.py"
       ],
       "groups": [
         "delivery"
@@ -178,6 +187,20 @@
         "tools.tests.test_single_team_distribution.*",
         "tools.tests.test_packaged_state_contract.*",
         "tools.tests.test_validator_contract.*",
+        "tools.tests.test_review_panels.*",
+        "tools.tests.test_mechanical_pass_tier.*",
+        "tools.tests.test_model_drift.*",
+        "tools.tests.test_story_size_budget.*",
+        "tools.tests.test_review_loop.*",
+        "tools.tests.test_execution_planning.*",
+        "tools.tests.test_owner_gates.*",
+        "tools.tests.test_autopilot.*",
+        "tools.tests.test_delivery_path.*",
+        "tools.tests.test_review_manifest_scope.*",
+        "tools.tests.test_process_policy.*",
+        "tools.tests.test_delivery_policy_pin.*",
+        "tools.tests.test_all_switches_on.*",
+        "tools.tests.test_default_equivalence.*",
         "tools.tests.test_counts.*",
         "tools.tests.test_task_inputs.*",
         "tools.tests.test_ci_*.*"
@@ -379,9 +402,11 @@
   },
   "known_test_modules": [
     "tools.tests.test_adapter_registry",
+    "tools.tests.test_all_switches_on",
     "tools.tests.test_architecture_compile",
     "tools.tests.test_artifact_snapshot_metadata",
     "tools.tests.test_atomic_file",
+    "tools.tests.test_autopilot",
     "tools.tests.test_ba_compile",
     "tools.tests.test_backlog_absence_history",
     "tools.tests.test_backlog_absent_inputs",
@@ -401,12 +426,16 @@
     "tools.tests.test_ci_release",
     "tools.tests.test_ci_tests",
     "tools.tests.test_counts",
+    "tools.tests.test_default_equivalence",
     "tools.tests.test_delivery_compile",
     "tools.tests.test_delivery_git",
+    "tools.tests.test_delivery_path",
+    "tools.tests.test_delivery_policy_pin",
     "tools.tests.test_delivery_protocol",
     "tools.tests.test_delivery_provider",
     "tools.tests.test_delivery_result",
     "tools.tests.test_delivery_verification",
+    "tools.tests.test_execution_planning",
     "tools.tests.test_experience_application_runtime",
     "tools.tests.test_experience_artifact_recovery",
     "tools.tests.test_experience_compile",
@@ -416,10 +445,14 @@
     "tools.tests.test_issue_report",
     "tools.tests.test_living_experience_flow",
     "tools.tests.test_maintainer_protocol",
+    "tools.tests.test_mechanical_pass_tier",
+    "tools.tests.test_model_drift",
     "tools.tests.test_operation_governance",
+    "tools.tests.test_owner_gates",
     "tools.tests.test_package_refresh",
     "tools.tests.test_packaged_state_contract",
     "tools.tests.test_performance_contracts",
+    "tools.tests.test_process_policy",
     "tools.tests.test_project_config",
     "tools.tests.test_project_instructions",
     "tools.tests.test_project_vault_contract",
@@ -430,6 +463,9 @@
     "tools.tests.test_requirement_compile",
     "tools.tests.test_requirement_flow",
     "tools.tests.test_requirement_review_contract",
+    "tools.tests.test_review_loop",
+    "tools.tests.test_review_manifest_scope",
+    "tools.tests.test_review_panels",
     "tools.tests.test_runtime_scripts",
     "tools.tests.test_scaffold",
     "tools.tests.test_scenario_report",
@@ -438,6 +474,7 @@
     "tools.tests.test_single_team_distribution",
     "tools.tests.test_smoke_plugin_installs",
     "tools.tests.test_solution_topology",
+    "tools.tests.test_story_size_budget",
     "tools.tests.test_task_inputs",
     "tools.tests.test_validator_contract",
     "tools.tests.test_vault_check",

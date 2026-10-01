@@ -48,6 +48,21 @@ def is_committed(path: Path) -> bool:
     return result.returncode == 0 and not result.stdout.strip()
 
 
+def committed_except_relations(path: Path) -> bool:
+    """Whether HEAD holds the Requirement apart from its generated relations.
+
+    A story that implements the Requirement makes render-relations write an
+    Implemented by block into it; the semantic hash already excludes that
+    block. Every other byte, Stage Results included, must still match HEAD.
+    """
+    # Git status knows the checkout conversions, such as line endings, that a
+    # text comparison with the blob would misread; it decides unchanged notes.
+    if is_committed(path):
+        return True
+    root = next((parent for parent in path.parents if (parent / ".git").exists()), None)
+    return root is not None and stage_package.matches_head_except_relations(root, path)
+
+
 def route_stage(path: Path) -> dict:
     """Return the first authoring, binding or repair action for a Requirement."""
     try:
@@ -57,7 +72,7 @@ def route_stage(path: Path) -> dict:
     docs = path.parents[1]
     if props.get("status") != "approved" or props.get("source_hash") != requirement_compile.semantic_hash(props, body):
         return {"next_entry": "requirement", "stage": "requirement", "action": "requirement"}
-    if not is_committed(path):
+    if not committed_except_relations(path):
         return {"next_entry": "requirement", "stage": "requirement", "action": "requirement",
                 "reason": "Requirement is not committed"}
     results = requirement_compile.stage_results(body)

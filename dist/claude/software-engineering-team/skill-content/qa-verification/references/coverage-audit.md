@@ -6,17 +6,30 @@ is a set intersection, not an opinion.
 
 ## Inputs
 
-- Approved story test plans containing canonical identities. Recognized forms
-  are qualified or unqualified `BR` and `AC` identities, including
-  `inventory:BR-STOCK-001`, and story scenarios shaped
-  `<story-id>-TS-###`, such as `AUTH-01-TS-003`.
+- The approved story Test Plan, passed with `--plan`. It plans each scenario
+  it defines under a `<story-id>-TS-###` heading, such as `AUTH-01-TS-003`,
+  followed by the qualified `AC` and `BR` identities that scenario's
+  `source_refs` cite, such as `inventory:BR-STOCK-001`. An identity the plan
+  only mentions, such as another story's scenario named in a Given clause or
+  a supersession note, is not planned.
+- When an Item's regressions run the scenarios of the stories it depends on,
+  pass the Item's own approved Test Plan first and each dependency's approved
+  Test Plan as a further `--plan` value, and name with `--superseded` each
+  dependency scenario that the Item's own approved Test Plan supersedes. A
+  superseded scenario leaves the audit with every `AC` or `BR` identity that
+  no remaining scenario cites. The script refuses a superseded id that the
+  first plan defines: the Item's own scenarios never leave the audit.
+- An explicit identity list goes through `--brief` instead, which plans every
+  qualified or unqualified `BR` and `AC` identity and every story scenario in
+  its text. A Test Plan never goes through `--brief`: each identity it cites
+  would become a planned row.
   Identities are extracted verbatim; the audit never infers an unlabeled
   requirement or scenario.
 - The suite results in JUnit XML, produced by running the configured suite command with its XML reporter enabled.
 
 ## Matrix Schema
 
-One row per requirement id, in brief order:
+One row per requirement id, in plan or brief order:
 
 | Id | Requirement summary | Mapped tests | Result |
 |---|---|---|---|
@@ -48,13 +61,13 @@ Both forms reduce to the same rule the script applies: the literal id string, ma
 
 ```
 scenario_report.py \
-  --brief workspace/docs/backlog/epics/accounts/stories/login/test-plan.md \
+  --plan workspace/docs/backlog/epics/accounts/stories/login/test-plan.md \
   --junit results-server.xml results-client.xml
 ```
 
 Run the packaged `skill-content/qa-verification/scripts/scenario_report.py`.
 
-Multiple briefs and multiple JUnit files are merged. The script prints the matrix, then a machine-readable summary line, and exits nonzero when any NO-TEST or FAIL row exists. Paste the matrix into the verification record unedited.
+Multiple plans or briefs and multiple JUnit files are merged. The script prints the matrix, then a machine-readable summary line, and exits nonzero when any NO-TEST or FAIL row exists. Paste the matrix into the verification record unedited.
 
 ## Audit Discipline
 

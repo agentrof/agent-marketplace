@@ -208,6 +208,11 @@
       "id": "delivery-governance",
       "query": "tag:#doc/delivery-governance",
       "rgb": 2388387
+    },
+    {
+      "id": "process-policy",
+      "query": "tag:#doc/process-policy",
+      "rgb": 2388387
     }
   ],
   "hubs": [],
@@ -355,6 +360,9 @@
     "definition_of_done_revision": "number",
     "definition_of_done_source_hash": "text",
     "definition_of_done_commit": "text",
+    "process_policy_path": "text",
+    "process_policy_revision": "number",
+    "process_policy_source_hash": "text",
     "target_branch": "text",
     "backlog_commit": "text",
     "backlog_path": "text",
@@ -382,8 +390,12 @@
     "environment_contract_ref": "text",
     "environment_contract_hash": "text",
     "operation_contract_hashes": "multitext",
+    "superseded_plan_approvals": "multitext",
     "role_sequence": "multitext",
     "verification_schedule": "text",
+    "implementation_schedule": "text",
+    "lane_scopes": "multitext",
+    "lane_seams": "multitext",
     "mutation_include_paths": "multitext",
     "verification_candidate_hash": "text",
     "verification_mode": "text",
@@ -512,14 +524,15 @@
     ],
     "requirements": ["request_kind", "urgency", "revision", "approved_at_utc", "source_hash"],
     "definition_of_done": ["revision", "approved_at_utc", "source_hash", "definition_of_done_source_hash", "definition_of_done_commit"],
-    "delivery": ["goal", "definition_of_done", "definition_of_done_path", "definition_of_done_revision", "definition_of_done_source_hash", "definition_of_done_commit", "target_branch", "backlog_commit", "backlog_path", "backlog_package_hash", "scope_hash", "revision", "approved_at_utc", "source_hash"],
-    "execution_plan": ["revision", "scope_hash", "plan_hash", "item_plan_hashes", "operation_contract_hashes", "approved_at_utc", "source_hash"],
-    "delivery_item": ["story_id", "story_path", "story_source_hash", "test_plan_path", "test_plan_source_hash", "integration_base_commit", "item_plan_hash", "verification_contract_ref", "verification_contract_hash", "environment_contract_ref", "environment_contract_hash", "execution_after", "dependency_bindings", "waits_for", "waits_for_bindings", "path_claims", "contract_claims", "role_sequence", "verification_schedule", "architecture_impact", "architecture_components", "architecture_record_kinds", "architecture_reason", "architecture_delta_hash", "source_hash"],
+    "delivery": ["goal", "definition_of_done", "definition_of_done_path", "definition_of_done_revision", "definition_of_done_source_hash", "definition_of_done_commit", "process_policy_path", "process_policy_revision", "process_policy_source_hash", "target_branch", "backlog_commit", "backlog_path", "backlog_package_hash", "scope_hash", "revision", "approved_at_utc", "source_hash"],
+    "execution_plan": ["revision", "scope_hash", "plan_hash", "item_plan_hashes", "operation_contract_hashes", "superseded_plan_approvals", "approved_at_utc", "source_hash"],
+    "delivery_item": ["story_id", "story_path", "story_source_hash", "test_plan_path", "test_plan_source_hash", "integration_base_commit", "item_plan_hash", "verification_contract_ref", "verification_contract_hash", "environment_contract_ref", "environment_contract_hash", "execution_after", "dependency_bindings", "waits_for", "waits_for_bindings", "path_claims", "contract_claims", "role_sequence", "verification_schedule", "implementation_schedule", "lane_scopes", "lane_seams", "architecture_impact", "architecture_components", "architecture_record_kinds", "architecture_reason", "architecture_delta_hash", "source_hash"],
     "code_review": ["item_plan_hash", "reviewed_commit", "verification_candidate_hash", "verification_mode", "verification_result_hash", "source_hash"],
     "verification": ["item_plan_hash", "verified_commit", "test_plan_source_hash", "verification_candidate_hash", "verification_mode", "verification_result_hash", "source_hash"],
     "delivery_review": ["plan_hash", "reviewed_commit", "reviewed_integration_commit", "approved_at_utc", "approval_hash", "source_hash"],
     "operation": ["revision", "constrained_by", "source_hash", "approved_at_utc", "test_command", "test_workdir", "diagnostic_test_command", "diagnostic_test_workdir", "mutation_include_paths", "mutation_disposition", "mutation_command", "mutation_workdir", "mutation_rationale", "dependency_audit_disposition", "dependency_audit_command", "dependency_audit_workdir", "dependency_audit_rationale", "pull_request_check_source", "pull_request_check_provider", "env_command", "env_workdir", "scenarios", "tolerated_warnings", "service_catalog"],
-    "delivery_governance": ["revision", "max_parallel", "governance_hash", "source_hash", "approved_at_utc"]
+    "delivery_governance": ["revision", "max_parallel", "governance_hash", "source_hash", "approved_at_utc"],
+    "process_policy": ["revision", "approved_at_utc", "source_hash"]
   },
   "fragment_graph_groups": {
     "base": ["navigation"],
@@ -530,7 +543,7 @@
     "experience_design": ["experience"],
     "backlog": ["backlog", "backlog-review", "epic", "epic-review", "story", "test-plan"],
     "requirements": ["requirement"],
-    "delivery": ["definition-of-done", "delivery", "execution-plan", "delivery-item", "code-review", "verification", "delivery-review", "delivery-governance"],
+    "delivery": ["definition-of-done", "delivery", "execution-plan", "delivery-item", "code-review", "verification", "delivery-review", "delivery-governance", "process-policy"],
     "operation": ["operation"]
   },
   "extra_doc_types": [
@@ -574,7 +587,8 @@
     "delivery-review",
     "verification-contract",
     "environment-contract",
-    "delivery-governance"
+    "delivery-governance",
+    "process-policy"
   ],
   "type_path_patterns": {
     "home": ["^home\\.md$"],
@@ -618,7 +632,8 @@
     "delivery_review": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/delivery-review\\.md$"],
     "verification_contract": ["^operation/verification-contract\\.md$"],
     "environment_contract": ["^operation/environment-contract\\.md$"],
-    "delivery_governance": ["^delivery/governance/governance\\.md$"]
+    "delivery_governance": ["^delivery/governance/governance\\.md$"],
+    "process_policy": ["^delivery/process-policy\\.md$"]
   },
   "status_values": {
     "decision": ["draft", "in_review", "proposed", "accepted", "rejected", "approved", "superseded"],
@@ -643,7 +658,8 @@
     "delivery_review": ["draft", "changes_requested", "approved"],
     "verification_contract": ["draft", "approved"],
     "environment_contract": ["draft", "approved"],
-    "delivery_governance": ["draft", "approved"]
+    "delivery_governance": ["draft", "approved"],
+    "process_policy": ["draft", "approved"]
   },
   "backlog_contract": {
     "applicable_inputs": {

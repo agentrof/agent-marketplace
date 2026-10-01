@@ -215,6 +215,15 @@ class CIPlanIntegrationTests(unittest.TestCase):
         event["pull_request"]["head"]["repo"]["full_name"] = "fork/project"
         self.assertEqual(self.choose(event=event), ("impact", self.base))
 
+    def test_merge_queue_group_selects_impact_against_the_queue_base(self):
+        event = {"merge_group": {
+            "base_sha": self.base, "head_sha": self.merge,
+            "base_ref": "refs/heads/main",
+            "head_ref": f"refs/heads/gh-readonly-queue/main/pr-9-{self.base}",
+        }}
+        self.assertEqual(self.choose(event_name="merge_group", event=event), ("impact", self.base))
+        self.assertEqual(self.queries, [])
+
     def test_manual_and_scheduled_refresh_always_run_full(self):
         for event in ("workflow_dispatch", "schedule"):
             with self.subTest(event=event):

@@ -451,8 +451,11 @@ paths inside its approved scope against the Item worktree's committed head,
 and `takeover-item` refuses to discard uncommitted lane work: it names each
 lane's paths and the choice between committing the work as the coordinator on
 a host whose writer receipt is verified and discarding it with the commands it
-names. A schedule change follows normal execution revision, approval and
-publication.
+names. Those commands keep any commit the worktree holds ahead of the remote
+Item tip, which the refusal lists; takeover then refuses with
+`DELIVERY_LOCAL_REF_DIVERGED`, since dropping such a commit is a separate,
+explicit choice. A schedule change follows normal execution revision, approval
+and publication.
 
 Process switch `execution_planning` decides how the facts a plan needs are
 written and reviewed. At `per_document`, the default, each Operation contract

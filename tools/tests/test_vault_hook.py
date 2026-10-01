@@ -4109,7 +4109,8 @@ class AutopilotRuntimeGuardTests(unittest.TestCase):
         (self.runtime / name).write_text(json.dumps(value), encoding="utf-8")
 
     def shell_event(self, command: str, change) -> subprocess.CompletedProcess:
-        payload = self.shell.payload(self.root, command)
+        # On Windows only a cmd-family shell can carry writer authority, as for every other writer.
+        payload = self.shell.attested_writer_payload(self.root, command)
         payload["tool_use_id"] = f"autopilot-{uuid.uuid4().hex[:8]}"
         before = self.shell.run_hook("pre", payload)
         self.assertEqual(before.returncode, 0, before.stdout + before.stderr)

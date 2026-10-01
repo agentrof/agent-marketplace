@@ -3137,7 +3137,7 @@ def declared_anchor_names(plugin: Path, source: object) -> tuple[set[str], str |
             docstring = node.body[0] if node.body and isinstance(node.body[0], ast.Expr) \
                 and isinstance(node.body[0].value, ast.Constant) else None
             skipped = set(map(id, ast.walk(docstring))) if docstring is not None else set()
-            headings = {re.sub(r"\s*<!--.*?-->", "", found.group(1)).strip()
+            headings = {re.sub(r"(?s)\s*<!--.*?-->", "", found.group(1)).strip()
                         for inner in ast.walk(node)
                         if id(inner) not in skipped and isinstance(inner, ast.Constant)
                         and isinstance(inner.value, str)

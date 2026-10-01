@@ -217,14 +217,21 @@ Delivery names the process switch values it ran under. Without a policy
 nothing is pinned and every compiler output is unchanged; such a Delivery runs
 with every switch at its default. A draft or invalid policy refuses scope
 approval. The pin is compared by value: each value, with its parameters, of
-the switches a Delivery flow owns, so a later policy that sets none of them to
-another value, one with every switch at its default included, agrees with the
-pin. While a new execution approval can still re-pin the Delivery, that is
-while it is `scope_approved` or `execution_approved`, a policy that changes
-one of those values makes `delivery_compile.py check`, and the coordinator
-verbs that run it, refuse the Delivery, naming each changed switch, until its
-execution plan is revised and approved again, which pins the current policy
-and lists the changed pin fields in `refreshed_delivery_pins`. The revision
+the switches the Delivery still reads, so a later policy that sets none of
+them to another value, one with every switch at its default included, agrees
+with the pin. A `scope_approved` Delivery reads every switch a Delivery flow
+owns. An `execution_approved` one runs only its `delivery-execution` flow
+until a plan revision, whose approval pins the policy anew, so it reads only
+the switches that flow owns: `execution_planning`, `implementation_schedule`,
+`owner_gates` and `review_loop`. A switch no Delivery flow owns, such as
+`mechanical_pass_tier`, is no part of the pin: inside a Delivery it is read
+from the current policy. While a new execution approval can still re-pin the
+Delivery, that is while it is `scope_approved` or `execution_approved`, a
+policy that changes one of the values it reads makes `delivery_compile.py
+check`, and the coordinator verbs that run it, refuse the Delivery, naming
+each changed switch, until its execution plan is revised and approved again,
+which pins the current policy and lists the changed pin fields in
+`refreshed_delivery_pins`. The revision
 runs in order: `begin-plan-revision`, the execution-plan tasks and the Item
 revisions they make, `approve-execution`, `publish-execution-plan` and
 `finish-plan-revision`. Before the first execution approval, and while the
@@ -247,9 +254,10 @@ strands one that can no longer re-pin, nor changes the values it runs under.
 Inside a Delivery a flow reads a switch with
 `process_policy.py value --switch <id> --delivery DLV-###`, which applies that
 rule to the switch it reads. Task derivation follows the same pin:
-`task_inputs.py` applies it to the switches the task's flows own for a task
-that names the Delivery with `--delivery` or reads a file of its package, so a
-Delivery's tasks never bind the switch references of values it did not pin. The
+`task_inputs.py` applies it to the switches the task's flows own that the
+Delivery reads, for a task that names the Delivery with `--delivery` or reads
+a file of its package, so a Delivery's tasks never bind the switch references
+of values it did not pin. The
 Delivery stays `execution_approved` while its Items run, so the pin holds
 through Item execution. An Item worktree reads the switch values from its own
 tree, so reservation and every publication of the execution plan carry the

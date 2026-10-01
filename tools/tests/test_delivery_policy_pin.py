@@ -241,6 +241,74 @@ class DeliveryPolicyPinTests(unittest.TestCase):
         self.revise_policy(review_loop="default")
         self.assertEqual(self.findings(), [])
 
+    def first_policy(self, *argv: tuple[str, ...]) -> None:
+        """Approve the project's first Process Policy with the given set commands."""
+        process_policy.path_for(self.docs).unlink(missing_ok=True)
+        self.policy("init")
+        for step in argv:
+            self.policy(*step)
+        self.policy("approve")
+
+    def test_an_execution_approved_delivery_compares_only_the_switches_its_execution_flow_reads(self):
+        """Once execution is approved only delivery-execution runs until a plan revision, whose
+        approval pins the planning switches anew, so a first policy that sets only review_panels
+        or story_size_budget leaves a Delivery that pinned none running (rr-switches-06)."""
+        planning = {
+            "review_panels": [("set", "--switch", "review_panels", "--value", "lens_panel")],
+            "story_size_budget": [("set", "--switch", "story_size_budget", "--value", "propose_split"),
+                                  ("set", "--switch", "story_size_budget", "--parameter",
+                                   "acceptance_criteria", "--value", "12")]}
+        self.propose_and_approve_scope()
+        # A scope-approved Delivery still runs its planning flows, so every Delivery switch counts.
+        for switch, commands in planning.items():
+            with self.subTest(status="scope_approved", switch=switch):
+                self.first_policy(*commands)
+                self.assertTrue(any(finding.startswith(f"Delivery runs switch {switch} at")
+                                    for finding in self.findings()), self.findings())
+        process_policy.path_for(self.docs).unlink()
+        self.approve_execution()
+        for switch, commands in planning.items():
+            with self.subTest(status="execution_approved", switch=switch):
+                self.first_policy(*commands)
+                self.assertEqual(self.findings(), [])
+                self.assertEqual(quiet(delivery_compile.check_delivery, self.plan)[0], 0)
+        # A switch the execution flow reads is still drift until an execution approval pins it.
+        self.first_policy(("set", "--switch", "review_loop", "--value", "blocking_delta"))
+        self.assertTrue(self.findings()[0].startswith("Delivery runs switch review_loop at current"))
+        # The protocol and /configure process name the set the registry derives.
+        names = sorted(process_policy.delivery_switches(process_policy.load_registry(),
+                                                        status="execution_approved"))
+        listed = ", ".join(f"`{name}`" for name in names[:-1]) + f" and `{names[-1]}`."
+        for relative in ("docs/requirement-delivery-protocol.md",
+                         "plugins/software-engineering-team/skill-content/configure/references/process-policy.md"):
+            with self.subTest(doc=relative):
+                text = " ".join((ROOT / relative).read_text(encoding="utf-8").split())
+                self.assertIn("flow owns: " + listed, text)
+
+    def test_a_switch_no_delivery_flow_owns_is_read_from_the_current_policy(self):
+        """The pin covers only the switches a Delivery flow owns. mechanical_pass_tier belongs to
+        backlog, Operation and Solution Design work, so a /configure task inside a running
+        Delivery reads it from the current policy instead of demanding a plan revision
+        (rr-seams-07)."""
+        self.revise_policy(review_loop="blocking_delta")
+        self.propose_and_approve_scope()
+        self.approve_execution()
+        self.commit("Pin Process Policy revision 1")
+        self.revise_policy(mechanical_pass_tier="mechanical")
+        self.assertEqual(self.findings(), [])
+        code, result = self.value("mechanical_pass_tier")
+        self.assertEqual((code, result["value"]), (0, "mechanical"), result)
+        self.task("configure", "qa-engineer", "revise", delivery=DELIVERY)
+        self.task("deliver", "backend-developer", delivery=DELIVERY)
+        # From the Review on a Delivery switch reads the pinned revision, the other the current policy.
+        self.set_status(self.delivery_note(), "review")
+        self.revise_policy(review_loop="default")
+        self.assertEqual(self.value("review_loop")[1]["value"], "blocking_delta")
+        code, result = self.value("mechanical_pass_tier")
+        self.assertEqual((code, result["value"]), (0, "mechanical"), result)
+        self.revise_policy(mechanical_pass_tier="default")
+        self.assertEqual(self.value("mechanical_pass_tier")[1]["value"], "role_tier")
+
     @contextlib.contextmanager
     def lane_story(self):
         """Give AUTH-01 two more implementation roles, so its Item can run lanes."""

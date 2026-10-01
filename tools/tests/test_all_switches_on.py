@@ -215,15 +215,19 @@ class AllSwitchesOnTests(unittest.TestCase):
             self.assertEqual(code, 0, f"{name}: {output}")
         self.assertEqual(delivery_compile.split_note(root / "delivery.md")[0]["status"], "review")
         # From the Review on the Delivery reads the values it pinned, whatever
-        # the policy sets for the next Delivery.
+        # the policy sets for the next Delivery. A switch no Delivery flow owns
+        # is no part of the pin, so it reads the current policy.
         self.policy("begin-revision")
         for switch in self.values:
             self.policy("set", "--switch", switch, "--default")
         self.policy("approve")
+        registry = process_policy.load_registry()
+        pinned = process_policy.delivery_switches(registry)
+        self.assertTrue(set(self.values) - pinned)
         for switch, value in self.values.items():
             with self.subTest(switch=switch):
                 self.assertEqual(delivery_compile.delivery_switch_value(self.docs, "DLV-001", switch),
-                                 value)
+                                 value if switch in pinned else registry[switch]["default"])
 
 
 if __name__ == "__main__":

@@ -2525,6 +2525,29 @@ def ruling_id_findings(body: str) -> list[str]:
     return errors
 
 
+def bundle_rulings(body: str) -> dict:
+    """The owner rulings of User Decisions that an execution-plan bundle binds.
+
+    A ruling is a line that starts with its id, or the answer of an answered
+    row of the decision table under its id. A pending row is a question, and
+    the Delivery path line and other text are no ruling, so none of them binds
+    the bundle. A table that cannot be read binds as it stands.
+    """
+    section = section_bodies(body).get("User Decisions", "")
+    lines = [line.strip() for line in section.splitlines()]
+    rulings: dict = {"lines": [line for line in lines
+                               if not line.startswith("|") and RULING_LINE_RE.match(line)],
+                     "answers": []}
+    table = [line for line in lines if line.startswith("|")]
+    if table:
+        rows, errors = decision_rows(body)
+        if errors:
+            rulings["table"] = table
+        else:
+            rulings["answers"] = [[row["id"], row["answer"]] for row in rows if row["status"] == "answered"]
+    return rulings
+
+
 def records_bundle_rulings(docs: Path, props: dict) -> bool:
     """Whether a Delivery records its owner rulings under execution_planning single_source_bundle.
 
@@ -2607,7 +2630,7 @@ def bundle_manifest(docs: Path, delivery_id: str, remote: str = "origin") -> dic
     to carry, every Item record with its Story and Test Plan and the switch
     value's package data, each with the hash of its bytes, and the Delivery's
     User Decisions section, which owns every owner ruling, with the hash of its
-    text. It names the counterpart reader of every revised contract as
+    rulings alone. It names the counterpart reader of every revised contract as
     task_inputs.py --role takes it. An unpinned revision is one no open Item
     pins that the Integration, or before reservation the target, does not hold:
     approval does not end it, only the target and refresh-target do. It
@@ -2625,9 +2648,9 @@ def bundle_manifest(docs: Path, delivery_id: str, remote: str = "origin") -> dic
         raise ValueError(f"{delivery_id} is {props.get('status')}; its bundle is reviewed"
                          " during execution planning")
     delivery = (root / "delivery.md").relative_to(docs).as_posix()
-    rulings = section_bodies(body).get("User Decisions")
-    if rulings is None:
+    if section_bodies(body).get("User Decisions") is None:
         raise ValueError(f"bundle input is missing: {delivery} User Decisions")
+    rulings = json.dumps(bundle_rulings(body), sort_keys=True, separators=(",", ":"))
     decisions = {"path": delivery, "section": "User Decisions",
                  "sha256": "sha256:" + hashlib.sha256(rulings.encode("utf-8")).hexdigest()}
     items, sources = [], []

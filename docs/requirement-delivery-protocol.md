@@ -469,8 +469,10 @@ and one id that starts two rulings, at every `owner_gates` value.
 `delivery_compile.py bundle-manifest --delivery DLV-###` lists every contract
 the plan revises, pins or still has to carry, every Item record with its Story
 and Test Plan and the fact ownership data, each with the hash of its bytes,
-and the Delivery's `User Decisions` section with the hash of its text, and
-names the counterpart of every revised contract as a reader, in the role name
+and the Delivery's `User Decisions` section with the hash of its rulings
+alone, each ruling line and the answer of each answered decision row, so a
+queued question or the Delivery path line leaves it fresh, and names the
+counterpart of every revised contract as a reader, in the role name
 `task_inputs.py --role` takes; it refuses a Delivery that runs
 `per_document`. The readers start together, the manifest is recomputed with
 `--expected-hash` before any finding is accepted, so a changed ruling needs a

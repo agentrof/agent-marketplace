@@ -368,6 +368,15 @@ class DefaultEquivalenceTests(unittest.TestCase):
         self.assertEqual(run_harness("shipped"), expected("shipped", SHIPPED_GOLDEN),
                          "run this file with --harness shipped --raw to read the tasks")
 
+    def test_the_invariant_names_the_listed_differences(self):
+        # Architecture invariant 30 states the rule these goldens prove,
+        # differences included, so it names both lists.
+        text = " ".join((ROOT / "docs/architecture.md").read_text(encoding="utf-8").split())
+        invariant = text.split(" 30. ", 1)[1].split(" 31. ", 1)[0]
+        self.assertIn("apart from the defect fixes that `EXPECTED_DIFFERENCES` in"
+                      " `tools/tests/test_default_equivalence.py` lists", invariant)
+        self.assertIn("the instruction files its `SHIPPED_ADDITIONS` lists", invariant)
+
     def test_every_listed_difference_names_its_issue(self):
         for kind, entries in EXPECTED_DIFFERENCES.items():
             for path, (_value, reason) in entries.items():

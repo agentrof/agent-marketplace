@@ -186,10 +186,14 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     `configure/data/process-switches.json` whose default is the behaviour it
     changes. With every switch at its default, every compiler and coordinator
     output is byte-identical to the previous release on the same inputs and
-    every task binds the same instructions; only script and contract hashes
-    change, and golden all-default runs prove it. Two exceptions stand
-    outside this rule: the model and effort lines of rendered agents follow
-    each host's model catalog and execution profile, not default
+    every task binds the same instructions, apart from the defect fixes that
+    `EXPECTED_DIFFERENCES` in `tools/tests/test_default_equivalence.py` lists,
+    each with the issue whose fix made it, and the instruction files its
+    `SHIPPED_ADDITIONS` lists, each with the issue that makes default tasks
+    bind it; otherwise only script and contract hashes change, and golden
+    all-default runs prove it. Two exceptions stand outside this rule: the
+    model and effort lines of rendered agents follow each host's model
+    catalog and execution profile, not default
     equivalence, so a catalog change reaches every role under any policy;
     and a user-armed session entry such as autopilot ships without a switch,
     because without an active grant its hooks exit silently, no task binds

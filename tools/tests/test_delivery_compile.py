@@ -815,12 +815,13 @@ class DeliveryCompilerTests(unittest.TestCase):
                        " decision in constrained_by; test_command is required"],
             "pending_operation_revisions": [], "pending_decisions": []}))
         path.write_bytes(draft)
-        # The standard path approves the revision before its plan gate, so the gate refuses it open.
+        # The standard path approves the revision before its plan gate, so the gate refuses it open,
+        # naming its status (rr-seams-06).
         for argv in (("begin-revision",), ("set", "--switch", "owner_gates", "--default"), ("approve",)):
             self.policy(*argv)
         code, checked = self.check_plan_result()
         self.assertEqual((code, checked["errors"], checked["pending_operation_revisions"]),
-                         (1, ["approved current verification contract is required: "], []))
+                         (1, ["approved current verification contract is required: revision 2 is a draft"], []))
         # A revision that fails its own check is refused in gate A too.
         for argv in (("begin-revision",), ("set", "--switch", "owner_gates", "--value", "two_fixed_gates"),
                      ("approve",)):
@@ -833,6 +834,39 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual((code, checked["pending_operation_revisions"]), (1, []))
         self.assertEqual(checked["errors"], ["approved current verification contract is required:"
                                              " mutation_disposition must be required or not_applicable"])
+
+    def test_gate_a_reads_owner_gates_by_value_after_a_revision_that_changes_no_delivery_switch(self):
+        """delivery_owner_gates compared the pin by hash, so once the owner approved a policy revision
+        that changes no Delivery switch, check-plan no longer saw two_fixed_gates and refused the
+        open revision gate A approves, with an empty reason. owner_gates is read by value, as every
+        other switch read is (rr-seams-06)."""
+        self.approve_verification_contract()
+        self.approve_dod()
+        for argv in (("init",), ("set", "--switch", "owner_gates", "--value", "two_fixed_gates"), ("approve",)):
+            self.policy(*argv)
+        init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                      "goal": "Authenticate", "outcome": None,
+                                      "target_branch": "main", "story": ["AUTH-01"]})
+        contract = type("Args", (), {"docs": str(self.docs), "kind": "verification", "constrained_by": None})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+            self.author_item(path_claims=["src/auth.py"], contract_claims=["auth:session"])
+            self.assertEqual(operation_compile.revise(contract), 0)
+            self.assertEqual(delivery_compile.approve_scope(
+                type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})), 0)
+        # The pinned revision stays readable from Git once the policy moves on.
+        self.git("add", "--all")
+        self.git("commit", "-q", "-m", "Pin Process Policy revision 1")
+        gated = self.check_plan_result()
+        self.assertEqual((gated[0], [revision["revision"] for revision in gated[1]["pending_operation_revisions"]]),
+                         (0, [2]))
+        # The owner approves a revision for the next Delivery that changes only a backlog switch.
+        for argv in (("begin-revision",), ("set", "--switch", "review_manifest_scope", "--value", "bounded"),
+                     ("approve",)):
+            self.policy(*argv)
+        props = delivery_compile.split_note(delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md")[0]
+        self.assertEqual(delivery_compile.delivery_owner_gates(self.docs, props), "two_fixed_gates")
+        self.assertEqual(self.check_plan_result(), gated)
 
     def test_execution_approval_refuses_without_workflows_until_render_ci_adds_one(self):
         plan_args = self.scope_ready_for_execution()

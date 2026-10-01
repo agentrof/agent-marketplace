@@ -403,21 +403,19 @@ def policy_owner_gates(docs: Path) -> str | None:
 def delivery_owner_gates(docs: Path, props: dict) -> str | None:
     """Return the owner_gates value a Delivery keeps its decision log under.
 
-    Before scope approval the current policy decides. Later only a pin that
-    still names the approved policy does: a policy revised or drafted since
-    decides nothing here, and the pin checks report that drift where it
-    blocks. Outside the gate window there is no open log to check.
+    It is read by value, as every switch read of a Delivery is, so a policy
+    revised since the pin that keeps owner_gates as pinned changes nothing
+    here. A value that cannot be read, a draft policy or a drifted owner_gates
+    included, decides nothing, and the pin checks report that drift where it
+    blocks; so does a package that declares no owner_gates. Outside the gate
+    window there is no open log to check.
     """
-    status = props.get("status")
-    if status not in DECISION_LOG_STATUSES:
+    if props.get("status") not in DECISION_LOG_STATUSES:
         return None
     try:
-        values, snapshot = process_policy.effective_values(docs)
-    except ValueError:
+        return delivery_switch_value(docs, str(props.get("id")), OWNER_GATES)
+    except (KeyError, ValueError):
         return None
-    if status != "scope_proposed" and process_policy.pin_findings(props, snapshot):
-        return None
-    return values.get(OWNER_GATES, {}).get("value")
 
 
 def owner_decision_classes() -> set[str]:
@@ -1953,7 +1951,7 @@ def execution_approval_refusals(docs: Path, delivery_id: str, reopen: list[str] 
     return {"root": root, "props": props, "body": body, "inputs": inputs}, []
 
 
-def pending_operation_revisions(docs: Path, root: Path) -> tuple[list[dict], dict[str, str]]:
+def pending_operation_revisions(docs: Path, root: Path, approves: bool = True) -> tuple[list[dict], dict[str, str]]:
     """Return each open Operation revision the plan binds that its approval takes, and why it refuses the rest.
 
     Under two fixed owner gates, gate A approves such a revision before
@@ -1961,7 +1959,8 @@ def pending_operation_revisions(docs: Path, root: Path) -> tuple[list[dict], dic
     Each revision is checked as its approval renders it, and its entry names
     the receipt that approval stamps, so gate A approves exact bytes. An open
     revision that passes its own check but not its approval's is refused by
-    kind with what the approval finds.
+    kind with what the approval finds. A gate that approves no revision, as
+    *approves* false says, refuses each open one by its status.
     """
     runtime = any(split_note(path)[0].get("runtime_required", False)
                   for path in sorted(root.glob("items/*/item.md")))
@@ -1971,6 +1970,9 @@ def pending_operation_revisions(docs: Path, root: Path) -> tuple[list[dict], dic
             continue
         receipt, errors = operation_compile.check_contract(docs, kind)
         if receipt.get("status") != "draft" or errors:
+            continue
+        if not approves:
+            refused[kind] = f"approved current {kind} contract is required: revision {receipt['revision']} is a draft"
             continue
         try:
             approved, errors = operation_compile.check_contract(
@@ -1994,8 +1996,9 @@ def check_plan(args) -> int:
     if root is not None:
         props, body = split_note(root / "delivery.md")
         status = props.get("status")
-        if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
-            pending, refused = pending_operation_revisions(docs, root)
+        # Only gate A approves an open revision; any other plan gate shows it refused by its status.
+        pending, refused = pending_operation_revisions(
+            docs, root, delivery_owner_gates(docs, props) == TWO_FIXED_GATES)
         # The queued questions the gate asks; the gate's writes refuse while one is pending.
         if keeps_decision_log(docs, props, body):
             decisions = pending_decisions(body)

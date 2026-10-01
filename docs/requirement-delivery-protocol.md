@@ -394,7 +394,8 @@ refused, since gate A approves it before execution approval runs. The revision
 is checked as its approval renders it, so one the approval would refuse, such
 as a draft without `test_command`, is refused with what the approval finds,
 and each listed revision carries the `source_hash` the approval stamps: gate A
-approves exactly that receipt.
+approves exactly that receipt. Any other plan gate approves no revision, so it
+refuses an open one and names its revision and draft status.
 
 `execution-plan.md` is a compiler-rendered aggregate of those Item records.
 Approval is local. `publish-execution-plan` is the only network writer for the

@@ -91,6 +91,9 @@
 ## Autopilot
 
 - `$software-engineering-team:autopilot` is the user-invoked autopilot entry.
+  Picking it from the skill menu inserts
+  `$software-engineering-team:autopilot on`, a prompt that arms as it stands
+  or with options such as `--for 9h` added.
   Only the user arms a grant: the plugin's `UserPromptSubmit` hook records a
   prompt that starts with that mention and an `on` command as a short-lived
   arming record, never a subagent's prompt, and `autopilot.py on`, run

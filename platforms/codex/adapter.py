@@ -24,6 +24,10 @@ BUNDLED_CATALOG_SOURCE_RE = re.compile(
     r"https://github\.com/openai/codex/blob/rust-v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)"
     r"/codex-rs/models-manager/models\.json"
 )
+# Entries whose inserted default prompt must itself be the command a hook
+# reads: the autopilot arming hook arms only on a prompt that starts with the
+# entry's mention and its on verb.
+DEFAULT_PROMPTS = {"autopilot": "${plugin}:{name} on"}
 # How a frozen-task A/B runs every role on one candidate model.
 MODEL_TRIAL = (
     "Codex: in a scratch copy of the project, run `generate_codex_project.py"
@@ -65,11 +69,13 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
     short = f"Start the {visible} guided workflow"
     if len(short) > 64:
         short = f"Run {visible}"
+    prompt = DEFAULT_PROMPTS.get(name, "Use ${plugin}:{name} to start this workflow.").format(
+        plugin=source_name, name=name)
     metadata_text = (
         "interface:\n"
         f"  display_name: \"{visible}\"\n"
         f"  short_description: \"{short}\"\n"
-        f"  default_prompt: \"Use ${source_name}:{name} to start this workflow.\"\n"
+        f"  default_prompt: \"{prompt}\"\n"
         "policy:\n"
         "  allow_implicit_invocation: false\n"
     )

@@ -3187,13 +3187,41 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
 BARRIER_BEGIN_VERBS = {"plan-revision": "begin-plan-revision", "upgrade": "quiesce-upgrade"}
 
 
+def published_cancellation(root: Path, remote: str, delivery_id: str) -> bool:
+    """Whether the Integration, or the target once the merge dropped it, records the Delivery cancelled.
+
+    A cancellation writes the cancelled status on the Integration alone, and its
+    PR carries it to the target.
+    """
+    from delivery_compile import docs_root, find_delivery, split_note
+    directory = find_delivery(docs_root(root), delivery_id)
+    if directory is None:
+        return False
+    ref = canonical_refs(delivery_id)["integration"]
+    try:
+        source = remote_ref_oids(root, remote, [ref])[ref] or fetch_target(root, remote)[1]
+        props, _body = split_remote_note(root, source, rel_posix(root, directory / "delivery.md"), split_note)
+    except RuntimeError:
+        return False
+    return props.get("status") == "cancelled"
+
+
 def _barrier_transition(project_root: Path, kind: str, action: str,
                         delivery_id: str | None = None, remote: str = "origin") -> dict:
-    """Install or release a lightweight barrier on existing coordination refs."""
+    """Install or release a lightweight barrier on existing coordination refs.
+
+    A cancellation is final and its Review stays at the Integration tip for its
+    PR, so a plan revision barrier that a cancellation carried, as one could
+    before cancel-delivery refused a barrier, is released on the Fence alone,
+    also once the merge dropped the Integration ref.
+    """
     root = main_worktree(project_root.resolve())
     validate_delivery_id(delivery_id or "DLV-000") if delivery_id else None
     fence_ref, fence_oid, values = _fence_context(root, remote)
     integration_ref = canonical_refs(delivery_id)["integration"] if delivery_id else None
+    if (action != "begin" and kind == "plan-revision" and integration_ref
+            and published_cancellation(root, remote, delivery_id)):
+        integration_ref = None
     integration_oid = remote_oid(root, remote, integration_ref) if integration_ref else None
     if action == "begin":
         if values["Mode"] != "open" or values["Barrier-Kind"] != "none":

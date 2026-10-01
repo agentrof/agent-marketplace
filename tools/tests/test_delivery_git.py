@@ -2137,6 +2137,39 @@ class DeliveryGitTests(unittest.TestCase):
         intent = delivery_git.prepare_pr_creation(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
 
+    def test_a_barrier_a_cancellation_carried_is_released_on_the_fence_alone(self):
+        """Before cancel-delivery refused a barrier, a cancellation could carry a plan revision's barrier.
+        finish-plan-revision and abort-plan-revision then wrote their release record on top of the
+        cancellation Review, and once its PR merged they failed on the absent Integration ref. For a
+        Delivery whose published status is cancelled they release the Fence barrier alone (#334, #337)."""
+        integration_ref = delivery_git.canonical_refs("DLV-001")["integration"]
+        for action, merged in (("abort", False), ("finish", False), ("finish", True), ("abort", True)):
+            with self.subTest(action=action, merged=merged):
+                project, _docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
+                    False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.begin_plan_revision(project, "DLV-001")
+                # The state a cancellation of an earlier release left: the Integration records the
+                # Delivery cancelled while the Fence still carries the plan revision's barrier.
+                barrier = delivery_git.remote_oid(project, "origin", integration_ref)
+                relative = (directory / "delivery.md").relative_to(project).as_posix()
+                props, body = delivery_git.split_remote_note(project, barrier, relative, delivery_compile.split_note)
+                props["status"] = "cancelled"
+                cancelled = delivery_git.commit_replacements(
+                    project, barrier, {relative: delivery_compile.frontmatter(props, body)},
+                    "Fixture: a cancellation that carried the barrier", {})
+                delivery_git.atomic_push(project, "origin", [(integration_ref, barrier, cancelled)])
+                if merged:
+                    # The cancellation PR merged, and the merge dropped the Integration ref.
+                    delivery_git.run_git(project, "push", "-q", "origin", f"{cancelled}:refs/heads/main")
+                    delivery_git.atomic_push(project, "origin", [(integration_ref, cancelled, "")])
+                released = getattr(delivery_git, f"{action}_plan_revision")(project, "DLV-001")
+                self.assertIsNone(released["integration"])
+                _ref, _fence, values = delivery_git._fence_context(project, "origin")
+                self.assertEqual((values["Barrier-Kind"], values["Barrier-Epoch"]), ("none", "none"))
+                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [integration_ref])[integration_ref],
+                                 "" if merged else cancelled)
+
     DECISION_HEADER = ("| id | class | question | options | recommendation | status | answer | blocks |"
                        " wait_minutes |\n|---|---|---|---|---|---|---|---|---|")
 

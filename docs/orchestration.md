@@ -59,8 +59,10 @@ Review. A re-review reads only the open blocking findings, the changed text and
 its dependency context. Before a critical or major claim gates, one fresh,
 read-only calibration reader, neither the writer nor the claiming reader,
 confirms it, lowers it to minor or rules it invalid, citing the text. It runs
-as the claiming reviewer's role on that role's own tier, never as a `-lens`
-variant. In Delivery code review it registers its rulings as a result of its
+as the claiming reviewer's role, or for an Operation contract or bundle claim
+the counterpart of the contract it concerns, on that role's own tier, never as
+a `-lens` or a `-mechanical` variant. In Delivery code review it registers its
+rulings as a result of its
 own, and `delivery_verification.py result` refuses rulings that the claiming
 result carries itself. Only confirmed claims gate, and each claim is ruled
 once. Every ruling is kept where a compiler reads it: a backlog review note and

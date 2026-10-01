@@ -284,8 +284,9 @@ class ReviewLoopReferenceTests(unittest.TestCase):
             " `backlog-reviewer`, `solution-reviewer` or `design-system-reviewer`",
             "`devops-engineer` for the Verification Contract and `qa-engineer` for the Environment"
             " Contract",
-            "Never spawn a `-lens` variant for calibration, also when a lens panel returned the"
-            " claims: a lower calibration tier needs its own data first",
+            "Never spawn a `-lens` or `-mechanical` variant for calibration, also when a lens panel"
+            " returned the claims or a mechanical pass applied the fixes: a lower calibration tier"
+            " needs its own data first",
             "adding `--findings <record of the claims>`",
             "Never pass the writer's triage or interpretation, another reply or the conversation",
             "`finding`, `claimed_severity`, `calibrated_severity` and `reason`",
@@ -333,7 +334,7 @@ class ReviewLoopReferenceTests(unittest.TestCase):
         # The only calibration evidence comes from a judge on the strongest tier;
         # a lower calibration tier needs its own data first (#326, 30 Sep 2026).
         calibration = flat(DOCUMENT).split("## Calibration", 1)[1]
-        self.assertNotRegex(calibration, r"`[a-z-]+-lens`")
+        self.assertNotRegex(calibration, r"`[a-z-]+-(?:lens|mechanical)`")
         switch = json.loads(read(REGISTRY))["switches"]["review_loop"]
         self.assertNotIn("agent_variants", switch)
         self.assertIn("one fresh calibration reader of the claiming reviewer's role, on that"

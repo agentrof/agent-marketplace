@@ -189,6 +189,8 @@ class AllSwitchesOnTests(unittest.TestCase):
         item = root / "items/auth-01/item.md"
         props, body = delivery_compile.split_note(item)
         props["path_claims"] = ["src/auth.py"]
+        # Under parallel_lanes_v1 a one-lane Item also declares its lane scope.
+        props["lane_scopes"] = ["backend_developer:src/auth.py"]
         props["contract_claims"] = ["auth:session"]
         delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
         steps = [("approve-scope", delivery_compile.approve_scope, plan),

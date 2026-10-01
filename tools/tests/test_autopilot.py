@@ -1060,6 +1060,23 @@ class DistributionTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn("bound to a claude session", result.stdout + result.stderr)
 
+    def test_the_codex_default_prompt_of_the_entry_arms_a_grant(self):
+        def default_prompt(entry: str) -> str:
+            metadata = self.package("codex") / "skills" / entry / "agents/openai.yaml"
+            line = next(line for line in metadata.read_text(encoding="utf-8").splitlines()
+                        if line.strip().startswith("default_prompt:"))
+            return line.split(":", 1)[1].strip().strip('"')
+
+        self.assertEqual(default_prompt("autopilot"), f"${NAME} on")
+        self.assertEqual(default_prompt("deliver"),
+                         "Use $software-engineering-team:deliver to start this workflow.")
+        with self.project() as root:
+            payload = prompt(root, default_prompt("autopilot") + " --for 9h")
+            result = self.run_hook("codex", "user-prompt", payload, root)
+            self.assertEqual((result.returncode, result.stdout), (0, ""))
+            arming = json.loads((root / RUNTIME / "arming.json").read_text(encoding="utf-8"))
+            self.assertEqual(arming["arguments"], "on --for 9h")
+
     def test_the_typed_entry_command_arms_a_grant_on_each_host(self):
         typed = {"claude": lambda root: expansion(root, "on --for 2h --deny merge"),
                  "codex": lambda root: prompt(root, f"${NAME} on --for 2h --deny merge")}

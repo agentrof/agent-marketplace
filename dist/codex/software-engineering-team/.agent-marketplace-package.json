@@ -95,7 +95,7 @@
       "61d151abb2ffc3a73fb444b1edb945adb9aff345f66515450b272e34082c4034"
     ,
     "flows/backlog-planning.md":
-      "2bb9579d5e8bf50f4e2a263dd1787329fc675b121b063421329252e8a5701363"
+      "437172477a147c181777552154ba985d1ceb5cd903ee4a064fc5372ba19ed80c"
     ,
     "flows/business-analysis.md":
       "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3"
@@ -131,10 +131,10 @@
       "d972c46964ec83c1387e656a4fa2d1c52e38bd92a90f26a90adbcd68652b856f"
     ,
     "hooks/hooks.json":
-      "6380a89159d2d186bfd205e923c6b9ed05286be446a4140d8c013622cd557d79"
+      "5ddbd99f207c73d0ee3880b1324c6eb4b3532f15a9b65945384edf899680b1ba"
     ,
     "host-contract.md":
-      "35d5a0bb735d98fb5f6dcb6d81a69e61811b85b789e4b644104eac71357bb9f4"
+      "93fce8e26f31ea28d071ab29428d87e6e37c0386136cee74203ad5c023f89d0f"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -152,19 +152,19 @@
       "6097b5a504ee3c8e98a414cb7a81961069d7435f92ce15882803b7cbec6a9899"
     ,
     "scripts/backlog_compile.py":
-      "734c0e404a8a376244c99d8fd911828661c3d3e64002a1b699527ad264067d9c"
+      "a2ab136a640a51427f97de032f04ed5b1de0f143f8c73639803fce07b52adf99"
     ,
     "scripts/backlog_input_policy.py":
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
     ,
     "scripts/backlog_review_inputs.py":
-      "4ac690a7cb294c0fa6b613a73a16b28e10b36369be71f8b48ba26f5b35319d46"
+      "a66cae017eb2341b1134db8a36f91289a7aeed49547de1e13355d4332907c2a0"
     ,
     "scripts/delivery_compile.py":
-      "53f76e3b87ff95df4aa05f101d47cf7c47e1cd551f36bb0d219ea4922dd86e76"
+      "b7977ee3129636baf93c717cede18649898f00d15837d2dd1a54d11360fe6c5a"
     ,
     "scripts/delivery_git.py":
-      "11d9d621c212e15dc3b2a2ca5b6610bb519ba86f561ae305ff72e2cda9f34d39"
+      "e54facd7563bef9e8b79b804ae374515423ce6dcd5d3ed26027d5dd5b18189fd"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
@@ -203,10 +203,10 @@
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/operation_compile.py":
-      "fa9f4916a293b2f5c9e10ac0377285098baa3722da9abc2bf04981b55f133746"
+      "30ca20a91cbb000c680d1dd49bc0355431e8cb944b655dc3beb09022b9511125"
     ,
     "scripts/process_policy.py":
-      "5f765870aa533264eff1a6b803915aefd23360bd92913b0190dfbc6424ae27e4"
+      "3a8561ebffee2f88cef317ca9f3fdb1b7f5100377e3e7df5dfd47bc8d48f3ec6"
     ,
     "scripts/project_config.py":
       "4ab9e8ff72684ba9217f247e7778b3d43ac1ad8d10c537e633f3b6d08d1066cb"
@@ -230,7 +230,7 @@
       "e0d667a6012af3cc67afa787ebaa6d12a9b9bf87adc422cc70dcd4b61456427b"
     ,
     "scripts/task_inputs.py":
-      "d9c36bd413157c297ad1054064ae14e52f2f24e2905b88a286ef84a51a487ecd"
+      "f5e6ea74c63c0be44259129484c45e0e5f6f07455f930c3a697d54bf87e97911"
     ,
     "scripts/team_guard.py":
       "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6"
@@ -242,16 +242,16 @@
       "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2"
     ,
     "scripts/vault_hook.py":
-      "15a90b6ec6f7545c228b919308e8b03cdf63bba2ab6ced6703f0a4c010f803da"
+      "dcb640372b69ccd04252b8474aa5e0d9e0856bd17b7755757954522c945c3e29"
     ,
     "skill-content/autopilot/SKILL.md":
-      "f37928934095bf1437adfea5c86e358f066f4fa19868da264b8e2adc9e5ae407"
+      "9c89150e5a82e7e40cd318fd99a98d264e6e9bf96ed2a6e9a7246e029df25288"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
       "e5ed2a98a3d59276df3a5f6f182495f516a7dbb6a76201b93568adce5c36fb9a"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "0e83a808484a7edc8a4dde4d22171c694ed303aef360e0e7c1772ea2942f7b4e"
+      "a4a19b12b4f796fa2a37ecd3a9182e7f7aba38547fcae23c150d34fc29c606ac"
     ,
     "skill-content/backlog-plan/SKILL.md":
       "f4314b20877593f179f92b726b93dc88e82e33781603599db0af98fe43349643"
@@ -308,13 +308,13 @@
       "3df25ade44dc31186fe452fb75d917c8b15dab4f34b303369cffbca9e7fe176c"
     ,
     "skill-content/configure/data/process-switches.json":
-      "f5b3dfaf9a0e2e768496181e9cd2cda7176ba4b4920a61e785139dfd90ac3399"
+      "3a06028e199721b30057cba602df857a982e442c89f1c2b2865c37a8dbde69d5"
     ,
     "skill-content/configure/references/config-contract.md":
       "a5e507262c4523750bfe885dfd3a7380763554001de0cbc0af0369f3c3d6d460"
     ,
     "skill-content/configure/references/process-policy.md":
-      "8b317c340c552af10da4a3249fc9cf9f1ce85c268c1701750c8c3159e5c56164"
+      "f83dca4c26ed91093860e79b6f3d633bcf4f8edf5b514572886b3aed557c08db"
     ,
     "skill-content/configure/references/switch-execution_planning-single_source_bundle.md":
       "d9cd3b9a72a9831caa012d32f02553e4fe39976859b9e3d02bd3c8ab624b2c81"
@@ -347,10 +347,10 @@
       "ce9f4eb4c264c77cc1e80f949b6ba36444dd508f86d95edbbc30aa60e3e00495"
     ,
     "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md":
-      "15a3b9b87fb86d39426003d0eb031af1c41907104913dd62c95188b0188c9092"
+      "c5236142872efae706e05030056e391aa5db968ed245ca16c2b4c3c7dd65c4cd"
     ,
     "skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md":
-      "85aa03d93b68b613025465ad3d306dbe9b276c8584fe118cfdd7b14415f3d173"
+      "9b18128e9329d69c9ecda42be3df30bb2f7861561c6c4293748c7e3b33c2b9c2"
     ,
     "skill-content/delivery-plan/SKILL.md":
       "bd1020b0afede9f2e7f28c47e49f9d28548ecc51d2ec84158c98a5dc360702fa"
@@ -395,7 +395,7 @@
       "8b1109f3cf7eb75520da15f07947aeb75e1e822f0334b632c48a64b86a457f49"
     ,
     "skill-content/execution-plan/references/switch-execution_planning-single_source_bundle.md":
-      "bb306ee53507a79d3e1c7577c63863a43d9b57a9b558dbd7c24e09d8b193e148"
+      "5a8883d7e6cc59096a0f5e3a2c477b094045af2fe075a59bbb94320f6cdb7786"
     ,
     "skill-content/execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md":
       "de0d35734aa0f3af259cd6027e3fd691855d596ffdc8514de67a87dfdc3b69a9"
@@ -728,7 +728,7 @@
       "c910124577d8050e783c9a4091d30684942b6e0e457b61267e2fc8a72888ab07"
     ,
     "skills/autopilot/agents/openai.yaml":
-      "1ed44b11da605744d5233575b26184888ac4dd5c7ad8264c023a61f73abe5428"
+      "0f2bc579c6d541b0a3744be0898a672006bbc9e82c7e41d14c6b77c608b562e7"
     ,
     "skills/backlog-plan/SKILL.md":
       "351a86df622b1a1027a3f1034071255d552281470b95eb0d7566134932daffb6"

@@ -403,21 +403,19 @@ def policy_owner_gates(docs: Path) -> str | None:
 def delivery_owner_gates(docs: Path, props: dict) -> str | None:
     """Return the owner_gates value a Delivery keeps its decision log under.
 
-    Before scope approval the current policy decides. Later only a pin that
-    still names the approved policy does: a policy revised or drafted since
-    decides nothing here, and the pin checks report that drift where it
-    blocks. Outside the gate window there is no open log to check.
+    It is read by value, as every switch read of a Delivery is, so a policy
+    revised since the pin that keeps owner_gates as pinned changes nothing
+    here. A value that cannot be read, a draft policy or a drifted owner_gates
+    included, decides nothing, and the pin checks report that drift where it
+    blocks; so does a package that declares no owner_gates. Outside the gate
+    window there is no open log to check.
     """
-    status = props.get("status")
-    if status not in DECISION_LOG_STATUSES:
+    if props.get("status") not in DECISION_LOG_STATUSES:
         return None
     try:
-        values, snapshot = process_policy.effective_values(docs)
-    except ValueError:
+        return delivery_switch_value(docs, str(props.get("id")), OWNER_GATES)
+    except (KeyError, ValueError):
         return None
-    if status != "scope_proposed" and process_policy.pin_findings(props, snapshot):
-        return None
-    return values.get(OWNER_GATES, {}).get("value")
 
 
 def owner_decision_classes() -> set[str]:
@@ -1953,7 +1951,7 @@ def execution_approval_refusals(docs: Path, delivery_id: str, reopen: list[str] 
     return {"root": root, "props": props, "body": body, "inputs": inputs}, []
 
 
-def pending_operation_revisions(docs: Path, root: Path) -> tuple[list[dict], dict[str, str]]:
+def pending_operation_revisions(docs: Path, root: Path, approves: bool = True) -> tuple[list[dict], dict[str, str]]:
     """Return each open Operation revision the plan binds that its approval takes, and why it refuses the rest.
 
     Under two fixed owner gates, gate A approves such a revision before
@@ -1961,7 +1959,8 @@ def pending_operation_revisions(docs: Path, root: Path) -> tuple[list[dict], dic
     Each revision is checked as its approval renders it, and its entry names
     the receipt that approval stamps, so gate A approves exact bytes. An open
     revision that passes its own check but not its approval's is refused by
-    kind with what the approval finds.
+    kind with what the approval finds. A gate that approves no revision, as
+    *approves* false says, refuses each open one by its status.
     """
     runtime = any(split_note(path)[0].get("runtime_required", False)
                   for path in sorted(root.glob("items/*/item.md")))
@@ -1972,9 +1971,13 @@ def pending_operation_revisions(docs: Path, root: Path) -> tuple[list[dict], dic
         receipt, errors = operation_compile.check_contract(docs, kind)
         if receipt.get("status") != "draft" or errors:
             continue
+        if not approves:
+            refused[kind] = f"approved current {kind} contract is required: revision {receipt['revision']} is a draft"
+            continue
         try:
             approved, errors = operation_compile.check_contract(
                 docs, kind, operation_compile.approval_text(docs, kind))
+        # Defensive: the draft check above already ran the record check approval_text runs.
         except ValueError as exc:
             approved, errors = {}, [str(exc)]
         if errors:
@@ -1994,8 +1997,9 @@ def check_plan(args) -> int:
     if root is not None:
         props, body = split_note(root / "delivery.md")
         status = props.get("status")
-        if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
-            pending, refused = pending_operation_revisions(docs, root)
+        # Only gate A approves an open revision; any other plan gate shows it refused by its status.
+        pending, refused = pending_operation_revisions(
+            docs, root, delivery_owner_gates(docs, props) == TWO_FIXED_GATES)
         # The queued questions the gate asks; the gate's writes refuse while one is pending.
         if keeps_decision_log(docs, props, body):
             decisions = pending_decisions(body)
@@ -2522,6 +2526,29 @@ def ruling_id_findings(body: str) -> list[str]:
     return errors
 
 
+def bundle_rulings(body: str) -> dict:
+    """The owner rulings of User Decisions that an execution-plan bundle binds.
+
+    A ruling is a line that starts with its id, or the answer of an answered
+    row of the decision table under its id. A pending row is a question, and
+    the Delivery path line and other text are no ruling, so none of them binds
+    the bundle. A table that cannot be read binds as it stands.
+    """
+    section = section_bodies(body).get("User Decisions", "")
+    lines = [line.strip() for line in section.splitlines()]
+    rulings: dict = {"lines": [line for line in lines
+                               if not line.startswith("|") and RULING_LINE_RE.match(line)],
+                     "answers": []}
+    table = [line for line in lines if line.startswith("|")]
+    if table:
+        rows, errors = decision_rows(body)
+        if errors:
+            rulings["table"] = table
+        else:
+            rulings["answers"] = [[row["id"], row["answer"]] for row in rows if row["status"] == "answered"]
+    return rulings
+
+
 def records_bundle_rulings(docs: Path, props: dict) -> bool:
     """Whether a Delivery records its owner rulings under execution_planning single_source_bundle.
 
@@ -2604,7 +2631,7 @@ def bundle_manifest(docs: Path, delivery_id: str, remote: str = "origin") -> dic
     to carry, every Item record with its Story and Test Plan and the switch
     value's package data, each with the hash of its bytes, and the Delivery's
     User Decisions section, which owns every owner ruling, with the hash of its
-    text. It names the counterpart reader of every revised contract as
+    rulings alone. It names the counterpart reader of every revised contract as
     task_inputs.py --role takes it. An unpinned revision is one no open Item
     pins that the Integration, or before reservation the target, does not hold:
     approval does not end it, only the target and refresh-target do. It
@@ -2622,9 +2649,9 @@ def bundle_manifest(docs: Path, delivery_id: str, remote: str = "origin") -> dic
         raise ValueError(f"{delivery_id} is {props.get('status')}; its bundle is reviewed"
                          " during execution planning")
     delivery = (root / "delivery.md").relative_to(docs).as_posix()
-    rulings = section_bodies(body).get("User Decisions")
-    if rulings is None:
+    if section_bodies(body).get("User Decisions") is None:
         raise ValueError(f"bundle input is missing: {delivery} User Decisions")
+    rulings = json.dumps(bundle_rulings(body), sort_keys=True, separators=(",", ":"))
     decisions = {"path": delivery, "section": "User Decisions",
                  "sha256": "sha256:" + hashlib.sha256(rulings.encode("utf-8")).hexdigest()}
     items, sources = [], []

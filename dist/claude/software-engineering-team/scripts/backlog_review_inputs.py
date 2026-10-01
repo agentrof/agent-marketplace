@@ -191,13 +191,15 @@ def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: di
 
     Source errors already failed the manifest, so they are empty here. The
     current review note gets the findings the final gate will report for it,
-    the Size Exceptions findings included while story_size_budget is on.
+    the Size Exceptions findings included while story_size_budget is on and
+    the review record's while review_loop is blocking_delta.
     """
     contract = backlog.backlog_contract()
     sections = contract["required_backlog_review_sections" if root
                         else "required_epic_review_sections"]
     pending = backlog.review_section_findings(review["body"], sections, review["path"], docs)
     pending += backlog.accepted_minor_findings(docs, review["body"], review["path"], contract)
+    pending += backlog.review_loop_record(docs, review["body"], review["path"], review["props"])
     if budget is not None and not root:
         pending += backlog.size_exception_rows(docs, scope_epics[0], review)[1]
     # The coverage check reads every current review; hand it only this one.
@@ -559,7 +561,7 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
             check["story_size"] = backlog.story_size_report(
                 record, docs, budget, {story["id"] for item in owning_epics
                                        for story in item["stories"]})
-        if writer or carried:
+        if carried:
             check["scaffold_findings"] = carried
 
     after = snapshot(docs)
@@ -591,20 +593,21 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         result[PANEL_SWITCH] = PANEL_VALUE
     if unparsed:
         result["unparsed_link_sources"] = sorted(unparsed)
-    result["source_hash"] = digest(bound_view(result, writer))
+    result["source_hash"] = digest(bound_view(result))
     if expected_hash is not None and result["source_hash"] != expected_hash:
         raise InputError("review input manifest is stale; regenerate and review the changed sources")
     return result
 
 
-def bound_view(result: dict, writer: bool) -> dict:
+def bound_view(result: dict) -> dict:
     """Return a manifest as its ``source_hash`` binds it.
 
     An epic manifest lists the stubs of notes outside its paths as
     information for its reader, never as an input, so they are left out; a
     writer manifest keeps the stubs inside its paths. A ``check`` that held
-    only such stubs binds as no ``check`` at all. ``task_inputs.py`` binds
-    an epic task's closure the same way.
+    only stubs from outside binds as no ``check`` at all, as a manifest that
+    lists no stub has none. ``task_inputs.py`` binds an epic task's closure
+    the same way.
     """
     check = result.get("check")
     if result["scope"] == "backlog" or check is None or "scaffold_findings" not in check:
@@ -613,7 +616,7 @@ def bound_view(result: dict, writer: bool) -> dict:
     inside = [finding for finding in check["scaffold_findings"]
               if finding.split(" ", 1)[0] in paths]
     bound_check = {key: value for key, value in check.items() if key != "scaffold_findings"}
-    if inside or writer:
+    if inside:
         bound_check["scaffold_findings"] = inside
     if not bound_check:
         return {key: value for key, value in result.items() if key != "check"}

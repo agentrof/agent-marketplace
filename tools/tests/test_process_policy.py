@@ -209,6 +209,10 @@ class ProcessPolicyLifecycleTests(unittest.TestCase):
         code, result = self.cli("check")
         self.assertEqual(code, 1)
         self.assertIn("switch 'other_mode' is not declared by this package", result["errors"])
+        # /configure process takes the rows to repair from the switch listing.
+        code, listed = self.cli("switches")
+        self.assertEqual((code, listed["undeclared"]),
+                         (1, {"switches": ["other_mode"], "parameters": []}))
         self.assertEqual(self.cli("approve")[0], 1)
         self.assertEqual(self.cli("begin-revision")[0], 0)
         self.assertEqual(self.cli("set", "--switch", "other_mode", "--value", "light")[0], 1)
@@ -216,6 +220,7 @@ class ProcessPolicyLifecycleTests(unittest.TestCase):
         self.assertEqual((code, result["changed"]), (0, True))
         self.assertEqual(self.cli("approve")[0], 0)
         self.assertEqual(self.cli("check")[0], 0)
+        self.assertNotIn("undeclared", self.cli("switches")[1])
 
     def test_switches_lists_the_choice_gate_text_and_the_value_in_force(self):
         self.approved_with(other_mode="light")
@@ -412,6 +417,28 @@ class ProcessPolicyParameterTests(unittest.TestCase):
             "in_force": {"scenarios": 30}})
         self.assertNotIn("parameters", listed["fixture_mode"])
 
+    def test_a_parameter_the_package_retired_is_listed_and_repaired_in_a_revision(self):
+        self.assertEqual(self.cli("init")[0], 0)
+        self.cli("set", "--switch", "limit_mode", "--value", "capped")
+        self.cli("set", "--switch", "limit_mode", "--parameter", "criteria", "--value", "12")
+        self.cli("set", "--switch", "limit_mode", "--parameter", "scenarios", "--value", "30")
+        self.assertEqual(self.cli("approve")[0], 0)
+        limits = self.package / LIMITS
+        measures = json.loads(limits.read_text(encoding="utf-8"))
+        del measures["measures"]["scenarios"]
+        limits.write_text(json.dumps(measures), encoding="utf-8")
+        code, listed = self.cli("switches")
+        self.assertEqual((code, listed["undeclared"]), (1, {
+            "switches": [], "parameters": [{"switch": "limit_mode", "parameter": "scenarios"}]}))
+        self.assertEqual(self.cli("begin-revision")[0], 0)
+        code, result = self.cli("set", "--switch", "limit_mode", "--parameter", "scenarios",
+                                "--default")
+        self.assertEqual((code, result["changed"]), (0, True))
+        self.assertEqual(self.cli("approve")[0], 0)
+        code, listed = self.cli("switches")
+        self.assertEqual(code, 0)
+        self.assertNotIn("undeclared", listed)
+
     def test_an_invalid_parameter_declaration_fails_the_registry(self):
         cases = (
             ({"declared_by": {"path": "../outside.json", "key": "measures"}}, "cannot be read"),
@@ -468,7 +495,14 @@ class ConfigureProcessContractTests(unittest.TestCase):
                 "Each option's description carries that value's registry tradeoffs",
                 "the question names the switch's metric and promotion unit",
                 "Never choose for the user and never skip a switch",
-                "When no answer changes a value in force, write nothing and stop",
+                "When no answer changes a value in force and `undeclared` lists no row, write"
+                " nothing and stop",
+                "Under `undeclared` it lists each policy row for a switch or parameter this"
+                " package no longer declares",
+                "each undeclared row the revision removes",
+                "`set --switch <id> --default` for each undeclared switch row and"
+                " `set --switch <id> --parameter <id> --default` for each undeclared parameter"
+                " row",
                 "Ask the approval choice gate. On rejection write nothing",
                 "Choosing the default removes the switch's row",
                 "`workspace/config.json` never holds a process choice",

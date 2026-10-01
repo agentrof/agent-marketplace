@@ -16,8 +16,9 @@ sets none.
 1. Run `process_policy.py switches --docs workspace/docs`. It lists every
    switch with its summary, values, tradeoffs, default, metric, promotion rule
    and the value in force, from the policy or the default, and for a switch
-   with parameters their declaration and the values set. Report any errors
-   it returns; the revision below repairs them.
+   with parameters their declaration and the values set. Under `undeclared`
+   it lists each policy row for a switch or parameter this package no longer
+   declares. Report any errors it returns; the revision below repairs them.
 2. Ask one choice-gate question per switch, at most four per host call. The
    package default is the recommended option and comes first: it is today's
    measured behaviour, and every other value is an experiment that its
@@ -28,9 +29,11 @@ sets none.
    summary and type, and take the number from the owner's own answer: the
    package recommends none. Offer the value in force, if any, and unset. At
    least the declared `min_count` must be set.
-3. When no answer changes a value in force, write nothing and stop.
+3. When no answer changes a value in force and `undeclared` lists no row,
+   write nothing and stop.
 4. Present the planned delta, each switch's value in force and the chosen
-   value, each parameter set, changed or unset, and name every Delivery that
+   value, each parameter set, changed or unset, each undeclared row the
+   revision removes, and name every Delivery that
    is scope- or execution-approved whose pinned value of a switch its flows
    own the delta changes: it runs under the values it pinned, so after the new
    revision is approved its checks refuse it until its execution plan is
@@ -45,8 +48,10 @@ sets none.
 5. On approval run `init` when the document is absent or `begin-revision`
    when it is approved, then `set --switch <id> --value <value>` for each
    changed switch and `set --switch <id> --parameter <id> --value <number>`,
-   or `--default` to unset it, for each changed parameter, `check` and
-   `approve`. Choosing the default removes the switch's row, so a later
+   or `--default` to unset it, for each changed parameter, then
+   `set --switch <id> --default` for each undeclared switch row and
+   `set --switch <id> --parameter <id> --default` for each undeclared
+   parameter row, `check` and `approve`. Choosing the default removes the switch's row, so a later
    promoted default also reaches it; a value that takes no parameters also
    removes the switch's parameter rows, which `set` reports as
    `removed_parameters`. `approve` renders the Delivery map. Then run the

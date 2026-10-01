@@ -244,6 +244,12 @@ class OwnerGatesReferenceTests(unittest.TestCase):
                               " recommended option first", text)
                 self.assertIn(f"`{surface}` takes at most {bound} questions per call", text)
                 self.assertEqual(text.count("at most four") + text.count("at most three"), 2)
+        # The orchestration doc states the same bound per host (rr-seams-08).
+        orchestration = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
+        self.assertIn("every gate groups its questions in host calls no larger than the per-call bound"
+                      " the host contract names, four questions on Claude Code and three on Codex",
+                      orchestration)
+        self.assertNotIn("calls of at most four,", orchestration)
 
     def test_docs_describe_both_values(self):
         for doc in ("docs/orchestration.md", "docs/requirement-delivery-protocol.md"):

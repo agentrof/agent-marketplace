@@ -144,8 +144,9 @@ as a `pending` row of the Delivery's `User Decisions` table and only the tasks
 that depend on it wait; when every remaining task does, the queue is asked as an
 early gate. The Software Architect's escalation clause and the classes in
 `deliver/data/owner-decision-classes.json` are still asked at once, nothing is
-decided by default, and every gate groups its questions in calls of at most
-four, recommended option first.
+decided by default, and every gate groups its questions in host calls no larger
+than the per-call bound the host contract names, four questions on Claude Code
+and three on Codex, recommended option first.
 `deliver/references/switch-owner_gates-two_fixed_gates.md` defines the gates.
 
 How many planning steps and owner gates a Delivery takes is process switch

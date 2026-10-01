@@ -492,6 +492,62 @@ class LifecycleTests(unittest.TestCase):
         self.assertFalse((linked / ".agentrof").exists())
 
 
+class BrokenGrantTests(unittest.TestCase):
+    """A grant file nothing can read is moved aside, so the next grant can start."""
+
+    def setUp(self) -> None:
+        self.p = Project(self, armed=True)
+
+    def broken(self, text: str) -> None:
+        self.p.state.mkdir(parents=True, exist_ok=True)
+        (self.p.state / "grant.json").write_text(text, encoding="utf-8")
+
+    def assert_moved_aside(self, text: str) -> None:
+        moved = sorted(self.p.state.glob("grant.json.broken-*"))
+        self.assertEqual(len(moved), 1, moved)
+        self.assertEqual(moved[0].read_text(encoding="utf-8"), text)
+        broken = [event for event in self.p.events() if event["event"] == "broken"]
+        self.assertEqual([event["moved_to"] for event in broken], [moved[0].name])
+
+    def test_an_unreadable_grant_is_moved_aside_and_on_starts_a_new_grant(self):
+        self.broken("")
+        code, out, err = self.p.run_verb("check")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("autopilot: inactive", out)
+        self.assertIn("moved", err)
+        self.assert_moved_aside("")
+        self.p.arm("on --for 2h")
+        code, out, err = self.p.run_verb("on")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.p.grant()["state"], "active")
+
+    def test_a_grant_missing_a_field_is_moved_aside_without_a_traceback(self):
+        text = json.dumps({"schema_version": 1, "id": "AP-1", "state": "active",
+                           "granted_at": stamp(NOW), "classes": ["choice"],
+                           "armed_by": {"guard": "user_prompt_hook"}})
+        for verb in ("check", "status", "off"):
+            with self.subTest(verb=verb):
+                self.broken(text)
+                for moved in self.p.state.glob("grant.json.broken-*"):
+                    moved.unlink()
+                (self.p.state / "ledger.jsonl").unlink(missing_ok=True)
+                code, out, err = self.p.run_verb(verb)
+                self.assertNotIn("Traceback", out + err)
+                self.assertFalse((self.p.state / "grant.json").exists())
+                self.assert_moved_aside(text)
+        self.p.arm("on --for 1h")
+        self.assertEqual(self.p.run_verb("on")[0], 0)
+
+    def test_on_reads_the_grant_state_before_it_consumes_the_arming(self):
+        self.p.arm("on --for 1h")
+        with mock.patch.object(autopilot, "current", side_effect=OSError("grant state is unreadable")):
+            code, _out, err = self.p.run_verb("on")
+        self.assertEqual(code, 1)
+        self.assertIn("grant state is unreadable", err)
+        self.assertTrue((self.p.state / "arming.json").exists())
+        self.assertEqual(self.p.run_verb("on")[0], 0)
+
+
 class GoalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.p = Project(self)

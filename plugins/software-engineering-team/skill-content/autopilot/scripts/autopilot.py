@@ -8,14 +8,15 @@ question. Classes, goal kinds and durations are data in the entry's
 ``<git-root>/.agentrof/agent-marketplace/.runtime/autopilot/``; only the
 decisions it takes reach tracked documents.
 
-Only the user arms a grant. When the installed package declares the
-user-prompt hook, ``hook user-prompt`` records the entry command the user
-typed as a short-lived arming record, and ``on`` refuses without it and takes
-the grant's options from it alone. Without that hook ``on`` reads its options
-on its own command line, and the grant records that the entry's user-only
-invocation was the guard. ``hook pre-question`` denies the host question tool
-while a grant is active. A hook with nothing to do, or one that fails, prints
-nothing and exits 0.
+Only the user arms a grant. The package's ``hook user-prompt`` records the
+entry command the user typed as a short-lived arming record, and ``on``
+refuses without it and takes the grant's options from it alone. A built
+package that cannot show that hook fails closed; only a source tree without
+hooks lets ``on`` read its options on its own command line, and the grant
+records which guard applied. A grant binds to the session and host whose user
+typed it. ``hook pre-question`` denies that session's question tool while the
+grant is active. A hook with nothing to do, or one that fails, prints nothing
+and exits 0.
 """
 
 from __future__ import annotations
@@ -493,7 +494,7 @@ def until(text: str, reference: datetime) -> datetime:
     try:
         # A time without an offset is the local wall clock.
         return datetime.fromisoformat(text.strip().replace("Z", "+00:00")).astimezone(timezone.utc)
-    except ValueError:
+    except (ValueError, OverflowError):
         raise Refusal(f"--until {text!r} is not a time such as 07:00 or 2026-10-02T07:00+03:00") from None
 
 
@@ -724,14 +725,17 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
             raise Refusal("this host arms a grant from the entry command you type; run `on`"
                           " without options and it takes them from your typed command")
         # Refused before any write: no arming, no grant, no runtime file.
-        typed = fresh_arming(directory, policy, now)
-        problem = binding_problem(typed.get("host"), typed.get("session_id"), typed=True)
+        seen = fresh_arming(directory, policy, now)
+        problem = binding_problem(seen.get("host"), seen.get("session_id"), typed=True)
         if problem:
             raise Refusal(problem)
         with locked(directory):
             # The grant state is read first, so a failure leaves the typed arming in place.
             current(directory, now)
             arming = fresh_arming(directory, policy, now)
+            problem = binding_problem(arming.get("host"), arming.get("session_id"), typed=True)
+            if problem:
+                raise Refusal(problem)
             (directory / ARMING).unlink()
         try:
             tokens = shlex.split(arming["arguments"])
@@ -876,11 +880,13 @@ def require_state(directory: Path, what: str) -> None:
         raise Refusal(what)
 
 
-def active_grant(directory: Path, now: datetime, project: Path | None = None) -> dict:
+def active_grant(directory: Path, now: datetime, project: Path | None = None, *,
+                 bound: bool = True) -> dict:
     """The grant that governs this session, or a refusal that names why there is none.
 
     Given the project, the grant's end conditions, its goal included, are
     applied first, so a decision is never recorded after the goal is reached.
+    Ending a grant is always allowed, so complete asks for no bound session.
     """
     if project is None:
         grant = current(directory, now)
@@ -891,7 +897,8 @@ def active_grant(directory: Path, now: datetime, project: Path | None = None) ->
     reason = inactive_reason(grant, now)
     if reason:
         raise Refusal("no active grant" + (f"; {grant['id']} is inactive: {reason}" if grant else ""))
-    problem = binding_problem(grant.get("host"), grant["armed_by"].get("session_id"))
+    problem = binding_problem(grant.get("host"), grant["armed_by"].get("session_id")) \
+        if bound else None
     if problem:
         raise Refusal(f"grant {grant['id']} is {problem}")
     return grant
@@ -972,7 +979,7 @@ def cmd_complete(args: argparse.Namespace, now: datetime) -> int:
     directory = state_dir(Path(args.project_root))
     require_state(directory, "no active grant")
     with locked(directory):
-        grant = active_grant(directory, now)
+        grant = active_grant(directory, now, bound=False)
         completion = {"by": "complete", "evidence": args.evidence, "goal_state": None,
                       "compiler_agreed": None}
         read = read_goal(Path(args.project_root), grant["goal"]) if grant.get("goal") else None

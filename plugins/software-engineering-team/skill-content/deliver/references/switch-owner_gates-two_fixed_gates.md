@@ -76,9 +76,10 @@ log's table.
 - A question outside the at-once classes is queued: add a `pending` row to the
   Delivery's `User Decisions` table and continue. Work that does not depend on
   the question goes on; a task that depends on it waits, and only that task
-  waits. The row's `blocks` names the Items that wait: `claim-items`,
-  `start-item`, `resume-item` and `reopen-item` refuse an Item a `pending` row
-  blocks with `DELIVERY_DECISION_PENDING`.
+  waits. The row's `blocks` names the Items that wait: `start-item`,
+  `resume-item` and `reopen-item` refuse an Item a `pending` row blocks with
+  `DELIVERY_DECISION_PENDING`, while `claim-items` claims it, since a claim
+  starts no work.
 - When every remaining task depends on pending questions, ask the queued
   questions at once as an early gate, grouped as gate A groups them.
 - Only the owner's answer closes a question. Record it verbatim and set the

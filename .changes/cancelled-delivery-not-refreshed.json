@@ -1,6 +1,0 @@
-{
-  "summary": "`delivery_git.py refresh-target` now refuses a Delivery that the Integration records as cancelled with `DELIVERY_CANCELLATION_INVALID`. Once the target had moved, it merged the target into the cancelled Integration and put a `target-refresh-v1` commit on top of the cancellation Review, after which `prepare-pr-creation` and `open-pr` refused and the cancellation could no longer reach the target through its PR. The refusal comes before any ref moves.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -11,6 +11,7 @@ Read `memory/me.md` and follow it before editing this repository.
 - Create components with `tools/scaffold.py`; do not hand-copy them.
 - Derived README counts are maintained by `make counts`, never by hand.
 - Stage the complete candidate, run `make check-local`, then `make verify-local` before committing. `make check` remains the exhaustive gate; one validation error fails CI.
+- Text and files committed here never identify a consumer project or its data; follow the Confidentiality section of `docs/maintainer-operations-protocol.md` for every commit, changeset and PR.
 
 ## Maintainer operations
 

@@ -2519,31 +2519,70 @@ def fetch_target(root: Path, remote: str) -> tuple[str, str]:
     return branch, run_git(root, "rev-parse", tracking)
 
 
+def published_pr_recorded(root: Path, remote: str, delivery_id: str, tip: str, directory: Path) -> bool:
+    """Whether the Review published at the Integration *tip* records the Delivery's PR.
+
+    Only that Review says so. An Integration holds none before
+    publish-delivery-review, and a Review without pull_request_url recorded
+    no PR yet. The commit that records the PR URL in the Review is the one
+    that sets awaiting_merge, so while the published Delivery is in
+    awaiting_merge a Review that is missing or has no pull_request_url is
+    broken, not one that recorded no PR. Such a Review, or a record that
+    cannot be read, raises DELIVERY_COORDINATION_CORRUPT naming it, as the
+    Delivery compiler reports such a merge state as unknown. Another host may
+    have moved the Integration to a commit this checkout lacks, so the ref is
+    fetched before its tree is read.
+    """
+    from delivery_compile import split_note
+    ref = canonical_refs(delivery_id)["integration"]
+    if subprocess.run(["git", "cat-file", "-e", tip + "^{commit}"], cwd=root,
+                      capture_output=True, check=False).returncode:
+        run_git(root, "fetch", "--no-tags", remote, ref)
+
+    def unknown(relative: str, reason: str) -> RuntimeError:
+        return RuntimeError("DELIVERY_COORDINATION_CORRUPT: Delivery merge state cannot be evaluated: "
+                            f"{relative} on {ref.removeprefix('refs/heads/')} {reason}")
+
+    def published(relative: str) -> dict | None:
+        try:
+            if not git_paths(root, "ls-tree", "-z", "--name-only", tip, "--", relative):
+                return None
+            return split_remote_note(root, tip, relative, split_note)[0]
+        except (RuntimeError, ValueError) as exc:
+            raise unknown(relative, f"cannot be read: {exc}") from exc
+
+    review_path = rel_posix(root, directory / "delivery-review.md")
+    review = published(review_path)
+    if review is not None and review.get("pull_request_url"):
+        return True
+    if (published(rel_posix(root, directory / "delivery.md")) or {}).get("status") != "awaiting_merge":
+        return False
+    raise unknown(review_path, ("is missing" if review is None else "records no pull_request_url")
+                  + ", but a Delivery reaches awaiting_merge only with its PR recorded there")
+
+
 def refuse_merged_delivery(root: Path, delivery_id: str, remote: str = "origin") -> None:
     """Refuse to change a Delivery whose PR the target has merged.
 
     It decides as the Delivery compiler does. Only a Delivery whose published
-    Review records its PR can be merged, so any other passes without a fetch
-    or a history walk. For one that does, the merge proof decides on the
-    freshly fetched target tip: a merge without a coordinator record whose
-    second parent is the Delivery's recorded PR head. A merged Delivery is
-    closed, so every verb that would change its refs calls this first. The
-    merge drops the Integration ref, so without one the fetched target alone
-    decides. A history that cannot answer the proof, such as a shallow clone,
-    refuses as well.
+    Review records its PR can be merged, so any other passes without fetching
+    the target or walking its history, and a published Review that cannot say
+    whether the PR was recorded refuses (published_pr_recorded). For a Review
+    that records it, the merge proof decides on the freshly fetched target
+    tip: a merge without a coordinator record whose second parent is the
+    Delivery's recorded PR head. A merged Delivery is closed, so every verb
+    that would change its refs calls this first. The merge drops the
+    Integration ref, so without one the fetched target alone decides. A
+    history that cannot answer the proof, such as a shallow clone, refuses as
+    well.
     """
-    from delivery_compile import docs_root, find_delivery, recorded_pr_merged, split_note
+    from delivery_compile import docs_root, find_delivery, recorded_pr_merged
     directory = find_delivery(docs_root(root), delivery_id)
     listed = run_git(root, "ls-remote", remote, canonical_refs(delivery_id)["integration"])
     if directory is None:
         return
     if listed:
-        try:
-            review, _ = split_remote_note(root, listed.split()[0], rel_posix(root, directory / "delivery-review.md"),
-                                          split_note)
-        except RuntimeError:
-            return
-        if not review.get("pull_request_url"):
+        if not published_pr_recorded(root, remote, delivery_id, listed.split()[0], directory):
             return
         _branch, target = fetch_target(root, remote)
         merged = recorded_pr_merged(root, delivery_id, target)

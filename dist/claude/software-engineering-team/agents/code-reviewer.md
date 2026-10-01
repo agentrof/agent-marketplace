@@ -2,6 +2,7 @@
 name: code-reviewer
 description: Code reviewer role. Spawned by software-engineering-team flows after implementation to audit the change and emit a verdict; never auto-triggered.
 model: claude-opus-5-5
+effort: xhigh
 output_contract: prose
 ---
 

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
+import sys
 from pathlib import Path
+from typing import Mapping
 
 import build_distributions
 
@@ -159,3 +162,102 @@ def install_fixture_package(root: Path, host: str, install_root: Path) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target)
     return target
+
+
+# A fake host binary: a sh wrapper around this program, which logs its
+# arguments and stdin and answers from the JSON file beside it. A case with
+# `reply` answers Claude Code's `initialize` request with its request id.
+FAKE_HOST = r'''
+import json, os, subprocess, sys, time
+from pathlib import Path
+config = json.loads(Path(__file__).with_suffix(".json").read_text(encoding="utf-8"))
+args = sys.argv[1:]
+stdin = sys.stdin.read()
+with open(config["log"], "a", encoding="utf-8") as log:
+    log.write(json.dumps({"argv": args, "stdin": stdin}) + "\n")
+case = config["cases"].get(" ".join(args), config["cases"].get("*", {}))
+if case.get("pid_file"):
+    Path(case["pid_file"]).write_text(str(os.getpid()), encoding="utf-8")
+if case.get("orphan_file"):
+    orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    Path(case["orphan_file"]).write_text(str(orphan.pid), encoding="utf-8")
+time.sleep(case.get("sleep", 0))
+out = case.get("stdout", "")
+if "reply" in case:
+    try:
+        request_id = json.loads(stdin.splitlines()[0])["request_id"]
+    except (ValueError, IndexError, KeyError, TypeError):
+        request_id = None
+    response = {"subtype": case.get("subtype", "success"),
+                "request_id": case.get("request_id", request_id), "response": case["reply"]}
+    out += json.dumps({"type": "control_response", "response": response}) + "\n"
+sys.stdout.write(out)
+sys.stdout.flush()
+sys.exit(case.get("exit", 0))
+'''
+
+
+class FakeHost:
+    """One fake host executable named ``name`` in ``directory``."""
+
+    def __init__(self, directory: Path, name: str) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        self.path = directory / name
+        self.program = directory / f"{name}-fake.py"
+        self.log = directory / f"{name}-calls.jsonl"
+        self.cases: dict = {}
+        self.program.write_text(FAKE_HOST, encoding="utf-8")
+        self.path.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + " "
+                             + shlex.quote(str(self.program)) + ' "$@"\n', encoding="utf-8")
+        self.path.chmod(0o755)
+        self.save()
+
+    def answer(self, args: str, **case) -> None:
+        self.cases[args] = case
+        self.save()
+
+    def save(self) -> None:
+        self.program.with_suffix(".json").write_text(
+            json.dumps({"log": str(self.log), "cases": self.cases}), encoding="utf-8")
+
+    def calls(self) -> list:
+        if not self.log.is_file():
+            return []
+        return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
+
+
+# No Codex release has this version, so the project generators' model check
+# skips any real codex process above the tests and any CLI an installed app
+# bundles; only a fake that prints it is a candidate.
+ISOLATED_CODEX_VERSION = "0.0.0-isolated"
+ISOLATED_FAKES = {
+    "claude": "9.9.9 (Claude Code)",
+    "codex": f"codex-cli {ISOLATED_CODEX_VERSION}",
+}
+
+
+def isolated_hosts(env: Mapping[str, str], directory: Path) -> dict:
+    """``env`` in which the project generators' model check reaches no real host.
+
+    CLAUDE_CODE_EXECPATH and CODEX_CLI_PATH name fakes that print a version
+    and list no model, CLAUDE_PID goes, CODEX_VERSION names no release and
+    CODEX_HOME an empty home, so every pinned model stays unverified and keeps
+    its pin, whatever runs the tests.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    isolated = {key: value for key, value in env.items() if key != "CLAUDE_PID"}
+    for name, version in ISOLATED_FAKES.items():
+        fake = directory / name
+        fake.write_text(
+            "#!/bin/sh\n"
+            f"if [ \"$1\" = --version ]; then echo {shlex.quote(version)}; exit 0; fi\n"
+            "cat >/dev/null\n"
+            "exit 1\n", encoding="utf-8")
+        fake.chmod(0o755)
+    isolated.update({
+        "CLAUDE_CODE_EXECPATH": str(directory / "claude"),
+        "CODEX_CLI_PATH": str(directory / "codex"),
+        "CODEX_VERSION": ISOLATED_CODEX_VERSION,
+        "CODEX_HOME": str(directory / "codex-home"),
+    })
+    return isolated

@@ -25,15 +25,29 @@ from types import ModuleType
 
 ADAPTER_API_VERSION = 1
 FEATURE_BRANCH_PREFIX_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/")
-CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "lens", "mechanical", "inherit"}
+CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "inherit"}
 EXECUTION_PROFILE_FILE = "execution-profiles.json"
-EXECUTION_PROFILE_SCHEMA_VERSION = 2
+EXECUTION_PROFILE_SCHEMA_VERSION = 3
 AUTO_EXECUTION_PROFILE = "auto"
 INHERIT_TIER = "inherit"
-EXECUTION_SETTING_KEYS = {"class", "effort"}
+EXECUTION_SETTING_KEYS = {"model", "effort"}
+# Each host's catalog is keyed by exact model ID; a tier names its model.
 MODEL_CATALOG_FILE = "model-catalog.json"
-MODEL_CLASS_KEYS = ("family", "id", "efforts", "min_cli_version", "sources", "verified")
-MODEL_CLASS_NAME_RE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
+MODEL_CATALOG_SCHEMA_VERSION = 2
+MODEL_ENTRY_KEYS = ("family", "efforts", "min_cli_version", "sources", "verified")
+# Each host's effort policy names the efforts that need the owner's
+# confirmation, with the evidence the question states, and the efforts no role
+# tier may run at.
+EFFORT_POLICY_FILE = "effort-policy.json"
+EFFORT_POLICY_SCHEMA_VERSION = 1
+EFFORT_POLICY_ENTRY_KEYS = {
+    "confirm": ("evidence", "sources", "verified"),
+    "refuse": ("reason", "sources", "verified"),
+}
+# Every build ships one tier map of every host, read by the project config
+# writer and the host project generators.
+TIER_MAP_RELPATH = "templates/tier-map.json"
+TIER_MAP_SCHEMA_VERSION = 2
 VERIFIED_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 CLI_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 HOST_CLI_VERSIONS_RELPATH = "tools/data/host-cli-versions.json"
@@ -451,6 +465,10 @@ def model_catalog_path(root: Path, host_id: str) -> Path:
     return root / "platforms" / host_id / MODEL_CATALOG_FILE
 
 
+def effort_policy_path(root: Path, host_id: str) -> Path:
+    return root / "platforms" / host_id / EFFORT_POLICY_FILE
+
+
 def _is_iso_date(value: object) -> bool:
     if not isinstance(value, str) or VERIFIED_DATE_RE.fullmatch(value) is None:
         return False
@@ -471,12 +489,12 @@ def cli_version(value: object) -> tuple[int, ...] | None:
 def host_cli_problems(
     pins: object, catalogs: dict[str, object], adapters: dict[str, HostAdapter],
 ) -> list[str]:
-    """Return every host CLI that CI pins below a model class's minimum.
+    """Return every host CLI that CI pins below a catalog model's minimum.
 
-    CI installs the pinned CLIs and starts no role, so a pin below a class's
+    CI installs the pinned CLIs and starts no role, so a pin below a model's
     ``min_cli_version`` would pass the host gates on a version whose roles
-    cannot run that class's model. A catalog with problems of its own is
-    skipped: they are reported against the catalog file.
+    cannot run that model. A catalog with problems of its own is skipped:
+    they are reported against the catalog file.
     """
     if not isinstance(pins, dict):
         return ["host CLI versions must be a JSON object"]
@@ -495,19 +513,19 @@ def host_cli_problems(
         catalog = catalogs.get(host)
         if model_catalog_problems(catalog, adapter):
             continue
-        for name, entry in catalog["classes"].items():
+        for model_id, entry in catalog["models"].items():
             minimum = entry["min_cli_version"]
             if version < cli_version(minimum):
                 problems.append(
-                    f"{key} {pinned} is below {minimum}, the minimum of {host} class"
-                    f" {name!r} ({entry['id']}); CI would pass a host version on"
-                    " which that class's roles cannot run"
+                    f"{key} {pinned} is below {minimum}, the minimum of {host} model"
+                    f" {model_id!r}; CI would pass a host version on which that model's"
+                    " roles cannot run"
                 )
     return problems
 
 
 def require_host_cli_versions(root: Path, adapters: dict[str, HostAdapter]) -> None:
-    """Refuse a build whose CI-pinned host CLI is below a class minimum."""
+    """Refuse a build whose CI-pinned host CLI is below a catalog model's minimum."""
     path = root / HOST_CLI_VERSIONS_RELPATH
     pins = _read_table(path, "host CLI versions")
     catalogs = {
@@ -518,21 +536,20 @@ def require_host_cli_versions(root: Path, adapters: dict[str, HostAdapter]) -> N
         raise ValueError("\n".join(f"{path}: {problem}" for problem in problems))
 
 
-def model_class_problems(entry: object, adapter: HostAdapter) -> list[str]:
-    """Return the problems of one catalog class against the host vocabulary."""
-    if not isinstance(entry, dict) or set(entry) != set(MODEL_CLASS_KEYS):
-        return [f"must hold exactly {', '.join(MODEL_CLASS_KEYS)}"]
+def model_entry_problems(model_id: str, entry: object, adapter: HostAdapter) -> list[str]:
+    """Return the problems of one catalog model against the host vocabulary."""
+    if not isinstance(entry, dict) or set(entry) != set(MODEL_ENTRY_KEYS):
+        return [f"must hold exactly {', '.join(MODEL_ENTRY_KEYS)}"]
     problems = []
-    family, model_id = entry["family"], entry["id"]
-    parsed = adapter.module.model_version(model_id) \
-        if isinstance(model_id, str) else None
+    family = entry["family"]
+    parsed = adapter.module.model_version(model_id)
     if parsed is None:
         problems.append(
-            f"id {model_id!r} is not a pinned model ID in the host's documented"
-            " format; aliases and unknown names are refused"
+            f"{model_id!r} is not a pinned model ID in the host's documented format;"
+            " aliases and unknown names are refused"
         )
     elif parsed[0] != family:
-        problems.append(f"id {model_id!r} belongs to family {parsed[0]!r}, not {family!r}")
+        problems.append(f"{model_id!r} belongs to family {parsed[0]!r}, not {family!r}")
     efforts = entry["efforts"]
     vocabulary = adapter.module.EFFORT_LEVELS
     if not isinstance(efforts, list) \
@@ -562,29 +579,17 @@ def model_class_problems(entry: object, adapter: HostAdapter) -> list[str]:
 
 def model_catalog_problems(catalog: object, adapter: HostAdapter) -> list[str]:
     """Return the shape and host-vocabulary problems of one model catalog."""
-    if not isinstance(catalog, dict) or set(catalog) != {"schema_version", "classes"} \
-            or catalog.get("schema_version") != 1:
-        return ["catalog must hold exactly schema_version 1 and classes"]
-    classes = catalog["classes"]
-    if not isinstance(classes, dict) or not classes:
-        return ["classes must map at least one class name to its pinned model"]
+    if not isinstance(catalog, dict) or set(catalog) != {"schema_version", "models"} \
+            or catalog.get("schema_version") != MODEL_CATALOG_SCHEMA_VERSION:
+        return [f"catalog must hold exactly schema_version {MODEL_CATALOG_SCHEMA_VERSION}"
+                " and models"]
+    models = catalog["models"]
+    if not isinstance(models, dict) or not models:
+        return ["models must map at least one exact model ID to its entry"]
     problems: list[str] = []
-    pinned: dict[str, str] = {}
-    for name, entry in classes.items():
-        where = f"classes.{name}"
-        if MODEL_CLASS_NAME_RE.fullmatch(name) is None:
-            problems.append(f"{where}: class names are snake_case")
-        problems.extend(
-            f"{where}: {problem}" for problem in model_class_problems(entry, adapter)
-        )
-        model_id = entry.get("id") if isinstance(entry, dict) else None
-        if isinstance(model_id, str) and model_id in pinned:
-            problems.append(
-                f"{where}: pins {model_id!r} like classes.{pinned[model_id]};"
-                " one class per model keeps a bump to one edit"
-            )
-        elif isinstance(model_id, str):
-            pinned[model_id] = name
+    for model_id, entry in models.items():
+        problems.extend(f"models.{model_id}: {problem}"
+                        for problem in model_entry_problems(model_id, entry, adapter))
     return problems
 
 
@@ -593,7 +598,7 @@ def execution_profile_problems(
 ) -> list[str]:
     """Return the shape and catalog problems of one profile table.
 
-    A ``None`` catalog skips the class checks: its own problems are reported
+    A ``None`` catalog skips the model checks: its own problems are reported
     against the catalog file.
     """
     if not isinstance(table, dict) or set(table) != {"schema_version", "profiles"} \
@@ -614,7 +619,7 @@ def execution_profile_problems(
             f"{AUTO_EXECUTION_PROFILE} must map exactly the reasoning tiers"
             f" {sorted(tiers)}"
         ]
-    classes = catalog["classes"] if catalog is not None else None
+    models = catalog["models"] if catalog is not None else None
     vocabulary = adapter.module.EFFORT_LEVELS
     problems: list[str] = []
     for tier in sorted(tiers):
@@ -625,35 +630,35 @@ def execution_profile_problems(
                 or not all(isinstance(value, str) and value
                            for value in setting.values()):
             problems.append(
-                f"{where} may hold only non-empty string class and effort values"
+                f"{where} may hold only non-empty string model and effort values"
             )
             continue
         if tier == INHERIT_TIER:
             if setting:
                 problems.append(
-                    f"{where}: the inherit tier sets neither class nor effort,"
+                    f"{where}: the inherit tier sets neither model nor effort,"
                     " so its roles follow the session"
                 )
             continue
-        name, effort = setting.get("class"), setting.get("effort")
-        if name is None:
-            problems.append(f"{where} must name a class of the host's model catalog")
+        model, effort = setting.get("model"), setting.get("effort")
+        if model is None:
+            problems.append(f"{where} must name a model of the host's model catalog")
         if effort is not None and effort not in vocabulary:
             problems.append(
                 f"{where}: effort must be one of {', '.join(vocabulary)} or absent"
             )
-        if name is None or classes is None:
+        if model is None or models is None:
             continue
-        entry = classes.get(name)
+        entry = models.get(model)
         if entry is None:
             problems.append(
-                f"{where}: unknown model class {name!r}; classes are"
-                f" {', '.join(sorted(classes))}"
+                f"{where}: unknown model {model!r}; the catalog pins"
+                f" {', '.join(sorted(models))}"
             )
         elif effort in vocabulary and effort not in entry["efforts"]:
             supported = ", ".join(entry["efforts"]) or "no effort"
             problems.append(
-                f"{where}: effort {effort!r} is not supported by {entry['id']},"
+                f"{where}: effort {effort!r} is not supported by {model},"
                 f" which takes {supported}"
             )
     return problems
@@ -693,17 +698,167 @@ def load_execution_profile(
     tiers: set[str] = CANONICAL_REASONING_LEVELS,
 ) -> dict[str, dict[str, str]]:
     """Resolve one host's default profile to each tier's model and effort."""
-    catalog, table = load_model_tables(root, adapter, tiers)
-    classes = catalog["classes"]
-    resolved = {}
-    for tier, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items():
-        value = {}
-        if "class" in setting:
-            value["model"] = classes[setting["class"]]["id"]
-        if "effort" in setting:
-            value["effort"] = setting["effort"]
-        resolved[tier] = value
-    return resolved
+    _catalog, table = load_model_tables(root, adapter, tiers)
+    return {tier: dict(setting)
+            for tier, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items()}
+
+
+def effort_policy_problems(
+    policy: object, adapter: HostAdapter, profile: object = None,
+) -> list[str]:
+    """Return the problems of one host's project effort policy.
+
+    Every effort of a tier's model that the policy does not refuse is open to
+    a project override; a confirmed one needs the owner's second answer. A
+    ``profile`` table, when given, must not pin a tier at a refused effort.
+    """
+    expected = {"schema_version", *EFFORT_POLICY_ENTRY_KEYS}
+    if not isinstance(policy, dict) or set(policy) != expected \
+            or policy.get("schema_version") != EFFORT_POLICY_SCHEMA_VERSION:
+        return [
+            f"policy must hold exactly schema_version {EFFORT_POLICY_SCHEMA_VERSION},"
+            " confirm and refuse"
+        ]
+    vocabulary = adapter.module.EFFORT_LEVELS
+    problems: list[str] = []
+    for kind, keys in EFFORT_POLICY_ENTRY_KEYS.items():
+        entries = policy[kind]
+        if not isinstance(entries, dict):
+            problems.append(f"{kind} must map an effort to its {keys[0]}")
+            continue
+        for effort, entry in entries.items():
+            where = f"{kind}.{effort}"
+            if effort not in vocabulary:
+                problems.append(
+                    f"{kind} names {effort!r}, which is not one of the host's efforts"
+                    f" {', '.join(vocabulary)}"
+                )
+                continue
+            if not isinstance(entry, dict) or set(entry) != set(keys):
+                problems.append(f"{where} must hold exactly {', '.join(keys)}")
+                continue
+            text = entry[keys[0]]
+            if not isinstance(text, str) or not text.strip() or "\n" in text:
+                problems.append(f"{where}: {keys[0]} must be one non-empty line")
+            sources = entry["sources"]
+            if not isinstance(sources, list) or not sources or not all(
+                    isinstance(source, str) and source.startswith("https://")
+                    for source in sources):
+                problems.append(
+                    f"{where}: sources must list the official https pages behind it"
+                )
+            if not _is_iso_date(entry["verified"]):
+                problems.append(
+                    f"{where}: verified must be the YYYY-MM-DD date the sources were checked"
+                )
+    confirm, refuse = policy["confirm"], policy["refuse"]
+    if not isinstance(confirm, dict) or not isinstance(refuse, dict):
+        return problems
+    problems.extend(
+        f"the policy both confirms and refuses {effort!r}"
+        for effort in sorted(set(confirm) & set(refuse))
+    )
+    auto = profile.get("profiles", {}).get(AUTO_EXECUTION_PROFILE) \
+        if isinstance(profile, dict) and isinstance(profile.get("profiles"), dict) else None
+    for tier, setting in sorted(auto.items() if isinstance(auto, dict) else ()):
+        effort = setting.get("effort") if isinstance(setting, dict) else None
+        if isinstance(effort, str) and effort in refuse:
+            problems.append(
+                f"the package profile pins the {tier} tier at {effort!r},"
+                " which this policy refuses for every role tier"
+            )
+    return problems
+
+
+def load_effort_policy(root: Path, adapter: HostAdapter) -> dict:
+    """Load one host's validated project effort policy."""
+    path = effort_policy_path(root, adapter.host_id)
+    policy = _read_table(path, "effort policy")
+    _catalog, table = load_model_tables(root, adapter)
+    problems = effort_policy_problems(policy, adapter, table)
+    if problems:
+        raise ValueError("\n".join(f"{path}: {problem}" for problem in problems))
+    return policy
+
+
+def model_id_shape(adapter: HostAdapter, catalog: dict) -> str:
+    """Return the shape of a model ID a project may set for one host's tier.
+
+    The adapter's ``MODEL_ID_SHAPE`` must be a regular expression that every
+    model ID of the host's catalog fully matches.
+    """
+    shape = getattr(adapter.module, "MODEL_ID_SHAPE", None)
+    if not isinstance(shape, str) or not shape:
+        raise ValueError(f"the {adapter.host_id} adapter must name the shape of a model ID"
+                         " as MODEL_ID_SHAPE")
+    try:
+        pattern = re.compile(shape)
+    except re.error as exc:
+        raise ValueError(f"{adapter.host_id} MODEL_ID_SHAPE {shape!r} is not a regular"
+                         f" expression: {exc}") from exc
+    for model_id in catalog["models"]:
+        if pattern.fullmatch(model_id) is None:
+            raise ValueError(f"{adapter.host_id} MODEL_ID_SHAPE {shape!r} rejects the catalog"
+                             f" ID {model_id!r}")
+    return shape
+
+
+def tier_map(root: Path, source: Path, adapters: dict[str, HostAdapter]) -> dict:
+    """Return the tier map of every host that each build ships.
+
+    ``roles`` names every generated agent, variants included, under its tier.
+    Per host, each tier carries its pinned model, package effort and every
+    effort the model takes; ``models`` is the host's catalog with the efforts
+    each model takes and the oldest host CLI that runs it, which sets the
+    floor of the project generator's model check, ``efforts`` the host's
+    vocabulary and ``model_id_shape``
+    the shape of a model ID a project may set; ``confirm`` and ``refuse`` are
+    the host's effort policy, which narrows what a project may choose.
+    """
+    roles: dict[str, list[str]] = {tier: [] for tier in CANONICAL_REASONING_LEVELS}
+    agents = source / "agents"
+    for path in sorted(agents.glob("*.md")) if agents.is_dir() else ():
+        roles[parse_frontmatter(path)[0]["reasoning"]].append(path.stem)
+    for _agent, name, tier, _description in agent_variants(
+            source, CANONICAL_REASONING_LEVELS):
+        roles[tier].append(name)
+    hosts = {}
+    for host, adapter in sorted(adapters.items()):
+        catalog, table = load_model_tables(root, adapter)
+        policy = load_effort_policy(root, adapter)
+        tiers = {}
+        for tier, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items():
+            value: dict = {}
+            if "model" in setting:
+                value = {"model": setting["model"],
+                         "efforts": list(catalog["models"][setting["model"]]["efforts"])}
+                if "effort" in setting:
+                    value["effort"] = setting["effort"]
+            tiers[tier] = value
+        hosts[host] = {
+            "tiers": tiers,
+            "models": {model_id: {"efforts": list(entry["efforts"]),
+                                  "min_cli_version": entry["min_cli_version"]}
+                       for model_id, entry in catalog["models"].items()},
+            "efforts": list(adapter.module.EFFORT_LEVELS),
+            "model_id_shape": model_id_shape(adapter, catalog),
+            "confirm": policy["confirm"], "refuse": policy["refuse"],
+        }
+    return {
+        "schema_version": TIER_MAP_SCHEMA_VERSION,
+        "roles": {tier: sorted(names) for tier, names in roles.items()},
+        "hosts": hosts,
+    }
+
+
+def write_tier_map(
+    root: Path, source: Path, target: Path, adapters: dict[str, HostAdapter],
+) -> None:
+    path = target / TIER_MAP_RELPATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes((json.dumps(
+        tier_map(root, source, adapters), indent=2, sort_keys=True,
+    ) + "\n").encode("utf-8"))
 
 
 def agent_variants(source: Path, tiers: set[str]) -> list[tuple[str, str, str, str]]:
@@ -1149,6 +1304,7 @@ def build_plugin(
         )
     generate_skills(source, target, adapter)
     generate_agents(source, target, adapter, execution_profile)
+    write_tier_map(root, source, target, adapters)
     compose_project_instructions(root, source, target, adapters)
     (target / marker_name).write_bytes(
         b"Generated by tools/build_distributions.py; do not edit.\n"

@@ -163,7 +163,7 @@ class ArchitectureCompilerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             deliveries = Path(raw) / "workspace/docs/delivery/deliveries"
             for folder, note, expected in (
-                    ("dlv-002-verify-every-item", "---\ntype: delivery\nid: DLV-002\n---\n", "DLV-002"),
+                    ("dlv-002-report-export", "---\ntype: delivery\nid: DLV-002\n---\n", "DLV-002"),
                     ("dlv-004-renamed-scope", "---\ntype: delivery\nid: DLV-009\n---\n", "DLV-009"),
                     ("dlv-003-no-id", "---\ntype: delivery\n---\n", "DLV-003"),
                     ("dlv-005-unreadable", "id: DLV-099\n", "DLV-005"),

@@ -557,8 +557,8 @@ class ProjectVaultContractTests(unittest.TestCase):
 class AliasOwnershipTests(unittest.TestCase):
     """An id-shaped link alias targets the one note that owns the id."""
 
-    REVIEW = "backlog/reviews/round-9-backlog-review.md"
-    EPIC = "backlog/epics/workspace"
+    REVIEW = "backlog/reviews/round-2-backlog-review.md"
+    EPIC = "backlog/epics/orders"
 
     @classmethod
     def setUpClass(cls):
@@ -603,15 +603,15 @@ class AliasOwnershipTests(unittest.TestCase):
 
     def backlog_notes(self, review_body: str) -> dict[str, str]:
         return {
-            f"{self.EPIC}/epic.md": self.note("Workspace epic", "EP-004"),
-            f"{self.EPIC}/reviews/round-4-epic-review.md": self.note(
-                "Workspace epic review", "EP-004-REVIEW-004"
+            f"{self.EPIC}/epic.md": self.note("Orders epic", "EP-002"),
+            f"{self.EPIC}/reviews/round-1-epic-review.md": self.note(
+                "Orders epic review", "EP-002-REVIEW-001"
             ),
-            f"{self.EPIC}/stories/handoff/story.md": self.note(
-                "Handoff story", "ST-009"
+            f"{self.EPIC}/stories/checkout/story.md": self.note(
+                "Checkout story", "ST-003"
             ),
-            "requirements/req-001-platform-naming.md": self.note(
-                "Platform naming requirement", "REQ-001"
+            "requirements/req-001-report-export.md": self.note(
+                "Report export requirement", "REQ-001"
             ),
             "delivery/deliveries/dlv-001-first-slice/delivery.md": self.note(
                 "First slice delivery", "DLV-001"
@@ -621,19 +621,19 @@ class AliasOwnershipTests(unittest.TestCase):
 
     def test_note_owned_id_on_another_target_is_an_error(self):
         epic = self.EPIC
-        review = f"{epic}/reviews/round-4-epic-review"
-        requirement = "requirements/req-001-platform-naming"
+        review = f"{epic}/reviews/round-1-epic-review"
+        requirement = "requirements/req-001-report-export"
         delivery = "delivery/deliveries/dlv-001-first-slice/delivery"
         files = self.backlog_notes(
-            f"- [[{review}|EP-004]]\n"
-            f"- [[{epic}/epic|ST-009]]\n"
+            f"- [[{review}|EP-002]]\n"
+            f"- [[{epic}/epic|ST-003]]\n"
             f"- [[{delivery}|REQ-001]]\n"
             f"- [[{requirement}|DLV-001]]\n"
         )
         self.assertEqual(self.alias_findings(files), [
-            self.misowned(7, "EP-004", review, f"{epic}/epic.md"),
-            self.misowned(8, "ST-009", f"{epic}/epic",
-                          f"{epic}/stories/handoff/story.md"),
+            self.misowned(7, "EP-002", review, f"{epic}/epic.md"),
+            self.misowned(8, "ST-003", f"{epic}/epic",
+                          f"{epic}/stories/checkout/story.md"),
             self.misowned(9, "REQ-001", delivery, f"{requirement}.md"),
             self.misowned(10, "DLV-001", requirement, f"{delivery}.md"),
         ])
@@ -641,14 +641,14 @@ class AliasOwnershipTests(unittest.TestCase):
     def test_note_owned_id_on_its_owner_passes(self):
         epic = self.EPIC
         files = self.backlog_notes(
-            f"- [[{epic}/epic|EP-004]]\n"
-            f"- [[{epic}/epic#^scope|EP-004]]\n"
-            f"| epic | [[{epic}/epic\\|EP-004]] |\n"
-            f"- [[{epic}/stories/handoff/story|EP-004]]\n"
+            f"- [[{epic}/epic|EP-002]]\n"
+            f"- [[{epic}/epic#^scope|EP-002]]\n"
+            f"| epic | [[{epic}/epic\\|EP-002]] |\n"
+            f"- [[{epic}/stories/checkout/story|EP-002]]\n"
         )
         # Only the fourth link misses its owner; the first three pass.
         self.assertEqual(self.alias_findings(files), [
-            self.misowned(10, "EP-004", f"{epic}/stories/handoff/story",
+            self.misowned(10, "EP-002", f"{epic}/stories/checkout/story",
                           f"{epic}/epic.md"),
         ])
 

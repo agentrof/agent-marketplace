@@ -126,10 +126,10 @@ class LegacyNoteCompatibilityTests(unittest.TestCase):
     def test_only_escaped_or_apostrophe_edged_quoted_tokens_change(self):
         # Every double-quoted token without a backslash or an inner apostrophe
         # edge parses as the historical quote strip did, so its hashes hold.
-        for token in ('"[[business-analysis/sales/space|Sales]]"',
-                      '"Scenario: Land and Expand Process"',
-                      '"business-analysis|business-analysis/sales/space|sha256:1a43"',
-                      '"ST-019: verification=sha256:20e3, environment=sha256:e5dc"',
+        for token in ('"[[business-analysis/core/space|Core]]"',
+                      '"Scenario: Order Intake Process"',
+                      '"business-analysis|business-analysis/core/space|sha256:1a43"',
+                      '"ST-001: verification=sha256:0a1b, environment=sha256:2c3d"',
                       '"[[a\\|b]]"', '"Use "fast": lane"', "'single'", 'plain "end"',
                       '""', '"true"', '"12"'):
             with self.subTest(token=token):
@@ -179,8 +179,8 @@ class ExperienceDigestCompatibilityTests(unittest.TestCase):
             package = Path(temporary) / "checkout"
             package.mkdir()
             note = package / "experience.md"
-            legacy = ("---\ntype: experience\nrevision: 1\ntitle: Scenario: Land and expand\n"
-                      "tags:\n  - \"doc/experience\"\n---\n\n# Scenario: Land and expand\n")
+            legacy = ("---\ntype: experience\nrevision: 1\ntitle: Scenario: Order intake\n"
+                      "tags:\n  - \"doc/experience\"\n---\n\n# Scenario: Order intake\n")
             note.write_text(legacy, encoding="utf-8")
             stable = legacy.replace('tags:\n  - "doc/experience"\n', "")
             historical = "sha256:" + hashlib.sha256(
@@ -189,7 +189,7 @@ class ExperienceDigestCompatibilityTests(unittest.TestCase):
 
             data, body = experience_compile.fm(note)
             experience_compile.rewrite(note, data, body)
-            self.assertIn('title: "Scenario: Land and expand"\n', note.read_text(encoding="utf-8"))
+            self.assertIn('title: "Scenario: Order intake"\n', note.read_text(encoding="utf-8"))
             self.assertEqual(experience_compile.source_digest(package), historical)
 
 

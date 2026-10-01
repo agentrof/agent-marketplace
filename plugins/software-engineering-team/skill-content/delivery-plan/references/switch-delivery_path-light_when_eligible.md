@@ -30,6 +30,11 @@ is eligible only while every condition holds:
   `architecture_impact: not_applicable` with the Software Architect's own
   reason; the reason `init` writes is a placeholder. `init` lists this
   condition as `pending`, because the topology pass decides it.
+- `no_operation_impact`: the approved Story does not classify
+  `operation_impact: required`, which expects an Operation contract revision,
+  so `init` decides it before any Operation draft exists. A Story without the
+  classification is unknown here, and `operation_contracts_unchanged` still
+  decides.
 - `operation_contracts_unchanged`: no Operation contract revision is open, and
   the Verification Contract, with the Environment Contract for a
   `runtime_required` Item, is approved and current. After scope approval the

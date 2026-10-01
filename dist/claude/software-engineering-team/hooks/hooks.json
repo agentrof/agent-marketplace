@@ -52,6 +52,16 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/vault_hook.py post"
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/model_fallback.py",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
@@ -61,6 +71,16 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/vault_hook.py post"
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/model_fallback.py",
+            "timeout": 10
           }
         ]
       }

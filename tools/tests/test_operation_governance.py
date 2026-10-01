@@ -225,6 +225,72 @@ class OperationGovernanceTests(unittest.TestCase):
             self.assertNotIn("diagnostic_test_workdir", props)
             self.assertEqual(operation_findings(docs), [])
 
+    def test_optional_command_variables_are_validated_and_typed_for_the_vault(self):
+        """A Verification Contract may name the variables its commands read, which run evidence then binds (#356)."""
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            ref = self.approved_solution(docs)
+            args = ("--docs", str(docs), "--kind", "verification")
+            initialized = self.invoke(OPERATION, "init", *args, "--constrained-by", f"[[{ref}|SD-001]]")
+            self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+            path = operation_compile.contract_path(docs, "verification")
+            draft, body = operation_compile.parse(path)
+            self.assertNotIn("command_variables", draft)
+            draft["test_command"] = "make test"
+            error = "command_variables must list unique environment variable names"
+            cases = [({}, None), ({"command_variables": ["DATABASE_URL"]}, None),
+                     ({"command_variables": ["DATABASE_URL", "http_proxy", "_PRIVATE_TOOL_HOME"]}, None),
+                     ({"command_variables": "DATABASE_URL"}, error),
+                     ({"command_variables": ["DATABASE_URL", "DATABASE_URL"]}, error)]
+            cases.extend(({"command_variables": [name]}, error)
+                         for name in ("", "1DATABASE", "DATABASE-URL", "DATABASE URL", "DATABASE=URL", "${DATABASE}"))
+            for fields, expected in cases:
+                with self.subTest(fields=fields):
+                    text = operation_compile.render({**draft, **fields}, body)
+                    _receipt, errors = operation_compile.check_contract(docs, "verification", text=text)
+                    if expected is None:
+                        self.assertEqual(errors, [])
+                    else:
+                        self.assertTrue(any(expected in finding for finding in errors), errors)
+            path.write_text(operation_compile.render(
+                {**draft, "command_variables": ["DATABASE_URL", "http_proxy"]}, body), encoding="utf-8")
+            approved = self.invoke(OPERATION, "approve", *args)
+            self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+            props, _ = operation_compile.parse(path)
+            self.assertEqual(props["command_variables"], ["DATABASE_URL", "http_proxy"])
+            self.assertEqual(operation_compile.check_contract(docs, "verification")[1], [])
+            self.assertEqual(operation_findings(docs), [])
+
+    def test_command_variables_never_name_the_runners_own_namespace(self):
+        """The runner sets every AGENTROF_ variable and run evidence binds them without a declaration, a
+        selection file by its content, so a contract that names one would refuse every run's evidence."""
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            ref = self.approved_solution(docs)
+            args = ("--docs", str(docs), "--kind", "verification")
+            initialized = self.invoke(OPERATION, "init", *args, "--constrained-by", f"[[{ref}|SD-001]]")
+            self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+            path = operation_compile.contract_path(docs, "verification")
+            draft, body = operation_compile.parse(path)
+            draft["test_command"] = "make test"
+            # Windows matches variable names without case, so the namespace is matched without case too.
+            for name in ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", "AGENTROF_MUTATION_FILES",
+                         "AGENTROF_VERIFICATION_SCRATCH", "AGENTROF_SAMPLE", "agentrof_reused_tests"):
+                with self.subTest(name=name):
+                    text = operation_compile.render({**draft, "command_variables": ["DATABASE_URL", name]}, body)
+                    _receipt, errors = operation_compile.check_contract(docs, "verification", text=text)
+                    self.assertIn(f"command_variables must not name {name}, a variable of the runner's own"
+                                  " AGENTROF_ namespace, which run evidence binds without a declaration", errors)
+            path.write_text(operation_compile.render(
+                {**draft, "command_variables": ["DATABASE_URL", "AGENTROF_REUSED_TESTS"]}, body), encoding="utf-8")
+            refused = self.invoke(OPERATION, "approve", *args)
+            self.assertNotEqual(refused.returncode, 0, refused.stdout + refused.stderr)
+            self.assertNotEqual(operation_compile.parse(path)[0].get("status"), "approved")
+
     def test_render_ci_refuses_an_external_pull_request_check_source(self):
         sys.path.insert(0, str(SCRIPTS))
         import operation_compile

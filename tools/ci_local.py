@@ -14,7 +14,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import unittest
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -275,10 +274,11 @@ def run_worker(root, plan, shard, path):
         ids, identity = tests.inventory(root)
         if identity != plan["inventory_hash"]:
             raise tests.CIError("test inventory changed")
-        suite = tests.load_selected(root, plan["shards"][shard], ids)
-        result = unittest.TextTestRunner(verbosity=2, resultclass=lambda *args, **kwargs:
-            tests.TimedResult(*args, report=report, report_path=path, **kwargs)).run(suite)
-        report["status"] = "complete" if result.wasSuccessful() else "failed"
+        result, unattributed = tests.run_guarded(
+            lambda: tests.load_selected(root, plan["shards"][shard], ids), report, path)
+        report["status"] = "complete" if result.wasSuccessful() and not unattributed else "failed"
+        if unattributed:
+            report["error"] = "a class or module fixture " + tests.host_calls_text(unattributed)
         assert_current(root, plan, environment=False)
         if sorted(row["id"] for row in report["tests"]) != plan["shards"][shard]:
             report["status"] = "failed"

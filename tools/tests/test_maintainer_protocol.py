@@ -95,6 +95,70 @@ class MaintainerProtocolTests(unittest.TestCase):
         self.assertIn("To keep it, the maintainer completes the publication", flat)
         self.assertIn("with an exact lease", flat)
 
+    def test_the_release_audit_requires_the_version_only_title(self):
+        protocol = PROTOCOL.read_text(encoding="utf-8")
+        flat = " ".join(protocol.split())
+        self.assertIn(
+            "`gh release view vX.Y.Z --json name,isDraft,isPrerelease,isImmutable`"
+            " must report the `name` `vX.Y.Z`", flat,
+        )
+        self.assertNotIn("Agent Marketplace v", protocol)
+
+    def test_the_one_time_release_reset_orders_the_owner_commands(self):
+        protocol = PROTOCOL.read_text(encoding="utf-8")
+        self.assertIn("\n## One-time release reset\n", protocol)
+        section = protocol.split("\n## One-time release reset\n", 1)[1].split("\n## ", 1)[0]
+        flat = " ".join(section.split())
+        for term in ("`.release/reset.json`", "refuses every partial or mixed variant",
+                     "The old history is not archived",
+                     "while `main` does not require the merge queue",
+                     "Every line must end in `false`"):
+            with self.subTest(term=term):
+                self.assertIn(term, flat)
+        # A Release goes before its tag, and the bootstrap refuses to run
+        # while any version tag exists without `stable`.
+        steps = (
+            '"\\(.tag_name) \\(.immutable)"',
+            'gh release delete "v$version" --yes',
+            '--force-with-lease="refs/tags/v$version:$object"',
+            "origin :refs/heads/release/stable",
+            "origin :refs/heads/stable",
+            "git fetch origin --prune --prune-tags",
+            "gh workflow run prepare-stable-release.yml --ref main",
+            "finalize-local --version 0.0.1",
+        )
+        positions = []
+        for step in steps:
+            with self.subTest(step=step):
+                self.assertIn(step, section)
+                positions.append(section.index(step))
+        self.assertEqual(positions, sorted(positions))
+
+    def test_upstream_text_never_identifies_a_consumer_project(self):
+        protocol = PROTOCOL.read_text(encoding="utf-8")
+        self.assertIn("\n## Confidentiality\n", protocol)
+        section = " ".join(protocol.split("\n## Confidentiality\n", 1)[1].split("\n## ", 1)[0].split())
+        for term in ("Issue intake, PR bodies, commit messages, changesets and every tracked file"
+                     " never identify a consumer project or its data",
+                     "never copy them into a branch, commit, changeset, PR or comment",
+                     '"in one measured project"',
+                     "Before each commit and PR, scan the message, body and diff",
+                     "The merge method keeps every commit of a PR",
+                     "`tools/release.py check-pr` reads every commit message and added line of"
+                     " the PR and refuses a home-directory path",
+                     "`AGENT_MARKETPLACE_PRIVATE_TERMS_FILE`",
+                     "in the PR text passed with `--pr-text` as well, and prints only each"
+                     " hit's kind and position"):
+            with self.subTest(term=term):
+                self.assertIn(term, section)
+        self.assertLess(protocol.index("\n## Confidentiality\n"), protocol.index("\n## Flow A"))
+        # Every commit made here reads the rule, not only issue and release work.
+        agents = " ".join((REPO / "AGENTS.md").read_text(encoding="utf-8").split())
+        working = agents.split("## Working in this repository", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("Text and files committed here never identify a consumer project or its"
+                      " data; follow the Confidentiality section of"
+                      " `docs/maintainer-operations-protocol.md`", working)
+
     def test_merge_and_release_authority_remain_explicit(self):
         protocol = PROTOCOL.read_text(encoding="utf-8")
         self.assertIn("Explicit user approval identifying that PR", protocol)

@@ -106,15 +106,15 @@
         },
         {
           "id": "lens_panel",
-          "tradeoffs": "One fresh read-only reader per lens assignment runs in parallel and replaces the step's reviewer; the read-only reviewer roles run as their lens-tier variants. The panel changes who reads, never the review loop: switch `review_loop` sets that, so at its `current` the panel keeps the step's own loop and a re-review reruns the whole panel, and at `blocking_delta` a re-review reruns only the assignments that returned a blocking finding. Shorter review wall time, while valid-major recall is still measured against the single reader and a panel major can be overrated."
+          "tradeoffs": "One fresh read-only reader per lens assignment runs in parallel and replaces the step's reviewer; the read-only reviewer roles run as their -lens variants, on the low tier. The panel changes who reads, never the review loop: switch `review_loop` sets that, so at its `current` the panel keeps the step's own loop and a re-review reruns the whole panel, and at `blocking_delta` a re-review reruns only the assignments that returned a blocking finding. Shorter review wall time, while valid-major recall is still measured against the single reader and a panel major can be overrated."
         }
       ],
       "default": "single_reader",
       "agent_variants": {
         "lens_panel": {
           "suffix": "lens",
-          "tier": "lens",
-          "description": "Lens-tier reader variant for review panels.",
+          "tier": "low",
+          "description": "Lens reader variant for review panels.",
           "agents": ["backlog-reviewer", "design-system-reviewer", "solution-reviewer"]
         }
       },
@@ -134,25 +134,25 @@
       "values": [
         {
           "id": "role_tier",
-          "tradeoffs": "Every writer pass runs on its role's own tier, usually as the resumed writer that still holds the document, and compiler steps run as each flow describes. Today's behaviour and the baseline the mechanical tier is measured against; a pass that only applies spelled-out fixes still generates every edit at the writer's full tier."
+          "tradeoffs": "Every writer pass runs on its role's own tier, usually as the resumed writer that still holds the document, and compiler steps run as each flow describes. Today's behaviour and the baseline the -mechanical variants are measured against; a pass that only applies spelled-out fixes still generates every edit at the writer's full tier."
         },
         {
           "id": "mechanical",
-          "tradeoffs": "A writer pass whose findings each name their exact fix runs on the owning writer's -mechanical variant, a fresh agent on the mechanical tier, and render, stamp and check steps run as direct entry commands with no role pass. The host contract states per host what a variant changes against its writer's own tier: a lower model class, or only a fixed effort that is lower only when the session runs above it. The tier's values are placeholders until the frozen-task A/B sets them. Shorter fix passes where the tier is lower, while the fresh variant re-reads what a resumed writer held and a lower tier may misapply a fix, which the unchanged re-check catches at the cost of a round."
+          "tradeoffs": "A writer pass whose findings each name their exact fix runs on the owning writer's -mechanical variant, a fresh agent on the low tier, and render, stamp and check steps run as direct entry commands with no role pass. The host contract states per host what a variant changes against its writer's own tier: today a smaller model on one host, and on the other only the fresh context, since its low tier runs the writers' own model and effort. The variants' values are placeholders until the frozen-task A/B sets them. Shorter fix passes where the low tier runs a lower model, while the fresh variant re-reads what a resumed writer held and a lower tier may misapply a fix, which the unchanged re-check catches at the cost of a round."
         }
       ],
       "default": "role_tier",
       "agent_variants": {
         "mechanical": {
           "suffix": "mechanical",
-          "tier": "mechanical",
-          "description": "Mechanical-tier variant for passes that apply only the fixes a review verdict names.",
+          "tier": "low",
+          "description": "Writer variant for passes that apply only the fixes a review verdict names.",
           "agents": ["devops-engineer", "product-owner", "qa-engineer", "solution-architect"]
         }
       },
       "metric": "Per mechanical pass, its wall time and output tokens against the base writer's median for the same pass kind, whether the re-check finds the fix incomplete or wrong (rework), and any unrelated edit the re-check finds.",
       "promotion": {
-        "unit": "A frozen-task A/B that sets the mechanical tier's host values, then at least 3 Deliveries run with mechanical.",
+        "unit": "A frozen-task A/B that sets the tier and host values the -mechanical variants run on, then at least 3 Deliveries run with mechanical.",
         "threshold": "Median apply_findings wall time at most 50% of the base writer's median for the same pass kind, a rework rate no higher than role_tier's over the same period and zero accepted unrelated edits, with every shared quality guard holding and the owner's approval."
       }
     },
@@ -198,6 +198,38 @@
         "threshold": "Median review-loop minutes at most 50% of the matching baseline, zero valid critical or major findings found later in the same document and traced to a skipped minor round or a calibration downgrade, the shadow judge confirming every downgrade, and an owner role and revisit trigger on every follow-up, with every shared quality guard holding and the owner's approval."
       }
     },
+    "code_review_panel": {
+      "summary": "Whether Delivery code review reads a frozen candidate with the official code reviewer alone, or also with a lens panel beside it whose calibrated blocking findings join the official result.",
+      "issue": 347,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "single_reader",
+          "tradeoffs": "One fresh code reviewer reads each frozen candidate through every review pass on its role's own tier and registers the code review result. Today's behaviour and the baseline the panel is measured against: in one measured project, the official reviewer found 8 of the 12 valid majors of one code review pass, and each blocker it misses costs a later repair and re-review round."
+        },
+        {
+          "id": "beside_official",
+          "tradeoffs": "One fresh code-reviewer-lens reader per lens assignment reads the same frozen candidate and inputs in parallel with the official code reviewer, which reviews as at single_reader. A panel critical or major finding gates only once a fresh code reviewer on its role's own tier calibrates it and finds that the official result lacks it, and merge-panel registers the one code review result: the official findings and the validated panel findings, each with its source. More blockers caught per pass, as in one measured project, where the panel added 4 valid blockers the official reviewer missed in one pass, while every pass adds the lens readers' tokens and a calibration pass before the merge, and a pass where the panel adds nothing, as that project's next pass did, pays them for no gain."
+        }
+      ],
+      "default": "single_reader",
+      "agent_variants": {
+        "beside_official": {
+          "suffix": "lens",
+          "tier": "low",
+          "description": "Lens reader variant for review panels.",
+          "agents": ["code-reviewer"]
+        }
+      },
+      "value_data": {
+        "beside_official": ["skill-content/code-review/data/code-review-panel.json"]
+      },
+      "metric": "Per code-review pass: the valid critical and major findings found only by the panel, only by the official reviewer and by both, as the shadow judge rates them; the panel claims calibration confirmed, lowered, ruled invalid and ruled duplicate of another finding; and the wall clock of the combined step, from the freeze to merge-panel, against the official reviewer's alone, from the freeze to its registration, as the panel record of each pass keeps them.",
+      "promotion": {
+        "unit": "At least 5 code-review passes run with beside_official across at least 2 Deliveries, the measurement criterion of #347.",
+        "threshold": "Union valid critical and major recall above the official reviewer's alone and a combined wall clock at most 120% of the official reviewer's, summed over those passes, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "story_size_budget": {
       "summary": "Whether backlog planning measures each story against owner-set size limits and proposes a split for a story over them, before its epic review.",
       "issue": 325,
@@ -230,6 +262,27 @@
       "promotion": {
         "unit": "At least 3 backlog revisions run with propose_split and 3 Deliveries that contain stories planned under it.",
         "threshold": "The owner accepts at least half of the split proposals, stories within budget reach integration with a median cycle time at most half that of stories over budget in the same period, and no split loses, merges or rewords a criterion, creates a dependency cycle or yields a story verifiable only after a sibling lands, with every shared quality guard holding and the owner's approval. A promotion keeps off as the default, since only a value the owner chooses takes parameters, and ships package_limits for propose_split, which a project at that value applies to each limit it leaves unset."
+      }
+    },
+    "pre_handoff_regression": {
+      "summary": "Whether an Item's candidate goes to Code Review and QA after its implementation's own tests, or only once the automated suites of the earlier stories its change touches, with its own Test Plan targets, pass on that exact candidate.",
+      "issue": 351,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "The implementation proves its own Item's tests and hands the candidate to the readers; the full gate is QA's. Today's behaviour and the baseline the run is measured against: in one measured project, three side effects of a story's change broke 18 cases of an earlier story's suite, QA's first `make test` stopped at its first failure before that group ran, and the readers found them only in round 2, one full reader and repair round of at least 4 h later."
+        },
+        {
+          "id": "touched_suites",
+          "tradeoffs": "Before the freeze the coordinator runs, under the Item's environment lock and in a private checkout of the exact candidate, the Test Plan automation targets of every earlier story whose integrated Item in a merged Delivery claims a path the change touches, with the Item's own, through the approved diagnostic adapter, or the full approved test command without one, and the freeze refuses until that run passed. A regression in an earlier story's suite is repaired before the readers start, while every freeze waits for that run, a story whose tests exercise code outside its own path claims is not selected, and without a diagnostic adapter the run is the full suite."
+        }
+      ],
+      "default": "off",
+      "metric": "Per Delivery: the blocking findings Code Review and QA raise that are regressions in an earlier story's suite, per review round, and the wall clock of each pre-handoff run.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with touched_suites.",
+        "threshold": "Zero blocking findings that are regressions in an earlier story's suite after the first review round of any Item, with every shared quality guard holding and the owner's approval."
       }
     }
   }

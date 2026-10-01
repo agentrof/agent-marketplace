@@ -14,8 +14,11 @@ EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
 MODEL_ID_RE = re.compile(
     r"gpt-(?P<major>[0-9]+)(?:\.(?P<minor>[0-9]+))?-(?P<family>[a-z]+(?:-[a-z]+)*)"
 )
+# The shape of a model ID a project may set for a tier: any slug of the
+# host's model list, such as gpt-5.5, which the list itself judges further.
+MODEL_ID_SHAPE = r"[a-z0-9]+(?:[.-][a-z0-9]+)*"
 # This host's CLI in tools/data/host-cli-versions.json, the exact version CI
-# installs; no model class's min_cli_version may be newer.
+# installs; no catalog model's min_cli_version may be newer.
 HOST_CLI_KEY = "codex"
 # The drift check reads the catalog bundled with the CLI, from `codex debug
 # models --bundled`. A pinned source of this form names the CLI release whose
@@ -32,7 +35,8 @@ DEFAULT_PROMPTS = {"autopilot": "${plugin}:{name} on"}
 MODEL_TRIAL = (
     "Codex: in a scratch copy of the project, run `generate_codex_project.py"
     " apply --scope local --execution-profile inherit`, then start the session"
-    " with `--model <model ID>` and `-c model_reasoning_effort=<tier effort>`."
+    " with `--model <model ID>`; each role keeps its tier's"
+    " `model_reasoning_effort`."
 )
 
 

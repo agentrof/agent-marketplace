@@ -18,11 +18,11 @@ requirement_compile = compiler.requirement_compile
 requirement_route = compiler.requirement_route
 
 LABEL = "backlog/backlog.md"
-BA = "business-analysis/sales/space"
+BA = "business-analysis/core/space"
 SOLUTION = "solution-design/landscape"
 DESIGN = "design-system/MASTER"
-APPLICATION = "application@r6"
-PROCESS = "workspace@r5"
+APPLICATION = "application@r2"
+PROCESS = "order-intake@r1"
 
 
 def digest(fill: str) -> str:
@@ -59,13 +59,13 @@ class RequirementBindingTests(unittest.TestCase):
         """Write an approved REQ-001 with the given impact matrix and Stage Results."""
         with contextlib.redirect_stdout(io.StringIO()):
             path = requirement_compile.create_requirement(
-                self.docs, "pin-acquisition", "Pin acquisition", "technical", "high", None, [])
+                self.docs, "report-export", "Report export", "technical", "high", None, [])
         props, body = requirement_compile.split_note(path)
         for placeholder, text in {
-            "TODO: state the requested change and who needs it.": "Acquire pins by digest.",
-            "TODO: state the observable outcome and acceptance boundary.": "Bring-up asks for each pinned digest.",
-            "TODO: define included and excluded behavior.": "Include acquisition. Exclude image builds.",
-            "TODO: record evidence, constraints and urgency rationale.": "A moved tag broke bring-up.",
+            "TODO: state the requested change and who needs it.": "Export the monthly report.",
+            "TODO: state the observable outcome and acceptance boundary.": "The report page offers one CSV download.",
+            "TODO: define included and excluded behavior.": "Include CSV export. Exclude PDF layout.",
+            "TODO: record evidence, constraints and urgency rationale.": "Users copy the report by hand.",
         }.items():
             body = body.replace(placeholder, text)
         for stage in requirement_compile.STAGES:

@@ -64,19 +64,20 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    gate, payload key or package projection fails even when the file exists.
 4. Run the generated host project `inspect`, resolve every declared
    preserve/discard choice for user-owned instruction companions, then run its
-   `apply` and `check`. Never overwrite companions silently. This is a host
-   adapter projection; project truth remains the canonical workspace.
+   `apply` and `check`. Never overwrite companions silently. This host adapter
+   projection is no project truth. Present the `roles` table: role, tier,
+   model, effort and source, any `kept` file and the `notice` it reports.
 5. Read the `obsidian-vault` skill completely. Refresh materializes its vault
    payload under `workspace/docs/`, rebuilds the closed `workspace/config.json`
-   shape, preserves valid language values, and converges compiler-owned
-   relation reports. Retired command fields migrate to draft `docs/operation/`
-   contracts and a valid legacy `max_parallel` becomes Governance revision 1.
-   It never edits authored notes during refresh. The policy includes the fixed
-   backlog keys `backlog`, `backlog-review`, `epic`, `epic-review`, `story`
-   and `test-plan`, plus all analysis/design types. Issue reporting is external
-   and stateless, so setup never creates an issue type, tree, map or runtime
-   record. Type keys and graph colors stay stable; taxonomy changes do not
-   expand project configuration.
+   shape, preserves valid language values and the `tier_models` and
+   `role_tiers` overrides, and converges compiler-owned relation reports.
+   Retired command fields migrate to draft `docs/operation/` contracts and a
+   valid legacy `max_parallel` becomes Governance revision 1; authored notes
+   are never edited. The policy includes the fixed backlog keys `backlog`,
+   `backlog-review`, `epic`, `epic-review`, `story` and `test-plan`, plus all
+   analysis/design types. Issue reporting is external and stateless, so setup
+   never creates an issue type, tree, map or runtime record. Type keys and
+   graph colors stay stable; taxonomy changes do not expand project config.
 6. Policy-owned keys in `app.json`, `core-plugins.json`, `graph.json` and
    `types.json` converge while unrelated user knobs remain untouched. The
    vetted community-plugin enable list and the policy-owned plugin directories

@@ -61,6 +61,8 @@
     "priority_reason": "text",
     "supporting_roles": "multitext",
     "experience_refs": "multitext",
+    "operation_impact": "text",
+    "operation_reason": "text",
     "depends_on": "multitext",
     "dependency_refs": "multitext",
     "scenario_refs": "multitext",
@@ -188,6 +190,7 @@
     "implementation_schedule": "text",
     "lane_scopes": "multitext",
     "lane_seams": "multitext",
-    "mutation_include_paths": "multitext"
+    "mutation_include_paths": "multitext",
+    "command_variables": "multitext"
   }
 }

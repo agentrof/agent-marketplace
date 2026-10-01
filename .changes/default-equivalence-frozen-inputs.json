@@ -1,4 +1,0 @@
-{
-  "summary": "The golden all-default Delivery run reads its approved backlog, upstream notes and Verification Contract from a frozen input file instead of rebuilding them with the backlog and Operation compilers. A fix in how those compilers write their own documents no longer moves the Delivery digests, while any change to Delivery compiler output on the same inputs, including what a hash covers, still fails the test.",
-  "components": {}
-}

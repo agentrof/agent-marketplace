@@ -1,9 +1,9 @@
-"""Process switch mechanical_pass_tier: writer fix passes on the mechanical tier.
+"""Process switch mechanical_pass_tier: writer fix passes on the writers' variants.
 
 At `role_tier`, the default, nothing a task binds changes. At `mechanical`,
-the owning writer's `-mechanical` variant applies the fixes a review names and
-compiler steps run without a role, while every review, re-check and
-calibration keeps its tier.
+the owning writer's `-mechanical` variant, on the `low` tier like every
+generated variant, applies the fixes a review names and compiler steps run
+without a role, while every review, re-check and calibration keeps its tier.
 """
 
 from __future__ import annotations
@@ -79,38 +79,39 @@ class RegistryTests(unittest.TestCase):
 
     def test_the_mechanical_value_declares_one_variant_per_writer(self):
         self.assertEqual(switch()["agent_variants"], {"mechanical": {
-            "suffix": "mechanical", "tier": "mechanical",
-            "description": "Mechanical-tier variant for passes that apply only the fixes a review"
-                           " verdict names.",
+            "suffix": "mechanical", "tier": "low",
+            "description": "Writer variant for passes that apply only the fixes a review verdict"
+                           " names.",
             "agents": sorted(WRITERS)}})
 
-    def test_every_host_maps_the_mechanical_tier(self):
+    def test_the_variants_run_on_the_low_tier_of_every_host(self):
+        # By the owner's decision of 1 Oct 2026 on #349 the `mechanical` tier
+        # is gone: the variants run on `low`, which every host maps.
         models = json.loads((ROOT / "tools/data/models.json").read_text(encoding="utf-8"))
-        self.assertIn("mechanical", models["reasoning_levels"])
-        self.assertIn("mechanical", build_distributions.CANONICAL_REASONING_LEVELS)
-        self.assertIn("mechanical", validate.AGENT_REASONING_ENUM)
-        tables = {
-            host: json.loads(build_distributions.execution_profile_path(ROOT, host)
-                             .read_text(encoding="utf-8"))["profiles"]["auto"]
-            for host in ("claude", "codex")
-        }
-        # Starting values: the frozen-task A/B sets them before a project opts in.
-        self.assertEqual(tables["claude"]["mechanical"], {"class": "strong", "effort": "high"})
-        self.assertEqual(tables["codex"]["mechanical"], {"class": "fast", "effort": "high"})
+        self.assertEqual(models["reasoning_levels"], ["high", "medium", "low", "inherit"])
+        self.assertNotIn("mechanical", build_distributions.CANONICAL_REASONING_LEVELS)
+        self.assertNotIn("mechanical", validate.AGENT_REASONING_ENUM)
+        self.assertEqual(switch()["agent_variants"]["mechanical"]["tier"], "low")
+        for host in ("claude", "codex"):
+            table = json.loads(build_distributions.execution_profile_path(ROOT, host)
+                               .read_text(encoding="utf-8"))["profiles"]["auto"]
+            with self.subTest(host=host):
+                self.assertNotIn("mechanical", table)
+                self.assertIn("model", table["low"])
 
     def test_every_statement_of_the_tier_says_what_a_variant_changes_per_host(self):
-        # On Claude three writers already run the mechanical tier's class, so
-        # their variant changes only the effort (#330); the texts must say so.
+        # On Claude Code every writer runs a larger model than the low tier, so
+        # every variant runs a smaller one; on Codex every tier runs the same
+        # model and effort, so a variant changes only the fresh context. The
+        # texts must say so and name the effort it runs against each writer's.
         tables = {host: json.loads(build_distributions.execution_profile_path(ROOT, host)
                                    .read_text(encoding="utf-8"))["profiles"]["auto"]
                   for host in ("claude", "codex")}
         tiers = {agent: build_distributions.parse_frontmatter(TEAM / "agents" / f"{agent}.md")[0]
                  ["reasoning"] for agent in WRITERS}
-        same_class = {host: {agent for agent, tier in tiers.items()
-                             if table[tier].get("class") == table["mechanical"]["class"]}
-                      for host, table in tables.items()}
-        self.assertEqual(same_class, {"claude": {"product-owner", "qa-engineer", "devops-engineer"},
-                                      "codex": set()})
+        same = {host: {agent for agent, tier in tiers.items() if table[tier] == table["low"]}
+                for host, table in tables.items()}
+        self.assertEqual(same, {"claude": set(), "codex": set(WRITERS)})
         spec = switch()
         mechanical = next(value for value in spec["values"] if value["id"] == "mechanical")
         for text in (mechanical["tradeoffs"], spec["agent_variants"]["mechanical"]["description"],
@@ -118,26 +119,37 @@ class RegistryTests(unittest.TestCase):
             self.assertNotIn("lower mechanical tier", flat(text))
             self.assertNotIn("Lower-tier", text)
             self.assertNotIn("on a lower tier", flat(text))
-        for fragment in ("The host contract states per host what a variant changes against its"
-                         " writer's own tier", "only a fixed effort that is lower only when the"
-                         " session runs above it", "placeholders until the frozen-task A/B sets"
-                         " them"):
+            self.assertNotIn("the mechanical tier", flat(text))
+        for fragment in ("a fresh agent on the low tier",
+                         "The host contract states per host what a variant changes against its"
+                         " writer's own tier: today a smaller model on one host, and on the"
+                         " other only the fresh context, since its low tier runs the writers'"
+                         " own model and effort",
+                         "placeholders until the frozen-task A/B sets them"):
             self.assertIn(fragment, mechanical["tradeoffs"])
+        self.assertNotIn("session runs above it", mechanical["tradeoffs"])
         contracts = {host: flat((ROOT / "platforms" / host / "software-engineering-team"
                                  / "host-contract.md").read_text(encoding="utf-8"))
                      .split("Every build also ships the `-mechanical` variants", 1)[1]
                      .split(" - ", 1)[0] for host in tables}
         authoring = flat((ROOT / "docs/authoring.md").read_text(encoding="utf-8")
                          .split("## Mechanical passes", 1)[1].split("\n## ", 1)[0])
+        self.assertIn("on the `low` tier, `claude-sonnet-5-5` at effort `high`",
+                      contracts["claude"])
+        self.assertIn("on the `low` tier, `gpt-6.1-sol` at effort `xhigh`",
+                      contracts["codex"])
         for text in (contracts["claude"], authoring):
-            self.assertIn("`product-owner`, `qa-engineer` and `devops-engineer` already run Sonnet"
-                          " at the session's effort, so their variant is lower only when the"
-                          " session runs above effort `high`", text)
-            self.assertIn("a lower model only for `solution-architect`", text)
+            self.assertIn("from Opus to Sonnet", text)
+            self.assertIn("above the `medium` of `product-owner`, `qa-engineer` and"
+                          " `devops-engineer`", text)
+            self.assertIn("below the `xhigh` of `solution-architect`", text)
+            self.assertNotIn("already run Sonnet", text)
         for text in (contracts["codex"], authoring):
-            self.assertIn("from Sol to Luna", text)
+            self.assertIn("own model and effort", text)
+            self.assertIn("only the fresh context", text)
+            self.assertNotIn("from Sol to Luna", text)
         for text in (*contracts.values(), authoring):
-            self.assertIn("placeholders until the tier's frozen-task A/B sets them", text)
+            self.assertIn("placeholders until the variants' frozen-task A/B sets them", text)
 
 
 class InstructionTests(unittest.TestCase):
@@ -194,11 +206,11 @@ class InstructionTests(unittest.TestCase):
 class ReviewTierContractTests(unittest.TestCase):
     """Every review, re-check and calibration keeps its tier under both values."""
 
-    def test_no_canonical_role_moves_to_the_mechanical_tier(self):
+    def test_no_canonical_role_declares_a_retired_tier(self):
         for path in sorted((TEAM / "agents").glob("*.md")):
             with self.subTest(agent=path.stem):
                 fields = build_distributions.parse_frontmatter(path)[0]
-                self.assertNotEqual(fields["reasoning"], "mechanical")
+                self.assertNotIn(fields["reasoning"], {"lens", "mechanical"})
 
     def test_every_variant_is_a_writer_and_never_a_reader(self):
         policy = json.loads(read("templates/task-input-policy.json"))
@@ -289,15 +301,20 @@ class ValidatorTests(unittest.TestCase):
                     and "must declare the 'mechanical' agent variants" in finding.message
                     for finding in findings), findings)
 
-    def test_a_host_table_must_map_the_tier_in_its_vocabulary(self):
+    def test_a_host_table_must_map_the_variants_tier_in_its_vocabulary(self):
         cases = (
-            ("claude", lambda auto: auto.pop("mechanical")),
-            ("codex", lambda auto: auto.pop("mechanical")),
-            ("claude", lambda auto: auto.update(mechanical={"class": "strong", "effort": "extreme"})),
-            ("claude", lambda auto: auto.update(mechanical={"class": "gpt-5"})),
-            ("claude", lambda auto: auto.update(mechanical={"model": "claude-sonnet-5-5"})),
-            ("codex", lambda auto: auto.update(mechanical={"class": "fast", "effort": "turbo"})),
-            ("codex", lambda auto: auto.update(mechanical={"class": "fast", "effort": "ultra"})),
+            ("claude", lambda auto: auto.pop("low")),
+            ("codex", lambda auto: auto.pop("low")),
+            ("claude", lambda auto: auto.update(
+                low={"model": "claude-sonnet-5-5", "effort": "extreme"})),
+            ("claude", lambda auto: auto.update(low={"model": "gpt-5"})),
+            ("claude", lambda auto: auto.update(low={"class": "strong", "effort": "high"})),
+            ("codex", lambda auto: auto.update(low={"model": "gpt-6-luna", "effort": "turbo"})),
+            ("codex", lambda auto: auto.update(low={"model": "gpt-6-luna", "effort": "ultra"})),
+            # A retired tier is no tier of the package.
+            ("claude", lambda auto: auto.update(
+                mechanical={"model": "claude-sonnet-5-5", "effort": "high"})),
+            ("codex", lambda auto: auto.update(lens={"model": "gpt-6.1-sol", "effort": "xhigh"})),
         )
         for host, mutate in cases:
             with self.subTest(host=host, mutate=mutate):
@@ -306,7 +323,7 @@ class ValidatorTests(unittest.TestCase):
                 self.assertIn((f"platforms/{host}/execution-profiles.json", "execution_profiles"),
                               {(finding.path, finding.check) for finding in findings})
         findings = self.edit_json("tools/data/models.json",
-                                  lambda models: models["reasoning_levels"].remove("mechanical"))
+                                  lambda models: models["reasoning_levels"].remove("low"))
         self.assertIn(("tools/data/models.json", "model_config_shape"),
                       {(finding.path, finding.check) for finding in findings})
 

@@ -1947,6 +1947,7 @@ def execution_approval_refusals(docs: Path, delivery_id: str, reopen: list[str] 
     if not any(root.glob("items/*/item.md")):
         return None, ["Execution Plan requires at least one Item"]
     inputs, errors = execution_approval_findings(docs, root, delivery_id, reopen, remote, pending)
+    errors = [*light_record_findings(docs, root, body, delivery_id), *errors]
     if errors:
         return None, errors
     return {"root": root, "props": props, "body": body, "inputs": inputs}, []
@@ -2317,15 +2318,23 @@ def with_delivery_path_line(body: str, line: str) -> str:
     return replace_section(body, "User Decisions", line + ("\n\n" + rest if rest else ""))
 
 
+def standard_path_line(step: str, left: bool, failed: list[dict]) -> str:
+    """The Delivery path line that records the standard path and each failed condition."""
+    reason = "the Delivery left the light path" if left else "the light path does not hold"
+    return (f"Delivery path: standard. {step} recorded that {reason}: "
+            + "; ".join(f"{failure['condition']}: {failure['finding']}" for failure in failed) + ".")
+
+
 def delivery_path_record(docs: Path, root: Path, body: str, step: str,
                          remote: str = "origin") -> tuple[str, dict] | None:
     """Record in User Decisions the path an approval finds, or None when switch delivery_path takes no part.
 
     Scope approval records light when every condition holds, with the Item
     topology and the contract receipts it approves, and standard otherwise.
-    Execution approval keeps a light record only while every condition holds
-    and the plan binds that topology and those receipts, and records standard
-    for a scope approved without one. A standard record never turns light.
+    Execution approval refuses a plan whose topology or receipts differ from a
+    light record, so here it keeps the record while every other condition
+    holds, and records standard otherwise or for a scope approved without one.
+    A standard record never turns light.
     """
     value = policy_delivery_path(docs)
     recorded = recorded_delivery_path(body)
@@ -2346,45 +2355,130 @@ def delivery_path_record(docs: Path, root: Path, body: str, step: str,
             f"Delivery path: light. {step} approved the scope with the Item topology"
             f" {state['topology_hash']} and the reused contract receipts {receipt_text(state['receipts'])}.")
     else:
-        reason = "the Delivery left the light path" if recorded is not None else "the light path does not hold"
-        line = (f"Delivery path: standard. {step} recorded that {reason}: "
-                + "; ".join(f"{failure['condition']}: {failure['finding']}" for failure in state["failed"]) + ".")
+        line = standard_path_line(step, recorded is not None, state["failed"])
     return (with_delivery_path_line(body, line),
             {"path": "light" if state["eligible"] else "standard", "failed": state["failed"], "line": line})
 
 
+def light_record_findings(docs: Path, root: Path, body: str, delivery_id: str) -> list[str]:
+    """Refuse a plan other than the one the light path's one owner gate approved.
+
+    Scope approval records the Item topology and the contract receipts that gate
+    approved. Until the Delivery records its fallback, execution approval takes
+    only that plan, since the owner saw no other: a changed one goes to the
+    owner gate of /execution-plan.
+    """
+    recorded = recorded_delivery_path(body)
+    if recorded is None or recorded["path"] != "light":
+        return []
+    items: dict[str, tuple[dict, str]] = {}
+    for item_path in sorted(root.glob("items/*/item.md")):
+        props, item_body = split_note(item_path)
+        items[str(props.get("story_id", ""))] = (props, item_body)
+    failed = []
+    if light_topology_hash(items) != recorded["topology"]:
+        failed.append("topology_unchanged: the Item topology differs from the one scope approval recorded")
+    runtime = any(props.get("runtime_required") is True for props, _body in items.values())
+    receipts: list[dict] | None = []
+    for kind in ("verification", "environment") if runtime else ("verification",):
+        receipt, errors = operation_compile.check_contract(docs, kind)
+        if errors or not receipt.get("current"):
+            # The plan's own checks refuse a contract that is not approved and current.
+            receipts = None
+            break
+        receipts.append({"kind": kind, "revision": receipt["revision"], "source_hash": receipt["source_hash"]})
+    if receipts is not None and receipt_text(receipts) != receipt_text(recorded["receipts"]):
+        failed.append(f"operation_contracts_unchanged: the plan binds {receipt_text(receipts)}, not"
+                      f" {receipt_text(recorded['receipts'])} that scope approval recorded")
+    if not failed:
+        return []
+    return [f"{delivery_id} left the light path after its one owner gate: {'; '.join(failed)}; the owner has"
+            " not seen this plan, so run light-path-check, which records the fallback, and take the plan to"
+            f" the owner gate of /execution-plan {delivery_id}"]
+
+
+def record_delivery_path_line(path: Path, props: dict, body: str, line: str) -> None:
+    """Write the Delivery path line into delivery.md, keeping an approved record's source_hash current."""
+    body = with_delivery_path_line(body, line)
+    if "source_hash" in props:
+        props = {**props, "source_hash": content_hash(props, body)}
+    atomic_text(path, frontmatter(props, body))
+
+
+# The steps the light path's one owner gate authorizes, in their order.
+LIGHT_SEQUENCE = ("approve-scope", "reserve-delivery", "approve-execution", "publish-execution-plan",
+                  "claim-items")
+
+
 def light_path_check(args) -> int:
-    """Repeat the light-path conditions and the plan's approval checks before a light step."""
+    """Repeat the light-path conditions and the plan's approval checks before a light step.
+
+    The first check that fails ends the light path for good. It records the
+    fallback as the Delivery's path line, so a later check or approval that
+    finds every condition met again keeps the standard path. A step of the
+    light sequence that was refused, named with --refused, records it the same way.
+    """
     docs = docs_root(args.docs)
     root = find_delivery(docs, args.delivery)
+    refused = getattr(args, "refused", None)
 
-    def refuse(error: str) -> int:
-        print(json.dumps({"ok": False, "errors": [error]}, indent=2)); return 1
+    def refuse(error: str, fallback: str | None = None) -> int:
+        result = {"ok": False, "errors": [error]}
+        if fallback is not None:
+            result["fallback"] = fallback
+        print(json.dumps(result, indent=2)); return 1
 
     if root is None:
         return refuse("Delivery not found")
-    try:
-        value = delivery_switch_value(docs, args.delivery, DELIVERY_PATH_SWITCH)
-    except ValueError as exc:
-        return refuse(str(exc))
-    if value != LIGHT_WHEN_ELIGIBLE:
-        return refuse(f"{args.delivery} runs switch {DELIVERY_PATH_SWITCH} at {value}; only"
-                      f" {LIGHT_WHEN_ELIGIBLE} plans a Delivery on the light path")
     props, body = split_note(root / "delivery.md")
     status = props.get("status")
     if status not in LIGHT_PATH_STATUSES:
         return refuse(f"{args.delivery} is {status}; the light path ends once its Items are claimed")
     recorded = recorded_delivery_path(body)
     light = recorded if recorded is not None and recorded["path"] == "light" else None
+    on_light_path = recorded is None or light is not None
+
+    def fall_back(failed: list[dict]) -> str:
+        line = standard_path_line("light-path-check", light is not None, failed)
+        record_delivery_path_line(root / "delivery.md", props, body, line)
+        return line
+
+    if refused is not None:
+        # A proposal is on the light path while the policy selects it; an approved scope records its path.
+        proposed = (recorded is None and status == "scope_proposed"
+                    and policy_delivery_path(docs) == LIGHT_WHEN_ELIGIBLE)
+        fallback = fall_back([{"condition": DELIVERY_PATH_SWITCH, "finding": f"{refused} was refused"}]) \
+            if light is not None or proposed else None
+        result = {"ok": False, "delivery": args.delivery, "status": status, "path": "standard",
+                  "recorded": "standard" if fallback is not None or recorded is not None else None}
+        if fallback is not None:
+            result["fallback"] = fallback
+        print(json.dumps(result, indent=2, sort_keys=True)); return 1
+    try:
+        value = delivery_switch_value(docs, args.delivery, DELIVERY_PATH_SWITCH)
+    except ValueError as exc:
+        # A light record whose pinned policy no longer holds ends the light path.
+        return refuse(str(exc), fall_back([{"condition": DELIVERY_PATH_SWITCH, "finding": str(exc)}])
+                      if light is not None else None)
+    if value != LIGHT_WHEN_ELIGIBLE:
+        return refuse(f"{args.delivery} runs switch {DELIVERY_PATH_SWITCH} at {value}; only"
+                      f" {LIGHT_WHEN_ELIGIBLE} plans a Delivery on the light path",
+                      fall_back([{"condition": DELIVERY_PATH_SWITCH,
+                                  "finding": f"the Process Policy sets it to {value}"}])
+                      if light is not None else None)
     with stage_package.candidate_session():
         state = light_path_evaluation(docs, root, light, args.remote)
+        fallback = fall_back(state["failed"]) if on_light_path and not state["eligible"] else None
         _approval, plan_findings = execution_approval_refusals(docs, args.delivery, remote=args.remote,
                                                                statuses=PLAN_GATE_STATUSES)
-    path = "light" if state["eligible"] and (recorded is None or light is not None) else "standard"
+    path = "light" if state["eligible"] and on_light_path else "standard"
     result = {"ok": path == "light" and not plan_findings, "delivery": args.delivery, "status": status,
-              "value": value, "path": path, "recorded": recorded["path"] if recorded else None,
+              "value": value, "path": path,
+              "recorded": "standard" if fallback else recorded["path"] if recorded else None,
               "eligible": state["eligible"], "failed": state["failed"], "receipts": state["receipts"],
               "topology_hash": state["topology_hash"], "plan_findings": plan_findings}
+    if fallback is not None:
+        result["fallback"] = fallback
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["ok"] else 1
 
@@ -3010,6 +3104,8 @@ def main(argv=None) -> int:
     light.add_argument("--delivery", required=True)
     light.add_argument("--remote", default="origin",
                        help="the Git remote whose local remote-tracking refs hold the target branch")
+    light.add_argument("--refused", choices=LIGHT_SEQUENCE,
+                       help="record that this step of the light sequence was refused, which ends the light path")
     light.set_defaults(func=light_path_check)
     bundle_cmd = sub.add_parser("bundle-manifest")
     bundle_cmd.add_argument("--delivery", required=True); bundle_cmd.add_argument("--expected-hash")

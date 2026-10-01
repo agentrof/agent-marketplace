@@ -129,10 +129,14 @@ review manifest and never the whole closure again. Its dependency context is
 the epic, test plan and dependency stories of each changed story, the review
 note that records the findings, and every note the changed text cites or that
 cites it. The step still runs `backlog_compile.py check` after the fix. The
-task's own `--expected-hash` rerun, which every task carries, binds exactly
-those inputs, so the re-review needs no narrower backlog manifest with a
-second freshness contract: rerun the task with its `source_hash` before
-accepting the re-review's result, and a changed input needs a fresh rerun.
+re-review keeps the freshness contract of every task derived without
+`--epic`, as the other steps' re-reviews do: its `source_hash` binds the
+inputs it reads and the vault's whole canonical source inventory, and
+rerunning the task with `--expected-hash <source_hash>` before accepting its
+result refuses it after any change to those sources. So the re-review needs
+no narrower backlog manifest with a second freshness contract, and a change
+outside its inputs, such as another epic's writer finishing its notes, also
+needs a fresh rerun.
 
 Each rerun reader confirms that every finding it was given is closed and
 reviews the changed text; it never re-audits unchanged text. The step's own

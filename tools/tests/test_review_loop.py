@@ -243,7 +243,12 @@ class ReviewLoopReferenceTests(unittest.TestCase):
             "A backlog rerun reader's task takes no `--epic`, so it binds no epic or root review"
             " manifest and never the whole closure again",
             "the epic, test plan and dependency stories of each changed story",
+            "The re-review keeps the freshness contract of every task derived without `--epic`",
+            "its `source_hash` binds the inputs it reads and the vault's whole canonical source"
+            " inventory",
             "the re-review needs no narrower backlog manifest with a second freshness contract",
+            "a change outside its inputs, such as another epic's writer finishing its notes, also"
+            " needs a fresh rerun",
             "it never re-audits unchanged text",
             "at `single_reader` one fresh reviewer of the step's reader role",
             "at `lens_panel` the assignments that returned a blocking finding",
@@ -537,12 +542,17 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                     entry=entry, role=role, mode="review", project=self.root, skills=skills,
                     findings=findings, base=reviewed, inputs=inputs,
                     expected_hash=result["source_hash"])["source_hash"], result["source_hash"])
-                write(self.root, docs + context[0], "---\ntype: note\n---\n\n# Moved\n")
-                with self.assertRaisesRegex(ValueError, "task inputs are stale"):
-                    task_inputs.manifest(entry=entry, role=role, mode="review", project=self.root,
-                                         skills=skills, findings=findings, base=reviewed,
-                                         inputs=inputs, expected_hash=result["source_hash"])
-                git(self.root, "checkout", "--", docs + changed, docs + context[0])
+                # The task's freshness covers the whole canonical source inventory, so a
+                # change outside its inputs stales it as a change inside them does.
+                for moved in (context[0], other):
+                    write(self.root, docs + moved, "---\ntype: note\n---\n\n# Moved\n")
+                    with self.assertRaisesRegex(ValueError, "task inputs are stale"):
+                        task_inputs.manifest(entry=entry, role=role, mode="review",
+                                             project=self.root, skills=skills, findings=findings,
+                                             base=reviewed, inputs=inputs,
+                                             expected_hash=result["source_hash"])
+                    git(self.root, "checkout", "--", docs + moved)
+                git(self.root, "checkout", "--", docs + changed)
 
 
 class PackageCalibrationRecordTests(unittest.TestCase):

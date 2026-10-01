@@ -622,10 +622,23 @@ def entry_classes(entry: dict) -> list[str]:
     return list(classes) if isinstance(classes, list) else [str(entry.get("class"))]
 
 
+def chain(directory: Path, grant: dict) -> list[str]:
+    """The grant's id and the ids of the grants it replaced, newest first."""
+    replaced = {event.get("grant"): event.get("replaces") for event in ledger(directory)
+                if event.get("event") == "granted"}
+    ids, previous = [grant["id"]], grant.get("replaces")
+    while previous and previous not in ids:
+        ids.append(previous)
+        previous = replaced.get(previous)
+    return ids
+
+
 def report_payload(directory: Path, grant: dict) -> dict:
-    entries = [event for event in ledger(directory, grant["id"])
-               if event.get("event") in ("decision", "queued")]
-    return {"grant": grant, "entries": entries,
+    """Every decision and queued question of the grant and the grants it replaced, in time order."""
+    ids = chain(directory, grant)
+    entries = [event for event in ledger(directory)
+               if event.get("grant") in ids and event.get("event") in ("decision", "queued")]
+    return {"grant": grant, "chain": ids, "entries": entries,
             "counts": {"decisions": sum(event["event"] == "decision" for event in entries),
                        "queued": sum(event["event"] == "queued" for event in entries)}}
 
@@ -638,21 +651,30 @@ def report_lines(payload: dict) -> list[str]:
              goal_line(grant.get("goal")),
              "allowed classes: " + (", ".join(grant.get("classes", [])) or "none"),
              f"armed by: {grant.get('armed_by', {}).get('guard')}"]
+    replaced = payload.get("chain", [grant.get("id")])[1:]
+    if replaced:
+        lines.append(f"replaces: {', '.join(replaced)}; their entries are listed too")
     completion = grant.get("completion")
-    if completion:
+    if completion and completion.get("by") == "compiler":
+        goal = grant.get("goal") or {}
+        lines.append(f"completed: {completion.get('compiler')} read {goal.get('kind')}"
+                     f" {goal.get('target')} as {completion.get('goal_state')}"
+                     f" at {completion.get('read_at')}")
+    elif completion:
         lines.append(f"completed by {completion.get('by')}: {completion.get('evidence') or ''}"
                      f" (goal state {completion.get('goal_state')},"
                      f" compiler agreed: {completion.get('compiler_agreed')})")
     for number, entry in enumerate(payload["entries"], 1):
         options = "; ".join(entry.get("options", []))
         classes = ", ".join(entry_classes(entry))
+        owner = f" {entry.get('grant')}" if replaced else ""
         if entry["event"] == "decision":
-            lines.append(f"{number}. {entry['time']} decision [{classes}]"
+            lines.append(f"{number}. {entry['time']}{owner} decision [{classes}]"
                          f" {entry['question']} -> {entry['choice']}")
             lines.append(f"   options: {options or 'none offered'}; reason: {entry['reason']};"
                          f" written to: {entry['target']}")
         else:
-            lines.append(f"{number}. {entry['time']} queued [{classes}]"
+            lines.append(f"{number}. {entry['time']}{owner} queued [{classes}]"
                          f" {entry['question']} -> recommended: {entry['recommendation']}")
             lines.append(f"   options: {options or 'none offered'}"
                          + (f"; blocks: {entry['blocks']}" if entry.get("blocks") else ""))
@@ -952,7 +974,8 @@ def cmd_report(args: argparse.Namespace, now: datetime) -> int:
             raise Refusal(f"no grant {args.grant}")
         grant = {"id": args.grant, "state": "ended", "granted_at": granted[0]["time"],
                  "expires_at": granted[0].get("expires_at"), "goal": granted[0].get("goal"),
-                 "classes": granted[0].get("classes", []), "armed_by": granted[0].get("armed_by", {})}
+                 "classes": granted[0].get("classes", []), "armed_by": granted[0].get("armed_by", {}),
+                 "replaces": granted[0].get("replaces")}
     if grant is None:
         raise Refusal("no grant to report")
     payload = report_payload(directory, grant)

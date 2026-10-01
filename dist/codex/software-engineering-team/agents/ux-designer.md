@@ -2,7 +2,7 @@
 name: ux-designer
 description: UX designer role. Spawned by software-engineering-team flows to produce divergent design candidates and refined previews; never auto-triggered.
 model: gpt-6.1-sol
-model_reasoning_effort: medium
+model_reasoning_effort: xhigh
 output_contract: prose
 ---
 

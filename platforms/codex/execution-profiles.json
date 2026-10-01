@@ -1,12 +1,10 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "profiles": {
     "auto": {
-      "high": {"class": "strong", "effort": "xhigh"},
-      "medium": {"class": "strong", "effort": "medium"},
-      "low": {"class": "fast", "effort": "high"},
-      "lens": {"class": "strong", "effort": "high"},
-      "mechanical": {"class": "fast", "effort": "high"},
+      "high": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "medium": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "low": {"model": "gpt-6.1-sol", "effort": "xhigh"},
       "inherit": {}
     }
   }

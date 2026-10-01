@@ -14,6 +14,11 @@ from unittest import mock
 from tools import build_distributions
 from tools import smoke_plugin_installs as smoke
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import fixtures  # noqa: E402
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -48,11 +53,13 @@ class HostSmokeContracts(unittest.TestCase):
         for host in ("claude", "codex"):
             with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
                 project = Path(temporary) / "project"
-                smoke.init_project(project, os.environ.copy())
+                # Setup checks each pinned model with the host binaries; fakes stand in.
+                environment = fixtures.isolated_hosts(os.environ, Path(temporary) / "isolation")
+                smoke.init_project(project, dict(environment))
                 smoke.exercise_package(
                     ROOT / "dist" / host / smoke.TEAM,
                     project,
-                    os.environ.copy(),
+                    dict(environment),
                 )
     def test_installed_package_smoke_requires_product_and_delivery_entrypoints(self):
         with tempfile.TemporaryDirectory() as temporary:

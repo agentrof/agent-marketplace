@@ -204,6 +204,7 @@ def backlog_contract() -> dict:
         raise RuntimeError(f"backlog policy is missing or invalid: {exc}") from exc
     required = {
         "story_owner_roles", "story_supporting_roles",
+        "optional_story_classifications",
         "required_story_sections", "required_epic_review_sections",
         "required_backlog_review_sections", "experience_ref_types",
         "minor_finding_owner_roles",
@@ -273,14 +274,23 @@ def front_matter(props: dict, body: str) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def canonical(path: Path) -> bytes:
-    props, body = parse_front_matter(path)
+def canonical_text(text: str) -> bytes:
+    props, body = parse_front_matter_text(text)
     body = without_generated_relations(body)
     stable = {key: value for key, value in props.items()
               if key not in APPROVAL_FIELDS}
     payload = json.dumps(stable, sort_keys=True, ensure_ascii=False,
                          separators=(",", ":"))
     return (payload + "\n" + body.strip() + "\n").encode("utf-8")
+
+
+def canonical(path: Path) -> bytes:
+    return canonical_text(path.read_text(encoding="utf-8"))
+
+
+def digest_text(text: str) -> str:
+    """The digest of a note's text, as ``digest`` gives it for the file that holds that text."""
+    return "sha256:" + hashlib.sha256(canonical_text(text)).hexdigest()
 
 
 def digest(path: Path) -> str:
@@ -1470,8 +1480,12 @@ def owner_and_supporting_roles(story: dict) -> int:
     return len(story_roles(story))
 
 
-def architecture_role(story: dict) -> int:
-    return int("software_architect" in story_roles(story))
+def architecture_role_and_operation_impact(story: dict) -> int:
+    """An expected architecture delta, software_architect among the roles, plus
+    an expected Operation contract revision, operation_impact: required. A
+    story without that optional classification counts no Operation delta."""
+    return (int("software_architect" in story_roles(story))
+            + int(story["props"].get("operation_impact") == "required"))
 
 
 # Every derivation a story size measure may name; tools/validate.py reads
@@ -1480,7 +1494,7 @@ STORY_SIZE_DERIVATIONS = {
     "acceptance_checklist_lines": acceptance_checklist_lines,
     "plan_scenario_blocks": plan_scenario_blocks,
     "owner_and_supporting_roles": owner_and_supporting_roles,
-    "architecture_role": architecture_role,
+    "architecture_role_and_operation_impact": architecture_role_and_operation_impact,
 }
 
 
@@ -1719,6 +1733,28 @@ def status_findings(props: dict, type_name: str, path: str,
     status_tags = [tag for tag in tags if tag.startswith("status/")]
     if status_tags != [status_tag_name(status)]:
         errors.append(f"{path} status tag does not mirror status: {status}")
+    return errors
+
+
+def story_classification_findings(props: dict, path: str, contract: dict) -> list[str]:
+    """Validate the optional impact classifications a story declares.
+
+    A story with neither a classification nor its reason is unknown for it and
+    checks as before; a reason alone is a half-written classification. One it
+    declares takes a declared value and a concrete reason.
+    """
+    errors = []
+    for key, spec in sorted(contract["optional_story_classifications"].items()):
+        if key not in props:
+            if spec["reason"] in props:
+                errors.append(f"{path} {spec['reason']} needs {key}")
+            continue
+        value, reason = props[key], props.get(spec["reason"])
+        if value not in spec["values"]:
+            errors.append(f"{path} {key} must be {' or '.join(spec['values'])},"
+                          f" not {value or '(missing)'}")
+        if not isinstance(reason, str) or not meaningful_text(reason):
+            errors.append(f"{path} {key} needs a concrete {spec['reason']}")
     return errors
 
 
@@ -2187,6 +2223,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
             for role in supporters:
                 if role not in allowed_supporters:
                     errors.append(f"{story_rel} has invalid supporting_role: {role}")
+            errors.extend(story_classification_findings(story_props, story_rel, contract))
             responsibilities = section(story_body, "Implementation Responsibilities")
             if normalized_text(RESPONSIBILITY_STUB) in normalized_text(
                     responsibilities):

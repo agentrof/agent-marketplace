@@ -202,6 +202,24 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(receipt['status'], 'complete')
         self.assertEqual(sum(len(report['tests']) for report in receipt['reports']), 2)
 
+    @unittest.skipIf(os.name != 'posix', 'the stand-in host binary is a POSIX shell script')
+    def test_a_worker_test_that_reaches_a_host_binary_through_the_environment_fails(self):
+        # The session that runs the gate names its own Claude Code binary.
+        own = Path(tempfile.mkdtemp(prefix='local-own-host-'))
+        self.addCleanup(shutil.rmtree, own, True)
+        (own / 'claude').write_text(f'#!/bin/sh\necho "$@" >> {own / "calls.log"}\nexit 0\n')
+        (own / 'claude').chmod(0o755)
+        self.test_path.write_text('import os, subprocess, unittest\nclass Example(unittest.TestCase):\n'
+            '    def test_one(self):\n'
+            '        subprocess.run([os.environ["CLAUDE_CODE_EXECPATH"], "--version"], capture_output=True)\n'
+            '    def test_two(self): pass\n')
+        self.git('add', '--all')
+        with mock.patch.dict(os.environ, {'CLAUDE_CODE_EXECPATH': str(own / 'claude')}), \
+                self.assertRaisesRegex(ci_tests.CIError, 'local test workers failed'):
+            self.run_check()
+        self.assertEqual(ci_tests.read_json(self.root / ci_local.CACHE_PATH / 'latest.json')['status'], 'failed')
+        self.assertFalse((own / 'calls.log').exists())
+
     def test_worker_temp_parent_rejects_candidate_and_other_git_ancestry(self):
         inside = self.root / '.agentrof/tmp'
         inside.mkdir(parents=True)

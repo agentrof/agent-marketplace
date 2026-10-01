@@ -20,6 +20,17 @@ duplicate, failed, cancelled or mismatched results fail validation. Explicit
 platform skips remain visible; mandatory native Windows regressions cannot
 skip.
 
+A worker, in CI or local validation, runs its tests with tripwire `claude`
+and `codex` binaries in place of the host binaries a session names:
+`CLAUDE_CODE_EXECPATH`, `CODEX_CLI_PATH`, `CODEX_VERSION` and `CODEX_HOME`
+point at them and `CLAUDE_PID` is removed. A project generator or
+`host_models.py` that a test runs with the runner's own environment therefore
+reaches a tripwire, never the developer's Claude Code or Codex, its MCP
+servers or its account's model cache. A tripwire records the call and fails;
+the worker fails the test during which it ran, or the shard when a class or
+module fixture ran it after the last test. A test pins fakes of its own with
+`fixtures.isolated_hosts`. `make check` runs unittest without the tripwires.
+
 The small macOS minimum-version suite uses one worker. That worker first
 executes the seven Apple system-Python launcher cases with the original system
 environment, before installing the policy-selected Python. The validated plan

@@ -47,8 +47,12 @@ def discard(temporary: Path) -> None:
 
 
 def replace_bytes(path: Path, data: bytes,
-                  before_replace: Callable[[], None] | None = None) -> None:
-    """Write data beside path, then replace path with it in one step."""
+                  before_replace: Callable[[], None] | None = None, *, mode: int | None = None) -> None:
+    """Write data beside path, then replace path with it in one step.
+
+    The file lands with *mode* when one is given, such as 0600 for a secret,
+    else with the mode replacement_mode names.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(raw)
@@ -57,7 +61,7 @@ def replace_bytes(path: Path, data: bytes,
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(temporary, replacement_mode(path))
+        os.chmod(temporary, replacement_mode(path) if mode is None else mode)
         if before_replace is not None:
             before_replace()
         os.replace(temporary, path)

@@ -44,7 +44,7 @@ class BacklogCompilerTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
 
     def test_implements_findings_require_one_typed_link_to_the_current_requirement(self):
-        link = "[[requirements/req-002-tiered-verification-gates|REQ-002]]"
+        link = "[[requirements/req-002-report-export|REQ-002]]"
         self.assertEqual(backlog_compile.implements_findings({"implements": [link]}, "s", "REQ-002"), [])
         self.assertIn("quoted vault-absolute wikilink",
                       backlog_compile.implements_findings({"implements": ["REQ-002"]}, "s", "REQ-002")[0])
@@ -69,23 +69,23 @@ class BacklogCompilerTests(unittest.TestCase):
                 "planning_mode": "requirement", "requirement_ref": "REQ-002", "revision": 7,
             }, "# Product Backlog\n"), encoding="utf-8")
             args = SimpleNamespace(
-                docs=docs, epic="platform", slug="gate", id="ST-104", title="Gate",
+                docs=docs, epic="platform", slug="export", id="ST-004", title="Export",
                 scope="Scope.", work_kind="technical", criterion_ref=[], experience_ref=[],
                 evidence_ref=[], uses_design=[], constrained_by=[], implements=[],
             )
             with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
                 self.assertEqual(backlog_compile.stub_story(args), 2)
-            self.assertFalse((docs / "backlog" / "epics" / "platform" / "stories" / "gate" / "story.md").exists())
-            (docs / "requirements" / "req-002-tiered-verification-gates.md").write_text(
+            self.assertFalse((docs / "backlog" / "epics" / "platform" / "stories" / "export" / "story.md").exists())
+            (docs / "requirements" / "req-002-report-export.md").write_text(
                 backlog_compile.front_matter({
-                    "type": "requirement", "id": "REQ-002", "title": "Tiered verification gates",
+                    "type": "requirement", "id": "REQ-002", "title": "Report export",
                     "status": "approved", "aliases": ["REQ-002"],
-                }, "# Tiered verification gates\n"), encoding="utf-8")
+                }, "# Report export\n"), encoding="utf-8")
             with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
                 self.assertEqual(backlog_compile.stub_story(args), 0)
             props, _body = backlog_compile.parse_front_matter(
-                docs / "backlog" / "epics" / "platform" / "stories" / "gate" / "story.md")
-            self.assertEqual(props["implements"], ["[[requirements/req-002-tiered-verification-gates|REQ-002]]"])
+                docs / "backlog" / "epics" / "platform" / "stories" / "export" / "story.md")
+            self.assertEqual(props["implements"], ["[[requirements/req-002-report-export|REQ-002]]"])
             self.assertEqual(backlog_compile.implements_findings(props, "story.md", "REQ-002"), [])
 
     def test_stub_story_passes_the_per_write_vault_check(self):
@@ -314,6 +314,67 @@ class BacklogCompilerTests(unittest.TestCase):
                 code = backlog_compile.main(["check", "--docs", str(docs), "--json"])
             self.assertEqual(code, 0)
             self.assertNotIn("advisories", json.loads(output.getvalue()))
+
+    def test_the_vault_policy_declares_operation_impact_as_an_optional_story_classification(self):
+        policy = json.loads(backlog_compile.POLICY_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(policy["backlog_contract"]["optional_story_classifications"], {
+            "operation_impact": {"values": ["required", "not_applicable"],
+                                 "reason": "operation_reason"}})
+        for key in ("operation_impact", "operation_reason"):
+            with self.subTest(key=key):
+                self.assertEqual(policy["property_types"][key], "text")
+                self.assertIn(key, policy["lazy_fragments"]["backlog"])
+
+    def test_an_operation_impact_classification_is_checked_only_when_present(self):
+        import vault_check
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            make_approved_backlog(docs)
+            rel = "backlog/epics/delivery-fixture/stories/auth-01/story.md"
+            story = docs / rel
+            original = story.read_bytes()
+
+            def check(**fields) -> tuple[int, dict]:
+                story.write_bytes(original)
+                if fields:
+                    props, body = backlog_compile.parse_front_matter(story)
+                    story.write_text(backlog_compile.front_matter({**props, **fields}, body),
+                                     encoding="utf-8")
+                output = StringIO()
+                with redirect_stdout(output):
+                    code = backlog_compile.main(["check", "--docs", str(docs), "--json"])
+                return code, json.loads(output.getvalue())
+
+            def vault_findings() -> list[str]:
+                vault = vault_check.build_vault(
+                    docs, vault_check.load_policy(vault_check.DEFAULT_POLICY))
+                return sorted(finding.message
+                              for finding in vault_check.changed_findings(vault, [rel])[rel])
+
+            # A story without the classification is unknown for it and checks as released.
+            released = check()
+            self.assertEqual((released[0], released[1]["errors"]), (0, []))
+            unclassified = vault_findings()
+            reason = "Delivering the story needs a queue service the Environment Contract lacks."
+            for value in ("required", "not_applicable"):
+                with self.subTest(value=value):
+                    self.assertEqual(check(operation_impact=value, operation_reason=reason), released)
+                    # The vault's closed property schema takes both properties.
+                    self.assertEqual(vault_findings(), unclassified)
+            for fields, error in (
+                ({"operation_impact": "maybe", "operation_reason": reason},
+                 f"{rel} operation_impact must be required or not_applicable, not maybe"),
+                ({"operation_impact": "required"},
+                 f"{rel} operation_impact needs a concrete operation_reason"),
+                ({"operation_impact": "not_applicable", "operation_reason": "TBD"},
+                 f"{rel} operation_impact needs a concrete operation_reason"),
+                # A reason alone is a half-written classification, not an unknown one.
+                ({"operation_reason": reason},
+                 f"{rel} operation_reason needs operation_impact"),
+            ):
+                with self.subTest(fields=fields):
+                    code, result = check(**fields)
+                    self.assertEqual((code, result["ok"], result["errors"]), (1, False, [error]))
 
     def test_changes_requested_status_tag_uses_kebab_case(self):
         props = {
@@ -912,7 +973,7 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
                       "reason, revisit_trigger", self.errors())
 
     def test_code_spans_in_review_citations_are_not_links(self):
-        code = "`pages/api/v1/health-checks/[[...resource]].ts`"
+        code = "`pages/api/v1/items/[[...resource]].ts`"
         props, body = backlog_compile.parse_front_matter(self.root_review)
         evidence = next(line for line in body.splitlines() if line.startswith("Evidence ["))
         self.root_review.write_text(backlog_compile.front_matter(

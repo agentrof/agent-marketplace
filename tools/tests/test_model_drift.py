@@ -1,4 +1,4 @@
-"""Model drift check: pinned classes against a host's own model catalog.
+"""Model drift check: pinned models against a host's own model catalog.
 
 Every host catalog here is a local fixture in the shape the host publishes;
 no test reaches the network or GitHub.
@@ -79,11 +79,24 @@ class ModelDriftTests(unittest.TestCase):
         return json.loads(build_distributions.model_catalog_path(self.root, host).read_text(
             encoding="utf-8"))
 
-    def pin(self, host: str, name: str, **fields) -> None:
+    def pin(self, host: str, model: str, **fields) -> None:
+        """Update the catalog entry of ``model``."""
         catalog = self.catalog(host)
-        catalog["classes"][name].update(fields)
+        catalog["models"][model].update(fields)
         build_distributions.model_catalog_path(self.root, host).write_text(
             json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
+
+    def repin(self, host: str, model: str, to: str, **fields) -> None:
+        """Pin ``to`` in place of ``model``: its catalog entry and every tier on it."""
+        catalog = self.catalog(host)
+        catalog["models"] = {
+            (to if name == model else name): ({**entry, **fields} if name == model else entry)
+            for name, entry in catalog["models"].items()}
+        build_distributions.model_catalog_path(self.root, host).write_text(
+            json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
+        path = build_distributions.execution_profile_path(self.root, host)
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            f'"model": "{model}"', f'"model": "{to}"'), encoding="utf-8")
 
     def write(self, name: str, value) -> Path:
         path = self.base / name
@@ -126,22 +139,21 @@ class ModelDriftTests(unittest.TestCase):
 
     def pin_scenario(self) -> None:
         """Pins that the fixture host catalogs overtake, whatever ships today."""
-        self.pin("codex", "strong", id="gpt-6-sol", verified="2026-09-20",
-                 efforts=["low", "medium", "high", "xhigh", "max", "ultra"])
-        self.pin("codex", "fast", id="gpt-6-luna",
-                 efforts=["low", "medium", "high", "xhigh", "max"])
-        self.pin("claude", "frontier", id="claude-opus-5-5", efforts=list(CLAUDE_LEVELS))
-        self.pin("claude", "strong", id="claude-sonnet-5-5", efforts=list(CLAUDE_LEVELS))
-        self.pin("claude", "fast", id="claude-haiku-4-5-20251001", efforts=[])
+        self.repin("codex", "gpt-6.1-sol", "gpt-6-sol", verified="2026-09-20",
+                   efforts=["low", "medium", "high", "xhigh", "max", "ultra"])
+        self.pin("codex", "gpt-6-luna", efforts=["low", "medium", "high", "xhigh", "max"])
+        self.pin("claude", "claude-opus-5-5", efforts=list(CLAUDE_LEVELS))
+        self.pin("claude", "claude-sonnet-5-5", efforts=list(CLAUDE_LEVELS))
+        self.pin("claude", "claude-haiku-4-5-20251001", efforts=[])
 
     def listed_pins(self, host: str) -> Path:
         """A host catalog that lists exactly the pinned models and efforts."""
-        classes = self.catalog(host)["classes"].values()
+        models = self.catalog(host)["models"].items()
         if host == "codex":
             return self.write("codex-pins.json", codex_catalog(
-                *((entry["id"], entry["efforts"], "list") for entry in classes)))
+                *((model, entry["efforts"], "list") for model, entry in models)))
         return self.write("claude-pins.json", models_api(
-            *((entry["id"], entry["efforts"]) for entry in classes)))
+            *((model, entry["efforts"]) for model, entry in models)))
 
     def test_a_newer_model_of_a_pinned_family_is_drift(self):
         self.pin_scenario()
@@ -154,21 +166,22 @@ class ModelDriftTests(unittest.TestCase):
         self.assertEqual(codex["catalog"]["cli_version"], "0.159.1")
         # Hidden entries and slugs without a family are not listed models.
         self.assertEqual(codex["catalog"]["models"], 4)
-        strong = codex["classes"]["strong"]
-        self.assertEqual(strong["family"], "sol")
+        strong = codex["models"]["gpt-6-sol"]
+        self.assertEqual((strong["family"], strong["pinned"]), ("sol", "gpt-6-sol"))
         self.assertTrue(strong["listed"])
         self.assertEqual(strong["newer"], [{
             "id": "gpt-6.1-sol",
             "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         }])
-        self.assertEqual(strong["tiers"], ["high", "medium", "lens"])
+        # Every tier runs Sol on Codex, the variants' low tier included.
+        self.assertEqual(strong["tiers"], ["high", "medium", "low"])
         self.assertIn("code-reviewer", strong["roles"])
         self.assertIn("backlog-reviewer-lens", strong["roles"])
-        self.assertNotIn("product-owner-mechanical", strong["roles"])
+        self.assertIn("product-owner-mechanical", strong["roles"])
         self.assertNotIn("efforts", strong)
-        fast = codex["classes"]["fast"]
+        fast = codex["models"]["gpt-6-luna"]
         self.assertEqual((fast["newer"], fast["listed"], fast["drift"]), ([], True, False))
-        self.assertEqual(fast["tiers"], ["low", "mechanical"])
+        self.assertEqual((fast["tiers"], fast["roles"]), ([], []))
 
     def test_a_pinned_model_the_host_no_longer_lists_is_drift(self):
         self.pin_scenario()
@@ -176,22 +189,21 @@ class ModelDriftTests(unittest.TestCase):
         self.assertEqual(code, model_drift.EXIT_DRIFT)
         claude = report["hosts"]["claude"]
         self.assertEqual(claude["catalog"]["format"], "anthropic_models")
-        frontier = claude["classes"]["frontier"]
+        frontier = claude["models"]["claude-opus-5-5"]
         self.assertEqual(frontier["newer"], [{"id": "claude-opus-5-6", "efforts": list(CLAUDE_LEVELS)}])
-        fast = claude["classes"]["fast"]
+        fast = claude["models"]["claude-haiku-4-5-20251001"]
         self.assertEqual((fast["listed"], fast["newer"], fast["drift"]), (False, [], True))
         self.assertEqual(fast["roles"], [])
         # An older Sonnet beside the pinned one is no drift.
-        self.assertFalse(claude["classes"]["strong"]["drift"])
+        self.assertFalse(claude["models"]["claude-sonnet-5-5"]["drift"])
 
     def test_changed_effort_support_is_drift(self):
-        self.pin("codex", "strong", id="gpt-6.1-sol",
-                 efforts=["low", "medium", "high", "xhigh", "max", "ultra"])
+        self.pin("codex", "gpt-6.1-sol", efforts=["low", "medium", "high", "xhigh", "max", "ultra"])
         code, report = self.report(
             "--catalog", f"codex={self.codex_host(['low', 'medium', 'high', 'max', 'ultra'])}",
             *CODEX_CLI)
         self.assertEqual(code, model_drift.EXIT_DRIFT)
-        strong = report["hosts"]["codex"]["classes"]["strong"]
+        strong = report["hosts"]["codex"]["models"]["gpt-6.1-sol"]
         self.assertEqual(strong["newer"], [])
         self.assertEqual(strong["efforts"], {
             "pinned": ["low", "medium", "high", "xhigh", "max", "ultra"],
@@ -200,12 +212,12 @@ class ModelDriftTests(unittest.TestCase):
         self.assertTrue(strong["drift"])
 
     def test_host_catalogs_that_list_the_pins_report_no_drift(self):
-        pins = {host: self.catalog(host)["classes"] for host in build_distributions.HOSTS}
+        pins = {host: self.catalog(host)["models"] for host in build_distributions.HOSTS}
         codex = self.write("codex.json", codex_catalog(
-            *((entry["id"], entry["efforts"], "list") for entry in pins["codex"].values()),
+            *((model, entry["efforts"], "list") for model, entry in pins["codex"].items()),
             ("gpt-5.6-sol", ["low"], "list"),
         ))
-        ids = [entry["id"] for entry in pins["claude"].values()]
+        ids = list(pins["claude"])
         claude = self.write("overview.md", "\n".join((
             "| Claude API ID | " + " | ".join(f"`{model_id}`" for model_id in ids) + " |",
             "| Amazon Bedrock ID | " + " | ".join(f"`anthropic.{model_id}`" for model_id in ids) + " |",
@@ -222,15 +234,16 @@ class ModelDriftTests(unittest.TestCase):
         self.assertIsNone(report["hosts"]["claude"]["catalog"]["cli_version"])
         self.assertEqual(report["hosts"]["claude"]["catalog"]["models"], len(set(ids)) + 2)
         for host, data in report["hosts"].items():
-            for name, item in data["classes"].items():
-                with self.subTest(host=host, name=name):
+            self.assertEqual(set(data["models"]), set(pins[host]))
+            for model, item in data["models"].items():
+                with self.subTest(host=host, model=model):
                     self.assertEqual((item["listed"], item["newer"], item["drift"]),
                                      (True, [], False))
-                    self.assertEqual(item["pinned"], pins[host][name]["id"])
+                    self.assertEqual(item["pinned"], model)
         code, out, err = self.run_drift("--catalog", f"codex={codex}",
                                         "--catalog", f"claude={claude}", "--issue-body", *CODEX_CLI)
         self.assertEqual((code, out), (model_drift.EXIT_CLEAN, ""))
-        self.assertEqual(err, "model-drift: every pinned class matches its host catalog\n")
+        self.assertEqual(err, "model-drift: every pinned model matches its host catalog\n")
 
     def test_an_omitted_host_fails_the_run_unless_a_subset_is_asked(self):
         # A run without a registered host's catalog never reads as "every pin is current".
@@ -242,11 +255,11 @@ class ModelDriftTests(unittest.TestCase):
         code, out, err = self.run_drift(*codex, "--issue-body")
         self.assertEqual((code, out), (model_drift.EXIT_UNCHECKED, ""))
         self.assertIn("not checked: claude", err)
-        self.assertNotIn("every pinned class matches its host catalog", err)
+        self.assertNotIn("every pinned model matches its host catalog", err)
         code, out, err = self.run_drift(*codex, "--issue-body", "--subset")
         self.assertEqual((code, out), (model_drift.EXIT_CLEAN, ""))
         self.assertIn("model-drift: not checked: claude\n", err)
-        self.assertIn("every pinned class of codex matches its host catalog", err)
+        self.assertIn("every pinned model of codex matches its host catalog", err)
         code, report = self.report(*codex, "--subset")
         self.assertEqual((code, report["unchecked"]), (model_drift.EXIT_CLEAN, ["claude"]))
         # Drift still wins, and the issue names the host it did not compare.
@@ -280,7 +293,7 @@ class ModelDriftTests(unittest.TestCase):
                 code, out, err = self.run_drift(*args)
                 self.assertEqual((code, out), (model_drift.EXIT_INVALID, ""))
                 self.assertIn(message, err)
-        self.pin("codex", "strong", id="gpt-6.1-sol-2026-09-01")
+        self.repin("codex", "gpt-6.1-sol", "gpt-6.1-sol-2026-09-01")
         code, _out, err = self.run_drift("--catalog", f"codex={codex}", *CODEX_CLI)
         self.assertEqual(code, model_drift.EXIT_INVALID)
         self.assertIn("is not a pinned model ID", err)
@@ -311,8 +324,9 @@ class ModelDriftTests(unittest.TestCase):
         code, report = self.report(*codex, "--cli-version", "codex=codex-cli 0.160.0", "--subset")
         self.assertEqual(report["hosts"]["codex"]["catalog"]["cli_version"], "0.160.0")
         # The floor follows the newest release a pinned source names.
-        sources = self.catalog("codex")["classes"]["fast"]["sources"]
-        self.pin("codex", "fast", sources=[*sources, sources[1].replace("0.159.1", "0.161.0")])
+        sources = self.catalog("codex")["models"]["gpt-6-luna"]["sources"]
+        self.pin("codex", "gpt-6-luna",
+                 sources=[*sources, sources[1].replace("0.159.1", "0.161.0")])
         code, out, err = self.run_drift(*codex, "--cli-version", "codex=0.160.0")
         self.assertEqual(code, model_drift.EXIT_INVALID)
         self.assertIn("older than 0.161.0", err)
@@ -326,18 +340,25 @@ class ModelDriftTests(unittest.TestCase):
         self.assertEqual(code, model_drift.EXIT_DRIFT, err)
         lines = out.splitlines()
         self.assertTrue(lines[0].startswith("# Model catalog drift: "))
-        for finding in ("claude frontier claude-opus-5-5 to claude-opus-5-6",
-                        "claude fast claude-haiku-4-5-20251001 not listed",
-                        "codex strong gpt-6-sol to gpt-6.1-sol"):
+        for finding in ("claude claude-opus-5-5 to claude-opus-5-6",
+                        "claude claude-haiku-4-5-20251001 not listed",
+                        "codex gpt-6-sol to gpt-6.1-sol"):
             self.assertIn(finding, lines[0])
         self.assertIn("no newer `haiku` model is listed. The owner decides", out)
-        self.assertIn('-      "id": "gpt-6-sol",', lines)
-        self.assertIn('+      "id": "gpt-6.1-sol",', lines)
+        # The catalog renames the pinned entry and every tier that names it follows.
+        self.assertIn('-    "gpt-6-sol": {', lines)
+        self.assertIn('+    "gpt-6.1-sol": {', lines)
         self.assertIn(f'+      "verified": "{TODAY}"', lines)
-        self.assertIn('+      "id": "claude-opus-5-6",', lines)
-        # The candidate lists no xhigh, so the high tier must change with it.
-        self.assertIn("- Tier `high` runs effort `xhigh`, which `gpt-6.1-sol` does not list",
-                      out)
+        self.assertIn('+    "claude-opus-5-6": {', lines)
+        self.assertIn('--- a/platforms/codex/execution-profiles.json', lines)
+        self.assertIn('+      "high": {"model": "gpt-6.1-sol", "effort": "xhigh"},', lines)
+        self.assertIn('+      "high": {"model": "claude-opus-5-6", "effort": "xhigh"},', lines)
+        # The candidate lists no `xhigh`, so every Codex tier, all at `xhigh`,
+        # must change with it.
+        for tier in ("high", "medium", "low"):
+            self.assertIn(f"- Tier `{tier}` runs effort `xhigh`, which `gpt-6.1-sol` does not"
+                          " list", out)
+        self.assertNotIn("runs effort `high`", out)
         self.assertIn(f"`{model_drift.AB_REFERENCE}`", out)
         self.assertIn("## Measurement", (ROOT / model_drift.AB_REFERENCE).read_text(
             encoding="utf-8"))
@@ -345,40 +366,49 @@ class ModelDriftTests(unittest.TestCase):
         self.assertIn("--execution-profile inherit`, then start the session", out)
         for row in ("| codex | high | | `gpt-6-sol` | | | |",
                     "| codex | high | | `gpt-6.1-sol` | | | |",
-                    "| codex | lens | | `gpt-6.1-sol` | | | |",
+                    "| codex | low | | `gpt-6.1-sol` | | | |",
                     "| claude | high | | `claude-opus-5-6` | | | |"):
             self.assertIn(row, lines)
         self.assertNotIn("| claude | low |", out)
         self.assertIn("Quality decides", out)
         self.assertIn("Flow B of `docs/maintainer-operations-protocol.md`", out)
         self.assertIn("at `minor` for `software-engineering-team`", out)
-        # A new model can need a newer host CLI than the class records.
+        # A new model can need a newer host CLI than the pin records.
         self.assertIn("its `min_cli_version`", out)
         self.assertIn("`tools/data/host-cli-versions.json`", out)
         self.assertNotIn(str(self.base), out)
 
         report = model_drift.drift_report(self.root, {"codex": codex}, {"codex": "0.159.1"})
-        classes = report["hosts"]["codex"]["classes"]
+        models = report["hosts"]["codex"]["models"]
         path = build_distributions.model_catalog_path(self.root, "codex")
         old, new = reconstruct(model_drift.catalog_diff(
-            self.root, "codex", classes, TODAY, context=10 ** 6))
+            self.root, "codex", models, TODAY, context=10 ** 6))
         self.assertEqual(old, path.read_text(encoding="utf-8"))
-        expected = self.catalog("codex")
-        expected["classes"]["strong"].update(
-            id="gpt-6.1-sol", efforts=["low", "medium", "high", "max", "ultra"], verified=TODAY)
+        expected = {"schema_version": self.catalog("codex")["schema_version"], "models": {
+            ("gpt-6.1-sol" if model == "gpt-6-sol" else model): (
+                {**entry, "efforts": ["low", "medium", "high", "max", "ultra"],
+                 "verified": TODAY} if model == "gpt-6-sol" else entry)
+            for model, entry in self.catalog("codex")["models"].items()}}
         self.assertEqual(json.loads(new), expected)
+        self.assertEqual(list(json.loads(new)["models"]), list(expected["models"]))
+        profile = build_distributions.execution_profile_path(self.root, "codex")
+        old, new = reconstruct(model_drift.profile_diff(self.root, "codex", models,
+                                                        context=10 ** 6))
+        self.assertEqual(old, profile.read_text(encoding="utf-8"))
+        self.assertEqual(new, old.replace('"model": "gpt-6-sol"', '"model": "gpt-6.1-sol"'))
 
     def test_a_missing_model_without_successor_proposes_no_bump(self):
-        self.pin("claude", "fast", id="claude-haiku-4-5-20251001", efforts=[])
+        haiku = "claude-haiku-4-5-20251001"
+        self.pin("claude", haiku, efforts=[])
         host = self.write("claude.json", models_api(
-            *((entry["id"], entry["efforts"])
-              for name, entry in self.catalog("claude")["classes"].items() if name != "fast")))
+            *((model, entry["efforts"])
+              for model, entry in self.catalog("claude")["models"].items() if model != haiku)))
         code, out, _err = self.run_drift("--catalog", f"claude={host}", "--issue-body",
                                          "--date", TODAY)
         self.assertEqual(code, model_drift.EXIT_DRIFT)
         self.assertNotIn("```diff", out)
         self.assertIn("the owner's decision above comes before any pull request", out)
-        self.assertIn("No class moves to another model, so no A/B is due.", out)
+        self.assertIn("No pin moves to another model, so no A/B is due.", out)
 
     def test_the_command_line_entry_runs(self):
         result = subprocess.run(

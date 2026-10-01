@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Report host models that are newer than the pinned model classes.
+"""Report host models that are newer than the pinned models.
 
-Each host pins its model classes in ``platforms/<host>/model-catalog.json``.
-This tool compares those pins with a copy of the host's own model catalog
-and prints a JSON report: pinned IDs the host no longer lists, newer models
-of each pinned family and changed effort support. ``--issue-body`` renders
-the upstream issue instead: the catalog bump diff and the frozen-task A/B
-that decides it. The tool reads local files only and never calls the
-network or GitHub.
+Each host pins its models by exact ID in ``platforms/<host>/model-catalog.json``,
+and each tier of its ``execution-profiles.json`` names one of them. This tool
+compares those pins with a copy of the host's own model catalog and prints a
+JSON report: pinned IDs the host no longer lists, newer models of each pinned
+family and changed effort support. ``--issue-body`` renders the upstream issue
+instead: the catalog and profile bump diff and the frozen-task A/B that
+decides it. The tool reads local files only and never calls the network or
+GitHub.
 
 Host catalogs it reads, detected by shape:
 
@@ -136,26 +137,27 @@ def roles_by_tier(root: Path) -> dict[str, list[str]]:
     return {tier: sorted(names) for tier, names in roles.items()}
 
 
-def class_report(
-    entry: dict, tiers: list[str], roles: list[str],
+def model_report(
+    model_id: str, entry: dict, tiers: list[str], roles: list[str],
     listed: dict[str, list[str] | None], adapter,
 ) -> dict:
-    family, version = adapter.module.model_version(entry["id"])
+    family, version = adapter.module.model_version(model_id)
     newer = []
-    for model_id, efforts in listed.items():
-        parsed = adapter.module.model_version(model_id)
+    for candidate, efforts in listed.items():
+        parsed = adapter.module.model_version(candidate)
         if parsed is not None and parsed[0] == family and parsed[1] > version:
-            newer.append((parsed[1], model_id, efforts))
+            newer.append((parsed[1], candidate, efforts))
     newer.sort(key=lambda item: (item[0], item[1]), reverse=True)
     report = {
         "family": family,
-        "pinned": entry["id"],
-        "listed": entry["id"] in listed,
-        "newer": [{"id": model_id, "efforts": efforts} for _version, model_id, efforts in newer],
+        "pinned": model_id,
+        "listed": model_id in listed,
+        "newer": [{"id": candidate, "efforts": efforts}
+                  for _version, candidate, efforts in newer],
         "tiers": tiers,
         "roles": roles,
     }
-    listed_efforts = listed.get(entry["id"])
+    listed_efforts = listed.get(model_id)
     if listed_efforts is not None and set(listed_efforts) != set(entry["efforts"]):
         report["efforts"] = {"pinned": entry["efforts"], "listed": listed_efforts}
     report["drift"] = bool(newer) or not report["listed"] or "efforts" in report
@@ -183,7 +185,7 @@ def capture_cli(host: str, catalog: dict, adapter, version: str | None) -> str |
             " bundled with its CLI, so the report records the CLI that printed it"
         )
     named = [
-        match["version"] for entry in catalog["classes"].values()
+        match["version"] for entry in catalog["models"].values()
         for match in map(pattern.fullmatch, entry["sources"]) if match
     ]
     floor = max(named, key=build_distributions.cli_version, default=None)
@@ -199,7 +201,7 @@ def capture_cli(host: str, catalog: dict, adapter, version: str | None) -> str |
 def drift_report(
     root: Path, catalogs: dict[str, Path], cli_versions: dict[str, str] | None = None,
 ) -> dict:
-    """Compare each named host's pinned classes with its listed models."""
+    """Compare each named host's pinned models with its listed models."""
     adapters = build_distributions.load_adapters(root)
     cli_versions = cli_versions or {}
     unknown = sorted((set(catalogs) | set(cli_versions)) - set(adapters))
@@ -218,20 +220,20 @@ def drift_report(
         cli = capture_cli(host, catalog, adapter, cli_versions.get(host))
         form, listed = listed_models(catalogs[host], adapter)
         auto = table["profiles"][build_distributions.AUTO_EXECUTION_PROFILE]
-        classes = {}
-        for name, entry in catalog["classes"].items():
-            tiers = [tier for tier, setting in auto.items() if setting.get("class") == name]
+        models = {}
+        for model_id, entry in catalog["models"].items():
+            tiers = [tier for tier, setting in auto.items() if setting.get("model") == model_id]
             roles = sorted({role for tier in tiers for role in tier_roles.get(tier, [])})
-            classes[name] = class_report(entry, tiers, roles, listed, adapter)
+            models[model_id] = model_report(model_id, entry, tiers, roles, listed, adapter)
         hosts[host] = {
             "catalog": {"path": str(catalogs[host]), "format": form, "models": len(listed),
                         "cli_version": cli},
-            "classes": classes,
+            "models": models,
         }
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "drift": any(
-            report["drift"] for host in hosts.values() for report in host["classes"].values()
+            report["drift"] for host in hosts.values() for report in host["models"].values()
         ),
         "hosts": hosts,
         "unchecked": sorted(set(adapters) - set(catalogs)),
@@ -242,28 +244,37 @@ def catalog_text(catalog: dict) -> str:
     return json.dumps(catalog, indent=2) + "\n"
 
 
-def bumped_catalog(catalog: dict, classes: dict, today: str) -> dict:
-    """Return the catalog with each drifting class moved to its newest model."""
-    bumped = json.loads(json.dumps(catalog))
-    for name, report in classes.items():
-        entry = bumped["classes"][name]
-        if report["newer"]:
+def renames(models: dict) -> dict[str, str]:
+    """Each drifting pin that moves to a newer model, with that model's ID."""
+    return {model_id: report["newer"][0]["id"]
+            for model_id, report in models.items() if report["drift"] and report["newer"]}
+
+
+def bumped_catalog(catalog: dict, models: dict, today: str) -> dict:
+    """Return the catalog with each drifting pin moved to its newest model.
+
+    A moved entry takes the new ID as its key, in its own place.
+    """
+    bumped = {}
+    for model_id, entry in catalog["models"].items():
+        report = models.get(model_id, {})
+        entry = dict(entry)
+        if report.get("newer"):
             candidate = report["newer"][0]
-            entry["id"] = candidate["id"]
             if candidate["efforts"] is not None:
                 entry["efforts"] = candidate["efforts"]
+            model_id = candidate["id"]
         elif "efforts" in report:
             entry["efforts"] = report["efforts"]["listed"]
         else:
+            bumped[model_id] = entry
             continue
         entry["verified"] = today
-    return bumped
+        bumped[model_id] = entry
+    return {**catalog, "models": bumped}
 
 
-def catalog_diff(root: Path, host: str, classes: dict, today: str, context: int = 3) -> str:
-    path = build_distributions.model_catalog_path(root, host)
-    current = path.read_text(encoding="utf-8")
-    proposed = catalog_text(bumped_catalog(json.loads(current), classes, today))
+def unified(root: Path, path: Path, current: str, proposed: str, context: int) -> str:
     relative = path.relative_to(root).as_posix()
     return "".join(difflib.unified_diff(
         current.splitlines(keepends=True), proposed.splitlines(keepends=True),
@@ -271,40 +282,57 @@ def catalog_diff(root: Path, host: str, classes: dict, today: str, context: int 
     ))
 
 
+def catalog_diff(root: Path, host: str, models: dict, today: str, context: int = 3) -> str:
+    path = build_distributions.model_catalog_path(root, host)
+    current = path.read_text(encoding="utf-8")
+    proposed = catalog_text(bumped_catalog(json.loads(current), models, today))
+    return unified(root, path, current, proposed, context)
+
+
+def profile_diff(root: Path, host: str, models: dict, context: int = 3) -> str:
+    """The execution profile change that points every tier on a moved pin at its
+    new ID, in the table's own layout."""
+    path = build_distributions.execution_profile_path(root, host)
+    current = path.read_text(encoding="utf-8")
+    proposed = current
+    for old, new in renames(models).items():
+        proposed = proposed.replace(f'"model": {json.dumps(old)}', f'"model": {json.dumps(new)}')
+    return unified(root, path, current, proposed, context)
+
+
 def listing(values: list[str]) -> str:
     return ", ".join(f"`{value}`" for value in values) or "none"
 
 
-def finding_title(host: str, name: str, report: dict) -> str:
+def finding_title(host: str, report: dict) -> str:
     if report["newer"]:
-        return f"{host} {name} {report['pinned']} to {report['newer'][0]['id']}"
+        return f"{host} {report['pinned']} to {report['newer'][0]['id']}"
     if not report["listed"]:
-        return f"{host} {name} {report['pinned']} not listed"
-    return f"{host} {name} {report['pinned']} efforts changed"
+        return f"{host} {report['pinned']} not listed"
+    return f"{host} {report['pinned']} efforts changed"
 
 
-def finding_text(host: str, name: str, report: dict) -> str:
+def finding_text(host: str, report: dict) -> str:
     pinned = f"`{report['pinned']}`"
     if report["newer"]:
-        text = (f"{host}: class `{name}` pins {pinned}; the host catalog lists the newer"
+        text = (f"{host}: the catalog pins {pinned}; the host catalog lists the newer"
                 f" {listing([model['id'] for model in report['newer']])} in family"
                 f" `{report['family']}`.")
     elif not report["listed"]:
-        text = (f"{host}: class `{name}` pins {pinned}, which the host catalog no longer"
+        text = (f"{host}: the catalog pins {pinned}, which the host catalog no longer"
                 f" lists, and no newer `{report['family']}` model is listed. The owner"
-                " decides whether the class moves to another family or its tiers move"
-                " to another class.")
+                " decides whether its tiers move to another model.")
     else:
-        text = f"{host}: class `{name}` pins {pinned}."
+        text = f"{host}: the catalog pins {pinned}."
     if "efforts" in report:
         text += (f" The host catalog lists the efforts {listing(report['efforts']['listed'])}"
                  f" for {pinned}; the pinned catalog records"
                  f" {listing(report['efforts']['pinned'])}.")
-    return (f"- {text} Tiers on the class: {listing(report['tiers'])}. Roles on them:"
+    return (f"- {text} Tiers on it: {listing(report['tiers'])}. Roles on them:"
             f" {listing(report['roles'])}.")
 
 
-def effort_warnings(table: dict, name: str, report: dict) -> list[str]:
+def effort_warnings(table: dict, report: dict) -> list[str]:
     """Name each tier whose effort the bumped model does not list."""
     if report["newer"]:
         model_id, efforts = report["newer"][0]["id"], report["newer"][0]["efforts"]
@@ -327,13 +355,13 @@ def issue_body(root: Path, report: dict, today: str) -> str:
     """Render the upstream issue that proposes the catalog bump."""
     adapters = build_distributions.load_adapters(root)
     drifting = [
-        (host, name, class_report_)
+        (host, item)
         for host, data in report["hosts"].items()
-        for name, class_report_ in data["classes"].items() if class_report_["drift"]
+        for item in data["models"].values() if item["drift"]
     ]
-    title = "; ".join(finding_title(host, name, item) for host, name, item in drifting)
+    title = "; ".join(finding_title(host, item) for host, item in drifting)
     lines = [f"# Model catalog drift: {title}", "", "## What changed", ""]
-    lines += [finding_text(host, name, item) for host, name, item in drifting]
+    lines += [finding_text(host, item) for host, item in drifting]
     lines += ["", "## Evidence", "",
               "| Host | Host catalog | Format | Models | CLI |",
               "| --- | --- | --- | --- | --- |"]
@@ -345,36 +373,38 @@ def issue_body(root: Path, report: dict, today: str) -> str:
         lines += ["", f"Not checked in this run: {', '.join(report['unchecked'])}."]
     lines += ["", "## Catalog change", ""]
     changed = False
-    for host in sorted({host for host, _name, _item in drifting}):
-        classes = report["hosts"][host]["classes"]
-        diff = catalog_diff(root, host, classes, today)
+    for host in sorted({host for host, _item in drifting}):
+        models = report["hosts"][host]["models"]
+        diff = catalog_diff(root, host, models, today) + profile_diff(root, host, models)
         if diff:
             changed = True
             lines += ["```diff", diff.rstrip("\n"), "```", ""]
         _catalog, table = build_distributions.load_model_tables(root, adapters[host])
-        for name, item in classes.items():
+        for item in models.values():
             if item["drift"]:
-                lines += effort_warnings(table, name, item)
+                lines += effort_warnings(table, item)
     if lines[-1]:
         lines.append("")
     lines += [(
         "The pull request confirms each new ID, its efforts and its `min_cli_version`, the"
         " oldest host CLI that runs it, on the model's official pages, sets `sources` to"
-        " them, raises `tools/data/host-cli-versions.json` to any newer minimum,"
+        " them, points every tier on the old ID at the new one in"
+        " `execution-profiles.json`, raises `tools/data/host-cli-versions.json` to any"
+        " newer minimum,"
         " regenerates `dist/` with `python3 tools/build_distributions.py` and adds a"
         " `.changes/<name>.json` at `minor` for `software-engineering-team`, because"
         " default role models change."
     ) if changed else (
-        "No drifting class has a newer model to move to, so the owner's decision above"
+        "No drifting pin has a newer model to move to, so the owner's decision above"
         " comes before any pull request."
     ), "", "## Frozen-task A/B", ""]
-    candidates = [(host, item) for host, _name, item in drifting if item["newer"]]
+    candidates = [(host, item) for host, item in drifting if item["newer"]]
     if not candidates:
-        lines.append("No class moves to another model, so no A/B is due.")
+        lines.append("No pin moves to another model, so no A/B is due.")
     else:
         lines += [
             "The pull request carries this comparison of the pinned and the candidate"
-            " model for every tier on a moving class. It follows the Measurement section"
+            " model for every tier on a moving pin. It follows the Measurement section"
             f" of `{AB_REFERENCE}` with the two models as the only candidates:",
             "",
             "1. Freeze at least one task per tier from Git history. For a writer tier"
@@ -502,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             output = ""
             checked = f" of {', '.join(report['hosts'])}" if unchecked else ""
-            print(f"model-drift: every pinned class{checked} matches its host catalog",
+            print(f"model-drift: every pinned model{checked} matches its host catalog",
                   file=sys.stderr)
     except ValueError as exc:
         print(f"model-drift: {exc}", file=sys.stderr)

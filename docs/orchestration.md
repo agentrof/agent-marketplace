@@ -30,9 +30,10 @@ the step's own loop and a re-review reruns the whole panel, and at
 findings were fixed or disproved, plus one changed-text check. A panel
 replaces the step's single reviewer and never stacks on top of it: the
 Solution primary reviewer existed only to stop two full panels from stacking
-(#293). Delivery code review and QA, and the Experience attestation, keep one
+(#293). Delivery code review, QA and the Experience attestation keep one
 reader per role because their machine interfaces accept one result per role;
-they join through a later merge step.
+only under process switch `code_review_panel` does Delivery code review add a
+panel beside its reader, whose merge step registers that one result.
 
 The writer side of those backlog, Solution Design and Operation contract
 reviews runs as process switch `mechanical_pass_tier` selects. `role_tier`,
@@ -76,6 +77,25 @@ Verification Contract and the QA Engineer for the Environment Contract, never
 by that contract's writer. The instructions live in the `challenge-review` and
 `code-review` references `switch-review_loop-blocking_delta.md`.
 
+Process switch `code_review_panel` decides who reads a Delivery Item's frozen
+candidate in code review. At `single_reader`, the default, the official code
+reviewer alone does. At `beside_official`, one fresh `code-reviewer-lens` per
+lens assignment of `code-review/data/code-review-panel.json` reads the same
+candidate and inputs in parallel with the official reviewer, which reviews as
+before, and every reader registers its result through
+`delivery_verification.py panel-result`. One fresh code reviewer on its own
+tier then calibrates every critical or major panel claim, confirming it,
+lowering it to minor, ruling it invalid or ruling it a duplicate of a finding
+that already carries the defect, and at `review_loop` `blocking_delta` the
+official claims too. `merge-panel` registers the one code review result the
+machine interface accepts: the official findings and the validated panel
+findings, each with its source, and a panel record of every lens claim with
+its ruling and of the combined step's wall clock against the official
+reviewer's, which `approve-item-evidence` keeps for every pass in the Item's
+code review record.
+`code-review/references/switch-code_review_panel-beside_official.md` defines
+the steps.
+
 What a backlog epic reviewer reads is process switch `review_manifest_scope`.
 At `transitive`, the default, every note the epic's manifest includes expands
 its own links, so the read set follows the vault. At `bounded`, links are
@@ -102,6 +122,18 @@ alone commits, once, before the candidate freeze.
 `execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md`
 and `deliver/references/switch-implementation_schedule-parallel_lanes_v1.md`
 define the lanes.
+
+What an Item's candidate has passed when Code Review and QA start is process
+switch `pre_handoff_regression`. At `off`, the default, the implementation
+hands it over after its own Item's tests. At `touched_suites`, the coordinator
+first runs the automated suites of the earlier stories whose integrated Items
+in merged Deliveries claim a path the change touches, with the Item's own Test
+Plan targets, through the approved diagnostic adapter or else the full approved
+test command, under the Item's environment lock, and repairs every failure
+before the freeze, which refuses until that run passed on the exact candidate.
+QA's first gate run reports every failing group where the approved command
+allows it. `deliver/references/switch-pre_handoff_regression-touched_suites.md`
+defines the run.
 
 Backlog planning measures story size as process switch `story_size_budget`
 selects. At `off`, the default, nothing is measured or shown. At
@@ -168,8 +200,9 @@ its approved documents before the next stage begins. The backlog compiler is
 the only machine that derives backlog indexes. All durable changes are
 ordinary Git changes in the project workspace.
 
-Host adapters preserve semantics: Claude uses namespaced agents and
-`AskUserQuestion`; Codex uses project-local agents and `request_user_input`.
+Host adapters preserve semantics: Claude uses project-local agents, else the
+plugin's namespaced ones, and `AskUserQuestion`; Codex uses project-local
+agents and `request_user_input`.
 Neither host requires another plugin.
 
 `task_inputs.py` derives the delegated task's full read list, conditional
@@ -217,7 +250,10 @@ reads the Requirement as incorporated into the approved backlog,
 `resolved_no_change`, `superseded` or `withdrawn`, and `text` only through
 `complete`, `off` or its cap. The session's own judgement never ends a
 readable goal; `complete` ends any grant and records whether the compiler
-agreed.
+agreed. A goal whose state its compiler cannot read, such as a Delivery whose
+merge state Git cannot decide or whose Review record cannot be read, is never
+terminal: `on` refuses it, and `check` and `status` show it as unknown with
+the reason instead of the tracked status.
 
 Only the user arms a grant. Each host's user-prompt hook records the `on`
 command the user typed as a short-lived arming record; `on` refuses without

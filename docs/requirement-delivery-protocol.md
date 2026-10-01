@@ -233,8 +233,9 @@ them to another value, one with every switch at its default included, agrees
 with the pin. A `scope_approved` Delivery reads every switch a Delivery flow
 owns. An `execution_approved` one runs only its `delivery-execution` flow
 until a plan revision, whose approval pins the policy anew, so it reads only
-the switches that flow owns: `execution_planning`, `implementation_schedule`,
-`owner_gates` and `review_loop`. A switch no Delivery flow owns, such as
+the switches that flow owns: `code_review_panel`, `execution_planning`,
+`implementation_schedule`, `owner_gates`, `pre_handoff_regression` and
+`review_loop`. A switch no Delivery flow owns, such as
 `mechanical_pass_tier`, is no part of the pin: inside a Delivery it is read
 from the current policy. While a new execution approval can still re-pin the
 Delivery, that is while it is `scope_approved` or `execution_approved`, a
@@ -364,12 +365,13 @@ reports under `delivery_path` whether the selection is eligible and names each
 failed condition, and `delivery_compile.py light-path-check --delivery DLV-###`
 repeats the check on the Delivery's records before each light step, with the
 findings execution approval would refuse. The compiler finds a Delivery
-eligible only when it selects one Story without a `software_architect` role,
-whose Item declares no architecture impact with the Software Architect's own
-reason, that reuses the approved current Operation contracts with no revision
-open, whose dependencies a merged Delivery records integrated, and that stays
-within the limits the owner set in switch `story_size_budget`; with no limit
-set no Story is eligible. An eligible Delivery gets a topology-only pass inside
+eligible only when it selects one Story without a `software_architect` role or
+an `operation_impact: required` classification, whose Item declares no
+architecture impact with the Software Architect's own reason, that reuses the
+approved current Operation contracts with no revision open, whose dependencies
+a merged Delivery records integrated, and that stays within the limits the
+owner set in switch `story_size_budget`; with no limit set no Story is
+eligible. An eligible Delivery gets a topology-only pass inside
 `/delivery-plan` and one owner gate for the scope, the Item topology and the
 reused contract receipts. Then `approve-scope`, `reserve-delivery`,
 `approve-execution`, `publish-execution-plan` and `claim-items` run in that
@@ -467,6 +469,48 @@ Item tip, which the refusal lists; takeover then refuses with
 `DELIVERY_LOCAL_REF_DIVERGED`, since dropping such a commit is a separate,
 explicit choice. A schedule change follows normal execution revision, approval
 and publication.
+
+Process switch `pre_handoff_regression` decides what an Item's candidate has
+passed when its readers start. At `off`, the default, the implementation
+proves its own Item's tests and hands the candidate over. At `touched_suites`,
+`delivery_verification.py regression-selection` derives the earlier stories
+whose Items are `integrated` in a Delivery the candidate holds as merged and
+claim a path the candidate changes against its integration base, and writes
+the automation targets of their Test Plans and of the Item's own as
+`affected_test_ids` in the diagnostic adapter's schema. An earlier story's
+Test Plan is the newest revision that an integrated Item the candidate holds
+records as its `test_plan_source_hash`, read from the candidate's Git history
+when the candidate's own Test Plan has changed since. `regression-run` runs
+that selection through the approved `diagnostic_test_command`, or the full
+approved test command without one, in a private checkout of the candidate
+commit under the Item's environment lock, and records the run against the
+candidate's tree; a command that changes the selection it receives, or the
+one QA's diagnostic reads, leaves the run not intact. The run holds that
+environment lock to its end, so meanwhile `regression-selection`, `freeze` and
+every other command on the Item environment refuse with
+`DELIVERY_ENVIRONMENT_BUSY` and name it. It holds the Item's verification
+command lock only while it derives the selection and clones the candidate, and
+only then does a guarded write to the Item worktree refuse and name the run; a
+commit made while its command runs is a new candidate, which the run, bound to
+the tree it cloned, does not cover. `freeze` then refuses
+with `DELIVERY_PRE_HANDOFF_MISSING` until the latest such run on the exact
+candidate, with the selection and command derived for it, passed intact, and
+the frozen session keeps that run and its wall clock, with every run of the
+Item so far as `pre_handoff_history`, which `approve-item-evidence` records
+run by run in the Item's verification record. A merge state Git cannot
+decide, a Delivery, Item or Delivery Review record that cannot be read, or an
+integrated Test Plan revision neither the candidate nor its history holds
+refuses the selection instead of dropping a suite. QA's final `run --kind test`
+on the frozen candidate then takes the earlier stories' targets from the
+accepted run instead of running them a second time, when that run passed
+intact on the frozen tree with the selection, the approved command and the
+declared environment of QA's run and is as fresh as final evidence must be;
+`run --fresh` reuses nothing. It names them in `AGENTROF_REUSED_TESTS` for
+the approved test command to skip, keeps the Item's own Test Plan targets and
+every earlier target that prefixes or lies under one for QA, records the reuse
+in the run's identity, and evidence approval checks it as recorded and writes
+it into the Item's verification record; when a binding differs, every suite
+runs.
 
 Process switch `execution_planning` decides how the facts a plan needs are
 written and reviewed. At `per_document`, the default, each Operation contract
@@ -659,9 +703,14 @@ altering their bytes or hashes. Parallel Code Review and QA bind one committed
 candidate and its exact plan, source and instruction identities. Both readers
 must settle or confirm cancellation before the owner can write. The compiler
 requires independent final results, including source-bound raw command evidence;
-diagnostic QA can return findings but cannot approve. A changed candidate or
-contract invalidates the result. A schedule change follows normal execution
-revision, approval and publication. The evidence child described below does
+diagnostic QA can return findings but cannot approve. Run evidence binds the
+variables that can change a command's result, `PATH`, `HOME`, `LANG`, `LC_*`,
+`TZ`, `AGENTROF_*` and the Verification Contract's `command_variables`, never
+the shell that recorded it, by a hash of their values keyed with a key that
+never leaves the Item's verification runtime, and approval checks each
+recorded identity without comparing it with its own environment. A changed
+candidate or contract invalidates the result. A schedule change follows normal
+execution revision, approval and publication. The evidence child described below does
 not itself create a new product candidate or require another verification run.
 The subsequent Item push accepts only a committed change after the active
 remote Item, refuses Delivery control-file changes except the current required
@@ -752,18 +801,35 @@ example on the Integration branch itself or after a fast-forward or squash,
 the Delivery keeps its tracked status and is still checked against its current
 approved sources. A merged Delivery keeps its pinned historical sources, as a
 cancelled one does. Only a Delivery whose Review records its PR is derived;
-any other keeps its tracked status without a Git query. When Git cannot
-evaluate the proof, in a shallow clone, outside a Git checkout or after a
-failed Git query, `check` and `status` fail with that finding instead of
+one in `review` whose Review record is missing or has no `pull_request_url`
+recorded no PR yet and keeps its tracked status without a Git query. When Git
+cannot evaluate the proof, in a shallow clone, outside a Git checkout or after
+a failed Git query, `check` and `status` fail with that finding instead of
 reporting the tracked status as the answer, so a CI job that checks a
-Delivery needs the full history.
+Delivery needs the full history. A Review record that exists but cannot be
+read, for example after an editor wrote a byte order mark, fails them the
+same way and names the record, since only that record says whether the PR
+was recorded. So does a Delivery in `awaiting_merge` whose Review record is
+missing or has no `pull_request_url`: the commit that records the PR URL in
+the Review is the one that sets `awaiting_merge`, so that record is broken,
+not one that recorded no PR. Every reader of the derived status takes such a
+finding as an unknown merge state: the pre-handoff selection refuses, an
+autopilot goal on the Delivery reads as unknown and `on` refuses it, and the
+story size budget measures only the stories the backlog revision changes.
 
 A merged Delivery is closed. Every coordinator verb that would change its refs
 first decides as the compiler does: when the published Review records the PR,
 it asks the same proof of the freshly fetched target tip and refuses with
 `DELIVERY_POST_MERGE_TRANSITION` once the target holds it; a history that
-cannot answer refuses too. Once the merge dropped the Integration ref, the
-proof alone decides. `open-pr` still reports the recorded PR,
+cannot answer refuses too. The published Review is the one at the Integration
+tip, which a host that lacks that commit fetches first. An Integration without
+a Review, or whose Review has no `pull_request_url`, recorded no PR yet and
+passes, unless the published Delivery is in `awaiting_merge`, which only the
+PR record sets. There a missing Review or one without the URL refuses with
+`DELIVERY_COORDINATION_CORRUPT` naming the record, as does a Review that
+cannot be read, which cannot say whether the PR was recorded; the compiler
+reports such a merge state as unknown. Once the merge dropped the Integration
+ref, the proof alone decides. `open-pr` still reports the recorded PR,
 `merge-pr` still verifies the merge, both reading the PR record from the
 target history when the ref is gone, and the release of a plan revision or
 upgrade barrier still runs, because the project Fence must not stay barred.

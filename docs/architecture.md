@@ -53,7 +53,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     `story_size_budget` at `propose_split` compares measures the compiler
     derives from a story and its Test Plan with owner-set limits from the
     Process Policy; it adds no story field, never fails a check and never
-    rewrites a criterion.
+    rewrites a criterion. A story may classify its Operation impact as
+    `operation_impact: required|not_applicable` with an `operation_reason`;
+    like a Requirement impact matrix row it classifies impact and carries no
+    estimate, and a story without it is unknown for it.
 14. Backlog approval checks structural coverage, exact relation sets and
     review approval. A review requests changes only for an open critical or
     major finding; an accepted minor finding is recorded in the review note's
@@ -87,8 +90,7 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
 19. Every host is discovered through `platforms/<host>/adapter.json` and its
     adapter module. Host-specific path names, manifests, permissions, hooks,
     the pinned model catalog and the per-tier model and effort profiles,
-    including the `lens` and `mechanical` tiers that only generated agent
-    variants use, and runtime behavior remain in that platform directory;
+    and runtime behavior remain in that platform directory;
     central tooling
     only orchestrates registry discovery, canonical copying, provenance, and
     owned generated-tree replacement.
@@ -99,6 +101,11 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     datastore choices belong to accepted Solution decisions, commands belong
     to Operation Contracts, and the hard Delivery concurrency guard belongs to
     approved Delivery Governance under `workspace/docs/delivery/governance/`.
+    Beside the languages it holds only the overrides `tier_models` and
+    `role_tiers`: a tier's model and effort per host, within what the
+    package's tier map lets that tier take, and a role's tier on every host.
+    Setup writes neither, and the package catalog and profiles stay the
+    defaults.
 22. Outside an explicitly closed artifact contract, `artifacts/` beneath a
     policy-valid vault folder holds opaque, local files. Generic artifact
    content is neither a vault note nor workflow executable behavior; symlinks
@@ -179,9 +186,13 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     replaces a step's single reviewer and never stacks on top of it, and it
     keeps the step's review loop, which process switch `review_loop` sets. The
     read-only document reviewers keep their own tier, and every build ships
-    their generated `-lens` variants on the `lens` tier for panel readers.
+    their generated `-lens` variants on the `low` tier for panel readers.
     Review steps whose machine interface accepts one result per role keep one
-    reader until a merge step exists.
+    reader, except Delivery code review under process switch
+    `code_review_panel` at `beside_official`: a panel of the code reviewer's
+    `-lens` variant reads beside the official code reviewer, a fresh
+    calibration reader on the code reviewer's own tier rules each panel claim,
+    and a merge step registers the one result.
 30. Every new process behaviour ships behind a process switch declared in
     `configure/data/process-switches.json` whose default is the behaviour it
     changes. With every switch at its default, every compiler and coordinator
@@ -194,8 +205,9 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     all-default runs prove it. Two exceptions stand outside this rule: the
     model and effort lines of rendered agents follow each host's model
     catalog and execution profile, not default
-    equivalence, so a catalog change reaches every role under any policy;
-    and a user-armed session entry such as autopilot ships without a switch,
+    equivalence, so a catalog change reaches every role under any policy,
+    and a role whose pinned model cannot run falls back to the session's
+    model with a warning; and a user-armed session entry such as autopilot ships without a switch,
     because without an active grant its hooks exit silently, no task binds
     it and every output stays byte-identical. A non-default value's
     instructions live in switch references that `task_inputs.py` binds only

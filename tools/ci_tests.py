@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import fnmatch
 import hashlib
 import importlib
@@ -11,6 +12,7 @@ import json
 import math
 import os
 import platform
+import shlex
 import signal
 import subprocess
 import sys
@@ -26,6 +28,101 @@ SUCCESS_OUTCOMES = {"success", "skipped", "expected_failure"}
 
 class CIError(ValueError):
     pass
+
+
+# A project generator or host_models.py finds Claude Code and Codex through
+# the environment, which a session that runs the suite points at its own
+# binaries; a test pins fakes of its own (fixtures.isolated_hosts). The
+# runner points the environment at these tripwires instead, and a test during
+# which one ran fails. Each prints a version, so the search stops there.
+TRIPWIRE_CODEX_VERSION = "0.0.0-tripwire"
+TRIPWIRE_HOSTS = {"claude": ("CLAUDE_CODE_EXECPATH", "0.0.0 (Claude Code)"),
+                  "codex": ("CODEX_CLI_PATH", f"codex-cli {TRIPWIRE_CODEX_VERSION}")}
+TRIPWIRE_PROGRAM = """import json, sys
+host, args = sys.argv[1], sys.argv[2:]
+with open(LOG, "a", encoding="utf-8") as log:
+    log.write(json.dumps([host, *args]) + "\\n")
+if args == ["--version"]:
+    print(VERSIONS[host])
+    sys.exit(0)
+sys.exit(1)
+"""
+
+
+class HostTripwire:
+    """Tripwire `claude` and `codex` binaries, and the host calls they record."""
+
+    def __init__(self, directory):
+        directory = Path(directory)
+        self.log = directory / "calls.jsonl"
+        program = directory / "tripwire.py"
+        versions = {host: version for host, (_name, version) in TRIPWIRE_HOSTS.items()}
+        program.write_text(f"LOG = {str(self.log)!r}\nVERSIONS = {versions!r}\n" + TRIPWIRE_PROGRAM,
+                           encoding="utf-8")
+        (directory / "codex-home").mkdir()
+        self.environment = {"CODEX_VERSION": TRIPWIRE_CODEX_VERSION,
+                            "CODEX_HOME": str(directory / "codex-home")}
+        for host, (name, _version) in TRIPWIRE_HOSTS.items():
+            if os.name == "nt":
+                path = directory / f"{host}.cmd"
+                path.write_text(f'@"{sys.executable}" "{program}" {host} %*\n', encoding="utf-8")
+            else:
+                path = directory / host
+                path.write_text(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} "
+                                f"{shlex.quote(str(program))} {host} \"$@\"\n", encoding="utf-8")
+                path.chmod(0o755)
+            self.environment[name] = str(path)
+        self.seen = 0
+
+    def calls(self):
+        try:
+            lines = self.log.read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            return []
+        return [" ".join(json.loads(line)) for line in lines if line.strip()]
+
+    def reached(self):
+        """The host calls recorded since the last look."""
+        calls = self.calls()
+        new, self.seen = calls[self.seen:], len(calls)
+        return new
+
+
+@contextlib.contextmanager
+def host_tripwire():
+    """Point this process's environment at tripwire host binaries, then restore it."""
+    with tempfile.TemporaryDirectory(prefix="agentrof-host-tripwire-") as directory:
+        tripwire = HostTripwire(directory)
+        saved = {name: os.environ.get(name) for name in (*tripwire.environment, "CLAUDE_PID")}
+        os.environ.pop("CLAUDE_PID", None)
+        os.environ.update(tripwire.environment)
+        try:
+            yield tripwire
+        finally:
+            for name, value in saved.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+
+def host_calls_text(calls):
+    return ("reached a host binary through the runner's environment instead of a fake it pins"
+            " (fixtures.isolated_hosts): " + "; ".join(calls))
+
+
+def run_guarded(load, report, report_path):
+    """Load and run a suite with tripwire host binaries in the environment.
+
+    Return the result and the host calls that no test was running for, which
+    a class or module fixture made after the last test.
+    """
+    with host_tripwire() as tripwire:
+        suite = load()
+        result = unittest.TextTestRunner(verbosity=2, resultclass=lambda *args, **kwargs:
+            TimedResult(*args, report=report, report_path=report_path, tripwire=tripwire,
+                        **kwargs)).run(suite)
+        return result, tripwire.reached()
 
 
 def digest(value):
@@ -433,6 +530,7 @@ class TimedResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs):
         self.report = kwargs.pop("report")
         self.report_path = kwargs.pop("report_path")
+        self.tripwire = kwargs.pop("tripwire", None)
         super().__init__(*args, **kwargs)
         self.starts = {}
         self.outcomes = {}
@@ -447,6 +545,13 @@ class TimedResult(unittest.TextTestResult):
         super().startTest(test)
 
     def stopTest(self, test):
+        # Calls from a class or module setup count for the test that follows it.
+        reached = self.tripwire.reached() if self.tripwire is not None else []
+        if reached:
+            try:
+                raise AssertionError("the test " + host_calls_text(reached))
+            except AssertionError:
+                self.addFailure(test, sys.exc_info())
         row = {"id": test.id(), "outcome": self.outcomes[test.id()],
                "seconds": round(time.monotonic() - self.starts[test.id()], 6)}
         phases = fixture_totals()
@@ -511,13 +616,15 @@ def run_shard(root, plan, lane_name, shard, report_path):
     started = time.monotonic()
     try:
         ids, _hash = inventory(root)
-        suite = load_selected(root, expected, ids)
-        result = unittest.TextTestRunner(verbosity=2, resultclass=lambda *args, **kwargs:
-            TimedResult(*args, report=report, report_path=report_path, **kwargs)).run(suite)
+        result, unattributed = run_guarded(lambda: load_selected(root, expected, ids),
+                                           report, report_path)
         complete = sorted(test["id"] for test in report["tests"]) == sorted(expected)
         required_ran = all(test["outcome"] == "success" for test in report["tests"]
                            if test["id"] in lane.get("must_run_ids", []))
-        report["status"] = "complete" if result.wasSuccessful() and complete and required_ran else "failed"
+        report["status"] = "complete" if result.wasSuccessful() and complete and required_ran \
+            and not unattributed else "failed"
+        if unattributed:
+            report["error"] = "a class or module fixture " + host_calls_text(unattributed)
         if not required_ran:
             report["error"] = "mandatory native regression was skipped or did not pass"
         if not complete:

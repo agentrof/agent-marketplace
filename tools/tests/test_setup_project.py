@@ -763,8 +763,8 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             runtime = project / ".agentrof" / "agent-marketplace" / ".runtime"
             for relative in ("tools/grype-db/6/vulnerability.db",
-                             "verification/mutation/connection-api/mutants.sqlite",
-                             "verification/mutation/connection-api/baseline.sqlite3"):
+                             "verification/mutation/api/mutants.sqlite",
+                             "verification/mutation/api/baseline.sqlite3"):
                 disposable = runtime / relative
                 disposable.parent.mkdir(parents=True, exist_ok=True)
                 disposable.write_bytes(b"disposable tool output")

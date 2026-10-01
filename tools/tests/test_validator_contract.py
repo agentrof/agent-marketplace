@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 TESTS = Path(__file__).resolve().parent
@@ -16,6 +18,7 @@ sys.path.insert(0, str(TESTS.parent))
 
 import fixtures  # noqa: E402
 import validate  # noqa: E402
+from git_fixture import init_repository  # noqa: E402
 
 
 class ValidatorContractTests(unittest.TestCase):
@@ -130,6 +133,44 @@ class ValidatorContractTests(unittest.TestCase):
                 for finding in findings
             ))
 
+    def test_optional_story_classifications_declare_values_and_text_properties(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            path = (
+                root / "plugins/software-engineering-team/skill-content/"
+                "obsidian-vault/data/vault-policy.json"
+            )
+            original = path.read_text(encoding="utf-8")
+
+            def messages(mutate) -> list[str]:
+                policy = json.loads(original)
+                mutate(policy)
+                path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
+                found: list = []
+                validate.CHECKS["vault_policy_shape"](validate.build_tree(root), found)
+                return [finding.message for finding in found]
+
+            def impact(policy: dict) -> dict:
+                return policy["backlog_contract"]["optional_story_classifications"]["operation_impact"]
+
+            self.assertEqual(messages(lambda policy: None), [])
+            shape = ("optional story classification 'operation_impact' must declare distinct"
+                     " snake_case values and a reason property other than itself")
+            for case, (mutate, message) in enumerate((
+                (lambda policy: impact(policy).update(values=[]), shape),
+                (lambda policy: impact(policy).update(values=["required", "required"]), shape),
+                (lambda policy: impact(policy).update(reason="operation_impact"), shape),
+                (lambda policy: impact(policy).pop("reason"), shape),
+                (lambda policy: impact(policy).update(reason="operation_rationale"),
+                 "optional story classification 'operation_impact' names property"
+                 " 'operation_rationale', which property_types does not type 'text'"),
+                (lambda policy: policy["property_types"].update(operation_impact="multitext"),
+                 "optional story classification 'operation_impact' names property"
+                 " 'operation_impact', which property_types does not type 'text'"),
+            )):
+                with self.subTest(case=case):
+                    self.assertIn(message, messages(mutate))
+
     def test_delivery_contract_set_and_merge_policy_are_validated(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
@@ -157,23 +198,27 @@ class ValidatorContractTests(unittest.TestCase):
     def test_execution_profile_tables_are_validated(self):
         for relative, mutate in (
                 ("platforms/claude/execution-profiles.json",
-                 lambda value: value["profiles"]["auto"]["high"].update({"class": "ghost"})),
+                 lambda value: value["profiles"]["auto"]["high"].update(model="claude-ghost-5-5")),
                 ("platforms/claude/execution-profiles.json",
-                 lambda value: value["profiles"]["auto"]["high"].update(model="claude-opus-5-5")),
+                 lambda value: value["profiles"]["auto"]["high"].update({"class": "frontier"})),
+                # Haiku 4.5 takes no effort; no tier runs it by default.
                 ("platforms/claude/execution-profiles.json",
-                 lambda value: value["profiles"]["auto"]["low"].update(effort="high")),
+                 lambda value: value["profiles"]["auto"]["low"].update(
+                     model="claude-haiku-4-5-20251001", effort="high")),
                 ("platforms/codex/execution-profiles.json",
                  lambda value: value["profiles"]["auto"]["inherit"].update(effort="low")),
                 ("platforms/codex/execution-profiles.json",
                  lambda value: value["profiles"].update(fast={})),
                 ("platforms/claude/model-catalog.json",
-                 lambda value: value["classes"]["frontier"].update(id="opus")),
+                 lambda value: value["models"].update(
+                     opus=value["models"].pop("claude-haiku-4-5-20251001"))),
                 ("platforms/codex/model-catalog.json",
-                 lambda value: value["classes"]["fast"].update(efforts=["low", "ultra", "turbo"])),
+                 lambda value: value["models"]["gpt-6-luna"].update(
+                     efforts=["low", "ultra", "turbo"])),
                 ("platforms/codex/model-catalog.json",
-                 lambda value: value["classes"]["fast"].update(min_cli_version="0.157")),
+                 lambda value: value["models"]["gpt-6-luna"].update(min_cli_version="0.157")),
                 ("platforms/claude/model-catalog.json",
-                 lambda value: value["classes"]["strong"].pop("min_cli_version")),
+                 lambda value: value["models"]["claude-sonnet-5-5"].pop("min_cli_version")),
                 ("tools/data/models.json",
                  lambda value: value["reasoning_levels"].append("extreme"))):
             with self.subTest(path=relative), \
@@ -213,7 +258,22 @@ class ValidatorContractTests(unittest.TestCase):
                     {(finding.path, finding.check) for finding in findings},
                 )
 
-    def test_ci_host_cli_versions_meet_every_model_class_minimum(self):
+    def test_a_model_catalog_keys_its_models_by_model_id(self):
+        # The owner's decision of 1 Oct 2026 on #349: model IDs are the only
+        # names, so a catalog's model keys are the host's IDs, not snake_case
+        # field names; every other key stays snake_case.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            self.assertEqual([finding for finding in validate.run(root)
+                              if finding.check == "json_hygiene"], [])
+            path = root / "platforms/codex/model-catalog.json"
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["models"]["gpt-6.1-sol"]["Family"] = value["models"]["gpt-6.1-sol"].pop("family")
+            path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+            self.assertIn(("platforms/codex/model-catalog.json", "json_hygiene"),
+                          {(finding.path, finding.check) for finding in validate.run(root)})
+
+    def test_ci_host_cli_versions_meet_every_catalog_model_minimum(self):
         pins = "tools/data/host-cli-versions.json"
 
         def run(relative: str, mutate) -> set:
@@ -231,9 +291,9 @@ class ValidatorContractTests(unittest.TestCase):
 
         below = run(pins, lambda value: value.update(claude_code="2.1.283", codex="0.158.9"))
         self.assertEqual({message.split(";")[0] for _path, message in below}, {
-            "claude_code 2.1.283 is below 2.1.284, the minimum of claude class 'strong'"
-            " (claude-sonnet-5-5)",
-            "codex 0.158.9 is below 0.159.1, the minimum of codex class 'strong' (gpt-6.1-sol)",
+            "claude_code 2.1.283 is below 2.1.284, the minimum of claude model"
+            " 'claude-sonnet-5-5'",
+            "codex 0.158.9 is below 0.159.1, the minimum of codex model 'gpt-6.1-sol'",
         })
         self.assertEqual({path for path, _message in below}, {pins})
         for relative, mutate, fragment in (
@@ -241,11 +301,13 @@ class ValidatorContractTests(unittest.TestCase):
                 (pins, lambda value: value.update(codex="0.159"),
                  "'codex' must pin the exact X.Y.Z codex CLI version CI installs"),
                 ("platforms/claude/model-catalog.json",
-                 lambda value: value["classes"]["fast"].update(min_cli_version="2.1.285"),
-                 "claude_code 2.1.284 is below 2.1.285, the minimum of claude class 'fast'")):
+                 lambda value: value["models"]["claude-haiku-4-5-20251001"].update(
+                     min_cli_version="2.1.285"),
+                 "claude_code 2.1.284 is below 2.1.285, the minimum of claude model"
+                 " 'claude-haiku-4-5-20251001'")):
             with self.subTest(fragment=fragment):
                 self.assertTrue(any(fragment in message for _path, message in run(relative, mutate)))
-        # A pin at a class's exact minimum, or above it, is clean.
+        # A pin at a model's exact minimum, or above it, is clean.
         self.assertEqual(run(pins, lambda value: value.update(claude_code="2.1.284")), set())
         self.assertEqual(run(pins, lambda value: value.update(codex="0.160.0")), set())
 
@@ -321,6 +383,36 @@ class ValidatorContractTests(unittest.TestCase):
                 self.assertTrue(any(finding.check == "delivery_contract_shape"
                                     and "implementation schedules" in finding.message
                                     for finding in validate.run(root)))
+
+    def test_instructions_name_only_declared_delivery_finding_codes(self):
+        """A refusal an instruction tells a role to expect is one the result envelope can carry,
+        whether the plugin or a host contract or overlay under platforms/ names it."""
+        sources = ("plugins/software-engineering-team/flows/delivery-execution.md",
+                   "platforms/claude/software-engineering-team/host-contract.md",
+                   "platforms/codex/software-engineering-team/host-contract.md",
+                   "platforms/claude/_team/overlay/templates/project-instructions/host.md",
+                   "platforms/codex/_team/overlay/templates/project-instructions/host.md")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            self.assertEqual([finding for finding in validate.run(root)
+                              if finding.check == "finding_code_references"], [])
+            for relative in sources:
+                with self.subTest(source=relative):
+                    path = root / relative
+                    original = path.read_text(encoding="utf-8")
+                    lines = original.splitlines()
+                    path.write_text("\n".join([*lines, "", "Freeze refuses with `DELIVERY_PRE_HANDOFF_ABSENT`,"
+                                               " never with `DELIVERY_PRE_HANDOFF_MISSING` alone."]) + "\n",
+                                    encoding="utf-8")
+                    try:
+                        findings = [finding for finding in validate.run(root)
+                                    if finding.check == "finding_code_references"]
+                    finally:
+                        path.write_text(original, encoding="utf-8")
+                    self.assertEqual([(finding.path, finding.line) for finding in findings],
+                                     [(relative, len(lines) + 2)])
+                    self.assertIn("DELIVERY_PRE_HANDOFF_ABSENT", findings[0].message)
+                    self.assertNotIn("DELIVERY_PRE_HANDOFF_MISSING", findings[0].message)
 
 
 PLUGIN_ROOT = "plugins/software-engineering-team"
@@ -957,6 +1049,9 @@ VALIDATOR_BUILDERS = {
         root, f"{PLUGIN_ROOT}/constitution.md", "- Filler principle.\n" * 61),
     "section_contract": lambda root: edit(root, AGENT, "## Output Contract", "## Output"),
     "content_bans": lambda root: append(root, FLOW, "\nOne step \u2014 then another.\n"),
+    "home_paths": lambda root: edit_json(
+        root, ".changes/fixture.json",
+        lambda value: value.update(summary="Measured in /Users/fixture/checkout.")),
     "agent_tech_nouns": lambda root: append(root, AGENT, "- Reads pytest reports.\n"),
     "handwritten_counts": lambda root: append(root, FLOW, "\nThe team ships 12 agents.\n"),
     "dead_links": lambda root: append(root, FLOW, "\nSee [the ghost](ghost.md).\n"),
@@ -1008,8 +1103,14 @@ VALIDATOR_BUILDERS = {
         lambda value: value["profiles"].update(fast={})),
     "host_cli_versions": lambda root: edit_json(
         root, "tools/data/host-cli-versions.json", lambda value: value.update(codex="0.157.0")),
+    "effort_policy": lambda root: edit_json(
+        root, "platforms/codex/effort-policy.json",
+        lambda value: value["refuse"].update(extreme=value["refuse"]["ultra"])),
     "review_panels": lambda root: edit_json(
         root, PANELS, lambda value: value["review_steps"]["design_system"].update(lenses=[])),
+    "code_review_panel": lambda root: edit_json(
+        root, f"{PLUGIN_ROOT}/skill-content/code-review/data/code-review-panel.json",
+        lambda value: value["review_steps"]["code_review"]["default_panel"].pop()),
     "process_switches": lambda root: edit_json(
         root, SWITCHES, lambda value: value["switches"]["review_panels"].update(default="ghost")),
     "switch_variant_references": lambda root: edit_json(
@@ -1036,12 +1137,155 @@ VALIDATOR_BUILDERS = {
         lambda value: value["authoring_caps"].update(ghost_cap=1)),
     "delivery_contract_shape": lambda root: remove(
         root, f"{PLUGIN_ROOT}/skill-content/deliver/data/delivery-receipt-contract.json"),
+    "finding_code_references": lambda root: append(
+        root, FLOW, "\nFreeze refuses with `DELIVERY_PRE_HANDOFF_ABSENT` before the readers start.\n"),
     "product_namespace": lambda root: append(
         root, f"{PLUGIN_ROOT}/scripts/marketplace_paths.py", "# drift\n"),
     "task_input_catalog": lambda root: edit_json(
         root, f"{PLUGIN_ROOT}/templates/task-input-policy.json",
         lambda value: value["role_skills"].pop("ux_designer")),
 }
+
+
+class HomePathCheckTests(unittest.TestCase):
+    """Package text never carries an absolute home directory, which names a
+    person and often the project a path was copied from (#357). The check
+    knows no project name; a fixture that needs a fake home declares it."""
+
+    @staticmethod
+    def findings(root: Path) -> list:
+        found: list = []
+        validate.check_home_paths(validate.build_tree(root), found)
+        return sorted((finding.path, finding.line) for finding in found)
+
+    @staticmethod
+    def user(text: str):
+        match = validate.HOME_PATH_RE.search(text)
+        return match and validate.home_path_user(match)
+
+    def test_every_file_git_would_commit_is_read_and_an_ignored_one_is_not(self):
+        # Generated, memory and top-level files are public once committed.
+        read = ("plugins/team/skill-content/topic/SKILL.md", "platforms/claude/adapter.json",
+                "docs/notes.md", ".changes/note.json", "tools/data/policy.json",
+                "tools/tests/test_sample.py", "tools/release.py", "dist/claude/team/notes.md",
+                "memory/me.md", "memory/profile.md", "README.md", "AGENTS.md",
+                ".github/workflows/ci.yml")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative in read + ("scratch/notes.md",):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("Fixture.\nMeasured in /home/fixture/checkout.\n", encoding="utf-8")
+            (root / "tools/data/blob.bin").write_bytes(b"\xff\xfe/home/fixture/\x00")
+            # An export holds no Git metadata, so every file in it is read.
+            self.assertEqual(self.findings(root),
+                             sorted((relative, 2) for relative in read + ("scratch/notes.md",)))
+            init_repository(root)
+            (root / ".gitignore").write_text("scratch/\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "docs/notes.md", "memory/me.md"],
+                           check=True)
+            # A checkout reads its tracked files and the untracked ones Git
+            # would add, never an ignored one.
+            self.assertEqual(self.findings(root), sorted((relative, 2) for relative in read))
+
+    def test_posix_windows_and_url_homes_are_found_and_placeholders_are_not(self):
+        for text in ("/Users/fixture/app", "cwd=/home/fixture", "`/home/fixture/`",
+                     "(/home/fixture)", "C:/Users/fixture/x", "file:///Users/fixture/x",
+                     "/mnt/c/Users/fixture/x", "C:\\Users\\fixture\\AppData",
+                     "c:\\users\\fixture", "C:\\\\Users\\\\fixture\\\\AppData"):
+            with self.subTest(text=text):
+                self.assertEqual(self.user(text), "fixture")
+        # Built from parts so that this source line holds no home path itself.
+        self.assertEqual(self.user("C:\\Users\\" + "Fixture Name\\Documents"), "Fixture Name")
+        for text in ("/Users/<name>/", "/home/<user>/", "C:\\Users\\<name>\\",
+                     "C:\\Users\\%USERNAME%\\", "/Users/$USER/", "/home/{user}/", "~/project",
+                     "$HOME/project", "https://example.com/home/products/",
+                     "src/pages/home/components/", "GET /users/42/orders",
+                     validate.ABSOLUTE_PATH_RE.pattern, validate.HOME_PATH_RE.pattern):
+            with self.subTest(text=text):
+                self.assertIsNone(self.user(text))
+
+    def test_the_folder_form_a_claude_code_project_encodes_is_a_home_path_too(self):
+        for text in ("~/.claude/projects/-Users-fixture-Projects-app/run.jsonl",
+                     "/tmp/claude-501/-home-fixture-work-app/notes.md",
+                     "-Users-fixture-app", "C--Users-fixture-app"):
+            with self.subTest(text=text):
+                self.assertEqual(self.user(text), "fixture")
+        for text in ("-Users-<name>-app", "page-home-hero", "--home-dir", "list-Users-admin-page",
+                     "-home-", "the home-office-chair"):
+            with self.subTest(text=text):
+                self.assertIsNone(self.user(text))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative in ("docs/notes.md", "tools/tests/test_sample.py"):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("Run log: /tmp/claude-501/-Users-fixture-app/run.jsonl\n",
+                                encoding="utf-8")
+            declared = {"tools/tests/test_sample.py": frozenset({"fixture"})}
+            with mock.patch.dict(validate.HOME_PATH_FIXTURES, declared, clear=True):
+                self.assertEqual(self.findings(root), [("docs/notes.md", 1)])
+
+    def test_drive_mounts_and_nested_or_bare_encoded_folders_are_homes_too(self):
+        # Git Bash and Cygwin print a Windows home under a drive segment. A
+        # session started in a scratch folder encodes an encoded folder again
+        # after a dash, and one started in the home itself ends at the name.
+        for text in ("cd /c/Users/fixture/code/app", "/cygdrive/c/Users/fixture/app",
+                     "c:/users/fixture/notes.txt",
+                     "~/.claude/projects/-private-tmp-claude-501--Users-fixture-Projects-app/1.jsonl",
+                     "~/.claude/projects/-tmp-claude-1000--home-fixture-app-scratchpad/1.jsonl",
+                     "~/.claude/projects/-Users-fixture/1.jsonl",
+                     "~/.claude/projects/-home-fixture/1.jsonl",
+                     "Folder -Users-fixture", "`-Users-fixture`"):
+            with self.subTest(text=text):
+                self.assertEqual(self.user(text), "fixture")
+        for text in ("--home-dir", "run -home-dir now", "--Users-only", "xy--home-dir-z",
+                     "src/a/Users/fixture", "list-Users-admin", "x1-home-page"):
+            with self.subTest(text=text):
+                self.assertIsNone(self.user(text))
+
+    def test_a_system_or_service_home_names_no_person_and_passes(self):
+        homes = {"runner": "Actions checks out into /home/runner/work/app/app.",
+                 "node": "WORKDIR /home/node/app",
+                 "linuxbrew": 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"',
+                 "vscode": "The dev container caches in /home/vscode/.cache.",
+                 "ubuntu": "cd /home/ubuntu/app",
+                 "Shared": "Shared fixtures live in /Users/Shared/fixtures.",
+                 "Public": "Installers write to C:\\Users\\Public\\Desktop.",
+                 "Default": "New profiles copy C:\\Users\\Default\\AppData."}
+        self.assertEqual(set(homes), set(validate.SYSTEM_HOMES))
+        for name, text in homes.items():
+            with self.subTest(home=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                path = root / "plugins/team/skill-content/ci/SKILL.md"
+                path.parent.mkdir(parents=True)
+                path.write_text(f"{text}\nMeasured in /home/fixture/checkout.\n", encoding="utf-8")
+                self.assertEqual(self.user(text), name)
+                self.assertEqual(self.findings(root), [("plugins/team/skill-content/ci/SKILL.md", 2)])
+
+    def test_a_declared_fake_home_passes_only_in_its_own_file_and_for_its_user(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("test_sample.py", "test_other.py"):
+                path = root / "tools/tests" / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('CWD = "/home/fixture/app"\n', encoding="utf-8")
+            declared = {"tools/tests/test_sample.py": frozenset({"fixture"})}
+            with mock.patch.dict(validate.HOME_PATH_FIXTURES, declared, clear=True):
+                self.assertEqual(self.findings(root), [("tools/tests/test_other.py", 1)])
+            declared = {"tools/tests/test_sample.py": frozenset({"someone"})}
+            with mock.patch.dict(validate.HOME_PATH_FIXTURES, declared, clear=True):
+                self.assertEqual(self.findings(root), [("tools/tests/test_other.py", 1),
+                                                       ("tools/tests/test_sample.py", 1)])
+
+    def test_the_repository_holds_only_its_declared_fake_homes(self):
+        root = TESTS.parents[1]
+        self.assertEqual(self.findings(root), [])
+        for relative, users in sorted(validate.HOME_PATH_FIXTURES.items()):
+            text = (root / relative).read_text(encoding="utf-8")
+            used = {validate.home_path_user(match) for match in validate.refused_home_paths(text)}
+            with self.subTest(fixture=relative):
+                self.assertEqual(used, set(users))
 
 
 class ValidatorBuilderTests(unittest.TestCase):

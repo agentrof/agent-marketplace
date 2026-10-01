@@ -14,6 +14,13 @@
 - Authored Markdown body prose follows `output_language`; project terminology
   follows `terminology_language`. Machine keys, ids, paths and CLI output stay
   English. User-facing conversation may use the user's language.
+- Agent Marketplace is public. An issue, comment, commit message or pull
+  request sent to it, the files a pull request adds included, never
+  identifies this project or its data: no project or code name, repository,
+  link or issue reference, commit id, local or home path, story, Delivery,
+  scenario or requirement id, measured data presented as this project's,
+  domain, client or person. Retell evidence as an anonymous case, such as
+  "in one measured project".
 
 # Software Engineering Team
 
@@ -62,6 +69,6 @@ backlog bindings must revise and rebind before further handoff.
 ## Claude host
 
 - Present declared project decisions through `AskUserQuestion`.
-- Use this team's namespaced agents and entry skills for managed work.
+- Use this team's agents and entry skills for managed work.
 - `CLAUDE.local.md` remains an optional, user-owned, untracked preference
   surface.

@@ -29,6 +29,32 @@ anything:
   still be too big and one over budget can still be one capability, so the
   owner decides each case.
 
+## Operation impact
+
+`contract_deltas` counts 1 for `software_architect` among the story's roles,
+an expected architecture delta, and 1 for `operation_impact: required`, an
+expected revision of the Environment Contract or the Verification Contract.
+The vault policy declares `operation_impact` as an optional story
+classification, never a size field: like a Requirement impact matrix row it
+classifies impact and carries no estimate.
+
+Classify a story when its scope, constraints or evidence already show whether
+delivering it revises an Operation contract:
+
+```yaml
+operation_impact: required
+operation_reason: The worker needs a queue service that the Environment Contract does not declare.
+```
+
+`required` expects a revision of either contract, and `not_applicable` states
+that the story reuses both as they stand. `operation_reason` says why in a
+concrete sentence, and `backlog_compile.py check` refuses another value or a
+missing reason. When the impact is not yet known, leave both out: a story
+without the classification counts no Operation delta, as before. Never
+classify a story to fit a limit. At switch `delivery_path` value
+`light_when_eligible`, a selected story classified `required` cannot take the
+light path.
+
 ## Reading the measures
 
 Under this value `backlog_compile.py check --json` adds `story_size`: the

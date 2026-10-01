@@ -2,6 +2,7 @@
 name: design-system-reviewer
 description: Read-only challenger for the approved Design System package.
 model: claude-opus-5-5
+effort: xhigh
 output_contract: prose
 tools: Read, Grep, Glob
 ---

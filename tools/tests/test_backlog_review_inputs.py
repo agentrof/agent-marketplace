@@ -287,7 +287,7 @@ class BacklogReviewInputTests(unittest.TestCase):
         props, body = backlog.parse_front_matter(path)
         props["priority_reason"] = "ST-001 serves `pages/api/[[...resource]].ts` for the approved epic outcome."
         path.write_text(backlog.front_matter(props, body), encoding="utf-8")
-        self.add_scope_text(1, "It adds `pages/api/v1/health-checks/[[...resource]].ts`.\n\n"
+        self.add_scope_text(1, "It adds `pages/api/v1/items/[[...resource]].ts`.\n\n"
                                "- Example:\n\n  ```text\n  [[example/only]]\n  ```")
         self.assertTrue(inputs.manifest(self.docs, epic="EP-001")["ok"])
         self.add_scope_text(1, "It follows [[design-system/missing|Missing guidance]].")
@@ -769,8 +769,10 @@ class BacklogReviewInputTests(unittest.TestCase):
 
     def test_the_writer_scope_release_note_states_the_epic_reader_rule(self):
         # #336 narrowed the reader rule that #301's release note still stated.
-        summary = json.loads((ROOT / ".changes/writer-epic-scope-after-stub-story.json")
-                             .read_text(encoding="utf-8"))["summary"]
+        changes = ROOT / ".changes/writer-epic-scope-after-stub-story.json"
+        if not changes.is_file():
+            self.skipTest("a release or the release reset removed this changeset")
+        summary = json.loads(changes.read_text(encoding="utf-8"))["summary"]
         self.assertIn("A read-only epic closure, `backlog_review_inputs.py` included, fails on"
                       " such a placeholder only in a note it reads", summary)
         self.assertIn("a read-only root closure still requires complete sources", summary)

@@ -2,6 +2,7 @@
 name: backlog-reviewer
 description: Independent backlog challenger for epic, story and test-plan packages; never auto-triggered.
 model: claude-opus-5-5
+effort: xhigh
 output_contract: prose
 tools: Read, Grep, Glob
 ---

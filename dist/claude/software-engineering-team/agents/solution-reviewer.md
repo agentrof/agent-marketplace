@@ -2,6 +2,7 @@
 name: solution-reviewer
 description: Read-only challenger for the approved Solution Design package.
 model: claude-opus-5-5
+effort: xhigh
 output_contract: prose
 tools: Read, Grep, Glob
 ---

@@ -1,6 +1,6 @@
 ---
 name: backlog-reviewer-lens
-description: Independent backlog challenger for epic, story and test-plan packages; never auto-triggered. Lens-tier reader variant for review panels.
+description: Independent backlog challenger for epic, story and test-plan packages; never auto-triggered. Lens reader variant for review panels.
 model: claude-sonnet-5-5
 effort: high
 output_contract: prose

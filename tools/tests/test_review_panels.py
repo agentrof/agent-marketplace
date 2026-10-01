@@ -1,6 +1,7 @@
 """Review panels: lens data per step, one protocol that a task binds only at
-switch `review_panels: lens_panel`, and lens-tier reader variants that leave
-the single reviewers and every default-path instruction as released."""
+switch `review_panels: lens_panel`, and `-lens` reader variants on the `low`
+tier that leave the single reviewers and every default-path instruction as
+released."""
 
 from __future__ import annotations
 
@@ -203,8 +204,8 @@ class ReviewPanelDataTests(unittest.TestCase):
         self.assertIn("Panel valid-major recall at least equal to the official review's and panel"
                       " wall time at most 50% of it", self.switch["promotion"]["threshold"])
         self.assertEqual(self.switch["agent_variants"], {"lens_panel": {
-            "suffix": "lens", "tier": "lens",
-            "description": "Lens-tier reader variant for review panels.",
+            "suffix": "lens", "tier": "low",
+            "description": "Lens reader variant for review panels.",
             "agents": LENS_VARIANTS}})
         self.assertEqual(set(self.data), {"schema_version", "review_steps"})
 
@@ -323,11 +324,11 @@ class ReviewPanelFlowTests(unittest.TestCase):
             for host in ("claude", "codex")
         }
         self.assertIn("spawn every reader of the panel in one message", contracts["claude"])
-        self.assertIn("on the `lens` tier, the `strong` class (Sonnet) at effort `high`",
+        self.assertIn("on the `low` tier, `claude-sonnet-5-5` at effort `high`",
                       contracts["claude"])
         self.assertIn("start every reader of the panel before waiting on any of them",
                       contracts["codex"])
-        self.assertIn("on the `lens` tier, the `strong` class (Sol) at effort `high`",
+        self.assertIn("on the `low` tier, `gpt-6.1-sol` at effort `xhigh`",
                       contracts["codex"])
         for host, contract in contracts.items():
             with self.subTest(host=host):
@@ -336,10 +337,10 @@ class ReviewPanelFlowTests(unittest.TestCase):
                 self.assertNotIn("tier_overrides", contract)
 
 
-class LensTierTests(unittest.TestCase):
+class LensVariantTierTests(unittest.TestCase):
     def test_canonical_readers_keep_their_released_tier(self):
         agents = {path.stem for path in (TEAM / "agents").glob("*.md")}
-        self.assertEqual({agent for agent in agents if tier(agent) == "lens"}, set())
+        self.assertEqual({agent for agent in agents if tier(agent) in {"lens", "low"}}, set())
         for agent in (*LENS_VARIANTS, "analysis-challenger", "domain-expert"):
             with self.subTest(agent=agent):
                 self.assertEqual(tier(agent), "high")
@@ -347,21 +348,27 @@ class LensTierTests(unittest.TestCase):
 
     def test_the_release_note_keeps_the_reviewers_tier_not_their_files(self):
         # The model pin (#344) rewrites every reviewer's released model line.
-        summary = json.loads((ROOT / ".changes/review-panel-lens-variants.json").read_text(
-            encoding="utf-8"))["summary"]
+        changes = ROOT / ".changes/review-panel-lens-variants.json"
+        if not changes.is_file():
+            self.skipTest("a release or the release reset removed this changeset")
+        summary = json.loads(changes.read_text(encoding="utf-8"))["summary"]
         self.assertIn("The reviewers themselves keep their tier.", summary)
         self.assertNotIn("released files", summary)
 
-    def test_lens_tier_is_declared_for_every_host(self):
+    def test_the_variants_run_on_the_low_tier_of_every_host(self):
+        # By the owner's decision of 1 Oct 2026 on #349 the `lens` tier is
+        # gone and the `-lens` readers keep the values chosen for them on `low`.
         models = json.loads((ROOT / "tools/data/models.json").read_text(encoding="utf-8"))
-        self.assertIn("lens", models["reasoning_levels"])
+        self.assertNotIn("lens", models["reasoning_levels"])
         tables = {
             host: json.loads((ROOT / "platforms" / host / "execution-profiles.json")
                              .read_text(encoding="utf-8"))["profiles"]["auto"]
             for host in ("claude", "codex")
         }
-        self.assertEqual(tables["claude"]["lens"], {"class": "strong", "effort": "high"})
-        self.assertEqual(tables["codex"]["lens"], {"class": "strong", "effort": "high"})
+        self.assertEqual(tables["claude"]["low"], {"model": "claude-sonnet-5-5", "effort": "high"})
+        self.assertEqual(tables["codex"]["low"], {"model": "gpt-6.1-sol", "effort": "xhigh"})
+        for table in tables.values():
+            self.assertNotIn("lens", table)
 
 
 if __name__ == "__main__":

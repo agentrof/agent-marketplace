@@ -142,14 +142,19 @@ class Project:
         path = self.state / "ledger.jsonl"
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
-    def delivery(self, status: str, identifier: str = "DLV-002") -> None:
+    def delivery(self, status: str, identifier: str = "DLV-001") -> None:
         path = (self.root / "workspace/docs/delivery/deliveries"
                 / f"{identifier.lower()}-night/delivery.md")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"---\ntype: delivery\nid: {identifier}\ntitle: Night run\n"
                         f"status: {status}\n---\n\n# Night run\n", encoding="utf-8")
+        if status == "awaiting_merge":
+            # The commit that records the PR URL in the Review sets awaiting_merge.
+            (path.parent / "delivery-review.md").write_text(
+                "---\ntype: delivery-review\npull_request_url: https://example.invalid/pull/2\n---\n\n# Review\n",
+                encoding="utf-8")
 
-    def requirement(self, status: str, identifier: str = "REQ-005") -> None:
+    def requirement(self, status: str, identifier: str = "REQ-001") -> None:
         path = self.root / f"workspace/docs/requirements/req-{identifier[4:]}-night.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"---\ntype: requirement\nid: {identifier}\ntitle: Night work\n"
@@ -245,20 +250,20 @@ class GrantTermsTests(unittest.TestCase):
                               " text", "on", "--goal", "sprint:9")
         self.p.assert_refused("names no target", "on", "--goal", "text:")
         self.p.delivery("cancelled")
-        self.p.assert_refused("goal delivery:DLV-002 is already reached", "on", "--goal",
-                              "delivery:DLV-002")
+        self.p.assert_refused("goal delivery:DLV-001 is already reached", "on", "--goal",
+                              "delivery:DLV-001")
         self.assertFalse((self.p.root / ".agentrof").exists())
 
     def test_a_goal_grant_ends_at_its_cap_or_at_the_earlier_given_time(self):
         self.p.delivery("active")
-        code, _out, err = self.p.run_verb("on", "--goal", "delivery:dlv-002")
+        code, _out, err = self.p.run_verb("on", "--goal", "delivery:dlv-001")
         self.assertEqual(code, 0, err)
         grant = self.p.grant()
         self.assertEqual(grant["expires_at"],
                          stamp(NOW + timedelta(hours=POLICY["default_goal_cap_hours"])))
-        self.assertEqual(grant["goal"]["target"], "DLV-002")
+        self.assertEqual(grant["goal"]["target"], "DLV-001")
         self.assertEqual(grant["goal"]["end"]["terminal_statuses"], ["merged", "cancelled"])
-        code, _out, err = self.p.run_verb("on", "--goal", "delivery:DLV-002", "--for", "3h")
+        code, _out, err = self.p.run_verb("on", "--goal", "delivery:DLV-001", "--for", "3h")
         self.assertEqual(code, 0, err)
         self.assertEqual(self.p.grant()["expires_at"], stamp(NOW + timedelta(hours=3)))
 
@@ -355,7 +360,7 @@ class LifecycleTests(unittest.TestCase):
         values = {"question": "Which cache root?",
                   "options": "One per checkout; One per Item", "choice": "One per checkout",
                   "reason": "the recommended option",
-                  "target": "workspace/docs/delivery/deliveries/dlv-002-night/delivery.md"
+                  "target": "workspace/docs/delivery/deliveries/dlv-001-night/delivery.md"
                             "#User Decisions D-07", **fields}
         argv = ["record", "--class", name]
         for key, value in values.items():
@@ -400,7 +405,7 @@ class LifecycleTests(unittest.TestCase):
             "event": "decision", "classes": ["choice"], "question": "Which cache root?",
             "options": ["One per checkout", "One per Item"], "choice": "One per checkout",
             "reason": "the recommended option",
-            "target": "workspace/docs/delivery/deliveries/dlv-002-night/delivery.md"
+            "target": "workspace/docs/delivery/deliveries/dlv-001-night/delivery.md"
                       "#User Decisions D-07"})
         code, _out, err = self.record("release")
         self.assertEqual(code, 1)
@@ -467,14 +472,14 @@ class LifecycleTests(unittest.TestCase):
 
     def test_status_shows_the_remaining_time_goal_classes_and_counts(self):
         self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-002", "--for", "9h")
+        self.p.run_verb("on", "--goal", "delivery:DLV-001", "--for", "9h")
         self.record()
         self.queue()
         self.queue("phase_start")
         code, out, err = self.p.run_verb("status", now=NOW + timedelta(hours=1, minutes=15))
         self.assertEqual(code, 0, err)
         self.assertIn("(7h 45m left)", out)
-        self.assertIn("goal: delivery DLV-002, ends when scripts/delivery_compile.py reads merged or"
+        self.assertIn("goal: delivery DLV-001, ends when scripts/delivery_compile.py reads merged or"
                       " cancelled; current state: active", out)
         self.assertIn("allowed classes: choice, approval_gate, merge", out)
         self.assertIn("decisions: 1, queued: 2", out)
@@ -819,12 +824,12 @@ class GoalTests(unittest.TestCase):
 
     def test_check_completes_a_delivery_goal_once_its_compiler_reads_a_terminal_status(self):
         self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-002")
+        self.p.run_verb("on", "--goal", "delivery:DLV-001")
         self.assertEqual(self.check(NOW + timedelta(hours=1))[0], 0)
         self.p.delivery("cancelled")
         code, out = self.check(NOW + timedelta(hours=2))
         self.assertEqual(code, 1)
-        self.assertIn("scripts/delivery_compile.py read delivery DLV-002 as cancelled", out)
+        self.assertIn("scripts/delivery_compile.py read delivery DLV-001 as cancelled", out)
         completion = self.p.grant()["completion"]
         self.assertEqual((self.p.grant()["state"], completion["goal_state"], completion["read_at"]),
                          ("completed", "cancelled", stamp(NOW + timedelta(hours=2))))
@@ -832,17 +837,17 @@ class GoalTests(unittest.TestCase):
 
     def test_a_compiler_completion_names_the_compiler_and_the_state_it_read(self):
         self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-002")
+        self.p.run_verb("on", "--goal", "delivery:DLV-001")
         self.p.delivery("cancelled")
         self.check(NOW + timedelta(hours=2))
         out = self.p.run_verb("report")[1]
-        self.assertIn("completed: scripts/delivery_compile.py read delivery DLV-002 as cancelled at"
+        self.assertIn("completed: scripts/delivery_compile.py read delivery DLV-001 as cancelled at"
                       f" {stamp(NOW + timedelta(hours=2))}", out)
         self.assertNotIn("compiler agreed: None", out)
 
     def test_a_merged_delivery_is_read_through_the_compiler_merge_derivation(self):
         self.p.delivery("awaiting_merge")
-        self.p.run_verb("on", "--goal", "delivery:DLV-002")
+        self.p.run_verb("on", "--goal", "delivery:DLV-001")
         with mock.patch.object(delivery_compile, "delivery_state",
                                return_value=("merged", None)) as derived:
             code, out = self.check(NOW + timedelta(hours=1))
@@ -850,11 +855,33 @@ class GoalTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(self.p.grant()["completion"]["goal_state"], "merged")
 
+    def test_a_delivery_whose_merge_state_cannot_be_read_has_no_goal_state(self):
+        """A Delivery Review record that cannot be read, here after an editor wrote a byte order mark, leaves
+        the merge state unknown: a running grant shows the goal unknown with the reason instead of the tracked
+        status, and on refuses the goal, as it refuses a Delivery record it cannot read."""
+        self.p.delivery("awaiting_merge")
+        review = self.p.root / "workspace/docs/delivery/deliveries/dlv-001-night/delivery-review.md"
+        code, _out, err = self.p.run_verb("on", "--goal", "delivery:DLV-001")
+        self.assertEqual(code, 0, err)
+        review.write_bytes(b"\xef\xbb\xbf" + review.read_bytes())
+        reason = (f"cannot read it: Delivery merge state cannot be evaluated: {review} cannot be read:"
+                  " missing frontmatter block")
+        later = NOW + timedelta(hours=1)
+        code, out = self.check(later)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"current state: unknown ({reason})", out)
+        self.assertEqual(self.p.grant()["state"], "active")
+        read = json.loads(self.p.run_verb("status", "--json", now=later)[1])["goal_read"]
+        self.assertEqual((read["found"], read["state"], read["terminal"], read["error"]),
+                         (False, None, False, reason))
+        self.p.assert_refused(f"goal delivery:DLV-001: the owning compiler scripts/delivery_compile.py {reason}",
+                              "on", "--goal", "delivery:DLV-001", now=later)
+
     def test_check_completes_a_requirement_goal_at_its_terminal_planning_status(self):
         for terminal in ("withdrawn", "incorporated"):
             with self.subTest(terminal=terminal):
                 self.p.requirement("approved")
-                self.p.run_verb("on", "--goal", "requirement:REQ-005")
+                self.p.run_verb("on", "--goal", "requirement:REQ-001")
                 self.assertEqual(self.check(NOW + timedelta(minutes=10))[0], 0)
                 if terminal == "incorporated":
                     patcher = mock.patch.object(requirement_compile, "requirement_incorporated",
@@ -871,7 +898,7 @@ class GoalTests(unittest.TestCase):
 
     def test_a_goal_that_is_not_terminal_stays_active_until_its_cap_whatever_is_claimed(self):
         self.p.delivery("review")
-        self.p.run_verb("on", "--goal", "delivery:DLV-002", "--for", "6h")
+        self.p.run_verb("on", "--goal", "delivery:DLV-001", "--for", "6h")
         claim = {"reason": "the Delivery is done, the goal is reached", "question": "Merge now?",
                  "options": "", "choice": "Yes", "target": "delivery.md"}
         argv = ["record", "--class", "choice"]
@@ -887,14 +914,14 @@ class GoalTests(unittest.TestCase):
 
     def test_record_and_queue_refuse_once_the_goal_is_reached(self):
         self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-002")
+        self.p.run_verb("on", "--goal", "delivery:DLV-001")
         self.p.delivery("cancelled")
         later = NOW + timedelta(minutes=10)
         code, _out, err = self.p.run_verb("record", "--class", "approval_gate", "--question",
                                           "Approve the next plan?", "--choice", "Approve",
                                           "--reason", "r", "--target", "t", now=later)
         self.assertEqual(code, 1)
-        self.assertIn("scripts/delivery_compile.py read delivery DLV-002 as cancelled", err)
+        self.assertIn("scripts/delivery_compile.py read delivery DLV-001 as cancelled", err)
         self.assertEqual(self.p.grant()["state"], "completed")
         code, _out, err = self.p.run_verb("queue", "--class", "release", "--question", "Tag?",
                                           "--recommendation", "Hold", now=later)
@@ -903,7 +930,7 @@ class GoalTests(unittest.TestCase):
         self.assertEqual([event["event"] for event in self.p.events()], ["granted", "completed"])
 
     def test_complete_ends_any_grant_and_records_evidence_and_compiler_agreement(self):
-        cases = (("delivery:DLV-002", False), ("delivery:DLV-003", True),
+        cases = (("delivery:DLV-001", False), ("delivery:DLV-003", True),
                  ("text:finish the migration", None), (None, None))
         for goal, agreed in cases:
             with self.subTest(goal=goal):
@@ -1339,15 +1366,15 @@ class DecisionLogTests(unittest.TestCase):
     def test_between_the_gates_the_answer_names_the_document_revision(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace" / "docs"
-            note = docs / "delivery/deliveries/dlv-002-night/delivery.md"
+            note = docs / "delivery/deliveries/dlv-001-night/delivery.md"
             note.parent.mkdir(parents=True)
-            note.write_text("---\ntype: delivery\nid: DLV-002\ntitle: Night run\n"
+            note.write_text("---\ntype: delivery\nid: DLV-001\ntitle: Night run\n"
                             "status: active\n---\n\n# Night run\n\n" + self.body(),
                             encoding="utf-8")
             self.assertEqual(delivery_compile.between_gates_refusals(
-                docs, "Verification Contract revision 6", "DLV-002"), [])
+                docs, "Verification Contract revision 6", "DLV-001"), [])
             self.assertTrue(delivery_compile.between_gates_refusals(
-                docs, "Environment Contract revision 2", "DLV-002"))
+                docs, "Environment Contract revision 2", "DLV-001"))
 
     def test_every_autopilot_document_states_the_decision_log_rules(self):
         rules = ("by story id", "`wait_minutes`", "`<document> revision n`",

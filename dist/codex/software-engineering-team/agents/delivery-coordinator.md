@@ -2,7 +2,7 @@
 name: delivery-coordinator
 description: Delivery Coordinator role invoked by software-engineering-team flows with explicit project-local inputs; not auto-triggered.
 model: gpt-6.1-sol
-model_reasoning_effort: medium
+model_reasoning_effort: xhigh
 output_contract: prose
 ---
 

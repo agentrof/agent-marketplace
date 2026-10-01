@@ -17,12 +17,19 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tools" / "tests"))
+import validate  # noqa: E402
+from git_fixture import init_repository, remove_temporary  # noqa: E402
+
 PLUGIN = ROOT / "plugins/software-engineering-team"
 FILE_ISSUE = PLUGIN / "scripts/file_issue.py"
 ISSUE_SKILL = PLUGIN / "skill-content/issue-report/SKILL.md"
 VAULT_POLICY = (
     PLUGIN / "skill-content/obsidian-vault/data/vault-policy.json"
 )
+NO_CHECKOUT_NOTICE = ("file_issue: notice: no Git checkout at the project root, so only"
+                      " home-directory paths are checked\n")
 
 
 def load_module():
@@ -145,7 +152,7 @@ class IssueReportTests(unittest.TestCase):
             after = {path.relative_to(root): path.read_bytes()
                      for path in root.rglob("*") if path.is_file()}
         self.assertEqual(code, 0)
-        self.assertEqual(error, "")
+        self.assertEqual(error, NO_CHECKOUT_NOTICE)
         self.assertEqual(
             output,
             "Opened #42: "
@@ -319,6 +326,259 @@ class IssueReportTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as raised:
                     self.issue.main(arguments)
             self.assertEqual(raised.exception.code, 2)
+
+
+class UpstreamConfidentialityTests(unittest.TestCase):
+    """The Agent Marketplace repository is public, so text sent to it never
+    identifies the project it comes from (#357)."""
+
+    def test_the_skill_scans_the_payload_before_it_is_shown_and_filed(self):
+        raw = ISSUE_SKILL.read_text(encoding="utf-8")
+        text = " ".join(raw.split())
+        self.assertIn("\n## Confidentiality\n", raw)
+        for term in ("An issue never identifies the reporting project or its data",
+                     "commit id, local or home path, story, Delivery, scenario or requirement id",
+                     '"in one measured project"',
+                     "retell every project detail as Confidentiality requires"):
+            with self.subTest(term=term):
+                self.assertIn(term, text)
+        scan = text.index("Scan the exact title and body before showing them")
+        self.assertLess(text.index("## Confidentiality"), text.index("## Procedure"))
+        self.assertLess(scan, text.index("Present the exact payload in chat"))
+        self.assertLess(text.index("Present the exact payload in chat"),
+                        text.index("invoke the packaged `scripts/file_issue.py`"))
+        self.assertIn("`Revise` changes the payload in chat, scans it again as step 3 does", text)
+
+    def test_a_payload_the_filer_refuses_returns_to_revise(self):
+        text = " ".join(ISSUE_SKILL.read_text(encoding="utf-8").split())
+        for term in ("exactly once per approved payload",
+                     "with `--project-root` set to the root of the project in scope",
+                     "a home-directory path, the project's checkout path, also written from"
+                     " the home directory, a Git remote URL or its owner/repo, or the project's"
+                     " repository or folder name as a word in any case, also inside"
+                     " percent-encoded, JSON-escaped and file URL text",
+                     "Without a Git checkout at the project root it checks home-directory"
+                     " paths only and prints a notice saying so",
+                     "names each fragment's kind and position, never its value",
+                     "When that reason says the payload identifies the reporting project,"
+                     " continue as `Revise`",
+                     "A refused payload is never filed"):
+            with self.subTest(term=term):
+                self.assertIn(term, text)
+
+    def test_every_role_and_session_reads_the_rule(self):
+        # The same list as the skill and the maintainer protocol, so a role
+        # keeps package paths and anonymous numbers a useful report needs.
+        listed = ("no project or code name, repository, link or issue reference, commit id,"
+                  " local or home path, story, Delivery, scenario or requirement id, measured"
+                  " data presented as this project's, domain, client or person")
+        for relative in ("constitution.md", "templates/project-instructions/common.md"):
+            with self.subTest(source=relative):
+                text = " ".join((PLUGIN / relative).read_text(encoding="utf-8").split())
+                self.assertIn("never identifies this project", text)
+                self.assertIn(listed, text)
+                self.assertIn("the files a pull request adds included", text)
+                self.assertIn("anonymous", text)
+
+
+
+class ProjectFragmentRefusalTests(unittest.TestCase):
+    """Before any request, the filer refuses a title or body that holds a home
+    directory, the reporting checkout's path, its Git remote or the project's
+    name (#357)."""
+
+    REMOTE = "https://github.com/fixture-owner/fixture-app.git"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.issue = load_module()
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        self.root = Path(temporary.name).resolve() / "fixture-checkout"
+        (self.root / "docs").mkdir(parents=True)
+        init_repository(self.root)
+        self.remote(self.REMOTE)
+        previous = Path.cwd()
+        os.chdir(self.root / "docs")
+        self.addCleanup(os.chdir, previous)
+
+    def remote(self, url: str) -> None:
+        subprocess.run(["git", "-C", str(self.root), "remote", "remove", "origin"],
+                       capture_output=True, check=False)
+        subprocess.run(["git", "-C", str(self.root), "remote", "add", "origin", url], check=True)
+
+    def file(self, title: str, body: str, *arguments: str):
+        output, error = io.StringIO(), io.StringIO()
+        with mock.patch.object(
+                self.issue, "create_issue",
+                return_value="https://github.com/agentrof/agent-marketplace/issues/5") as create, \
+                mock.patch("sys.stdin", io.StringIO(body)), \
+                redirect_stdout(output), redirect_stderr(error):
+            code = self.issue.main(["--title", title, *arguments])
+        return code, error.getvalue(), create
+
+    def test_each_fragment_is_refused_by_kind_and_position_and_never_echoed(self):
+        checkout = str(self.root)
+        body = ("## Summary\n"
+                f"Seen in {checkout}/workspace/docs.\n"
+                f"Remote: {self.REMOTE}\n"
+                "Repository fixture-owner/fixture-app broke.\n"
+                "Transcript at /Users/fixture/.claude/projects/run.jsonl\n"
+                "Scratch at /tmp/claude-501/-Users-fixture-app/notes.md\n")
+        code, error, create = self.file("Crash in fixture-owner/fixture-app", body)
+        self.assertEqual(code, 2)
+        create.assert_not_called()
+        self.assertIn("Not opened: the title or body identifies the reporting project", error)
+        for expected in ("remote repository name at title line 1, column 10",
+                         "checkout path at body line 2, column 9",
+                         "remote URL at body line 3, column 9",
+                         "remote repository name at body line 4, column 12",
+                         "home-directory path at body line 5, column 15",
+                         "home-directory path at body line 6, column 28",
+                         "project name at body line 6, column 35"):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, error)
+        self.assertEqual(error.count(" at "), 7, error)
+        for value in (checkout, self.REMOTE, "fixture-owner", "fixture-app", "Users"):
+            with self.subTest(value=value):
+                self.assertNotIn(value, error)
+
+    def test_a_scp_or_ssh_remote_is_refused_by_its_owner_and_repository(self):
+        for url in ("git@github.com:fixture-owner/fixture-app.git",
+                    "ssh://git@gitlab.example.test:22/fixture-owner/fixture-app.git"):
+            with self.subTest(url=url):
+                self.remote(url)
+                code, error, create = self.file("Report", "See fixture-owner/fixture-app.\n")
+                self.assertEqual(code, 2)
+                create.assert_not_called()
+                self.assertIn("remote repository name at body line 1, column 5", error)
+
+    def test_a_payload_without_those_fragments_is_filed_from_the_checkout(self):
+        code, error, create = self.file(
+            "Refresh fails", "## Summary\nRefresh fails in an owner/repository checkout.\n")
+        self.assertEqual((code, error), (0, ""))
+        create.assert_called_once()
+
+    def test_the_marketplace_remote_is_not_the_reporting_project(self):
+        self.remote("https://github.com/agentrof/agent-marketplace.git")
+        code, error, create = self.file(
+            "Refresh fails", "Target: agentrof/agent-marketplace\n")
+        self.assertEqual((code, error), (0, ""))
+        create.assert_called_once()
+
+    def test_outside_a_git_checkout_only_home_paths_are_refused_and_a_notice_says_so(self):
+        notice = NO_CHECKOUT_NOTICE
+        with tempfile.TemporaryDirectory() as temporary:
+            previous = Path.cwd()
+            os.chdir(temporary)
+            try:
+                filed = self.file("Report", "Seen in fixture-owner/fixture-app at /srv/app.\n")
+                refused = self.file("Report", "Seen in /home/fixture/app.\n")
+            finally:
+                os.chdir(previous)
+        self.assertEqual(filed[:2], (0, notice))
+        self.assertEqual(refused[0], 2)
+        self.assertTrue(refused[1].startswith(notice), refused[1])
+        self.assertIn("home-directory path at body line 1, column 9", refused[1])
+
+    def test_the_project_root_argument_names_the_checkout_to_check(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            previous = Path.cwd()
+            os.chdir(temporary)
+            try:
+                code, error, create = self.file(
+                    "Report", f"Seen in {self.root}/docs.\n", "--project-root", str(self.root / "docs"))
+                missing = self.file("Report", "Body.\n", "--project-root", str(Path(temporary) / "gone"))
+            finally:
+                os.chdir(previous)
+        self.assertEqual(code, 2)
+        create.assert_not_called()
+        self.assertIn("checkout path at body line 1, column 9", error)
+        self.assertNotIn("notice", error)
+        self.assertEqual(missing[0], 2)
+        missing[2].assert_not_called()
+        self.assertIn("Not opened: --project-root is not a directory", missing[1])
+
+    def test_the_checkout_path_written_from_the_home_directory_is_refused(self):
+        rest = self.root.name
+        with mock.patch.dict(os.environ, {"HOME": str(self.root.parent)}):
+            for written in (f"~/{rest}/docs", f"$HOME/{rest}/docs", f"${{HOME}}/{rest}/docs",
+                            f"%USERPROFILE%\\{rest}\\docs"):
+                with self.subTest(written=written):
+                    code, error, create = self.file("Report", f"Seen in {written}.\n")
+                    self.assertEqual(code, 2)
+                    create.assert_not_called()
+                    self.assertIn("checkout path at body line 1, column 9", error)
+
+    def test_a_remote_is_read_as_git_rewrites_it_and_in_its_userless_scp_form(self):
+        subprocess.run(["git", "-C", str(self.root), "config",
+                        "url.https://github.com/.insteadOf", "hub:"], check=True)
+        for url in ("hub:fixture-owner/fixture-app", "github.com:fixture-owner/fixture-app.git"):
+            for body in ("Fork of fixture-owner/fixture-app fails.\n",
+                         "See https://github.com/fixture-owner/fixture-app/issues/3.\n"):
+                with self.subTest(url=url, body=body):
+                    self.remote(url)
+                    code, error, create = self.file("Report", body)
+                    self.assertEqual(code, 2)
+                    create.assert_not_called()
+                    self.assertIn("at body line 1", error)
+
+    def test_the_project_name_is_refused_as_a_word_in_any_case_and_never_echoed(self):
+        for title, body, column in (
+                ("Report", "In FIXTURE-APP the nightly export fails.\n", 4),
+                ("Report", "The Fixture-Checkout suite broke.\n", 5)):
+            with self.subTest(body=body):
+                code, error, create = self.file(title, body)
+                self.assertEqual(code, 2)
+                create.assert_not_called()
+                self.assertIn(f"project name at body line 1, column {column}", error)
+                self.assertNotIn("fixture-app", error.lower())
+                self.assertNotIn("fixture-checkout", error.lower())
+        code, error, create = self.file("Report", "The fixture-application tests pass.\n")
+        self.assertEqual((code, error), (0, ""))
+        create.assert_called_once()
+
+    def test_encoded_and_file_url_text_is_decoded_before_the_check(self):
+        checkout = str(self.root)
+        for body, expected in (
+                (f"Open vscode://file{checkout}/docs/x.md:10\n", "checkout path at body line 1, column 19"),
+                (f"Open file://localhost{checkout}/docs/x.md\n", "checkout path at body line 1, column 22"),
+                ('{"cwd": "' + checkout.replace("/", "\\/") + '"}\n',
+                 "checkout path at body line 1, column 10"),
+                ("See fixture-owner%2Ffixture-app\n", "remote repository name at body line 1, column 5"),
+                ("GET /open?path=%2FUsers%2Ffixture%2Fnotes.txt\n",
+                 "home-directory path at body line 1, column 16"),
+                ("Open file:///c%3A/Users/fixture/notes.txt\n",
+                 "home-directory path at body line 1, column 14")):
+            with self.subTest(body=body):
+                code, error, create = self.file("Report", body)
+                self.assertEqual(code, 2)
+                create.assert_not_called()
+                self.assertIn(expected, error)
+                self.assertEqual(error.count(" at "), 1, error)
+
+    def test_the_marketplace_name_is_no_project_name(self):
+        fork = self.root.parent / "agent-marketplace"
+        fork.mkdir()
+        init_repository(fork)
+        subprocess.run(["git", "-C", str(fork), "remote", "add", "origin",
+                        "https://github.com/fixture-owner/agent-marketplace.git"], check=True)
+        code, error, create = self.file(
+            "Refresh fails", "The agent-marketplace refresh fails.\n", "--project-root", str(fork))
+        self.assertEqual((code, error), (0, ""))
+        create.assert_called_once()
+
+    def test_the_filer_refuses_the_home_paths_the_validator_refuses(self):
+        self.assertEqual(self.issue.HOME_PATH_RE.pattern, validate.HOME_PATH_RE.pattern)
+        self.assertEqual(self.issue.SYSTEM_HOMES, validate.SYSTEM_HOMES)
+
+    def test_a_system_or_service_home_names_no_person_and_is_filed(self):
+        code, error, create = self.file(
+            "CI fails", "The job fails in /home/runner/work/app/app/tools/check.py.\n")
+        self.assertEqual((code, error), (0, ""))
+        create.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 ---
 name: product-owner
 description: Product owner role that groups approved product knowledge into the project-local epic and story backlog; never auto-triggered.
-model: claude-sonnet-5-5
+model: claude-opus-5-5
+effort: medium
 output_contract: prose
 ---
 

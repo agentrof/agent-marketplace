@@ -27,14 +27,22 @@ configuration remain the source of truth.
    schema replacement. It refreshes only policy-asserted Obsidian JSON keys
    and preserves user-owned instruction companions through the separate host
    projection choice gate. A Codex projection keeps its recorded execution
-   profile. A release that moves a model class to a newer pinned model
-   rewrites the role files of an `auto` projection on this refresh and leaves
-   an `inherit` projection unchanged; Claude Code roles change with the plugin
-   update itself.
-5. Config schema v2 has only team identity and language settings. An upgrade
-   removes every field outside that closed shape without editing Markdown,
-   aliases or links. Taxonomy additions and graph-color changes therefore never
-   write `workspace/config.json`.
+   profile and any model fallback its managed agent files record. A release
+   that moves a tier to a newer pinned model rewrites the role files
+   of an `auto` projection on this refresh and leaves an `inherit` projection
+   unchanged. Claude Code roles change at the refresh that renders them again
+   into `.claude/agents/` with the project's tier models, efforts and role
+   tiers. Until a refresh renders them, on either host, the session start
+   check reports the role files whose stamp is not the installed package's or
+   the project config's, as after a pull that changes `tier_models` or
+   `role_tiers`; `.codex/agents/` and `.claude/agents/` are ignored local
+   projections, so a pull never updates them.
+5. Config schema v2 has only team identity, language settings and the
+   valid overrides `tier_models` and `role_tiers`, which setup keeps and never
+   writes. An upgrade removes every field outside that closed shape without
+   editing Markdown, aliases or links, and stops on an override the installed
+   package no longer takes, naming the tier or role. Taxonomy additions and
+   graph-color changes therefore never write `workspace/config.json`.
 6. `workspace/` is the only managed workspace and every second managed vault
    is rejected. Requirement Flow determines request applicability. Repeated
    apply with the same package and project must produce an empty inspect plan.

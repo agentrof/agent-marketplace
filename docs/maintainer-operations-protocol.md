@@ -57,6 +57,31 @@ merge or release authority. If an instruction could select more than one issue
 or unmerged PR, stop and ask the user to identify the exact set. Never infer a
 batch from recency, labels, milestones, or open changesets.
 
+## Confidentiality
+
+This repository is public. Issue intake, PR bodies, commit messages,
+changesets and every tracked file never identify a consumer project or its
+data: no project or code name, repository, link or issue reference, commit id,
+local or home path, story, Delivery, scenario or requirement id, measured data
+presented as that project's, domain, client or person.
+
+- Read such details in an issue as evidence only; never copy them into a
+  branch, commit, changeset, PR or comment.
+- Retell evidence as an anonymous case, such as "in one measured project" or
+  "an earlier story's suite". Generic format examples such as `DLV-001` stay.
+- Before each commit and PR, scan the message, body and diff and rewrite every
+  hit. `tools/validate.py` refuses a home-directory path in every file the
+  repository publishes but cannot know project names, so the scan stays
+  required.
+- The merge method keeps every commit of a PR, so a detail one commit adds
+  and a later commit removes is still published: rewrite the commit that
+  added it. `tools/release.py check-pr` reads every commit message and added
+  line of the PR and refuses a home-directory path. Keep the names no generic
+  check can know, one per line, in a local file outside the repository, and
+  name it in `AGENT_MARKETPLACE_PRIVATE_TERMS_FILE`; check-pr then refuses
+  those terms too, in the PR text passed with `--pr-text` as well, and prints
+  only each hit's kind and position. Run it before every push.
+
 ## Flow A: manually selected issue to approval-ready PR
 
 ```text
@@ -273,12 +298,14 @@ approval unless scope becomes ambiguous or a gate fails:
    ancestor of the observed `main` at initial staging. A later `main` advance
    does not invalidate that already-verified release; the release commit
    remains an ancestor of `main`.
-7. Verify the GitHub Release is published, not a draft or prerelease, and
-   immutable: `gh release view vX.Y.Z --json isDraft,isPrerelease,isImmutable`
-   must report `isDraft` and `isPrerelease` false and `isImmutable` true. Require
-   the tag and `origin/stable` to resolve to the same commit, and require that
-   commit to be an ancestor of `origin/main`. Audit issue states and remote
-   refs before cleanup.
+7. Verify the GitHub Release is published, not a draft or prerelease,
+   immutable and titled with its tag alone:
+   `gh release view vX.Y.Z --json name,isDraft,isPrerelease,isImmutable`
+   must report the `name` `vX.Y.Z`, `isDraft` and `isPrerelease` false and
+   `isImmutable` true. Publication refuses to adopt a Release with any other
+   title. Require the tag and `origin/stable` to resolve to the same commit,
+   and require that commit to be an ancestor of `origin/main`. Audit issue
+   states and remote refs before cleanup.
 8. Delete only explicitly selected feature branches that are proven ancestors
    of `origin/main`. Align local `main` with `origin/main` and local `stable`
    with `origin/stable`, prune tracking refs, switch to `main`, and require an
@@ -303,7 +330,138 @@ local protected branches, and any selected branch not proven merged into
 
 If an invariant fails, stop at the current recoverable state and report the
 exact gate. Never repair a release by moving an existing tag, force-pushing
-`main` or `stable`, deleting an unmerged branch, or bypassing CI.
+`main` or `stable`, deleting an unmerged branch other than an abandoned
+`release/stable`, or bypassing CI.
+
+A release PR whose checks fail is abandoned, never patched: its head must stay
+one deterministic preparation commit. With the maintainer's decision to fix
+first, close the release PR, land the fix through an ordinary PR, then remove
+remote `release/stable` with an exact lease on the prepared commit, the
+closed release PR's head, and dispatch `Prepare stable release` again on the
+new `main`:
+
+```console
+git push --force-with-lease=refs/heads/release/stable:<prepared-sha> \
+  origin :refs/heads/release/stable
+```
+
+Removing it loses no work, because preparation replays it deterministically;
+preparation itself removes the branch the same way when `main` races.
+
+## One-time release reset
+
+The owner decided once to restart stable numbering: every published Release,
+its version tag and the `stable` branch are deleted, and the next release is
+`v0.0.1` again, published through the first-stable-baseline (bootstrap) path
+of `Prepare stable release`. It is not a recurring flow, and only the owner
+starts it. It can happen only once: the new `v0.0.1` is immutable, and GitHub
+never lets the tag name of a deleted immutable Release be used again.
+
+### The reset pull request
+
+One commit on an ordinary pull request makes the whole reset:
+
+- it adds `.release/reset.json` with `schema_version` 1, the `reason`, the
+  `date` (`YYYY-MM-DD`) and `retired_versions`, every release of the base
+  `CHANGELOG.md` in order;
+- it sets the marketplace and every plugin in `versions.json` to `0.0.1` and
+  updates every version surface with `python3 tools/release.py sync --write`
+  and `python3 tools/build_distributions.py`;
+- it deletes `.release/stable.json` and every `.changes/*.json`;
+- it replaces `CHANGELOG.md` with the bootstrap note alone, the same note the
+  `v0.0.1` Release carries.
+
+The marker selects the reset mode of `tools/release.py check-pr`. That mode
+accepts only the complete state above, which is the state the bootstrap path
+accepts, and refuses every partial or mixed variant: a version or version
+surface left behind, a kept or added changeset, kept or rewritten stable
+metadata, any other `CHANGELOG.md`, a plugin registry change, a marker whose
+list differs from the base `CHANGELOG.md`, and a base without a published
+stable release. The old history is not archived: a line in any other file
+that repeats a retired `CHANGELOG.md` entry is refused. A pull request may
+only add the marker. Editing, renaming or deleting it later is refused, and
+every pull request that leaves it unchanged follows the normal changeset
+rules.
+
+`check-pr` runs the pull request's own tools from its merge commit, so the
+reset needs no earlier pull request to install the mode. The merge queue's
+release gate runs the base's tools and refuses any change of the attested
+release other than a `release/stable` merge, so merge the reset pull request
+while `main` does not require the merge queue.
+
+### Owner commands, in order
+
+The owner runs these with their own credentials from a clean, up-to-date
+`main` checkout, after the reset pull request merged and the validation of
+the new `main` passed. Each step starts only after the previous one
+succeeded.
+
+1. Confirm that no retired Release is immutable. GitHub keeps the tag name of
+   a deleted immutable Release unusable, which would block `v0.0.1`:
+
+   ```console
+   gh api --paginate 'repos/{owner}/{repo}/releases' --jq '.[] | "\(.tag_name) \(.immutable)"'
+   ```
+
+   Every line must end in `false`.
+2. Read the retired versions from the marker and record the remote refs:
+
+   ```console
+   retired="$(python3 -c 'import json; print(" ".join(json.load(open(".release/reset.json"))["retired_versions"]))')"
+   git ls-remote origin refs/heads/stable refs/heads/release/stable 'refs/tags/v*'
+   ```
+
+   `stable` must resolve to the commit of the last retired tag, its `^{}`
+   line.
+3. Delete the GitHub Releases. Their tags stay for the next step:
+
+   ```console
+   for version in $retired; do gh release delete "v$version" --yes; done
+   ```
+
+4. Delete every retired tag with an exact lease on the tag object it names:
+
+   ```console
+   for version in $retired; do
+     ref="refs/tags/v$version"
+     object="$(git ls-remote origin "$ref" | awk -v ref="$ref" '$2 == ref {print $1}')"
+     git push --force-with-lease="refs/tags/v$version:$object" origin ":$ref"
+   done
+   ```
+
+5. If step 2 listed `release/stable`, an abandoned release candidate, delete
+   it with an exact lease on the head step 2 printed:
+
+   ```console
+   git push --force-with-lease=refs/heads/release/stable:<release-stable-sha> \
+     origin :refs/heads/release/stable
+   ```
+
+6. Delete `stable` with an exact lease on the head step 2 printed. The public
+   `stable` channel then does not exist until the bootstrap of step 7 stages
+   the new one, after its source validation and host gates pass, so run
+   steps 6 and 7 back to back:
+
+   ```console
+   git push --force-with-lease=refs/heads/stable:<stable-sha> \
+     origin :refs/heads/stable
+   ```
+
+7. Confirm that no retired ref is left, drop every local tag the remote no
+   longer has, the old local `v0.0.1` included, and start the bootstrap:
+
+   ```console
+   git ls-remote origin refs/heads/stable refs/heads/release/stable 'refs/tags/v*'
+   git fetch origin --prune --prune-tags
+   gh workflow run prepare-stable-release.yml --ref main
+   ```
+
+   The first command must print nothing: the bootstrap refuses to run while
+   any version tag exists without `stable`.
+8. When `Prepare stable release` finishes, verify the Release and clean up as
+   Flow B steps 7 and 8 describe, with
+   `python3 tools/release.py finalize-local --version 0.0.1 --apply` and a
+   `--branch` for each merged branch to delete.
 
 ## Model catalog bump
 
@@ -342,18 +500,21 @@ DRIFT_REPORT
    use.
 2. Exit 0 means every pin is current. Exit 1 reports a pinned ID the host no
    longer lists, a newer model of a pinned family or changed effort support,
-   per class with its tiers and roles. Exit 3 means a registered host had no
-   catalog: `--subset` checks only the named hosts, and the unchecked ones are
-   named on stderr and in the issue.
+   per pinned model with its tiers and roles. Exit 3 means a registered host
+   had no catalog: `--subset` checks only the named hosts, and the unchecked
+   ones are named on stderr and in the issue.
 3. On drift, `--issue-body` renders the upstream issue: the finding in plain
-   words, the catalog bump diff, the frozen-task A/B and the approval steps.
-   The maintainer files it. A pinned model that is gone without a successor
-   waits for the owner's decision instead of a bump.
-4. Flow A turns the issue into the pull request: the catalog change with each
-   new ID's efforts, `min_cli_version` and sources confirmed on the official
-   pages, `tools/data/host-cli-versions.json` raised to any newer minimum, the
-   regenerated `dist/`, a `minor` changeset and the A/B results. Quality on
-   the frozen tasks decides the bump; speed is reported beside it.
+   words, the bump diff of the catalog and of every tier that names the moved
+   model, the frozen-task A/B and the approval steps. The maintainer files
+   it. A pinned model that is gone without a successor waits for the owner's
+   decision instead of a bump.
+4. Flow A turns the issue into the pull request: the catalog change, keyed by
+   each new ID with its efforts, `min_cli_version` and sources confirmed on
+   the official pages, every `execution-profiles.json` tier on the old ID
+   moved to the new one, `tools/data/host-cli-versions.json` raised to any
+   newer minimum, the regenerated `dist/`, a `minor` changeset and the A/B
+   results. Quality on the frozen tasks decides the bump; speed is reported
+   beside it.
 5. The owner approves the merge in `AWAIT_MERGE_APPROVAL`, and the release
    follows Flow B.
 

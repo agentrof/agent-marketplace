@@ -1,0 +1,6 @@
+{
+  "summary": "At process switch `pre_handoff_regression` value `touched_suites`, every pre-handoff regression run of a Delivery Item reaches its durable evidence. Each `freeze` carries every run of the Item so far, failed runs included, into the new session as `pre_handoff_history`: the history the previous session carried and each run of the Item's runtime record it does not hold yet, by evidence hash, so a second freeze of the same tree counts no run twice and a runtime record moved aside loses no run a freeze already carried. `approve-item-evidence` records that history, with any later run, in the Item's verification record under `Implementation Evidence`, one row per run with its candidate tree, kind, result, exit code, wall clock in seconds and the earlier stories it ran, as it records the code review panel passes. Until then the runs exist only in the Item's verification runtime, in its session and its run record, so clearing that runtime before `approve-item-evidence` loses them. At `off`, the default, the verification record is approved as before, with no such block.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -297,6 +297,67 @@ class CITestPlannerTests(unittest.TestCase):
                     self.assertEqual(ci_tests.run_shard(self.root, plan, "local", 0, path), 1)
                 self.assertEqual(ci_tests.read_json(path)["status"], "failed")
 
+    @unittest.skipIf(os.name != "posix", "the stand-in host binaries are POSIX shell scripts")
+    def test_a_test_that_reaches_a_host_binary_through_the_runner_environment_fails(self):
+        # The session that runs the suite names its own Claude Code and Codex
+        # binaries; a project generator follows those names unless the test
+        # pins fakes of its own.
+        own = Path(tempfile.mkdtemp(prefix="ci-own-hosts-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(own, ignore_errors=True))
+        log = own / "calls.log"
+        for name in ("claude", "codex"):
+            (own / name).write_text(f"#!/bin/sh\necho {name} \"$@\" >> {log}\nexit 0\n",
+                                    encoding="utf-8")
+            (own / name).chmod(0o755)
+        probe = ("    def test_alpha(self):\n"
+                 "        subprocess.run([os.environ['CLAUDE_CODE_EXECPATH'], '--version'],"
+                 " capture_output=True)\n"
+                 "        subprocess.run([os.environ['CODEX_CLI_PATH'], 'debug', 'models'],"
+                 " capture_output=True)\n")
+        pinned = ("    def test_beta(self):\n"
+                  "        with tempfile.TemporaryDirectory() as raw:\n"
+                  "            fake = pathlib.Path(raw) / 'claude'\n"
+                  "            fake.write_text('#!/bin/sh\\necho 9.9.9\\n')\n"
+                  "            fake.chmod(0o755)\n"
+                  "            env = dict(os.environ, CLAUDE_CODE_EXECPATH=str(fake))\n"
+                  "            subprocess.run([env['CLAUDE_CODE_EXECPATH'], '--version'], env=env,"
+                  " capture_output=True, check=True)\n")
+        header = "import os, pathlib, subprocess, tempfile, unittest\nclass Tests(unittest.TestCase):\n"
+        teardown = ("    @classmethod\n    def tearDownClass(cls):\n"
+                    "        subprocess.run([os.environ['CLAUDE_CODE_EXECPATH'], '--version'],"
+                    " capture_output=True)\n")
+        developer = {"CLAUDE_CODE_EXECPATH": str(own / "claude"),
+                     "CODEX_CLI_PATH": str(own / "codex"), "CLAUDE_PID": "4242"}
+        self.policy["lanes"]["local"]["shards"] = 1
+        self.save_policy()
+        for name, text in (("a test", header + probe + pinned),
+                           ("a class fixture", header + teardown + "    def test_alpha(self): pass\n")):
+            with self.subTest(case=name), mock.patch.dict(os.environ, developer):
+                sys.modules.pop(self.module, None)
+                self.test_file.write_text(text, encoding="utf-8")
+                plan = self.plan()
+                path = self.root / "report.json"
+                with mock.patch("sys.stderr", io.StringIO()):
+                    self.assertEqual(ci_tests.run_shard(self.root, plan, "local", 0, path), 1)
+                report = ci_tests.read_json(path)
+                self.assertEqual(report["status"], "failed")
+                rows = {row["id"].rsplit(".", 1)[-1]: row for row in report["tests"]}
+                if name == "a test":
+                    self.assertEqual(rows["test_alpha"]["outcome"], "failure")
+                    detail = rows["test_alpha"]["detail"]
+                    self.assertIn("claude --version", detail)
+                    self.assertIn("codex debug models", detail)
+                    self.assertIn("fixtures.isolated_hosts", detail)
+                    self.assertEqual(rows["test_beta"]["outcome"], "success")
+                else:
+                    self.assertEqual(rows["test_alpha"]["outcome"], "success")
+                    self.assertIn("claude --version", report["error"])
+                # The developer's binaries never ran, and the runner left the
+                # environment as it found it.
+                self.assertFalse(log.exists())
+                for key, value in developer.items():
+                    self.assertEqual(os.environ.get(key), value)
+
     def test_known_runtime_and_regression_changes_select_dependency_closure(self):
         policy = ci_tests.policy_at(ci_tests.ROOT)
         ids, _hash = ci_tests.inventory(ci_tests.ROOT)

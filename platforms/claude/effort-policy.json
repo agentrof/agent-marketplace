@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "confirm": {
+    "max": {
+      "evidence": "On Anthropic's own charts Opus 5.5 at max scores at most 1.8 points above high on Terminal-Bench 4.0, FrontierCode and CursorBench for 2.9 to 5.7 times the cost per task; Sonnet 5.5 at max scores 46.2% on FrontierCode against 52.1% at xhigh for 13 times the cost and more often splits a review across subagents of its own; in Anthropic's effort post one build took 79 minutes at max against 33 at high.",
+      "sources": [
+        "https://www.anthropic.com/claude-opus-5-5",
+        "https://www.anthropic.com/claude-sonnet-5-5",
+        "https://claude.dev/blog/spending-your-effort/"
+      ],
+      "verified": "2026-10-01"
+    }
+  },
+  "refuse": {}
+}

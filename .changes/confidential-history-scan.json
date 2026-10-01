@@ -1,0 +1,4 @@
+{
+  "summary": "Repository checks keep consumer details out of public text. `tools/validate.py` refuses an absolute home-directory path in every file the repository publishes, `dist/` and `memory/` included, in the forms hosts print: `/Users/<name>`, `/home/<name>` and `C:\\Users\\<name>`, under a WSL, Cygwin or Git Bash drive segment too, and the folder forms a Claude Code project encodes one as; the homes of system and service accounts such as the Actions runner pass. `tools/release.py check-pr` reads every commit message and added line of a pull request, not only its final tree, because the merge method keeps every commit, and refuses such a path there. With `AGENT_MARKETPLACE_PRIVATE_TERMS_FILE` naming a local file of private terms kept outside the repository, it also refuses those terms there and in the PR text passed with `--pr-text`, printing only each hit's kind and position.",
+  "components": {}
+}

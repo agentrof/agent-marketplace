@@ -606,10 +606,35 @@ class PromotionRuleTests(unittest.TestCase):
         self.assertIn("5 epic review passes", units.pop("review_manifest_scope"))
         self.assertIn("5 panel review passes", units.pop("review_panels"))
         self.assertIn("5 reviewed documents", units.pop("review_loop"))
+        # #347 states the code review panel's unit as its measurement criterion.
+        self.assertIn("5 code-review passes", units.pop("code_review_panel"))
         for name, unit in units.items():
             with self.subTest(switch=name):
                 self.assertIn("3", unit)
                 self.assertRegex(unit, "Deliveries")
+
+
+class MeasuredBaselineTests(unittest.TestCase):
+    """The registry ships to every user, so a baseline measured in a project is
+    retold anonymously and never names that project's Deliveries or stories (#357)."""
+
+    def test_a_measured_baseline_is_retold_as_one_measured_project(self):
+        switches = json.loads((TEAM / process_policy.REGISTRY).read_text(
+            encoding="utf-8"))["switches"]
+        cited = []
+        for name, spec in sorted(switches.items()):
+            for text in [value["tradeoffs"] for value in spec["values"]] \
+                    + [spec["promotion"]["threshold"]]:
+                with self.subTest(switch=name, text=text[:40]):
+                    self.assertNotRegex(text, r"\b(?:DLV|ST|REQ)-\d")
+            default = next(value for value in spec["values"] if value["id"] == spec["default"])
+            _behaviour, colon, evidence = default["tradeoffs"].partition("measured against:")
+            if colon:
+                cited.append(name)
+                with self.subTest(switch=name):
+                    self.assertTrue(evidence.startswith(" in one measured project"), evidence)
+        self.assertEqual(cited, ["code_review_panel", "delivery_path", "execution_planning",
+                                 "owner_gates", "pre_handoff_regression"])
 
 
 if __name__ == "__main__":

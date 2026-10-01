@@ -1,6 +1,6 @@
 ---
 name: design-system-reviewer-lens
-description: Read-only challenger for the approved Design System package. Lens-tier reader variant for review panels.
+description: Read-only challenger for the approved Design System package. Lens reader variant for review panels.
 model: claude-sonnet-5-5
 effort: high
 output_contract: prose

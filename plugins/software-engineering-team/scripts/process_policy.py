@@ -899,8 +899,17 @@ def switches(args) -> int:
             }
     policy = None if state is None else {key: state.get(key) for key in
                                          ("path", "status", "revision", "source_hash")}
-    return emit({"ok": not errors, "policy": policy, "switches": listed, "errors": errors},
-                1 if errors else 0)
+    result = {"ok": not errors, "policy": policy, "switches": listed, "errors": errors}
+    # A row this package no longer declares is repaired with set --default.
+    undeclared = {
+        "switches": sorted(switch for switch in rows if switch not in registry),
+        "parameters": [{"switch": switch, "parameter": parameter}
+                       for switch, named in sorted(set_parameters.items())
+                       for parameter in sorted(named)
+                       if parameter not in registry.get(switch, {}).get("parameters", {}).get("ids", {})]}
+    if undeclared["switches"] or undeclared["parameters"]:
+        result["undeclared"] = undeclared
+    return emit(result, 1 if errors else 0)
 
 
 def main(argv: list[str] | None = None) -> int:

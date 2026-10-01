@@ -842,8 +842,9 @@ class DeliveryCompilerTests(unittest.TestCase):
         other switch read is (rr-seams-06)."""
         self.approve_verification_contract()
         self.approve_dod()
-        for argv in (("init",), ("set", "--switch", "owner_gates", "--value", "two_fixed_gates"), ("approve",)):
-            self.policy(*argv)
+        self.policy("init")
+        self.policy("set", "--switch", "owner_gates", "--value", "two_fixed_gates")
+        self.policy("approve")
         init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
                                       "goal": "Authenticate", "outcome": None,
                                       "target_branch": "main", "story": ["AUTH-01"]})

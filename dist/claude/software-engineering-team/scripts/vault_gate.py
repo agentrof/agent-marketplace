@@ -105,6 +105,20 @@ def packaged_closure(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return tuple(sorted(included)), tuple(data)
 
 
+def root_folders(root: Path) -> tuple[str, ...]:
+    """Return every folder directly under a DATA_ROOTS directory.
+
+    The archive lists each one, so a script that lists a data root sees the
+    package's folders, as landscape_check does to resolve the installed
+    method skills. A listed folder holds only the files the closure bundles.
+    """
+    return tuple(sorted(
+        f"{name}/{child.name}"
+        for name in DATA_ROOTS if (root / name).is_dir()
+        for child in (root / name).iterdir() if child.is_dir()
+    ))
+
+
 def run(command: list[str], name: str) -> dict:
     completed = subprocess.run(
         command, capture_output=True, text=True, check=False, timeout=300)
@@ -354,6 +368,12 @@ def cmd_install(args) -> int:
             with zipfile.ZipFile(
                 temporary_zip, "w", zipfile.ZIP_DEFLATED
             ) as archive:
+                for folder in root_folders(root):
+                    info = zipfile.ZipInfo(f"{folder}/")
+                    info.date_time = (1980, 1, 1, 0, 0, 0)
+                    # 0x10 is the MS-DOS directory attribute.
+                    info.external_attr = (0o40755 << 16) | 0x10
+                    archive.writestr(info, b"")
                 for path in sorted(staging.rglob("*")):
                     if path.is_file():
                         info = zipfile.ZipInfo(path.relative_to(staging).as_posix())

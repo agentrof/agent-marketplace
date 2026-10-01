@@ -375,7 +375,11 @@ class LifecycleTests(unittest.TestCase):
         code, out, _err = self.p.run_verb("check", now=NOW + timedelta(minutes=30))
         self.assertEqual(code, 0)
         self.assertIn(f"autopilot: active {grant['id']} until {grant['expires_at']}", out)
-        self.assertIn("allowed classes: choice, approval_gate\n", out)
+        described = {entry["id"]: entry["description"] for entry in POLICY["classes"]}
+        self.assertIn("allowed classes:\n"
+                      f"- choice: {described['choice']}\n"
+                      f"- approval_gate: {described['approval_gate']}\n", out)
+        self.assertNotIn("- merge:", out)
         code, out, _err = self.p.run_verb("check", now=NOW + timedelta(hours=2))
         self.assertEqual(code, 1)
         self.assertIn(f"autopilot: expired {grant['id']} at {grant['expires_at']}", out)
@@ -392,7 +396,7 @@ class LifecycleTests(unittest.TestCase):
         decision = self.p.events()[-1]
         self.assertEqual(decision, {
             "time": stamp(NOW + timedelta(minutes=1)), "grant": self.p.grant()["id"],
-            "event": "decision", "class": "choice", "question": "Which cache root?",
+            "event": "decision", "classes": ["choice"], "question": "Which cache root?",
             "options": ["One per checkout", "One per Item"], "choice": "One per checkout",
             "reason": "the recommended option",
             "target": "workspace/docs/delivery/deliveries/dlv-002-night/delivery.md"
@@ -412,12 +416,39 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("queued question 1", out)
         entry = self.p.events()[-1]
-        self.assertEqual((entry["event"], entry["class"], entry["options"], entry["recommendation"],
-                          entry["blocks"], entry["time"]),
-                         ("queued", "release", ["Publish", "Hold"], "Hold", "release notes",
+        self.assertEqual((entry["event"], entry["classes"], entry["options"],
+                          entry["recommendation"], entry["blocks"], entry["time"]),
+                         ("queued", ["release"], ["Publish", "Hold"], "Hold", "release notes",
                           stamp(NOW + timedelta(minutes=2))))
-        code, _out, err = self.queue("choice")
-        self.assertIn("class 'choice' is allowed by grant", err)
+        # Doubt queues a question, so an allowed class is queued too and said to be.
+        code, out, err = self.queue("choice")
+        self.assertEqual(code, 0, err)
+        self.assertIn("in doubt", out)
+
+    def test_record_takes_every_class_a_decision_touches_and_refuses_one_not_allowed(self):
+        self.p.run_verb("on")
+        cases = ((["approval_gate", "security_settings"], "class 'security_settings' is never"),
+                 (["approval_gate", "phase_start"], "class 'phase_start' is not allowed by grant"))
+        for classes, fragment in cases:
+            with self.subTest(classes=classes):
+                argv = ["record", *(item for name in classes for item in ("--class", name)),
+                        "--question", "Approve gate A, which starts DLV-003?", "--choice", "Approve",
+                        "--reason", "r", "--target", "t"]
+                code, _out, err = self.p.run_verb(*argv)
+                self.assertEqual(code, 1)
+                self.assertIn(fragment, err)
+        code, _out, err = self.p.run_verb("record", "--class", "approval_gate", "--class", "merge",
+                                          "--question", "Approve gate B and merge?",
+                                          "--choice", "Approve", "--reason", "r", "--target", "t")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.p.events()[-1]["classes"], ["approval_gate", "merge"])
+        self.assertIn("decision [approval_gate, merge] Approve gate B and merge?",
+                      self.p.run_verb("report")[1])
+        self.p.run_verb("on", "--allow", "phase_start")
+        code, _out, err = self.p.run_verb("record", "--class", "approval_gate", "--class",
+                                          "phase_start", "--question", "Approve gate A?",
+                                          "--choice", "Approve", "--reason", "r", "--target", "t")
+        self.assertEqual(code, 0, err)
 
     def test_off_revokes_the_grant_prints_the_report_and_check_is_inactive(self):
         self.p.run_verb("on")
@@ -461,8 +492,9 @@ class LifecycleTests(unittest.TestCase):
         code, out, err = self.p.run_verb("report", "--json", now=NOW + timedelta(minutes=4))
         self.assertEqual(code, 0, err)
         report = json.loads(out)
-        self.assertEqual([(entry["event"], entry["class"]) for entry in report["entries"]],
-                         [("queued", "release"), ("decision", "choice"), ("queued", "phase_start")])
+        self.assertEqual([(entry["event"], entry["classes"]) for entry in report["entries"]],
+                         [("queued", ["release"]), ("decision", ["choice"]),
+                          ("queued", ["phase_start"])])
         times = [entry["time"] for entry in report["entries"]]
         self.assertEqual(times, sorted(times))
         code, out, _err = self.p.run_verb("report")
@@ -990,7 +1022,12 @@ class DistributionTests(unittest.TestCase):
                 self.assertEqual((output["hookEventName"], output["permissionDecision"]),
                                  ("PreToolUse", "deny"))
                 reason = output["permissionDecisionReason"]
-                for fragment in (grant["id"], grant["expires_at"], ", ".join(grant["classes"]),
+                for fragment in (grant["id"], grant["expires_at"],
+                                 *(f"{entry['id']} ({entry['description']})"
+                                   for entry in POLICY["classes"]
+                                   if entry["id"] in grant["classes"]),
+                                 "by every effect of its recommended option",
+                                 "--class once per class it touches", "doubt queues it",
                                  "take the recommended option", " check`", " record`",
                                  "governing document", " queue`", "Do not ask the user",
                                  "if it exits 1, ask the user as usual",
@@ -1049,6 +1086,19 @@ class ContractTests(unittest.TestCase):
                 self.assertIn("when it exits 1, ask the user as usual", section)
         skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
         self.assertIn("recorded with `record` before it is applied", skill)
+
+    def test_the_procedure_classifies_a_question_by_every_effect(self):
+        rule = ("classify the question by every effect of its recommended option: any never"
+                " effect makes it never, an excluded effect the grant does not allow queues it,"
+                " and doubt queues it")
+        for host in ("claude", "codex"):
+            with self.subTest(host=host):
+                text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
+                                 / "host-contract.md").read_text(encoding="utf-8").split())
+                self.assertIn(rule, text.split("## Autopilot", 1)[1].lower())
+                self.assertIn("--class` once per class it touches", text)
+        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split()).lower()
+        self.assertIn(rule, skill)
 
     def test_the_entry_skill_states_that_only_the_user_arms_a_grant(self):
         text = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())

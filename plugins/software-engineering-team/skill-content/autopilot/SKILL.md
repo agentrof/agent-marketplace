@@ -44,7 +44,11 @@ names, followed by one verb:
 
 Each class is `allowed` or `excluded` by default, or `never`, which no grant
 can allow. The classes, goal kinds, default duration, default goal cap and
-maximum duration are data in `data/autopilot-policy.json`.
+maximum duration are data in `data/autopilot-policy.json`. Under a grant,
+classify the question by every effect of its recommended option: any never
+effect makes it never, an excluded effect the grant does not allow queues it,
+and doubt queues it. `record` takes `--class` once per class a decision
+touches and refuses when one of them is not allowed.
 
 ## Only the user arms a grant
 

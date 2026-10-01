@@ -41,7 +41,7 @@ names, followed by one verb:
 - `on --allow release,phase_start` adds excluded classes; `on --deny merge`
   drops a default one. `on` while a grant is active replaces it.
 - `status`: the remaining time, the goal and its current state, the classes,
-  the counts and the guards this host runs.
+  the counts and the guards this package declares.
 - `complete --evidence "<what shows the goal is reached>"`: ends the grant.
 - `off`: revokes the grant and prints the report. `report`: the report alone.
 

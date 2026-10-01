@@ -40,6 +40,8 @@ if str(SCRIPTS) not in sys.path:
 
 POLICY = ENTRY / "data" / "autopilot-policy.json"
 HOOKS = PACKAGE / "hooks" / "hooks.json"
+# The build writes this provenance file into every host package it makes.
+MANIFEST = PACKAGE / ".agent-marketplace-package.json"
 GRANT = "grant.json"
 ARMING = "arming.json"
 LEDGER = "ledger.jsonl"
@@ -80,12 +82,18 @@ def load_policy() -> dict:
     return json.loads(POLICY.read_text(encoding="utf-8"))
 
 
-def hook_commands() -> list[str]:
-    """Every command line the installed package declares for its hooks."""
+def hook_commands() -> list[str] | None:
+    """Every command line the installed package declares for its hooks, None when unreadable.
+
+    A source tree has no hooks file and declares none. A built package always
+    ships one, so a missing or torn file there reads as None.
+    """
     try:
         data = json.loads(HOOKS.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None if MANIFEST.is_file() else []
     except (OSError, ValueError):
-        return []
+        return None
     found: list[str] = []
 
     def walk(node) -> None:
@@ -106,7 +114,26 @@ def hook_commands() -> list[str]:
 
 
 def declares_hook(verb: str) -> bool:
-    return any(f"autopilot.py hook {verb}" in command for command in hook_commands())
+    return any(f"autopilot.py hook {verb}" in command for command in hook_commands() or [])
+
+
+def package_guard() -> tuple[str | None, str]:
+    """How this package arms a grant, or None and why it can arm none.
+
+    A built package arms only through its declared user-prompt hook; one that
+    cannot show that hook fails closed. Only a source tree without hooks falls
+    back to the entry's user-only invocation.
+    """
+    commands = hook_commands()
+    if commands is None:
+        problem = "hooks/hooks.json is missing" if not HOOKS.exists() \
+            else "hooks/hooks.json cannot be read"
+        return None, f"{problem} in this built package"
+    if any("autopilot.py hook user-prompt" in command for command in commands):
+        return "user_prompt_hook", ""
+    if MANIFEST.is_file():
+        return None, "this built package declares no arming hook in hooks/hooks.json"
+    return "user_only_entry", ""
 
 
 # ---------------------------------------------------------------------------
@@ -210,11 +237,45 @@ def log(directory: Path, now: datetime, grant: dict, event: str, **fields) -> No
     append_private(directory / LEDGER, {"time": stamp(now), "grant": grant["id"], "event": event, **fields})
 
 
+def inactive_reason(grant: dict | None, now: datetime) -> str | None:
+    """Why a grant gives no authority here, or None while it is active.
+
+    Besides its state and time, a grant this package could not have armed is
+    inactive: one armed under another guard, one longer than the maximum or
+    one that holds a never class.
+    """
+    if not grant:
+        return "no grant"
+    if not isinstance(grant, dict):
+        return "grant.json is not an object"
+    problem = grant_problem(grant)
+    if problem:
+        return problem
+    if grant["state"] != "active":
+        return f"{grant['state']} at {grant.get('ended_at')}"
+    expires = parse_stamp(grant["expires_at"])
+    if now >= expires:
+        return f"expired at {grant['expires_at']}"
+    guard, problem = package_guard()
+    if guard is None:
+        return f"{problem}, so it honours no grant"
+    armed = grant["armed_by"].get("guard")
+    if armed != guard:
+        return f"armed by {armed}, but this package arms through {guard}"
+    policy = load_policy()
+    length = expires - parse_stamp(grant["granted_at"])
+    if length > timedelta(hours=policy["max_duration_hours"]):
+        return (f"runs {span(length)} from granted_at, longer than the"
+                f" {policy['max_duration_hours']} h maximum")
+    never = {entry["id"] for entry in policy["classes"] if entry["default"] == "never"}
+    held = [name for name in grant["classes"] if name in never]
+    if held:
+        return f"holds never class {held[0]!r}"
+    return None
+
+
 def is_active(grant: dict | None, now: datetime) -> bool:
-    try:
-        return bool(grant) and grant.get("state") == "active" and now < parse_stamp(grant["expires_at"])
-    except (KeyError, TypeError, ValueError):
-        return False
+    return inactive_reason(grant, now) is None
 
 
 def end_grant(directory: Path, now: datetime, grant: dict, state: str, ended_at: datetime,
@@ -546,7 +607,8 @@ def report_lines(payload: dict) -> list[str]:
 
 
 def guards() -> dict:
-    return {"arming": "user_prompt_hook" if declares_hook("user-prompt") else "user_only_entry",
+    guard, problem = package_guard()
+    return {"arming": guard or f"none ({problem})",
             "question_guard": "hook" if declares_hook("pre-question") else "instructions"}
 
 
@@ -559,7 +621,10 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
     project = Path(args.project_root)
     policy = load_policy()
     directory = state_dir(project)
-    if declares_hook("user-prompt"):
+    guard, problem = package_guard()
+    if guard is None:
+        raise Refusal(f"{problem}; on refuses until the package is repaired or reinstalled")
+    if guard == "user_prompt_hook":
         if options_given(args):
             raise Refusal("this host arms a grant from the entry command you type; run `on`"
                           " without options and it takes them from your typed command")
@@ -596,9 +661,13 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
                  "id": f"AP-{now.astimezone(timezone.utc):%Y%m%dT%H%M%SZ}-{secrets.token_hex(2)}",
                  "host": host, "state": "active", "granted_at": stamp(now), **terms,
                  "armed_by": armed_by, "replaces": None}
-        if is_active(previous, now):
+        reason = inactive_reason(previous, now)
+        if previous and reason is None:
             grant["replaces"] = previous["id"]
             end_grant(directory, now, previous, "replaced", now, replaced_by=grant["id"])
+        elif previous and previous.get("state") == "active":
+            # A grant this package could not have armed is set aside, never chained.
+            log(directory, now, previous, "set_aside", reason=reason)
         write_private(directory / GRANT, grant)
         log(directory, now, grant, "granted", expires_at=grant["expires_at"], goal=grant["goal"],
             classes=grant["classes"], armed_by=armed_by, replaces=grant["replaces"])
@@ -620,7 +689,7 @@ def settle(directory: Path, project: Path, now: datetime) -> tuple[dict | None, 
         return None, None
     with locked(directory):
         grant = current(directory, now)
-        if grant is None or grant.get("state") != "active" or not grant.get("goal"):
+        if not grant or not grant.get("goal") or inactive_reason(grant, now) is not None:
             return grant, None
         read = read_goal(project, grant["goal"])
         if read is not None and read["terminal"]:
@@ -648,6 +717,10 @@ def cmd_check(args: argparse.Namespace, now: datetime) -> int:
     if grant.get("state") != "active":
         print(ended_line(grant))
         return 1
+    reason = inactive_reason(grant, now)
+    if reason:
+        print(f"autopilot: inactive {grant['id']}: {reason}")
+        return 1
     print("\n".join(summary(grant, now, read)))
     return 0
 
@@ -657,22 +730,24 @@ def cmd_status(args: argparse.Namespace, now: datetime) -> int:
     directory = state_dir(project)
     coverage = guards()
     grant, read = settle(directory, project, now)
-    problem = None
     counts = report_payload(directory, grant)["counts"] if grant else {"decisions": 0, "queued": 0}
-    active = is_active(grant, now)
+    reason = inactive_reason(grant, now)
+    active = reason is None
     if args.json:
         result = {"active": active, "grant": grant, "goal_read": read, "counts": counts,
                   "remaining_minutes": int((parse_stamp(grant["expires_at"]) - now).total_seconds()
                                            // 60) if active else 0,
-                  "problem": problem, **coverage}
+                  "inactive_reason": reason, **coverage}
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     if grant is None:
-        lines = ["autopilot: inactive" + (f" ({problem})" if problem else "")]
+        lines = ["autopilot: inactive"]
     elif active:
         lines = summary(grant, now, read)
-    else:
+    elif grant.get("state") != "active":
         lines = [ended_line(grant)]
+    else:
+        lines = [f"autopilot: inactive {grant['id']}: {reason}"]
     if grant:
         lines.append(f"decisions: {counts['decisions']}, queued: {counts['queued']}")
     lines.append(f"arming: {coverage['arming']}; question guard: {coverage['question_guard']}")
@@ -688,8 +763,9 @@ def require_state(directory: Path, what: str) -> None:
 
 def active_grant(directory: Path, now: datetime) -> dict:
     grant = current(directory, now)
-    if not is_active(grant, now):
-        raise Refusal("no active grant" + (f"; {grant['id']} is {grant.get('state')}" if grant else ""))
+    reason = inactive_reason(grant, now)
+    if reason:
+        raise Refusal("no active grant" + (f"; {grant['id']} is inactive: {reason}" if grant else ""))
     return grant
 
 

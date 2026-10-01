@@ -548,6 +548,69 @@ class BrokenGrantTests(unittest.TestCase):
         self.assertEqual(self.p.run_verb("on")[0], 0)
 
 
+class FailClosedTests(unittest.TestCase):
+    """A package that cannot show its arming hook, or a grant it could not have armed, grants nothing."""
+
+    def setUp(self) -> None:
+        self.p = Project(self, armed=True)
+
+    def forge(self, **fields) -> dict:
+        grant = {"schema_version": 1, "id": "AP-20261001T210000Z-f0f0", "host": "fixture",
+                 "state": "active", "granted_at": stamp(NOW),
+                 "expires_at": stamp(NOW + timedelta(hours=2)), "goal": None,
+                 "classes": ["choice", "release"],
+                 "armed_by": {"guard": "user_prompt_hook", "arguments": "on --for 2h",
+                              "session_id": "session-1"},
+                 "replaces": None, **fields}
+        self.p.state.mkdir(parents=True, exist_ok=True)
+        (self.p.state / "grant.json").write_text(json.dumps(grant), encoding="utf-8")
+        return grant
+
+    def test_a_built_package_whose_arming_hook_cannot_be_read_refuses_on(self):
+        with tempfile.TemporaryDirectory() as raw:
+            manifest = Path(raw) / ".agent-marketplace-package.json"
+            manifest.write_text("{}\n", encoding="utf-8")
+            cases = (('{"hooks": {"UserPromptSubmit": [{"hooks": [', "cannot be read"),
+                     (json.dumps({"hooks": {"SessionStart": []}}), "declares no arming hook"))
+            with mock.patch.object(autopilot, "MANIFEST", manifest):
+                for hooks, fragment in cases:
+                    with self.subTest(fragment=fragment):
+                        autopilot.HOOKS.write_text(hooks, encoding="utf-8")
+                        self.p.assert_refused(fragment, "on", "--for", "72h", "--allow", "release")
+                        self.assertFalse((self.p.root / ".agentrof").exists())
+                autopilot.HOOKS.unlink()
+                self.p.assert_refused("hooks/hooks.json is missing", "on", "--for", "72h")
+
+    def test_a_grant_this_package_could_not_have_armed_is_inactive_everywhere(self):
+        maximum = POLICY["max_duration_hours"]
+        cases = (
+            ({"armed_by": {"guard": "user_only_entry", "arguments": "on --for 72h"}},
+             "armed by user_only_entry, but this package arms through user_prompt_hook"),
+            ({"expires_at": stamp(NOW + timedelta(hours=maximum + 1))},
+             f"longer than the {maximum} h maximum"),
+            ({"classes": ["choice", "credentials"]}, "holds never class 'credentials'"),
+        )
+        question = {"session_id": "session-1", "cwd": str(self.p.root),
+                    "hook_event_name": "PreToolUse", "tool_name": "ask", "tool_input": {}}
+        for fields, fragment in cases:
+            with self.subTest(fragment=fragment):
+                grant = self.forge(**fields)
+                code, out, _err = self.p.run_verb("check")
+                self.assertEqual(code, 1)
+                self.assertIn(f"autopilot: inactive {grant['id']}: ", out)
+                self.assertIn(fragment, out)
+                code, out, _err = self.p.run_verb("status")
+                self.assertIn(fragment, out)
+                status = json.loads(self.p.run_verb("status", "--json")[1])
+                self.assertEqual((status["active"], fragment in status["inactive_reason"]),
+                                 (False, True))
+                self.assertEqual(self.p.hook("pre-question", question), (0, ""))
+                code, _out, err = self.p.run_verb("record", "--class", "choice", "--question", "q",
+                                                  "--choice", "a", "--reason", "r", "--target", "t")
+                self.assertEqual(code, 1)
+                self.assertIn(fragment, err)
+
+
 class GoalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.p = Project(self)
@@ -739,6 +802,32 @@ class DistributionTests(unittest.TestCase):
                 status = json.loads(self.run_verb(host, root, "status", "--json").stdout)
                 self.assertEqual((status["arming"], status["question_guard"]),
                                  ("user_prompt_hook", "hook"))
+
+    def test_a_copied_package_mints_no_grant_the_installed_package_honours(self):
+        for host in HOST_HOOKS:
+            with self.subTest(host=host), self.project() as root, \
+                    tempfile.TemporaryDirectory() as raw:
+                copy = Path(raw) / "copy"
+                shutil.copytree(self.package(host), copy, ignore=shutil.ignore_patterns("hooks"))
+                script = copy / "skill-content/autopilot/scripts/autopilot.py"
+                agent_on = [sys.executable, str(script), "on", "--for", "72h", "--allow", "release"]
+                result = subprocess.run(agent_on, cwd=root, capture_output=True, text=True,
+                                        check=False, timeout=60)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("hooks/hooks.json is missing", result.stderr)
+                self.assertFalse((root / RUNTIME / "grant.json").exists())
+                (copy / ".agent-marketplace-package.json").unlink()
+                result = subprocess.run(agent_on, cwd=root, capture_output=True, text=True,
+                                        check=False, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                result = self.run_verb(host, root, "check")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("armed by user_only_entry, but this package arms through"
+                              " user_prompt_hook", result.stdout)
+                question = {"session_id": "s", "cwd": str(root), "hook_event_name": "PreToolUse",
+                            "tool_name": HOST_HOOKS[host][2], "tool_input": {}}
+                result = self.run_hook(host, "pre-question", question, root)
+                self.assertEqual((result.returncode, result.stdout), (0, ""))
 
     def test_the_typed_entry_command_arms_a_grant_on_each_host(self):
         typed = {"claude": lambda root: expansion(root, "on --for 2h --deny merge"),

@@ -51,8 +51,9 @@ WRITER_ROLES = {"verification": "qa_engineer", "environment": "devops_engineer"}
 # An accepted minor review finding is followed up by one of the contract writers.
 MINOR_FINDING_OWNER_ROLES = tuple(WRITER_ROLES.values())
 ACCEPTED_MINOR_FINDINGS = "Accepted Minor Findings"
-# Only this review_loop value writes and validates the contract's review record.
-REVIEW_LOOP, BLOCKING_DELTA = "review_loop", "blocking_delta"
+# The sections of the review record that switch review_loop keeps at
+# blocking_delta; backlog_compile validates them as it does a review note's.
+REVIEW_RECORD_SECTIONS = ("Returned Findings", "Severity Calibration", ACCEPTED_MINOR_FINDINGS)
 DISPOSITIONS = {"required", "not_applicable"}
 # Where the checks that merge-pr requires on a Delivery PR come from. The first
 # is the default, so a contract approved before the field existed keeps it.
@@ -164,39 +165,32 @@ def accepted_solution_ref(docs: Path, value: object) -> bool:
     return props.get("status") == "accepted" and not package_errors
 
 
-def review_loop(docs: Path) -> str:
-    """The review_loop value of the project's approved Process Policy.
+def review_record_findings(docs: Path, kind: str, props: dict, body: str) -> list[str]:
+    """Validate the review record that the blocking_delta review loop keeps in a contract.
 
-    Without a policy it is the package default. A draft or invalid policy
-    raises ValueError: it is refused, never read.
-    """
-    import process_policy
-
-    values, _snapshot = process_policy.effective_values(docs)
-    return values[REVIEW_LOOP]["value"]
-
-
-def accepted_minor_findings(docs: Path, kind: str, body: str) -> list[str]:
-    """Validate the optional record of minor review findings accepted as written.
-
-    Only the blocking_delta review loop records them. At any other value a
-    section of that name is authored text, as it was before the switch, and
-    the Process Policy is read only when the section exists.
+    At any other review_loop value a section of a record's name is authored
+    text, as it was before the switch, and a contract without such a section
+    never reads the Process Policy. An approved contract without Returned
+    Findings was approved before its review kept a record and stays as it was.
     """
     authored = without_generated_relations(body)
-    if not re.search(rf"(?m)^##\s+{ACCEPTED_MINOR_FINDINGS}\s*$", authored):
+    if not any(re.search(rf"(?m)^##\s+{title}\s*$", authored) for title in REVIEW_RECORD_SECTIONS):
         return []
-    try:
-        if review_loop(docs) != BLOCKING_DELTA:
-            return []
-    except ValueError as exc:
-        return [f"{ACCEPTED_MINOR_FINDINGS} needs the review_loop value of the Process Policy: {exc}"]
-    # The backlog review note records accepted minor findings in the same table.
     import backlog_compile
 
-    return backlog_compile.accepted_minor_findings(
-        docs, authored, f"operation/{FILE_FOR[kind]}",
-        {"minor_finding_owner_roles": MINOR_FINDING_OWNER_ROLES})
+    try:
+        if backlog_compile.review_loop_value(docs) != backlog_compile.RECORDING_LOOP:
+            return []
+    except ValueError as exc:
+        return [f"the review record needs the review_loop value of the Process Policy: {exc}"]
+    path = f"operation/{FILE_FOR[kind]}"
+    approved = props.get("status") == "approved"
+    if approved and backlog_compile.RETURNED_FINDINGS not in backlog_compile.headings(authored):
+        return []
+    # The backlog review note records accepted minor findings in the same table.
+    errors = backlog_compile.accepted_minor_findings(
+        docs, authored, path, {"minor_finding_owner_roles": MINOR_FINDING_OWNER_ROLES})
+    return errors + backlog_compile.review_record_findings(docs, authored, path, approved=approved)
 
 
 def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict, list[str]]:
@@ -279,7 +273,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         for name in ("tolerated_warnings", "service_catalog"):
             if not isinstance(props.get(name), list):
                 errors.append(f"{name} must be a list")
-    errors.extend(accepted_minor_findings(docs, kind, body))
+    errors.extend(review_record_findings(docs, kind, props, body))
     digest = receipt_hash(props, body)
     if props.get("status") == "approved":
         if props.get("source_hash") != digest:
@@ -356,6 +350,11 @@ def approve(args) -> int:
     props, body = parse(path)
     if props.get("status") != "draft":
         raise ValueError("approve requires a draft contract")
+    # The review record binds the draft its review read, before the stamp
+    # makes the contract one that was approved.
+    record_errors = review_record_findings(docs, args.kind, props, body)
+    if record_errors:
+        raise ValueError("approval check failed: " + "; ".join(record_errors))
     props["status"] = "approved"
     props["tags"] = [f"doc/{TYPE_FOR[args.kind]}", "status/approved"]
     props["approved_at_utc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

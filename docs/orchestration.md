@@ -62,13 +62,17 @@ confirms it, lowers it to minor or rules it invalid, citing the text. It runs
 as the claiming reviewer's role on that role's own tier, never as a `-lens`
 variant. In Delivery code review it registers its rulings as a result of its
 own, and `delivery_verification.py result` refuses rulings that the claiming
-result carries itself. A claim on an Operation contract is calibrated by the
-counterpart of the contract the claim concerns, the DevOps Engineer for the
+result carries itself. Only confirmed claims gate, and each claim is ruled
+once. Every ruling is kept where a compiler reads it: a backlog review note and
+an Operation contract keep a review record of the returned findings with their
+ids and severities, the rulings and the id of each accepted minor finding, so
+no finding that stays critical or major is accepted as minor; a Solution Design
+engagement, `MASTER.md` and the code review record keep their rulings too, and
+the approval gate shows them. A claim on an Operation contract is calibrated by
+the counterpart of the contract the claim concerns, the DevOps Engineer for the
 Verification Contract and the QA Engineer for the Environment Contract, never
-by that contract's writer. Only confirmed claims gate, each claim is ruled
-once, and the review note, the code review record or the approval gate keeps
-every ruling. The instructions live in the `challenge-review` and `code-review`
-references `switch-review_loop-blocking_delta.md`.
+by that contract's writer. The instructions live in the `challenge-review` and
+`code-review` references `switch-review_loop-blocking_delta.md`.
 
 What a backlog epic reviewer reads is process switch `review_manifest_scope`.
 At `transitive`, the default, every note the epic's manifest includes expands

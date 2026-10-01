@@ -68,7 +68,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     the open blocking findings, the changed text and its dependency context,
     and a critical or major claim gates only once one fresh, read-only
     calibration reader, never its writer or claimant, confirms it with a
-    citation of the text.
+    citation of the text. Each review keeps its rulings where its compiler
+    reads them, and a review note or an Operation contract also records the
+    findings its review returned, so no finding that stays critical or major
+    enters `Accepted Minor Findings`.
 15. File names are stable slugs; membership is path-derived. A story does not
     duplicate its epic relationship in front matter.
 16. Authored titles are direct, natural phrases in the configured output

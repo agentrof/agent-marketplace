@@ -2137,6 +2137,69 @@ class DeliveryGitTests(unittest.TestCase):
         intent = delivery_git.prepare_pr_creation(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
 
+    DECISION_HEADER = ("| id | class | question | options | recommendation | status | answer | blocks |"
+                       " wait_minutes |\n|---|---|---|---|---|---|---|---|---|")
+
+    def log_decisions(self, directory: Path, *rows: str) -> None:
+        """Keep the owner's questions in the Delivery's User Decisions table, as two fixed owner gates do."""
+        path = directory / "delivery.md"
+        props, body = delivery_compile.split_note(path)
+        body = delivery_compile.replace_section(body, "User Decisions", "\n".join([self.DECISION_HEADER, *rows]))
+        delivery_compile.atomic_text(path, delivery_compile.frontmatter(props, body))
+
+    @staticmethod
+    def decision(identifier: str, status: str, blocks: str = "AUTH-01") -> str:
+        answer, wait = ("The current store.", "5") if status == "answered" else ("", "")
+        return (f"| {identifier} | queued | Which session store does the Item reuse? | The current store; a new"
+                f" store | The current store | {status} | {answer} | {blocks} | {wait} |")
+
+    def test_a_pending_question_holds_the_items_it_blocks_and_the_review(self):
+        """Only the owner's answer closes a queued question. claim-items, start-item and reopen-item refuse an
+        Item a pending User Decisions row blocks, and publish-delivery-review refuses while any row is
+        pending, each before any ref moves; a row that blocks no Item holds none (#329)."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+
+        def refuses(call, message: str) -> None:
+            before = delivery_git.run_git(project, "ls-remote", "origin")
+            self.assertEqual(self.refused_finding(call), ("DELIVERY_DECISION_PENDING", message))
+            self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
+        self.log_decisions(directory, self.decision("D-01", "pending"))
+        refuses(lambda: delivery_git.claim_items(project, "DLV-001"),
+                "AUTH-01 waits for the owner's answer to User Decisions D-01; record it before claim-items")
+        self.log_decisions(directory, self.decision("D-01", "pending", blocks=""))
+        delivery_git.claim_items(project, "DLV-001")
+        self.log_decisions(directory, self.decision("D-01", "answered"), self.decision("D-02", "pending"))
+        refuses(lambda: delivery_git.start_item(project, "DLV-001", "AUTH-01"),
+                "AUTH-01 waits for the owner's answer to User Decisions D-02; record it before start-item")
+        self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+        answered = [self.decision("D-01", "answered"), self.decision("D-02", "answered")]
+        self.log_decisions(directory, *answered)
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        self.log_decisions(directory, *answered, self.decision("D-03", "pending"))
+        refuses(lambda: delivery_git.reopen_item(project, "DLV-001", "AUTH-01"),
+                "AUTH-01 waits for the owner's answer to User Decisions D-03; record it before reopen-item")
+        answered.append(self.decision("D-03", "answered"))
+        self.log_decisions(directory, *answered)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_review(type("Args", (), {
+                "docs": str(docs), "delivery": "DLV-001", "reviewed_commit": integrated["integration"],
+                "reviewed_integration_commit": integrated["integration"]})), 0)
+        # A question queued after gate B's approval holds the Review until the owner answers it.
+        self.log_decisions(directory, *answered, self.decision("D-04", "pending", blocks=""))
+        refuses(lambda: delivery_git.publish_delivery_review(project, "DLV-001"),
+                "User Decisions row D-04 is pending; gate B asks every queued question, so record the owner's"
+                " answers before publish-delivery-review")
+        self.log_decisions(directory, *answered, self.decision("D-04", "answered", blocks=""))
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(
+            project, delivery_git.publish_delivery_review(project, "DLV-001")["integration"]), "Record"),
+            "delivery-review-published-v1")
+
     def test_record_pr_remote_checks_the_local_mirror_and_the_adoption_intent(self):
         """record-pr-remote refuses a URL that an existing local Review does not mirror, as it did
         before the PR record became the only source of the URL, and a PR other than the one an

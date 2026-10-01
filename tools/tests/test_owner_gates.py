@@ -21,7 +21,9 @@ sys.path.insert(0, str(TEAM / "scripts"))
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
 sys.path.insert(0, str(ROOT / "tools"))
 import delivery_compile  # noqa: E402
+import delivery_governance  # noqa: E402
 import fixtures  # noqa: E402
+import operation_compile  # noqa: E402
 import process_policy  # noqa: E402
 import task_inputs  # noqa: E402
 import validate  # noqa: E402
@@ -36,8 +38,17 @@ FLOWS = ("delivery-execution", "delivery-governance", "delivery-planning",
          "execution-planning", "operation")
 HEADER = ("| id | class | question | options | recommendation | status | answer | blocks |"
           " wait_minutes |\n|---|---|---|---|---|---|---|---|---|\n")
+ANSWER = "One root per checkout, in Verification Contract revision 6."
 ROW = ("| D-01 | queued | Which cache root do the runs share? | One root per checkout; one root"
-       " per Item | One root per checkout | answered | One root per checkout. | VC revision 6 | 12 |\n")
+       f" per Item | One root per checkout | answered | {ANSWER} | AUTH-01 | 12 |\n")
+PENDING = ROW.replace(f"| answered | {ANSWER} |", "| pending |  |")
+DECISION = "[[solution-design/decisions/fixture-api|Fixture API]]"
+
+
+def ruling(identifier: str, document: str) -> str:
+    """An answered row whose answer names the document the owner let change between the gates."""
+    return (f"| {identifier} | queued | May {document} change? | Change it; keep it | Change it | answered |"
+            f" Change it and approve {document}. | AUTH-01 | 4 |\n")
 GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
                 "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"}
 
@@ -295,6 +306,10 @@ class DecisionLogTests(unittest.TestCase):
             "schema_version": 2, "team_id": "software-engineering-team",
             "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
         make_approved_backlog(self.docs)
+        # Execution approval needs a committed workflow that the Delivery PR runs.
+        workflow = self.root / ".github" / "workflows" / "tests.yml"
+        workflow.parent.mkdir(parents=True)
+        workflow.write_text("on:\n  pull_request:\n", encoding="utf-8")
         init_repository(self.root, initial_branch="main")
         for args in (("add", "--all"), ("commit", "-qm", "fixture")):
             subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True,
@@ -303,6 +318,8 @@ class DecisionLogTests(unittest.TestCase):
         self.assertEqual(quiet(delivery_compile.init_dod, dod)[0], 0)
         self.assertEqual(quiet(delivery_compile.approve_dod, dod)[0], 0)
         self.plan = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        self.review = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
+                                        "reviewed_commit": "1" * 40, "reviewed_integration_commit": "2" * 40})
 
     def init(self) -> Path:
         init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
@@ -319,6 +336,27 @@ class DecisionLogTests(unittest.TestCase):
     def findings(self) -> list[str]:
         return [error for error in delivery_compile.delivery_findings(self.docs, "DLV-001")[1]
                 if "User Decisions" in error]
+
+    def contract(self, kind: str = "verification"):
+        return type("Args", (), {"docs": str(self.docs), "kind": kind, "constrained_by": [DECISION]})
+
+    def plan_the_item(self) -> None:
+        """Approve the Verification Contract and give the Item the claims execution approval needs."""
+        path = operation_compile.contract_path(self.docs, "verification")
+        quiet(operation_compile.init, self.contract())
+        props, body = operation_compile.parse(path)
+        props["test_command"] = "make test"
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        self.assertEqual(quiet(operation_compile.approve, self.contract())[0], 0)
+        item = delivery_compile.find_delivery(self.docs, "DLV-001") / "items" / "auth-01" / "item.md"
+        props, body = delivery_compile.split_note(item)
+        props.update(path_claims=["src/auth.py"], contract_claims=["auth:session"])
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+
+    def refused(self, call, args) -> list[str]:
+        code, output = quiet(call, args)
+        self.assertEqual(code, 1, output)
+        return json.loads(output)["errors"]
 
     def test_per_step_keeps_the_free_text_log_unchecked(self):
         path = self.init()
@@ -338,8 +376,7 @@ class DecisionLogTests(unittest.TestCase):
         self.decisions(path, HEADER + ROW)
         self.assertEqual(self.findings(), [])
         self.assertEqual(quiet(delivery_compile.check_delivery, self.plan)[0], 0)
-        pending = ROW.replace("| answered | One root per checkout. |", "| pending |  |")
-        self.decisions(path, HEADER + ROW + pending.replace("D-01", "D-02"))
+        self.decisions(path, HEADER + ROW + PENDING.replace("D-01", "D-02").replace("| 12 |", "|  |"))
         self.assertEqual(self.findings(), [])
         cases = (
             (ROW + ROW, "row 2 repeats id D-01; every id is unique"),
@@ -352,10 +389,18 @@ class DecisionLogTests(unittest.TestCase):
             (ROW.replace("| One root per checkout | answered", "| A shared root | answered"),
              "row 1 recommendation must be one of its options"),
             (ROW.replace("| answered |", "| deferred |"), "row 1 status must be pending or answered"),
-            (ROW.replace("| One root per checkout. |", "|  |"), "row 1 is answered but records no answer"),
+            (ROW.replace(f"| {ANSWER} |", "|  |"), "row 1 is answered but records no answer"),
             (ROW.replace("| answered |", "| pending |"), "row 1 is pending but records an answer"),
             (ROW.replace("| 12 |", "| about 12 |"), "row 1 wait_minutes must be a whole number"),
             (ROW.replace("| Which cache root do the runs share? |", "|  |"), "row 1 states no question"),
+            # A row names the Items that wait for it, so the verbs that start them can hold them.
+            (ROW.replace("| AUTH-01 |", "| Verification Contract revision 6 |"),
+             "row 1 blocks must name Items of this Delivery by Story id, separated by semicolons, not"
+             " Verification Contract revision 6"),
+            (ROW.replace("| AUTH-01 |", "| AUTH-01; AUTH-09 |"),
+             "row 1 blocks must name Items of this Delivery by Story id, separated by semicolons, not AUTH-09"),
+            (ROW.replace("| 12 |", "|  |"),
+             "row 1 is answered after AUTH-01 waited for it, so it records that wait in wait_minutes"),
         )
         for rows, fragment in cases:
             with self.subTest(fragment=fragment):
@@ -380,20 +425,129 @@ class DecisionLogTests(unittest.TestCase):
         self.decisions(path, HEADER + ROW + ROW)
         self.assertEqual(quiet(delivery_compile.check_delivery, self.plan)[0], 1)
 
-    def test_a_policy_changed_after_the_pin_leaves_the_log_unchecked(self):
+    def test_a_policy_changed_after_the_pin_keeps_the_log_checked(self):
+        """At review, the gate B window, a policy set for the next Delivery drifts from the pin, and the
+        pin is no longer compared there. The table the section holds is still checked (#329)."""
         choose(self.docs, "two_fixed_gates")
         path = self.init()
+        self.decisions(path, HEADER + ROW)
         self.assertEqual(quiet(delivery_compile.approve_scope, self.plan)[0], 0)
-        props, body = delivery_compile.split_note(path)
-        props["status"] = "active"
-        delivery_compile.atomic_text(path, delivery_compile.frontmatter(props, body))
-        self.decisions(path, HEADER + ROW + ROW)
-        self.assertTrue(self.findings())
-        # A later policy for the next Delivery never strands this one on its log.
+        self.assertEqual(quiet(delivery_compile.approve_review, self.review)[0], 0)
+        self.assertEqual(delivery_compile.split_note(path)[0]["status"], "review")
+        answered_without_answer = ROW.replace(f"| {ANSWER} |", "|  |")
+        for step in ("the pinned policy", "a policy for the next Delivery", "its draft revision"):
+            with self.subTest(step=step):
+                if step == "a policy for the next Delivery":
+                    choose(self.docs, "per_step")
+                elif step == "its draft revision":
+                    policy(self.docs, "begin-revision")
+                self.decisions(path, HEADER + answered_without_answer)
+                self.assertEqual(self.findings(), ["delivery.md User Decisions row 1 is answered but records no answer"])
+                self.assertEqual(quiet(delivery_compile.check_delivery, self.plan)[0], 1)
+                self.decisions(path, HEADER + ROW)
+                self.assertEqual(self.findings(), [])
+
+    def test_the_gates_ask_every_queued_question_before_their_writes(self):
+        """Gate A and gate B each ask every queued question, so approve-scope and approve-review refuse
+        while a row is pending and name it, and check-plan reports the pending rows (#329)."""
+        choose(self.docs, "two_fixed_gates")
+        path = self.init()
+        self.plan_the_item()
+        self.decisions(path, HEADER + PENDING + PENDING.replace("D-01", "D-02"))
+        before = path.read_bytes()
+        checked = json.loads(quiet(delivery_compile.check_plan, type("Args", (), {
+            "docs": str(self.docs), "delivery": "DLV-001", "reopen": [], "remote": "origin"}))[1])
+        self.assertEqual((checked["ok"], checked["pending_decisions"]), (True, ["D-01", "D-02"]))
+        self.assertEqual(self.refused(delivery_compile.approve_scope, self.plan), [
+            "User Decisions rows D-01, D-02 are pending; gate A asks every queued question, so record the"
+            " owner's answers before approve-scope"])
+        self.assertEqual(path.read_bytes(), before)
+        self.decisions(path, HEADER + ROW + PENDING.replace("D-01", "D-02"))
+        self.assertEqual(self.refused(delivery_compile.approve_scope, self.plan), [
+            "User Decisions row D-02 is pending; gate A asks every queued question, so record the owner's"
+            " answers before approve-scope"])
+        self.decisions(path, HEADER + ROW)
+        self.assertEqual(quiet(delivery_compile.approve_scope, self.plan)[0], 0)
+        self.assertEqual(quiet(delivery_compile.approve_execution, self.plan)[0], 0)
+        # A question queued between the gates holds gate B's approval of the Review.
+        self.decisions(path, HEADER + ROW + PENDING.replace("D-01", "D-03"))
+        before = path.read_bytes()
+        self.assertEqual(self.refused(delivery_compile.approve_review, self.review), [
+            "User Decisions row D-03 is pending; gate B asks every queued question, so record the owner's"
+            " answers before approve-review"])
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse((path.parent / "delivery-review.md").exists())
+        self.decisions(path, HEADER + ROW + ROW.replace("D-01", "D-03"))
+        self.assertEqual(quiet(delivery_compile.approve_review, self.review)[0], 0)
+
+    def test_per_step_asks_each_question_when_it_comes_up(self):
+        """Without the decision log no gate write reads User Decisions."""
         choose(self.docs, "per_step")
-        self.assertEqual(self.findings(), [])
-        policy(self.docs, "begin-revision")
-        self.assertEqual(self.findings(), [])
+        path = self.init()
+        self.plan_the_item()
+        self.decisions(path, "D-01 is still open: which cache root do the runs share?")
+        self.assertEqual(quiet(delivery_compile.approve_scope, self.plan)[0], 0)
+        self.assertEqual(quiet(delivery_compile.approve_execution, self.plan)[0], 0)
+        self.assertEqual(quiet(delivery_compile.approve_review, self.review)[0], 0)
+
+    def test_no_approved_document_changes_between_the_gates_without_a_ruling(self):
+        """Between gate A and gate B an Operation contract, the Delivery Governance and the execution plan
+        change only once an answered row names them in its answer; gate A's own approvals need none (#329)."""
+        governance = type("Args", (), {"docs": str(self.docs), "max_parallel": 1})
+        quiet(delivery_governance.init, governance)
+        self.assertEqual(quiet(delivery_governance.approve, governance)[0], 0)
+        choose(self.docs, "two_fixed_gates")
+        path = self.init()
+        self.plan_the_item()
+        self.decisions(path, HEADER + ROW)
+        self.assertEqual(quiet(delivery_compile.approve_scope, self.plan)[0], 0)
+        self.assertEqual(quiet(delivery_compile.approve_execution, self.plan)[0], 0)
+
+        def between(document: str) -> str:
+            return (f"DLV-001 is between its two owner gates, where {document} is approved only once an"
+                    " answered User Decisions row names it in its answer; queue the question and record the"
+                    f" owner's answer naming {document} first")
+
+        contract = operation_compile.contract_path(self.docs, "verification")
+        quiet(operation_compile.revise, self.contract())
+        draft = contract.read_bytes()
+        with self.assertRaises(ValueError) as refused:
+            operation_compile.approve(self.contract())
+        self.assertEqual(str(refused.exception), between("Verification Contract revision 2"))
+        self.assertEqual(contract.read_bytes(), draft)
+        # Naming another revision is no ruling on this one.
+        self.decisions(path, HEADER + ROW + ruling("D-02", "Verification Contract revision 21"))
+        with self.assertRaises(ValueError):
+            operation_compile.approve(self.contract())
+        self.decisions(path, HEADER + ROW + ruling("D-02", "Verification Contract revision 2"))
+        self.assertEqual(quiet(operation_compile.approve, self.contract())[0], 0)
+
+        governance_path = delivery_governance.path_for(self.docs)
+        quiet(delivery_governance.begin_revision, governance)
+        draft = governance_path.read_bytes()
+        with self.assertRaises(ValueError) as refused:
+            delivery_governance.approve(governance)
+        self.assertEqual(str(refused.exception), between("Delivery Governance revision 2"))
+        self.assertEqual(governance_path.read_bytes(), draft)
+        self.decisions(path, HEADER + ROW + ruling("D-02", "Verification Contract revision 2")
+                       + ruling("D-03", "Delivery Governance revision 2"))
+        self.assertEqual(quiet(delivery_governance.approve, governance)[0], 0)
+
+        # The Items bind the new contract only through a new execution approval, the second one.
+        plan = delivery_compile.find_delivery(self.docs, "DLV-001") / "execution-plan.md"
+        approved = plan.read_bytes()
+        self.assertEqual(self.refused(delivery_compile.approve_execution, self.plan),
+                         [between("execution plan approval 2")])
+        self.assertEqual(plan.read_bytes(), approved)
+        checked = json.loads(quiet(delivery_compile.check_plan, type("Args", (), {
+            "docs": str(self.docs), "delivery": "DLV-001", "reopen": [], "remote": "origin"}))[1])
+        self.assertEqual(checked["errors"], [between("execution plan approval 2")])
+        self.decisions(path, HEADER + ROW + ruling("D-02", "Verification Contract revision 2")
+                       + ruling("D-03", "Delivery Governance revision 2")
+                       + ruling("D-04", "execution plan approval 2"))
+        self.assertEqual(quiet(delivery_compile.approve_execution, self.plan)[0], 0)
+        self.assertEqual(self.refused(delivery_compile.approve_execution, self.plan),
+                         [between("execution plan approval 3")])
 
     def test_a_policy_with_an_unknown_value_is_refused(self):
         choose(self.docs, "two_fixed_gates")

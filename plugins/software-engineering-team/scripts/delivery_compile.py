@@ -426,11 +426,55 @@ def owner_decision_classes() -> set[str]:
     return {entry["id"] for entry in (*data["agent_clauses"], *data["classes"])}
 
 
-def user_decision_findings(body: str) -> list[str]:
-    """Validate the User Decisions table a Delivery keeps under two fixed owner gates."""
-    rows, errors = backlog_compile.structured_table(
-        section_bodies(body).get("User Decisions", ""), USER_DECISION_COLUMNS,
-        "delivery.md", "User Decisions")
+def decision_rows(body: str) -> tuple[list[dict[str, str]], list[str]]:
+    """Read the User Decisions table as rows, with what keeps it from being read."""
+    return backlog_compile.structured_table(section_bodies(body).get("User Decisions", ""),
+                                            USER_DECISION_COLUMNS, "delivery.md", "User Decisions")
+
+
+def holds_decision_log(body: str) -> bool:
+    """Whether the User Decisions section holds the table two fixed owner gates keep."""
+    lines = [line for line in section_bodies(body).get("User Decisions", "").splitlines()
+             if line.strip().startswith("|")]
+    return bool(lines) and tuple(cell.casefold().replace(" ", "_")
+                                 for cell in backlog_compile.table_cells(lines[0])) == USER_DECISION_COLUMNS
+
+
+def keeps_decision_log(docs: Path, props: dict, body: str) -> bool:
+    """Whether a Delivery keeps the owner's questions in its User Decisions table.
+
+    Its owner_gates value keeps the log from the proposal through gate B. A
+    section that holds the log's table keeps it whatever policy is in force
+    now, so a policy set for the next Delivery never turns this one's log off.
+    """
+    return holds_decision_log(body) or delivery_owner_gates(docs, props) == TWO_FIXED_GATES
+
+
+def decision_blocks(row: dict[str, str]) -> list[str]:
+    """The Story ids of the Items a decision row blocks."""
+    return [story.strip() for story in row["blocks"].split(";") if story.strip()]
+
+
+def pending_decisions(body: str, stories=None) -> list[str]:
+    """The ids of the pending decision rows, or of those that block an Item of *stories*."""
+    rows, _errors = decision_rows(body)
+    wanted = None if stories is None else {str(story).casefold() for story in stories}
+    return [row["id"] for row in rows if row["status"] == "pending"
+            and (wanted is None or wanted & {story.casefold() for story in decision_blocks(row)})]
+
+
+def pending_rows_text(ids: list[str]) -> str:
+    return f"User Decisions {'row' if len(ids) == 1 else 'rows'} {', '.join(ids)}" \
+           f" {'is' if len(ids) == 1 else 'are'} pending"
+
+
+def user_decision_findings(body: str, stories: list[str]) -> list[str]:
+    """Validate the User Decisions table a Delivery keeps under two fixed owner gates.
+
+    A row names the Items that wait for its answer in blocks, by the Story ids
+    of this Delivery's Items, and once answered records how long they waited.
+    """
+    rows, errors = decision_rows(body)
     classes = {QUEUED_DECISION_CLASS, *owner_decision_classes()}
     seen: set[str] = set()
     for number, row in enumerate(rows, 1):
@@ -450,6 +494,11 @@ def user_decision_findings(body: str) -> list[str]:
             errors.append(f"{label} needs at least two options separated by semicolons")
         if row["recommendation"] not in options:
             errors.append(f"{label} recommendation must be one of its options")
+        blocked = decision_blocks(row)
+        unknown = [story for story in blocked if story not in stories]
+        if unknown:
+            errors.append(f"{label} blocks must name Items of this Delivery by Story id, separated by"
+                          f" semicolons, not {', '.join(unknown)}")
         if row["status"] not in USER_DECISION_STATUSES:
             errors.append(f"{label} status must be {' or '.join(USER_DECISION_STATUSES)}")
         elif row["status"] == "answered" and not row["answer"]:
@@ -459,6 +508,9 @@ def user_decision_findings(body: str) -> list[str]:
                           " closes a question")
         if row["wait_minutes"] and not re.fullmatch(r"[0-9]+", row["wait_minutes"]):
             errors.append(f"{label} wait_minutes must be a whole number of minutes")
+        elif row["status"] == "answered" and blocked and not row["wait_minutes"]:
+            errors.append(f"{label} is answered after {', '.join(blocked)} waited for it, so it records"
+                          " that wait in wait_minutes")
     return errors
 
 
@@ -941,8 +993,10 @@ def delivery_findings(docs: Path, identifier: str, *,
     elif split_note(dod)[0].get("status") != "approved": errors.append("Definition of Done must be approved")
     item_paths = sorted(root.glob("items/*/item.md"))
     if not item_paths: errors.append("Delivery must contain at least one Item")
+    stories: list[str] = []
     for item_path in item_paths:
         item_props, item_body = split_note(item_path)
+        stories.append(str(item_props.get("story_id", "")))
         if item_props.get("type") != "delivery-item": errors.append(f"{item_path} type must be delivery-item")
         if item_props.get("status") not in ITEM_STATUSES: errors.append(f"{item_path} invalid Item status")
         for read_schedule in (verification_schedule, implementation_schedule):
@@ -951,8 +1005,8 @@ def delivery_findings(docs: Path, identifier: str, *,
             except ValueError as exc:
                 errors.append(f"{item_path}: {exc}")
         errors.extend(f"{item_path} missing section: {name}" for name in sorted(set(SECTIONS["item"]) - sections(item_body)))
-    if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
-        errors.extend(user_decision_findings(body))
+    if keeps_decision_log(docs, props, body):
+        errors.extend(user_decision_findings(body, stories))
     plan = root / "execution-plan.md"
     if plan.exists():
         plan_props, plan_body = split_note(plan)
@@ -1158,6 +1212,11 @@ def approve_scope(args) -> int:
     dod = delivery_root(docs) / "definition-of-done.md"
     if not dod.exists() or split_note(dod)[0].get("status") != "approved":
         errors.append("Definition of Done must be approved before scope approval")
+    # Gate A asks every queued question, and its approval runs this write first.
+    pending = pending_decisions(body) if keeps_decision_log(docs, props, body) else []
+    if pending:
+        errors.append(f"{pending_rows_text(pending)}; gate A asks every queued question, so record the"
+                      " owner's answers before approve-scope")
     # Scope approval is the handoff: the selected Stories' upstream bindings must
     # be current now, while every later phase keeps the historical read above.
     if not errors:
@@ -1604,6 +1663,56 @@ def superseded_plan_approvals(root: Path, delivery_props: dict) -> list[str]:
         [str(value) for value in earlier] if isinstance(earlier, list) else [])
 
 
+# Gate A's writes end with the Delivery's first execution approval and gate B's
+# begin with approve-review, so a Delivery that keeps a decision log is between
+# its two owner gates while it is execution_approved.
+BETWEEN_GATES_STATUSES = ("execution_approved", "active")
+
+
+def names_document(answer: str, document: str) -> bool:
+    """Whether an answer names *document*, such as Verification Contract revision 6, as a whole phrase."""
+    return re.search(rf"(?<![0-9A-Za-z]){re.escape(document)}(?![0-9A-Za-z])", answer,
+                     re.IGNORECASE) is not None
+
+
+def between_gates_refusals(docs: Path, document: str, delivery_id: str | None = None) -> list[str]:
+    """Refuse an approval of *document* while a Delivery is between its two fixed owner gates.
+
+    No approved document changes between gate A and gate B unless an answered
+    User Decisions row names it in its answer. An Operation contract and the
+    Delivery Governance serve every Delivery, so their approvals ask each one
+    between its gates; an execution plan asks only its own Delivery.
+    """
+    errors = []
+    for directory in delivery_dirs(docs):
+        try:
+            props, body = split_note(directory / "delivery.md")
+        except (OSError, ValueError):
+            continue
+        if delivery_id is not None and props.get("id") != delivery_id:
+            continue
+        if props.get("status") not in BETWEEN_GATES_STATUSES or not keeps_decision_log(docs, props, body):
+            continue
+        rows, _errors = decision_rows(body)
+        if not any(row["status"] == "answered" and names_document(row["answer"], document) for row in rows):
+            errors.append(f"{props.get('id')} is between its two owner gates, where {document} is approved only"
+                          " once an answered User Decisions row names it in its answer; queue the question and"
+                          f" record the owner's answer naming {document} first")
+    return errors
+
+
+def plan_approval_refusals(docs: Path, root: Path, props: dict) -> list[str]:
+    """Refuse an execution approval between the two fixed owner gates that no answered row names.
+
+    Gate A covers the first execution approval of the approved scope. Each later
+    approval is named by its number: the approvals it supersedes, plus one.
+    """
+    if props.get("status") not in BETWEEN_GATES_STATUSES:
+        return []
+    approval = len(superseded_plan_approvals(root, props)) + 1
+    return between_gates_refusals(docs, f"execution plan approval {approval}", str(props.get("id")))
+
+
 # merge-pr merges a Delivery PR only on green provider checks, so execution
 # approval requires a GitHub workflow that the Delivery PR runs: a `.yml` or
 # `.yaml` file directly in `.github/workflows/`, the only place GitHub reads.
@@ -1877,21 +1986,27 @@ def check_plan(args) -> int:
     """Report everything execution approval would refuse, before an owner gate shows the plan."""
     docs = docs_root(args.docs)
     root = find_delivery(docs, args.delivery)
-    status, pending, refused = None, [], {}
+    status, pending, refused, decisions = None, [], {}, None
     if root is not None:
-        props, _body = split_note(root / "delivery.md")
+        props, body = split_note(root / "delivery.md")
         status = props.get("status")
         if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
             pending, refused = pending_operation_revisions(docs, root)
+        # The queued questions the gate asks; the gate's writes refuse while one is pending.
+        if keeps_decision_log(docs, props, body):
+            decisions = pending_decisions(body)
     reopen = sorted(set(str(story) for story in (args.reopen or [])))
     with stage_package.candidate_session():
         # A refused revision is reported once, with what its approval finds.
         _approval, errors = execution_approval_refusals(
             docs, args.delivery, reopen, args.remote, PLAN_GATE_STATUSES,
             frozenset(revision["kind"] for revision in pending) | frozenset(refused))
-    errors = [*refused.values(), *errors]
-    print(json.dumps({"ok": not errors, "id": args.delivery, "status": status, "errors": errors,
-                      "pending_operation_revisions": pending}, indent=2))
+    errors = [*refused.values(), *errors, *(plan_approval_refusals(docs, root, props) if root else [])]
+    result = {"ok": not errors, "id": args.delivery, "status": status, "errors": errors,
+              "pending_operation_revisions": pending}
+    if decisions is not None:
+        result["pending_decisions"] = decisions
+    print(json.dumps(result, indent=2))
     return 0 if not errors else 1
 
 
@@ -1900,7 +2015,9 @@ def approve_execution(args) -> int:
     reopen = sorted(set(str(story) for story in (getattr(args, "reopen", None) or [])))
     remote = getattr(args, "remote", "origin")
     approval, errors = execution_approval_refusals(docs, args.delivery, reopen, remote)
-    if approval is None:
+    if approval is not None:
+        errors = plan_approval_refusals(docs, approval["root"], approval["props"])
+    if approval is None or errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
     root, props, body = approval["root"], approval["props"], approval["body"]
     path = root / "delivery.md"
@@ -2776,11 +2893,21 @@ def approve_review(args) -> int:
             "review approval requires exact reviewed_commit and reviewed_integration_commit Git OIDs"
         ]}, indent=2)); return 2
     delivery_path_value = root / "delivery.md"
-    delivery_props, _ = split_note(delivery_path_value)
+    delivery_props, delivery_body = split_note(delivery_path_value)
     try:
         review_loop = delivery_switch_value(docs, args.delivery, REVIEW_LOOP)
     except ValueError as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
+    # Gate B presents the decision log and asks every queued question before this write.
+    if keeps_decision_log(docs, delivery_props, delivery_body):
+        errors = user_decision_findings(delivery_body, [
+            str(split_note(item)[0].get("story_id", "")) for item in sorted(root.glob("items/*/item.md"))])
+        pending = pending_decisions(delivery_body)
+        if pending:
+            errors.append(f"{pending_rows_text(pending)}; gate B asks every queued question, so record the"
+                          " owner's answers before approve-review")
+        if errors:
+            print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
     review_path = root / "delivery-review.md"
     review_subject = str(delivery_props.get("goal", args.delivery)).strip()
     review_props = {"type": "delivery-review", "id": f"{args.delivery}-REVIEW",

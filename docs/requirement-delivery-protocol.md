@@ -267,14 +267,33 @@ Delivery Review and the merge form gate B. Between them a question is queued in
 the Delivery's `User Decisions` table unless it is of an at-once class: the
 Software Architect's escalation clause or a class of
 `skill-content/deliver/data/owner-decision-classes.json`. `init` writes the
-table's header. From the proposal through the Review,
-`delivery_compile.py check` and every verb that runs its checks refuse a row
-whose id is not a unique `D-` id of at least two digits, whose class is neither
-`queued` nor an at-once class, that lists fewer than two options or a
-recommendation outside them, whose status is neither `pending` nor `answered`,
-or that is `answered` without an answer or `pending` with one. The pinned Process Policy names the
-value the Delivery ran under; a policy changed after the pin leaves the table
-unchecked, and the pin checks report that drift where it blocks.
+table's header. From the proposal through the Review, and whenever the section
+holds that table whatever policy is in force later, `delivery_compile.py
+check` and every verb that runs its checks refuse a row whose id is not a
+unique `D-` id of at least two digits, whose class is neither `queued` nor an
+at-once class, that lists fewer than two options or a recommendation outside
+them, whose status is neither `pending` nor `answered`, that is `answered`
+without an answer or `pending` with one, whose `blocks` names anything but the
+Delivery's Items by Story id, or that is `answered` after blocking an Item
+without the minutes it waited in `wait_minutes`. The pinned Process Policy names
+the value the Delivery ran under, and a policy set for the next Delivery leaves
+the table checked. Each gate asks every queued question: `approve-scope`,
+`approve-review` and `publish-delivery-review` refuse while a row is `pending`
+and name it, and `check-plan` lists the pending rows under
+`pending_decisions`. Between the gates a pending row holds only the Items its
+`blocks` names: `claim-items`, `start-item`, `resume-item` and `reopen-item`
+refuse such an Item with `DELIVERY_DECISION_PENDING` before any ref moves. No
+approved document changes between the gates without an answered row that names
+it: from the Delivery's first execution approval until `approve-review`,
+`operation_compile.py approve`, `delivery_governance.py approve` and
+`approve-execution` refuse until an answer names `Verification Contract
+revision N`, `Environment Contract revision N`, `Delivery Governance revision
+N` or `execution plan approval N`. Gate A's writes start with `approve-scope`
+and the Governance change it approved, applied before the reservation, which
+needs the Fence to carry it; the Operation revisions follow the reservation. So
+a refused reservation leaves only an applied Governance change in force, as a
+project document, and a proposal declined after execution planning leaves the
+drafts of its revisions to their own flows.
 
 Scope approval is the handoff check for upstream bindings, and `init` runs the
 same check before it renders the proposal, so a selection that cannot be handed

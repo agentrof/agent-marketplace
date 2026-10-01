@@ -661,7 +661,7 @@ class LightPathCompilerTests(unittest.TestCase):
         header = ("| id | class | question | options | recommendation | status | answer | blocks |"
                   " wait_minutes |\n|---|---|---|---|---|---|---|---|---|")
         row = ("| D-01 | queued | Which session store does the Item reuse? | The current store; a new store"
-               " | The current store | answered | The current store. | AUTH-01 topology | 3 |")
+               " | The current store | answered | The current store. | AUTH-01 | 3 |")
         props, body = delivery_compile.split_note(path)
         delivery_compile.atomic_text(path, delivery_compile.frontmatter(
             props, delivery_compile.replace_section(body, "User Decisions", header + "\n" + row)))

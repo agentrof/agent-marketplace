@@ -1356,6 +1356,7 @@ def publish_delivery_review(project_root: Path, delivery_id: str,
     review_props, _ = split_note(review_path)
     if review_props.get("status") != "approved":
         raise RuntimeError("publish-delivery-review requires an approved review record")
+    refuse_pending_decisions(root, directory, "publish-delivery-review")
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
@@ -2535,6 +2536,43 @@ def refuse_cancelled_delivery(root: Path, directory: Path, integration_oid: str,
                            "through its PR")
 
 
+def refuse_pending_decisions(root: Path, directory: Path, verb: str, stories: list[str] | None = None) -> None:
+    """Refuse a step that waits for a pending question of the Delivery's decision log.
+
+    Under two fixed owner gates, a question between the gates is a pending row of
+    the User Decisions table in the checkout's delivery.md, where the Delivery
+    Coordinator queues it, and only the owner's answer closes it. A row holds the
+    Items of *stories* that its blocks column names; without *stories*, every
+    pending row holds the step. A table that cannot be read shows no answer, so
+    it holds the step as well.
+    """
+    from delivery_compile import (decision_blocks, decision_rows, docs_root, keeps_decision_log,
+                                  pending_rows_text, split_note)
+    props, body = split_note(directory / "delivery.md")
+    if not keeps_decision_log(docs_root(root), props, body):
+        return
+    rows, errors = decision_rows(body)
+    if errors:
+        raise RuntimeError(f"DELIVERY_DECISION_PENDING: {verb} waits until the User Decisions table can be"
+                           " read: " + "; ".join(errors))
+    if stories is None:
+        pending = [row["id"] for row in rows if row["status"] == "pending"]
+        if pending:
+            raise RuntimeError(f"DELIVERY_DECISION_PENDING: {pending_rows_text(pending)}; gate B asks every"
+                               f" queued question, so record the owner's answers before {verb}")
+        return
+    wanted = {story.casefold(): story for story in stories}
+    pending, held = [], []
+    for row in rows:
+        blocked = [wanted[story.casefold()] for story in decision_blocks(row) if story.casefold() in wanted]
+        if row["status"] == "pending" and blocked:
+            pending.append(row["id"])
+            held.extend(story for story in blocked if story not in held)
+    if pending:
+        raise RuntimeError(f"DELIVERY_DECISION_PENDING: {', '.join(held)} {'waits' if len(held) == 1 else 'wait'}"
+                           f" for the owner's answer to User Decisions {', '.join(pending)}; record it before {verb}")
+
+
 # Once its Review is published, an Integration's delivery.md records the Delivery
 # past its execution plan, and the Review and PR records at its tip carry it to the PR.
 PAST_EXECUTION_STATUSES = ("review", "pr_handoff", "awaiting_merge", "merged")
@@ -3579,6 +3617,8 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     delivery_props, _ = split_note(directory / "delivery.md")
     if delivery_props.get("status") != "execution_approved":
         raise RuntimeError("claim-items requires an execution-approved Delivery")
+    refuse_pending_decisions(root, directory, "claim-items",
+                             [path.parent.name.upper() for path in sorted(directory.glob("items/*/item.md"))])
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
@@ -4065,6 +4105,7 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
         raise RuntimeError("local Delivery package is required for Item activation")
+    refuse_pending_decisions(root, directory, "start-item", [story_id])
     refs = canonical_refs(delivery_id, story_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
@@ -4250,6 +4291,7 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
         raise RuntimeError("local Delivery package is required for Item reopen")
+    refuse_pending_decisions(root, directory, "reopen-item", [story_id])
     refs = canonical_refs(delivery_id, story_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])

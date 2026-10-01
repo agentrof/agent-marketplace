@@ -780,10 +780,11 @@ class DeliveryCompilerTests(unittest.TestCase):
                                       "goal": "Authenticate", "outcome": None,
                                       "target_branch": "main", "story": ["AUTH-01"]})
         self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+        # Gate A also lists the queued questions it asks, none here.
         self.assertEqual(self.check_plan_result(), (1, {
             "ok": False, "id": "DLV-001", "status": "scope_proposed",
             "errors": ["AUTH-01 needs at least one exact path_claim or contract_claim"],
-            "pending_operation_revisions": []}))
+            "pending_operation_revisions": [], "pending_decisions": []}))
         self.author_item(path_claims=["src/auth.py"], contract_claims=["auth:session"])
         self.assertEqual(self.check_plan_result()[0], 0)
         contract = type("Args", (), {"docs": str(self.docs), "kind": "verification", "constrained_by": None})
@@ -812,7 +813,7 @@ class DeliveryCompilerTests(unittest.TestCase):
             "errors": ["approved current verification contract is required: revision 2 is open and its"
                        " approval would refuse it: approved contract must cite at least one accepted Solution"
                        " decision in constrained_by; test_command is required"],
-            "pending_operation_revisions": []}))
+            "pending_operation_revisions": [], "pending_decisions": []}))
         path.write_bytes(draft)
         # The standard path approves the revision before its plan gate, so the gate refuses it open.
         for argv in (("begin-revision",), ("set", "--switch", "owner_gates", "--default"), ("approve",)):

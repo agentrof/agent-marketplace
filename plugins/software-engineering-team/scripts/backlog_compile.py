@@ -3226,6 +3226,10 @@ def restore_tree(root: Path, snapshot: tuple[dict[Path, bytes], set[Path]]) -> N
                 pass
 
 
+# The flow whose switches set how a backlog review runs.
+BACKLOG_FLOW = "backlog-planning"
+
+
 def policy_pin(docs: Path) -> tuple[dict, list[str]]:
     """Return the Process Policy pin a review round and an approval record,
     the one a Delivery takes.
@@ -3244,10 +3248,23 @@ def round_pin(docs: Path) -> dict:
 
     A round written while the policy is a draft or invalid records nothing;
     no review can run until the policy is approved, and the first check
-    after that pins the round.
+    after that pins the round. Without a policy a round records nothing
+    either, so the default path writes the bytes it wrote before; the
+    policy's init records revision 0 in it should a policy follow.
     """
     pin, errors = policy_pin(docs)
     return {} if errors else pin
+
+
+def no_policy_pin() -> dict:
+    """Return the pin of a round written before the project had a Process Policy.
+
+    Its review ran with every switch at its default. Revision 0 precedes the
+    policy's first revision, so no approved revision ever records it.
+    """
+    import process_policy
+
+    return {"process_policy_path": process_policy.RELATIVE, "process_policy_revision": 0}
 
 
 def recorded_pin(props: dict) -> dict:
@@ -3257,7 +3274,7 @@ def recorded_pin(props: dict) -> dict:
 
 
 def pin_label(pin: dict) -> str:
-    if not pin:
+    if not pin or pin == no_policy_pin():
         return "no Process Policy"
     return f"Process Policy revision {pin.get('process_policy_revision')}"
 
@@ -3272,26 +3289,17 @@ class RoundChanged(RuntimeError):
     """Raised when a review round changes while the compiler pins it."""
 
 
-def pin_first_seen_reviews(docs: Path, record: dict) -> list[str]:
-    """Pin each draft review round that records no Process Policy yet.
+def record_round_pins(docs: Path, paths: list[str], pin: dict) -> list[str]:
+    """Write ``pin`` into each draft review round of ``paths`` that records no policy yet.
 
-    A round records the policy in force when it is written: init, stub-epic
-    and begin-revision write theirs with it, and a round the Product Owner
-    writes is pinned here, the first time the compiler sees it. A pinned or
-    approved round is never touched, and without an approved policy nothing
-    is written. A round that changes while it is pinned is left for the next
-    check.
+    A pinned or approved round is never touched, and a round that changes
+    while it is pinned is left as it is.
     """
     import atomic_file
 
-    pin = round_pin(docs)
-    if not pin:
-        return []
     pinned = []
-    for review in draft_review_rounds(record):
-        if recorded_pin(review["props"]):
-            continue
-        path = docs / review["path"]
+    for relative in paths:
+        path = docs / relative
         original = path.read_bytes()
         props, body = parse_front_matter_text(original.decode("utf-8"))
         if recorded_pin(props) or props.get("approved_at_utc") or props.get("source_hash"):
@@ -3306,21 +3314,82 @@ def pin_first_seen_reviews(docs: Path, record: dict) -> list[str]:
                 path, front_matter({**props, **pin}, body).encode("utf-8"), unchanged)
         except RoundChanged:
             continue
-        review["props"].update(pin)
-        pinned.append(review["path"])
+        pinned.append(relative)
     return pinned
+
+
+def pin_first_seen_reviews(docs: Path, record: dict) -> list[str]:
+    """Pin each draft review round that records no Process Policy yet.
+
+    A round records the policy in force when it is written: init, stub-epic
+    and begin-revision write theirs with it, and a round the Product Owner
+    writes is pinned here, the first time the compiler sees it. A pinned or
+    approved round is never touched, and without an approved policy nothing
+    is written. A round that changes while it is pinned is left for the next
+    check.
+    """
+    pin = round_pin(docs)
+    if not pin:
+        return []
+    drafts = [review for review in draft_review_rounds(record)
+              if not recorded_pin(review["props"])]
+    pinned = record_round_pins(docs, [review["path"] for review in drafts], pin)
+    for review in drafts:
+        if review["path"] in pinned:
+            review["props"].update(pin)
+    return pinned
+
+
+def pin_rounds_before_policy_change(docs: Path) -> list[str]:
+    """Record the policy in force in each draft review round that records none yet.
+
+    ``process_policy.py`` calls this as init and begin-revision start, the
+    only steps that change the policy in force, so a round that no check has
+    pinned keeps the state its review ran under: revision 0 before the
+    project's first policy, the approved revision before its successor. A
+    draft or invalid policy lets no review run and records nothing. A round
+    still without a pin afterwards was written under the policy approved
+    next, which check or the approval records in it.
+    """
+    pin, errors = policy_pin(docs)
+    if errors:
+        return []
+    root = docs / "backlog"
+    rounds = []
+    for path in (*sorted((root / "reviews").glob("round-*-backlog-review.md")),
+                 *sorted((root / "epics").glob("*/reviews/round-*-epic-review.md"))):
+        try:
+            kind = parse_front_matter(path)[0].get("type")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if kind in {"backlog-review", "epic-review"}:
+            rounds.append(path.relative_to(docs).as_posix())
+    return record_round_pins(docs, rounds, pin or no_policy_pin())
 
 
 def review_pin_findings(record: dict, docs: Path, pin: dict,
                         preserved: dict[Path, bytes]) -> list[str]:
-    """Refuse a review the approval stamps whose round records another policy.
+    """Refuse a review the approval stamps that ran under other backlog switch values.
 
-    The root backlog records the policy in force at approval, so every review
-    the approval stamps must have run under it. A round that records no
-    policy is pinned by this approval, the first compiler step to see it
-    under one. A review approved in an earlier revision keeps its own pin and
-    is not compared.
+    Every review the approval stamps must have run with the value, parameters
+    included, that the approval's policy sets for each switch the
+    backlog-planning flow owns. Its round's pin is the record: the values it
+    names are read from the current policy or from the Git history of its
+    path, as a Delivery's are, and compared, never the revision or hash that
+    names them. So a revision that changes only other switches, a Delivery's
+    among them, leaves the review valid, and a round written before the
+    project's first policy agrees with a policy that keeps those switches at
+    their defaults. A pinned revision that cannot be read back is refused as
+    unverifiable. A round that records no policy is pinned by this approval,
+    the first compiler step to see it under one. A review approved in an
+    earlier revision keeps its own pin and is not compared.
     """
+    import process_policy
+
+    registry = process_policy.load_registry()
+    switches = sorted(switch for switch, entry in registry.items()
+                      if BACKLOG_FLOW in (entry["spec"].get("flows") or []))
+    values = process_policy.effective_values(docs)[0]
     findings = []
     reviews = [latest(record["backlog_reviews"])] + [latest(epic["reviews"])
                                                       for epic in record["epics"]]
@@ -3328,12 +3397,29 @@ def review_pin_findings(record: dict, docs: Path, pin: dict,
         if review is None or docs / review["path"] in preserved:
             continue
         recorded = recorded_pin(review["props"])
-        if recorded and recorded != pin:
+        if not recorded or recorded == pin:
+            continue
+        try:
+            ran = process_policy.pinned_values(
+                docs, {} if recorded == no_policy_pin() else recorded, registry)[0]
+        except ValueError as exc:
+            findings.append(
+                f"{review['path']} records {pin_label(recorded)}, whose switch values this"
+                f" approval cannot read back to compare: {exc}; or write a new review round and"
+                " rerun its review under the current Process Policy")
+            continue
+        changed = [switch for switch in switches
+                   if (ran[switch]["value"], ran[switch].get("parameters"))
+                   != (values[switch]["value"], values[switch].get("parameters"))]
+        if changed:
             findings.append(
                 f"{review['path']} records {pin_label(recorded)}, but the approval runs under"
                 f" {pin_label(pin)}; write a new review round and rerun its review under the"
-                f" current Process Policy, or restore {pin_label(recorded)} if that review"
-                " ran under it")
+                " current Process Policy, or approve a Process Policy revision that sets back"
+                " the values it ran under: " + "; ".join(
+                    f"switch {switch} ran at {process_policy.described(ran[switch])} and the"
+                    f" approval's policy sets {process_policy.described(values[switch])}"
+                    for switch in changed))
     return findings
 
 
@@ -3419,7 +3505,11 @@ def approve(args) -> int:
             props.pop("source_hash", None)
             props.pop("package_hash", None)
             if path in pinned:
-                props = with_policy_pin(props, pin)
+                # The root records the approval's pin. A review keeps the pin
+                # of the policy it ran under, whose backlog switch values the
+                # approval matched, and takes the approval's when it has none.
+                own = recorded_pin(props) if path != docs / record["backlog"]["path"] else {}
+                props = with_policy_pin(props, own or pin)
             path.write_bytes(front_matter(props, body).encode("utf-8"))
 
         with stage_package.candidate_session(), experience_validation_session():

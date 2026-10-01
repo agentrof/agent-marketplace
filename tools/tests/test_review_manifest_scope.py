@@ -179,6 +179,9 @@ class BoundedManifestTests(unittest.TestCase):
     def test_default_and_a_policy_that_keeps_it_read_the_default_manifests(self):
         self.depends(1, 3)
         self.refresh_reviews()
+        # A Process Policy's init first records in each draft round that its
+        # review ran under none; recorded here, every read compares the same notes.
+        backlog.pin_rounds_before_policy_change(self.docs)
         scopes = {"reader": {"epic": "EP-001"}, "writer": {"epic": "EP-001", "writer": True},
                   "root": {}}
         plain = {name: inputs.manifest(self.docs, **kwargs) for name, kwargs in scopes.items()}
@@ -287,6 +290,9 @@ class BoundedManifestTests(unittest.TestCase):
 
     def test_root_and_writer_manifests_keep_the_transitive_read_set(self):
         self.chain()
+        # A Process Policy's init first records in each draft round that its
+        # review ran under none; recorded here, every read compares the same notes.
+        backlog.pin_rounds_before_policy_change(self.docs)
         before = {"root": inputs.manifest(self.docs),
                   "writer": inputs.manifest(self.docs, epic="EP-001", writer=True)}
         choose(self.docs, "bounded")

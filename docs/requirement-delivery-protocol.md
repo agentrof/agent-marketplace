@@ -190,18 +190,29 @@ pin a Delivery takes at scope approval, the policy's path, revision and source
 hash, as the policy in force when the round is written: `init`, `stub-epic`
 and `begin-revision` write their rounds with it, and `check` pins a draft round
 the Product Owner writes the first time it sees it, never an approved round.
-Backlog approval records the same pin in `backlog.md` and refuses a review it
-approves whose round records another policy, naming the remedy: rerun that
-review in a new round under the current policy, or restore the policy it ran
-under. So a backlog revision and its reviews name the process switch values
-they ran under outside any Delivery. Once approved, the pin is a record and is
-never compared: a later policy revision leaves the approved backlog current, a
-round approved earlier keeps its own pin, and `begin-revision` drops the pin
-from the new draft root until its own approval. A round written while the
-policy is a draft records nothing and is pinned by the first check after the
-policy's approval. Without a policy nothing is recorded and the approval
-writes the bytes it wrote before; a draft or invalid policy refuses the
-approval.
+The policy in force changes only through `process_policy.py init` and
+`process_policy.py begin-revision`, and each first records the state it
+replaces in every draft round that records none yet: `init` records revision
+0, which names no policy, and `begin-revision` the approved revision, so no
+round written before a policy change takes the next policy's pin. Backlog
+approval records its own pin in `backlog.md` and refuses, before any write, a
+review it approves that ran with another value, parameters included, of a
+switch the backlog-planning flow owns than the approval's policy sets, reading
+the round's values from the current policy or the Git history of its path, or
+whose pinned revision it cannot read back, naming the remedy: rerun that
+review in a new round under the current policy, or approve a policy revision
+that sets those values back. A revision that changes only other switches, such
+as one set for the next Delivery, leaves the reviews valid, and a round from
+before the first policy agrees with a policy that keeps every backlog switch
+at its default. Each round keeps its own pin, so a backlog revision and its
+reviews name the process switch values they ran under outside any Delivery.
+Once approved, the pin is a record and is never compared: a later policy
+revision leaves the approved backlog current, a round approved earlier keeps
+its own pin, and `backlog_compile.py begin-revision` drops the pin from the new
+draft root until its own approval. A round written while the policy is a draft
+records nothing and is pinned by the first check after the policy's approval.
+Without a policy nothing is recorded and the approval writes the bytes it wrote
+before; a draft or invalid policy refuses the approval.
 
 ## Delivery Planning
 

@@ -490,6 +490,9 @@ class BacklogReviewInputTests(unittest.TestCase):
                 inputs.manifest(self.docs, epic="EP-001")
 
     def test_only_a_lens_panel_manifest_carries_the_compiler_facts_and_names_the_switch(self):
+        # A Process Policy's init first records in each draft round that its
+        # review ran under none; recorded here, every read compares the same notes.
+        backlog.pin_rounds_before_policy_change(self.docs)
         epic = inputs.manifest(self.docs, epic="EP-001")
         root = inputs.manifest(self.docs)
         # With no Process Policy a reader receives the manifest it received

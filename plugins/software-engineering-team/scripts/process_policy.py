@@ -709,6 +709,20 @@ def render_delivery_map(docs: Path) -> None:
     delivery_compile.render_map(docs)
 
 
+def pin_backlog_rounds(docs: Path) -> list[str]:
+    """Record the policy in force in the backlog's draft review rounds before it changes.
+
+    Only init and begin-revision change the policy in force, so each first
+    records it in every draft review round that records no policy yet, as
+    ``backlog_compile.pin_rounds_before_policy_change`` does.
+    """
+    if not (docs / "backlog").is_dir():
+        return []
+    import backlog_compile
+
+    return backlog_compile.pin_rounds_before_policy_change(docs)
+
+
 def write(path: Path, props: dict, body: str) -> None:
     atomic_file.replace_text(path, render(props, body))
 
@@ -727,10 +741,14 @@ def init(args) -> int:
         "| Switch | Value |", "| --- | --- |", "",
         "## Navigation <!-- sec: nav -->", "", "[[maps/delivery|Delivery map]]",
     ])
+    pinned = pin_backlog_rounds(docs)
     path.parent.mkdir(parents=True, exist_ok=True)
     write(path, props, body)
     render_delivery_map(docs)
-    return emit({"ok": True, "path": RELATIVE, "status": "draft", "revision": 1})
+    result = {"ok": True, "path": RELATIVE, "status": "draft", "revision": 1}
+    if pinned:
+        result["pinned_reviews"] = pinned
+    return emit(result)
 
 
 def begin_revision(args) -> int:
@@ -746,6 +764,7 @@ def begin_revision(args) -> int:
         errors = ["Process Policy revision requires an approved current policy"]
     if errors:
         return emit({"ok": False, "errors": errors}, 1)
+    pinned = pin_backlog_rounds(docs)
     props["revision"] = int(props["revision"]) + 1
     props["status"] = "draft"
     for key in ("approved_at_utc", "source_hash"):
@@ -753,7 +772,10 @@ def begin_revision(args) -> int:
     props["tags"] = [tag for tag in props.get("tags", [])
                      if not str(tag).startswith("status/")] + ["status/draft"]
     write(path, props, body)
-    return emit({"ok": True, "path": RELATIVE, "status": "draft", "revision": props["revision"]})
+    result = {"ok": True, "path": RELATIVE, "status": "draft", "revision": props["revision"]}
+    if pinned:
+        result["pinned_reviews"] = pinned
+    return emit(result)
 
 
 def set_value(args) -> int:

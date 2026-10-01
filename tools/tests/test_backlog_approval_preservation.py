@@ -18,6 +18,8 @@ from tools.tests.git_fixture import init_repository, remove_temporary
 import process_policy
 
 compiler = backlog_fixture.backlog_compile
+# The pin of a round written before the project had a Process Policy.
+NO_POLICY = {"process_policy_path": "delivery/process-policy.md", "process_policy_revision": 0}
 
 
 class EarlierClock(datetime):
@@ -416,6 +418,7 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             code = process_policy.main([argv[0], "--docs", str(self.docs), *argv[1:]])
         self.assertEqual(code, 0, output.getvalue())
+        return json.loads(output.getvalue())
 
     def pin_of(self, path):
         props, _body = compiler.parse_front_matter(path)
@@ -524,15 +527,12 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
         self.assertEqual(errors, [])
         return pin
 
+    def relative(self, paths):
+        return [path.relative_to(self.docs).as_posix() for path in paths]
+
     def test_a_round_the_owner_writes_is_pinned_when_a_check_first_sees_it(self):
-        reviews = [self.revise(), self.new_epic_review_round()]
-        # Without a policy a check writes nothing.
-        before = compiler.snapshot_tree(self.docs)
-        code, result = self.check()
-        self.assertEqual(code, 0, result)
-        self.assertNotIn("pinned_reviews", result)
-        self.assertEqual(compiler.snapshot_tree(self.docs), before)
         first = self.approve_policy("review_panels", "lens_panel")
+        reviews = [self.revise(), self.new_epic_review_round()]
         approved = {path: path.read_bytes() for path in (self.old_review, self.epic_review)}
         code, result = self.check()
         self.assertEqual(code, 0, result)
@@ -553,6 +553,115 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             compiler.main(["status", "--docs", str(self.docs), "--json"])
         self.assertEqual({path: path.read_bytes() for path in reviews}, pinned)
+
+    def test_rounds_written_before_the_first_policy_record_that_they_ran_under_none(self):
+        reviews = [self.revise(), self.new_epic_review_round()]
+        # Without a policy a check writes nothing.
+        before = compiler.snapshot_tree(self.docs)
+        code, result = self.check()
+        self.assertEqual(code, 0, result)
+        self.assertNotIn("pinned_reviews", result)
+        self.assertEqual(compiler.snapshot_tree(self.docs), before)
+        # The first policy's init records it before the policy exists, so the
+        # first check under that policy no longer claims them for it.
+        self.assertEqual(self.policy("init")["pinned_reviews"], self.relative(reviews))
+        for path in reviews:
+            self.assertEqual(self.pin_of(path), NO_POLICY, path)
+        self.policy("set", "--switch", "review_panels", "--value", "lens_panel")
+        self.policy("approve")
+        code, result = self.check()
+        self.assertEqual(code, 0, result)
+        self.assertNotIn("pinned_reviews", result)
+        before = compiler.snapshot_tree(self.docs)
+        result, output = self.approve()
+        self.assertEqual(result, 1, output)
+        for path in self.relative(reviews):
+            self.assertIn(f"{path} records no Process Policy, but the approval runs under Process"
+                          " Policy revision 1; write a new review round and rerun its review"
+                          " under the current Process Policy, or approve a Process Policy"
+                          " revision that sets back the values it ran under: switch"
+                          " review_panels ran at single_reader and the approval's policy sets"
+                          " lens_panel", output)
+        self.assertEqual(compiler.snapshot_tree(self.docs), before)
+
+    def test_a_first_policy_that_keeps_the_backlog_defaults_agrees_with_rounds_before_it(self):
+        reviews = [self.revise(), self.new_epic_review_round()]
+        # The owner's first policy sets only a switch no backlog flow owns.
+        self.policy("init")
+        self.policy("set", "--switch", "owner_gates", "--value", "two_fixed_gates")
+        self.policy("approve")
+        pin, _errors = process_policy.approved_snapshot(self.docs)
+        result, output = self.approve()
+        self.assertEqual(result, 0, output)
+        self.assert_full_gate()
+        self.assertEqual(self.pin_of(self.root), pin)
+        for path in reviews:
+            self.assertEqual(self.pin_of(path), NO_POLICY, path)
+        # The vault reads revision 0 as the number the property declares.
+        vault = compiler.vault_check.build_vault(self.docs, compiler.vault_check.load_policy(compiler.POLICY_PATH))
+        findings = []
+        compiler.vault_check.check_frontmatter_props(vault, findings)
+        self.assertEqual([finding for finding in findings
+                          if any(key in finding.message for key in process_policy.PIN_FIELDS)], [])
+
+    def test_an_approval_accepts_a_review_whose_backlog_switches_a_revision_kept(self):
+        first = self.approve_policy("review_panels", "lens_panel")
+        self.commit()
+        reviews = [self.revise(), self.new_epic_review_round()]
+        code, result = self.check()
+        self.assertEqual(result["pinned_reviews"], self.relative(reviews))
+        # The owner then sets a switch that only Delivery flows own.
+        self.policy("begin-revision")
+        self.policy("set", "--switch", "owner_gates", "--value", "two_fixed_gates")
+        self.policy("approve")
+        second, _errors = process_policy.approved_snapshot(self.docs)
+        result, output = self.approve()
+        self.assertEqual(result, 0, output)
+        self.assert_full_gate()
+        # The root records the approval's revision; each review keeps the one it ran under.
+        self.assertEqual(self.pin_of(self.root), second)
+        for path in reviews:
+            self.assertEqual(self.pin_of(path), first, path)
+
+    def test_an_approval_refuses_a_review_whose_pinned_revision_cannot_be_read_back(self):
+        # Revision 1 is never committed, so once revision 2 replaces it no
+        # file holds its values.
+        self.approve_policy("review_panels", "lens_panel")
+        reviews = [self.revise(), self.new_epic_review_round()]
+        code, result = self.check()
+        self.assertEqual(code, 0, result)
+        self.policy("begin-revision")
+        self.policy("set", "--switch", "owner_gates", "--value", "two_fixed_gates")
+        self.policy("approve")
+        before = compiler.snapshot_tree(self.docs)
+        result, output = self.approve()
+        self.assertEqual(result, 1, output)
+        for path in self.relative(reviews):
+            self.assertIn(f"{path} records Process Policy revision 1, whose switch values this"
+                          " approval cannot read back to compare: the pinned Process Policy"
+                          " revision 1", output)
+        self.assertIn("or write a new review round and rerun its review under the current"
+                      " Process Policy", output)
+        self.assertEqual(compiler.snapshot_tree(self.docs), before)
+
+    def test_a_policy_revision_records_the_revision_a_round_no_check_saw_ran_under(self):
+        first = self.approve_policy("review_panels", "lens_panel")
+        self.commit()
+        # The Product Owner writes both rounds and no check runs before the
+        # owner revises the policy.
+        reviews = [self.revise(), self.new_epic_review_round()]
+        self.assertEqual(self.policy("begin-revision")["pinned_reviews"], self.relative(reviews))
+        for path in reviews:
+            self.assertEqual(self.pin_of(path), first, path)
+        self.policy("set", "--switch", "review_panels", "--default")
+        self.policy("approve")
+        result, output = self.approve()
+        self.assertEqual(result, 1, output)
+        for path in self.relative(reviews):
+            self.assertIn(f"{path} records Process Policy revision 1, but the approval runs under"
+                          " Process Policy revision 2;", output)
+        self.assertIn("switch review_panels ran at lens_panel and the approval's policy sets"
+                      " single_reader", output)
 
     def test_an_approval_refuses_a_review_that_ran_under_another_policy(self):
         first = self.approve_policy("review_panels", "lens_panel")

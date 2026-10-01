@@ -348,6 +348,8 @@
     "work_kind": "text",
     "supporting_roles": "multitext",
     "experience_refs": "multitext",
+    "operation_impact": "text",
+    "operation_reason": "text",
     "package_hash": "text",
     "package_contract_version": "number",
     "depends_on": "multitext",
@@ -397,6 +399,7 @@
     "lane_scopes": "multitext",
     "lane_seams": "multitext",
     "mutation_include_paths": "multitext",
+    "command_variables": "multitext",
     "verification_candidate_hash": "text",
     "verification_mode": "text",
     "verification_result_hash": "text",
@@ -516,6 +519,8 @@
       "depends_on",
       "dependency_refs",
       "experience_refs",
+      "operation_impact",
+      "operation_reason",
       "package_hash",
       "scenario_refs",
       "criterion_refs",
@@ -530,7 +535,7 @@
     "code_review": ["item_plan_hash", "reviewed_commit", "verification_candidate_hash", "verification_mode", "verification_result_hash", "source_hash"],
     "verification": ["item_plan_hash", "verified_commit", "test_plan_source_hash", "verification_candidate_hash", "verification_mode", "verification_result_hash", "source_hash"],
     "delivery_review": ["plan_hash", "reviewed_commit", "reviewed_integration_commit", "approved_at_utc", "approval_hash", "source_hash"],
-    "operation": ["revision", "constrained_by", "source_hash", "approved_at_utc", "test_command", "test_workdir", "diagnostic_test_command", "diagnostic_test_workdir", "mutation_include_paths", "mutation_disposition", "mutation_command", "mutation_workdir", "mutation_rationale", "dependency_audit_disposition", "dependency_audit_command", "dependency_audit_workdir", "dependency_audit_rationale", "pull_request_check_source", "pull_request_check_provider", "env_command", "env_workdir", "scenarios", "tolerated_warnings", "service_catalog"],
+    "operation": ["revision", "constrained_by", "source_hash", "approved_at_utc", "test_command", "test_workdir", "diagnostic_test_command", "diagnostic_test_workdir", "command_variables", "mutation_include_paths", "mutation_disposition", "mutation_command", "mutation_workdir", "mutation_rationale", "dependency_audit_disposition", "dependency_audit_command", "dependency_audit_workdir", "dependency_audit_rationale", "pull_request_check_source", "pull_request_check_provider", "env_command", "env_workdir", "scenarios", "tolerated_warnings", "service_catalog"],
     "delivery_governance": ["revision", "max_parallel", "governance_hash", "source_hash", "approved_at_utc"],
     "process_policy": ["revision", "approved_at_utc", "source_hash"]
   },
@@ -681,6 +686,12 @@
       "software_architect",
       "ux_designer"
     ],
+    "optional_story_classifications": {
+      "operation_impact": {
+        "values": ["required", "not_applicable"],
+        "reason": "operation_reason"
+      }
+    },
     "required_story_sections": [
       "User Value",
       "Scope",

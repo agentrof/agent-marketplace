@@ -1,0 +1,6 @@
+{
+  "summary": "A backlog story may now classify its Operation impact with the optional `operation_impact: required|not_applicable` and a concrete `operation_reason`. The vault policy declares the pair under `backlog_contract.optional_story_classifications` beside the other story properties, and setup's project refresh declares both in `.obsidian/types.json`. `backlog_compile.py check` refuses another value, a missing or placeholder reason, or an `operation_reason` without `operation_impact`, naming the story's path, and accepts every story that carries neither, which stays unknown. At `story_size_budget` value `propose_split`, the `contract_deltas` measure adds 1 for `operation_impact: required`, an expected Environment or Verification Contract revision, beside the architecture delta it already counted. At `delivery_path` value `light_when_eligible`, a selected Story classified `required` makes the Delivery ineligible under the new condition `no_operation_impact`, which names the Story, before any Operation draft exists. `tools/validate.py` requires each declared classification to list distinct values and a reason property, both typed as vault-wide text. With no Process Policy, or every switch at its default, every compiler output and task binding is unchanged.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import hashlib
+import hmac
 import io
 import json
 import os
@@ -13,6 +15,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -22,6 +25,7 @@ sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 sys.path.insert(0, str(ROOT / "tools/tests"))
 import delivery_compile as delivery
 import delivery_verification as verification
+import file_lock
 from git_fixture import init_repository, remove_temporary
 
 
@@ -91,6 +95,41 @@ class VerificationTests(unittest.TestCase):
     def settle(self):
         verification.register_result(self.root, self.result())
         verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
+
+    # Two shells of one host, apart only in their shell and session variables (#356).
+    SHELL = {"PWD": "/reader/worktree", "OLDPWD": "/reader/previous", "SHLVL": "2", "_": "/usr/bin/reader-tool",
+             "READER_SESSION_ID": "qa-reader"}
+    OTHER_SHELL = {"PWD": "/coordinator/checkout", "OLDPWD": "/coordinator/previous", "SHLVL": "5",
+                   "_": "/usr/bin/coordinator-tool", "READER_SESSION_ID": "coordinator", "TERM_SESSION_ID": "w0t1p0"}
+
+    def declare_variables(self, *names):
+        """Approve a Verification Contract whose commands read the named variables."""
+        path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(path)
+        contract["command_variables"] = list(names)
+        self.write(path.relative_to(self.root), delivery.frontmatter(contract, body))
+        self.commit()
+
+    def forge_test_identity(self, change):
+        """Apply *change* to the settled test evidence's identity, keeping every hash that binds it consistent."""
+        self.forge_identity("test", "full_test_suite", change)
+
+    def forge_identity(self, kind, check, change):
+        """Apply *change* to the identity of QA's settled *kind* evidence, keeping every hash that binds it."""
+        session = verification.read_session(self.root)
+        raw = copy.deepcopy(session["raw_evidence"][kind])
+        change(raw["identity"])
+        raw.pop("evidence_hash")
+        raw["evidence_hash"] = verification.digest(raw)
+        session["raw_evidence"][kind] = raw
+        result = copy.deepcopy(session["workers"]["qa_engineer"]["result"])
+        result.pop("result_hash")
+        result["checks"][check]["raw_evidence_hash"] = raw["evidence_hash"]
+        if check == "full_test_suite":
+            result["checks"][check]["environment"] = raw["identity"].get("environment_hash")
+        result["result_hash"] = verification.digest(result)
+        session["workers"]["qa_engineer"]["result"] = result
+        verification.write_session(self.root, session)
 
     def platform_subprocess_probe(self):
         # Python 3.9 on Windows queries its platform through a string subprocess.
@@ -388,16 +427,197 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertEqual(scope["candidate_hash"], frozen["candidate"]["candidate_hash"])
         self.assertEqual(scope["scope"], "whole_changed_files")
 
-    def test_raw_evidence_rejects_changed_environment_and_missing_output_at_seal(self):
+    def test_the_run_identity_names_the_declared_variables_it_covers_without_their_values(self):
+        self.declare_variables("ITEM_DATABASE_URL", "ITEM_TOKEN")
         self.freeze()
-        self.settle()
-        with mock.patch.dict(os.environ, {"VERIFICATION_TEST_ENV": "changed"}):
-            with self.assertRaisesRegex(RuntimeError, "environment changed"):
-                verification.validate(self.root, "DLV-001", "AUTH-01")
+        secret = "s3cret-item-token-value"
+        with mock.patch.dict(os.environ, {**self.SHELL, "ITEM_TOKEN": secret, "LC_TIME": "C",
+                                          "AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json"}):
+            os.environ.pop("ITEM_DATABASE_URL", None)
+            raw = verification.run_check(self.root, "test")
+        names = raw["identity"]["environment_variables"]
+        self.assertEqual(names, sorted(set(names)))
+        # The fixed variables and the contract's are covered even unset, and the namespaces as they are set.
+        for name in ("AGENTROF_MUTATION_FILES", "AGENTROF_VERIFICATION_SCRATCH", "HOME", "ITEM_DATABASE_URL",
+                     "ITEM_TOKEN", "LANG", "LC_TIME", "PATH", "TZ"):
+            self.assertIn(name, names)
+        declared = {"HOME", "ITEM_DATABASE_URL", "ITEM_TOKEN", "LANG", "PATH", "TZ"}
+        self.assertEqual([name for name in names if name not in declared
+                          and not name.startswith(("AGENTROF_", "LC_"))], [])
+        for name in (*self.SHELL, "AGENTROF_DIAGNOSTIC_TESTS"):
+            self.assertNotIn(name, names)
+        self.assertRegex(raw["identity"]["environment_hash"], r"^hmac-sha256:[0-9a-f]{64}$")
+        self.assertNotIn(secret, verification.session_path(self.root).read_text(encoding="utf-8"))
+        self.assertNotIn(secret, json.dumps(raw))
+        # Only its hash binds the secret, so a changed secret is still a changed identity.
+        with mock.patch.dict(os.environ, {**self.SHELL, "ITEM_TOKEN": "another-value", "LC_TIME": "C"}):
+            os.environ.pop("ITEM_DATABASE_URL", None)
+            self.assertFalse(verification.run_check(self.root, "test")["reused"])
+
+    def test_a_recorded_run_is_reused_from_another_shell_but_not_after_a_declared_variable_changes(self):
+        self.declare_variables("ITEM_DATABASE_URL")
+        self.freeze()
+        base = {**self.SHELL, "ITEM_DATABASE_URL": "postgres://item-a"}
+        with mock.patch.dict(os.environ, base):
+            first = verification.run_check(self.root, "test")
+        self.assertFalse(first["reused"])
+        with mock.patch.dict(os.environ, {**base, **self.OTHER_SHELL}):
+            again = verification.run_check(self.root, "test")
+        self.assertTrue(again["reused"])
+        self.assertEqual(again["evidence_hash"], first["evidence_hash"])
+        for label, change in (("PATH", {"PATH": os.environ.get("PATH", "") + os.pathsep + "/opt/other/bin"}),
+                              ("contract variable", {"ITEM_DATABASE_URL": "postgres://item-b"}),
+                              ("locale", {"LC_ALL": "C"}),
+                              ("time zone", {"TZ": "Pacific/Auckland"}),
+                              ("runner namespace", {"AGENTROF_SAMPLE": "set"})):
+            with self.subTest(changed=label):
+                with mock.patch.dict(os.environ, base):
+                    verification.run_check(self.root, "test")
+                with mock.patch.dict(os.environ, {**base, **change}):
+                    self.assertFalse(verification.run_check(self.root, "test")["reused"])
+
+    def test_approval_checks_the_recorded_identity_and_never_the_checkers_environment(self):
+        self.freeze()
+        with mock.patch.dict(os.environ, self.SHELL):
+            self.settle()
+        # Another shell approves, with another declared value too: approval never compares the two.
+        checker = {**self.OTHER_SHELL, "VERIFICATION_TEST_ENV": "changed",
+                   "PATH": os.environ.get("PATH", "") + os.pathsep + "/opt/approver/bin"}
+        with mock.patch.dict(os.environ, checker):
+            verification.validate(self.root, "DLV-001", "AUTH-01")
+        names = verification.read_session(self.root)["raw_evidence"]["test"]["identity"]["environment_variables"]
+        refusals = (
+            ("full_test_suite evidence carries the whole-environment hash of an earlier runner, which binds the shell"
+             " that ran it; freeze the candidate again with freeze --fresh and rerun both readers",
+             lambda identity: identity.pop("environment_variables")),
+            ("full_test_suite evidence does not cover PATH",
+             lambda identity: identity["environment_variables"].remove("PATH")),
+            ("full_test_suite evidence does not cover AGENTROF_MUTATION_FILES",
+             lambda identity: identity["environment_variables"].remove("AGENTROF_MUTATION_FILES")),
+            ("full_test_suite evidence covers OLDPWD, PWD, which no declaration names",
+             lambda identity: identity.update(environment_variables=sorted([*names, "OLDPWD", "PWD"]))),
+            ("full_test_suite evidence must name each variable it covers once, in order",
+             lambda identity: identity.update(environment_variables=sorted(names, reverse=True))),
+            ("full_test_suite evidence records no environment hash",
+             lambda identity: identity.update(environment_hash="changed")),
+            ("full_test_suite evidence records no python",
+             lambda identity: identity.pop("python")),
+            ("full_test_suite evidence does not run the approved command in its approved workdir",
+             lambda identity: identity.update(command=self.command + " --other")),
+            ("full_test_suite evidence does not run the approved command in its approved workdir",
+             lambda identity: identity.update(kind="mutation")),
+        )
+        original = verification.session_path(self.root).read_bytes()
+        for message, change in refusals:
+            with self.subTest(message=message):
+                verification.session_path(self.root).write_bytes(original)
+                self.forge_test_identity(change)
+                with mock.patch.dict(os.environ, checker), self.assertRaisesRegex(RuntimeError, re.escape(message)):
+                    verification.validate(self.root, "DLV-001", "AUTH-01")
+        verification.session_path(self.root).write_bytes(original)
         raw = verification.read_session(self.root)["raw_evidence"]["test"]
+        with mock.patch.object(verification.time, "time", return_value=raw["completed_at"] + 86401), \
+                self.assertRaisesRegex(RuntimeError, "full_test_suite evidence expired"):
+            verification.validate(self.root, "DLV-001", "AUTH-01")
         (verification.session_path(self.root).parent / raw["output_file"]).unlink()
         with self.assertRaisesRegex(RuntimeError, "missing or changed"):
             verification.validate(self.root, "DLV-001", "AUTH-01")
+
+    def test_the_tracked_environment_hash_checks_no_guess_of_a_declared_value(self):
+        """Evidence approval writes QA's checks, the run identity's environment hash among them, into the Item's
+        tracked verification record. A hash of a few guessable values would let anyone who reads that record
+        confirm a guess of a declared credential offline, so the hash is keyed with a random key that never
+        leaves the Item's verification runtime, where every identity is compared (#356)."""
+        self.declare_variables("ITEM_TOKEN")
+        self.freeze()
+        with mock.patch.dict(os.environ, {"ITEM_TOKEN": "7319"}):
+            self.settle()
+            environment = verification.command_environment(self.root)
+        identity = verification.read_session(self.root)["raw_evidence"]["test"]["identity"]
+        # Every covered value known and the declared one guessed right: the guess still checks nothing.
+        values = {name: verification.variable_value(environment, name) for name in identity["environment_variables"]}
+        self.assertEqual(values["ITEM_TOKEN"], "7319")
+        canonical = json.dumps(values, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()
+        self.assertNotEqual(identity["environment_hash"], "sha256:" + hashlib.sha256(canonical).hexdigest())
+        key = verification.session_path(self.root).parent / "identity.key"
+        self.assertEqual(len(key.read_bytes()), 32)
+        if os.name != "nt":
+            self.assertEqual(stat.S_IMODE(key.stat().st_mode), 0o600)
+        self.assertEqual(identity["environment_hash"],
+                         "hmac-sha256:" + hmac.new(key.read_bytes(), canonical, hashlib.sha256).hexdigest())
+        args = type("Args", (), {"docs": ".", "worktree": str(self.root), "delivery": "DLV-001", "story": "AUTH-01"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery.approve_item_evidence(args), 0)
+        record = (self.root / self.directory / "items/auth-01/verification.md").read_text(encoding="utf-8")
+        self.assertIn(identity["environment_hash"], record)
+        self.assertNotIn("7319", record)
+
+    def test_a_contract_that_names_a_runner_variable_refuses_before_any_command_runs(self):
+        """A run identity drops a selection file the runner writes and binds it by content, so a contract that
+        declared one would refuse QA's evidence at every check, a fresh rerun too: the run refuses at once and
+        names the contract's error (#356)."""
+        self.declare_variables("ITEM_TOKEN", "AGENTROF_REUSED_TESTS")
+        self.freeze()
+        refusal = ("command_variables must not name AGENTROF_REUSED_TESTS, a variable of the runner's own AGENTROF_"
+                   " namespace, which run evidence binds without a declaration")
+        for fresh in (False, True):
+            with self.subTest(fresh=fresh), self.assertRaisesRegex(RuntimeError, "^" + re.escape(refusal) + "$"):
+                verification.run_check(self.root, "test", fresh=fresh)
+        self.assertNotIn("test", verification.read_session(self.root)["raw_evidence"])
+        for name in ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_MUTATION_FILES", "agentrof_reused_tests"):
+            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, f"^command_variables must not name {name},"):
+                verification.contract_variables({"command_variables": ["ITEM_TOKEN", name]})
+
+    def test_every_final_record_runs_in_the_full_suites_declared_environment(self):
+        """Every final record of a session shares the declared environment of its full_test_suite evidence, as
+        the comparison with one environment did before (#356), and only that evidence may reuse a pre-handoff
+        run (#354)."""
+        contract_path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(contract_path)
+        contract.update(mutation_disposition="required", mutation_command=self.command,
+                        dependency_audit_disposition="required", dependency_audit_command=self.command)
+        self.write(contract_path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
+        self.commit()
+        frozen = self.freeze()
+        verification.register_result(self.root, self.result())
+        kinds = {"full_test_suite": "test", "mutation_whole_changed_files": "mutation",
+                 "dependency_audit": "dependency_audit"}
+
+        def final(elsewhere=None):
+            """QA's final result, the check *elsewhere* names run in another declared time zone."""
+            result = self.result("qa_engineer", "qa_diagnostic")
+            result.update(mode="qa_final", checks={
+                name: {"passed": True, "evidence": "Independently verified"}
+                for name in verification.required_checks(self.root, frozen["candidate"], "qa_engineer")})
+            for check, kind in kinds.items():
+                with mock.patch.dict(os.environ, {"TZ": "Pacific/Chatham"} if check == elsewhere else {}):
+                    raw = verification.run_check(self.root, kind)
+                result["checks"][check]["raw_evidence_hash"] = raw["evidence_hash"]
+                if check == "full_test_suite":
+                    result["checks"][check].update(command=self.command, exit_code=0,
+                                                   environment=raw["identity"]["environment_hash"])
+            result["checks"]["mutation_whole_changed_files"]["files"] = frozen["candidate"]["mutation_files"]
+            return result
+
+        for check in ("mutation_whole_changed_files", "dependency_audit"):
+            with self.subTest(elsewhere=check), self.assertRaisesRegex(
+                    RuntimeError, f"^{check} evidence ran in another environment than full_test_suite evidence$"):
+                verification.register_result(self.root, final(check))
+        verification.register_result(self.root, final())
+        verification.validate(self.root, "DLV-001", "AUTH-01")
+        reuse = {"evidence_hash": "sha256:" + "0" * 64, "test_ids": ["tests/test_product.py::test_value"],
+                 "earlier_stories": [{"delivery": "DLV-000", "story": "AUTH-00",
+                                      "test_ids": ["tests/test_product.py::test_value"]}]}
+        original = verification.session_path(self.root).read_bytes()
+        for check, kind in kinds.items():
+            if check == "full_test_suite":
+                continue
+            with self.subTest(reuse=check):
+                verification.session_path(self.root).write_bytes(original)
+                self.forge_identity(kind, check, lambda identity: identity.update(reused_pre_handoff=reuse))
+                with self.assertRaisesRegex(RuntimeError, f"^{check} evidence reuses a pre-handoff run, which only"
+                                                          " the full test suite does$"):
+                    verification.validate(self.root, "DLV-001", "AUTH-01")
 
     def test_repair_preserves_finding_ids_and_requires_explicit_resolution(self):
         self.freeze()
@@ -492,9 +712,159 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertTrue(observed)
         self.assertFalse(raw["candidate_intact"])
         self.assertEqual((self.root / "src/product.py").read_text(), "value = 2\n")
-        with verification.command_lock(self.root):
-            with self.assertRaisesRegex(RuntimeError, "command to exit"):
-                verification.register_result(self.root, self.result())
+        with verification.command_lock(self.root, "qa_engineer", "run --kind test"):
+            with self.assertRaisesRegex(RuntimeError, "to exit before settling its reader"):
+                verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic"))
+
+    # A suite command that runs until the test releases it.
+    GATED_SUITE = """import pathlib, sys, time
+gate = pathlib.Path(sys.argv[1])
+(gate / "started").write_text("started", encoding="utf-8")
+deadline = time.monotonic() + 60
+while not (gate / "release").exists() and time.monotonic() < deadline:
+    time.sleep(0.02)
+print("suite passed")
+"""
+
+    def test_a_finished_reader_registers_while_the_other_readers_command_runs(self):
+        """The code reviewer registers while QA's verification command holds the command lock; QA's own result
+        waits for its command, and every barrier holds (#355)."""
+        markers = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, markers)
+        gate = Path(markers.name).resolve()
+        (gate / "suite.py").write_text(self.GATED_SUITE, encoding="utf-8")
+        arguments = [sys.executable, str(gate / "suite.py"), str(gate)]
+        self.command = subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
+        path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(path)
+        contract["test_command"] = self.command
+        self.write(path.relative_to(self.root), delivery.frontmatter(contract, body))
+        self.commit()
+        self.freeze()
+        outcome: dict = {}
+
+        def run() -> None:
+            try:
+                outcome["run"] = verification.run_check(self.root, "test")
+            except Exception as exc:  # noqa: BLE001 - reported by the assertions below
+                outcome["error"] = exc
+
+        thread = threading.Thread(target=run)
+        thread.start()
+
+        def release() -> None:
+            (gate / "release").write_text("release", encoding="utf-8")
+            thread.join(60)
+
+        self.addCleanup(release)
+        deadline = time.monotonic() + 60
+        while not (gate / "started").exists() and thread.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue((gate / "started").exists(), outcome)
+        holder = verification.command_holder(self.root)
+        self.assertEqual({key: holder.get(key) for key in ("role", "command", "pid")},
+                         {"role": "qa_engineer", "command": "run --kind test", "pid": os.getpid()})
+        self.assertRegex(holder["started_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        waiting = (r"^wait for qa_engineer's verification command `run --kind test` in process \d+ since \S+ to exit"
+                   r" before settling its reader$")
+        with self.assertRaisesRegex(RuntimeError, waiting):
+            verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic"))
+        verification.register_result(self.root, self.result())
+        session = verification.read_session(self.root)
+        self.assertEqual((session["workers"]["code_reviewer"]["state"], session["workers"]["qa_engineer"]["state"]),
+                         ("settled", "running"))
+        # QA still reads and its command still runs, so the writer and the approval keep waiting.
+        with self.assertRaisesRegex(RuntimeError, "READERS_ACTIVE"):
+            verification.guard_write(self.root, [self.root / "src/product.py"])
+        with self.assertRaisesRegex(RuntimeError, "verification command is still running"):
+            verification.validate(self.root, "DLV-001", "AUTH-01")
+        release()
+        self.assertNotIn("error", outcome)
+        raw = outcome["run"]
+        self.assertEqual((raw["exit_code"], raw["candidate_intact"]), (0, True))
+        # The command's record reached the session that the code reviewer's registration rewrote.
+        session = verification.read_session(self.root)
+        self.assertEqual(session["raw_evidence"]["test"]["evidence_hash"], raw["evidence_hash"])
+        self.assertEqual(session["workers"]["code_reviewer"]["state"], "settled")
+        self.assertIsNone(verification.command_holder(self.root))
+        self.assertFalse(verification.session_path(self.root).with_name("command-owner.json").exists())
+        verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
+        verification.validate(self.root, "DLV-001", "AUTH-01")
+
+    # An environment command whose up runs until the test releases it.
+    GATED_ENVIRONMENT = """import pathlib, sys, time
+gate = pathlib.Path(sys.argv[1])
+if sys.argv[2] == "up":
+    (gate / "started").write_text("started", encoding="utf-8")
+    deadline = time.monotonic() + 60
+    while not (gate / "release").exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+print(sys.argv[2])
+"""
+
+    def test_qa_never_settles_while_its_environment_verb_runs(self):
+        """An environment verb holds the verification command lock as QA's command, so QA's own result waits
+        for it and the code reviewer, which runs none, registers meanwhile (#355)."""
+        markers = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, markers)
+        gate = Path(markers.name).resolve()
+        (gate / "environment.py").write_text(self.GATED_ENVIRONMENT, encoding="utf-8")
+        arguments = [sys.executable, str(gate / "environment.py"), str(gate)]
+        item, body = delivery.split_note(self.root / self.item_path)
+        item.update(runtime_required=True, environment_contract_ref="operation/environment-contract")
+        self.write(self.item_path, delivery.frontmatter(item, body))
+        self.note("workspace/docs/operation/environment-contract.md", {
+            "status": "approved", "env_command": subprocess.list2cmdline(arguments) if os.name == "nt"
+            else shlex.join(arguments), "env_workdir": ".", "scenarios": ["baseline"], "service_catalog": []})
+        self.commit()
+        self.freeze()
+        self.assertEqual(verification.run_environment(self.root, "down")["exit_code"], 0)
+        outcome: dict = {}
+
+        def run() -> None:
+            try:
+                outcome["event"] = verification.run_environment(self.root, "up")
+            except Exception as exc:  # noqa: BLE001 - reported by the assertions below
+                outcome["error"] = exc
+
+        thread = threading.Thread(target=run)
+        thread.start()
+
+        def release() -> None:
+            (gate / "release").write_text("release", encoding="utf-8")
+            thread.join(60)
+
+        self.addCleanup(release)
+        deadline = time.monotonic() + 60
+        while not (gate / "started").exists() and thread.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue((gate / "started").exists(), outcome)
+        holder = verification.command_holder(self.root)
+        self.assertEqual({key: holder.get(key) for key in ("role", "command", "pid")},
+                         {"role": "qa_engineer", "command": "environment --verb up", "pid": os.getpid()})
+        with self.assertRaisesRegex(RuntimeError, r"^wait for qa_engineer's verification command `environment --verb"
+                                                  r" up` in process \d+ since \S+ to exit before settling its"
+                                                  r" reader$"):
+            verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic"))
+        verification.register_result(self.root, self.result())
+        release()
+        self.assertNotIn("error", outcome)
+        self.assertEqual(outcome["event"]["exit_code"], 0)
+        self.assertEqual(verification.read_session(self.root)["workers"]["code_reviewer"]["state"], "settled")
+
+    def test_a_command_that_has_not_recorded_its_owner_holds_every_reader(self):
+        self.freeze()
+        lock = verification.session_path(self.root).with_name("commands.lock")
+        descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+        self.addCleanup(os.close, descriptor)
+        self.assertTrue(file_lock.try_lock(descriptor))
+        self.addCleanup(file_lock.unlock, descriptor)
+        self.assertEqual(verification.command_holder(self.root), {})
+        for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_diagnostic")):
+            with self.subTest(role=role), self.assertRaisesRegex(
+                    RuntimeError, "^wait for a verification command that has not recorded its owner yet to exit"
+                                  " before settling its reader$"):
+                verification.register_result(self.root, self.result(role, mode))
 
     def test_original_write_then_restore_invalidates_source_observations(self):
         frozen = self.freeze()
@@ -574,6 +944,54 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
             verification.run_environment(self.root, "logs")
         self.assertEqual(verification.run_environment(self.root, "down")["exit_code"], 0)
         self.assertFalse(verification.read_session(self.root)["runtime"]["active"])
+
+    @contextlib.contextmanager
+    def git_for_windows_checkouts(self):
+        """Check private clones out as Git for Windows does by default.
+
+        Without core.longpaths it creates no file whose absolute path reaches
+        260 characters, and the checkout still exits 0. Yields the root of each
+        clone checked out.
+        """
+        original = verification.git
+        roots = []
+
+        def git(root, *args):
+            output = original(root, *args)
+            if args[:1] == ("checkout",):
+                roots.append(Path(root))
+                configured = subprocess.run(["git", "-C", str(root), "config", "--bool", "core.longpaths"],
+                                            capture_output=True, text=True, check=False).stdout.strip()
+                if configured != "true":
+                    for relative in original(root, "ls-files", "-z").split("\0"):
+                        if relative and len(str(Path(root) / relative)) >= 260:
+                            (Path(root) / relative).unlink(missing_ok=True)
+            return output
+
+        with mock.patch.object(verification, "git", side_effect=git):
+            yield roots
+
+    def test_private_checkouts_hold_a_tracked_path_past_the_windows_path_limit(self):
+        """The private clones sit deep in the verification scratch, so a tracked path that fits
+        the project reaches 260 characters there. Git for Windows must still check it out, or
+        neither checkout counts as intact and the runtime one refuses up."""
+        deep = "src/" + "/".join(["nested-package-level"] * 7) + "/module.py"
+        self.write(deep, "value = 3\n")
+        item, body = delivery.split_note(self.root / self.item_path)
+        item.update(runtime_required=True, environment_contract_ref="operation/environment-contract")
+        self.write(self.item_path, delivery.frontmatter(item, body))
+        self.note("workspace/docs/operation/environment-contract.md", {"status": "approved", "env_command": self.command, "env_workdir": ".", "scenarios": ["baseline"], "service_catalog": []})
+        self.commit()
+        self.freeze()
+        with self.git_for_windows_checkouts() as clones:
+            with self.subTest(checkout="runtime"):
+                events = [verification.run_environment(self.root, verb) for verb in ("down", "up")]
+                self.assertEqual([event["candidate_intact"] for event in events], [True, True])
+            with self.subTest(checkout="command"):
+                self.assertTrue(verification.run_check(self.root, "test")["candidate_intact"])
+        self.assertEqual(len(clones), 2)
+        for clone in clones:
+            self.assertGreaterEqual(len(str(clone / deep)), 260)
 
     def test_failed_or_interrupted_runtime_start_requires_cleanup_before_cancellation(self):
         item, body = delivery.split_note(self.root / self.item_path)
@@ -825,25 +1243,89 @@ print(sys.argv[1])
                       " point only inside the Item worktree.", reference)
         self.assertIn("keeps every entry inside the worktree", reference)
 
-    def test_runtime_evidence_requires_unchanged_environment_and_fresh_events(self):
+    def test_lane_commands_never_receive_an_inherited_runner_selection(self):
+        """Only the run that writes a selection file names it, so a lane command never receives
+        AGENTROF_DIAGNOSTIC_TESTS or AGENTROF_REUSED_TESTS from the coordinator's shell, which would let a
+        reuse-aware test command skip suites while the lane reports green."""
+        self.lane_fixture()
+        names = verification.SELECTION_VARIABLES
+        script = self.markers / "selections.py"
+        script.write_text(f"import json, os\nprint(json.dumps({{name: os.environ.get(name) for name in {names!r}}}))\n",
+                          encoding="utf-8")
+        arguments = [sys.executable, str(script)]
+        contract_path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(contract_path)
+        contract["test_command"] = subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
+        self.write(contract_path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
+        self.commit()
+        self.assertEqual(names, ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS"))
+        with mock.patch.dict(os.environ, {"AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json",
+                                          "AGENTROF_REUSED_TESTS": "inherited-reuse.json"}):
+            result = self.lane("backend_developer", "test")
+        output = Path(result["output_file"]).read_text(encoding="utf-8")
+        self.assertEqual(result["exit_code"], 0, output)
+        self.assertEqual(json.loads(output), {name: None for name in names})
+        reference = " ".join((ROOT / "plugins/software-engineering-team/skill-content/deliver/references"
+                              / "switch-implementation_schedule-parallel_lanes_v1.md")
+                             .read_text(encoding="utf-8").split())
+        self.assertIn("`lane-run` also unsets the runner's selection variables `AGENTROF_DIAGNOSTIC_TESTS` and"
+                      " `AGENTROF_REUSED_TESTS`", reference)
+
+    def test_runtime_evidence_shares_one_recorded_identity_and_stays_fresh(self):
         item, body = delivery.split_note(self.root / self.item_path)
         item.update(runtime_required=True, environment_contract_ref="operation/environment-contract")
         self.write(self.item_path, delivery.frontmatter(item, body))
         self.note("workspace/docs/operation/environment-contract.md", {"status": "approved", "env_command": self.command, "env_workdir": ".", "scenarios": ["baseline"], "service_catalog": []})
         self.commit()
         self.freeze()
-        for verb, value in (("down", None), ("up", None), ("seed", "baseline"), ("logs", None), ("down", None)):
-            verification.run_environment(self.root, verb, value)
+        with mock.patch.dict(os.environ, self.SHELL):
+            for verb, value in (("down", None), ("up", None), ("seed", "baseline"), ("logs", None), ("down", None)):
+                verification.run_environment(self.root, verb, value)
         session = verification.read_session(self.root)
         evidence = {"event_hashes": [event["evidence_hash"] for event in session["runtime"]["events"]]}
         verification.require_runtime_evidence(self.root, session, evidence)
-        with mock.patch.dict(os.environ, {"RUNTIME_CONFIGURATION": "changed"}):
-            with self.assertRaisesRegex(RuntimeError, "stale"):
-                verification.require_runtime_evidence(self.root, session, evidence)
+        # Another shell checks the events, with another declared value too: it never compares them with itself.
+        with mock.patch.dict(os.environ, {**self.OTHER_SHELL, "RUNTIME_CONFIGURATION": "changed",
+                                          "PATH": os.environ.get("PATH", "") + os.pathsep + "/opt/checker/bin"}):
+            verification.require_runtime_evidence(self.root, session, evidence)
+
+        def forged(change) -> tuple[dict, dict]:
+            value = copy.deepcopy(session)
+            event = value["runtime"]["events"][2]
+            change(event["environment_identity"])
+            event.pop("evidence_hash")
+            event["evidence_hash"] = verification.digest(event)
+            return value, {"event_hashes": [entry["evidence_hash"] for entry in value["runtime"]["events"]]}
+
+        for message, change in (
+                ("runtime command evidence ran in more than one environment",
+                 lambda identity: identity.update(environment_hash="hmac-sha256:" + "0" * 64)),
+                ("runtime command evidence carries the whole-environment hash of an earlier runner, which binds the"
+                 " shell that ran it; freeze the candidate again with freeze --fresh and rerun both readers",
+                 lambda identity: identity.pop("environment_variables")),
+                ("runtime command evidence does not cover PATH",
+                 lambda identity: identity["environment_variables"].remove("PATH"))):
+            with self.subTest(message=message), self.assertRaisesRegex(RuntimeError, re.escape(message)):
+                verification.require_runtime_evidence(self.root, *forged(change))
         latest = max(event["completed_at"] for event in session["runtime"]["events"])
         with mock.patch.object(verification.time, "time", return_value=latest + 86401):
             with self.assertRaisesRegex(RuntimeError, "stale"):
                 verification.require_runtime_evidence(self.root, session, evidence)
+        # QA's final evidence runs in one declared environment: a test run in another one is refused.
+        verification.register_result(self.root, self.result())
+        with mock.patch.dict(os.environ, {**self.SHELL, "PATH": os.environ.get("PATH", "") + os.pathsep + "/opt/qa"}):
+            final = self.result("qa_engineer", "qa_final")
+        final["checks"]["fresh_runtime"]["event_hashes"] = evidence["event_hashes"]
+        with self.assertRaisesRegex(RuntimeError, "runtime command evidence ran in another environment than"
+                                                  " full_test_suite evidence"):
+            verification.register_result(self.root, final)
+        with mock.patch.dict(os.environ, self.OTHER_SHELL):
+            final = self.result("qa_engineer", "qa_final")
+        final["checks"]["fresh_runtime"]["event_hashes"] = evidence["event_hashes"]
+        verification.register_result(self.root, final)
+        with mock.patch.dict(os.environ, {**self.OTHER_SHELL,
+                                          "PATH": os.environ.get("PATH", "") + os.pathsep + "/opt/approver/bin"}):
+            verification.validate(self.root, "DLV-001", "AUTH-01")
 
     def test_failed_runtime_retries_qa_without_repeating_same_candidate_review(self):
         item, body = delivery.split_note(self.root / self.item_path)

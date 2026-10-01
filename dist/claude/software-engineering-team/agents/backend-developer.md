@@ -1,7 +1,8 @@
 ---
 name: backend-developer
 description: Backend developer role. Spawned by software-engineering-team flows to implement server-side work against approved contracts; never auto-triggered.
-model: claude-sonnet-5-5
+model: claude-opus-5-5
+effort: medium
 output_contract: prose
 ---
 

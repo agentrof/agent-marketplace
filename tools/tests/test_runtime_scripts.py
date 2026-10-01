@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "plugins" / "software-engineering-team" / "scripts"
@@ -352,6 +353,19 @@ class DesignSystemCompileTests(unittest.TestCase):
             self.assertIn(str(output / "MASTER.md"), result["created_files"])
             self.assertIn(str(output / "artifacts" / "standalone.html"), result["created_files"])
             self.assertIn("contract_version: 3", (output / "MASTER.md").read_text(encoding="utf-8"))
+
+    def test_catalog_template_check_names_a_font_a_design_language_and_a_vendor_only(self):
+        # The shipped template invents no project font, design language or
+        # vendor color; the check names no client and no client domain.
+        self.assertEqual(design_system_compile.FORBIDDEN_TEMPLATE_TERMS, ("azure", "inter", "fluent"))
+        self.assertEqual(design_system_compile.template_findings(), [])
+        with tempfile.TemporaryDirectory() as temporary:
+            template = Path(temporary) / "standalone-template.html"
+            template.write_text("<style>body { font-family: Inter, sans-serif; }</style>\n",
+                                encoding="utf-8")
+            with mock.patch.object(design_system_compile, "CATALOG_TEMPLATE", template):
+                self.assertEqual(design_system_compile.template_findings(),
+                                 ["catalog template contains forbidden project-specific term 'inter'"])
 
 
 if __name__ == "__main__":

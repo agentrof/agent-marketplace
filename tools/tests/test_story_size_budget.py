@@ -196,6 +196,19 @@ class RegistryAndInstructionTests(unittest.TestCase):
         for skill in sorted(TEAM.glob("skill-content/*/SKILL.md")):
             self.assertNotIn("switch-story_size_budget", skill.read_text(encoding="utf-8"))
 
+    def test_the_reference_defines_the_optional_operation_impact_classification(self):
+        text = flat(read(REFERENCE))
+        for rule in (
+                "`contract_deltas` counts 1 for `software_architect` among the story's roles, an"
+                " expected architecture delta, and 1 for `operation_impact: required`, an expected"
+                " revision of the Environment Contract or the Verification Contract",
+                "like a Requirement impact matrix row it classifies impact and carries no estimate",
+                "`backlog_compile.py check` refuses another value or a missing reason",
+                "a story without the classification counts no Operation delta, as before",
+                "Never classify a story to fit a limit"):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, text)
+
 
 def story(body: str = "", scenarios: int = 0, owner: str = "backend_developer",
           supporting: tuple[str, ...] = ()) -> dict:
@@ -293,6 +306,21 @@ class MeasureTests(unittest.TestCase):
         # A repeated role is one role.
         repeated = story(supporting=("backend_developer",))
         self.assertEqual(measured(repeated)["implementation_roles"], 1)
+
+    def test_contract_deltas_count_an_operation_impact_classification(self):
+        # An unclassified story is unknown for its Operation impact and counts no delta (#348).
+        for supporting, impact, deltas in (
+            ((), None, 0), ((), "not_applicable", 0), ((), "required", 1),
+            (("software_architect",), None, 1),
+            (("software_architect",), "not_applicable", 1),
+            (("software_architect",), "required", 2),
+        ):
+            with self.subTest(supporting=supporting, impact=impact):
+                value = story(supporting=supporting)
+                if impact is not None:
+                    value["props"].update(operation_impact=impact,
+                                          operation_reason="The story needs a new queue service.")
+                self.assertEqual(measured(value)["contract_deltas"], deltas)
 
 
 def approved_backlog(fixture: "Project") -> None:
@@ -409,6 +437,27 @@ class CheckTests(unittest.TestCase):
                     "test_scenarios": {"value": 1, "limit": 5}},
                     "over_budget": [], "size_exceptions": []}}})
 
+    def test_contract_deltas_report_an_operation_impact_classification(self):
+        path = self.fx.story_path(1)
+        props, body = backlog_compile.parse_front_matter(path)
+        self.fx.choose((SWITCH, "propose_split"), limits={"contract_deltas": 1})
+        for impact, deltas in ((None, 0), ("not_applicable", 0), ("required", 1)):
+            with self.subTest(impact=impact):
+                fields = {} if impact is None else {
+                    "operation_impact": impact,
+                    "operation_reason": "Delivering the story needs a queue service the"
+                                        " Environment Contract lacks."}
+                path.write_text(backlog_compile.front_matter({**props, **fields}, body),
+                                encoding="utf-8")
+                code, output = self.fx.check()
+                result = json.loads(output)
+                self.assertEqual((code, result["errors"]), (0, []))
+                stories = result["story_size"]["stories"]
+                self.assertEqual(stories["ST-001"]["measures"]["contract_deltas"],
+                                 {"value": deltas, "limit": 1})
+                self.assertEqual(stories["ST-002"]["measures"]["contract_deltas"],
+                                 {"value": 0, "limit": 1})
+
     def test_the_policy_refuses_propose_split_without_valid_limits(self):
         def refused(*argv: str) -> str:
             code, output = quiet(process_policy.main,
@@ -490,9 +539,9 @@ class CheckTests(unittest.TestCase):
         second = (block.replace("ST-001-TS-001", "ST-001-TS-002")
                   .replace("an eligible customer supplies valid account details",
                            "the account state that ST-005-TS-003 leaves; this scenario"
-                           " supersedes ST-005-TS-004 and ST-019-TS-001"))
+                           " supersedes ST-005-TS-004 and ST-006-TS-001"))
         text = text.replace(block, block + "\n\n" + second + "\n\nRegression context names"
-                            " ST-031-TS-007 and ST-031-TS-008 only in prose.")
+                            " ST-007-TS-007 and ST-007-TS-008 only in prose.")
         text = text.replace("| empty | covered | ST-001-TS-001 |",
                             "| empty | covered | ST-001-TS-001, ST-001-TS-002 |")
         plan.write_text(text, encoding="utf-8")
@@ -677,10 +726,8 @@ class SizeExceptionApprovalTests(unittest.TestCase):
         code, output = self.fx.check()
         self.assertEqual(sorted(json.loads(output)["story_size"]["stories"]), ["ST-001", "ST-002"])
 
-    def test_without_a_readable_merge_state_the_budget_measures_the_revision_changes(self):
-        self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 1})
-        # The recorded PR's merge needs Git, which this project does not have.
-        self.delivery("awaiting_merge", pull_request_url="https://example.invalid/pr/1")
+    def revise_second_story(self) -> None:
+        """Open backlog revision 2, which changes ST-002 alone."""
         root = self.fx.docs / "backlog/backlog.md"
         props, body = backlog_compile.parse_front_matter(root)
         props["revision"] = 2
@@ -689,12 +736,34 @@ class SizeExceptionApprovalTests(unittest.TestCase):
             props.pop(key, None)
         root.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
         self.fx.add_criteria(2, "- [ ] A second observable result.")
+
+    def test_without_a_readable_merge_state_the_budget_measures_the_revision_changes(self):
+        self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 1})
+        # The recorded PR's merge needs Git, which this project does not have.
+        self.delivery("awaiting_merge", pull_request_url="https://example.invalid/pr/1")
+        self.revise_second_story()
         code, output = self.fx.check()
         size = json.loads(output)["story_size"]
         self.assertEqual(sorted(size["stories"]), ["ST-002"])
         self.assertEqual(sorted(size["skipped_stories"]), ["ST-001"])
         self.assertTrue(size["skipped_stories"]["ST-001"].startswith(
             "unchanged in this revision while Delivery merge state cannot be evaluated"))
+
+    def test_an_unreadable_review_record_measures_the_revision_changes_and_names_it(self):
+        """A Delivery Review record that cannot be read, here after an editor wrote a byte order mark, leaves
+        the merge state unknown, as Git does when it cannot decide: the budget measures only the revision's
+        changes and names the record, never the Delivery's story as one no Delivery merged."""
+        self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 1})
+        self.delivery("awaiting_merge", pull_request_url="https://example.invalid/pr/1")
+        review = self.fx.docs / "delivery/deliveries/dlv-001-auth/delivery-review.md"
+        review.write_bytes(b"\xef\xbb\xbf" + review.read_bytes())
+        self.revise_second_story()
+        finding = f"Delivery merge state cannot be evaluated: {review} cannot be read: missing frontmatter block"
+        self.assertEqual(backlog_compile.delivered_stories(self.fx.docs), (set(), finding))
+        code, output = self.fx.check()
+        size = json.loads(output)["story_size"]
+        self.assertEqual(sorted(size["stories"]), ["ST-002"])
+        self.assertEqual(size["skipped_stories"], {"ST-001": "unchanged in this revision while " + finding})
 
     def test_at_the_default_approval_never_reads_the_table(self):
         self.fx.choose()

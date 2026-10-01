@@ -60,3 +60,15 @@ interpolation. The approved adapter provisions dependencies in its private
 candidate checkout or uses the approved fixed environment; it cannot borrow
 ignored dependencies from the writer's checkout. Diagnostic output cannot
 satisfy final full-suite evidence.
+
+Verification may also name, in `command_variables`, the environment variables
+its commands read beyond `PATH`, `HOME`, `LANG`, `LC_*` and `TZ`, such as a
+service URL or a credential the tests use. Each is a variable name, never a
+value. Delivery run evidence covers those variables by name and binds their
+values by a hash alone, keyed with a key kept only in the Item's verification
+runtime, so a recorded run is reused only while they hold, a tracked record
+that carries the hash checks no guess of a value, and a variable left out
+never binds the evidence. The contract check refuses a name of the runner's
+own `AGENTROF_` namespace: the runner sets those variables, and run evidence
+binds them without a declaration, a selection file the runner writes by its
+content. Add the field through the normal revision and approval lifecycle.

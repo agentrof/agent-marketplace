@@ -31,8 +31,8 @@ names, followed by one verb:
   across a daylight-saving change; one that passes before `on` runs is
   refused. `--until` also takes an ISO time; a time without an offset is the
   local clock.
-- `on --goal delivery:DLV-002`: until the owning compiler reads the Delivery
-  as merged or cancelled. `--goal requirement:REQ-005` ends when the
+- `on --goal delivery:DLV-001`: until the owning compiler reads the Delivery
+  as merged or cancelled. `--goal requirement:REQ-001` ends when the
   Requirement is incorporated into the approved backlog, resolved with no
   change, superseded or withdrawn. `--goal text:"finish the migration"` ends
   only through `complete`, `off` or its cap. A goal-bound grant without

@@ -1,0 +1,4 @@
+{
+  "summary": "GitHub Release titles are the version tag alone, for example `v0.0.1`, and so is the annotated tag's message. Publication refuses to adopt an existing Release with any other title, such as one that also names the product, and the maintainer protocol's Release audit checks the title.",
+  "components": {}
+}

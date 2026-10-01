@@ -152,6 +152,17 @@ class VaultHookPrototypeTests(unittest.TestCase):
                 routed = [*command[:-1], verb]
                 routed_text = subprocess.list2cmdline(routed) if os.name == "nt" else shlex.join(routed)
                 self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(routed_text)), 0)
+            # A code review panel registers, calibrates and merges while both readers run,
+            # under the checks result passes: the installed script and one --worktree.
+            for verb, *arguments in (("result", "--file", str(scratch)), ("panel-result", "--file", str(scratch)),
+                                     ("calibrate", "--file", str(scratch)), ("merge-panel",)):
+                routed = [*command[:-1], verb, *arguments]
+                for value, expected in ((routed, 0), ([*routed, "--worktree", str(project)], 2),
+                                        ([*routed[:2], str(project / "delivery_verification.py"), *routed[3:]], 2)):
+                    text = subprocess.list2cmdline(value) if os.name == "nt" else shlex.join(value)
+                    for shell, outcome in ((text, expected), (text + " && echo unsafe", 2)):
+                        with self.subTest(command=shell), redirect_stderr(io.StringIO()):
+                            self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(shell)), outcome)
             command_text = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
             diagnostic = [*command[:-1], "run", "--kind", "diagnostic_test", "--selection-file", str(scratch.parent / "selection.json")]
             diagnostic_text = subprocess.list2cmdline(diagnostic) if os.name == "nt" else shlex.join(diagnostic)
@@ -2295,7 +2306,8 @@ class VaultHookShellContractTests(unittest.TestCase):
             )
             marker = subprocess.run(
                 ["/usr/bin/python3", str(guard), "register"],
-                capture_output=True, text=True, check=False,
+                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                check=False,
             )
             self.assertEqual(marker.returncode, 0, marker.stdout + marker.stderr)
             context = json.loads(marker.stdout)["hookSpecificOutput"][
@@ -2453,6 +2465,93 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertFalse(self.hook.sanctioned_application_writer(
                 unsupported_flag, docs,
             ))
+
+    def test_set_tier_and_set_role_tier_are_config_writers_under_an_exact_option_parse(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _docs, config = self.project(root)
+            other = root / "other" / "config.json"
+
+            def sanctioned(command: str, *args: str) -> bool:
+                argv = [sys.executable, str(SCRIPTS / "project_config.py"), command, *args]
+                payload = self.payload(
+                    root,
+                    subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv),
+                    field="cmd",
+                )
+                if os.name == "nt":
+                    payload["shell_family"] = "cmd"
+                return self.hook.sanctioned_config_writer(payload, config)
+
+            target = ("--config", str(config), "--host", "codex", "--tier", "high")
+            for args in (
+                (*target, "--effort", "low"),
+                (*target, "--model", "gpt-5.5"),
+                (*target, "--model", "session", "--effort", "max", "--confirmed", "--dry-run",
+                 "--json"),
+                (*target, "--default"),
+                # A tier or host the package retired is the writer's to judge.
+                ("--json", "--default", "--tier", "ghost", "--host", "retired",
+                 "--config", str(config)),
+            ):
+                with self.subTest(accepted=args):
+                    self.assertTrue(sanctioned("set-tier", *args))
+            for args in (
+                target,
+                (*target, "--effort", "low", "--default"),
+                (*target, "--model", "session", "--default"),
+                (*target, "--effort", ""),
+                (*target, "--model", ""),
+                ("--config", str(config), "--tier", "high", "--default"),
+                ("--config", str(config), "--host", "codex", "--default"),
+                ("--host", "codex", "--tier", "high", "--default"),
+                ("--config", str(other), "--host", "codex", "--tier", "high", "--default"),
+                (*target, "--default", "--default"),
+                (*target, "--model", "gpt-5.5", "--model", "session"),
+                (*target, "--default", "--field", "output_language"),
+                (*target, "--default", "extra"),
+                (*target, "--effort=low"),
+                ("--config", str(config), "--host", "", "--tier", "high", "--default"),
+            ):
+                with self.subTest(refused=args):
+                    self.assertFalse(sanctioned("set-tier", *args))
+            role = ("--config", str(config), "--role", "code-reviewer")
+            for args in (
+                (*role, "--tier", "medium"),
+                (*role, "--default"),
+                (*role, "--tier", "low", "--dry-run", "--json"),
+                # A role the package retired is the writer's to judge.
+                ("--default", "--role", "retired-role", "--config", str(config)),
+            ):
+                with self.subTest(accepted_role=args):
+                    self.assertTrue(sanctioned("set-role-tier", *args))
+            for args in (
+                role,
+                (*role, "--tier", "low", "--default"),
+                (*role, "--tier", ""),
+                ("--config", str(config), "--tier", "low"),
+                ("--config", str(config), "--role", "", "--default"),
+                ("--config", str(other), "--role", "code-reviewer", "--default"),
+                (*role, "--tier", "low", "--confirmed"),
+                (*role, "--model", "session"),
+                (*role, "--tier=low"),
+            ):
+                with self.subTest(refused_role=args):
+                    self.assertFalse(sanctioned("set-role-tier", *args))
+            # The retired effort writer is no config writer any more.
+            self.assertFalse(sanctioned("set-effort", *target, "--effort", "low"))
+            # The language writer keeps its own parse.
+            self.assertTrue(sanctioned(
+                "set", "--config", str(config), "--field", "output_language",
+                "--value", "Turkish"))
+            for args in (
+                ("--config", str(config), "--field", "output_language", "--default"),
+                ("--config", str(config), "--host", "codex", "--tier", "high",
+                 "--effort", "low"),
+            ):
+                with self.subTest(refused_set=args):
+                    self.assertFalse(sanctioned("set", *args))
+            self.assertFalse(sanctioned("tiers", "--config", str(config)))
 
     def test_cmd_pre_and_command_post_preserve_official_config_change(self):
         with tempfile.TemporaryDirectory() as temporary:

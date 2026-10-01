@@ -404,7 +404,10 @@ def read_delivery_goal(docs: Path, target: str) -> dict:
         return {"found": False, "error": f"finds no Delivery {target}"}
     props, _body = delivery_compile.split_note(root / "delivery.md")
     state, unknown = delivery_compile.delivery_state(root, props)
-    return {"found": True, "state": str(state), "error": unknown}
+    if unknown is not None:
+        # Without a merge state the tracked status is no answer, so the read fails as for delivery.md.
+        raise RuntimeError(unknown)
+    return {"found": True, "state": str(state), "error": None}
 
 
 def read_requirement_goal(docs: Path, target: str) -> dict:

@@ -623,6 +623,11 @@ class DeliveryCompilerTests(unittest.TestCase):
                 props["status"] = status
                 delivery_compile.atomic_text(root / "delivery.md",
                                              delivery_compile.frontmatter(props, body))
+                if status == "awaiting_merge":
+                    # The commit that records the PR URL in the Review sets awaiting_merge.
+                    delivery_compile.atomic_text(root / "delivery-review.md", delivery_compile.frontmatter(
+                        {"type": "delivery-review", "pull_request_url": "https://example.invalid/pull/1"},
+                        "# Review\n"))
                 self.assertEqual(delivery_compile.delivery_findings(self.docs, "DLV-001")[1], [])
                 self.assertEqual(self.policy("value", "--switch", "review_panels", "--delivery",
                                              "DLV-001")["value"], "single_reader")
@@ -2160,7 +2165,7 @@ class ScopeHandoffBindingTests(unittest.TestCase):
         """Let AUTH-01 implement the current REQ-001 under root Requirement REQ-002, and propose it."""
         implemented = self.requirement("REQ-001", "account-access", ("business-analysis",))
         requirement_compile.bind_stage(implemented, "business-analysis", "business-analysis/delivery/space")
-        root = self.requirement("REQ-002", "pin-acquisition")
+        root = self.requirement("REQ-002", "report-export")
         self.requirement_mode(root, origin_mode="manual",
                               implements=[f"[[requirements/{implemented.stem}|REQ-001]]"], **self.TECHNICAL)
         self.assertEqual(requirement_route.route(self.docs, "REQ-001")["action"], "backlog")
@@ -2251,7 +2256,7 @@ class ScopeHandoffBindingTests(unittest.TestCase):
 
     def test_proposal_and_scope_refuse_experience_refs_when_the_root_marks_experience_not_applicable(self):
         application, _hash = self.publish_application()
-        root = self.requirement("REQ-002", "pin-acquisition")
+        root = self.requirement("REQ-002", "report-export")
         finding = (f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current "
                    f"{application}: root Requirement REQ-002 marks experience-design not_applicable; "
                    f"{self.INPUT_REF_REMEDY}")
@@ -2323,7 +2328,7 @@ class ScopeHandoffBindingTests(unittest.TestCase):
         bindings = [f"{stage}|{ref}|{digest}" for stage, ref, digest in receipts]
         bindings.append(f"experience-design|{application}|{application_hash}")
         self.edit("backlog/backlog.md", input_bindings=sorted(bindings))
-        root = self.requirement("REQ-002", "pin-acquisition")
+        root = self.requirement("REQ-002", "report-export")
         self.requirement_mode(root, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
         return application, application_hash
 
@@ -2370,7 +2375,7 @@ class ScopeHandoffBindingTests(unittest.TestCase):
             ]))
 
     def test_scope_accepts_a_selection_without_experience_refs_on_current_requirements(self):
-        root = self.requirement("REQ-002", "pin-acquisition")
+        root = self.requirement("REQ-002", "report-export")
         self.requirement_mode(root, origin_mode="requirement", introduced_in_revision=2,
                               implements=[f"[[requirements/{root.stem}|REQ-002]]"], **self.TECHNICAL)
         self.propose()

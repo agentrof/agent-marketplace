@@ -34,6 +34,7 @@ from git_fixture import init_repository, remove_temporary  # noqa: E402
 LIMITS = {"acceptance_criteria": 12, "test_scenarios": 20}
 OWNER_GATES = "deliver/references/switch-owner_gates-two_fixed_gates.md"
 LANES = "deliver/references/switch-implementation_schedule-parallel_lanes_v1.md"
+PRE_HANDOFF = "deliver/references/switch-pre_handoff_regression-touched_suites.md"
 BUNDLE = "execution_planning-single_source_bundle.md"
 REVIEW = ("challenge-review/references/switch-mechanical_pass_tier-mechanical.md",
           "challenge-review/references/switch-review_loop-blocking_delta.md",
@@ -61,12 +62,13 @@ EXPECTED = {
     "backlog-plan:qa-engineer": [BOUNDED],
     **{f"configure:{role}": ["configure/references/switch-" + BUNDLE, OWNER_GATES]
        for role in ("delivery-coordinator", "devops-engineer", "qa-engineer")},
-    **{f"deliver:{role}": [LANES, OWNER_GATES]
+    **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF]
        for role in ("backend-developer", "delivery-coordinator", "devops-engineer",
                     "frontend-developer", "qa-engineer")},
-    "deliver:code-reviewer": ["code-review/references/switch-review_loop-blocking_delta.md",
-                              LANES, OWNER_GATES],
-    "deliver:software-architect": [LANES, OWNER_GATES,
+    "deliver:code-reviewer": ["code-review/references/switch-code_review_panel-beside_official.md",
+                              "code-review/references/switch-review_loop-blocking_delta.md",
+                              LANES, OWNER_GATES, PRE_HANDOFF],
+    "deliver:software-architect": [LANES, OWNER_GATES, PRE_HANDOFF,
                                    "software-architecture/references/switch-" + BUNDLE],
     "delivery-plan:delivery-coordinator": [
         OWNER_GATES, "delivery-plan/references/switch-delivery_path-light_when_eligible.md"],

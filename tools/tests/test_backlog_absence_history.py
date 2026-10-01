@@ -173,7 +173,7 @@ class BacklogAbsenceHistoryTests(unittest.TestCase):
     def test_unapproved_requirement_body_change_blocks_historical_read(self):
         self.approved_headless_backlog()
         self.req.write_text(self.req.read_text().replace(
-            "Acquire pins by digest.", "Acquire a different deliverable."))
+            "Export the monthly report.", "Export a different deliverable."))
         _record, errors = self.collect()
         self.assertTrue(any("approved source_hash is stale" in error for error in errors), errors)
 

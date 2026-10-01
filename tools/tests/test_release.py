@@ -20,6 +20,7 @@ import build_distributions  # noqa: E402
 import fixtures  # noqa: E402
 import git_fixture  # noqa: E402
 import release  # noqa: E402
+import validate  # noqa: E402
 
 
 def changeset(path: Path, summary: str, components: dict[str, str]) -> release.Changeset:
@@ -321,6 +322,404 @@ class ReleaseRepositoryTests(unittest.TestCase):
             released_paths={".changes/fixture.json"},
         )
         self.assertEqual(metadata["summaries"], ["Apply new-patch."])
+
+
+RESET_RETIRED = ["0.0.1", "0.1.0", "0.2.0"]
+RETIRED_CHANGELOG = (
+    "# Changelog\n\n"
+    "## 0.0.1\n\n- Establish the retired baseline of the reset fixture.\n\n"
+    "## 0.1.0\n\n- Ship the first retired feature of the reset fixture.\n\n"
+    "## 0.2.0\n\n- Ship the second retired feature of the reset fixture.\n"
+)
+BOOTSTRAP_CHANGELOG = (
+    "# Changelog\n\n## 0.0.1\n\n"
+    "- Establish the first stable Agent Marketplace baseline for all supported hosts.\n"
+)
+REMOVED = object()
+
+
+def reset_marker(**changes: object) -> dict:
+    marker = {
+        "schema_version": 1,
+        "reason": "Restart stable numbering at the bootstrap version.",
+        "date": "2026-10-01",
+        "retired_versions": list(RESET_RETIRED),
+    }
+    for key, value in changes.items():
+        if value is REMOVED:
+            marker.pop(key)
+        else:
+            marker[key] = value
+    return marker
+
+
+def set_every_version(root: Path, version: str) -> None:
+    plugins = release.load_versions(root)["plugins"]
+    versions = {
+        "schema_version": 1,
+        "marketplace": version,
+        "plugins": {name: version for name in plugins},
+    }
+    release.write_json(root / "versions.json", versions)
+    release.sync_version_surfaces(root, versions)
+    build_distributions.replace_generated(root, root / "dist")
+
+
+def apply_release_reset(root: Path) -> None:
+    """Make every edit of the complete one-time reset."""
+    set_every_version(root, release.BOOTSTRAP_VERSION)
+    (root / ".release" / "stable.json").unlink()
+    for path in (root / ".changes").glob("*.json"):
+        path.unlink()
+    fixtures.write(root / "CHANGELOG.md", BOOTSTRAP_CHANGELOG)
+    release.write_json(root / ".release" / "reset.json", reset_marker())
+
+
+class ReleaseResetPolicyTests(unittest.TestCase):
+    """check-pr accepts only the complete one-time restart at the bootstrap version."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.tmp.name) / "repository"
+        cls.root.mkdir()
+        fixtures.make_valid_root(cls.root, "0.2.0")
+        fixtures.write(cls.root / ".changes" / "README.md", "# Changesets\n")
+        fixtures.write(cls.root / ".changes" / "pending-feature.json", json.dumps({
+            "summary": "Ship a pending feature.",
+            "components": {fixtures.PLUGIN: "minor"},
+        }, indent=2) + "\n")
+        fixtures.write(cls.root / "CHANGELOG.md", RETIRED_CHANGELOG)
+        release.write_json(cls.root / ".release" / "stable.json", {
+            "schema_version": 1,
+            "version": "0.2.0",
+            "stable_base": "a" * 40,
+            "main_source": "b" * 40,
+            "impacts": {fixtures.PLUGIN: "minor"},
+            "summaries": ["Ship the second retired feature of the reset fixture."],
+        })
+        git_fixture.init_repository(cls.root, initial_branch="main")
+        cls.git("config", "user.name", "Release Reset Test")
+        cls.git("config", "user.email", "release-reset@example.test")
+        cls.git("add", "--all")
+        cls.git("commit", "-qm", "a released line at 0.2.0")
+        cls.base_sha = cls.git("rev-parse", "HEAD")
+        apply_release_reset(cls.root)
+        cls.git("add", "--all")
+        cls.git("commit", "-qm", "chore(release): restart stable numbering")
+        cls.reset_sha = cls.git("rev-parse", "HEAD")
+
+    @classmethod
+    def tearDownClass(cls):
+        git_fixture.remove_temporary(cls.tmp)
+
+    @classmethod
+    def git(cls, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=cls.root, capture_output=True, text=True,
+            check=True,
+        ).stdout.strip()
+
+    def setUp(self):
+        self.start_from(self.reset_sha)
+
+    def start_from(self, revision: str) -> None:
+        self.git("checkout", "-q", "--detach", "--force", revision)
+        self.git("clean", "-qfdx")
+
+    def commit(self, message: str) -> str:
+        self.git("add", "--all")
+        self.git("commit", "-qm", message)
+        return self.git("rev-parse", "HEAD")
+
+    def restore(self, *paths: str) -> None:
+        """Take paths back to the released line, undoing that part of the reset."""
+        self.git("checkout", self.base_sha, "--", *paths)
+
+    def base_with(self, message: str, edit) -> str:
+        """Commit a variant of the released line and return to the reset."""
+        self.start_from(self.base_sha)
+        edit()
+        variant = self.commit(message)
+        self.start_from(self.reset_sha)
+        return variant
+
+    def check(self, base: str | None = None) -> dict:
+        return release.check_pr_changeset(self.root, base or self.base_sha)
+
+    def assert_refused(self, cases: dict, base: str | None = None) -> None:
+        for name, (edit, message) in cases.items():
+            with self.subTest(name):
+                self.start_from(self.reset_sha)
+                edit()
+                self.commit(name)
+                with self.assertRaisesRegex(release.ReleaseError, message):
+                    self.check(base)
+
+    def test_the_reset_changelog_holds_only_the_bootstrap_release_note(self):
+        self.assertEqual(release.bootstrap_changelog(), BOOTSTRAP_CHANGELOG)
+        self.assertEqual(
+            "\n\n".join(BOOTSTRAP_CHANGELOG.split("\n\n")[2:]),
+            release.release_notes(self.root, release.BOOTSTRAP_VERSION),
+        )
+
+    def test_the_complete_reset_is_accepted_as_the_bootstrap_state(self):
+        self.assertEqual(self.check(), {
+            "mode": "reset",
+            "version": "0.0.1",
+            "retired_versions": RESET_RETIRED,
+        })
+        self.assertEqual(release.verify_bootstrap(self.root)["marketplace"], "0.0.1")
+        environment = {key: value for key, value in os.environ.items()
+                       if key != release.PRIVATE_TERMS_VARIABLE}
+        completed = subprocess.run(
+            [
+                sys.executable, str(TESTS_DIR.parent / "release.py"),
+                "--root", str(self.root), "check-pr", "--base", self.base_sha,
+            ],
+            capture_output=True, text=True, check=False, env=environment,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.splitlines(), [
+            "release: release reset valid; it retires 3 releases, 0.0.1 to "
+            "0.2.0, and restarts stable numbering at 0.0.1",
+            "release: 1 commit and its added lines hold no home-directory path or private term"
+            " (no private terms set)",
+        ])
+
+    def test_every_partial_reset_is_refused(self):
+        def keep_versions(**kept: str) -> None:
+            versions = release.load_versions(self.root)
+            versions["marketplace"] = kept.get("marketplace", versions["marketplace"])
+            versions["plugins"][fixtures.PLUGIN] = kept.get(
+                "plugin", versions["plugins"][fixtures.PLUGIN]
+            )
+            release.write_json(self.root / "versions.json", versions)
+
+        every_version = "sets the marketplace and every plugin to 0.0.1"
+        self.assert_refused({
+            "marketplace version kept": (
+                lambda: keep_versions(marketplace="0.2.0"), every_version,
+            ),
+            "plugin version kept": (
+                lambda: keep_versions(plugin="0.2.0"), every_version,
+            ),
+            "catalog version kept": (
+                lambda: self.restore(".claude-plugin/marketplace.json"),
+                "version drift at claude marketplace",
+            ),
+            "host manifest kept": (
+                lambda: self.restore(f"platforms/codex/{fixtures.PLUGIN}/manifest.json"),
+                "version drift at platforms.codex",
+            ),
+            "distribution kept": (
+                lambda: self.restore("dist"), "version drift at dist",
+            ),
+            "stable metadata kept": (
+                lambda: self.restore(".release/stable.json"),
+                "deletes .release/stable.json",
+            ),
+            "empty changeset kept": (
+                lambda: self.restore(".changes/fixture.json"),
+                "deletes every pending changeset: fixture.json",
+            ),
+            "release-impact changeset kept": (
+                lambda: self.restore(".changes/pending-feature.json"),
+                "deletes every pending changeset: pending-feature.json",
+            ),
+            "changelog kept": (
+                lambda: self.restore("CHANGELOG.md"),
+                "starts CHANGELOG.md over",
+            ),
+            "changelog emptied": (
+                lambda: fixtures.write(self.root / "CHANGELOG.md", "# Changelog\n"),
+                "starts CHANGELOG.md over",
+            ),
+        })
+
+    def test_every_mixed_reset_is_refused(self):
+        def archive(path: str):
+            return lambda: fixtures.write(
+                self.root / path,
+                "# Release history before the reset\n"
+                + RETIRED_CHANGELOG.split("\n", 1)[1],
+            )
+
+        def append_history() -> None:
+            agents = self.root / "AGENTS.md"
+            agents.write_text(
+                agents.read_text(encoding="utf-8")
+                + "\n- Ship the first retired feature of the reset fixture.\n",
+                encoding="utf-8",
+            )
+
+        no_history = "keeps no changelog history"
+        self.assert_refused({
+            "new changeset": (
+                lambda: fixtures.write(
+                    self.root / ".changes" / "extra.json",
+                    json.dumps({"summary": "Extra.", "components": {}}) + "\n",
+                ),
+                "deletes every pending changeset: extra.json",
+            ),
+            "another version": (
+                lambda: set_every_version(self.root, "1.0.0"),
+                "sets the marketplace and every plugin to 0.0.1",
+            ),
+            "rewritten stable metadata": (
+                lambda: release.write_json(
+                    self.root / ".release" / "stable.json",
+                    {"schema_version": 1, "version": "0.0.1"},
+                ),
+                "deletes .release/stable.json",
+            ),
+            "changelog archive": (
+                archive("docs/history/changelog-before-reset.md"),
+                f"{no_history}: docs/history/changelog-before-reset.md",
+            ),
+            "renamed changelog archive": (
+                archive("notes/releases.md"), f"{no_history}: notes/releases.md",
+            ),
+            "history appended to a document": (
+                append_history, f"{no_history}: AGENTS.md",
+            ),
+        })
+
+    def test_a_reset_cannot_change_the_plugin_registry(self):
+        def register_retired_plugin() -> None:
+            versions = release.load_versions(self.root)
+            versions["plugins"]["retired-team"] = "0.2.0"
+            release.write_json(self.root / "versions.json", versions)
+
+        base = self.base_with("register a second plugin", register_retired_plugin)
+        with self.assertRaisesRegex(release.ReleaseError, "cannot change the plugin registry"):
+            self.check(base)
+
+    def test_a_base_without_a_stable_release_has_nothing_to_retire(self):
+        base = self.base_with(
+            "no stable release",
+            lambda: (self.root / ".release" / "stable.json").unlink(),
+        )
+        with self.assertRaisesRegex(release.ReleaseError, "no .release/stable.json"):
+            self.check(base)
+
+    def test_the_base_stable_release_must_be_the_last_retired_version(self):
+        base = self.base_with(
+            "stable behind its changelog",
+            lambda: release.write_json(
+                self.root / ".release" / "stable.json",
+                {"schema_version": 1, "version": "0.1.0"},
+            ),
+        )
+        with self.assertRaisesRegex(release.ReleaseError, "stable release 0.1.0"):
+            self.check(base)
+
+    def test_the_marker_records_the_exact_retired_line(self):
+        shape = "must contain only date, reason, retired_versions and schema_version"
+        listed = "every release of the base CHANGELOG.md, in order: 0.0.1, 0.1.0, 0.2.0"
+        cases = {
+            "missing date": (reset_marker(date=REMOVED), shape),
+            "extra key": (reset_marker(restart_version="0.0.1"), shape),
+            "schema 2": (reset_marker(schema_version=2), "schema_version must be 1"),
+            "boolean schema": (reset_marker(schema_version=True), "schema_version must be 1"),
+            "blank reason": (reset_marker(reason="  "), "reason must be a non-empty string"),
+            "impossible date": (reset_marker(date="2026-13-01"), "date must be"),
+            "prose date": (reset_marker(date="1 Oct 2026"), "date must be"),
+            "version string": (
+                reset_marker(retired_versions="0.2.0"),
+                "retired_versions must be a non-empty list",
+            ),
+            "empty list": (
+                reset_marker(retired_versions=[]),
+                "retired_versions must be a non-empty list",
+            ),
+            "tag names": (
+                reset_marker(retired_versions=["v0.0.1", "v0.1.0", "v0.2.0"]),
+                "strict SemVer",
+            ),
+            "unordered": (
+                reset_marker(retired_versions=["0.1.0", "0.0.1", "0.2.0"]),
+                "unique and ascending",
+            ),
+            "missing release": (
+                reset_marker(retired_versions=["0.0.1", "0.2.0"]), listed,
+            ),
+            "unreleased version": (
+                reset_marker(retired_versions=["0.0.1", "0.1.0", "0.2.0", "0.3.0"]),
+                listed,
+            ),
+        }
+        self.assert_refused({
+            name: (
+                lambda marker=marker: release.write_json(
+                    self.root / ".release" / "reset.json", marker,
+                ),
+                message,
+            )
+            for name, (marker, message) in cases.items()
+        })
+        self.assert_refused({
+            "not JSON": (
+                lambda: fixtures.write(self.root / ".release" / "reset.json", "{\n"),
+                "invalid JSON",
+            ),
+        })
+
+    def test_the_marker_is_added_once_and_never_changed(self):
+        # Once merged, the marker is part of every later base.
+        self.assert_refused({
+            "edited": (
+                lambda: release.write_json(
+                    self.root / ".release" / "reset.json",
+                    reset_marker(reason="Restart once more."),
+                ),
+                "may only add it",
+            ),
+            "deleted": (
+                lambda: (self.root / ".release" / "reset.json").unlink(),
+                "may only add it",
+            ),
+            "renamed": (
+                lambda: (self.root / ".release" / "reset.json").rename(
+                    self.root / ".release" / "earlier-reset.json"
+                ),
+                "may only add it",
+            ),
+        }, base=self.reset_sha)
+
+    def test_a_branch_from_before_the_reset_stays_a_normal_pull_request(self):
+        # Like the diff, the mode looks from where the branch left its base.
+        self.start_from(self.base_sha)
+        fixtures.write(self.root / "notes" / "before-reset.md", "before\n")
+        fixtures.write(
+            self.root / ".changes" / "before-reset.json",
+            json.dumps({"summary": "Add a note.", "components": {}}) + "\n",
+        )
+        self.commit("docs: a note from before the reset")
+        self.assertEqual(self.check(self.reset_sha), {"mode": "changeset"})
+
+    def test_a_reset_without_its_marker_follows_the_normal_rules(self):
+        (self.root / ".release" / "reset.json").unlink()
+        self.commit("reset without the marker")
+        with self.assertRaisesRegex(release.ReleaseError, "every normal pull request must add"):
+            self.check()
+
+    def test_after_the_reset_normal_pull_requests_keep_the_changeset_rules(self):
+        fixtures.write(self.root / "notes" / "after-reset.md", "after\n")
+        fixtures.write(
+            self.root / ".changes" / "after-reset.json",
+            json.dumps({"summary": "Add a note.", "components": {}}) + "\n",
+        )
+        self.commit("docs: a note after the reset")
+        self.assertEqual(self.check(self.reset_sha), {"mode": "changeset"})
+        constitution = self.root / "plugins" / fixtures.PLUGIN / "constitution.md"
+        constitution.write_text(
+            constitution.read_text(encoding="utf-8") + "\nAfter the reset.\n",
+            encoding="utf-8",
+        )
+        self.commit("change the package without its component")
+        with self.assertRaisesRegex(release.ReleaseError, "omits changed release components"):
+            self.check(self.reset_sha)
 
 
 class BootstrapCandidatePolicyTests(unittest.TestCase):
@@ -1266,6 +1665,171 @@ class BootstrapFinalizeTests(unittest.TestCase):
             self.assertEqual(result["release"]["version"], "0.0.1")
             self.assertEqual(run("git", "branch", "--show-current").stdout.strip(), "main")
             self.assertEqual(run("git", "status", "--porcelain").stdout, "")
+
+
+class PullRequestConfidentialityTests(unittest.TestCase):
+    """check-pr reads every commit message and added line of base..HEAD, and
+    the PR text it is given, because a merge commit keeps every commit: a
+    home-directory path is refused, and so is a term of the owner's local
+    private terms file, by kind and position only (#357)."""
+
+    # Built from parts so that this file holds no home path itself.
+    HOME = "/" + "home/fixture"
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(git_fixture.remove_temporary, temporary)
+        self.scratch = Path(temporary.name).resolve()
+        self.root = self.scratch / "repository"
+        self.root.mkdir()
+        git_fixture.init_repository(self.root, initial_branch="main")
+        self.git("config", "user.name", "Release Test")
+        self.git("config", "user.email", "release@example.test")
+        self.commit({"README.md": "Fixture.\n"}, "Base")
+        self.base = self.git("rev-parse", "HEAD")
+        environment = mock.patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop(release.PRIVATE_TERMS_VARIABLE, None)
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(["git", *args], cwd=self.root, capture_output=True,
+                              text=True, check=True).stdout.strip()
+
+    def commit(self, files: dict, message: str) -> str:
+        for relative, text in files.items():
+            fixtures.write(self.root / relative, text)
+        self.git("add", "--all")
+        self.git("commit", "-qm", message)
+        return self.git("rev-parse", "HEAD")[:12]
+
+    def terms(self, *terms: str) -> Path:
+        path = self.scratch / "private-terms.txt"
+        path.write_text("\n".join(terms) + "\n", encoding="utf-8")
+        os.environ[release.PRIVATE_TERMS_VARIABLE] = str(path)
+        return path
+
+    def refusal(self, base: str = "", pr_text: Path | None = None) -> str:
+        with self.assertRaises(release.ReleaseError) as raised:
+            release.check_pr_publishable(self.root, base or self.base, pr_text)
+        return str(raised.exception)
+
+    def test_a_home_path_in_any_commit_message_or_added_line_is_refused(self):
+        added = self.commit({"docs/notes.md": f"Notes.\nSeen in {self.HOME}/app.\n"}, "Add notes")
+        message = self.commit({"docs/other.md": "Other.\n"},
+                              f"Add other\n\nMeasured in {self.HOME}/app.")
+        self.commit({"docs/notes.md": "Notes.\n"}, "Drop the path again")
+        # The final tree is clean, yet the merge commit keeps both commits.
+        error = self.refusal()
+        self.assertIn(f"home-directory path at commit {added} docs/notes.md line 2, column 9", error)
+        self.assertIn(f"home-directory path at commit {message} message line 3, column 13", error)
+        self.assertEqual(error.count(" at commit "), 2, error)
+        self.assertNotIn(self.HOME, error)
+
+    def test_a_system_home_or_a_declared_fixture_home_passes(self):
+        self.commit({"docs/ci.md": "Runs in /home/runner/work/app/app.\n",
+                     "tools/tests/test_sample.py": f'CWD = "{self.HOME}/app"\n'}, "Add CI notes")
+        declared = {"tools/tests/test_sample.py": frozenset({"fixture"})}
+        with mock.patch.dict(validate.HOME_PATH_FIXTURES, declared, clear=True):
+            self.assertEqual(release.check_pr_publishable(self.root, self.base),
+                             {"commits": 1, "terms_checked": 0})
+
+    def test_private_terms_are_refused_by_kind_and_position_and_never_printed(self):
+        self.terms("Fixture Corp", "acme-internal")
+        commit = self.commit({"docs/acme-internal-notes.md": "Notes.\nOwned by ACME-INTERNAL.\n"},
+                             "Report for fixture corp")
+        pr_text = self.scratch / "pr.md"
+        pr_text.write_text("Report\n\nFixture Corp asked for it.\n", encoding="utf-8")
+        error = self.refusal(pr_text=pr_text)
+        for expected in (f"private term at commit {commit} message line 1, column 12",
+                         f"private term at commit {commit} file 1 path",
+                         f"private term at commit {commit} file 1 line 2, column 10",
+                         "private term at PR text line 3, column 1"):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, error)
+        self.assertEqual(error.count(" at "), 4, error)
+        for value in ("fixture corp", "acme-internal", "notes.md", str(self.scratch)):
+            with self.subTest(value=value):
+                self.assertNotIn(value.lower(), error.lower())
+
+    def test_a_term_is_a_whole_word_and_without_a_terms_file_none_is_checked(self):
+        commit = self.commit({"docs/a.md": "The fixture corporation.\n"}, "Fixture Corp report")
+        self.assertEqual(release.check_pr_publishable(self.root, self.base),
+                         {"commits": 1, "terms_checked": 0})
+        self.terms("", "Fixture Corp", "  ")
+        error = self.refusal()
+        self.assertIn(f"private term at commit {commit} message line 1, column 1", error)
+        self.assertEqual(error.count(" at "), 1, error)
+
+    def test_a_merge_is_read_for_the_lines_it_adds_itself(self):
+        self.terms("Fixture Corp")
+        self.git("checkout", "-qb", "feature")
+        self.commit({"docs/feature.md": "Feature.\n"}, "Feature")
+        self.git("checkout", "-q", "main")
+        self.commit({"docs/main.md": "Fixture Corp history already on main.\n"}, "Main work")
+        base = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "main")
+        merge = self.commit({"docs/feature.md": "Feature.\nFixture Corp in the merge.\n"},
+                            "Merge main")
+        error = self.refusal(base)
+        self.assertIn(f"private term at commit {merge} docs/feature.md line 2, column 1", error)
+        self.assertEqual(error.count(" at "), 1, error)
+
+    def test_the_terms_file_must_be_readable_and_stay_out_of_the_repository(self):
+        os.environ[release.PRIVATE_TERMS_VARIABLE] = str(self.scratch / "missing.txt")
+        with self.assertRaisesRegex(release.ReleaseError, "names a file that cannot be read"):
+            release.check_pr_publishable(self.root, self.base)
+        inside = self.root / "terms.txt"
+        inside.write_text("Fixture Corp\n", encoding="utf-8")
+        os.environ[release.PRIVATE_TERMS_VARIABLE] = str(inside)
+        error = self.refusal()
+        self.assertIn("inside this checkout", error)
+        self.assertNotIn(str(self.root), error)
+        (self.root / ".git" / "info" / "exclude").write_text("terms.txt\n", encoding="utf-8")
+        self.assertEqual(release.check_pr_publishable(self.root, self.base),
+                         {"commits": 0, "terms_checked": 1})
+
+    def test_check_pr_scans_after_the_changeset_check_and_reads_the_pr_text(self):
+        root = self.scratch / "valid"
+        fixtures.make_valid_root(root)
+        git_fixture.init_repository(root, initial_branch="main")
+
+        def git(*args: str) -> str:
+            return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True,
+                                  check=True).stdout.strip()
+
+        git("config", "user.name", "Release Test")
+        git("config", "user.email", "release@example.test")
+        git("add", "--all")
+        git("commit", "-qm", "Base")
+        base = git("rev-parse", "HEAD")
+        fixtures.write(root / ".changes" / "notes.json",
+                       json.dumps({"summary": "Add notes.", "components": {}}))
+        fixtures.write(root / "docs" / "notes.md", "Notes.\n")
+        git("add", "--all")
+        git("commit", "-qm", "Add notes")
+        pr_text = self.scratch / "pr.md"
+        pr_text.write_text("Add notes\n\nFixture Corp asked for them.\n", encoding="utf-8")
+        self.terms("Fixture Corp")
+
+        def cli(*arguments: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [sys.executable, str(TESTS_DIR.parent / "release.py"), "--root", str(root),
+                 "check-pr", "--base", base, *arguments],
+                capture_output=True, text=True, check=False)
+
+        refused = cli("--pr-text", str(pr_text))
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("private term at PR text line 3, column 1", refused.stderr)
+        self.assertNotIn("fixture corp", refused.stderr.lower())
+        accepted = cli()
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(accepted.stdout.splitlines(), [
+            "release: pull request changeset valid",
+            "release: 1 commit and its added lines hold no home-directory path or private term"
+            " (1 private term checked)",
+        ])
 
 
 if __name__ == "__main__":

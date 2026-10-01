@@ -1,7 +1,8 @@
 ---
 name: ux-designer
 description: UX designer role. Spawned by software-engineering-team flows to produce divergent design candidates and refined previews; never auto-triggered.
-model: claude-sonnet-5-5
+model: claude-opus-5-5
+effort: medium
 output_contract: prose
 ---
 

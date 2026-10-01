@@ -1,0 +1,1 @@
+{"summary": "The maintainer protocol now says how to recover from a release PR whose checks fail: close it, land the fix through an ordinary PR, remove `release/stable` with an exact lease on the prepared commit, and prepare the release again.", "components": {}}

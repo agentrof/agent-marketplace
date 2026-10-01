@@ -14,8 +14,8 @@
       "derivation": "owner_and_supporting_roles"
     },
     "contract_deltas": {
-      "summary": "Expected contract deltas: 1 when software_architect is among the story's roles, an expected architecture delta. An expected Operation contract revision counts once the owner adopts a story classification for it.",
-      "derivation": "architecture_role"
+      "summary": "Expected contract deltas: 1 when software_architect is among the story's roles, an expected architecture delta, and 1 when the story classifies operation_impact: required, an expected Environment or Verification Contract revision. A story without that optional classification counts no Operation delta.",
+      "derivation": "architecture_role_and_operation_impact"
     }
   }
 }

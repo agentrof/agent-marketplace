@@ -59,6 +59,12 @@ DISPOSITIONS = {"required", "not_applicable"}
 # is the default, so a contract approved before the field existed keeps it.
 PULL_REQUEST_CHECK_SOURCES = ("repository_workflow", "external")
 TOKEN_RE = re.compile(r"(?:\{\{[^{}]+\}\}|\$\{[^{}]+\})")
+# The optional command_variables of a Verification Contract name the environment
+# variables its commands read, which every run identity then covers.
+VARIABLE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# The runner sets the variables of this namespace, and run evidence binds them
+# without a declaration: a selection file the runner writes by its content.
+RUNNER_VARIABLE_PREFIX = "AGENTROF_"
 CREDENTIAL_RE = re.compile(
     r"(?i)(?:api[_-]?key|token|password|secret)\s*=\s*[^\s]+"
 )
@@ -137,6 +143,24 @@ def valid_workdir(value: object) -> bool:
     return not path.is_absolute() and path.as_posix() == value and all(
         item not in {"", ".", ".."} for item in path.parts
     )
+
+
+def command_variable_problem(names: object) -> str | None:
+    """Why a Verification Contract's command_variables declare no valid list, or None.
+
+    The contract check and the Delivery runner both apply it. Windows matches
+    variable names without case, so the runner's namespace is matched so too.
+    """
+    if (not isinstance(names, list)
+            or any(not isinstance(name, str) or not VARIABLE_NAME_RE.fullmatch(name) for name in names)
+            or len(set(names)) != len(names)):
+        return "command_variables must list unique environment variable names"
+    reserved = [name for name in names if name.upper().startswith(RUNNER_VARIABLE_PREFIX)]
+    if reserved:
+        noun = "a variable" if len(reserved) == 1 else "variables"
+        return (f"command_variables must not name {', '.join(reserved)}, {noun} of the runner's own"
+                f" {RUNNER_VARIABLE_PREFIX} namespace, which run evidence binds without a declaration")
+    return None
 
 
 def pull_request_checks(props: dict) -> tuple[object, object]:
@@ -253,6 +277,9 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         if (not isinstance(include, list) or any(not isinstance(path, str) or path == "." or not valid_workdir(path)
                                               for path in include)):
             errors.append("mutation_include_paths must be normalized repository-relative paths")
+        problem = command_variable_problem(props.get("command_variables", []))
+        if problem:
+            errors.append(problem)
         source, provider = pull_request_checks(props)
         if source not in PULL_REQUEST_CHECK_SOURCES:
             errors.append("pull_request_check_source must be repository_workflow or external")

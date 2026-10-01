@@ -7,6 +7,7 @@ SemVer belongs only to stable releases.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -25,6 +26,13 @@ SEMVER_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 CHANGESET_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\.json$")
 BOOTSTRAP_VERSION = "0.0.1"
+BOOTSTRAP_NOTE = (
+    "Establish the first stable Agent Marketplace baseline for all supported hosts."
+)
+RESET_MARKER = ".release/reset.json"
+RESET_MARKER_KEYS = ("date", "reason", "retired_versions", "schema_version")
+CHANGELOG_RELEASE_RE = re.compile(r"^## (\S+)[ \t\r]*$", re.MULTILINE)
+ISO_DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
 
 class ReleaseError(RuntimeError):
@@ -297,6 +305,20 @@ def git(
     if completed.returncode != 0:
         raise ReleaseError(completed.stderr.strip() or "git command failed")
     return completed.stdout.strip()
+
+
+def git_text(
+    root: Path, *args: str, environment: dict[str, str] | None = None,
+) -> str:
+    """What git prints, decoded without failing on a byte that is not UTF-8."""
+    completed = subprocess.run(
+        ["git", *args], cwd=root, capture_output=True, check=False,
+        env=environment,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", "replace").strip()
+        raise ReleaseError(detail or "git command failed")
+    return completed.stdout.decode("utf-8", "replace")
 
 
 def git_ok(
@@ -771,8 +793,206 @@ def stable_retirement_cleanup(
     return expected == current_metadata
 
 
-def check_pr_changeset(root: Path, base: str) -> None:
+def blob_at_ref(root: Path, ref: str, path: str) -> bytes | None:
+    """Return a file's exact bytes at a Git ref, or None when it is absent."""
+    completed = subprocess.run(
+        ["git", "cat-file", "blob", f"{ref}:{path}"],
+        cwd=root, capture_output=True, check=False,
+    )
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def bootstrap_changelog() -> str:
+    """Return the CHANGELOG.md of the first stable baseline: its note alone."""
+    return f"# Changelog\n\n## {BOOTSTRAP_VERSION}\n\n- {BOOTSTRAP_NOTE}\n"
+
+
+def changelog_releases(text: str) -> list[str]:
+    """Return the versions a CHANGELOG.md released, in file order."""
+    return [
+        version for version in CHANGELOG_RELEASE_RE.findall(text)
+        if SEMVER_RE.fullmatch(version)
+    ]
+
+
+def read_reset_marker(root: Path) -> dict:
+    marker = read_json(root / RESET_MARKER)
+    if set(marker) != set(RESET_MARKER_KEYS):
+        raise ReleaseError(
+            f"{RESET_MARKER} must contain only "
+            + ", ".join(RESET_MARKER_KEYS[:-1]) + f" and {RESET_MARKER_KEYS[-1]}"
+        )
+    schema_version = marker["schema_version"]
+    if isinstance(schema_version, bool) or schema_version != 1:
+        raise ReleaseError(f"{RESET_MARKER} schema_version must be 1")
+    reason = marker["reason"]
+    if not isinstance(reason, str) or not reason.strip():
+        raise ReleaseError(f"{RESET_MARKER} reason must be a non-empty string")
+    date = marker["date"]
+    try:
+        valid_date = isinstance(date, str) and ISO_DATE_RE.fullmatch(date) \
+            and datetime.date.fromisoformat(date)
+    except ValueError:
+        valid_date = False
+    if not valid_date:
+        raise ReleaseError(f"{RESET_MARKER} date must be a calendar date YYYY-MM-DD")
+    retired = marker["retired_versions"]
+    if not isinstance(retired, list) or not retired \
+            or not all(isinstance(version, str) for version in retired):
+        raise ReleaseError(
+            f"{RESET_MARKER} retired_versions must be a non-empty list of versions"
+        )
+    parsed = [parse_semver(version, "retired version") for version in retired]
+    if parsed != sorted(set(parsed)):
+        raise ReleaseError(
+            f"{RESET_MARKER} retired_versions must be unique and ascending"
+        )
+    return marker
+
+
+def pull_request_fork(root: Path, base: str) -> str:
+    """Return where the pull request left ``base``, where its diff starts.
+
+    The three-dot diff already needs this merge base, so ``base`` stands in
+    only where no repository answers.
+    """
+    completed = subprocess.run(
+        ["git", "merge-base", base, "HEAD"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    fork = completed.stdout.strip()
+    return fork if completed.returncode == 0 and fork else base
+
+
+def reset_marker_changed(root: Path, fork: str) -> bool:
+    """Tell whether a pull request adds, edits, renames or deletes the marker.
+
+    ``fork`` is where the pull request left its base, the commit its diff
+    starts from, so a branch behind a base that gained the marker is not
+    taken for one that deletes it.
+    """
+    marker = root / RESET_MARKER
+    current = marker.read_bytes() if marker.is_file() else None
+    return blob_at_ref(root, fork, RESET_MARKER) != current
+
+
+def changelog_history_kept(root: Path, base: str, entries: set[str]) -> list[str]:
+    """Return the files whose added lines repeat a retired CHANGELOG.md entry."""
+    completed = subprocess.run(
+        [
+            "git", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
+            "--src-prefix=a/", "--dst-prefix=b/", "--unified=0",
+            f"{base}...HEAD", "--", ".", ":(exclude)CHANGELOG.md",
+        ],
+        cwd=root, capture_output=True, check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise ReleaseError(detail or "git diff failed")
+    kept: list[str] = []
+    current = ""
+    for line in completed.stdout.decode("utf-8", errors="replace").splitlines():
+        if line.startswith("diff --git "):
+            current = line.rsplit(" b/", 1)[-1]
+        elif line.startswith("+") and line[1:].strip() in entries \
+                and current not in kept:
+            kept.append(current)
+    return kept
+
+
+def check_release_reset(root: Path, base: str, fork: str) -> dict:
+    """Accept only the complete one-time restart of stable numbering.
+
+    The owner retires every published release once and publishes
+    BOOTSTRAP_VERSION again through the first-stable-baseline path. The pull
+    request adds RESET_MARKER, which lists every release of the base
+    CHANGELOG.md, and leaves exactly the state that path accepts: every
+    version at BOOTSTRAP_VERSION on every surface, no stable release metadata,
+    no changeset and a CHANGELOG.md holding only the bootstrap note. No
+    retired entry is kept anywhere else. Any other mix is refused. ``fork``
+    is where the pull request left ``base``.
+    """
+    if blob_at_ref(root, fork, RESET_MARKER) is not None \
+            or not (root / RESET_MARKER).is_file():
+        raise ReleaseError(
+            f"{RESET_MARKER} records a one-time release reset: a pull request "
+            "may only add it, never edit, rename or delete it"
+        )
+    marker = read_reset_marker(root)
+    retired = marker["retired_versions"]
+    base_stable = json_at_ref(root, base, ".release/stable.json")
+    if base_stable is None:
+        raise ReleaseError(
+            "a release reset retires a published stable line, but the base has "
+            "no .release/stable.json"
+        )
+    base_changelog = (
+        blob_at_ref(root, base, "CHANGELOG.md") or b""
+    ).decode("utf-8", errors="replace")
+    released = changelog_releases(base_changelog)
+    if retired != released:
+        raise ReleaseError(
+            f"{RESET_MARKER} retired_versions must list every release of the "
+            "base CHANGELOG.md, in order: " + (", ".join(released) or "none")
+        )
+    if base_stable.get("version") != retired[-1]:
+        raise ReleaseError(
+            f"the base stable release {base_stable.get('version')} must be the "
+            f"last retired version, {retired[-1]}"
+        )
+    versions = load_versions(root)
+    if versions["marketplace"] != BOOTSTRAP_VERSION or any(
+        version != BOOTSTRAP_VERSION for version in versions["plugins"].values()
+    ):
+        raise ReleaseError(
+            "a release reset sets the marketplace and every plugin to "
+            f"{BOOTSTRAP_VERSION}"
+        )
+    base_versions = json_at_ref(root, base, "versions.json")
+    base_plugins = (
+        base_versions.get("plugins") if isinstance(base_versions, dict) else None
+    )
+    if not isinstance(base_plugins, dict) \
+            or set(base_plugins) != set(versions["plugins"]):
+        raise ReleaseError("a release reset cannot change the plugin registry")
+    if (root / ".release" / "stable.json").exists():
+        raise ReleaseError("a release reset deletes .release/stable.json")
+    pending = sorted(path.name for path in (root / ".changes").glob("*.json"))
+    if pending:
+        raise ReleaseError(
+            "a release reset deletes every pending changeset: " + ", ".join(pending)
+        )
+    verify_bootstrap(root)
+    changelog = root / "CHANGELOG.md"
+    if not changelog.is_file() \
+            or changelog.read_text(encoding="utf-8") != bootstrap_changelog():
+        raise ReleaseError(
+            "a release reset starts CHANGELOG.md over with the bootstrap note "
+            f"alone: {bootstrap_changelog()!r}"
+        )
+    entries = {
+        line.strip() for line in base_changelog.splitlines()
+        if line.startswith("- ")
+    }
+    kept = changelog_history_kept(root, base, entries)
+    if kept:
+        raise ReleaseError(
+            "a release reset keeps no changelog history: " + ", ".join(kept)
+            + (" repeats" if len(kept) == 1 else " repeat")
+            + " retired CHANGELOG.md entries"
+        )
+    return {
+        "mode": "reset",
+        "version": BOOTSTRAP_VERSION,
+        "retired_versions": retired,
+    }
+
+
+def check_pr_changeset(root: Path, base: str) -> dict:
     changed = changed_paths(root, base)
+    fork = pull_request_fork(root, base)
+    if reset_marker_changed(root, fork):
+        return check_release_reset(root, base, fork)
     added = [path for status, path in changed if status == "A" and path.startswith(".changes/") and path.endswith(".json")]
     versions = load_versions(root)
     selected = [item for item in load_changesets(root, versions) if item.path.relative_to(root).as_posix() in added]
@@ -832,6 +1052,136 @@ def check_pr_changeset(root: Path, base: str) -> None:
         raise ReleaseError(
             "changeset omits changed release components: " + ", ".join(sorted(missing))
         )
+    return {"mode": "changeset"}
+
+
+# The owner's local file of private terms, one per line, such as consumer
+# project names a generic check cannot know. It stays outside the
+# repository; check-pr never prints its path or a term.
+PRIVATE_TERMS_VARIABLE = "AGENT_MARKETPLACE_PRIVATE_TERMS_FILE"
+HUNK_RE = re.compile(r"^(@+) (?:-[0-9]+(?:,[0-9]+)? )+\+([0-9]+)(?:,[0-9]+)? @+")
+
+
+def owner_terms(root: Path) -> list[str]:
+    """The terms of the file PRIVATE_TERMS_VARIABLE names; none when unset."""
+    name = os.environ.get(PRIVATE_TERMS_VARIABLE, "").strip()
+    if not name:
+        return []
+    path = Path(name).expanduser()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ReleaseError(
+            f"{PRIVATE_TERMS_VARIABLE} names a file that cannot be read"
+        ) from exc
+    resolved, top = path.resolve(), root.resolve()
+    if (resolved == top or top in resolved.parents) \
+            and not git_ok(root, "check-ignore", "-q", str(resolved)):
+        raise ReleaseError(
+            f"{PRIVATE_TERMS_VARIABLE} names a file inside this checkout that Git"
+            " does not ignore; keep it outside the repository"
+        )
+    return sorted({line.strip() for line in text.splitlines() if line.strip()})
+
+
+def text_position(text: str, offset: int) -> str:
+    """The 1-based line and column of offset in text."""
+    line = text.count("\n", 0, offset) + 1
+    column = offset - text.rfind("\n", 0, offset)
+    return f"line {line}, column {column}"
+
+
+def check_pr_publishable(
+    root: Path, base: str, pr_text: Path | None = None,
+) -> dict:
+    """Refuse a home-directory path, and a private term when the owner names
+    a terms file, in every commit message and added line of base..HEAD and
+    in the PR text. The merge method keeps every commit of a pull request, so
+    a later commit that removes a hit does not unpublish it. A merge is read
+    for the lines it adds itself. A refusal names kind and position only."""
+    import validate  # validate imports this module, so it loads on use
+
+    terms = owner_terms(root)
+    term_re = re.compile("|".join(
+        rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])" for term in terms
+    ), re.IGNORECASE) if terms else None
+    hits: list[str] = []
+
+    def scan(text: str, place: Callable[[int], str], relative: str = "") -> bool:
+        found = [(match.start(), "home-directory path")
+                 for match in validate.refused_home_paths(text, relative)]
+        if term_re is not None:
+            found += [(match.start(), "private term") for match in term_re.finditer(text)]
+        hits.extend(f"{kind} at {place(offset)}" for offset, kind in sorted(found))
+        return bool(found)
+
+    environment = hermetic_git_environment()
+    commits = int(git(root, "rev-list", "--count", f"{base}..HEAD", environment=environment))
+    log = git_text(root, "log", "-z", "--format=%H%n%B", f"{base}..HEAD",
+                   environment=environment)
+    for entry in filter(None, log.split("\0")):
+        commit, _, message = entry.partition("\n")
+        scan(message, lambda offset: f"commit {commit[:12]} message "
+             + text_position(message, offset))
+    patch = git_text(
+        root, "-c", "core.quotePath=false", "log", "-p", "--cc", "-M",
+        "--no-color", "--no-ext-diff", "--no-textconv", "--no-show-signature",
+        "--src-prefix=a/", "--dst-prefix=b/", "--format=%x00%H", f"{base}..HEAD",
+        environment=environment,
+    )
+    commit, path, shown, index, parents, line = "", "", "", 0, 0, 0
+    for raw in patch.split("\n"):
+        if raw.startswith("\0"):
+            commit, index, parents = raw[1:13], 0, 0
+            continue
+        if raw.startswith(("diff --git ", "diff --cc ", "diff --combined ")):
+            path, shown, index, parents = "", "", index + 1, 0
+            continue
+        hunk = HUNK_RE.match(raw)
+        if hunk:
+            parents, line = len(hunk.group(1)) - 1, int(hunk.group(2))
+            continue
+        if not parents:
+            target = raw[6:] if raw.startswith("+++ b/") \
+                else raw[10:] if raw.startswith("rename to ") else None
+            if target is not None:
+                path = target
+                hidden = scan(path, lambda _offset: f"commit {commit} file {index} path")
+                shown = f"file {index}" if hidden else path
+            continue
+        prefix = raw[:parents]
+        if raw.startswith("\\") or "-" in prefix:
+            continue
+        if prefix == "+" * parents:
+            content = raw[parents:]
+            scan(content, lambda offset: f"commit {commit} {shown} line {line},"
+                 f" column {offset + 1}", path)
+        line += 1
+    if pr_text is not None:
+        try:
+            text = pr_text.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ReleaseError("the --pr-text file cannot be read") from exc
+        scan(text, lambda offset: "PR text " + text_position(text, offset))
+    if hits:
+        raise ReleaseError(
+            "the pull request carries text a public repository must not publish: "
+            + "; ".join(dict.fromkeys(hits))
+            + ". Reword each one, rewriting the commit that holds it, then run"
+            " check-pr again"
+        )
+    return {"commits": commits, "terms_checked": len(terms)}
+
+
+def publishable_summary(scanned: dict, pr_text: bool) -> str:
+    commits = scanned["commits"]
+    subject = f"{commits} commit and its" if commits == 1 else f"{commits} commits and their"
+    count = scanned["terms_checked"]
+    checked = "no private terms set" if not count else (
+        f"{count} private term{'' if count == 1 else 's'} checked")
+    text = " and the PR text" if pr_text else ""
+    return (f"release: {subject} added lines{text} hold no home-directory path or"
+            f" private term ({checked})")
 
 
 def append_changelog(root: Path, plan: dict) -> None:
@@ -1292,7 +1642,7 @@ def release_notes(root: Path, version: str) -> str:
         if metadata.get("version") == version:
             return "\n".join(f"- {item}" for item in metadata.get("summaries", [])) + "\n"
     if version == BOOTSTRAP_VERSION:
-        return "- Establish the first stable Agent Marketplace baseline for all supported hosts.\n"
+        return f"- {BOOTSTRAP_NOTE}\n"
     raise ReleaseError(f"release notes unavailable for {version}")
 
 
@@ -1306,6 +1656,10 @@ def main() -> int:
     sync_parser.add_argument("--write", action="store_true", required=True)
     pr_parser = sub.add_parser("check-pr")
     pr_parser.add_argument("--base", required=True)
+    pr_parser.add_argument(
+        "--pr-text", type=Path,
+        help="a file with the pull request title and body to scan as well",
+    )
     prepare_parser = sub.add_parser("prepare")
     prepare_parser.add_argument("--stable-sha", required=True)
     prepare_parser.add_argument("--main-sha", required=True)
@@ -1346,8 +1700,19 @@ def main() -> int:
     elif args.command == "sync":
         sync_version_surfaces(root, load_versions(root))
     elif args.command == "check-pr":
-        check_pr_changeset(root, args.base)
-        print("release: pull request changeset valid")
+        result = check_pr_changeset(root, args.base)
+        if result["mode"] == "reset":
+            retired = result["retired_versions"]
+            plural = "" if len(retired) == 1 else "s"
+            print(
+                f"release: release reset valid; it retires {len(retired)} "
+                f"release{plural}, {retired[0]} to {retired[-1]}, and restarts "
+                f"stable numbering at {result['version']}"
+            )
+        else:
+            print("release: pull request changeset valid")
+        scanned = check_pr_publishable(root, args.base, args.pr_text)
+        print(publishable_summary(scanned, args.pr_text is not None))
     elif args.command == "prepare":
         released_paths = changeset_paths_at_ref(root, args.stable_sha)
         result = prepare(

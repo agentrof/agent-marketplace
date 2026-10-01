@@ -20,6 +20,13 @@ import build_distributions  # noqa: E402
 import fixtures  # noqa: E402
 import git_fixture  # noqa: E402
 
+# The role agent the N package ships and the next one retires, as each
+# host's project generator renders it.
+RETIRED_AGENT = {
+    "claude": f".claude/agents/{fixtures.PLUGIN}-refresh-retired-probe.md",
+    "codex": ".codex/agents/refresh-retired-probe.toml",
+}
+
 
 class PackageRefreshAcceptanceTests(unittest.TestCase):
     def run_json(
@@ -31,6 +38,10 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             text=True,
             check=False,
             timeout=120,
+            # A generator apply reads the host's model list; it reaches only
+            # fakes that list nothing, never the Claude Code or Codex binary
+            # that the environment running the tests names.
+            env=fixtures.isolated_hosts(os.environ, self.isolation),
         )
         self.assertEqual(
             result.returncode,
@@ -64,6 +75,12 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             "all",
         )
         self.assertEqual(generated["status"], "ok")
+        self.assert_isolated(generated, host)
+
+    def assert_isolated(self, applied: dict, host: str) -> None:
+        """A generator apply judged its models with this test's fake, never a
+        host binary the environment running the tests names."""
+        self.assertEqual(applied["model_check"]["binary"], str(self.isolation / host))
 
     @staticmethod
     def tree_snapshot(root: Path, excluded: set[str]) -> dict[str, tuple]:
@@ -145,10 +162,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
         )
         self.assertTrue((projected / "LICENSE").is_dir())
         self.assertTrue((projected / "retired-after-n.js").is_file())
-        if host == "codex":
-            self.assertTrue(
-                (project / ".codex/agents/refresh-retired-probe.toml").is_file()
-            )
+        self.assertTrue((project / RETIRED_AGENT[host]).is_file())
         protected = self.customize_n_project(project)
 
         package = fixtures.install_fixture_package(next_root, host, install_root)
@@ -211,11 +225,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
         )
         self.assertIn("AGENTS.override.md", generator_plan["changes"])
         self.assertIn("CLAUDE.md", generator_plan["changes"])
-        if host == "codex":
-            self.assertIn(
-                ".codex/agents/refresh-retired-probe.toml",
-                generator_plan["changes"],
-            )
+        self.assertIn(RETIRED_AGENT[host], generator_plan["changes"])
         generator_apply = self.run_json(
             generator,
             "apply",
@@ -225,6 +235,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             "all",
         )
         self.assertEqual(generator_apply["status"], "ok")
+        self.assert_isolated(generator_apply, host)
 
         config = json.loads(
             (project / "workspace/config.json").read_text(encoding="utf-8")
@@ -270,10 +281,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             ).read_text(encoding="utf-8"),
             "project-owned plugin\n",
         )
-        if host == "codex":
-            self.assertFalse(
-                (project / ".codex/agents/refresh-retired-probe.toml").exists()
-            )
+        self.assertFalse((project / RETIRED_AGENT[host]).exists())
         for path, expected in protected.items():
             if path.name == "config.json":
                 continue
@@ -333,12 +341,15 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             "all",
         )
         self.assertEqual(second_generator["written"], [])
+        self.assert_isolated(second_generator, host)
         self.assertEqual(self.tree_snapshot(project, {".git"}), before_second)
-        return self.tree_snapshot(project, {".git", ".agentrof", ".codex"})
+        # Each host's local projection differs; the tracked project does not.
+        return self.tree_snapshot(project, {".git", ".agentrof", ".claude", ".codex"})
 
     def test_real_n_to_next_refresh_converges_on_native_marketplace_hosts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            self.isolation = root / "isolation"
             n_root = root / "marketplace-n"
             next_root = root / "marketplace-next"
             fixtures.make_refresh_pair(n_root, next_root)

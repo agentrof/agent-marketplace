@@ -246,49 +246,53 @@ class DeliveryGitTests(unittest.TestCase):
             check=True, capture_output=True, text=True,
         ).stdout.strip()
 
+    def record_item_evidence(self, worktree: str, delivery: str = "DLV-001", story: str = "AUTH-01") -> None:
+        """Freeze the Item's candidate, run its approved commands and settle both readers passing."""
+        import delivery_verification
+        frozen = delivery_verification.freeze(Path(worktree), delivery, story, fresh=True)
+        raw = {}
+        contract, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/verification-contract.md")
+        commands = {contract[kind + "_command"] for kind in ("test", "mutation", "dependency_audit")
+                    if isinstance(contract.get(kind + "_command"), str)}
+        runtime_commands = []
+        if frozen["candidate"]["runtime_required"]:
+            environment, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/environment-contract.md")
+            runtime_commands = [("down", None), ("up", None), ("seed", environment["scenarios"][0]), ("logs", None), ("down", None)]
+            commands.update(environment["env_command"] + " " + verb + (" " + argument if argument else "")
+                            for verb, argument in runtime_commands)
+        with approved_fixture_shell_commands(commands):
+            for kind in ("test", "mutation", "dependency_audit"):
+                if kind == "test" or contract.get(kind + "_disposition") == "required":
+                    raw[kind] = delivery_verification.run_check(Path(worktree), kind)
+            runtime_events = []
+            for verb, argument in runtime_commands:
+                runtime_events.append(delivery_verification.run_environment(Path(worktree), verb, argument)["evidence_hash"])
+        for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_final")):
+            candidate = frozen["candidate"]
+            checks = {key: {"passed": True, "evidence": "Explicit fixture gate result"}
+                      for key in delivery_verification.required_checks(Path(worktree), candidate, role)}
+            if role == "qa_engineer":
+                contract, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/verification-contract.md")
+                checks["full_test_suite"].update(command=contract["test_command"], exit_code=0, environment=raw["test"]["identity"]["environment_hash"], raw_evidence_hash=raw["test"]["evidence_hash"])
+                if "mutation_whole_changed_files" in checks:
+                    checks["mutation_whole_changed_files"].update(files=candidate["mutation_files"], raw_evidence_hash=raw["mutation"]["evidence_hash"])
+                if "fresh_runtime" in checks:
+                    checks["fresh_runtime"]["event_hashes"] = runtime_events
+                if "dependency_audit" in checks:
+                    checks["dependency_audit"]["raw_evidence_hash"] = raw["dependency_audit"]["evidence_hash"]
+            delivery_verification.register_result(Path(worktree), {
+                "role": role, "mode": mode, "verdict": "passed",
+                "candidate_hash": candidate["candidate_hash"], "session_id": frozen["session_id"],
+                "report": delivery_compile.split_note(Path(worktree) / candidate["report_paths"][0 if role == "code_reviewer" else 1])[1], "checks": checks,
+            })
+
     def approve_item_evidence(self, worktree: str, delivery: str = "DLV-001",
                               story: str = "AUTH-01") -> int:
-        import delivery_verification
         args = type("Args", (), {
             "docs": ".", "worktree": worktree, "delivery": delivery, "story": story,
         })
         try:
-            frozen = delivery_verification.freeze(Path(worktree), delivery, story, fresh=True)
-            raw = {}
-            contract, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/verification-contract.md")
-            commands = {contract[kind + "_command"] for kind in ("test", "mutation", "dependency_audit")
-                        if isinstance(contract.get(kind + "_command"), str)}
-            runtime_commands = []
-            if frozen["candidate"]["runtime_required"]:
-                environment, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/environment-contract.md")
-                runtime_commands = [("down", None), ("up", None), ("seed", environment["scenarios"][0]), ("logs", None), ("down", None)]
-                commands.update(environment["env_command"] + " " + verb + (" " + argument if argument else "")
-                                for verb, argument in runtime_commands)
-            with approved_fixture_shell_commands(commands):
-                for kind in ("test", "mutation", "dependency_audit"):
-                    if kind == "test" or contract.get(kind + "_disposition") == "required":
-                        raw[kind] = delivery_verification.run_check(Path(worktree), kind)
-                runtime_events = []
-                for verb, argument in runtime_commands:
-                    runtime_events.append(delivery_verification.run_environment(Path(worktree), verb, argument)["evidence_hash"])
-            for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_final")):
-                candidate = frozen["candidate"]
-                checks = {key: {"passed": True, "evidence": "Explicit fixture gate result"}
-                          for key in delivery_verification.required_checks(Path(worktree), candidate, role)}
-                if role == "qa_engineer":
-                    contract, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/verification-contract.md")
-                    checks["full_test_suite"].update(command=contract["test_command"], exit_code=0, environment=raw["test"]["identity"]["environment_hash"], raw_evidence_hash=raw["test"]["evidence_hash"])
-                    if "mutation_whole_changed_files" in checks:
-                        checks["mutation_whole_changed_files"].update(files=candidate["mutation_files"], raw_evidence_hash=raw["mutation"]["evidence_hash"])
-                    if "fresh_runtime" in checks:
-                        checks["fresh_runtime"]["event_hashes"] = runtime_events
-                    if "dependency_audit" in checks:
-                        checks["dependency_audit"]["raw_evidence_hash"] = raw["dependency_audit"]["evidence_hash"]
-                delivery_verification.register_result(Path(worktree), {
-                    "role": role, "mode": mode, "verdict": "passed",
-                    "candidate_hash": candidate["candidate_hash"], "session_id": frozen["session_id"],
-                    "report": delivery_compile.split_note(Path(worktree) / candidate["report_paths"][0 if role == "code_reviewer" else 1])[1], "checks": checks,
-                })
+            self.record_item_evidence(worktree, delivery, story)
         except (RuntimeError, ValueError, KeyError):
             # Invalid candidates are exercised by approval rejection tests.
             pass
@@ -1769,6 +1773,53 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], reported["errors"])
         self.assertEqual(self.reported_status(merged / "workspace/docs"), "merged")
 
+    def test_a_review_record_that_cannot_say_whether_the_pr_was_recorded_is_reported(self):
+        """Only the Review record says that a Delivery recorded its PR, so one that exists but cannot be read,
+        here after an editor wrote a byte order mark, fails status and check instead of reading as no PR. The
+        commit that records the PR URL in the Review sets awaiting_merge, so at awaiting_merge a Review record
+        that is missing or has no pull_request_url fails them too, while in review it recorded no PR yet."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type({})):
+            delivery_git.open_pr(project, "DLV-001")
+        merged, _integration = self.merge_and_integration_checkouts(project)
+        docs = delivery_compile.docs_root(merged / "workspace/docs")
+        package = delivery_compile.find_delivery(docs, "DLV-001")
+        review = package / "delivery-review.md"
+        readable = review.read_bytes()
+        props, body = delivery_compile.split_note(review)
+        unrecorded = delivery_compile.frontmatter(
+            {key: value for key, value in props.items() if key != "pull_request_url"}, body)
+        reached = ", but a Delivery reaches awaiting_merge only with its PR recorded there"
+        self.assertEqual(self.reported_status(docs), "merged")
+        for name, breaks, finding in (
+                ("unreadable", lambda: review.write_bytes(b"\xef\xbb\xbf" + readable),
+                 f"{review} cannot be read: missing frontmatter block"),
+                ("deleted", review.unlink, f"{review} is missing{reached}"),
+                ("without its URL", lambda: review.write_text(unrecorded, encoding="utf-8"),
+                 f"{review} records no pull_request_url{reached}")):
+            with self.subTest(review=name):
+                breaks()
+                try:
+                    code, reported = self.reported(docs)
+                    self.assertEqual((code, reported["ok"], reported["status"]), (1, False, "awaiting_merge"))
+                    self.assertEqual(reported["errors"], ["Delivery merge state cannot be evaluated: " + finding])
+                    self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], reported["errors"])
+                finally:
+                    review.write_bytes(readable)
+        self.assertEqual(self.reported_status(docs), "merged")
+        # A PR recorded in review is merged all the same; without that record the Delivery recorded no PR yet.
+        record = package / "delivery.md"
+        delivery_props, delivery_body = delivery_compile.split_note(record)
+        record.write_text(delivery_compile.frontmatter({**delivery_props, "status": "review"}, delivery_body),
+                          encoding="utf-8")
+        self.assertEqual(self.reported_status(docs), "merged")
+        for name, breaks in (("without its URL", lambda: review.write_text(unrecorded, encoding="utf-8")),
+                             ("deleted", review.unlink)):
+            with self.subTest(status="review", review=name):
+                breaks()
+                self.assertEqual(self.reported_status(docs), "review")
+
     def test_cancelled_delivery_stays_cancelled_through_its_pr_record_and_merge(self):
         temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
         self.addCleanup(remove_temporary, temporary)
@@ -2000,6 +2051,90 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual([item["target"] for item in verified["observations"] if item["value"] == "absent"],
                          ["agentrof/deliveries/dlv-001", "agentrof/items/auth-01"])
         self.assertEqual(self.coordination_branches(project), ["agentrof/fence"])
+
+    def merge_pr_keeping_refs(self, project: Path) -> str:
+        """Open the PR and let the provider merge it while the Delivery keeps its refs, as it does until
+        verify-merge runs, and return the recorded PR head."""
+        provider = self.fake_provider_type({})
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            url = delivery_git.open_pr(project, "DLV-001")["pull_request_url"]
+        record = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+        provider(project).merge_commit(url, record)
+        return record
+
+    def push_review_edit(self, project: Path, edit) -> None:
+        """Push a commit made by hand on the Integration branch whose Delivery Review *edit* changed."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        view = Path(temporary.name) / "edit"
+        branch = delivery_git.short_refs("DLV-001")["integration"]
+        tip = delivery_git.remote_oid(project, "origin", "refs/heads/" + branch)
+        subprocess.run(["git", "-C", str(project), "worktree", "add", "-q", "--detach", str(view), tip], check=True)
+        edit(delivery_compile.find_delivery(view / "workspace/docs", "DLV-001") / "delivery-review.md")
+        subprocess.run(["git", "-C", str(view), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(view), "-c", "user.email=test@example.com", "-c", "user.name=Test",
+                        "commit", "-qm", "Edit the Delivery Review"], check=True)
+        subprocess.run(["git", "-C", str(view), "push", "-q", "origin", "HEAD:refs/heads/" + branch], check=True)
+        subprocess.run(["git", "-C", str(project), "worktree", "remove", "--force", str(view)], check=True)
+
+    def test_a_published_review_that_cannot_say_whether_the_pr_was_recorded_refuses_a_change(self):
+        """The provider merged the recorded PR head while the Delivery kept its refs, and a commit made by hand
+        on the Integration branch then broke the published Review. The commit that records the PR URL in the
+        Review sets awaiting_merge, so a published Review that lost that URL, or is missing, or cannot be read
+        cannot say whether the PR was recorded: refresh-target refuses with DELIVERY_COORDINATION_CORRUPT
+        naming the record and moves no ref. It used to merge the target, the PR merge included, into the
+        merged Delivery's Integration."""
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        record = self.merge_pr_keeping_refs(project)
+        refs = [delivery_git.canonical_refs("DLV-001", "AUTH-01")[name] for name in ("fence", "integration", "item")]
+        self.assertEqual(self.refused_finding(lambda: delivery_git.refresh_target(project, "DLV-001")), (
+            "DELIVERY_POST_MERGE_TRANSITION", "the target has merged the PR of DLV-001, so the Delivery is closed"))
+        review = (delivery_compile.find_delivery(docs, "DLV-001") / "delivery-review.md").relative_to(project)
+        published = f"{review.as_posix()} on agentrof/deliveries/dlv-001"
+        reached = ", but a Delivery reaches awaiting_merge only with its PR recorded there"
+
+        def unrecorded(path: Path) -> None:
+            props, body = delivery_compile.split_note(path)
+            del props["pull_request_url"]
+            path.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+
+        for name, edit, finding in (
+                ("without its URL", unrecorded, f"{published} records no pull_request_url{reached}"),
+                ("deleted", Path.unlink, f"{published} is missing{reached}"),
+                ("unreadable", lambda path: path.write_bytes(b"\xef\xbb\xbf" + path.read_bytes()),
+                 f"{published} cannot be read: missing frontmatter block")):
+            with self.subTest(review=name):
+                self.push_review_edit(project, edit)
+                before = delivery_git.remote_ref_oids(project, "origin", refs)
+                try:
+                    self.assertEqual(self.refused_finding(lambda: delivery_git.refresh_target(project, "DLV-001")), (
+                        "DELIVERY_COORDINATION_CORRUPT", "Delivery merge state cannot be evaluated: " + finding))
+                    self.assertEqual(delivery_git.remote_ref_oids(project, "origin", refs), before)
+                finally:
+                    tip = delivery_git.remote_oid(project, "origin", refs[1])
+                    delivery_git.atomic_push(project, "origin", [(refs[1], tip, record)])
+
+    def test_a_host_that_lacks_the_pr_record_refuses_a_change_to_the_merged_delivery(self):
+        """Another host recorded the PR and the provider merged it while the Delivery kept its refs. A host
+        that has not fetched since lacks the published Review at the Integration tip, so it fetches the
+        Integration before it reads that Review and refuses as the recording host does. It used to read the
+        record it could not see as a Review not published yet."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, other)
+        host = Path(other.name) / "host"
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                        str(project / "remote.git"), str(host)], check=True)
+        record = self.merge_pr_keeping_refs(project)
+        self.assertNotEqual(subprocess.run(["git", "-C", str(host), "cat-file", "-e", record + "^{commit}"],
+                                           capture_output=True, check=False).returncode, 0)
+        refs = [delivery_git.canonical_refs("DLV-001", "AUTH-01")[name] for name in ("fence", "integration", "item")]
+        before = delivery_git.remote_ref_oids(project, "origin", refs)
+        self.assertEqual(self.refused_finding(lambda: delivery_git.refresh_target(host, "DLV-001")), (
+            "DELIVERY_POST_MERGE_TRANSITION", "the target has merged the PR of DLV-001, so the Delivery is closed"))
+        self.assertEqual(delivery_git.remote_ref_oids(project, "origin", refs), before)
 
     def test_a_published_cancellation_refuses_a_second_cancellation(self):
         """cancel-delivery judges a Delivery by its published status: the local delivery.md keeps
@@ -3113,6 +3248,35 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
         self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
         self.assertFalse(worktree.exists())
+
+    def test_evidence_recorded_in_one_shell_is_approved_pushed_and_integrated_from_another(self):
+        """Run evidence binds the variables a command uses, not the reader's shell (#356): the coordinator
+        approves, pushes and integrates from its own shell what QA recorded in another."""
+        project, _docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts()
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        reader = {"PWD": active["worktree"], "OLDPWD": str(project), "SHLVL": "2", "_": "/usr/bin/env",
+                  "READER_SESSION_ID": "qa-reader", "ITEM_SCRATCH_NOTE": "set by the reader"}
+        with mock.patch.dict(os.environ, reader):
+            self.record_item_evidence(active["worktree"])
+        coordinator = {key: value for key, value in os.environ.items() if key != "ITEM_SCRATCH_NOTE"}
+        coordinator.update(PWD=str(project), OLDPWD=str(project.parent), SHLVL="4", _=sys.executable,
+                           READER_SESSION_ID="coordinator", TERM_SESSION_ID="w1t0p0")
+        scripts = ROOT / "plugins" / "software-engineering-team" / "scripts"
+        story = ("--delivery", "DLV-001", "--story", "AUTH-01")
+        for script, argv in (("delivery_compile.py", ("approve-item-evidence", *story, "--worktree", active["worktree"])),
+                             ("delivery_git.py", ("push-item", "--project-root", str(project), *story)),
+                             ("delivery_git.py", ("integrate-item", "--project-root", str(project), *story))):
+            with self.subTest(command=argv[0]):
+                completed = subprocess.run([sys.executable, "-B", str(scripts / script), *argv], cwd=project,
+                                           env=coordinator, capture_output=True, text=True, check=False)
+                self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        integration = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001", "AUTH-01")["integration"])
+        props, _body = delivery_git.split_remote_note(project, integration, item.relative_to(project).as_posix(),
+                                                      delivery_compile.split_note)
+        self.assertEqual(props["status"], "integrated")
 
     def test_integration_merges_item_deletions_and_republished_evidence_drafts(self):
         integration_ref = "refs/heads/agentrof/deliveries/dlv-001"

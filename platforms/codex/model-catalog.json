@@ -1,9 +1,8 @@
 {
-  "schema_version": 1,
-  "classes": {
-    "strong": {
+  "schema_version": 2,
+  "models": {
+    "gpt-6.1-sol": {
       "family": "sol",
-      "id": "gpt-6.1-sol",
       "efforts": [
         "low",
         "medium",
@@ -20,9 +19,8 @@
       ],
       "verified": "2026-10-01"
     },
-    "fast": {
+    "gpt-6-luna": {
       "family": "luna",
-      "id": "gpt-6-luna",
       "efforts": [
         "low",
         "medium",

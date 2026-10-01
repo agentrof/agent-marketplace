@@ -32,7 +32,7 @@ panel.
 
 ## Readers and inputs
 
-- A read-only reviewer role runs as its lens-tier variant: spawn
+- A read-only reviewer role runs as its `-lens` variant: spawn
   `backlog-reviewer-lens`, `solution-reviewer-lens` or
   `design-system-reviewer-lens` where the step's reader role is
   `backlog-reviewer`, `solution-reviewer` or `design-system-reviewer`. The
@@ -188,4 +188,6 @@ A lens reader returns its role file's output contract for its assigned lens:
 - Delivery code review and QA, and the Experience attestation, keep one
   reader per role because their machine interfaces accept one result per
   role. They join panels later through a merge step that produces that one
-  result.
+  result. Delivery code review has one under process switch
+  `code_review_panel`, whose panel runs beside the official code reviewer
+  instead of replacing it.

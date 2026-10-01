@@ -1,0 +1,4 @@
+{
+  "summary": "CI shards and local validation workers now run their tests with tripwire `claude` and `codex` binaries in place of the host binaries the environment names, so a project generator or `host_models.py` that a test runs without pinning its own fakes reaches a tripwire instead of the developer's Claude Code or Codex, and the worker fails that test, or the shard when a class or module fixture reached one after the last test. `test_package_refresh` now runs its setup and generator commands with `fixtures.isolated_hosts`, as the other generator tests do, and checks that every generator apply judged its models with that fake.",
+  "components": {}
+}

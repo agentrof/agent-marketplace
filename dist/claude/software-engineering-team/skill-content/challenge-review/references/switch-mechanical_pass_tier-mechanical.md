@@ -8,9 +8,10 @@ flow differ on a step that names switch `mechanical_pass_tier`, this file
 governs.
 
 A mechanical pass decides nothing. It does work whose result the returned
-findings, a compiler or an approval already fix, so it runs on the mechanical
-tier or without a role. The review before it runs as switch `review_panels`
-selects, and every review, re-check and calibration keeps its roles and tiers.
+findings, a compiler or an approval already fix, so it runs on a writer's
+`-mechanical` variant or without a role. The review before it runs as switch
+`review_panels` selects, and every review, re-check and calibration keeps its
+roles and tiers.
 
 ## Pass kinds
 
@@ -35,7 +36,7 @@ repairs, and every review, re-check or calibration.
 | `solution-architect` | `solution-architect-mechanical` | Solution landscape, components and decisions | Solution Design |
 
 A variant is its writer: the same body, boundaries and identity on the
-`mechanical` tier, never a separate fixer, so writer ownership is unchanged.
+`low` tier, never a separate fixer, so writer ownership is unchanged.
 Every other role, and every other flow's writer, keeps its own tier. A
 variant never reads for a review, re-check or calibration: the Operation
 counterpart that reviews the other contract runs as its base role.
@@ -87,24 +88,25 @@ writer inside its own pass stays in that pass.
 ## Measurement
 
 The project owner runs this outside every task; no role acts on it. The
-`mechanical` tier's host settings in `platforms/<host>/execution-profiles.json`
-are starting values that the frozen-task A/B sets before a project selects
-`mechanical`.
+variants run on the `low` tier, whose host settings in
+`platforms/<host>/execution-profiles.json` are starting values that the
+frozen-task A/B sets before a project selects `mechanical`.
 
 1. Freeze each task from Git history: the commit before an accepted fix
    pass, the review findings that pass applied, and the accepted fix commit
    as the reference result. Use Operation contract and backlog fix passes.
 2. Run each task once per candidate on an unchanged checkout: the base writer
    as it ran, resumed where its session still exists, and fresh `-mechanical`
-   candidates at each setting under test. Pin a candidate's effort with the
-   session-level setting the host contract names; where role files keep their
-   own effort over the session's, apply the `inherit` execution profile in a
-   scratch copy first.
+   candidates at each setting under test. Pin a candidate's effort the way
+   the host contract names: with a session-level setting, or, where role
+   files keep their own effort over the session's, in the role files of a
+   scratch copy.
 3. A fresh, read-only judge on the strongest tier compares each result with
    the accepted fix: every finding applied, no unrelated edit, compilers
    green. Record wall time and output tokens per run.
 4. The cheapest candidate that applies every finding correctly with no
-   unrelated edit sets the `mechanical` rows in a package change.
+   unrelated edit sets the variants' tier and that tier's rows in a package
+   change.
 
 After the owner selects `mechanical`, record per mechanical pass its kind,
 wall time, output tokens, re-check outcome and any unrelated edit the re-check

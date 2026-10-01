@@ -1,8 +1,8 @@
 ---
 name: devops-engineer-mechanical
-description: DevOps engineer role. Spawned by software-engineering-team flows to realize the approved architecture as a runnable containerized environment; never auto-triggered. Mechanical-tier variant for passes that apply only the fixes a review verdict names.
-model: gpt-6-luna
-model_reasoning_effort: high
+description: DevOps engineer role. Spawned by software-engineering-team flows to realize the approved architecture as a runnable containerized environment; never auto-triggered. Writer variant for passes that apply only the fixes a review verdict names.
+model: gpt-6.1-sol
+model_reasoning_effort: xhigh
 output_contract: prose
 ---
 

@@ -18,14 +18,29 @@ only durable record.
 - A defect or improvement in Agent Marketplace needs to be reported upstream.
 - The user wants to review the exact GitHub payload before it is filed.
 
+## Confidentiality
+
+The Agent Marketplace repository is public. An issue never identifies the
+reporting project or its data: no project or code name, repository, link or
+issue reference, commit id, local or home path, story, Delivery, scenario or
+requirement id, measured data presented as that project's, domain, client or
+person. Retell such evidence as an anonymous case, for example "in one
+measured project" or "an earlier story's suite", and write an id only as a
+placeholder such as `ST-001`.
+
 ## Procedure
 
 1. Prepare the issue from the current conversation. If evidence is missing and
    the user has placed a project in scope, inspect files, logs and Git state
    read-only. Do not run tests, builds, setup or any command that may write a
    cache or artifact. Do not invent missing facts.
-2. Remove secrets, tokens, absolute local paths and unrelated project details.
-   Present the exact payload in chat with this shape:
+2. Remove secrets and tokens, and retell every project detail as
+   Confidentiality requires.
+3. Scan the exact title and body before showing them: search for the
+   project's name, its Git remote and checkout path, any home-directory path
+   and every other detail Confidentiality names. Rewrite each hit and scan
+   again until none is left.
+4. Present the exact payload in chat with this shape:
 
    - Target: `agentrof/agent-marketplace`
    - Title
@@ -37,21 +52,33 @@ only durable record.
    - Evidence and Context
 
    Use `Unknown` or `Not observed` where the available evidence is incomplete.
-3. Immediately after the complete preview, present one declared choice gate:
+5. Immediately after the complete preview, present one declared choice gate:
    `Open issue`, `Revise` or `Cancel`. Never treat an earlier request to report
    the problem as approval of an unseen payload.
    - `Open issue` approves only the exact displayed title and body.
-   - `Revise` changes the payload in chat, displays it again and requires a new
-     choice gate.
+   - `Revise` changes the payload in chat, scans it again as step 3 does,
+     displays it again and requires a new choice gate.
    - `Cancel` ends without external or local mutation.
-4. After `Open issue`, invoke the packaged `scripts/file_issue.py` exactly once
-   with `--title`. Pass the approved Markdown body through standard input. Do
-   not create a body file, temporary file, report file or local receipt.
-5. Report success only when the filer exits successfully with a canonical
+6. After `Open issue`, invoke the packaged `scripts/file_issue.py` exactly once
+   per approved payload with `--title`, and with `--project-root` set to the
+   root of the project in scope when there is one. Pass the approved Markdown
+   body through standard input. Do not create a body file, temporary file,
+   report file or local receipt. Before any request, the filer refuses a title
+   or body that holds a home-directory path, the project's checkout path, also
+   written from the home directory, a Git remote URL or its owner/repo, or the
+   project's repository or folder name as a word in any case, also inside
+   percent-encoded, JSON-escaped and file URL text, and names each fragment's
+   kind and position, never its value. Without a Git checkout at the project
+   root it checks home-directory paths only and prints a notice saying so.
+7. Report success only when the filer exits successfully with a canonical
    `https://github.com/agentrof/agent-marketplace/issues/<number>` URL. Say
-   `Opened #<number>: <url>`. For exit 2 say `Not opened` with the reason. For
-   exit 3 say `Outcome unknown, do not retry automatically` and preserve the
-   diagnostic in chat. Never retry a filing attempt automatically.
+   `Opened #<number>: <url>`. For exit 2 say `Not opened` with the reason.
+   When that reason says the payload identifies the reporting project,
+   continue as `Revise`: reword each named fragment, scan again as step 3
+   does, display the new payload and ask the choice gate again. A refused
+   payload is never filed.
+   For exit 3 say `Outcome unknown, do not retry automatically` and preserve
+   the diagnostic in chat. Never retry a filing attempt automatically.
 
 This entry does not require project setup, a Git repository or a project
 workspace. It remains separate from Requirement and Delivery flows.

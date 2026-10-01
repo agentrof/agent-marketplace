@@ -47,13 +47,27 @@ While readers are active, use the same CLI's `inspect --path <file>` and
 selects its exact integration base. These interfaces permit source inspection
 without opening a general shell writer through the barrier.
 Use `inspect --instruction <package-relative-file>` for bound package instructions.
+Switch `pre_handoff_regression`: at `touched_suites`, the coordinator runs the
+suites of the earlier stories the candidate touches, with the Item's own Test
+Plan targets, before `freeze`, which refuses until that run passed on the exact
+candidate, as
+`skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md`
+defines.
 
 Invoke Code Review and QA independently through the host's native agent
 mechanism. Keep the implementation writer idle until both readers finish or
 their cancellation is confirmed. Readers return separate JSON results through
 `result --file <result.json>`; the existing owner alone persists canonical
-reports after the barrier. A cancelled or diagnostic result cannot approve an
+reports after the barrier. A reader registers as soon as it finishes, also
+while the other reader's verification command runs: the runner records which
+role runs each command, and a registration waits only for the settling
+reader's own command to exit. A cancelled or diagnostic result cannot approve an
 Item. Code, test, contract or instruction drift invalidates the candidate.
+Switch `code_review_panel`: at `beside_official`, a lens panel reads the frozen
+candidate beside the official code reviewer and `merge-panel` registers the
+one code review result, as
+`skill-content/code-review/references/switch-code_review_panel-beside_official.md`
+defines.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
 For failed or affected tests first, an optional approved
@@ -64,8 +78,8 @@ manifest's scratch directory. The runner validates the candidate binding and
 passes normalized selection data through `AGENTROF_DIAGNOSTIC_TESTS`; it never
 appends those identifiers to shell text. The compiler-owned JSON adds
 `selected_test_ids`, the sorted union of the failed and affected identifiers.
-Only diagnostic commands receive this environment variable; final checks and
-runtime commands remove it, including any inherited value.
+Only diagnostic commands receive this environment variable; final checks,
+runtime commands and lane commands remove it, including any inherited value.
 A changed selection cannot reuse an
 older diagnostic run. Without this approved adapter, use the full approved
 test command or revise the Operation Contract through its normal approval.
@@ -75,9 +89,21 @@ with no shared Git objects or mutable working files. The runner exposes an
 output directory through `AGENTROF_VERIFICATION_SCRATCH`. Provision dependencies through
 approved commands and environment, never by borrowing the writer's ignored
 files. Tests and mutation cannot temporarily edit the reviewer's source.
-The runner stores raw output under ignored runtime, binds it to the candidate,
-command and environment, and reuses only identical successful evidence.
-`--fresh` explicitly reruns a command. The mutation command reads the exact
+The runner stores raw output under ignored runtime and binds it to the
+candidate, the command and the variables that can change its result: `PATH`,
+`HOME`, `LANG`, `LC_*`, `TZ`, every `AGENTROF_*` variable but a selection file
+the runner writes, which the run binds by its content, and the variables the
+approved Verification Contract names in `command_variables`. The run identity names
+them and keeps only a hash of their values, keyed with a random key that never
+leaves the Item's verification runtime, so a shell or session variable such as
+`PWD` never binds it, no secret value is written, and the hash QA's result
+carries into the tracked verification record checks no guess of a value. The
+runner reuses only identical successful evidence, these values included.
+`--fresh` explicitly reruns a command. Evidence approval and `push-item` check
+each identity as recorded: complete, running the approved command, and shared
+by every final run and runtime event of the session. They never compare it
+with their own shell, so the coordinator approves evidence QA recorded in
+another. The mutation command reads the exact
 JSON file scope through `AGENTROF_MUTATION_FILES`; no shell path interpolation
 is permitted. The QA result names the raw evidence identities and records
 coverage, right-reason and all applicable final checks. A diagnostic returns

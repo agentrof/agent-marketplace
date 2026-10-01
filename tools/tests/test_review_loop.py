@@ -200,12 +200,33 @@ class ReviewLoopReferenceTests(unittest.TestCase):
             "Solution Design: shown with its acceptance reason at the approval gate",
             "Design System: shown at the approval gate with its reason, the owner role"
             " `ux_designer` and its revisit trigger",
-            "the contract's optional `Accepted Minor Findings` section",
+            "the contract's `Accepted Minor Findings` section of the review record",
+            "with each `finding` starting with the finding's id",
+            "`finding` starts with the id of the finding it accepts",
             "| finding | owner_role | reason | revisit_trigger |",
             "`owner_role` is `qa_engineer` or `devops_engineer`",
             "`operation_compile.py` validates every row whenever the section is present",
-            "Recording the section is not a change to the reviewed text and starts no re-review",
-            "A critical or major finding never enters an `Accepted Minor Findings` section",
+            "Recording the record is not a change to the reviewed text and starts no re-review",
+            "A finding that stays critical or major after calibration never enters an"
+            " `Accepted Minor Findings` section",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, text)
+
+    def test_the_review_record_keeps_returned_findings_where_the_compiler_reads_them(self):
+        text = flat(DOCUMENT)
+        for rule in (
+            "Every finding carries an id that is unique within its review record, such as `F-3`,"
+            " and the writer never changes it",
+            "`Returned Findings`, `Severity Calibration` and `Accepted Minor Findings`",
+            "| finding | severity | description |",
+            "`Returned Findings` lists every finding of every pass of the review with the severity"
+            " it was returned at",
+            "an accepted row for a finding that is not minor after calibration",
+            "a calibration row whose `claimed_severity` is not the returned severity",
+            "a critical or major returned finding without its calibration row",
+            "so one approved before its review kept a record stays as it was",
+            "A contract's record belongs to its current revision",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)
@@ -273,8 +294,12 @@ class ReviewLoopReferenceTests(unittest.TestCase):
             " keeps its claimed severity",
             "Only confirmed critical and major findings keep the verdict at `changes_requested`",
             "The writer never changes a returned or calibrated severity",
-            "`Severity Calibration` section placed before `Verdict`",
-            "they show the rows with the verdict at the approval gate",
+            "Record every row where the step's compiler reads it, in an optional `Severity Calibration` section, and show the rows with the verdict at the approval gate as well",
+            "Solution Design: a section of the engagement the review read, placed after its"
+            " `Verdict`; `landscape_check.py` validates it and the package hash binds it",
+            "Design System: a section of `MASTER.md`, placed before its navigation;"
+            " `design_system_compile.py` validates it and the baseline hash binds it",
+            "a `reason` that cites no resolvable vault note",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)
@@ -517,6 +542,107 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                                          skills=skills, findings=findings, base=reviewed,
                                          inputs=inputs, expected_hash=result["source_hash"])
                 git(self.root, "checkout", "--", docs + changed, docs + context[0])
+
+
+class PackageCalibrationRecordTests(unittest.TestCase):
+    """At blocking_delta a Solution Design review keeps its calibration rows in the
+    engagement it read and a Design System review in MASTER.md, where each
+    package's compiler validates them and its package hash binds them."""
+
+    CITE = "[[solution-design/engagements/api\\|API engagement]]"
+    ROW = (f"| SR-1 | major | minor | {CITE} The Options table prices both stacks at the stated"
+           " scale, so the decision and its exit path stay the same. |")
+    HEADER = "| finding | claimed_severity | calibrated_severity | reason |"
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.docs = Path(temporary.name).resolve() / "workspace" / "docs"
+        (self.docs / "maps").mkdir(parents=True)
+        self.tree = self.docs / "solution-design"
+        write(self.docs, "solution-design/landscape.md",
+              "---\ntype: landscape\ntitle: Landscape\n---\n\n# Landscape\n\n## Summary\n\nOne"
+              " engagement.\n\n## Current\n\nNothing built yet.\n\n## Target\n\n## Transition\n\n"
+              "## Components\n")
+        self.engagement = self.tree / "engagements/api.md"
+        self.engagement_text = ("---\ntype: engagement\ntitle: API\n---\n\n# API\n\n## Summary\n\n"
+                                "Status: open\n\n## Framing\n\nThe API stack.\n\n## Options\n\n"
+                                "Two stacks.\n\n## Verdict\n\nThe managed stack.\n")
+        self.design = self.docs / "design-system"
+        self.master = self.design / "MASTER.md"
+        self.master_text = ("---\ntype: design_master\nstatus: draft\nrevision: 1\ncontract_version: 3\n"
+                            "tags:\n  - status/draft\n---\n\n# Design Master\n\n## Navigation\n\n"
+                            "[[maps/design-system|Design System]]\n")
+        self.loop("blocking_delta")
+
+    def loop(self, value: str) -> None:
+        first = "begin-revision" if process_policy.path_for(self.docs).exists() else "init"
+        for step in ((first,), ("set", "--switch", "review_loop", "--value", value), ("approve",)):
+            policy(self.docs, *step)
+
+    def calibrate(self, path: Path, text: str, *rows: str, before: str) -> None:
+        section = "\n".join(["## Severity Calibration", "", self.HEADER, "|---|---|---|---|", *rows, "", ""])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text.replace(before, section + before, 1) if rows else text, encoding="utf-8")
+
+    def solution_check(self) -> tuple[int, str]:
+        import landscape_check
+
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors), contextlib.redirect_stdout(io.StringIO()):
+            code = landscape_check.main(["check", "--tree", str(self.tree)])
+        return code, errors.getvalue()
+
+    def test_a_solution_engagement_records_and_binds_its_calibration_rows(self):
+        import landscape_check
+
+        self.calibrate(self.engagement, self.engagement_text, self.ROW, before="## Verdict")
+        self.assertEqual(self.solution_check(), (0, ""))
+        digest = landscape_check.package_hash(self.tree)
+        self.calibrate(self.engagement, self.engagement_text,
+                       self.ROW.replace("| minor |", "| invalid |"), before="## Verdict")
+        self.assertEqual(self.solution_check()[0], 0)
+        self.assertNotEqual(landscape_check.package_hash(self.tree), digest)
+        label = "solution-design/engagements/api.md severity calibration 1"
+        cases = {
+            f"{label} reason must cite a vault note": self.ROW.replace(self.CITE + " ", ""),
+            f"{label} claimed_severity must be critical or major": self.ROW.replace("| major |", "| minor |"),
+            f"{label} calibrated_severity must confirm major or be minor or invalid":
+                self.ROW.replace("| minor |", "| critical |"),
+            f"{label} targets missing note: solution-design/engagements/web":
+                self.ROW.replace("engagements/api", "engagements/web"),
+        }
+        for expected, row in cases.items():
+            with self.subTest(expected=expected):
+                self.calibrate(self.engagement, self.engagement_text, row, before="## Verdict")
+                code, errors = self.solution_check()
+                self.assertEqual(code, 1)
+                self.assertIn(f"  - {expected}\n", errors)
+        # At current a section of that name is the engagement's own text.
+        self.loop("current")
+        self.calibrate(self.engagement, self.engagement_text, "| a | b | c | d |", before="## Verdict")
+        self.assertEqual(self.solution_check(), (0, ""))
+
+    def test_the_design_system_master_records_and_binds_its_calibration_rows(self):
+        import design_system_compile
+
+        row = self.ROW.replace(self.CITE, "[[design-system/MASTER\\|Design Master]]")
+        write(self.docs, "design-system/MASTER.md", self.master_text)
+        self.calibrate(self.master, self.master_text, row, before="## Navigation")
+        self.assertEqual(design_system_compile.calibration_findings(self.design), [])
+        digest = design_system_compile.baseline_hash(self.design)
+        self.calibrate(self.master, self.master_text, row.replace("| minor |", "| invalid |"),
+                       before="## Navigation")
+        self.assertNotEqual(design_system_compile.baseline_hash(self.design), digest)
+        label = "design-system/MASTER.md severity calibration 1"
+        self.calibrate(self.master, self.master_text, row.replace("| major |", "| minor |"),
+                       before="## Navigation")
+        expected = f"{label} claimed_severity must be critical or major"
+        self.assertEqual(design_system_compile.calibration_findings(self.design), [expected])
+        # The check and the approval read every semantic finding, this one included.
+        self.assertIn(expected, design_system_compile.semantic_findings(self.design))
+        self.loop("current")
+        self.assertEqual(design_system_compile.calibration_findings(self.design), [])
 
 
 if __name__ == "__main__":

@@ -932,5 +932,188 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
         self.assertTrue(any("owner_role must be one of" in error for error in self.errors()))
 
 
+class ReviewRecordTests(unittest.TestCase):
+    """Switch `review_loop` at `blocking_delta` keeps a review note's record: the
+    findings the review returned with their ids and severities, the calibration
+    rulings and the finding id of each accepted minor finding."""
+
+    STORY = "[[backlog/epics/delivery-fixture/stories/auth-01/story\\|AUTH-01]]"
+    RETURNED = (
+        f"| F-1 | major | {STORY} Scope states the lockout rule twice, with five and with six attempts. |",
+        f"| F-2 | minor | {STORY} Scope states the lockout rule twice in different words. |",
+    )
+    LOWERED = (f"| F-1 | major | minor | {STORY} Scope and Acceptance both name five attempts,"
+               " so behavior and tests stay the same. |")
+    ACCEPTED = (
+        f"| F-1 {STORY} Scope names the attempts in two sentences. | product_owner | Both name five"
+        " attempts, so behavior and tests stay the same. | Revisit at the next revision of AUTH-01. |",
+        f"| F-2 {STORY} Scope states the lockout rule twice in different words. | qa_engineer | Both"
+        " sentences state one rule, so verification is unchanged. | Revisit at the next revision of AUTH-01. |",
+    )
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.docs = Path(self.temporary.name) / "workspace" / "docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.docs.parent / "config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English",
+        }), encoding="utf-8")
+        make_approved_backlog(self.docs)
+        self.epic_review = (self.docs / "backlog/epics/delivery-fixture/reviews"
+                            / "round-1-epic-review.md")
+        self.root_review = self.docs / "backlog/reviews/round-1-backlog-review.md"
+        self.originals = {path: path.read_text(encoding="utf-8")
+                          for path in (self.epic_review, self.root_review)}
+        self.loop("blocking_delta")
+
+    def loop(self, value: str) -> None:
+        import process_policy
+
+        first = "begin-revision" if process_policy.path_for(self.docs).exists() else "init"
+        for step in ((first,), ("set", "--switch", "review_loop", "--value", value), ("approve",)):
+            output = StringIO()
+            with redirect_stdout(output):
+                code = process_policy.main([step[0], "--docs", str(self.docs), *step[1:]])
+            self.assertEqual(code, 0, output.getvalue())
+
+    def record(self, review: Path, *, returned=RETURNED, calibration=(LOWERED,), accepted=ACCEPTED,
+               status: str = "draft") -> str:
+        review.write_text(self.originals[review], encoding="utf-8")
+        props, body = backlog_compile.parse_front_matter(review)
+        sections = []
+        for title, header, rows in (
+                ("Returned Findings", "| finding | severity | description |", returned),
+                ("Severity Calibration", "| finding | claimed_severity | calibrated_severity | reason |",
+                 calibration),
+                ("Accepted Minor Findings", "| finding | owner_role | reason | revisit_trigger |",
+                 accepted)):
+            if rows is not None:
+                separator = "|" + "---|" * (header.count("|") - 1)
+                sections.append("\n".join([f"## {title}", "", header, separator, *rows, "", ""]))
+        backlog_compile.status_tag(props, status)
+        review.write_text(backlog_compile.front_matter(
+            props, body.replace("## Verdict", "".join(sections) + "## Verdict", 1)), encoding="utf-8")
+        return review.relative_to(self.docs).as_posix()
+
+    def errors(self) -> list[str]:
+        return backlog_compile.collect(self.docs)[1]
+
+    def test_a_complete_record_passes_in_epic_and_root_reviews(self):
+        for review in (self.epic_review, self.root_review):
+            with self.subTest(review=review.name):
+                self.record(review)
+                self.assertEqual(self.errors(), [])
+                review.write_text(self.originals[review], encoding="utf-8")
+
+    def test_a_finding_the_review_returned_as_blocking_never_enters_accepted_minor_findings(self):
+        path = self.epic_review.relative_to(self.docs).as_posix()
+        label = f"{path} accepted minor finding 1 names F-1, which"
+        confirmed = self.LOWERED.replace("| minor |", "| major |")
+        cases = (
+            ((confirmed,), [f"{label} calibration ruled major; only a minor finding is accepted"]),
+            ((self.LOWERED.replace("| minor |", "| invalid |"),),
+             [f"{label} calibration ruled invalid; only a minor finding is accepted"]),
+            ((), [f"{path} returned major finding F-1 has no Severity Calibration row",
+                  f"{label} the review returned as major; only a minor finding is accepted"]),
+        )
+        for calibration, expected in cases:
+            with self.subTest(calibration=calibration):
+                self.record(self.epic_review, calibration=calibration)
+                self.assertEqual(sorted(self.errors()), sorted(expected))
+        self.record(self.epic_review, accepted=(self.ACCEPTED[1].replace("| F-2 ", "| "),))
+        self.assertEqual(self.errors(), [
+            f"{path} accepted minor finding 1 must start with the id of the finding it accepts"])
+        self.record(self.epic_review, returned=None, calibration=None, accepted=(self.ACCEPTED[1],))
+        self.assertEqual(self.errors(), [
+            f"{path} accepted minor finding 1 names F-2, which Returned Findings does not list"])
+
+    def test_severity_calibration_rows_are_validated(self):
+        path = self.root_review.relative_to(self.docs).as_posix()
+        label = f"{path} severity calibration 1"
+        reason = "Scope and Acceptance both name five attempts, so behavior and tests stay the same."
+        cases = {
+            # The finding's own example: a lowering with no citation and no returned claim.
+            "| F-3 | major | minor | not a real problem |": [
+                f"{label} reason must cite a vault note", f"{label} needs a concrete reason",
+                f"{label} rules F-3, which Returned Findings does not list",
+                f"{path} returned major finding F-1 has no Severity Calibration row"],
+            self.LOWERED.replace("| major | minor |", "| minor | minor |"): [
+                f"{label} claimed_severity must be critical or major",
+                f"{label} claimed_severity must be major, the severity F-1 was returned at"],
+            self.LOWERED.replace("| major | minor |", "| major | critical |"): [
+                f"{label} calibrated_severity must confirm major or be minor or invalid"],
+            self.LOWERED.replace(self.STORY, "[[backlog/epics/missing/story\\|ST-9]]"): [
+                f"{label} targets missing note: backlog/epics/missing/story"],
+            self.LOWERED.replace(reason, "Fine."): [f"{label} needs a concrete reason"],
+            self.LOWERED.replace("| F-1 |", "| one |"): [
+                f"{label} finding must be an id such as F-3: one",
+                f"{path} returned major finding F-1 has no Severity Calibration row"],
+        }
+        for row, expected in cases.items():
+            with self.subTest(row=row):
+                self.record(self.root_review, calibration=(row,), accepted=(self.ACCEPTED[1],))
+                self.assertEqual(sorted(self.errors()), sorted(expected))
+        self.record(self.root_review, calibration=(self.LOWERED, self.LOWERED), accepted=None)
+        self.assertEqual(self.errors(), [f"{path} calibrates finding F-1 twice"])
+        props, body = backlog_compile.parse_front_matter(self.root_review)
+        self.root_review.write_text(backlog_compile.front_matter(props, body.replace(
+            "| finding | claimed_severity | calibrated_severity | reason |",
+            "| finding | severity | reason | revisit |")), encoding="utf-8")
+        self.assertIn(f"{path} Severity Calibration columns must be: finding, claimed_severity,"
+                      " calibrated_severity, reason", self.errors())
+
+    def test_returned_findings_carry_an_id_a_severity_and_a_citation(self):
+        path = self.epic_review.relative_to(self.docs).as_posix()
+        label = f"{path} returned finding 1"
+        cases = {
+            f"{label} finding must be an id such as F-3: two": ("| F-2 |", "| two |"),
+            f"{label} severity must be critical, major or minor": ("| minor |", "| low |"),
+            f"{label} description must cite a vault note": (self.STORY + " ", ""),
+        }
+        for expected, (old, new) in cases.items():
+            with self.subTest(expected=expected):
+                self.record(self.epic_review, returned=(self.RETURNED[1].replace(old, new),),
+                            calibration=None, accepted=None)
+                self.assertEqual(self.errors(), [expected])
+        self.record(self.epic_review, returned=(self.RETURNED[1], self.RETURNED[1]),
+                    calibration=None, accepted=None)
+        self.assertEqual(self.errors(), [f"{path} returns finding F-2 twice"])
+
+    def test_a_note_approved_before_its_review_kept_a_record_stays_as_it_was(self):
+        old_style = (self.ACCEPTED[1].replace("| F-2 ", "| "),)
+        self.record(self.epic_review, returned=None, calibration=None, accepted=old_style,
+                    status="approved")
+        self.assertEqual(self.errors(), [])
+        self.record(self.epic_review, returned=None, calibration=None, accepted=old_style)
+        path = self.epic_review.relative_to(self.docs).as_posix()
+        self.assertEqual(self.errors(), [
+            f"{path} accepted minor finding 1 must start with the id of the finding it accepts"])
+        # An approved note that carries a record keeps being read as one.
+        self.record(self.epic_review, calibration=(), status="approved")
+        self.assertIn(f"{path} returned major finding F-1 has no Severity Calibration row", self.errors())
+
+    def test_the_record_is_authored_text_unless_the_loop_is_blocking_delta(self):
+        garbage = {"returned": ("| not an id | fatal | no citation |",),
+                   "calibration": ("| F-3 | major | minor | not a real problem |",)}
+        for value in ("current", None):
+            with self.subTest(policy=value):
+                if value is None:
+                    (self.docs / "delivery/process-policy.md").unlink()
+                else:
+                    self.loop(value)
+                self.record(self.epic_review, **garbage, accepted=None)
+                self.assertEqual(self.errors(), [])
+        self.loop("blocking_delta")
+        import process_policy
+        with redirect_stdout(StringIO()):
+            self.assertEqual(process_policy.main(["begin-revision", "--docs", str(self.docs)]), 0)
+        errors = self.errors()
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("needs the review_loop value of the Process Policy", errors[0])
+        self.assertIn("is a draft", errors[0])
+
+
 if __name__ == "__main__":
     unittest.main()

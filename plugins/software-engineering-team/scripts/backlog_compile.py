@@ -1249,6 +1249,168 @@ def accepted_minor_findings(docs: Path, body: str, path: str,
     return errors
 
 
+# Switch review_loop at blocking_delta keeps a review record: the findings a
+# review returned with their ids and severities, the rulings of its calibration
+# reader and the finding id of each accepted minor finding.
+REVIEW_LOOP, RECORDING_LOOP = "review_loop", "blocking_delta"
+RETURNED_FINDINGS = "Returned Findings"
+RETURNED_FINDING_COLUMNS = ("finding", "severity", "description")
+SEVERITY_CALIBRATION = "Severity Calibration"
+SEVERITY_CALIBRATION_COLUMNS = ("finding", "claimed_severity", "calibrated_severity", "reason")
+REVIEW_RECORD_SECTIONS = (RETURNED_FINDINGS, SEVERITY_CALIBRATION, ACCEPTED_MINOR_FINDINGS)
+FINDING_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
+ACCEPTED_FINDING_ID_RE = re.compile(r"^([A-Z][A-Z0-9]*-[0-9]+)\s")
+FINDING_SEVERITIES = ("critical", "major", "minor")
+CLAIM_SEVERITIES = ("critical", "major")
+
+
+def review_loop_value(docs: Path) -> str:
+    """The review_loop value of the project's approved Process Policy.
+
+    Without a policy it is the package default. A draft or invalid policy
+    raises ValueError: it is refused, never read.
+    """
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    return values[REVIEW_LOOP]["value"]
+
+
+def cited_statement(docs: Path, value: str, label: str, what: str,
+                    errors: list[str]) -> None:
+    """Require a concrete statement that cites a vault note with a resolvable wikilink."""
+    links = re.findall(r"\[\[[^\[\]\n]+\]\]", INLINE_CODE_RE.sub("", value))
+    if not links:
+        errors.append(f"{label} {what} must cite a vault note")
+    for link in links:
+        read_link(docs, link, label, errors)
+    if not meaningful_text(re.sub(r"\[\[[^\[\]\n]+\]\]", " ", value)):
+        errors.append(f"{label} needs a concrete {what}")
+
+
+def returned_findings(docs: Path, body: str, path: str) -> tuple[dict[str, str], list[str]]:
+    """Read a review record's Returned Findings: each finding id with its returned severity."""
+    if RETURNED_FINDINGS not in headings(body):
+        return {}, []
+    rows, errors = structured_table(section(body, RETURNED_FINDINGS), RETURNED_FINDING_COLUMNS,
+                                    path, RETURNED_FINDINGS)
+    returned: dict[str, str] = {}
+    for number, row in enumerate(rows, 1):
+        label = f"{path} returned finding {number}"
+        identifier, severity = row["finding"], row["severity"].casefold()
+        if not FINDING_ID_RE.fullmatch(identifier):
+            errors.append(f"{label} finding must be an id such as F-3: {identifier or '(missing)'}")
+        elif identifier in returned:
+            errors.append(f"{path} returns finding {identifier} twice")
+        if severity not in FINDING_SEVERITIES:
+            errors.append(f"{label} severity must be critical, major or minor")
+        cited_statement(docs, row["description"], label, "description", errors)
+        if FINDING_ID_RE.fullmatch(identifier) and identifier not in returned:
+            returned[identifier] = severity
+    return returned, errors
+
+
+def severity_calibration(docs: Path, body: str, path: str,
+                         returned: dict[str, str] | None) -> tuple[dict[str, str], list[str]]:
+    """Read a review record's Severity Calibration: each ruled finding id with its ruling.
+
+    With ``returned``, the record's Returned Findings, every row rules a
+    finding returned at its claimed severity, and every critical or major
+    returned finding has exactly one row.
+    """
+    rows: list[dict[str, str]] = []
+    errors: list[str] = []
+    if SEVERITY_CALIBRATION in headings(body):
+        rows, errors = structured_table(section(body, SEVERITY_CALIBRATION),
+                                        SEVERITY_CALIBRATION_COLUMNS, path, SEVERITY_CALIBRATION)
+    ruled: dict[str, str] = {}
+    for number, row in enumerate(rows, 1):
+        label = f"{path} severity calibration {number}"
+        identifier = row["finding"]
+        claimed = row["claimed_severity"].casefold()
+        ruling = row["calibrated_severity"].casefold()
+        known = FINDING_ID_RE.fullmatch(identifier) is not None
+        if not known:
+            errors.append(f"{label} finding must be an id such as F-3: {identifier or '(missing)'}")
+        elif identifier in ruled:
+            errors.append(f"{path} calibrates finding {identifier} twice")
+        if claimed not in CLAIM_SEVERITIES:
+            errors.append(f"{label} claimed_severity must be critical or major")
+        elif ruling not in {claimed, "minor", "invalid"}:
+            errors.append(f"{label} calibrated_severity must confirm {claimed} or be minor or invalid")
+        cited_statement(docs, row["reason"], label, "reason", errors)
+        if known and returned is not None:
+            if identifier not in returned:
+                errors.append(f"{label} rules {identifier}, which Returned Findings does not list")
+            elif returned[identifier] != claimed:
+                errors.append(f"{label} claimed_severity must be {returned[identifier]},"
+                              f" the severity {identifier} was returned at")
+        if known and identifier not in ruled:
+            ruled[identifier] = ruling
+    for identifier, severity in sorted((returned or {}).items()):
+        if severity in CLAIM_SEVERITIES and identifier not in ruled:
+            errors.append(f"{path} returned {severity} finding {identifier} has no Severity Calibration row")
+    return ruled, errors
+
+
+def review_record_findings(docs: Path, body: str, path: str, *, approved: bool) -> list[str]:
+    """Validate the review record that the blocking_delta loop keeps in a document.
+
+    A critical or major finding never enters Accepted Minor Findings: each row
+    names the id of a finding the review returned as minor or its calibration
+    lowered to minor. An approved document without Returned Findings was
+    approved before its review kept a record, so it stays as it was.
+    """
+    present = headings(body)
+    if approved and RETURNED_FINDINGS not in present:
+        return []
+    returned, errors = returned_findings(docs, body, path)
+    ruled, calibration_errors = severity_calibration(docs, body, path, returned)
+    errors.extend(calibration_errors)
+    if ACCEPTED_MINOR_FINDINGS not in present:
+        return errors
+    # The table's own shape is reported by accepted_minor_findings.
+    rows, _table_errors = structured_table(section(body, ACCEPTED_MINOR_FINDINGS),
+                                           ACCEPTED_MINOR_COLUMNS, path, ACCEPTED_MINOR_FINDINGS)
+    accepted: set[str] = set()
+    for number, row in enumerate(rows, 1):
+        label = f"{path} accepted minor finding {number}"
+        match = ACCEPTED_FINDING_ID_RE.match(row["finding"])
+        if match is None:
+            errors.append(f"{label} must start with the id of the finding it accepts")
+            continue
+        identifier = match.group(1)
+        if identifier in accepted:
+            errors.append(f"{path} accepts finding {identifier} twice")
+        accepted.add(identifier)
+        if identifier not in returned:
+            errors.append(f"{label} names {identifier}, which Returned Findings does not list")
+        elif identifier in ruled and ruled[identifier] != "minor":
+            errors.append(f"{label} names {identifier}, which calibration ruled {ruled[identifier]};"
+                          " only a minor finding is accepted")
+        elif identifier not in ruled and returned[identifier] != "minor":
+            errors.append(f"{label} names {identifier}, which the review returned as"
+                          f" {returned[identifier]}; only a minor finding is accepted")
+    return errors
+
+
+def review_loop_record(docs: Path, body: str, path: str, props: dict) -> list[str]:
+    """Validate a review note's record when the project's review_loop keeps one.
+
+    A note without a record section never reads the Process Policy, and at
+    any value but blocking_delta a section of a record's name is authored text.
+    """
+    if not set(REVIEW_RECORD_SECTIONS) & headings(body):
+        return []
+    try:
+        loop = session_read(("review_loop", docs.resolve()), lambda: review_loop_value(docs))
+    except ValueError as exc:
+        return [f"{path} needs the review_loop value of the Process Policy: {exc}"]
+    if loop != RECORDING_LOOP:
+        return []
+    return review_record_findings(docs, body, path, approved=props.get("status") == "approved")
+
+
 def acceptance_checklist_lines(story: dict) -> int:
     """Count the checklist criteria of the Acceptance section, outside code blocks.
 
@@ -1883,6 +2045,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
             errors.extend(review_section_findings(
                 body, contract["required_backlog_review_sections"], rel, docs))
             errors.extend(accepted_minor_findings(docs, body, rel, contract))
+            errors.extend(review_loop_record(docs, body, rel, review_props))
         record["backlog_reviews"].append({"path": rel, "props": review_props,
                                           "body": body,
                                           "id": note_id(review_props, path.stem),
@@ -1941,6 +2104,8 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                     review_rel, docs))
                 errors.extend(accepted_minor_findings(
                     docs, review_body_text, review_rel, contract))
+                errors.extend(review_loop_record(docs, review_body_text, review_rel,
+                                                 review_props))
             item = {"path": review_rel, "props": review_props,
                     "body": review_body_text,
                     "id": note_id(review_props, review.stem),

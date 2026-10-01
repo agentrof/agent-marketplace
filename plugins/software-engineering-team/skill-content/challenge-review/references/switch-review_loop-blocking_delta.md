@@ -35,6 +35,40 @@ Findings that share one root cause are one finding at the severity of that
 cause. The writer never lowers a returned severity, and a verdict requests
 changes only while a confirmed critical or major finding is open.
 
+## Review record
+
+Every finding carries an id that is unique within its review record, such as
+`F-3`, and the writer never changes it. A backlog review note and an Operation
+contract keep the record where their compiler reads it, in up to three optional
+sections: `Returned Findings`, `Severity Calibration` and
+`Accepted Minor Findings`, in that order, placed before `Verdict` in a review
+note and before `Navigation` and a generated relations block in a contract.
+
+```markdown
+## Returned Findings
+
+| finding | severity | description |
+|---|---|---|
+| F-3 | major | [[backlog/epics/identity/stories/sign-in/story\|ST-002]] Scope states the lockout rule twice in different words, so a reader may build two rules. |
+| F-4 | minor | [[backlog/epics/identity/stories/sign-in/story\|ST-002]] Delivery Notes repeat the lockout rule in other words. |
+```
+
+`Returned Findings` lists every finding of every pass of the review with the
+severity it was returned at; `description` states it and cites the affected
+vault note with an escaped-table wikilink. `backlog_compile.py` and
+`operation_compile.py` refuse a `Severity Calibration` or
+`Accepted Minor Findings` row that names a finding this section does not list,
+a calibration row whose `claimed_severity` is not the returned severity, a
+critical or major returned finding without its calibration row, and an accepted
+row for a finding that is not minor after calibration. They read the
+record of every note or contract that is not approved, and of an approved one
+that carries `Returned Findings`, so one approved before its review kept a
+record stays as it was. A contract's record belongs to its current revision:
+the writer of a new revision removes the rows of findings that closed, keeps
+each still-open accepted finding with its `Returned Findings` row, and records
+the new review's findings under ids the record does not hold yet. Recording the
+record is not a change to the reviewed text and starts no re-review.
+
 ## Minor findings
 
 A minor finding never blocks and never starts a round. Fix it only in a writer
@@ -45,33 +79,33 @@ revisit trigger:
 
 - Backlog: the review note's `Accepted Minor Findings` table, as the Review
   findings section of `product-planning/references/structured-records.md`
-  defines.
+  defines, with each `finding` starting with the finding's id.
 - Solution Design: shown with its acceptance reason at the approval gate, as
   the Solution review plan defines.
 - Design System: shown at the approval gate with its reason, the owner role
   `ux_designer` and its revisit trigger.
-- Operation contracts: the contract's optional `Accepted Minor Findings`
-  section, placed before `Navigation` and before a generated relations block:
+- Operation contracts: the contract's `Accepted Minor Findings` section of the
+  review record:
 
 ```markdown
 ## Accepted Minor Findings
 
 | finding | owner_role | reason | revisit_trigger |
 |---|---|---|---|
-| [[operation/verification-contract\|Verification Contract]] The Contract section states the test workdir twice in different words. | qa_engineer | Both sentences name one directory, so the test command runs the same way. | Revisit at the next revision of the Verification Contract. |
+| OP-2 [[operation/verification-contract\|Verification Contract]] The Contract section states the test workdir twice in different words. | qa_engineer | Both sentences name one directory, so the test command runs the same way. | Revisit at the next revision of the Verification Contract. |
 ```
 
-`finding` states the minor finding and cites the affected vault note with an
-escaped-table wikilink. `owner_role` is `qa_engineer` or `devops_engineer`,
-the Operation contract writer that follows it up. `reason` says why the text is
-safe to accept as written, and `revisit_trigger` names the event that reopens
-it. `operation_compile.py` validates every row whenever the section is present;
-a contract without accepted minor findings omits it. Recording the section is
-not a change to the reviewed text and starts no re-review.
+`finding` starts with the id of the finding it accepts, then states it and
+cites the affected vault note with an escaped-table wikilink. `owner_role` is
+`qa_engineer` or `devops_engineer`, the Operation contract writer that follows
+it up. `reason` says why the text is safe to accept as written, and
+`revisit_trigger` names the event that reopens it. `operation_compile.py`
+validates every row whenever the section is present; a contract without
+accepted minor findings omits it.
 
-A critical or major finding never enters an `Accepted Minor Findings` section
-or an approval-gate list of minor findings. It closes only through a fix or a
-disproof that the re-review confirms.
+A finding that stays critical or major after calibration never enters an
+`Accepted Minor Findings` section or an approval-gate list of minor findings.
+It closes only through a fix or a disproof that the re-review confirms.
 
 ## Re-review
 
@@ -140,9 +174,10 @@ its own calibration before it gates.
   `calibrated_severity` and `reason`. `calibrated_severity` is the claimed
   severity when the claim holds, `minor` when the text as written still yields
   the same behavior, verification and ownership, and `invalid` when the cited
-  text disproves the claim. `reason` cites the text that decides it: a
-  wikilink or path and the passage. Imprecision that could mislead a careful
-  reader stays major, and calibration never raises a severity.
+  text disproves the claim. `reason` cites the text that decides it: an
+  escaped-table wikilink to the note and the passage. Imprecision that could
+  mislead a careful reader stays major, and calibration never raises a
+  severity.
 - A row that lowers or invalidates a claim without citing the text is refused:
   that claim keeps its claimed severity.
 - Only confirmed critical and major findings keep the verdict at
@@ -150,16 +185,27 @@ its own calibration before it gates.
   follows the minor rule, and one calibrated `invalid` closes with its cited
   evidence. The writer never changes a returned or calibrated severity.
 
-Record every row. A backlog review note keeps them in an optional
-`Severity Calibration` section placed before `Verdict`:
+Record every row where the step's compiler reads it, in an optional
+`Severity Calibration` section, and show the rows with the verdict at the
+approval gate as well:
+
+- Backlog and Operation contracts: the review record's section, beside
+  `Returned Findings`.
+- Solution Design: a section of the engagement the review read, placed after
+  its `Verdict`; `landscape_check.py` validates it and the package hash binds
+  it.
+- Design System: a section of `MASTER.md`, placed before its navigation;
+  `design_system_compile.py` validates it and the baseline hash binds it.
 
 ```markdown
 ## Severity Calibration
 
 | finding | claimed_severity | calibrated_severity | reason |
 |---|---|---|---|
-| F-3 | major | minor | [[backlog/epics/identity/stories/sign-in/story\|ST-002]] Scope states the lockout rule twice, and both sentences name five attempts, so behavior and tests stay the same. |
+| F-3 | major | minor | [[backlog/epics/identity/stories/sign-in/story\|ST-002]] Scope and Acceptance both name five attempts, so behavior and tests stay the same. |
 ```
 
-Solution Design, Design System and Operation contract reviews keep no review
-record, so they show the rows with the verdict at the approval gate.
+The compilers refuse other columns, a `claimed_severity` that is not critical
+or major, a `calibrated_severity` that is neither the claimed severity nor
+`minor` or `invalid`, a finding ruled twice and a `reason` that cites no
+resolvable vault note. At `current` a section of that name is authored text.

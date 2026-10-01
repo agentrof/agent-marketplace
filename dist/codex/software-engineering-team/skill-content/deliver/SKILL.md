@@ -46,7 +46,8 @@ Cancellation is a deliberate exception inside the same entry. `/deliver
 DLV-###` first renders an exact read-only cancellation preview when the user
 chooses cancellation. The internal `cancel-delivery` coordinator records the
 reason and every Item disposition, releases active Slots atomically, reverts
-integrated Item merges in reverse order and publishes the cancellation Review.
+every integration merge of its Items in reverse order, including one a
+reopened Item left, and publishes the cancellation Review.
 It never fabricates an Item, plan hash or integration base for a scope-only
 cancellation; response loss is recovered by refetching the exact Fence,
 Integration, Item and Slot tips.

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "classes": {
+    "strong": {
+      "family": "sol",
+      "id": "gpt-6.1-sol",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "min_cli_version": "0.159.1",
+      "sources": [
+        "https://learn.chatgpt.com/docs/models",
+        "https://github.com/openai/codex/blob/rust-v0.159.1/codex-rs/models-manager/models.json",
+        "https://github.com/openai/codex/releases/tag/rust-v0.159.1"
+      ],
+      "verified": "2026-10-01"
+    },
+    "fast": {
+      "family": "luna",
+      "id": "gpt-6-luna",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "min_cli_version": "0.157.0",
+      "sources": [
+        "https://learn.chatgpt.com/docs/models",
+        "https://github.com/openai/codex/blob/rust-v0.159.1/codex-rs/models-manager/models.json",
+        "https://github.com/openai/codex/releases/tag/rust-v0.157.0"
+      ],
+      "verified": "2026-10-01"
+    }
+  }
+}

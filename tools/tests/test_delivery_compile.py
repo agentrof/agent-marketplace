@@ -26,6 +26,7 @@ import backlog_compile  # noqa: E402
 import design_system_compile  # noqa: E402
 import experience_application_check  # noqa: E402
 import operation_compile  # noqa: E402
+import process_policy  # noqa: E402
 import requirement_compile  # noqa: E402
 import requirement_route  # noqa: E402
 import stage_package  # noqa: E402
@@ -463,6 +464,204 @@ class DeliveryCompilerTests(unittest.TestCase):
         _root, stale = delivery_compile.delivery_findings(self.docs, "DLV-001")
         self.assertTrue(any("Verification Contract binding" in finding for finding in stale), stale)
 
+    def policy(self, *argv: str) -> dict:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = process_policy.main([argv[0], "--docs", str(self.docs), *argv[1:]])
+        result = json.loads(output.getvalue())
+        self.assertEqual(code, 0, result)
+        return result
+
+    def approve_policy(self) -> dict:
+        path = process_policy.path_for(self.docs)
+        self.policy("begin-revision" if path.exists() else "init")
+        self.policy("approve")
+        return process_policy.approved_snapshot(self.docs)[0]
+
+    def test_scope_approval_pins_the_approved_process_policy(self):
+        self.approve_verification_contract()
+        self.approve_dod()
+        init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None,
+                                 "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        proposal, _ = delivery_compile.split_note(root / "delivery.md")
+        snapshot = self.approve_policy()
+        # A proposal carries no pin, and a policy approved after it is not drift.
+        self.assertFalse(set(process_policy.PIN_FIELDS) & set(proposal))
+        self.assertEqual(delivery_compile.delivery_findings(self.docs, "DLV-001")[1], [])
+        plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_scope(plan_args), 0)
+        props, body = delivery_compile.split_note(root / "delivery.md")
+        self.assertEqual({key: props[key] for key in process_policy.PIN_FIELDS}, snapshot)
+        self.assertEqual(snapshot["process_policy_revision"], 1)
+        keys = list(props)
+        self.assertEqual(keys.index("process_policy_source_hash") + 1, keys.index("aliases"))
+        # The scope hash covers the pin, so the approved scope names its policy.
+        self.assertEqual(props["scope_hash"], delivery_compile.content_hash(
+            props, body, exclude=delivery_compile.MUTABLE | {"scope_hash"}))
+        self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
+        self.assert_delivery_vault_contract()
+
+    def test_without_a_process_policy_no_pin_is_written(self):
+        plan_args = self.scope_ready_for_execution()
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["refreshed_delivery_pins"], [])
+        props, _ = delivery_compile.split_note(
+            delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md")
+        self.assertFalse(set(process_policy.PIN_FIELDS) & set(props))
+
+    def test_a_draft_or_invalid_process_policy_refuses_scope_approval(self):
+        self.approve_dod()
+        init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None,
+                                 "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        self.policy("init")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.approve_scope(plan_args), 1)
+        self.assertIn("Process Policy revision 1 is a draft", output.getvalue())
+        self.policy("approve")
+        path = process_policy.path_for(self.docs)
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "Each row is an explicit", "Each row is one explicit"), encoding="utf-8")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.approve_scope(plan_args), 1)
+        self.assertIn("approved Process Policy source_hash is stale", output.getvalue())
+        props, _ = delivery_compile.split_note(
+            delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md")
+        self.assertEqual(props["status"], "scope_proposed")
+
+    def test_process_policy_drift_blocks_a_delivery_until_execution_reapproval(self):
+        plan_args = self.scope_ready_for_execution()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+
+        def findings():
+            return delivery_compile.delivery_findings(self.docs, "DLV-001")[1]
+
+        def reapprove() -> list[str]:
+            code, result = self.approve_execution_result(plan_args)
+            self.assertEqual(code, 0, result)
+            self.assertEqual(findings(), [])
+            return result["refreshed_delivery_pins"]
+
+        def revise(value: str | None) -> dict:
+            path = process_policy.path_for(self.docs)
+            self.policy("begin-revision" if path.exists() else "init")
+            self.policy("set", "--switch", "review_loop",
+                        *(["--value", value] if value else ["--default"]))
+            self.policy("approve")
+            self.git("add", "--all")
+            self.git("commit", "-q", "-m", "Approve the Process Policy")
+            return process_policy.approved_snapshot(self.docs)[0]
+
+        # A first policy that leaves every switch the Delivery reads at its
+        # default agrees with the Delivery's missing pin.
+        first = revise(None)
+        self.assertEqual(findings(), [])
+        second = revise("blocking_delta")
+        self.assertEqual(len(findings()), 1)
+        self.assertIn("Delivery runs switch review_loop at current under no Process Policy, as it"
+                      " pinned none, but the approved revision 2 sets blocking_delta", findings()[0])
+        self.assertIn("begin-plan-revision, the execution-plan tasks", findings()[0])
+        self.assertEqual(delivery_compile.check_delivery(plan_args), 1)
+        self.assertEqual(reapprove(), sorted(process_policy.PIN_FIELDS))
+        props, _ = delivery_compile.split_note(root / "delivery.md")
+        self.assertEqual({key: props[key] for key in process_policy.PIN_FIELDS}, second)
+        self.assertNotEqual(second["process_policy_source_hash"], first["process_policy_source_hash"])
+
+        third = revise(None)
+        self.assertEqual(third["process_policy_revision"], 3)
+        self.assertIn("Delivery runs switch review_loop at blocking_delta under its pinned Process"
+                      " Policy revision 2, but the approved revision 3 sets current", findings()[0])
+        self.assertEqual(reapprove(), ["process_policy_revision", "process_policy_source_hash"])
+        props, _ = delivery_compile.split_note(root / "delivery.md")
+        self.assertEqual({key: props[key] for key in process_policy.PIN_FIELDS}, third)
+
+        self.policy("begin-revision")
+        self.assertIn("Process Policy revision 4 is a draft", " ".join(findings()))
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertIn("Process Policy revision 4 is a draft", " ".join(result["errors"]))
+
+        # Without a policy every switch is at its default, as revision 3 set it.
+        process_policy.path_for(self.docs).unlink()
+        self.assertEqual(findings(), [])
+        self.assertEqual(reapprove(), sorted(process_policy.PIN_FIELDS))
+        props, _ = delivery_compile.split_note(root / "delivery.md")
+        self.assertFalse(set(process_policy.PIN_FIELDS) & set(props))
+
+    def test_a_reviewed_or_closed_delivery_keeps_its_process_policy_pin_as_history(self):
+        # From the Delivery Review on no execution approval can re-pin the
+        # Delivery, so a later policy revision must not strand it or change
+        # the values it reads.
+        self.approve_policy()
+        self.git("add", "--all")
+        self.git("commit", "-q", "-m", "Approve Process Policy revision 1")
+        plan_args = self.scope_ready_for_execution()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        original = (root / "delivery.md").read_bytes()
+        pinned = {key: delivery_compile.split_note(root / "delivery.md")[0][key]
+                  for key in process_policy.PIN_FIELDS}
+        self.policy("begin-revision")
+        self.policy("set", "--switch", "review_panels", "--value", "lens_panel")
+        # Only a switch delivery-execution reads is drift for an execution-approved Delivery.
+        self.policy("set", "--switch", "review_loop", "--value", "blocking_delta")
+        self.policy("approve")
+        self.assertTrue(delivery_compile.delivery_findings(self.docs, "DLV-001")[1])
+        for status in ("review", "pr_handoff", "awaiting_merge", "cancelled"):
+            with self.subTest(status=status):
+                (root / "delivery.md").write_bytes(original)
+                props, body = delivery_compile.split_note(root / "delivery.md")
+                props["status"] = status
+                delivery_compile.atomic_text(root / "delivery.md",
+                                             delivery_compile.frontmatter(props, body))
+                self.assertEqual(delivery_compile.delivery_findings(self.docs, "DLV-001")[1], [])
+                self.assertEqual(self.policy("value", "--switch", "review_panels", "--delivery",
+                                             "DLV-001")["value"], "single_reader")
+                props, _ = delivery_compile.split_note(root / "delivery.md")
+                self.assertEqual({key: props[key] for key in process_policy.PIN_FIELDS}, pinned)
+        self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
+
+    def test_switch_readers_refuse_a_delivery_whose_pin_drifted(self):
+        package = self.root / "fixture-package"
+        registry = package / process_policy.REGISTRY
+        registry.parent.mkdir(parents=True)
+        # Only a switch a Delivery flow owns is pinned, so the fixture switch has one.
+        registry.write_text(json.dumps({"schema_version": 1, "switches": {"fixture_mode": {
+            "values": [{"id": "current", "tradeoffs": "Today."}, {"id": "fast", "tradeoffs": "New."}],
+            "flows": ["delivery-execution"], "default": "current"}}}), encoding="utf-8")
+        policy = package / process_policy.TASK_INPUT_POLICY
+        policy.parent.mkdir(parents=True)
+        policy.write_text(json.dumps({"entries": {"deliver": {
+            "flows": ["delivery-execution"], "scope_kind": "delivery"}}}), encoding="utf-8")
+        with mock.patch.object(process_policy, "PACKAGE", package):
+            self.policy("init")
+            self.policy("set", "--switch", "fixture_mode", "--value", "fast")
+            self.policy("approve")
+            self.scope_ready_for_execution()
+            result = self.policy("value", "--switch", "fixture_mode", "--delivery", "DLV-001")
+            self.assertEqual((result["value"], result["source"]), ("fast", "policy"))
+            self.policy("begin-revision")
+            self.policy("set", "--switch", "fixture_mode", "--default")
+            self.policy("approve")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = process_policy.main(["value", "--docs", str(self.docs), "--switch",
+                                            "fixture_mode", "--delivery", "DLV-001"])
+            self.assertEqual(code, 1)
+            # No commit holds the pinned revision, so the pin itself is compared.
+            self.assertIn("Delivery process_policy_revision is stale", output.getvalue())
+            # Outside a Delivery the project's approved value is in force.
+            self.assertEqual(self.policy("value", "--switch", "fixture_mode")["value"], "current")
+
     def test_scope_then_execution_creates_exact_item_evidence_files(self):
         self.approve_verification_contract()
         dod_args = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})
@@ -535,6 +734,201 @@ class DeliveryCompilerTests(unittest.TestCase):
     def delivery_bytes(self):
         root = delivery_compile.find_delivery(self.docs, "DLV-001")
         return {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+    def check_plan_result(self, *reopen: str) -> tuple[int, dict]:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_compile.main(["--docs", str(self.docs), "check-plan", "--delivery", "DLV-001",
+                                          *(flag for story in reopen for flag in ("--reopen", story))])
+        return code, json.loads(output.getvalue())
+
+    def author_item(self, **fields) -> None:
+        item = delivery_compile.find_delivery(self.docs, "DLV-001") / "items" / "auth-01" / "item.md"
+        props, body = delivery_compile.split_note(item)
+        props.update(fields)
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+
+    def test_the_plan_gate_refuses_a_topology_that_execution_approval_would_refuse(self):
+        """#345: the standard path checks the plan before the owner sees it, with approval's own checks."""
+        plan_args = self.scope_ready_for_execution()
+        self.author_item(path_claims=["../src/auth.py"], execution_after=["AUTH-01"],
+                         role_sequence=["qa_engineer", "code_reviewer"])
+        before = self.delivery_bytes()
+        code, checked = self.check_plan_result()
+        self.assertEqual((code, checked["ok"], checked["status"]), (1, False, "scope_approved"))
+        for fragment in ("AUTH-01 path_claim is not normalized: ../src/auth.py",
+                         "AUTH-01 cannot execute after itself", "AUTH-01 role_sequence must be"):
+            with self.subTest(fragment=fragment):
+                self.assertTrue(any(fragment in error for error in checked["errors"]), checked)
+        code, refused = self.approve_execution_result(plan_args)
+        self.assertEqual((code, refused["errors"]), (1, checked["errors"]))
+        self.assertEqual(self.delivery_bytes(), before)
+        # A valid topology passes unchanged, and approval then stamps the plan the gate showed.
+        self.author_item(path_claims=["src/auth.py"], execution_after=[],
+                         role_sequence=["backend_developer", "code_reviewer", "qa_engineer"])
+        before = self.delivery_bytes()
+        self.assertEqual(self.check_plan_result(), (0, {
+            "ok": True, "id": "DLV-001", "status": "scope_approved", "errors": [],
+            "pending_operation_revisions": []}))
+        self.assertEqual(self.delivery_bytes(), before)
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        # A plan revision is checked with the reopen its approval will name.
+        self.assertEqual(self.check_plan_result("AUTH-01")[1]["errors"],
+                         ["reopen requires an integrated Item: AUTH-01"])
+
+    def test_gate_a_checks_the_proposed_plan_and_keeps_a_revision_it_approves_pending(self):
+        """#345: gate A checks the plan before the scope is approved; the revision it approves may stay open."""
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.policy("init")
+        self.policy("set", "--switch", "owner_gates", "--value", "two_fixed_gates")
+        self.policy("approve")
+        init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                      "goal": "Authenticate", "outcome": None,
+                                      "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+        # Gate A also lists the queued questions it asks, none here.
+        self.assertEqual(self.check_plan_result(), (1, {
+            "ok": False, "id": "DLV-001", "status": "scope_proposed",
+            "errors": ["AUTH-01 needs at least one exact path_claim or contract_claim"],
+            "pending_operation_revisions": [], "pending_decisions": []}))
+        self.author_item(path_claims=["src/auth.py"], contract_claims=["auth:session"])
+        self.assertEqual(self.check_plan_result()[0], 0)
+        contract = type("Args", (), {"docs": str(self.docs), "kind": "verification", "constrained_by": None})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(operation_compile.revise(contract), 0)
+        code, checked = self.check_plan_result()
+        [pending] = checked["pending_operation_revisions"]
+        self.assertEqual((code, checked["ok"], checked["errors"], pending["kind"], pending["revision"]),
+                         (0, True, [], "verification", 2))
+        # The entry names the receipt the approval then stamps, so gate A approves exact bytes (#345).
+        path = operation_compile.contract_path(self.docs, "verification")
+        draft = path.read_bytes()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(operation_compile.approve(contract), 0)
+        self.assertEqual(operation_compile.check_contract(self.docs, "verification")[0]["source_hash"],
+                         pending["source_hash"])
+        path.write_bytes(draft)
+        # A revision that passes its own check is still checked as its approval would check it.
+        props, body = operation_compile.parse(path)
+        props.pop("test_command")
+        props.pop("constrained_by")
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        self.assertEqual(operation_compile.check_contract(self.docs, "verification")[1], [])
+        self.assertEqual(self.check_plan_result(), (1, {
+            "ok": False, "id": "DLV-001", "status": "scope_proposed",
+            "errors": ["approved current verification contract is required: revision 2 is open and its"
+                       " approval would refuse it: approved contract must cite at least one accepted Solution"
+                       " decision in constrained_by; test_command is required"],
+            "pending_operation_revisions": [], "pending_decisions": []}))
+        path.write_bytes(draft)
+        # The standard path approves the revision before its plan gate, so the gate refuses it open,
+        # naming its status (rr-seams-06).
+        for argv in (("begin-revision",), ("set", "--switch", "owner_gates", "--default"), ("approve",)):
+            self.policy(*argv)
+        code, checked = self.check_plan_result()
+        self.assertEqual((code, checked["errors"], checked["pending_operation_revisions"]),
+                         (1, ["approved current verification contract is required: revision 2 is a draft"], []))
+        # A revision that fails its own check is refused in gate A too.
+        for argv in (("begin-revision",), ("set", "--switch", "owner_gates", "--value", "two_fixed_gates"),
+                     ("approve",)):
+            self.policy(*argv)
+        path = operation_compile.contract_path(self.docs, "verification")
+        props, body = operation_compile.parse(path)
+        props["mutation_disposition"] = "sometimes"
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        code, checked = self.check_plan_result()
+        self.assertEqual((code, checked["pending_operation_revisions"]), (1, []))
+        self.assertEqual(checked["errors"], ["approved current verification contract is required:"
+                                             " mutation_disposition must be required or not_applicable"])
+
+    def test_gate_a_reads_owner_gates_by_value_after_a_revision_that_changes_no_delivery_switch(self):
+        """delivery_owner_gates compared the pin by hash, so once the owner approved a policy revision
+        that changes no Delivery switch, check-plan no longer saw two_fixed_gates and refused the
+        open revision gate A approves, with an empty reason. owner_gates is read by value, as every
+        other switch read is (rr-seams-06)."""
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.policy("init")
+        self.policy("set", "--switch", "owner_gates", "--value", "two_fixed_gates")
+        self.policy("approve")
+        init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                      "goal": "Authenticate", "outcome": None,
+                                      "target_branch": "main", "story": ["AUTH-01"]})
+        contract = type("Args", (), {"docs": str(self.docs), "kind": "verification", "constrained_by": None})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+            self.author_item(path_claims=["src/auth.py"], contract_claims=["auth:session"])
+            self.assertEqual(operation_compile.revise(contract), 0)
+            self.assertEqual(delivery_compile.approve_scope(
+                type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})), 0)
+        # The pinned revision stays readable from Git once the policy moves on.
+        self.git("add", "--all")
+        self.git("commit", "-q", "-m", "Pin Process Policy revision 1")
+        gated = self.check_plan_result()
+        self.assertEqual((gated[0], [revision["revision"] for revision in gated[1]["pending_operation_revisions"]]),
+                         (0, [2]))
+        # The owner approves a revision for the next Delivery that changes only a backlog switch.
+        for argv in (("begin-revision",), ("set", "--switch", "review_manifest_scope", "--value", "bounded"),
+                     ("approve",)):
+            self.policy(*argv)
+        props = delivery_compile.split_note(delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md")[0]
+        self.assertEqual(delivery_compile.delivery_owner_gates(self.docs, props), "two_fixed_gates")
+        self.assertEqual(self.check_plan_result(), gated)
+
+    def test_gate_a_checks_an_open_revisions_review_record_as_its_approval_does(self):
+        """Under owner_gates two_fixed_gates and review_loop blocking_delta, gate A refuses an open
+        Operation revision whose review record its approval would refuse, naming the record's
+        finding, and lists one with a complete record under the source_hash its approval stamps
+        (rr-delivery-04)."""
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.policy("init")
+        self.policy("set", "--switch", "owner_gates", "--value", "two_fixed_gates")
+        self.policy("set", "--switch", "review_loop", "--value", "blocking_delta")
+        self.policy("approve")
+        init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                      "goal": "Authenticate", "outcome": None,
+                                      "target_branch": "main", "story": ["AUTH-01"]})
+        contract = type("Args", (), {"docs": str(self.docs), "kind": "verification", "constrained_by": None})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+            self.author_item(path_claims=["src/auth.py"], contract_claims=["auth:session"])
+            self.assertEqual(operation_compile.revise(contract), 0)
+        path = operation_compile.contract_path(self.docs, "verification")
+        draft = path.read_text(encoding="utf-8")
+        cite = "[[operation/verification-contract\\|Verification Contract]]"
+
+        def record(*sections: tuple[str, str, tuple[str, ...]]) -> None:
+            text = "".join("\n".join([f"## {title}", "", header, "|" + "---|" * (header.count("|") - 1),
+                                       *rows, "", ""]) for title, header, rows in sections)
+            path.write_text(draft.replace("## Navigation", text + "## Navigation", 1), encoding="utf-8")
+
+        returned = ("Returned Findings", "| finding | severity | description |", (
+            f"| OP-1 | major | {cite} The Contract section never states where the test command runs. |",
+            f"| OP-2 | minor | {cite} The Contract section states the test workdir twice in different words. |"))
+        record(returned)
+        self.assertEqual(self.check_plan_result(), (1, {
+            "ok": False, "id": "DLV-001", "status": "scope_proposed",
+            "errors": ["approved current verification contract is required: operation/verification-contract.md"
+                       " returned major finding OP-1 has no Severity Calibration row"],
+            "pending_operation_revisions": [], "pending_decisions": []}))
+        record(returned,
+               ("Severity Calibration", "| finding | claimed_severity | calibrated_severity | reason |", (
+                   f"| OP-1 | major | invalid | {cite} The front matter sets test_workdir to the repository"
+                   " root, so the command runs from one directory. |",)),
+               ("Accepted Minor Findings", "| finding | owner_role | reason | revisit_trigger |", (
+                   f"| OP-2 {cite} The Contract section states the test workdir twice in different words."
+                   " | qa_engineer | Both sentences name one directory, so the test command runs the same"
+                   " way. | Revisit at the next revision of the Verification Contract. |",)))
+        code, checked = self.check_plan_result()
+        [pending] = checked["pending_operation_revisions"]
+        self.assertEqual((code, checked["errors"], pending["kind"], pending["revision"]),
+                         (0, [], "verification", 2))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(operation_compile.approve(contract), 0)
+        self.assertEqual(operation_compile.check_contract(self.docs, "verification")[0]["source_hash"],
+                         pending["source_hash"])
 
     def test_execution_approval_refuses_without_workflows_until_render_ci_adds_one(self):
         plan_args = self.scope_ready_for_execution()
@@ -1140,6 +1534,109 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(props["approval_hash"], delivery_compile.content_hash(
             props, body, exclude=delivery_compile.MUTABLE | {"approval_hash"}))
 
+    def test_review_approval_lists_code_review_follow_ups_at_blocking_delta(self):
+        self.policy("init")
+        self.policy("set", "--switch", "review_loop", "--value", "blocking_delta")
+        self.policy("approve")
+        plan_args = self.scope_ready_for_execution()
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 0, result)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        item = root / "items/auth-01/item.md"
+        props, body = delivery_compile.split_note(item)
+        props["status"] = "integrated"
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        record = item.parent / "code-review.md"
+        row = ("| CR-2 | minor | src/auth.py:12 | The helper name hides \\| its unit. "
+               "| backend_developer | Revisit at the next change to src/auth.py. |")
+        # The calibration table after the follow-ups never reaches the Delivery Review.
+        calibration = delivery_compile.table_block(
+            delivery_compile.ITEM_CALIBRATION, delivery_compile.CALIBRATION_COLUMNS,
+            ["| CR-2 | major | minor | src/auth.py:12 names a constant that no caller reads. |"])
+        record_props, record_body = delivery_compile.split_note(record)
+        delivery_compile.atomic_text(record, delivery_compile.frontmatter(
+            record_props, delivery_compile.replace_section(
+                record_body, "Deviations and Follow-ups", delivery_compile.table_block(
+                    delivery_compile.ITEM_FOLLOW_UPS, delivery_compile.FOLLOW_UP_COLUMNS, [row])
+                + "\n\n" + calibration)))
+        review_path = root / "delivery-review.md"
+        review_path.write_text(delivery_compile.frontmatter(
+            {"type": "delivery-review", "status": "draft"},
+            delivery_compile.body_for("delivery-review", "Draft review",
+                                      {"Lessons and Follow-up": "Rotate the fixture keys."})),
+            encoding="utf-8")
+        review = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
+                                   "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
+        expected = "\n".join([
+            "Rotate the fixture keys.", "", delivery_compile.DELIVERY_FOLLOW_UPS, "",
+            "| item | finding | severity | file | description | owner_role | revisit_trigger |",
+            "|---|---|---|---|---|---|---|", "| AUTH-01 " + row])
+        for attempt in ("first", "repeated"):
+            with self.subTest(attempt=attempt), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(delivery_compile.approve_review(review), 0)
+                props, body = delivery_compile.split_note(review_path)
+                self.assertEqual(delivery_compile.section_bodies(body)["Lessons and Follow-up"], expected)
+                self.assertEqual(props["approval_hash"], delivery_compile.content_hash(
+                    props, body, exclude=delivery_compile.MUTABLE | {"approval_hash"}))
+        # From the Review on the Delivery reads the revision it pinned, so a
+        # revision begun for the next Delivery changes nothing here; a pinned
+        # revision that no commit holds cannot be read back.
+        path = process_policy.path_for(self.docs)
+        approved = path.read_bytes()
+        self.policy("begin-revision")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.approve_review(review), 1)
+        self.assertIn("the pinned Process Policy revision 1", output.getvalue())
+        self.assertIn("is neither the current policy nor an approved file in the Git history",
+                      output.getvalue())
+        draft = path.read_bytes()
+        path.write_bytes(approved)
+        self.git("add", "--", path.relative_to(self.root).as_posix())
+        self.git("commit", "-q", "-m", "Approve Process Policy revision 1")
+        path.write_bytes(draft)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_review(review), 0)
+        props, body = delivery_compile.split_note(review_path)
+        self.assertEqual(delivery_compile.section_bodies(body)["Lessons and Follow-up"], expected)
+
+    def test_calibration_rows_never_become_open_follow_ups(self):
+        # A claim ruled invalid closes; with no minor open, the follow-up block says none.
+        self.policy("init")
+        self.policy("set", "--switch", "review_loop", "--value", "blocking_delta")
+        self.policy("approve")
+        plan_args = self.scope_ready_for_execution()
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 0, result)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        item = root / "items/auth-01/item.md"
+        props, body = delivery_compile.split_note(item)
+        props["status"] = "integrated"
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        record = item.parent / "code-review.md"
+        block = (delivery_compile.table_block(
+            delivery_compile.ITEM_FOLLOW_UPS, delivery_compile.FOLLOW_UP_COLUMNS, [])
+            + "\n\n" + delivery_compile.table_block(
+                delivery_compile.ITEM_CALIBRATION, delivery_compile.CALIBRATION_COLUMNS,
+                ["| CR-1 | major | invalid | src/auth.py:12 checks the token before use. |"]))
+        record_props, record_body = delivery_compile.split_note(record)
+        delivery_compile.atomic_text(record, delivery_compile.frontmatter(
+            record_props, delivery_compile.replace_section(
+                record_body, "Deviations and Follow-ups", block)))
+        text = delivery_compile.section_bodies(
+            delivery_compile.split_note(record)[1])["Deviations and Follow-ups"]
+        self.assertEqual(delivery_compile.block_rows(text, delivery_compile.ITEM_FOLLOW_UPS), [])
+        self.assertEqual(delivery_compile.block_rows(text, delivery_compile.ITEM_CALIBRATION),
+                         ["| CR-1 | major | invalid | src/auth.py:12 checks the token before use. |"])
+        self.assertEqual(delivery_compile.delivery_follow_ups(root), [])
+        review = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
+                                   "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_review(review), 0)
+        _props, body = delivery_compile.split_note(root / "delivery-review.md")
+        self.assertEqual(delivery_compile.section_bodies(body)["Lessons and Follow-up"],
+                         delivery_compile.DELIVERY_FOLLOW_UPS + " none.")
+
     def test_vault_paths_stay_posix_on_a_host_with_backslash_separators(self):
         """A vault path uses forward slashes on every host (#228)."""
         from test_delivery_git import WindowsVaultPath, windows_vault_paths
@@ -1180,6 +1677,320 @@ class DeliveryCompilerTests(unittest.TestCase):
         scope = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
         self.assertEqual(delivery_compile.approve_scope(scope), 0)
         self.assertEqual(delivery_compile.approve_execution(scope), 1)
+
+    # Switch implementation_schedule: lane plans are declared, validated and hashed (#327).
+    LANE_COMPONENTS = {"api": {"sourcing": "build", "code_path": "workspace/apps/api"}}
+    LANES = ["backend_developer:workspace/apps/api", "devops_engineer:deploy",
+             "frontend_developer:workspace/apps/web"]
+
+    @contextlib.contextmanager
+    def story_roles(self, *supporting: str):
+        """Give AUTH-01 supporting roles without re-approving the fixture backlog."""
+        original = delivery_compile.approved_backlog_sources
+
+        def with_roles(docs, story_ids, **kwargs):
+            sources, snapshot, errors = original(docs, story_ids, **kwargs)
+            for source in sources.values():
+                source["supporting_roles"] = list(supporting)
+            return sources, snapshot, errors
+
+        with mock.patch.object(delivery_compile, "approved_backlog_sources", with_roles), \
+                mock.patch.object(architecture_compile, "solution_components",
+                                  return_value=self.LANE_COMPONENTS):
+            yield
+
+    def select_parallel_lanes(self):
+        self.policy("begin-revision" if process_policy.path_for(self.docs).exists() else "init")
+        self.policy("set", "--switch", "implementation_schedule", "--value", "parallel_lanes_v1")
+        self.policy("approve")
+
+    def init_lane_delivery(self, delivery: str = "DLV-001") -> tuple[int, str, Path]:
+        args = type("Args", (), {"docs": str(self.docs), "id": delivery, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None,
+                                 "target_branch": "main", "story": ["AUTH-01"]})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_compile.init_delivery(args)
+        root = delivery_compile.find_delivery(self.docs, delivery)
+        return code, output.getvalue(), root / "items/auth-01/item.md" if root else None
+
+    def lane_item(self, item: Path, **changes) -> dict:
+        props, body = delivery_compile.split_note(item)
+        props.update({
+            "architecture_impact": "required", "architecture_components": ["api"],
+            "architecture_record_kinds": ["interface-contract"],
+            "architecture_reason": "Fix the API seam before the lanes start.",
+            "role_sequence": ["software_architect", "backend_developer", "devops_engineer",
+                              "frontend_developer", "code_reviewer", "qa_engineer"],
+            "path_claims": ["deploy", "workspace/apps/api", "workspace/apps/web"],
+            "contract_claims": ["auth:session"], "implementation_schedule": "parallel_lanes_v1",
+            "lane_scopes": list(self.LANES),
+            "lane_seams": ["backend_developer -> frontend_developer via IFC-001"], **changes})
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        return props
+
+    def lane_findings(self, item: Path, **changes) -> list[str]:
+        self.lane_item(item, **changes)
+        sources, _snapshot, errors = delivery_compile.approved_backlog_sources(self.docs, ["AUTH-01"])
+        self.assertEqual(errors, [])
+        return delivery_compile.execution_plan_findings(item.parents[2], sources, self.docs)
+
+    def test_switch_is_declared_off_by_default_with_the_issue_promotion_unit(self):
+        switch = process_policy.load_registry()["implementation_schedule"]
+        self.assertEqual((switch["values"], switch["default"]),
+                         (["sequential_v1", "parallel_lanes_v1"], "sequential_v1"))
+        self.assertIn("At least 3 Items", switch["spec"]["promotion"]["unit"])
+        self.assertIn("70%", switch["spec"]["promotion"]["threshold"])
+
+    def test_parallel_lane_policy_declares_the_schedule_on_every_new_item(self):
+        """#327: init writes the schedule on every new Item, a one-lane Item included (rv-accept-ideas-27)."""
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.select_parallel_lanes()
+        fields = {"implementation_schedule": "parallel_lanes_v1", "lane_scopes": [], "lane_seams": []}
+        for delivery, supporting in (("DLV-001", ("devops_engineer", "software_architect")),
+                                     ("DLV-002", ("software_architect",))):
+            with self.subTest(supporting=supporting):
+                with self.story_roles(*supporting):
+                    code, output, item = self.init_lane_delivery(delivery)
+                self.assertEqual(code, 0, output)
+                props, _body = delivery_compile.split_note(item)
+                self.assertEqual({key: props.get(key) for key in fields}, fields)
+                keys = list(props)
+                self.assertEqual(keys[keys.index("verification_schedule") + 1:keys.index("tags")], list(fields))
+        self.assert_delivery_vault_contract()
+        # The one lane owns every path claim, and an Item that only the architect
+        # implements has no lane, so it declares sequential_v1.
+        with self.story_roles("software_architect"):
+            self.assertEqual(self.lane_findings(
+                item, role_sequence=["software_architect", "backend_developer", "code_reviewer", "qa_engineer"],
+                path_claims=["workspace/apps/api"], lane_scopes=["backend_developer:workspace/apps/api"],
+                lane_seams=[]), [])
+        self.assertEqual(delivery_compile.lane_plan_findings(
+            "AUTH-01", {"implementation_schedule": "parallel_lanes_v1",
+                        "role_sequence": ["software_architect", "code_reviewer", "qa_engineer"]},
+            ["workspace/apps/api"], [], []),
+            ["AUTH-01 has no implementation role besides the Software Architect to run as a lane;"
+             " declare implementation_schedule sequential_v1"])
+        self.policy("begin-revision")
+        code, output, missing = self.init_lane_delivery("DLV-003")
+        self.assertEqual((code, missing), (2, None))
+        self.assertIn("Process Policy revision 2 is a draft", output)
+
+    def test_approval_renders_each_lane_after_its_own_producers_and_hashes_the_lane_plan(self):
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.select_parallel_lanes()
+        plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        with self.story_roles("devops_engineer", "frontend_developer"):
+            code, output, item = self.init_lane_delivery()
+            self.assertEqual(code, 0, output)
+            self.assertEqual(delivery_compile.approve_scope(plan_args), 0)
+            self.lane_item(item)
+            code, result = self.approve_execution_result(plan_args)
+            self.assertEqual(code, 0, result)
+            plan = item.parents[2] / "execution-plan.md"
+            first_plan, plan_body = delivery_compile.split_note(plan)
+            first_item = delivery_compile.split_note(item)[0]
+            # The frontend lane consumes only the backend lane, so it starts when
+            # that lane finishes and never waits for the independent devops lane
+            # (rv-accept-ideas-26).
+            self.assertIn("- AUTH-01: software_architect -> backend_developer + devops_engineer"
+                          " + frontend_developer (after backend_developer) -> code_reviewer + qa_engineer",
+                          plan_body)
+            self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
+            self.assert_delivery_vault_contract()
+            # The lane plan is inside the Item plan hash and so inside the plan hash.
+            self.lane_item(item, lane_seams=[])
+            code, result = self.approve_execution_result(plan_args)
+            self.assertEqual(code, 0, result)
+            second_plan, plan_body = delivery_compile.split_note(plan)
+            self.assertIn("- AUTH-01: software_architect -> backend_developer + devops_engineer"
+                          " + frontend_developer -> code_reviewer + qa_engineer", plan_body)
+            self.assertNotEqual(delivery_compile.split_note(item)[0]["item_plan_hash"],
+                                first_item["item_plan_hash"])
+            self.assertNotEqual(second_plan["plan_hash"], first_plan["plan_hash"])
+            self.lane_item(item, lane_seams=first_item["lane_seams"], lane_scopes=list(reversed(self.LANES)))
+            self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+            self.assertNotEqual(delivery_compile.split_note(item)[0]["item_plan_hash"],
+                                first_item["item_plan_hash"])
+
+    def test_approval_rejects_lane_scopes_that_overlap_miss_claims_or_reach_serial_state(self):
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.select_parallel_lanes()
+        with self.story_roles("devops_engineer", "frontend_developer"):
+            item = self.init_lane_delivery()[2]
+            self.assertEqual(self.lane_findings(item), [])
+            # Near-prefix siblings are disjoint; parents and children are not.
+            self.assertEqual(self.lane_findings(
+                item, path_claims=["api", "api-tools", "deploy"],
+                lane_scopes=["backend_developer:api", "devops_engineer:deploy", "frontend_developer:api-tools"]), [])
+            cases = {
+                "lane scopes of backend_developer and frontend_developer overlap": dict(
+                    path_claims=["api", "api/web", "deploy"],
+                    lane_scopes=["backend_developer:api", "devops_engineer:deploy", "frontend_developer:api/web"]),
+                "unassigned claims: workspace/apps/web": dict(lane_scopes=self.LANES[:2] + ["frontend_developer:web"]),
+                "overlaps workspace/docs, which stays serial": dict(
+                    path_claims=["deploy", "workspace/apps/api", "workspace/docs/ui"],
+                    lane_scopes=self.LANES[:2] + ["frontend_developer:workspace/docs/ui"]),
+                "overlaps .agentrof, which stays serial": dict(
+                    path_claims=["deploy", "workspace/apps/api", ".agentrof/cache"],
+                    lane_scopes=self.LANES[:2] + ["frontend_developer:.agentrof/cache"]),
+                "implementation role frontend_developer has no lane scope": dict(
+                    path_claims=["deploy", "workspace/apps/api"], lane_scopes=self.LANES[:2]),
+                "software_architect, which runs alone before the lanes": dict(
+                    lane_scopes=self.LANES + ["software_architect:workspace/apps/api"]),
+                "qa_engineer, which is not an implementation role": dict(
+                    path_claims=["deploy", "workspace/apps/api", "workspace/apps/web", "tests"],
+                    lane_scopes=self.LANES + ["qa_engineer:tests"]),
+                "lane_scope must be <role>:<normalized path>: backend_developer:workspace\\apps\\api": dict(
+                    lane_scopes=["backend_developer:workspace\\apps\\api", *self.LANES[1:]]),
+                "lane_scope must be <role>:<normalized path>: backend_developer:C:/apps": dict(
+                    lane_scopes=["backend_developer:C:/apps", *self.LANES[1:]]),
+                "lane_scope must be <role>:<normalized path>: backend_developer: workspace/apps/api": dict(
+                    lane_scopes=["backend_developer: workspace/apps/api", *self.LANES[1:]]),
+                "lane_scopes repeat an entry": dict(lane_scopes=self.LANES + self.LANES[:1]),
+            }
+            for expected, changes in cases.items():
+                with self.subTest(expected=expected):
+                    findings = self.lane_findings(item, **changes)
+                    self.assertTrue(any(expected in finding for finding in findings), findings)
+
+    def test_approval_rejects_cyclic_or_unbound_seams_and_an_unselected_schedule(self):
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.select_parallel_lanes()
+        with self.story_roles("devops_engineer", "frontend_developer"):
+            item = self.init_lane_delivery()[2]
+            self.assertEqual(self.lane_findings(item, lane_seams=[
+                "devops_engineer -> backend_developer via auth:session",
+                "backend_developer -> frontend_developer via IFC-001"]), [])
+            chained = delivery_compile.split_note(item)[0]
+            self.assertEqual(delivery_compile.execution_phases(chained), [
+                ["software_architect"], ["backend_developer", "devops_engineer", "frontend_developer"],
+                ["code_reviewer", "qa_engineer"]])
+            self.assertEqual(delivery_compile.lane_dependencies(chained), {
+                "backend_developer": ["devops_engineer"], "devops_engineer": [],
+                "frontend_developer": ["backend_developer"]})
+            cases = {
+                "lane_seams contain a cycle": ["backend_developer -> frontend_developer via IFC-001",
+                                               "frontend_developer -> backend_developer via auth:session"],
+                "must name one of its contract_claims": ["backend_developer -> frontend_developer via DAT-001"],
+                "via HUB-api must name": ["backend_developer -> frontend_developer via HUB-api"],
+                "via billing:invoice must name": ["backend_developer -> frontend_developer via billing:invoice"],
+                "must join two different lane roles": ["software_architect -> backend_developer via IFC-001"],
+                "join two different lane roles": ["backend_developer -> backend_developer via IFC-001"],
+                "lane_seam must be <producer> -> <consumer> via <interface>": ["backend_developer to frontend_developer"],
+                "lane_seams repeat a seam": ["backend_developer -> frontend_developer via IFC-001"] * 2,
+            }
+            for expected, seams in cases.items():
+                with self.subTest(expected=expected):
+                    findings = self.lane_findings(item, lane_seams=seams)
+                    self.assertTrue(any(expected in finding for finding in findings), findings)
+            findings = self.lane_findings(item, implementation_schedule="parallel_lanes_v2")
+            self.assertTrue(any("unsupported implementation_schedule" in finding for finding in findings), findings)
+            findings = self.lane_findings(item, implementation_schedule="sequential_v1")
+            self.assertTrue(any("only implementation_schedule parallel_lanes_v1 reads" in finding
+                                for finding in findings), findings)
+            self.assertEqual(self.lane_findings(item, implementation_schedule="sequential_v1",
+                                                lane_scopes=[], lane_seams=[]), [])
+            # An Item that still runs lanes needs a policy that selects them.
+            self.policy("begin-revision")
+            self.policy("set", "--switch", "implementation_schedule", "--default")
+            self.policy("approve")
+            findings = self.lane_findings(item)
+            self.assertTrue(any("parallel_lanes_v1 needs the Process Policy to select it" in finding
+                                for finding in findings), findings)
+            props = self.lane_item(item, status="integrated")
+            sources = delivery_compile.approved_backlog_sources(self.docs, ["AUTH-01"])[0]
+            self.assertEqual(delivery_compile.execution_plan_findings(item.parents[2], sources, self.docs), [])
+            self.assertTrue(delivery_compile.execution_plan_findings(
+                item.parents[2], sources, self.docs, reopen=[props["story_id"]]))
+
+    def test_host_contracts_start_a_consumer_lane_when_its_own_producers_finish(self):
+        """A consumer lane waits only for the producers its seams name, never for a whole phase
+        (rv-accept-ideas-26)."""
+        for host, start in (("claude", "Spawn every lane that waits for no producer in one message"),
+                            ("codex", "Start every lane that waits for no producer before waiting on any")):
+            text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
+                             / "host-contract.md").read_text(encoding="utf-8").split())
+            bullet = text[text.index("Under switch `implementation_schedule` at `parallel_lanes_v1`"):]
+            bullet = bullet[:bullet.index(" - ")]
+            with self.subTest(host=host):
+                self.assertIn(start, bullet)
+                self.assertIn("each consumer lane as soon as every producer it waits for has finished", bullet)
+                self.assertNotIn("next phase", bullet)
+                # Approval refuses intersecting lane scopes, so lanes overlap only when disjoint (rr-seams-09).
+                self.assertIn("writers run at the same time only when their approved lane scopes are disjoint",
+                              bullet)
+                self.assertNotIn("intersect", bullet)
+        reference = " ".join((SCRIPTS.parent / "skill-content/deliver/references"
+                              / "switch-implementation_schedule-parallel_lanes_v1.md")
+                             .read_text(encoding="utf-8").split())
+        self.assertIn("start it as soon as every producer it names has finished, without waiting for"
+                      " any other lane", reference)
+
+    def test_only_the_coordinator_writes_the_shared_git_index(self):
+        """Lanes share one Git index, so a lane never runs git add -N; it reports each new file and
+        the coordinator adds it, one Git command at a time (rv-accept-ideas-28)."""
+        reference = " ".join((SCRIPTS.parent / "skill-content/deliver/references"
+                              / "switch-implementation_schedule-parallel_lanes_v1.md")
+                             .read_text(encoding="utf-8").split())
+        self.assertIn("A lane makes no Git writes: no add, commit,", reference)
+        self.assertIn("That includes `git add -N`", reference)
+        self.assertIn("A lane reports each file it creates, and the coordinator runs `git add -N <path>`"
+                      " for it, one Git command at a time", reference)
+        self.assertNotIn("The one exception is `git add -N", reference)
+        for doc in ("docs/orchestration.md", "docs/requirement-delivery-protocol.md"):
+            text = " ".join((ROOT / doc).read_text(encoding="utf-8").split())
+            with self.subTest(doc=doc):
+                self.assertIn("the coordinator runs intent-to-add for the new files they report", text)
+                self.assertNotIn("no Git writes except intent-to-add", text)
+
+    def test_orchestration_names_both_writer_exceptions_and_the_operation_calibrator(self):
+        """orchestration.md keeps its general rules true to the switch references (rv-seams-13)."""
+        text = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
+        self.assertIn("Writers are serialized, except in the two process-switch cases below: the parallel"
+                      " lanes of `implementation_schedule` and the parallel contract drafts of"
+                      " `execution_planning`.", text)
+        self.assertIn("`parallel_lanes_v1` is one of the two exceptions to serialized writers, beside the"
+                      " parallel contract drafts of `single_source_bundle`", text)
+        self.assertNotIn("the one exception", text)
+        self.assertIn("A claim on an Operation contract is calibrated by the counterpart of the contract the"
+                      " claim concerns, the DevOps Engineer for the Verification Contract and the QA Engineer"
+                      " for the Environment Contract, never by that contract's writer.", text)
+
+    def test_items_without_a_schedule_keep_their_phases(self):
+        roles = ["software_architect", "backend_developer", "devops_engineer", "code_reviewer", "qa_engineer"]
+        self.assertEqual(delivery_compile.execution_phases({"role_sequence": roles}),
+                         [[role] for role in roles])
+        self.assertEqual(delivery_compile.execution_phases(
+            {"role_sequence": roles, "verification_schedule": "parallel_snapshot_v1"}),
+            [[role] for role in roles[:3]] + [["code_reviewer", "qa_engineer"]])
+        self.assertEqual(delivery_compile.execution_phases(
+            {"role_sequence": roles, "implementation_schedule": "parallel_lanes_v1"}),
+            [["software_architect"], ["backend_developer", "devops_engineer"],
+             ["code_reviewer"], ["qa_engineer"]])
+        with self.assertRaisesRegex(ValueError, "unsupported implementation_schedule"):
+            delivery_compile.execution_phases({"role_sequence": roles, "implementation_schedule": "fast"})
+
+
+class PlanGateInstructionTests(unittest.TestCase):
+    def test_every_plan_gate_checks_the_plan_before_the_owner_sees_it(self):
+        """#345: the standard plan gate and gate A both run check-plan first."""
+        team = ROOT / "plugins" / "software-engineering-team"
+        for relative, rule in (
+            ("flows/execution-planning.md", "Show the plan to the user only once it passes"),
+            ("skill-content/execution-plan/SKILL.md", "the plan is shown only once it passes"),
+            ("skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md",
+             "(`delivery_compile.py check` and `check-plan`, `operation_compile.py check`,"
+             " `delivery_governance.py check`), present gate A"),
+        ):
+            with self.subTest(path=relative):
+                text = " ".join((team / relative).read_text(encoding="utf-8").split())
+                self.assertIn("check-plan", text)
+                self.assertIn(rule, text)
 
 
 class ScopeHandoffBindingTests(unittest.TestCase):

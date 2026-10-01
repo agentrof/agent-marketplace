@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import hashlib
 import subprocess
@@ -35,6 +37,20 @@ def declare(path: Path, **fields: object) -> None:
 
     props, body = operation_compile.parse(path)
     path.write_text(operation_compile.render({**props, **fields}, body), encoding="utf-8")
+
+
+def set_review_loop(docs: Path, value: str) -> None:
+    """Approve a Process Policy revision that sets switch review_loop to ``value``."""
+    sys.path.insert(0, str(SCRIPTS))
+    import process_policy
+
+    first = "begin-revision" if process_policy.path_for(docs).exists() else "init"
+    for step in ((first,), ("set", "--switch", "review_loop", "--value", value), ("approve",)):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = process_policy.main([step[0], "--docs", str(docs), *step[1:]])
+        if code:
+            raise AssertionError(output.getvalue())
 
 
 def operation_findings(docs: Path) -> list[tuple[str, str]]:
@@ -581,6 +597,278 @@ class OperationGovernanceTests(unittest.TestCase):
                     draft["source_hash"] = historical_digest(draft, draft_body + "\n")
                     self.assertEqual(operation_compile.receipt_hash(draft, draft_body), historical_digest(draft, draft_body))
                     self.assertNotEqual(operation_compile.receipt_hash(draft, draft_body), draft["source_hash"])
+
+
+def record_section(title: str, header: str, rows: tuple[str, ...] | list[str]) -> str:
+    """One review-record section: its heading and a table of ``rows``."""
+    separator = "|" + "---|" * (header.count("|") - 1)
+    return "\n".join([f"## {title}", "", header, separator, *rows, "", ""])
+
+
+class AcceptedMinorFindingsTests(unittest.TestCase):
+    """Switch `review_loop` at `blocking_delta` keeps an Operation review's record in
+    the contract: the findings the review returned, the calibration rulings and
+    the minor findings accepted as written, validated as a backlog review note's."""
+
+    invoke = OperationGovernanceTests.invoke
+    approved_solution = OperationGovernanceTests.approved_solution
+    HEADER = "| finding | owner_role | reason | revisit_trigger |"
+    CITE = "[[operation/verification-contract\\|Verification Contract]]"
+    VALID = (f"| OP-2 {CITE} The Contract section states the test workdir twice in different words. "
+             "| qa_engineer | Both sentences name one directory, so the test command runs the same "
+             "way. | Revisit at the next revision of the Verification Contract. |")
+    OTHER = (f"| OP-3 {CITE} The Contract section states the test command origin twice. "
+             "| devops_engineer | Both sentences name the approved command, so it runs the same "
+             "way. | Revisit at the next revision of the Verification Contract. |")
+    RETURNED = (
+        f"| OP-1 | major | {CITE} The Contract section never states where the test command runs. |",
+        f"| OP-2 | minor | {CITE} The Contract section states the test workdir twice in different words. |",
+        f"| OP-3 | minor | {CITE} The Contract section states the test command origin twice. |",
+    )
+    INVALID = (f"| OP-1 | major | invalid | {CITE} The front matter sets test_workdir to the repository"
+               " root, so the command runs from one directory. |")
+    LABEL = "operation/verification-contract.md accepted minor finding 1"
+    PATH = "operation/verification-contract.md"
+
+    def setUp(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+
+        self.operation = operation_compile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.docs = Path(temporary.name) / "workspace" / "docs"
+        ref = self.approved_solution(self.docs)
+        self.args = ("--docs", str(self.docs), "--kind", "verification")
+        initialized = self.invoke(OPERATION, "init", *self.args, "--constrained-by", ref)
+        self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+        self.path = operation_compile.contract_path(self.docs, "verification")
+        declare(self.path, test_command="make test")
+        self.draft = self.path.read_text(encoding="utf-8")
+        set_review_loop(self.docs, "blocking_delta")
+
+    def record(self, accepted=(VALID,), returned=RETURNED, calibration=(INVALID,),
+               header: str = HEADER) -> None:
+        sections = []
+        if returned is not None:
+            sections.append(record_section("Returned Findings", "| finding | severity | description |",
+                                           returned))
+        if calibration is not None:
+            sections.append(record_section(
+                "Severity Calibration", "| finding | claimed_severity | calibrated_severity | reason |",
+                calibration))
+        if accepted is not None:
+            sections.append(record_section("Accepted Minor Findings", header, accepted))
+        self.write_section("".join(sections))
+
+    def accept(self, *rows: str, header: str = HEADER) -> None:
+        self.record(accepted=rows, header=header)
+
+    def write_section(self, section: str) -> None:
+        self.path.write_text(self.draft.replace("## Navigation", section + "## Navigation", 1),
+                             encoding="utf-8")
+
+    def errors(self) -> list[str]:
+        return self.operation.check_contract(self.docs, "verification")[1]
+
+    def test_a_contract_without_the_section_is_unchanged(self):
+        self.assertEqual(self.errors(), [])
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+
+    def test_the_section_is_authored_text_unless_the_loop_is_blocking_delta(self):
+        # Only the blocking_delta loop writes the table; before the switch a
+        # section of that name was prose that checked and approved.
+        prose = "## Accepted Minor Findings\n\nThe owner accepts the repeated workdir sentence.\n\n"
+        self.write_section(prose)
+        self.assertEqual(self.errors(), [f"{self.PATH} Accepted Minor Findings must be a Markdown table"])
+        for policy in ("current", None):
+            with self.subTest(policy=policy):
+                if policy is None:
+                    (self.docs / "delivery/process-policy.md").unlink()
+                else:
+                    set_review_loop(self.docs, policy)
+                self.write_section(prose)
+                self.assertEqual(self.errors(), [])
+                self.record(accepted=(self.VALID.replace("qa_engineer", "product_owner"),),
+                            returned=("| not an id | fatal | no citation |",),
+                            calibration=("| OP-1 | minor | critical | no citation |",))
+                self.assertEqual(self.errors(), [])
+        self.write_section(prose)
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+        receipt, errors = self.operation.check_contract(self.docs, "verification")
+        self.assertEqual((errors, receipt["current"], receipt["source_hash"]),
+                         ([], True, json.loads(approved.stdout)["source_hash"]))
+        # A policy that cannot be read is refused, never read as the default.
+        set_review_loop(self.docs, "blocking_delta")
+        begun = self.invoke(OPERATION, "begin-revision", *self.args)
+        self.assertEqual(begun.returncode, 0, begun.stdout + begun.stderr)
+        sys.path.insert(0, str(SCRIPTS))
+        import process_policy
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(process_policy.main(["begin-revision", "--docs", str(self.docs)]), 0)
+        self.assertEqual(len(self.errors()), 1)
+        self.assertIn("Process Policy revision 2 is a draft", self.errors()[0])
+
+    def test_an_approved_contract_without_returned_findings_never_reads_the_policy(self):
+        # Approved before its review kept a record, the contract stays as it
+        # was, so a draft Process Policy, which no check may read, leaves it valid.
+        set_review_loop(self.docs, "current")
+        self.record(returned=None, calibration=None)
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+        import process_policy
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(process_policy.main(["begin-revision", "--docs", str(self.docs)]), 0)
+        receipt, errors = self.operation.check_contract(self.docs, "verification")
+        self.assertEqual((errors, receipt["current"]), ([], True))
+
+    def test_complete_rows_approve_and_stay_current(self):
+        self.accept(self.VALID, self.OTHER)
+        self.assertEqual(self.errors(), [])
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+        receipt, errors = self.operation.check_contract(self.docs, "verification")
+        self.assertEqual((errors, receipt["current"]), ([], True))
+
+    def test_incomplete_rows_fail_with_the_missing_follow_up(self):
+        cases = {
+            "must cite the affected vault note": self.VALID.replace(self.CITE + " ", ""),
+            "targets missing note: operation/missing":
+                self.VALID.replace("operation/verification-contract", "operation/missing"),
+            "needs a concrete finding": self.VALID.replace(
+                "The Contract section states the test workdir twice in different words.", "typo"),
+            "owner_role must be one of: qa_engineer, devops_engineer":
+                self.VALID.replace("qa_engineer", "product_owner"),
+            "needs a concrete reason": self.VALID.replace(
+                "Both sentences name one directory, so the test command runs the same way.", "TODO"),
+            "needs a concrete revisit_trigger": self.VALID.replace(
+                "Revisit at the next revision of the Verification Contract.", "later"),
+        }
+        for expected, row in cases.items():
+            with self.subTest(expected=expected):
+                self.accept(row)
+                self.assertEqual(self.errors(), [f"{self.LABEL} {expected}"])
+        self.accept(self.VALID, self.VALID)
+        self.assertEqual(self.errors(), [f"{self.PATH} repeats accepted minor finding 2",
+                                         f"{self.PATH} accepts finding OP-2 twice"])
+
+    def test_a_blocking_finding_cannot_enter_the_section(self):
+        # Each row names a finding the review returned; only a minor one fits.
+        blocking = self.VALID.replace("| OP-2 ", "| OP-1 ")
+        label = f"{self.LABEL} names OP-1, which"
+        cases = (
+            ((self.INVALID,), [f"{label} calibration ruled invalid; only a minor finding is accepted"]),
+            ((self.INVALID.replace("| invalid |", "| major |"),),
+             [f"{label} calibration ruled major; only a minor finding is accepted"]),
+            ((), [f"{self.PATH} returned major finding OP-1 has no Severity Calibration row",
+                  f"{label} the review returned as major; only a minor finding is accepted"]),
+        )
+        for calibration, expected in cases:
+            with self.subTest(calibration=calibration):
+                self.record(accepted=(blocking,), calibration=calibration)
+                self.assertEqual(self.errors(), expected)
+        # A claim calibration lowered to minor is a minor finding and follows the minor rule.
+        self.record(accepted=(blocking,), calibration=(self.INVALID.replace("| invalid |", "| minor |"),))
+        self.assertEqual(self.errors(), [])
+        self.accept(self.VALID.replace("| OP-2 ", "| OP-9 "))
+        self.assertEqual(self.errors(), [f"{self.LABEL} names OP-9, which Returned Findings does not list"])
+        self.accept(self.VALID.replace("| OP-2 ", "| "))
+        self.assertEqual(self.errors(), [f"{self.LABEL} must start with the id of the finding it accepts"])
+        self.accept(self.VALID)
+        self.record(returned=None, calibration=None)
+        self.assertEqual(self.errors(), [f"{self.LABEL} names OP-2, which Returned Findings does not list"])
+        self.accept(self.VALID.replace("| qa_engineer |", "| major | qa_engineer |"),
+                    header="| finding | severity | owner_role | reason | revisit_trigger |")
+        self.assertEqual(self.errors(), [
+            f"{self.PATH} Accepted Minor Findings columns must be: finding,"
+            " owner_role, reason, revisit_trigger"])
+
+    def test_calibration_rows_are_complete_and_rule_returned_claims(self):
+        calibration = "operation/verification-contract.md severity calibration 1"
+        reason = ("The front matter sets test_workdir to the repository root, so the command runs"
+                  " from one directory.")
+        cases = {
+            f"{calibration} claimed_severity must be critical or major":
+                self.INVALID.replace("| major | invalid |", "| minor | invalid |"),
+            f"{calibration} calibrated_severity must confirm major or be minor or invalid":
+                self.INVALID.replace("| invalid |", "| critical |"),
+            f"{calibration} reason must cite a vault note": self.INVALID.replace(self.CITE + " ", ""),
+            f"{calibration} targets missing note: operation/missing":
+                self.INVALID.replace("operation/verification-contract", "operation/missing"),
+            f"{calibration} needs a concrete reason": self.INVALID.replace(reason, "no."),
+            f"{calibration} finding must be an id such as F-3: first":
+                self.INVALID.replace("| OP-1 |", "| first |"),
+            f"{calibration} rules OP-4, which Returned Findings does not list":
+                self.INVALID.replace("| OP-1 |", "| OP-4 |"),
+            f"{calibration} claimed_severity must be major, the severity OP-1 was returned at":
+                self.INVALID.replace("| major | invalid |", "| critical | invalid |"),
+        }
+        for expected, row in cases.items():
+            with self.subTest(expected=expected):
+                self.record(calibration=(row,))
+                errors = self.errors()
+                self.assertIn(expected, errors)
+                self.assertTrue(all("calibration" in error or "Severity Calibration" in error
+                                    for error in errors), errors)
+        self.record(calibration=(self.INVALID, self.INVALID))
+        self.assertEqual(self.errors(), [f"{self.PATH} calibrates finding OP-1 twice"])
+        self.record(calibration=(self.INVALID,),
+                    accepted=None)
+        self.assertEqual(self.errors(), [])
+        section = record_section("Severity Calibration", "| finding | severity | reason |",
+                                 ["| OP-1 | invalid | " + self.CITE + " " + reason + " |"])
+        self.write_section(section)
+        self.assertEqual(self.errors(), [
+            f"{self.PATH} Severity Calibration columns must be: finding, claimed_severity,"
+            " calibrated_severity, reason"])
+
+    def test_returned_findings_carry_an_id_a_severity_and_a_citation(self):
+        returned = "operation/verification-contract.md returned finding 1"
+        statement = "The Contract section states the test workdir twice in different words."
+        cases = {
+            f"{returned} finding must be an id such as F-3: second": ("| OP-2 |", "| second |"),
+            f"{returned} severity must be critical, major or minor": ("| minor |", "| trivial |"),
+            f"{returned} description must cite a vault note": (self.CITE + " ", ""),
+            f"{returned} needs a concrete description": (statement, "twice."),
+        }
+        for expected, (old, new) in cases.items():
+            with self.subTest(expected=expected):
+                self.record(accepted=None, calibration=None,
+                            returned=(self.RETURNED[1].replace(old, new),))
+                self.assertEqual(self.errors(), [expected])
+        self.record(accepted=None, calibration=None, returned=(self.RETURNED[1], self.RETURNED[1]))
+        self.assertEqual(self.errors(), [f"{self.PATH} returns finding OP-2 twice"])
+
+    def test_a_contract_approved_before_its_review_kept_a_record_stays_valid(self):
+        set_review_loop(self.docs, "current")
+        old_style = self.VALID.replace("| OP-2 ", "| ")
+        self.record(accepted=(old_style,), returned=None, calibration=None)
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+        set_review_loop(self.docs, "blocking_delta")
+        receipt, errors = self.operation.check_contract(self.docs, "verification")
+        self.assertEqual((errors, receipt["current"]), ([], True))
+        # Its next revision is reviewed under the record.
+        begun = self.invoke(OPERATION, "begin-revision", *self.args)
+        self.assertEqual(begun.returncode, 0, begun.stdout + begun.stderr)
+        self.assertEqual(self.errors(), [f"{self.LABEL} must start with the id of the finding it accepts"])
+
+    def test_refused_approval_leaves_the_draft_byte_identical(self):
+        self.accept(self.VALID.replace("qa_engineer", "product_owner"))
+        draft = self.path.read_bytes()
+        refused = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn("owner_role must be one of: qa_engineer, devops_engineer", refused.stdout)
+        self.assertEqual(self.path.read_bytes(), draft)
+        # The approval reads the record of the draft it stamps.
+        self.accept(self.VALID.replace("| OP-2 ", "| OP-1 "))
+        draft = self.path.read_bytes()
+        refused = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn("names OP-1, which calibration ruled invalid", refused.stdout)
+        self.assertEqual(self.path.read_bytes(), draft)
 
 
 if __name__ == "__main__":

@@ -30,12 +30,13 @@ import delivery_provider  # noqa: E402
 import delivery_result  # noqa: E402
 import file_lock  # noqa: E402
 import operation_compile  # noqa: E402
+import process_policy  # noqa: E402
 import architecture_compile  # noqa: E402
 import setup_check  # noqa: E402
 import stage_package  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
-from git_fixture import init_repository, remove_temporary, temporary_directory  # noqa: E402
+from git_fixture import disable_automatic_maintenance, init_repository, remove_temporary, temporary_directory  # noqa: E402
 from fixture_cache import RepositorySeedCache  # noqa: E402
 
 
@@ -853,25 +854,133 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(values["Target-Update-Intent"], "none")
         finally:
             remove_temporary(temporary)
+    def push_protocol_1_fence(self, project: Path, replacing: str = "") -> str:
+        """Push the open Fence a protocol-1 project left on the target tip, in place of the
+        Fence *replacing* names, and return it."""
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        v1 = delivery_git.commit_tree(
+            project, target, [], "Open legacy Agentrof Fence", {
+                "Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+                "Epoch": delivery_git.epoch_token(), "Target": target,
+                "Config-Hash": "none", "Source-Kind": "none", "Source-Intent": "none",
+                "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
+                "Target-Repository": "none", "Target-Carrier-Kind": "none",
+                "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
+                "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
+                "Upgrade-Phase": "none", "Upgrade-Contract": "none", "Handoff-Target": "none",
+                "Barrier-Kind": "none", "Barrier-Epoch": "none",
+            },
+        )
+        delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-000")["fence"], replacing, v1)])
+        return v1
+
+    def test_a_protocol_1_fence_points_each_reader_to_upgrade_fence_v1(self):
+        """A protocol-1 Fence is neither corrupt nor closed: each reader names its migration (#318)."""
+        project, docs = self.two_story_project()
+        self.scope_delivery(docs, "DLV-001", "auth", "AUTH-01")
+        fence = delivery_git.canonical_refs("DLV-000")["fence"]
+        v1 = self.push_protocol_1_fence(project)
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        for reader, refusal in (
+            ("reserve-delivery", lambda: delivery_git.reserve_delivery(project, "DLV-001")),
+            ("apply-governance", lambda: delivery_git.apply_governance(project)),
+            ("begin-source-handoff", lambda: delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)),
+            ("writer readiness", lambda: delivery_git.require_target_ancestry(
+                project, "origin", delivery_git.commit_message(project, v1), target)),
+        ):
+            with self.subTest(reader=reader):
+                self.assertEqual(self.refused_finding(refusal), (
+                    "DELIVERY_PROTOCOL_UNSUPPORTED",
+                    "the Fence is protocol 1; migrate it with upgrade-fence-v1 before new mutations"))
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
+        # A record of neither protocol stays corrupt, for the Fence context and for writer readiness.
+        corrupt = delivery_git.commit_tree(project, target, [], "Unknown Fence", {"Record": "project-fence-v3"})
+        delivery_git.atomic_push(project, "origin", [(fence, v1, corrupt)])
+        for reader, refusal in (
+            ("apply-governance", lambda: delivery_git.apply_governance(project)),
+            ("writer readiness", lambda: delivery_git.require_target_ancestry(
+                project, "origin", delivery_git.commit_message(project, corrupt), target)),
+        ):
+            with self.subTest(reader=reader, record="project-fence-v3"):
+                self.assertEqual(self.refused_finding(refusal),
+                                 ("DELIVERY_FENCE_CORRUPT", "current Fence record is unsupported"))
+        delivery_git.atomic_push(project, "origin", [(fence, corrupt, v1)])
+
+        # The remedy the refusal names converts the Fence, and the reservation then takes it over.
+        delivery_git.upgrade_fence_v1(project)
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, reserved["fence"]), "Record"),
+                         "project-fence-v2")
+
+    PROTOCOL_1_REFUSAL = ("DELIVERY_PROTOCOL_UNSUPPORTED",
+                          "the Fence is protocol 1; migrate it with upgrade-fence-v1 before new mutations")
+
+    def test_delivery_verbs_never_write_a_protocol_2_fence_over_a_protocol_1_one(self):
+        """Scope, cancellation, review and PR verbs refuse a protocol-1 Fence before any write (#333)."""
+        project, docs = self.two_story_project()
+        self.scope_delivery(docs, "DLV-001", "auth", "AUTH-01")
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        v1 = self.push_protocol_1_fence(project, reserved["fence"])
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        provider = mock.Mock()
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            for verb, refusal in (
+                ("revise-unclaimed-scope", lambda: delivery_git.revise_unclaimed_scope(project, "DLV-001")),
+                ("cancel-delivery", lambda: delivery_git.cancel_delivery(project, "DLV-001", "Stop")),
+                ("prepare-pr-creation", lambda: delivery_git.prepare_pr_creation(project, "DLV-001")),
+                ("invalidate-delivery-review", lambda: delivery_git.invalidate_delivery_review(
+                    project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)),
+                ("record-pr-remote", lambda: delivery_git.record_pr_remote(
+                    project, "DLV-001", "https://github.com/agentrof/example/pull/17")),
+                ("open-pr", lambda: delivery_git.open_pr(project, "DLV-001")),
+            ):
+                with self.subTest(verb=verb):
+                    self.assertEqual(self.refused_finding(refusal), self.PROTOCOL_1_REFUSAL)
+                    self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        provider.assert_not_called()
+
+        # After the migration the scope revision writes a Fence that carries the approved Governance.
+        migrated = delivery_git.upgrade_fence_v1(project)
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", migrated["fence"] + "^"), v1)
+        revised = delivery_git.revise_unclaimed_scope(project, "DLV-001")
+        message = delivery_git.commit_message(project, revised["fence"])
+        self.assertEqual([delivery_git.trailer(message, key) for key in ("Record", "Governance-Hash")],
+                         ["project-fence-v2", delivery_git.governed_governance_hash(project)])
+
+    def test_item_verbs_never_write_a_protocol_2_fence_over_a_protocol_1_one(self):
+        """Pause and reopen refuse a protocol-1 Fence before any write, leaving the writer's state (#333)."""
+        project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        fence = delivery_git.remote_oid(project, "origin", refs["fence"])
+        v1 = self.push_protocol_1_fence(project, fence)
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.pause_item(project, "DLV-001", "AUTH-01")),
+                         self.PROTOCOL_1_REFUSAL)
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertTrue(Path(active["worktree"]).is_dir())
+        self.assertEqual(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01")["state"], "verified")
+
+        delivery_git.atomic_push(project, "origin", [(refs["fence"], v1, fence)])
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        self.push_protocol_1_fence(project, fence)
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.reopen_item(project, "DLV-001", "AUTH-01")),
+                         self.PROTOCOL_1_REFUSAL)
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+
     def test_quiescent_v1_fence_upgrades_to_governed_v2(self):
         temporary, project = self.make_project()
         try:
-            target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
-            v1 = delivery_git.commit_tree(
-                project, target, [], "Open legacy Agentrof Fence", {
-                    "Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
-                    "Epoch": delivery_git.epoch_token(), "Target": target,
-                    "Config-Hash": "none", "Source-Kind": "none", "Source-Intent": "none",
-                    "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
-                    "Target-Repository": "none", "Target-Carrier-Kind": "none",
-                    "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
-                    "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
-                    "Upgrade-Phase": "none", "Upgrade-Contract": "none", "Handoff-Target": "none",
-                    "Barrier-Kind": "none", "Barrier-Epoch": "none",
-                },
-            )
-            fence = delivery_git.canonical_refs("DLV-000")["fence"]
-            delivery_git.atomic_push(project, "origin", [(fence, "", v1)])
+            self.push_protocol_1_fence(project)
             preview = delivery_git.upgrade_fence_v1(project, dry_run=True)
             self.assertTrue(preview["changed"])
             result = delivery_git.upgrade_fence_v1(project)
@@ -1908,6 +2017,264 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual([delivery_git.remote_oid(project, "origin", refs[name]) for name in ("fence", "integration")],
                          before)
 
+    def cancelled_refusal(self, verb: str) -> tuple[str, str]:
+        return ("DELIVERY_CANCELLATION_INVALID",
+                f"the published Delivery is cancelled and a cancellation is final, so {verb} cannot continue it; "
+                "its cancellation Review reaches the target through its PR")
+
+    def test_a_cancelled_delivery_is_not_published_or_claimed_again(self):
+        """A checkout whose delivery.md never learned of the cancellation cannot undo it: publication
+        from it or from a second checkout and a claim refuse, and the cancellation keeps its PR route."""
+        project, _docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        first = delivery_git.publish_execution_plan(project, "DLV-001")
+        second = self.second_checkout(project, directory, first["integration"])
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        self.assertEqual(delivery_compile.split_note(directory / "delivery.md")[0]["status"], "execution_approved")
+        delivery_git.run_git(second, "fetch", "-q", "origin")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        for label, verb, refusal in (
+            ("same checkout", "publish-execution-plan", lambda: delivery_git.publish_execution_plan(project, "DLV-001")),
+            ("second checkout", "publish-execution-plan", lambda: delivery_git.publish_execution_plan(second, "DLV-001")),
+            ("same checkout", "claim-items", lambda: delivery_git.claim_items(project, "DLV-001")),
+        ):
+            with self.subTest(verb=verb, checkout=label):
+                self.assertEqual(self.refused_finding(refusal), self.cancelled_refusal(verb))
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
+
+    def test_a_cancelled_delivery_is_not_refreshed_off_its_pr_route(self):
+        """A target refresh would put a commit on top of the cancellation Review, which the PR intent
+        and the PR need at the Integration tip, so it refuses whether or not the target moved."""
+        project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        for moment in ("target unchanged", "target advanced"):
+            with self.subTest(moment=moment):
+                if moment == "target advanced":
+                    (project / "NOTES.md").write_text("Unrelated target change\n", encoding="utf-8")
+                    delivery_git.run_git(project, "add", "NOTES.md")
+                    delivery_git.run_git(project, "commit", "-qm", "Advance the target")
+                    delivery_git.run_git(project, "push", "-q", "origin", "HEAD:main")
+                before = delivery_git.run_git(project, "ls-remote", "origin")
+                self.assertEqual(self.refused_finding(lambda: delivery_git.refresh_target(project, "DLV-001")),
+                                 self.cancelled_refusal("refresh-target"))
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
+
+    def test_a_delivery_cancelled_at_its_scope_is_not_revised_again(self):
+        """revise-unclaimed-scope reads the published status too: the local delivery.md still says scope_approved."""
+        temporary, project, _docs = self.reserve_scope()
+        self.addCleanup(remove_temporary, temporary)
+        delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.revise_unclaimed_scope(project, "DLV-001")),
+                         self.cancelled_refusal("revise-unclaimed-scope"))
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
+    def test_a_cancelled_delivery_takes_no_plan_revision_or_upgrade(self):
+        """A barrier or an upgrade target merge would put its record on top of the cancellation Review,
+        which the PR intent and the PR need at the Integration tip, so begin-plan-revision,
+        quiesce-upgrade and upgrade-target-merge refuse a cancelled Delivery before any ref moves (#334, #337)."""
+        project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        for verb, refusal in (
+            ("begin-plan-revision", lambda: delivery_git.begin_plan_revision(project, "DLV-001")),
+            ("quiesce-upgrade", lambda: delivery_git.begin_upgrade(project, "DLV-001")),
+        ):
+            with self.subTest(verb=verb):
+                before = delivery_git.run_git(project, "ls-remote", "origin")
+                self.assertEqual(self.refused_finding(refusal), self.cancelled_refusal(verb))
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        with self.subTest(verb="upgrade-target-merge"):
+            # An upgrade the project acquired meanwhile would merge the target into every Integration.
+            fence_ref, open_fence, values = delivery_git._fence_context(project, "origin")
+            target = values["Target"]
+            upgrade = delivery_git._fence_child(project, open_fence, {
+                **values, "Mode": "upgrade", "Upgrade-Phase": "acquired",
+                "Upgrade-Contract": "sha256:" + "3" * 64, "Target-Update-Intent": "sha256:" + "1" * 64,
+                "Target-Update-Attempt": delivery_git.epoch_token(), "Target-Repository": "upstream",
+                "Target-Carrier-Kind": "direct_target", "Target-Carrier-Ref": "refs/heads/main",
+                "Target-Carrier-Object": "direct", "Target-Carrier-Head": target,
+                "Target-Carrier-Base": target}, "Acquire an upgrade")
+            delivery_git.atomic_push(project, "origin", [(fence_ref, open_fence, upgrade)])
+            before = delivery_git.run_git(project, "ls-remote", "origin")
+            self.assertEqual(self.refused_finding(lambda: delivery_git.upgrade_target_merge(project, "DLV-001")),
+                             self.cancelled_refusal("upgrade-target-merge"))
+            self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+            delivery_git.atomic_push(project, "origin", [(fence_ref, upgrade, open_fence)])
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
+
+    def test_a_cancellation_waits_until_the_open_plan_revision_ends(self):
+        """A cancellation cannot release the plan revision's Fence barrier, and carrying it would keep the
+        project Fence barred after the cancellation merged, while finishing the revision afterwards would
+        put its release on top of the cancellation Review. So cancel-delivery refuses while the Fence
+        carries a barrier, naming the verbs that end it, and cancels once the revision ended (#334, #337)."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        self.revise_verification_contract(docs, "Revision 2 is the newer approved contract.")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(
+                type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.cancel_delivery(
+            project, "DLV-001", "The owner withdrew the request")), (
+            "DELIVERY_BARRIER_ACTIVE",
+            "the Fence carries a plan-revision barrier, which a cancellation cannot release; end it with "
+            "finish-plan-revision or abort-plan-revision before cancel-delivery"))
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        delivery_git.finish_plan_revision(project, "DLV-001")
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        _ref, _fence, values = delivery_git._fence_context(project, "origin")
+        self.assertEqual((values["Barrier-Kind"], values["Barrier-Epoch"]), ("none", "none"))
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
+
+    def test_a_barrier_a_cancellation_carried_is_released_on_the_fence_alone(self):
+        """Before cancel-delivery refused a barrier, a cancellation could carry a plan revision's barrier.
+        finish-plan-revision and abort-plan-revision then wrote their release record on top of the
+        cancellation Review, and once its PR merged they failed on the absent Integration ref. For a
+        Delivery whose published status is cancelled they release the Fence barrier alone (#334, #337)."""
+        integration_ref = delivery_git.canonical_refs("DLV-001")["integration"]
+        for action, merged in (("abort", False), ("finish", False), ("finish", True), ("abort", True)):
+            with self.subTest(action=action, merged=merged):
+                project, _docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
+                    False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.begin_plan_revision(project, "DLV-001")
+                # The state a cancellation of an earlier release left: the Integration records the
+                # Delivery cancelled while the Fence still carries the plan revision's barrier.
+                barrier = delivery_git.remote_oid(project, "origin", integration_ref)
+                relative = (directory / "delivery.md").relative_to(project).as_posix()
+                props, body = delivery_git.split_remote_note(project, barrier, relative, delivery_compile.split_note)
+                props["status"] = "cancelled"
+                cancelled = delivery_git.commit_replacements(
+                    project, barrier, {relative: delivery_compile.frontmatter(props, body)},
+                    "Fixture: a cancellation that carried the barrier", {})
+                delivery_git.atomic_push(project, "origin", [(integration_ref, barrier, cancelled)])
+                if merged:
+                    # The cancellation PR merged, and the merge dropped the Integration ref.
+                    delivery_git.run_git(project, "push", "-q", "origin", f"{cancelled}:refs/heads/main")
+                    delivery_git.atomic_push(project, "origin", [(integration_ref, cancelled, "")])
+                released = getattr(delivery_git, f"{action}_plan_revision")(project, "DLV-001")
+                self.assertIsNone(released["integration"])
+                _ref, _fence, values = delivery_git._fence_context(project, "origin")
+                self.assertEqual((values["Barrier-Kind"], values["Barrier-Epoch"]), ("none", "none"))
+                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [integration_ref])[integration_ref],
+                                 "" if merged else cancelled)
+
+    DECISION_HEADER = ("| id | class | question | options | recommendation | status | answer | blocks |"
+                       " wait_minutes |\n|---|---|---|---|---|---|---|---|---|")
+
+    def log_decisions(self, directory: Path, *rows: str) -> None:
+        """Keep the owner's questions in the Delivery's User Decisions table, as two fixed owner gates do."""
+        path = directory / "delivery.md"
+        props, body = delivery_compile.split_note(path)
+        body = delivery_compile.replace_section(body, "User Decisions", "\n".join([self.DECISION_HEADER, *rows]))
+        delivery_compile.atomic_text(path, delivery_compile.frontmatter(props, body))
+
+    @staticmethod
+    def decision(identifier: str, status: str, blocks: str = "AUTH-01") -> str:
+        answer, wait = ("The current store.", "5") if status == "answered" else ("", "")
+        return (f"| {identifier} | queued | Which session store does the Item reuse? | The current store; a new"
+                f" store | The current store | {status} | {answer} | {blocks} | {wait} |")
+
+    def test_a_pending_question_holds_the_items_it_blocks_and_the_review(self):
+        """Only the owner's answer closes a queued question. start-item and reopen-item refuse an Item a
+        pending User Decisions row blocks, while claim-items claims it, since a claim starts no work, and
+        publish-delivery-review refuses while any row is pending, each before any ref moves; a row that
+        blocks no Item holds none (#329)."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+
+        def refuses(call, message: str) -> None:
+            before = delivery_git.run_git(project, "ls-remote", "origin")
+            self.assertEqual(self.refused_finding(call), ("DELIVERY_DECISION_PENDING", message))
+            self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
+        self.log_decisions(directory, self.decision("D-01", "pending"))
+        self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-01"])
+        refuses(lambda: delivery_git.start_item(project, "DLV-001", "AUTH-01"),
+                "AUTH-01 waits for the owner's answer to User Decisions D-01; record it before start-item")
+        self.log_decisions(directory, self.decision("D-01", "answered"), self.decision("D-02", "pending"))
+        refuses(lambda: delivery_git.start_item(project, "DLV-001", "AUTH-01"),
+                "AUTH-01 waits for the owner's answer to User Decisions D-02; record it before start-item")
+        self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+        self.log_decisions(directory, self.decision("D-01", "answered"), self.decision("D-02", "pending", blocks=""))
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        answered = [self.decision("D-01", "answered"), self.decision("D-02", "answered", blocks="")]
+        self.log_decisions(directory, *answered)
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        self.log_decisions(directory, *answered, self.decision("D-03", "pending"))
+        refuses(lambda: delivery_git.reopen_item(project, "DLV-001", "AUTH-01"),
+                "AUTH-01 waits for the owner's answer to User Decisions D-03; record it before reopen-item")
+        answered.append(self.decision("D-03", "answered"))
+        self.log_decisions(directory, *answered)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_review(type("Args", (), {
+                "docs": str(docs), "delivery": "DLV-001", "reviewed_commit": integrated["integration"],
+                "reviewed_integration_commit": integrated["integration"]})), 0)
+        # A question queued after gate B's approval holds the Review until the owner answers it.
+        self.log_decisions(directory, *answered, self.decision("D-04", "pending", blocks=""))
+        refuses(lambda: delivery_git.publish_delivery_review(project, "DLV-001"),
+                "User Decisions row D-04 is pending; gate B asks every queued question, so record the owner's"
+                " answers before publish-delivery-review")
+        self.log_decisions(directory, *answered, self.decision("D-04", "answered", blocks=""))
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(
+            project, delivery_git.publish_delivery_review(project, "DLV-001")["integration"]), "Record"),
+            "delivery-review-published-v1")
+
+    def test_a_pending_question_holds_only_the_item_it_blocks_from_starting(self):
+        """claim-items claims every Item in one push, so a pending row that blocked one Item refused the
+        claims of all of them and no Item could start. A claim starts no work: claim-items claims every
+        Item, and only the Item the row blocks waits to start (#329)."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs, "AUTH-01", "AUTH-02")
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_dod(dod), 0)
+            self.assertEqual(delivery_compile.approve_dod(dod), 0)
+            self.assertEqual(delivery_compile.init_delivery(type("Args", (), {
+                "docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication", "outcome": None,
+                "target_branch": "main", "story": ["AUTH-01", "AUTH-02"]})), 0)
+            self.assertEqual(delivery_compile.approve_scope(scope), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve the scope")
+        delivery_git.run_git(project, "push", "-q")
+        delivery_git.reserve_delivery(project, "DLV-001")
+        self.author_execution_topology(docs)
+        directory = delivery_compile.find_delivery(docs, "DLV-001")
+        later = directory / "items" / "auth-02" / "item.md"
+        props, body = delivery_compile.split_note(later)
+        props["path_claims"] = ["src/session.py"]
+        delivery_compile.atomic_text(later, delivery_compile.frontmatter(props, body))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        self.log_decisions(directory, self.decision("D-01", "pending", blocks="AUTH-02"))
+        self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-01", "AUTH-02"])
+        self.assertEqual(delivery_git.start_item(project, "DLV-001", "AUTH-01")["story"], "AUTH-01")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.start_item(project, "DLV-001", "AUTH-02")), (
+            "DELIVERY_DECISION_PENDING",
+            "AUTH-02 waits for the owner's answer to User Decisions D-01; record it before start-item"))
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-02"))
+
     def test_record_pr_remote_checks_the_local_mirror_and_the_adoption_intent(self):
         """record-pr-remote refuses a URL that an existing local Review does not mirror, as it did
         before the PR record became the only source of the URL, and a PR other than the one an
@@ -2074,6 +2441,34 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(len(cancelled["reverts"]), 1)
         for commit in (cancelled["reverts"][0], cancelled["review"]):
             self.assertEqual(self.product_files(project, commit), {changed: "kayıt = 'önce'"})
+
+    def test_cancellation_reverts_every_integration_of_a_reopened_item(self):
+        """A reopened Item is active on its ref but its integration stays on the Integration, and a
+        second integration merges only what changed since. Each integration is reverted."""
+        for integrations, reopened_last in ((1, True), (2, True), (2, False)):
+            with self.subTest(integrations=integrations, reopened_last=reopened_last):
+                project, _docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.claim_items(project, "DLV-001")
+                worktree = delivery_git.start_item(project, "DLV-001", "AUTH-01")["worktree"]
+                for version in range(1, integrations + 1):
+                    if version > 1:
+                        worktree = delivery_git.reopen_item(project, "DLV-001", "AUTH-01")["worktree"]
+                    self.commit_item_product_change(worktree, f"def authenticate():\n    return {version}\n")
+                    self.assertEqual(self.approve_item_evidence(worktree), 0)
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                    integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+                if reopened_last:
+                    self.assertEqual(delivery_git.reopen_item(project, "DLV-001", "AUTH-01")["status"], "active")
+                self.assertEqual(self.product_files(project, integrated["integration"]),
+                                 {"src/auth.py": f"def authenticate():\n    return {integrations}"})
+                cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+                self.assertEqual(len(cancelled["reverts"]), integrations)
+                self.assertEqual(self.product_files(project, cancelled["review"]), {})
+                record = (directory / "items/auth-01/item.md").relative_to(project).as_posix()
+                props = delivery_git.split_remote_note(project, cancelled["review"], record, delivery_compile.split_note)[0]
+                self.assertEqual((props["status"], props["cancellation_disposition"]), ("cancelled", "integrated_reverted"))
+                self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
 
     def test_cancellation_reverts_an_item_rename_to_its_old_path(self):
         """Git diff detects renames by default and then lists only the new path, so the revert
@@ -2359,6 +2754,38 @@ class DeliveryGitTests(unittest.TestCase):
                     self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
                 finally:
                     delivery_git.atomic_push(project, "origin", [(ref, oid, resting[ref]) for ref, oid in held.items()])
+
+    def test_item_start_names_apply_governance_after_a_governance_revision(self):
+        """An approved Governance the Fence does not carry yet refuses activation with its remedy, and a
+        reopen activates an Item too, so it reads the limit only from the Governance the Fence carries (#317)."""
+        for verb in ("start-item", "reopen-item"):
+            with self.subTest(verb=verb):
+                project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.claim_items(project, "DLV-001")
+                if verb == "reopen-item":
+                    active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+                    self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+                    self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                    delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+                args = type("Args", (), {"docs": str(docs)})
+                self.assertEqual(delivery_governance.begin_revision(args), 0)
+                governance = delivery_governance.path_for(docs)
+                props, body = delivery_governance.read(governance)
+                props["max_parallel"] += 1
+                governance.write_text(delivery_governance.render(props, body), encoding="utf-8")
+                self.assertEqual(delivery_governance.approve(args), 0)
+                _ref, _fence, values = delivery_git._fence_context(project, "origin")
+                self.assertNotEqual(values["Governance-Hash"], delivery_git.governed_governance_hash(project))
+                activate = {"start-item": delivery_git.start_item, "reopen-item": delivery_git.reopen_item}[verb]
+                before = delivery_git.run_git(project, "ls-remote", "origin")
+                self.assertEqual(self.refused_finding(lambda: activate(project, "DLV-001", "AUTH-01")), (
+                    "DELIVERY_FENCE_GOVERNANCE", "the Fence does not carry the approved Governance; "
+                                                 "apply it with apply-governance before Item activation"))
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+                self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+                self.assertFalse(delivery_git.worktree_paths(project, "DLV-001", "AUTH-01")["item"].exists())
 
     def test_candidate_map_excludes_unpublished_local_governance(self):
         temporary, project = self.make_project()
@@ -3405,6 +3832,133 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), slots)
         self.assertTrue(Path(active["worktree"]).is_dir())
 
+    def start_lane_item(self) -> tuple[Path, Path, dict]:
+        """Start an Item whose approved plan runs backend_developer on src/api and devops_engineer on deploy."""
+        project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
+            False, "src/api", extra_path_claims=("deploy",))
+        self.change_process_policy(docs, ("implementation_schedule", "parallel_lanes_v1"))
+        props, body = delivery_compile.split_note(item)
+        props.update(implementation_schedule="parallel_lanes_v1",
+                     role_sequence=["backend_developer", "devops_engineer", "code_reviewer", "qa_engineer"],
+                     lane_scopes=["backend_developer:src/api", "devops_engineer:deploy"], lane_seams=[])
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        original = delivery_compile.approved_backlog_sources
+
+        def with_devops_lane(docs_root, story_ids, **kwargs):
+            sources, snapshot, errors = original(docs_root, story_ids, **kwargs)
+            for source in sources.values():
+                source["supporting_roles"] = ["devops_engineer"]
+            return sources, snapshot, errors
+
+        # The fixture Story names no supporting role, so it gains the devops lane for this test.
+        patcher = mock.patch.object(delivery_compile, "approved_backlog_sources", with_devops_lane)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        plan = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(plan), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        return project, Path(active["worktree"]), active
+
+    def test_lane_status_and_takeover_report_each_lanes_uncommitted_work(self):
+        """After a host loss each lane's work exists only uncommitted in the Item worktree: status reports
+        it per lane, and takeover refuses to discard it and names the choice (rv-accept-ideas-25)."""
+        project, worktree, active = self.start_lane_item()
+        (worktree / "src/api").mkdir(parents=True)
+        (worktree / "src/api/handler.py").write_text("def handle():\n    return 1\n", encoding="utf-8")
+        (worktree / "notes.txt").write_text("not in any lane scope\n", encoding="utf-8")
+
+        def lanes() -> dict:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = delivery_git.main(["lane-status", "--project-root", str(project),
+                                          "--delivery", "DLV-001", "--story", "AUTH-01"])
+            envelope = json.loads(output.getvalue())
+            self.assertEqual((code, envelope["mutation_state"]), (0, "none"), envelope)
+            return {observation["target"]: observation["value"] for observation in envelope["observations"]}
+
+        self.assertEqual(lanes(), {
+            "item": active["item"], "item_worktree_head": active["item"], "writer_receipt": "verified",
+            "lane:backend_developer": ["src/api/handler.py"], "lane:devops_engineer": [],
+            "lanes_with_work": ["backend_developer"], "outside_lane_scopes": ["notes.txt"]})
+        remote_before = delivery_git.run_git(project, "ls-remote", "origin")
+        work = (": backend_developer: src/api/handler.py; devops_engineer: no work; outside every lane scope:"
+                " notes.txt. ")
+        discard = (f"discard it with `git -C {worktree} reset --hard {active['item']}` and"
+                   f" `git -C {worktree} clean -fd`, then run takeover-item again")
+        with self.assertRaises(RuntimeError) as refused:
+            delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertEqual(str(refused.exception), (
+            "DELIVERY_WORKTREE_UNSAFE: takeover would discard the uncommitted lane work in the Item worktree"
+            f" {worktree}{work}This host still holds the Item's verified writer receipt, so the choice is to"
+            " keep it without takeover: finish the lanes that have work and commit it as the coordinator in"
+            f" {worktree}; or to {discard}"))
+        receipt_path = delivery_git.writer_receipt_paths(project, "DLV-001", "AUTH-01")[0]
+        receipt = receipt_path.read_bytes()
+        receipt_path.unlink()
+        with self.assertRaises(RuntimeError) as refused:
+            delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertTrue(str(refused.exception).endswith(
+            f"{work}This host holds no verified writer receipt for the Item, so it cannot commit and publish"
+            f" that work: copy out any path to keep and {discard}"), str(refused.exception))
+        receipt_path.write_bytes(receipt)
+        # Neither refusal changed a ref or discarded a lane's file.
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), remote_before)
+        self.assertTrue((worktree / "src/api/handler.py").is_file())
+        # Keeping it: the coordinator commits the lanes' work once, and nothing is left uncommitted.
+        (worktree / "notes.txt").unlink()
+        delivery_git.run_git(worktree, "add", "--", "src/api/handler.py")
+        delivery_git.run_git(worktree, "-c", "user.name=Coordinator", "-c", "user.email=coordinator@example.com",
+                             "commit", "-qm", "Commit the lanes' work")
+        committed = lanes()
+        self.assertNotEqual(committed["item_worktree_head"], active["item"])
+        self.assertEqual((committed["lanes_with_work"], committed["lane:backend_developer"]), ([], []))
+        # Discarding it with the named commands lets takeover proceed.
+        delivery_git.run_git(worktree, "reset", "--hard", active["item"])
+        delivery_git.run_git(worktree, "clean", "-fd")
+        taken = delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertNotEqual(taken["writer_epoch"], active["writer_epoch"])
+        self.assertFalse((Path(taken["worktree"]) / "src/api/handler.py").exists())
+
+    def test_takeover_never_names_a_discard_that_drops_committed_item_work(self):
+        """Item commits stay local until push-item, so a repair round can leave the Item worktree ahead of
+        the remote Item tip. The lane-work refusal named `reset --hard <tip>`, which deleted that committed
+        work as well. It names `reset --hard HEAD`, which drops only uncommitted work, and lists the commits
+        ahead of the tip; takeover then refuses on the divergence instead of dropping them (#327)."""
+        project, worktree, active = self.start_lane_item()
+        (worktree / "src/api").mkdir(parents=True)
+        (worktree / "src/api/handler.py").write_text("def handle():\n    return 1\n", encoding="utf-8")
+        delivery_git.run_git(worktree, "add", "--", "src/api/handler.py")
+        delivery_git.run_git(worktree, "-c", "user.name=Coordinator", "-c", "user.email=coordinator@example.com",
+                             "commit", "-qm", "Commit the first round")
+        head = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        (worktree / "deploy").mkdir()
+        (worktree / "deploy/run.sh").write_text("echo run\n", encoding="utf-8")
+        delivery_git.writer_receipt_paths(project, "DLV-001", "AUTH-01")[0].unlink()
+        remote_before = delivery_git.run_git(project, "ls-remote", "origin")
+        with self.assertRaises(RuntimeError) as refused:
+            delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertEqual(str(refused.exception), (
+            "DELIVERY_WORKTREE_UNSAFE: takeover would discard the uncommitted lane work in the Item worktree"
+            f" {worktree}: backend_developer: no work; devops_engineer: deploy/run.sh. This host holds no"
+            " verified writer receipt for the Item, so it cannot commit and publish that work: copy out any"
+            f" path to keep and discard it with `git -C {worktree} reset --hard HEAD` and"
+            f" `git -C {worktree} clean -fd`, then run takeover-item again. The worktree's HEAD also holds"
+            f" commits the remote Item tip {active['item']} does not, which no ref holds: {head} Commit the"
+            " first round. `reset --hard HEAD` keeps them, and takeover refuses while the worktree is ahead"
+            " of the tip, since it would drop them: discarding them is a separate, explicit choice."))
+        # The named commands drop only the uncommitted work, and takeover then refuses on the divergence.
+        delivery_git.run_git(worktree, "reset", "--hard", "HEAD")
+        delivery_git.run_git(worktree, "clean", "-fd")
+        with self.assertRaisesRegex(RuntimeError, "^DELIVERY_LOCAL_REF_DIVERGED: "):
+            delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertEqual(delivery_git.run_git(worktree, "rev-parse", "HEAD"), head)
+        self.assertTrue((worktree / "src/api/handler.py").is_file())
+        self.assertFalse((worktree / "deploy/run.sh").exists())
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), remote_before)
+
     def test_target_refresh_rejects_changed_descendant_of_claimed_directory(self):
         project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False, "src")
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -3491,6 +4045,197 @@ class DeliveryGitTests(unittest.TestCase):
                 refs = delivery_git.canonical_refs("DLV-001")
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
+
+    def change_process_policy(self, docs: Path, *changes: tuple[str, str]) -> None:
+        """Approve a new Process Policy revision that sets each (switch, value)."""
+        commands = [["begin-revision" if process_policy.path_for(docs).exists() else "init"],
+                    *(["set", "--switch", switch, "--value", value] for switch, value in changes),
+                    ["approve"]]
+        for argv in commands:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = process_policy.main([argv[0], "--docs", str(docs), *argv[1:]])
+            self.assertEqual(code, 0, output.getvalue())
+
+    def test_target_refresh_treats_a_changed_process_policy_as_a_pinned_input(self):
+        """refresh-target merged a target policy that the Integration's Delivery does not pin, and
+        only the next check reported the drift. While the pin is enforced the policy is a pinned
+        input, as the Definition of Done is: the refresh refuses a target policy that differs from
+        the pin and carries one that matches it (#332)."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-001")
+        policy = process_policy.path_for(docs).relative_to(project).as_posix()
+        refused = ("^DELIVERY_TARGET_SOURCE_VIOLATION: target changed a pinned source or Operation receipt: "
+                   + policy.replace(".", "\\.") + "$")
+        carrier = "refs/heads/governance-input"
+
+        def hand_policy_to_target() -> str:
+            previous = delivery_git.remote_ref_oids(project, "origin", [carrier])[carrier]
+            if previous:
+                delivery_git.atomic_push(project, "origin", [(carrier, previous, "")])
+            return self.governance_target_handoff(project, docs, [policy])[1]
+
+        # The Delivery pins no policy, and the target creates one.
+        self.change_process_policy(docs)
+        fence = hand_policy_to_target()
+        with self.assertRaisesRegex(RuntimeError, refused):
+            delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
+        # A revised plan pins the target's policy, and the refresh then carries it.
+        plan = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(plan), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        refreshed = delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "show", f"{refreshed['integration']}:{policy}") + "\n",
+                         process_policy.path_for(docs).read_text(encoding="utf-8"))
+        # A revision the pin does not name is refused again.
+        self.change_process_policy(docs, ("implementation_schedule", "parallel_lanes_v1"))
+        hand_policy_to_target()
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        with self.assertRaisesRegex(RuntimeError, refused):
+            delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        # From the Delivery Review on the pin records what the Delivery ran under, so a
+        # policy set for the next Delivery never strands it.
+        integration = delivery_git.remote_oid(project, "origin", refs["integration"])
+        relative = (directory / "delivery.md").relative_to(project).as_posix()
+        props, body = delivery_git.split_remote_note(project, integration, relative, delivery_compile.split_note)
+        props["status"] = "review"
+        reviewed = delivery_git.commit_replacements(
+            project, integration, {relative: delivery_compile.frontmatter(props, body)},
+            "Fixture: the Delivery reached its Review", {})
+        delivery_git.atomic_push(project, "origin", [(refs["integration"], integration, reviewed)])
+        refreshed = delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "show", f"{refreshed['integration']}:{policy}") + "\n",
+                         process_policy.path_for(docs).read_text(encoding="utf-8"))
+
+    def test_reservation_carries_the_process_policy_its_scope_pinned(self):
+        """An Item worktree reads the switch values from its own tree, so reservation carries the
+        policy scope approval pinned onto the Integration, as publication carries a pinned Operation
+        contract, before the policy's own commit reaches the target (#332)."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve the backlog")
+        delivery_git.run_git(project, "push", "-q")
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        self.change_process_policy(docs, ("review_panels", "lens_panel"))
+        self.assertEqual(delivery_compile.init_delivery(type("Args", (), {
+            "docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication", "outcome": None,
+            "target_branch": "main", "story": ["AUTH-01"]})), 0)
+        self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        policy = process_policy.path_for(docs)
+        relative = policy.relative_to(project).as_posix()
+        # Everything the scope needs reaches the target except the policy.
+        delivery_git.run_git(project, "add", "workspace/docs")
+        delivery_git.run_git(project, "reset", "-q", "--", relative)
+        delivery_git.run_git(project, "commit", "-qm", "Approve the scope")
+        delivery_git.run_git(project, "push", "-q")
+        self.assertEqual(delivery_git.run_git(project, "ls-tree", "origin/main", "--", relative), "")
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        self.assertEqual(delivery_git.published_plan_blobs(project, reserved["integration"], [relative]),
+                         {relative: policy.read_text(encoding="utf-8")})
+
+    def test_reservation_carries_the_pinned_policy_revision_not_a_later_value_equal_one(self):
+        """The package checks compare the pin by value, so they pass a later policy revision that
+        sets every Delivery switch the same way, and reservation carried that revision onto the
+        Integration instead of the one the Delivery pinned. It carries the pinned revision's bytes,
+        from the Git history once the checkout moved on, and refuses when neither holds them (#332)."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs)
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        self.change_process_policy(docs, ("review_panels", "lens_panel"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_delivery(type("Args", (), {
+                "docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication", "outcome": None,
+                "target_branch": "main", "story": ["AUTH-01"]})), 0)
+            self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs),
+                                                                              "delivery": "DLV-001"})), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve the scope under Process Policy revision 1")
+        delivery_git.run_git(project, "push", "-q")
+        policy = process_policy.path_for(docs)
+        relative = policy.relative_to(project).as_posix()
+        pinned = policy.read_text(encoding="utf-8")
+        # The owner approves a revision for the next Delivery that changes only a backlog switch.
+        self.change_process_policy(docs, ("review_manifest_scope", "bounded"))
+        self.assertNotEqual(policy.read_text(encoding="utf-8"), pinned)
+        self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], [])
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        self.assertEqual(delivery_git.published_plan_blobs(project, reserved["integration"], [relative]),
+                         {relative: pinned})
+        # The package checks read the pinned values from the same places, so only a history lost
+        # after they ran reaches this refusal.
+        directory = delivery_compile.find_delivery(docs, "DLV-001")
+        with mock.patch.object(process_policy, "history_revision", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "requires the pinned Process Policy revision 1 "
+                                                      r"\(sha256:[0-9a-f]{64}\), which is neither"):
+                delivery_git.carried_policy_blobs(project, directory, docs)
+
+    def test_publication_carries_the_pinned_policy_revision_not_a_later_value_equal_one(self):
+        """Publication carries the revision the execution approval pinned, so the Item worktree reads
+        that revision as its current policy even after the owner approved a later one that sets every
+        Delivery switch the same way (#332)."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        self.change_process_policy(docs, ("review_panels", "lens_panel"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(
+                type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        policy = process_policy.path_for(docs)
+        relative = policy.relative_to(project).as_posix()
+        pinned = policy.read_text(encoding="utf-8")
+        delivery_git.run_git(project, "add", "--", relative)
+        delivery_git.run_git(project, "commit", "-qm", "Approve Process Policy revision 1")
+        self.change_process_policy(docs, ("review_manifest_scope", "bounded"))
+        self.assertNotEqual(policy.read_text(encoding="utf-8"), pinned)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(delivery_git.published_plan_blobs(project, published["integration"], [relative]),
+                         {relative: pinned})
+        delivery_git.claim_items(project, "DLV-001")
+        worktree = Path(delivery_git.start_item(project, "DLV-001", "AUTH-01")["worktree"])
+        self.assertEqual((worktree / relative).read_text(encoding="utf-8"), pinned)
+        self.assertEqual(delivery_compile.delivery_switch_value(worktree / "workspace/docs", "DLV-001",
+                                                                "review_panels"), "lens_panel")
+
+    def test_an_item_worktree_holds_the_process_policy_its_delivery_pinned(self):
+        """A policy pinned by execution approval reaches the Integration with the plan, so the Item
+        worktree holds the pinned bytes, reads the switch values from them, and a code reviewer's
+        result registers and its evidence is approved there under that policy (#332)."""
+        import delivery_verification
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        self.change_process_policy(docs, ("review_panels", "lens_panel"))
+        policy = process_policy.path_for(docs)
+        relative = policy.relative_to(project).as_posix()
+        self.assertEqual(delivery_git.run_git(project, "ls-tree", "origin/main", "--", relative), "")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(
+                type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(delivery_git.published_plan_blobs(project, published["integration"], [relative]),
+                         {relative: policy.read_text(encoding="utf-8")})
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        worktree = Path(active["worktree"])
+        self.assertEqual((worktree / relative).read_text(encoding="utf-8"), policy.read_text(encoding="utf-8"))
+        self.assertEqual(delivery_compile.delivery_switch_value(worktree / "workspace/docs", "DLV-001",
+                                                                "review_panels"), "lens_panel")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        reviewer = delivery_verification.read_session(worktree)["workers"]["code_reviewer"]
+        self.assertEqual((reviewer["state"], reviewer["result"]["verdict"]), ("settled", "passed"))
 
     def test_target_refresh_preserves_legacy_operation_pins_after_relation_rendering(self):
         project, docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
@@ -4078,6 +4823,72 @@ class DeliveryGitTests(unittest.TestCase):
         carried = delivery_git.published_plan_blobs(project, published["integration"], [contract])[contract]
         self.assertEqual(operation_compile.check_contract(docs, "environment", carried), (receipt, []))
 
+    def test_a_bundle_records_its_unpinned_revision_on_the_target_before_publication(self):
+        """At single_source_bundle the plan's own step carries a revision no Item pins (#324, #321)."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs)
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        def policy(*argv):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+        policy("init")
+        policy("set", "--switch", "execution_planning", "--value", "single_source_bundle")
+        policy("approve")
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "approved backlog, DoD and Process Policy")
+        delivery_git.run_git(project, "push", "-q")
+        init = type("Args", (), {"docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication",
+                                 "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_scope(scope), 0)
+        delivery_git.run_git(project, "add", "workspace/docs")
+        delivery_git.run_git(project, "commit", "-qm", "scope")
+        delivery_git.run_git(project, "push", "-q")
+        delivery_git.reserve_delivery(project, "DLV-001")
+        self.author_execution_topology(docs)
+        # The bundle drafts an Environment Contract revision that the non-runtime Item never pins.
+        args = type("Args", (), {"docs": str(docs), "kind": "environment",
+                                 "constrained_by": ["[[solution-design/decisions/fixture-api|Fixture API]]"]})
+        self.assertEqual(operation_compile.init(args), 0)
+        path = operation_compile.contract_path(docs, "environment")
+        props, body = operation_compile.parse(path)
+        props["env_command"] = "make env"
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        manifest = delivery_compile.bundle_manifest(docs, "DLV-001")
+        contract = "workspace/docs/operation/environment-contract.md"
+        self.assertEqual(manifest["unpinned_revisions"], ["operation/environment-contract.md"])
+        self.assertEqual(manifest["readers"], ["qa-engineer"])
+        self.assertEqual(operation_compile.approve(args), 0)
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        # A manifest recomputed after approval, as a resumed session does, still
+        # names the revision, and keeps it until the Integration holds it.
+        integration = "refs/remotes/origin/" + delivery_git.short_refs("DLV-001")["integration"]
+        recomputed = delivery_compile.bundle_manifest(docs, "DLV-001")
+        self.assertEqual(recomputed["unpinned_revisions"], ["operation/environment-contract.md"])
+        self.assertEqual(recomputed["held_by"], integration)
+        # Skipping the step still refuses, as #321 records.
+        with self.assertRaisesRegex(RuntimeError, "^DELIVERY_OPERATION_UNCARRIED: "):
+            delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.run_git(project, "add", "--", contract)
+        delivery_git.run_git(project, "commit", "-qm", "Record the approved Environment Contract")
+        delivery_git.run_git(project, "push", "-q", "origin", "main")
+        self.assertEqual(delivery_compile.bundle_manifest(docs, "DLV-001")["unpinned_revisions"],
+                         ["operation/environment-contract.md"])
+        self.assertIn(contract, delivery_git.refresh_target(project, "DLV-001")["paths"])
+        self.assertEqual(delivery_compile.bundle_manifest(docs, "DLV-001")["unpinned_revisions"], [])
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(published["operation_not_carried"], [])
+        carried = delivery_git.published_plan_blobs(project, published["integration"], [contract])[contract]
+        receipt, errors = operation_compile.check_contract(docs, "environment")
+        self.assertEqual(errors, [])
+        self.assertEqual(operation_compile.check_contract(docs, "environment", carried), (receipt, []))
+
     def test_execution_publication_reports_an_operation_contract_it_cannot_carry(self):
         """A differing local copy that is not approved and current is left out and named, not refused."""
         contract = "workspace/docs/operation/environment-contract.md"
@@ -4099,6 +4910,239 @@ class DeliveryGitTests(unittest.TestCase):
                               delivery_result.from_raw("publish-execution-plan", published)["observations"])
                 self.assertEqual(delivery_git.run_git(project, "show", published["integration"] + ":" + contract),
                                  delivery_git.run_git(project, "show", reserved["integration"] + ":" + contract))
+
+    SUPERSEDED_REMEDY = ("take the Delivery package and the Operation contracts from the Integration, "
+                         "then revise inside begin-plan-revision")
+
+    def second_checkout(self, project: Path, directory: Path, publication: str) -> Path:
+        """Clone the project as a second host and take the package and Operation contracts of one publication."""
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, holder)
+        clone = Path(holder.name) / "checkout"
+        delivery_git.run_git(project, "clone", "-q", str(project / "remote.git"), str(clone))
+        disable_automatic_maintenance(clone / ".git")
+        delivery_git.run_git(clone, "config", "user.email", "second@example.com")
+        delivery_git.run_git(clone, "config", "user.name", "Second host")
+        delivery_git.run_git(clone, "checkout", publication, "--",
+                             directory.relative_to(project).as_posix(), "workspace/docs/operation")
+        delivery_git.run_git(clone, "reset", "-q")
+        return clone
+
+    def revise_verification_contract(self, docs: Path, note: str) -> dict:
+        """Approve the next Verification Contract revision and return its receipt."""
+        kind = type("Args", (), {"docs": str(docs), "kind": "verification"})
+        self.assertEqual(operation_compile.revise(kind), 0)
+        path = operation_compile.contract_path(docs, "verification")
+        props, body = operation_compile.parse(path)
+        operation_compile.atomic_text(path, operation_compile.render(props, body + "\n\n" + note + "\n"))
+        self.assertEqual(operation_compile.approve(kind), 0)
+        receipt, errors = operation_compile.check_contract(docs, "verification")
+        self.assertEqual(errors, [])
+        return receipt
+
+    def test_a_checkout_holding_an_earlier_approval_cannot_publish_over_a_revised_plan(self):
+        """An earlier approval, or one re-approved from it, never replaces the plan that revised it (#322)."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        refs = delivery_git.canonical_refs("DLV-001")
+        first = delivery_git.publish_execution_plan(project, "DLV-001")
+        second = self.second_checkout(project, directory, first["integration"])
+        second_docs = second / "workspace/docs"
+        second_delivery = second_docs / directory.relative_to(docs) / "delivery.md"
+        earlier = delivery_compile.split_note(second_delivery)[0]["plan_hash"]
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        self.assertEqual(self.revise_verification_contract(docs, "Revision 2 is the newer approved contract.")["revision"], 2)
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        revised = delivery_compile.split_note(directory / "delivery.md")[0]["plan_hash"]
+        self.assertNotEqual(revised, earlier)
+
+        def refused(plan_hash: str) -> tuple[str, str]:
+            return ("DELIVERY_PLAN_SUPERSEDED",
+                    f"the Integration holds execution plan {revised} and the Verification Contract approved at "
+                    f"revision 2, which this checkout's approval of execution plan {plan_hash} does not supersede; "
+                    + self.SUPERSEDED_REMEDY)
+
+        for moment in ("inside the plan revision", "after the plan revision"):
+            with self.subTest(moment=moment):
+                if moment == "after the plan revision":
+                    delivery_git.finish_plan_revision(project, "DLV-001")
+                delivery_git.run_git(second, "fetch", "-q", "origin")
+                before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
+                self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")),
+                                 refused(earlier))
+                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            exit_code = delivery_git.main(["publish-execution-plan", "--project-root", str(second), "--delivery", "DLV-001"])
+        envelope = json.loads(output.getvalue())
+        self.assertEqual((exit_code, envelope["ok"], envelope["mutation_state"]), (1, False, "none"))
+        self.assertEqual([finding["code"] for finding in envelope["findings"]], ["DELIVERY_PLAN_SUPERSEDED"])
+
+        # Re-approving the earlier package supersedes only that approval, not the revision.
+        second_plan = second_delivery.parent / "execution-plan.md"
+        earlier_approval = delivery_compile.split_note(second_plan)[0]["source_hash"]
+        self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(second_docs), "delivery": "DLV-001"})), 0)
+        self.assertEqual(delivery_compile.split_note(second_plan)[0]["superseded_plan_approvals"], [earlier_approval])
+        reapproved = delivery_compile.split_note(second_delivery)[0]["plan_hash"]
+        before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
+        self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")),
+                         refused(reapproved))
+        self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
+
+    def test_a_checkout_holding_an_earlier_contract_cannot_publish_it_under_a_sealed_plan(self):
+        """A sealed Item keeps its bindings and so the plan hash, which cannot show the older contract (#322)."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        refs = delivery_git.canonical_refs("DLV-001")
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        # The plan revision compiles the tracked package as the Integration sealed it.
+        for name in ("item.md", "code-review.md", "verification.md"):
+            relative = (directory / "items/auth-01" / name).relative_to(project).as_posix()
+            props, body = delivery_git.split_remote_note(project, integrated["integration"], relative, delivery_compile.split_note)
+            delivery_compile.atomic_text(project / relative, delivery_compile.frontmatter(props, body))
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        sealed = delivery_git.publish_execution_plan(project, "DLV-001")
+        second = self.second_checkout(project, directory, sealed["integration"])
+        second_docs = second / "workspace/docs"
+        plan_hash = delivery_compile.split_note(directory / "delivery.md")[0]["plan_hash"]
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        self.revise_verification_contract(docs, "Revision 2 is the newer approved contract.")
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        self.assertEqual(delivery_compile.split_note(directory / "delivery.md")[0]["plan_hash"], plan_hash)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.finish_plan_revision(project, "DLV-001")
+        delivery_git.run_git(second, "fetch", "-q", "origin")
+        self.assertEqual(delivery_compile.split_note(second_docs / directory.relative_to(docs) / "delivery.md")[0]["plan_hash"],
+                         plan_hash)
+        for local in ("revision 1", "another revision 2"):
+            with self.subTest(local=local):
+                if local == "another revision 2":
+                    self.revise_verification_contract(second_docs, "Revision 2 as the second host approved it.")
+                replacement = "its approved revision 1" if local == "revision 1" else "a different approved revision 2"
+                before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
+                self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")), (
+                    "DELIVERY_PLAN_SUPERSEDED",
+                    f"the Integration holds execution plan {plan_hash} and the Verification Contract approved at "
+                    f"revision 2, which this checkout would replace with {replacement}; " + self.SUPERSEDED_REMEDY))
+                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
+
+    def test_publication_takes_a_first_an_identical_and_a_superseding_approval(self):
+        """Only an approval that revises the Integration's, directly or through unpublished ones, replaces it."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        plan = directory / "execution-plan.md"
+        refs = delivery_git.canonical_refs("DLV-001")
+        first = delivery_compile.split_note(plan)[0]
+        self.assertEqual(first["superseded_plan_approvals"], [])
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        republished = delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), republished["integration"])
+        # A second host holding the same approval publishes it again, as before.
+        second = self.second_checkout(project, directory, published["integration"])
+        delivery_git.run_git(second, "fetch", "-q", "origin")
+        delivery_git.publish_execution_plan(second, "DLV-001")
+        delivery_git.run_git(project, "fetch", "-q", "origin")
+
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        self.revise_verification_contract(docs, "Revision 2 is the newer approved contract.")
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        revision = delivery_compile.split_note(plan)[0]
+        self.assertEqual(revision["superseded_plan_approvals"], [first["source_hash"]])
+        # Approval is offline, so one approved again before it is published still names the published one.
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        again = delivery_compile.split_note(plan)[0]
+        self.assertEqual(again["plan_hash"], revision["plan_hash"])
+        self.assertEqual(again["superseded_plan_approvals"], [revision["source_hash"], first["source_hash"]])
+        revised = delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.finish_plan_revision(project, "DLV-001")
+        carried = delivery_git.split_remote_note(project, revised["integration"], plan.relative_to(project).as_posix(),
+                                                 delivery_compile.split_note)[0]
+        self.assertEqual((carried["source_hash"], carried["superseded_plan_approvals"]),
+                         (again["source_hash"], again["superseded_plan_approvals"]))
+
+    def test_republication_keeps_the_records_of_an_item_the_integration_sealed(self):
+        """Publication never puts a sealed Item's record or evidence back to a checkout's earlier copy."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        first = delivery_git.publish_execution_plan(project, "DLV-001")
+        second = self.second_checkout(project, directory, first["integration"])
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        records = [(directory / "items/auth-01" / name).relative_to(project).as_posix()
+                   for name in ("item.md", "code-review.md", "verification.md")]
+        sealed = delivery_git.published_plan_blobs(project, integrated["integration"], records)
+
+        def statuses(checkout: Path, oid: str) -> list:
+            return [delivery_git.split_remote_note(checkout, oid, path, delivery_compile.split_note)[0]["status"]
+                    for path in records]
+
+        self.assertEqual(statuses(project, integrated["integration"]), ["integrated", "approved", "passed"])
+        for checkout, label in ((project, "integrating checkout"), (second, "second checkout")):
+            with self.subTest(checkout=label):
+                self.assertEqual([delivery_compile.split_note(checkout / path)[0]["status"] for path in records],
+                                 ["in_scope", "draft", "draft"])
+                delivery_git.run_git(checkout, "fetch", "-q", "origin")
+                republished = delivery_git.publish_execution_plan(checkout, "DLV-001")
+                self.assertEqual(delivery_git.published_plan_blobs(checkout, republished["integration"], records), sealed)
+
+        # The sealed record an approval starts from is published, and the evidence stays sealed.
+        delivery_git.run_git(project, "fetch", "-q", "origin")
+        record = project / records[0]
+        record.write_text(sealed[records[0]], encoding="utf-8")
+        self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        revised = delivery_git.publish_execution_plan(project, "DLV-001")
+        carried = delivery_git.published_plan_blobs(project, revised["integration"], records)
+        self.assertEqual(carried[records[0]], record.read_text(encoding="utf-8"))
+        self.assertEqual((carried[records[1]], carried[records[2]]), (sealed[records[1]], sealed[records[2]]))
+        self.assertEqual(statuses(project, revised["integration"]), ["integrated", "approved", "passed"])
+
+    def test_republication_never_takes_a_reviewed_delivery_back_to_its_plan(self):
+        """A checkout that still holds the approved plan cannot publish it over the published Review,
+        the PR intent or the PR record: that would move the Integration tip off them and put its
+        delivery.md back to execution_approved. Each refusal names the Integration's state and moves
+        no ref, and the PR route goes on (#322, #331)."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        first = delivery_git.publish_execution_plan(project, "DLV-001")
+        second = self.second_checkout(project, directory, first["integration"])
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_review(type("Args", (), {
+                "docs": str(docs), "delivery": "DLV-001", "reviewed_commit": integrated["integration"],
+                "reviewed_integration_commit": integrated["integration"]})), 0)
+        state: dict = {}
+        steps = (("review", "delivery-review-published-v1",
+                  lambda: delivery_git.publish_delivery_review(project, "DLV-001")),
+                 ("review", "pr-creation-intent-v1", lambda: delivery_git.prepare_pr_creation(project, "DLV-001")),
+                 ("awaiting_merge", "pr-url-recorded-v1", lambda: delivery_git.open_pr(project, "DLV-001")))
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            for status, record, step in steps:
+                with self.subTest(record=record):
+                    step()
+                    delivery_git.run_git(second, "fetch", "-q", "origin")
+                    before = delivery_git.run_git(project, "ls-remote", "origin")
+                    self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")), (
+                        "DELIVERY_PLAN_SUPERSEDED",
+                        f"the Integration records DLV-001 at {status} with {record} at its tip, past its execution "
+                        "plan, so publication would take it back to execution_approved and off the route of its "
+                        "Review and PR; take the Delivery package from the Integration"))
+                    self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+            self.assertEqual(delivery_git.merge_pr(project, "DLV-001")["status"], "merged")
 
     def test_execution_publication_keeps_a_terminal_item_on_its_verified_revision(self):
         """A closed Item's binding names history, not a stale current receipt."""

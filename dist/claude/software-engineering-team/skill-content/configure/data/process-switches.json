@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "switches": {
+    "delivery_path": {
+      "summary": "Whether a Delivery of one small Story that reuses the current Operation contracts and changes no architecture plans its scope and its execution in one step with one owner gate, or every Delivery plans them in two steps with two owner gates.",
+      "issue": 328,
+      "flows": ["delivery-planning", "execution-planning"],
+      "values": [
+        {
+          "id": "standard",
+          "tradeoffs": "Every Delivery plans its scope in /delivery-plan and its execution in /execution-plan DLV-###, each step with its own owner gate. Today's behaviour and the baseline the light path is measured against: HAN DLV-001 took 78 min from reservation to its first published plan, and DLV-002's two gates were 6 h apart."
+        },
+        {
+          "id": "light_when_eligible",
+          "tradeoffs": "A Delivery the compiler finds eligible, exactly one Story with no software_architect role, no architecture impact, reused current Operation contracts, met dependencies and a size within the owner's story_size_budget limits, plans its scope and its Item topology in one step and one owner gate; approve-scope, reserve-delivery, approve-execution, publish-execution-plan and claim-items then run in order with their checks and refusals unchanged, and every other Delivery takes the standard path. One gate and one planning pass less for a small Story, while reservation and publication run without a pause between them, a Story that needs architecture work can slip through until code review, and with no story_size_budget limit set no Story is eligible."
+        }
+      ],
+      "default": "standard",
+      "metric": "Per light-path Delivery: time from the proposal's start to the plan's publication, owner gates, model passes on that path, and fallbacks to the standard path with the condition or refused verb that caused each, against the standard path's 2 owner gates and 2 planning passes. Guards: an Item reopened or re-planned because the light path missed architecture or Operation impact, code review conformance findings about path claims, and plan revisions after publication.",
+      "promotion": {
+        "unit": "At least 3 light-path Deliveries.",
+        "threshold": "A median proposal-to-publication time of at most 30 min with exactly one owner gate per light-path Delivery, and zero reopens or re-plans caused by missed architecture or Operation impact, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "execution_planning": {
+      "summary": "How execution planning writes and reviews the facts an execution plan needs: each Operation contract written and reviewed on its own, or every fact written once in the document that owns it and the revised contracts reviewed together with the Item topology in one pass.",
+      "issue": 324,
+      "flows": ["delivery-execution", "execution-planning", "operation"],
+      "values": [
+        {
+          "id": "per_document",
+          "tradeoffs": "Each Operation contract the plan needs is revised and reviewed on its own through the Operation flow, and a planning definition may be restated in every document that uses it. Today's behaviour and the baseline the bundle is measured against: HAN DLV-002 took 342 min from plan start to publication, with two separate contract review loops and 24% of its planning text restated in a contract."
+        },
+        {
+          "id": "single_source_bundle",
+          "tradeoffs": "Each execution-planning fact is written once, in the section fact-ownership.json names, and linked from every other document; the revised contracts, the Item records and their Stories and Test Plans take one review layer, read by each revised contract's counterpart. Fewer serial passes and no copies to reconcile, while one bundle is larger than one contract and may lower a single reader's recall, and a revised contract that no Item pins still needs a target commit and refresh-target before publication."
+        }
+      ],
+      "default": "per_document",
+      "value_data": {
+        "single_source_bundle": [
+          "skill-content/execution-plan/data/fact-ownership.json",
+          "skill-content/challenge-review/data/review-panels.json"
+        ]
+      },
+      "metric": "Per Delivery that revises at least one Operation contract or declares architecture impact: execution-planning wall time from plan start to publication; serial model passes on that path; review layers and review-loop minutes; the restated share, the distinct 8-word sequences of any planning document found in another one; and owner rulings recorded once with an id. Guards: valid critical or major findings against the contracts or the topology found after approval, plan revisions caused by contract errors and DELIVERY_OPERATION_UNCARRIED refusals.",
+      "promotion": {
+        "unit": "At least 3 Deliveries that revise at least one Operation contract or declare architecture impact, run with single_source_bundle.",
+        "threshold": "One review layer per plan, at most 5 serial model passes, a restated share under 5%, a median execution-planning wall time at most 60% of the 342 min DLV-002 baseline and zero escaped valid critical or major findings, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "implementation_schedule": {
+      "summary": "How the implementation roles of one Delivery Item write: one after another in their approved order, or at the same time in lanes whose approved write scopes are disjoint.",
+      "issue": 327,
+      "flows": ["delivery-execution", "execution-planning"],
+      "values": [
+        {
+          "id": "sequential_v1",
+          "tradeoffs": "Implementation roles write one after another in their approved order in the Item worktree. Today's behaviour and the baseline lanes are measured against; the slowest path when the plan gives each role its own files."
+        },
+        {
+          "id": "parallel_lanes_v1",
+          "tradeoffs": "Implementation roles whose approved lane scopes are disjoint write at the same time in the one Item worktree, ordered only by declared seams, and the coordinator stays the only committer. Shorter implementation wall time, while the plan must declare lane scopes and seams, seam defects surface only at the frozen candidate and token cost per Item rises."
+        }
+      ],
+      "default": "sequential_v1",
+      "metric": "Per Item with 2 or more implementation roles besides the Software Architect: implementation wall time from the first implementation role's start to the candidate freeze against the sum of its lane times, mean concurrent writer lanes, lane scope violations found before the coordinator's commit, seam-related critical or major code review findings, QA failures at a seam and environment collisions.",
+      "promotion": {
+        "unit": "At least 3 Items with 2 or more implementation roles besides the Software Architect run with parallel_lanes_v1, from at least 2 Deliveries.",
+        "threshold": "Implementation wall time at most 70% of the lane-time sum, zero lane scope violations, seam-related critical or major findings per Item no higher than the sequential baseline and zero environment collisions, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "owner_gates": {
+      "summary": "When the owner answers a Delivery's questions: each as soon as it comes up, or in two fixed gates, scope and plan first and review and merge last, with every other question queued in User Decisions until then and never decided by default.",
+      "issue": 329,
+      "flows": ["delivery-execution", "delivery-governance", "delivery-planning", "execution-planning", "operation"],
+      "values": [
+        {
+          "id": "per_step",
+          "tradeoffs": "The owner is asked each question as soon as it comes up, and the run waits for the answer even when the work in progress does not depend on it. Today's behaviour and the baseline the gates are measured against: in HAN DLV-001, 53% of calendar hours had nothing running and one weekend stop lasted 41.7 h, and DLV-002's execution planning waited 61.1 min on questions with no subagent running."
+        },
+        {
+          "id": "two_fixed_gates",
+          "tradeoffs": "The owner decides the scope, the plan and every Operation or Governance change it needs in gate A, and the Delivery Review and the merge in gate B. Between them a question is queued in User Decisions, only the tasks that depend on it wait, a decision of an at-once class is still asked at once and nothing is decided by default. Fewer stops and less idle waiting, while a queued question holds its dependent tasks until the next gate, a long gate A can overload the owner and the class list can miss a decision the owner wanted asked at once."
+        }
+      ],
+      "default": "per_step",
+      "reference_scope": "owning_flows",
+      "value_data": {
+        "two_fixed_gates": ["skill-content/deliver/data/owner-decision-classes.json"]
+      },
+      "metric": "Per Delivery: owner stops outside gates A and B; critical-path owner wait, question waits with no subagent running; questions queued and their time from queueing to answer; minutes dependent tasks waited; early gates forced because every remaining task depended on pending questions; idle hours that began with an open question; and status questions from the owner. Guard: every User Decisions row is answered before the work that depends on it runs.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with two_fixed_gates.",
+        "threshold": "At most 1 stop outside the two gates per Delivery, and only for an at-once class, a critical-path owner wait outside the gates of at most 15 min per Delivery and zero dependent tasks run before their question was answered, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "review_panels": {
+      "summary": "How backlog epic and root, Solution Design, Design System, Operation contract and execution-plan bundle reviews read the reviewed documents.",
+      "issue": 312,
+      "flows": ["backlog-planning", "design-system", "execution-planning", "operation", "solution-design"],
+      "values": [
+        {
+          "id": "single_reader",
+          "tradeoffs": "One fresh reviewer per review step reads every lens on its role's own tier. Today's behaviour and the baseline the panel is measured against; the slowest path, since one reader works through every lens in turn."
+        },
+        {
+          "id": "lens_panel",
+          "tradeoffs": "One fresh read-only reader per lens assignment runs in parallel and replaces the step's reviewer; the read-only reviewer roles run as their lens-tier variants. The panel changes who reads, never the review loop: switch `review_loop` sets that, so at its `current` the panel keeps the step's own loop and a re-review reruns the whole panel, and at `blocking_delta` a re-review reruns only the assignments that returned a blocking finding. Shorter review wall time, while valid-major recall is still measured against the single reader and a panel major can be overrated."
+        }
+      ],
+      "default": "single_reader",
+      "agent_variants": {
+        "lens_panel": {
+          "suffix": "lens",
+          "tier": "lens",
+          "description": "Lens-tier reader variant for review panels.",
+          "agents": ["backlog-reviewer", "design-system-reviewer", "solution-reviewer"]
+        }
+      },
+      "value_data": {
+        "lens_panel": ["skill-content/challenge-review/data/review-panels.json"]
+      },
+      "metric": "Per review pass on the same document, the panel's valid critical and major findings against the official single-reader review's, and the panel's wall time against the official review's.",
+      "promotion": {
+        "unit": "At least 5 panel review passes across at least 2 flows.",
+        "threshold": "Panel valid-major recall at least equal to the official review's and panel wall time at most 50% of it, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "mechanical_pass_tier": {
+      "summary": "Which tier runs a backlog, Operation contract or Solution Design writer pass that only applies the fixes a review verdict names, and whether a compiler render, stamp or check step spawns a role at all.",
+      "issue": 330,
+      "flows": ["backlog-planning", "operation", "solution-design"],
+      "values": [
+        {
+          "id": "role_tier",
+          "tradeoffs": "Every writer pass runs on its role's own tier, usually as the resumed writer that still holds the document, and compiler steps run as each flow describes. Today's behaviour and the baseline the mechanical tier is measured against; a pass that only applies spelled-out fixes still generates every edit at the writer's full tier."
+        },
+        {
+          "id": "mechanical",
+          "tradeoffs": "A writer pass whose findings each name their exact fix runs on the owning writer's -mechanical variant, a fresh agent on the mechanical tier, and render, stamp and check steps run as direct entry commands with no role pass. The host contract states per host what a variant changes against its writer's own tier: a lower model class, or only a fixed effort that is lower only when the session runs above it. The tier's values are placeholders until the frozen-task A/B sets them. Shorter fix passes where the tier is lower, while the fresh variant re-reads what a resumed writer held and a lower tier may misapply a fix, which the unchanged re-check catches at the cost of a round."
+        }
+      ],
+      "default": "role_tier",
+      "agent_variants": {
+        "mechanical": {
+          "suffix": "mechanical",
+          "tier": "mechanical",
+          "description": "Mechanical-tier variant for passes that apply only the fixes a review verdict names.",
+          "agents": ["devops-engineer", "product-owner", "qa-engineer", "solution-architect"]
+        }
+      },
+      "metric": "Per mechanical pass, its wall time and output tokens against the base writer's median for the same pass kind, whether the re-check finds the fix incomplete or wrong (rework), and any unrelated edit the re-check finds.",
+      "promotion": {
+        "unit": "A frozen-task A/B that sets the mechanical tier's host values, then at least 3 Deliveries run with mechanical.",
+        "threshold": "Median apply_findings wall time at most 50% of the base writer's median for the same pass kind, a rework rate no higher than role_tier's over the same period and zero accepted unrelated edits, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "review_manifest_scope": {
+      "summary": "How far a backlog epic review's input manifest reads beyond the epic: every note reached through the links of the notes it includes, or only the epic's dependency closure, the notes that closure links to or cites and their front-matter relations.",
+      "issue": 303,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "transitive",
+          "tradeoffs": "Every note an epic manifest includes expands its own links, so the read set grows with the vault instead of the epic and a small epic is handed about as many paths as a large one. Today's behaviour and the baseline bounded is measured against."
+        },
+        {
+          "id": "bounded",
+          "tradeoffs": "An epic manifest follows links only from the epics, stories and test plans of the epic and its dependency closure, reads each note they link to or cite with that note's front-matter relations one hop further, and expands nothing beyond; the backlog root and the review history are read without their links. A smaller manifest, while evidence behind a linked note's body links or two links out is outside it until the reviewer asks for it, and only the root review, which keeps the transitive read set, reads the whole closure."
+        }
+      ],
+      "default": "transitive",
+      "metric": "Per epic review pass, against the transitive manifest of the same epic and backlog revision: manifest path count, JSON bytes and build seconds; reviewer wall time; valid findings by severity against a transitive shadow review of the same epic and revision, as recall; and each request for evidence outside the manifest.",
+      "promotion": {
+        "unit": "At least 5 epic review passes run with bounded across at least 2 backlog revisions, each beside a transitive shadow review of the same epic and revision. The switch changes only backlog planning, which runs outside any Delivery, so review passes replace the 3-Delivery default.",
+        "threshold": "Valid critical and major recall at least equal to the transitive shadow review's, zero valid critical or major findings found later in the same epic whose evidence lay outside the bounded manifest, and median reviewer wall time at most 70% of the transitive review's, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "review_loop": {
+      "summary": "How a review loop treats the findings a review returns: which findings start a round, where a minor finding goes, what a re-review reads and whether an independent reader calibrates a critical or major claim before it gates, for backlog, Solution Design, Design System and Operation contract reviews and Delivery code review.",
+      "issue": 326,
+      "flows": ["backlog-planning", "delivery-execution", "design-system", "operation", "solution-design"],
+      "values": [
+        {
+          "id": "current",
+          "tradeoffs": "Every review loop runs as today, the baseline the other value is measured against, with a single reader or a lens panel alike: switch `review_panels` changes only who reads, and a panel keeps the step's own loop. Operation and Design System reviews have no minor rule or re-review scope, so a review that approves with only minor findings can still take a fix pass and a recheck, a code review minor stays a note with no owner, and every critical or major claim gates as returned."
+        },
+        {
+          "id": "blocking_delta",
+          "tradeoffs": "Only a critical or major finding starts a round, and only once one fresh calibration reader of the claiming reviewer's role, or for an Operation contract or bundle claim the counterpart of the contract it concerns, on that role's own tier, confirms it. A minor finding becomes a follow-up with an owner role and a revisit trigger, and a re-review reads only the open blocking findings, the changed text and its dependency context. It applies to a single reader and a lens panel alike, and a panel's re-review reruns only the assignments that returned a blocking finding. Shorter review loops, while calibration adds a few minutes whenever a major is real, a wrong downgrade can hide a defect until the shadow judge audits it, and a changed-text re-review can miss a knock-on effect outside the dependency context it is given."
+        }
+      ],
+      "default": "current",
+      "metric": "Per reviewed document against its matching baseline, a `current` run under the same `review_panels` value: review-loop minutes from review start to final verdict, fixes included; rounds; minor findings fixed in a blocking pass against those recorded as follow-ups; and calibration counts, claimed, confirmed, downgraded and invalid, with calibration minutes.",
+      "promotion": {
+        "unit": "At least 5 reviewed documents across at least 2 flows: a contract revision, an epic or root review, a Solution or Design System review, or an Item code review.",
+        "threshold": "Median review-loop minutes at most 50% of the matching baseline, zero valid critical or major findings found later in the same document and traced to a skipped minor round or a calibration downgrade, the shadow judge confirming every downgrade, and an owner role and revisit trigger on every follow-up, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "story_size_budget": {
+      "summary": "Whether backlog planning measures each story against owner-set size limits and proposes a split for a story over them, before its epic review.",
+      "issue": 325,
+      "flows": ["backlog-planning", "delivery-planning"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "Nothing is measured or shown, and the one-review-unit rule stays a reviewer's judgement. Today's behaviour and the baseline the budget is measured against; a story can grow far past one review unit before a Delivery plans it."
+        },
+        {
+          "id": "propose_split",
+          "tradeoffs": "The backlog compiler reports each story's measures against the owner's limits, and the Product Owner proposes a split for each story over budget before its epic review; the owner accepts it or keeps the story with a recorded reason. Advisory only: it never fails a check, blocks an approval or rewrites a criterion. More, smaller stories each carry their own planning, review and gate overhead, and a count is only a proxy for one review unit."
+        }
+      ],
+      "default": "off",
+      "parameters": {
+        "summary": "Owner-set limit per story size measure. The package sets no limit: a measure without a limit is reported but never over budget.",
+        "values": ["propose_split"],
+        "declared_by": {
+          "path": "skill-content/product-planning/data/story-size-measures.json",
+          "key": "measures"
+        },
+        "type": "positive_integer",
+        "min_count": 1
+      },
+      "value_data": {
+        "propose_split": ["skill-content/product-planning/data/story-size-measures.json"]
+      },
+      "metric": "Per backlog revision run with propose_split, stories over budget, split proposals accepted and kept, criteria and scenarios moved with exact coverage, and epic review passes; per story, cycle time from start-item to integration, code review cycles, QA rounds and reopens, compared between stories within and over budget in the same period.",
+      "promotion": {
+        "unit": "At least 3 backlog revisions run with propose_split and 3 Deliveries that contain stories planned under it.",
+        "threshold": "The owner accepts at least half of the split proposals, stories within budget reach integration with a median cycle time at most half that of stories over budget in the same period, and no split loses, merges or rewords a criterion, creates a dependency cycle or yields a story verifiable only after a sibling lands, with every shared quality guard holding and the owner's approval. A promotion keeps off as the default, since only a value the owner chooses takes parameters, and ships package_limits for propose_split, which a project at that value applies to each limit it leaves unset."
+      }
+    }
+  }
+}

@@ -21,9 +21,29 @@ Requirement stage and it does not alter product-stage package hashes.
 3. Spawn the non-writing counterpart as a read-only reviewer when the contract
    crosses test/runtime boundaries or changes where Delivery PR checks come
    from. The review prompt includes the exact contract path, accepted Solution
-   references, command safety lens and `SELF-CHECK`.
+   references, command safety lens and `SELF-CHECK`. Switch `review_panels`: at
+   `lens_panel`, review panel `operation_verification` or
+   review panel `operation_environment` replaces this reviewer, as
+   `skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
+   defines. Switch `mechanical_pass_tier`: at `mechanical`, the writer pass
+   that applies the review's named fixes, and the `check` and `approve`
+   commands of steps 2 and 4, run as
+   `skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md`
+   defines.
+   Switch `review_loop`: at `blocking_delta`, this review loop follows
+   `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+   Switch `execution_planning`: at `single_source_bundle`, a contract that a
+   Delivery's execution plan revises is written against the fact ownership of
+   `skill-content/execution-plan/data/fact-ownership.json`, and that plan's
+   bundle review replaces this step, as
+   `skill-content/configure/references/switch-execution_planning-single_source_bundle.md`
+   defines.
 4. Approve with `operation_compile.py approve --kind <kind>`. Return the exact
    contract receipt. Do not run a downstream product stage automatically.
+   Switch `owner_gates`: at `two_fixed_gates`, a revision that a Delivery's
+   execution plan needs is approved in that Delivery's gate A, as
+   `skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
+   defines.
 
 Verification may declare an optional `diagnostic_test_command` adapter for
 failed or affected tests, with `diagnostic_test_workdir` defaulting to `.` only

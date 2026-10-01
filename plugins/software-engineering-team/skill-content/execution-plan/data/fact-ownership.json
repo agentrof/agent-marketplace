@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "documents": {
+    "verification_contract": {
+      "type": "verification_contract",
+      "title": "Verification Contract",
+      "flow": "operation",
+      "sections_from": "scripts/operation_compile.py:init"
+    },
+    "environment_contract": {
+      "type": "environment_contract",
+      "title": "Environment Contract",
+      "flow": "operation",
+      "sections_from": "scripts/operation_compile.py:init"
+    },
+    "architecture_decision": {
+      "type": "decision",
+      "title": "architecture decision record",
+      "flow": "execution-planning",
+      "sections_from": "scripts/architecture_compile.py:stub"
+    },
+    "item_topology": {
+      "type": "delivery_item",
+      "title": "Item topology",
+      "flow": "execution-planning",
+      "keys_from": "scripts/delivery_compile.py:LIGHT_TOPOLOGY_FIELDS"
+    },
+    "user_decisions": {
+      "type": "delivery",
+      "title": "User Decisions",
+      "flow": "execution-planning",
+      "sections_from": "scripts/delivery_compile.py:SECTIONS.delivery"
+    }
+  },
+  "fact_classes": {
+    "verification_semantics": {
+      "facts": "How Delivery verification resolves an Item's context, the test suites and what each declares, the evidence and coverage rules, the cache locations and the diagnostic test adapter.",
+      "owner": {
+        "document": "verification_contract",
+        "section": "Contract",
+        "writer": "qa_engineer"
+      }
+    },
+    "runtime_topology": {
+      "facts": "The live environment's runtime topology, instance naming, resource ownership and teardown.",
+      "owner": {
+        "document": "environment_contract",
+        "section": "Contract",
+        "writer": "devops_engineer"
+      }
+    },
+    "structural_decisions": {
+      "facts": "Each structural decision with the alternatives weighed and its rationale, recorded inside the active Item.",
+      "owner": {
+        "document": "architecture_decision",
+        "section": "Scope",
+        "writer": "software_architect"
+      }
+    },
+    "item_topology": {
+      "facts": "An Item's execution order, path and contract claims, whether it needs a live environment, which decides its Operation pins, its architecture impact with the one-paragraph architecture_reason, its role sequence, and its verification and implementation schedules with their lanes.",
+      "owner": {
+        "document": "item_topology",
+        "keys": [
+          "execution_after",
+          "waits_for",
+          "path_claims",
+          "contract_claims",
+          "runtime_required",
+          "architecture_impact",
+          "architecture_components",
+          "architecture_record_kinds",
+          "architecture_reason",
+          "role_sequence",
+          "verification_schedule",
+          "implementation_schedule",
+          "lane_scopes",
+          "lane_seams"
+        ],
+        "writer": "software_architect"
+      }
+    },
+    "owner_rulings": {
+      "facts": "Every owner ruling, once, under one stable id.",
+      "owner": {
+        "document": "user_decisions",
+        "section": "User Decisions",
+        "writer": "delivery_coordinator"
+      }
+    }
+  }
+}

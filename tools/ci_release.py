@@ -12,7 +12,6 @@ import argparse
 import copy
 import hashlib
 import json
-import re
 import subprocess
 from pathlib import Path
 
@@ -138,20 +137,15 @@ def provenance_valid(
     path = f"{package}/{filename}"
     value = json_object(blobs, path)
     keys = {
-        "schema_version", "component", "host", "version", "build_id",
-        "marketplace_release", "source_channel", "source_ref", "source_commit",
+        "schema_version", "component", "host", "version", "marketplace_release",
         "files", "executables", "runtime_contracts", "delivery_protocol",
     }
-    if set(value) != keys or value["schema_version"] != 3:
+    if set(value) != keys or value["schema_version"] != 4:
         raise ClassificationError(f"unsupported package provenance: {path}")
     if (
         value["component"] != component or value["host"] != host
         or value["version"] != registry["plugins"][component]
         or value["marketplace_release"] != registry["marketplace"]
-        or value["source_channel"] != "snapshot" or value["source_commit"] != ""
-        or not isinstance(value["build_id"], str)
-        or not re.fullmatch(r"snapshot\.[0-9a-f]{64}", value["build_id"])
-        or value["source_ref"] != value["build_id"]
     ):
         raise ClassificationError(f"invalid package provenance: {path}")
     prefix = package + "/"

@@ -109,6 +109,15 @@ APPLICATION_PACKAGE_WRITERS = {
     "begin-revision", "enter-review", "stub", "render", "rename", "retire",
 }
 RECOVERY_TTL_SECONDS = 24 * 60 * 60
+# Only the packaged autopilot.py writes the grant and the arming record; the
+# entry's user-prompt hook writes the arming record outside any tool call.
+AUTOPILOT_RUNTIME = (".agentrof", "agent-marketplace", ".runtime", "autopilot")
+AUTOPILOT_AUTHORITY = ("grant.json", "arming.json")
+AUTOPILOT_SCRIPT = "skill-content/autopilot/scripts/autopilot.py"
+AUTOPILOT_ENDED_STATES = ("expired", "completed", "revoked", "replaced")
+AUTOPILOT_GUARD_MESSAGE = (
+    "autopilot runtime state is written only by the packaged autopilot.py and its"
+    " hooks; only the user arms a grant")
 EXPERIENCE_ROOT_RELATIVE = "experience-design"
 EXPERIENCE_ARTIFACT_ROOT_RELATIVE = "experience-design/artifacts"
 
@@ -1253,8 +1262,21 @@ def virtual_overlay_check(payload: dict) -> int:
     return 0
 
 
+def in_autopilot_runtime(file_path: str) -> bool:
+    """Whether a path lies in an autopilot runtime directory, as written or once resolved."""
+    size = len(AUTOPILOT_RUNTIME)
+    for path in (Path(os.path.abspath(file_path)), Path(file_path).resolve()):
+        parts = path.parts
+        if any(parts[index:index + size] == AUTOPILOT_RUNTIME
+               for index in range(len(parts) - size + 1)):
+            return True
+    return False
+
+
 def pre_target(written: dict) -> int:
     file_path = str(written.get("file_path", ""))
+    if file_path and in_autopilot_runtime(file_path):
+        return deny(AUTOPILOT_GUARD_MESSAGE)
     alias_violation = application_surface_alias_violation(file_path)
     if alias_violation:
         return deny(alias_violation)
@@ -1523,7 +1545,8 @@ def _cli_path(value: str, cwd: Path) -> Path | None:
     return (path if path.is_absolute() else cwd / path).resolve()
 
 
-def _installed_script_path(value: str, cwd: Path, name: str) -> Path | None:
+def _installed_script_path(value: str, cwd: Path, name: str,
+                           relative: str | None = None) -> Path | None:
     expanded = os.path.expandvars(value)
     candidate = _lexical_executable_path(expanded, cwd)
     if candidate is None or candidate.name != name:
@@ -1531,12 +1554,14 @@ def _installed_script_path(value: str, cwd: Path, name: str) -> Path | None:
     # In a built host distribution vault_hook and the writers are siblings.
     # Source-tree tests run the uncomposed overlay, so fall back to the
     # canonical directory that supplied the imported vault_check module.
+    # A writer outside scripts/ names its path from the package root.
+    relative = relative or f"scripts/{name}"
     hook_directory = Path(__file__).resolve().parent
     imported_directory = Path(vault_check.__file__).resolve().parent
     packaged = hook_directory == imported_directory
     expected = (
-        hook_directory / name if packaged else imported_directory / name
-    )
+        hook_directory if packaged else imported_directory
+    ).parent / relative
     try:
         if path_is_alias(expected) or not expected.is_file() \
                 or expected.stat().st_nlink != 1:
@@ -1553,7 +1578,7 @@ def _installed_script_path(value: str, cwd: Path, name: str) -> Path | None:
             return None
         try:
             package = json.loads(manifest.read_text(encoding="utf-8"))
-            expected_hash = package["files"][f"scripts/{name}"]
+            expected_hash = package["files"][relative]
             actual_hash = hashlib.sha256(expected.read_bytes()).hexdigest()
         except (KeyError, OSError, json.JSONDecodeError, TypeError):
             return None
@@ -3297,6 +3322,11 @@ def load_recovery(payload: dict, path: Path) -> tuple[dict | None, str]:
         return None, "recovery vault root is invalid"
     if not isinstance(state.get("config_writer_allowed"), bool):
         return None, "recovery config writer authorization is invalid"
+    # A capsule from before the autopilot guard holds neither field.
+    if "autopilot" in state and (
+            not valid_autopilot_snapshot(state.get("autopilot"))
+            or not isinstance(state.get("autopilot_writer_allowed"), bool)):
+        return None, "recovery autopilot snapshot is invalid"
     if not isinstance(state.get("application_writer_allowed"), bool):
         return None, "recovery application writer authorization is invalid"
     if not isinstance(state.get("application_writer_candidate"), bool):
@@ -3320,6 +3350,7 @@ def load_recovery(payload: dict, path: Path) -> tuple[dict | None, str]:
     if not recovery_binding_matches(state, payload):
         state = dict(state)
         state["config_writer_allowed"] = False
+        state["autopilot_writer_allowed"] = False
         state["application_writer_allowed"] = False
         state["application_writer_candidate"] = False
         return state, "recovery shell command binding changed"
@@ -3462,6 +3493,134 @@ def cleanup_guard_state(primary: Path, recovery: Path) -> None:
         pass
 
 
+def autopilot_main_checkout(project: Path) -> Path:
+    """The main worktree of the checkout holding project, read from its .git link.
+
+    A linked worktree, such as a Delivery Item's, keeps the grant of the main
+    worktree; its .git file names the common directory inside it.
+    """
+    marker = project / ".git"
+    try:
+        if marker.is_file():
+            text = marker.read_text(encoding="utf-8").strip()
+            if text.startswith("gitdir:"):
+                gitdir = Path(text[len("gitdir:"):].strip())
+                gitdir = gitdir if gitdir.is_absolute() else project / gitdir
+                common = gitdir / "commondir"
+                if common.is_file():
+                    gitdir = gitdir / common.read_text(encoding="utf-8").strip()
+                gitdir = Path(os.path.abspath(gitdir))
+                if gitdir.name == ".git":
+                    return gitdir.parent
+    except (OSError, UnicodeError):
+        pass
+    return project
+
+
+def read_autopilot_files(directory: Path) -> dict:
+    files = {}
+    for name in AUTOPILOT_AUTHORITY:
+        path = directory / name
+        try:
+            files[name] = base64.b64encode(path.read_bytes()).decode("ascii") \
+                if path.is_file() and not path_is_alias(path) else None
+        except OSError:
+            files[name] = None
+    return files
+
+
+def autopilot_snapshot(project: Path) -> dict:
+    directory = autopilot_main_checkout(project).joinpath(*AUTOPILOT_RUNTIME)
+    return {"directory": str(directory), "files": read_autopilot_files(directory)}
+
+
+def valid_autopilot_snapshot(snapshot: object) -> bool:
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("directory"), str):
+        return False
+    files = snapshot.get("files")
+    return isinstance(files, dict) and set(files) == set(AUTOPILOT_AUTHORITY) \
+        and all(value is None or isinstance(value, str) for value in files.values())
+
+
+def sanctioned_autopilot_writer(payload: dict) -> bool:
+    """Recognize one direct invocation of the packaged autopilot.py, any verb."""
+    parsed = trusted_python_script_tokens(payload)
+    if parsed is None:
+        return False
+    script_token, _args, cwd = parsed
+    return _installed_script_path(
+        script_token, cwd, "autopilot.py", AUTOPILOT_SCRIPT) is not None
+
+
+def ends_same_grant(before: bytes, after: bytes) -> bool:
+    """Whether a grant change only ends the grant it held, which adds no authority."""
+    try:
+        old = json.loads(before.decode("utf-8"))
+        new = json.loads(after.decode("utf-8"))
+    except (UnicodeError, ValueError):
+        return False
+    if not isinstance(old, dict) or not isinstance(new, dict) \
+            or old.get("id") != new.get("id") or new.get("state") not in AUTOPILOT_ENDED_STATES:
+        return False
+    ending = {"state", "ended_at", "completion", "replaced_by"}
+    return all(old.get(key) == new.get(key) for key in set(old) | set(new) if key not in ending)
+
+
+def restore_autopilot_file(path: Path, encoded: str | None) -> str | None:
+    runtime = path.parent
+    for part in (runtime, *list(runtime.parents)[:3]):
+        if path_is_alias(part):
+            return f"{part} is a link, which autopilot.py refuses"
+    try:
+        if path_is_alias(path) or (path.exists() and not path.is_file()):
+            remove_local_tree(path)
+        if encoded is None:
+            path.unlink(missing_ok=True)
+            return None
+        fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.restore-", dir=str(runtime))
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(base64.b64decode(encoded))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+    except (OSError, ValueError) as exc:
+        return str(exc)
+    return None
+
+
+def autopilot_violation(before: object, writer_allowed: bool) -> str:
+    """Restore what a shell command added to autopilot authority, and name it.
+
+    A command may leave the grant and the arming record as they were, delete
+    them or end the grant it held; anything else, a new or widened grant or
+    an arming record, is put back as the command found it. The packaged
+    autopilot.py is the one shell writer that may change them.
+    """
+    if writer_allowed or not valid_autopilot_snapshot(before):
+        return ""
+    directory = Path(before["directory"])
+    after = read_autopilot_files(directory)
+    restored = []
+    for name in AUTOPILOT_AUTHORITY:
+        old, new = before["files"][name], after[name]
+        if new == old or new is None:
+            continue
+        if name == "grant.json" and old is not None \
+                and ends_same_grant(base64.b64decode(old), base64.b64decode(new)):
+            continue
+        error = restore_autopilot_file(directory / name, old)
+        restored.append(name if error is None else f"{name} (restore failed: {error})")
+    if not restored:
+        return ""
+    return ("Bash changed autopilot runtime state outside the packaged autopilot.py; "
+            + ", ".join(restored) + " put back as the command found it. "
+            + AUTOPILOT_GUARD_MESSAGE)
+
+
 def shell_snapshot(payload: dict) -> int:
     barrier = delivery_reader_barrier(payload)
     if barrier:
@@ -3540,6 +3699,8 @@ def shell_snapshot(payload: dict) -> int:
             "Experience lifecycle authority state is unreadable: "
             + authority_error
         )
+    autopilot = autopilot_snapshot(project)
+    autopilot_writer_allowed = sanctioned_autopilot_writer(payload)
     value = {
         "vault": str(root) if root else "",
         "inventory": vault_inventory(root, experience_snapshot=experience_tree) if root else {},
@@ -3547,6 +3708,7 @@ def shell_snapshot(payload: dict) -> int:
         "config_writer_allowed": sanctioned_config_writer(
             payload, config_path
         ),
+        "autopilot": autopilot,
         "experience_tree": experience_tree,
         "recovery_artifacts": recovery_artifacts,
         "application_writer_allowed": application_writer_allowed,
@@ -3564,6 +3726,8 @@ def shell_snapshot(payload: dict) -> int:
         "vault": value["vault"],
         "config": config,
         "config_writer_allowed": value["config_writer_allowed"],
+        "autopilot": autopilot,
+        "autopilot_writer_allowed": autopilot_writer_allowed,
         "experience_tree": experience_tree,
         "recovery_artifacts": recovery_artifacts,
         "application_writer_allowed": value[
@@ -3631,6 +3795,8 @@ def shell_verify(payload: dict) -> int:
     if recovery_state is not None:
         config_before = recovery_state["config"]
         writer_allowed = bool(recovery_state.get("config_writer_allowed"))
+        autopilot_before = recovery_state.get("autopilot")
+        autopilot_writer = bool(recovery_state.get("autopilot_writer_allowed"))
         experience_before = recovery_state["experience_tree"]
         recovery_artifacts_before = recovery_state.get("recovery_artifacts")
         application_writer_allowed = bool(
@@ -3647,12 +3813,14 @@ def shell_verify(payload: dict) -> int:
         if before is None:
             integrity_error = "project-local vault snapshot is missing or unreadable"
             writer_allowed = False
+            autopilot_writer = False
             application_writer_allowed = False
             application_writer_candidate = False
         elif primary_hash != recovery_state.get("primary_sha256"):
             integrity_error = "project-local vault snapshot was tampered with"
             before = None
             writer_allowed = False
+            autopilot_writer = False
             application_writer_allowed = False
             application_writer_candidate = False
     else:
@@ -3667,6 +3835,8 @@ def shell_verify(payload: dict) -> int:
         # authorization credential. Only the separately checksummed recovery
         # capsule may carry a writer grant; losing it must fail closed.
         writer_allowed = False
+        autopilot_before = before.get("autopilot") if isinstance(before, dict) else None
+        autopilot_writer = False
         experience_before = (
             before.get("experience_tree") if isinstance(before, dict) else None
         )
@@ -3756,6 +3926,10 @@ def shell_verify(payload: dict) -> int:
                         " setup_project.py or project_config.py"
                     )
                 config_violation = message
+        autopilot_message = autopilot_violation(autopilot_before, autopilot_writer)
+        if autopilot_message:
+            config_violation = "; ".join(
+                part for part in (config_violation, autopilot_message) if part)
         if integrity_error and not isinstance(before, dict):
             restore_error = (
                 restore_recovery_protected_state(

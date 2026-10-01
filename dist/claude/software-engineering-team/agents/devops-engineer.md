@@ -1,7 +1,7 @@
 ---
 name: devops-engineer
 description: DevOps engineer role. Spawned by software-engineering-team flows to realize the approved architecture as a runnable containerized environment; never auto-triggered.
-model: sonnet
+model: claude-sonnet-5-5
 output_contract: prose
 ---
 

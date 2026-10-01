@@ -23,6 +23,7 @@ invocation and choice gates.
 /sketch
 /organize-docs
 /issue-report
+/autopilot
 ```
 
 The public path for implementation work is:
@@ -30,6 +31,17 @@ The public path for implementation work is:
 ```text
 /setup -> /requirement -> applicable stages -> /backlog-plan
        -> /delivery-plan -> /execution-plan -> /deliver
+```
+
+Process switch `delivery_path` decides how many planning steps and owner gates
+one Delivery takes between the backlog and `/deliver`. `standard`, the
+default, is the path above. At `light_when_eligible`, a Delivery the compiler
+finds eligible plans its scope and its execution inside `/delivery-plan`, and
+every other Delivery keeps the standard path:
+
+```text
+standard: /delivery-plan -> scope gate -> /execution-plan DLV-### -> execution gate -> /deliver DLV-###
+light:    /delivery-plan -> one gate: scope, topology, reused contract receipts -> /deliver DLV-###
 ```
 
 Entry skills are the only user-facing commands. Coordinator verbs such as
@@ -40,6 +52,12 @@ internal operations invoked by the owning entry.
 Agent Marketplace GitHub issue in chat and files only the explicitly approved
 payload. It does not require setup and never reads or writes Requirement,
 Delivery, workspace or runtime state as workflow state.
+
+`/autopilot` lets the user arm a bounded grant under which the orchestrating
+session takes the recommended option of every question in an allowed class,
+records it and queues every other question. It creates no Requirement,
+Delivery or workspace state; [Orchestration](orchestration.md#autopilot)
+defines its classes, goals and limits.
 
 ## Durable project truth
 
@@ -87,6 +105,7 @@ workspace/docs/
 └── delivery/
     ├── governance/governance.md
     ├── definition-of-done.md
+    ├── process-policy.md
     └── deliveries/dlv-<digits>-<slug>/
         ├── delivery.md
         ├── execution-plan.md
@@ -166,6 +185,35 @@ approved backlog package and selected Story/Test Plan bytes historically; it
 does not silently adopt or become blocked by a later unrelated upstream
 application receipt.
 
+When the project has a Process Policy, each backlog review round records the
+pin a Delivery takes at scope approval, the policy's path, revision and source
+hash, as the policy in force when the round is written: `init`, `stub-epic`
+and `begin-revision` write their rounds with it, and `check` pins a draft round
+the Product Owner writes the first time it sees it, never an approved round.
+The policy in force changes only through `process_policy.py init` and
+`process_policy.py begin-revision`, and each first records the state it
+replaces in every draft round that records none yet: `init` records revision
+0, which names no policy, and `begin-revision` the approved revision, so no
+round written before a policy change takes the next policy's pin. Backlog
+approval records its own pin in `backlog.md` and refuses, before any write, a
+review it approves that ran with another value, parameters included, of a
+switch the backlog-planning flow owns than the approval's policy sets, reading
+the round's values from the current policy or the Git history of its path, or
+whose pinned revision it cannot read back, naming the remedy: rerun that
+review in a new round under the current policy, or approve a policy revision
+that sets those values back. A revision that changes only other switches, such
+as one set for the next Delivery, leaves the reviews valid, and a round from
+before the first policy agrees with a policy that keeps every backlog switch
+at its default. Each round keeps its own pin, so a backlog revision and its
+reviews name the process switch values they ran under outside any Delivery.
+Once approved, the pin is a record and is never compared: a later policy
+revision leaves the approved backlog current, a round approved earlier keeps
+its own pin, and `backlog_compile.py begin-revision` drops the pin from the new
+draft root until its own approval. A round written while the policy is a draft
+records nothing and is pinned by the first check after the policy's approval.
+Without a policy nothing is recorded and the approval writes the bytes it wrote
+before; a draft or invalid policy refuses the approval.
+
 ## Delivery Planning
 
 `/delivery-plan "<goal>"` creates a disposable local proposal.
@@ -173,6 +221,104 @@ application receipt.
 binds the goal, exact Story set, dependency facts, Definition of Done and
 target branch. The Git coordinator then reserves the Delivery by atomically
 creating its Integration ref with the project Fence lease.
+
+When the project has a Process Policy, scope approval also pins its path,
+revision and source hash in `delivery.md`, inside the scope hash, so every
+Delivery names the process switch values it ran under. Without a policy
+nothing is pinned and every compiler output is unchanged; such a Delivery runs
+with every switch at its default. A draft or invalid policy refuses scope
+approval. The pin is compared by value: each value, with its parameters, of
+the switches the Delivery still reads, so a later policy that sets none of
+them to another value, one with every switch at its default included, agrees
+with the pin. A `scope_approved` Delivery reads every switch a Delivery flow
+owns. An `execution_approved` one runs only its `delivery-execution` flow
+until a plan revision, whose approval pins the policy anew, so it reads only
+the switches that flow owns: `execution_planning`, `implementation_schedule`,
+`owner_gates` and `review_loop`. A switch no Delivery flow owns, such as
+`mechanical_pass_tier`, is no part of the pin: inside a Delivery it is read
+from the current policy. While a new execution approval can still re-pin the
+Delivery, that is while it is `scope_approved` or `execution_approved`, a
+policy that changes one of the values it reads makes `delivery_compile.py
+check`, and the coordinator verbs that run it, refuse the Delivery, naming
+each changed switch, until its execution plan is revised and approved again,
+which pins the current policy and lists the changed pin fields in
+`refreshed_delivery_pins`. The revision
+runs in order: `begin-plan-revision`, the execution-plan tasks and the Item
+revisions they make, `approve-execution`, `publish-execution-plan` and
+`finish-plan-revision`. Before the first execution approval, and while the
+plan-revision barrier is held, a task of `/delivery-plan`, `/execution-plan`
+or `/configure` inside the Delivery binds the approved policy that the next
+approval pins, while its implementation tasks wait for that approval; a later
+policy revision that sets the values back is the other way out. In those
+phases `refresh-target` treats the policy as a pinned input, like the
+Definition of Done: it refuses with `DELIVERY_TARGET_SOURCE_VIOLATION` a
+target whose policy differs from the Integration's pin, including one created
+or removed since. Revise, approve and publish the execution plan first, which
+pins the target's policy; the refresh then carries that policy into the
+Integration. From the Delivery Review on, for a merged or cancelled Delivery
+and for an Item reopened after the Review, the pin is the record of the policy
+the Delivery ran under and its revision's values are read back: from the
+current policy when it is that revision, or else from the Git history of the
+policy file by the pinned source hash, and a pin that neither holds is refused
+with how to restore it. A policy set for the next Delivery therefore never
+strands one that can no longer re-pin, nor changes the values it runs under.
+Inside a Delivery a flow reads a switch with
+`process_policy.py value --switch <id> --delivery DLV-###`, which applies that
+rule to the switch it reads. Task derivation follows the same pin:
+`task_inputs.py` applies it to the switches the task's flows own that the
+Delivery reads, for a task that names the Delivery with `--delivery` or reads
+a file of its package, so a Delivery's tasks never bind the switch references
+of values it did not pin. The
+Delivery stays `execution_approved` while its Items run, so the pin holds
+through Item execution. An Item worktree reads the switch values from its own
+tree, so reservation and every publication of the execution plan carry the
+pinned policy revision onto the Integration with the package, as publication
+carries a pinned Operation contract, and activation refreshes it in the Item:
+the worktree holds the policy its Delivery pinned even before the policy's own
+commit reaches the target. Because the pin is compared by value, the checkout
+may hold a later revision that sets every Delivery switch the same way; the
+checkout's file is carried only when it is the pinned revision, otherwise the
+approved file the Git history of the policy file holds under the pinned source
+hash, and publication refuses, naming how to restore it, when neither holds
+it.
+
+Process switch `owner_gates` decides when the owner answers a Delivery's
+questions. At `per_step`, the default, each is asked when it comes up and
+`User Decisions` keeps free text. At `two_fixed_gates`, the scope decision joins
+the execution plan and every Operation or Governance change it needs in gate A,
+whose approval authorizes the plan's writes through Item start, and the
+Delivery Review and the merge form gate B. Between them a question is queued in
+the Delivery's `User Decisions` table unless it is of an at-once class: the
+Software Architect's escalation clause or a class of
+`skill-content/deliver/data/owner-decision-classes.json`. `init` writes the
+table's header. From the proposal through the Review, and whenever the section
+holds that table whatever policy is in force later, `delivery_compile.py
+check` and every verb that runs its checks refuse a row whose id is not a
+unique `D-` id of at least two digits, whose class is neither `queued` nor an
+at-once class, that lists fewer than two options or a recommendation outside
+them, whose status is neither `pending` nor `answered`, that is `answered`
+without an answer or `pending` with one, whose `blocks` names anything but the
+Delivery's Items by Story id, or that is `answered` after blocking an Item
+without the minutes it waited in `wait_minutes`. The pinned Process Policy names
+the value the Delivery ran under, and a policy set for the next Delivery leaves
+the table checked. Each gate asks every queued question: `approve-scope`,
+`approve-review` and `publish-delivery-review` refuse while a row is `pending`
+and name it, and `check-plan` lists the pending rows under
+`pending_decisions`. Between the gates a pending row holds only the Items its
+`blocks` names: `start-item`, `resume-item` and `reopen-item` refuse such an
+Item with `DELIVERY_DECISION_PENDING` before any ref moves, while `claim-items`
+claims it, since a claim starts no work. No
+approved document changes between the gates without an answered row that names
+it: from the Delivery's first execution approval until `approve-review`,
+`operation_compile.py approve`, `delivery_governance.py approve` and
+`approve-execution` refuse until an answer names `Verification Contract
+revision N`, `Environment Contract revision N`, `Delivery Governance revision
+N` or `execution plan approval N`. Gate A's writes start with `approve-scope`
+and the Governance change it approved, applied before the reservation, which
+needs the Fence to carry it; the Operation revisions follow the reservation. So
+a refused reservation leaves only an applied Governance change in force, as a
+project document, and a proposal declined after execution planning leaves the
+drafts of its revisions to their own flows.
 
 Scope approval is the handoff check for upstream bindings, and `init` runs the
 same check before it renders the proposal, so a selection that cannot be handed
@@ -211,6 +357,41 @@ capacity or release field. Before reservation, declining or stopping leaves no
 tracked file, ID, ref or provider object. After reservation, its ID,
 goal-derived slug and scope hash are immutable.
 
+Process switch `delivery_path` decides whether a small Delivery plans in one
+step. At `standard`, the default, every Delivery takes the scope gate here and
+the execution gate in Execution Planning. At `light_when_eligible`, `init`
+reports under `delivery_path` whether the selection is eligible and names each
+failed condition, and `delivery_compile.py light-path-check --delivery DLV-###`
+repeats the check on the Delivery's records before each light step, with the
+findings execution approval would refuse. The compiler finds a Delivery
+eligible only when it selects one Story without a `software_architect` role,
+whose Item declares no architecture impact with the Software Architect's own
+reason, that reuses the approved current Operation contracts with no revision
+open, whose dependencies a merged Delivery records integrated, and that stays
+within the limits the owner set in switch `story_size_budget`; with no limit
+set no Story is eligible. An eligible Delivery gets a topology-only pass inside
+`/delivery-plan` and one owner gate for the scope, the Item topology and the
+reused contract receipts. Then `approve-scope`, `reserve-delivery`,
+`approve-execution`, `publish-execution-plan` and `claim-items` run in that
+order with every check and refusal unchanged. A failed check or any refused
+step falls back to the standard path and keeps every approval already made,
+and the Delivery records the fallback for good: the first failed
+`light-path-check` rewrites its `Delivery path:` line to `standard` with each
+failed condition, and `light-path-check --refused <step>` does so for a refused
+step of the sequence, so a failure that clears again never returns the Delivery
+to the light path. A `DELIVERY_TRANSACTION_UNCERTAIN` from reservation or
+publication is no fallback: it is resolved by reading the refs again, not by a
+second gate. `approve-scope` writes the `Delivery path:` line first in `User
+Decisions`, inside the scope hash: `light` with the Item topology hash and the
+contract receipts it approved, or `standard` with each failed condition.
+`approve-execution` and `check-plan` refuse a plan whose Item topology or bound
+contract receipts differ from a light line, since its owner never saw it, and
+name `light-path-check`, which records the fallback, and the owner gate of
+`/execution-plan DLV-###`. Otherwise `approve-execution` keeps a light line
+only while every condition holds, and records `standard` when one fails. With
+the pinned Process Policy, the line names the path the Delivery ran. At
+`owner_gates` `two_fixed_gates` the one gate is gate A.
+
 ## Execution Planning
 
 `/execution-plan DLV-###` writes the exact Item topology. Each Item is the
@@ -221,6 +402,20 @@ canonical owner of:
 - implementation owner and supporting responsibilities;
 - role sequence;
 - review and verification strategy.
+
+No owner gate shows a plan that execution approval would refuse.
+`delivery_compile.py check-plan --delivery DLV-###` runs the same checks as
+`approve-execution`, writes nothing and must pass before the plan gate on the
+standard path and before gate A at `owner_gates` `two_fixed_gates`;
+`light-path-check` reports the same findings as `plan_findings` before the
+light path's one gate. In gate A, an open Operation revision that its
+approval would take is listed under `pending_operation_revisions` instead of
+refused, since gate A approves it before execution approval runs. The revision
+is checked as its approval renders it, so one the approval would refuse, such
+as a draft without `test_command`, is refused with what the approval finds,
+and each listed revision carries the `source_hash` the approval stamps: gate A
+approves exactly that receipt. Any other plan gate approves no revision, so it
+refuses an open one and names its revision and draft status.
 
 `execution-plan.md` is a compiler-rendered aggregate of those Item records.
 Approval is local. `publish-execution-plan` is the only network writer for the
@@ -233,6 +428,75 @@ are named by Story alone, so a Delivery reads an Item ref as its own only when
 the tip's `Agentrof-Delivery` trailer names it. Target refresh, scope revision
 and cancellation pass over another Delivery's claim and never re-issue it.
 
+Each Item also records its implementation schedule, which process switch
+`implementation_schedule` selects for new Items. An Item without the field runs
+`sequential_v1`: its implementation roles write one after another in their
+approved order, and an approved Item without it keeps its bytes and hashes. At
+`parallel_lanes_v1`, `init` writes the schedule with empty `lane_scopes`
+(`<role>:<path>`) and `lane_seams` (`<producer> -> <consumer> via <interface>`)
+on every new Item. Approval then requires an implementation role besides the
+Software Architect and lane scopes that are disjoint in both directions,
+together equal `path_claims`, reach neither `workspace/docs`, `.git` nor
+`.agentrof`, and give every implementation role except the Software Architect a
+scope; seams that join two lanes, name a contract the Item claims or an
+architecture record of a claimed kind, and form no cycle; and a Process Policy
+that still selects the schedule. Role Sequences render the phases: the
+Software Architect alone, then the lanes, each seam consumer with the producer
+lanes it waits for, then Code Review and QA. A consumer lane starts as soon as
+its own producers finish and waits for no other lane.
+`item_plan_hash` and the plan hash cover the schedule, the scopes and the
+seams. The Item keeps one worktree, Item ref, Slot and writer receipt epoch:
+each lane role's task manifest bounds its write scope to its lane, lanes make
+no Git writes, the coordinator runs intent-to-add for the new files they
+report, and the coordinator alone commits the combined change before the
+freeze. Environment verbs and verification commands of the Item run one at a
+time under its environment lock: `delivery_verification.py lane-run` runs a
+lane's approved full test command or environment verb in the Item worktree,
+with no `PYTHONPATH`, `PYTHONHOME` or `NODE_PATH` entry that resolves outside
+it, and QA's `run` and `environment` take the same lock. While another command
+holds it they refuse with `DELIVERY_ENVIRONMENT_BUSY` and name the holder from
+its owner record. The lock ends with its holder's process, so a holder that
+died frees it, and the next command reports it as interrupted.
+After a host loss, `delivery_git.py lane-status` reports each lane's changed
+paths inside its approved scope against the Item worktree's committed head,
+and `takeover-item` refuses to discard uncommitted lane work: it names each
+lane's paths and the choice between committing the work as the coordinator on
+a host whose writer receipt is verified and discarding it with the commands it
+names. Those commands keep any commit the worktree holds ahead of the remote
+Item tip, which the refusal lists; takeover then refuses with
+`DELIVERY_LOCAL_REF_DIVERGED`, since dropping such a commit is a separate,
+explicit choice. A schedule change follows normal execution revision, approval
+and publication.
+
+Process switch `execution_planning` decides how the facts a plan needs are
+written and reviewed. At `per_document`, the default, each Operation contract
+the plan needs is revised and reviewed through the Operation flow on its own.
+At `single_source_bundle`, each fact is written once, in the section or
+front-matter keys that `skill-content/execution-plan/data/fact-ownership.json`
+names; `tools/validate.py` checks each against what the owning document's
+compiler writes. Every other document links it, and each owner ruling gets one
+stable `User Decisions` id; `delivery_compile.py check` refuses a malformed id
+and one id that starts two rulings, at every `owner_gates` value.
+`delivery_compile.py bundle-manifest --delivery DLV-###` lists every contract
+the plan revises, pins or still has to carry, every Item record with its Story
+and Test Plan and the fact ownership data, each with the hash of its bytes,
+and the Delivery's `User Decisions` section with the hash of its rulings
+alone, each ruling line and the answer of each answered decision row, so a
+queued question or the Delivery path line leaves it fresh, and names the
+counterpart of every revised contract as a reader, in the role name
+`task_inputs.py --role` takes; it refuses a Delivery that runs
+`per_document`. The readers start together, the manifest is recomputed with
+`--expected-hash` before any finding is accepted, so a changed ruling needs a
+fresh read too, and the bundle replaces each revised contract's separate
+counterpart review. Its one verdict is approved only when no reader holds an
+open critical or major finding and the Operation and Delivery checks are
+green. A contract revision that no Item pins stays in the manifest's
+`unpinned_revisions` until the Integration, or before reservation the target,
+holds it, approval notwithstanding; it is recorded on the target branch and
+brought in with `refresh-target` before publication, because publication
+still carries only pinned contracts. The Delivery's pinned Process Policy
+names the value it ran under.
+
 Execution approval pins the approved Verification Contract on every Item. An
 Item marked `runtime_required: true` additionally pins the approved
 Environment Contract. Contract hash drift blocks Item start, resume, reopen and
@@ -244,6 +508,35 @@ no Item pins reaches the Delivery through the target branch and
 and the Integration does not hold it. Publication leaves out a differing local
 copy that is not approved and current, and its result names that copy as a
 `not_carried` file observation.
+
+Publication reads its leases when it runs, so they stop a concurrent publisher
+but not a checkout that still holds an earlier approval. Each execution
+approval therefore lists in `superseded_plan_approvals` the `source_hash` of
+every earlier execution approval it revises, newest first; approval is offline
+and cannot tell which of them was published, so it keeps them all. When the
+Integration already holds a different published plan, `publish-execution-plan`
+publishes only an approval that lists the Integration's. It publishes a pinned
+Operation contract only when the Integration's copy is not approved at a later
+revision or as another approval of the same revision, because a sealed Item
+keeps its bindings and so the plan hash cannot show an older contract.
+Otherwise it refuses with `DELIVERY_PLAN_SUPERSEDED`, names the Integration's
+plan hash and contract revisions, and moves no ref: take the Delivery package
+and the Operation contracts from the Integration, then revise inside
+`begin-plan-revision`. The first publication and a republication of the same
+plan are unchanged. Once the Integration records the Delivery past its plan,
+with a `delivery.md` status of `review` or later or with the Delivery Review,
+its PR intent or its PR record at the tip, publication refuses with
+`DELIVERY_PLAN_SUPERSEDED` too and names that status and record, since it
+would take the Integration's `delivery.md` back to `execution_approved` and
+move the tip off the route of the Review and the PR.
+
+Publication never moves a sealed Item back. An Item's sealed record and its
+approved review and verification records reach the Integration only through
+integration or cancellation, and nothing returns them to a checkout's package.
+For an Item the Integration holds integrated or cancelled, publication keeps
+its review and verification records, and keeps its record unless the local
+copy has the same lifecycle, base and stamp: the sealed record an approval
+started from, such as one that rebinds the Item for reopen.
 
 Closure requires successful provider checks, so execution approval also
 carries the pull request check precondition that
@@ -307,12 +600,19 @@ number of simultaneously active Items. Slot refs `001..N` enforce that limit acr
 machines. Activation advances the Item and selected Slot to the same candidate
 OID. Normal Item writes advance both refs together. Pause or integration
 deletes the Slot under an exact lease. A Slot is coordination evidence, not a
-schedule or backlog property.
+schedule or backlog property. Activation reads that limit only while the Fence
+carries the approved Governance: after a Governance revision, `start-item`,
+`resume-item` and `reopen-item` refuse with `DELIVERY_FENCE_GOVERNANCE` until
+`apply-governance` binds the revision to the Fence.
 
 A protocol-1 Fence is accepted only by the dedicated quiescent migration path.
 It must be open with every Slot free; `upgrade-fence-v1` writes the
 protocol-2 Fence with the current approved Governance hash. No new Item
-mutation is legal until that conversion succeeds.
+mutation is legal until that conversion succeeds. Every other coordinator verb
+that reads or writes the Fence refuses a protocol-1 Fence before any ref or
+provider write with `DELIVERY_PROTOCOL_UNSUPPORTED` and names
+`upgrade-fence-v1`; a Fence record of neither protocol refuses with
+`DELIVERY_FENCE_CORRUPT`.
 
 ## Item execution
 
@@ -497,15 +797,32 @@ unless the refetched Fence never took the authorizing candidate, so a Fence
 that may carry the intent still has the receipt its handoff needs.
 
 Cancellation is an explicit action inside `/deliver DLV-###`. Its approved
-intent freezes exact Story dispositions, quiesces active Items, reverts
-integrated Item merges in reverse order and publishes one cancellation Review
-through the same Integration branch and final PR. A scope-only or claims-free
-Delivery uses `not_started` dispositions and never fabricates Item refs,
+intent freezes exact Story dispositions, quiesces active Items, reverts every
+Item integration merge on the Integration's own line in reverse order and
+publishes one cancellation Review through the same Integration branch and
+final PR. That includes the integration a reopened Item left and each earlier
+integration of an Item integrated again, so such a Story is
+`integrated_reverted` whatever its Item ref now records. A scope-only or
+claims-free Delivery uses `not_started` dispositions and never fabricates Item refs,
 review evidence or integration bases. A cancellation is final: a Delivery
-whose published status is already `cancelled` refuses another cancellation and
-any invalidation of its cancellation Review with
-`DELIVERY_CANCELLATION_INVALID`, so that Review still reaches the target
-through the PR.
+whose published status is already `cancelled` refuses another cancellation,
+any invalidation of its cancellation Review, a publication of its execution
+plan, a revision of its scope, a target refresh, a claim of its Items, a plan
+revision or upgrade barrier (`begin-plan-revision`, `quiesce-upgrade`) and an
+upgrade target merge with `DELIVERY_CANCELLATION_INVALID`, so that Review
+still reaches the target through the PR. Each of these verbs reads the status
+the Integration records, because a cancellation writes it there alone and a
+checkout's `delivery.md` keeps the status it had. A cancellation never ends a
+barrier it did not install: while the Fence carries one, `cancel-delivery`
+refuses with `DELIVERY_BARRIER_ACTIVE` and names `finish-plan-revision` and
+`abort-plan-revision`, because a carried barrier would outlive the
+cancellation's merge and a release after it would bury the cancellation
+Review. End the plan revision first, then cancel. A barrier that a
+cancellation carried before this rule is released the same way: for a
+Delivery whose published status is `cancelled`, `finish-plan-revision` and
+`abort-plan-revision` release the Fence barrier alone and leave the
+cancellation Review at the Integration tip, also once its PR merged and the
+merge dropped the Integration ref, when the target records the cancellation.
 
 ## Setup and package upgrade
 

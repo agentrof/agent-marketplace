@@ -1,6 +1,7 @@
 ---
 name: backend-developer
 description: Backend developer role. Spawned by software-engineering-team flows to implement server-side work against approved contracts; never auto-triggered.
+model: gpt-6.1-sol
 model_reasoning_effort: medium
 output_contract: prose
 ---

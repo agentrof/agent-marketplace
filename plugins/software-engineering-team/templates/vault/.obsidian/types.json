@@ -76,6 +76,9 @@
     "definition_of_done_revision": "number",
     "definition_of_done_source_hash": "text",
     "definition_of_done_commit": "text",
+    "process_policy_path": "text",
+    "process_policy_revision": "number",
+    "process_policy_source_hash": "text",
     "target_branch": "text",
     "backlog_commit": "text",
     "backlog_path": "text",
@@ -103,6 +106,7 @@
     "environment_contract_ref": "text",
     "environment_contract_hash": "text",
     "operation_contract_hashes": "multitext",
+    "superseded_plan_approvals": "multitext",
     "role_sequence": "multitext",
     "reviewed_commit": "text",
     "reviewed_integration_commit": "text",
@@ -181,6 +185,9 @@
     "verification_mode": "text",
     "verification_result_hash": "text",
     "verification_schedule": "text",
+    "implementation_schedule": "text",
+    "lane_scopes": "multitext",
+    "lane_seams": "multitext",
     "mutation_include_paths": "multitext"
   }
 }

@@ -12,8 +12,8 @@ Every rule in this repository is machine-enforced or it is not a rule.
 `tools/validate.py` is the rulebook; `make check` runs it together with
 the count-drift gate and the complete test suite. CI runs fresh static gates
 and independently selects and verifies the required platform test matrix on
-push and pull request. One finding is red. There are no exception
-files, no allowlists, no temporary waivers. If you believe a rule is
+push, pull request and merge queue groups. One finding is red. There are no
+exception files, no allowlists, no temporary waivers. If you believe a rule is
 wrong, change the rule in `tools/validate.py` in your PR and update its
 fixture; do not work around it.
 
@@ -66,7 +66,11 @@ current lifecycle and Git protocol in
 Repository maintainers use the separate, manually invoked
 [issue and release operations protocol](docs/maintainer-operations-protocol.md);
 an issue event never starts an agent and issue text never grants merge or
-release authority.
+release authority. When `main` requires the merge queue, a green PR need not be
+brought up to date before merging: the queue runs the required checks again on
+the exact commit it merges. The protocol lists the
+[repository settings](docs/maintainer-operations-protocol.md#repository-settings)
+the owner enables for it.
 
 ## Add a knowledge skill: walkthrough
 
@@ -115,8 +119,8 @@ validator.
 - Version pins and vendor bias in content. Pinned versions rot; content
   is written in principle language and stays valid across releases.
 - Model names in authored content. Agents declare a reasoning tier; each
-  host's `platforms/<host>/execution-profiles.json` maps it to a model and
-  effort, never prose.
+  host's `platforms/<host>/execution-profiles.json` maps it to a class of the
+  host's pinned `model-catalog.json` and an effort, never prose.
 - Absolute or user-level paths. All outputs are project-relative;
   writing outside the consuming project's tree is a structural leak.
 - Technology nouns in agent bodies. The moment a role names a framework,
@@ -132,8 +136,10 @@ validator.
 
 ## Guarding the guard
 
-Every validator check has at least one deliberately broken fixture in
-`tools/tests/`, and a meta-test keeps the check list and fixture list in
-lockstep. Adding a check without a fixture turns the suite red. If your
-PR changes validation behavior, it must change the fixtures in the same
-commit.
+Every validator check has a deliberately broken fixture:
+`VALIDATOR_BUILDERS` in `tools/tests/test_validator_contract.py` holds one
+builder per entry of `CHECKS` in `tools/validate.py`, and each builder breaks
+the valid fixture repository so that its check reports it. A meta-test keeps
+the two in lockstep, so adding a check without a builder turns the suite red.
+If your PR changes validation behavior, it must change the builders in the
+same commit.

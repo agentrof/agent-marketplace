@@ -4078,5 +4078,98 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertFalse(generated.exists())
 
 
+
+AUTOPILOT_RUNTIME = Path(".agentrof/agent-marketplace/.runtime/autopilot")
+AUTOPILOT_SCRIPT = ROOT / "plugins/software-engineering-team/skill-content/autopilot/scripts/autopilot.py"
+
+
+class AutopilotRuntimeGuardTests(unittest.TestCase):
+    """Only the packaged autopilot.py writes the autopilot runtime: tool writes are denied and a
+    shell command's added authority is restored. Ending a grant or deleting a file stays allowed."""
+
+    shell = VaultHookShellContractTests
+
+    def setUp(self):
+        isolate_recovery_root(self)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.shell.project(self.root)
+        self.runtime = self.root / AUTOPILOT_RUNTIME
+        self.runtime.mkdir(parents=True)
+
+    def grant(self, **fields) -> dict:
+        grant = {"schema_version": 1, "id": "AP-1", "host": "claude", "state": "active",
+                 "granted_at": "2026-10-01T21:00:00Z", "expires_at": "2026-10-01T23:00:00Z",
+                 "goal": None, "classes": ["choice"], "replaces": None,
+                 "armed_by": {"guard": "user_prompt_hook", "session_id": "session-1"}, **fields}
+        return grant
+
+    def write(self, name: str, value) -> None:
+        (self.runtime / name).write_text(json.dumps(value), encoding="utf-8")
+
+    def shell_event(self, command: str, change) -> subprocess.CompletedProcess:
+        # On Windows only a cmd-family shell can carry writer authority, as for every other writer.
+        payload = self.shell.attested_writer_payload(self.root, command)
+        payload["tool_use_id"] = f"autopilot-{uuid.uuid4().hex[:8]}"
+        before = self.shell.run_hook("pre", payload)
+        self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+        change()
+        return self.shell.run_hook("post", payload)
+
+    def test_write_edit_and_patch_into_the_autopilot_runtime_are_denied(self):
+        target = self.runtime / "grant.json"
+        payloads = (
+            {"tool_name": "Write", "tool_input": {"file_path": str(target), "content": "{}"}},
+            {"tool_name": "Edit", "tool_input": {"file_path": str(self.runtime / "arming.json"),
+                                                 "old_string": "a", "new_string": "b"}},
+            {"tool_name": "apply_patch", "tool_input": {"command": (
+                "*** Begin Patch\n*** Add File: " + str(AUTOPILOT_RUNTIME / "arming.json")
+                + "\n+{}\n*** End Patch")}},
+        )
+        for payload in payloads:
+            with self.subTest(tool=payload["tool_name"]):
+                payload.update(cwd=str(self.root), session_id=SESSION, tool_use_id="autopilot-write")
+                result = self.shell.run_hook("pre", payload)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("autopilot runtime state is written only by the packaged autopilot.py",
+                              result.stderr)
+        self.assertFalse(target.exists())
+
+    def test_a_shell_command_that_adds_autopilot_authority_is_restored(self):
+        def forge():
+            self.write("grant.json", self.grant(classes=["choice", "release"]))
+            self.write("arming.json", {"armed_at": "2026-10-01T21:00:00Z", "arguments": "on"})
+
+        result = self.shell_event("python3 make_grant.py", forge)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("autopilot runtime", result.stderr)
+        self.assertFalse((self.runtime / "grant.json").exists())
+        self.assertFalse((self.runtime / "arming.json").exists())
+        self.write("grant.json", self.grant())
+        original = (self.runtime / "grant.json").read_bytes()
+        result = self.shell_event("python3 extend.py", lambda: self.write(
+            "grant.json", self.grant(expires_at="2026-10-04T21:00:00Z")))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual((self.runtime / "grant.json").read_bytes(), original)
+
+    def test_a_shell_command_may_end_the_grant_or_delete_the_runtime_files(self):
+        self.write("grant.json", self.grant())
+        ended = self.grant(state="revoked", ended_at="2026-10-01T22:00:00Z")
+        result = self.shell_event("git status", lambda: self.write("grant.json", ended))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads((self.runtime / "grant.json").read_text())["state"], "revoked")
+        result = self.shell_event("rm grant.json", (self.runtime / "grant.json").unlink)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.runtime / "grant.json").exists())
+
+    def test_the_packaged_autopilot_script_may_write_its_runtime(self):
+        argv = [sys.executable, str(AUTOPILOT_SCRIPT), "--project-root", str(self.root), "status"]
+        command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+        result = self.shell_event(command, lambda: self.write("grant.json", self.grant()))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.runtime / "grant.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

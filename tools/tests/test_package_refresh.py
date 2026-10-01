@@ -343,8 +343,8 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             next_root = root / "marketplace-next"
             fixtures.make_refresh_pair(n_root, next_root)
 
-            n_identity = set()
-            next_identity = set()
+            n_release = set()
+            next_release = set()
             adapters = build_distributions.load_adapters(n_root)
             native_hosts = [
                 host for host, adapter in adapters.items()
@@ -363,11 +363,14 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
                 self.assertEqual(
                     next_provenance["version"], fixtures.REFRESH_NEXT_VERSION
                 )
-                n_identity.add(n_provenance["build_id"])
-                next_identity.add(next_provenance["build_id"])
-            self.assertEqual(len(n_identity), 1)
-            self.assertEqual(len(next_identity), 1)
-            self.assertNotEqual(n_identity, next_identity)
+                n_release.add(n_provenance["marketplace_release"])
+                next_release.add(next_provenance["marketplace_release"])
+            self.assertEqual(n_release, {fixtures.REFRESH_N_VERSION})
+            self.assertEqual(next_release, {fixtures.REFRESH_NEXT_VERSION})
+            self.assertNotEqual(
+                build_distributions.marketplace_snapshot(n_root)["build_id"],
+                build_distributions.marketplace_snapshot(next_root)["build_id"],
+            )
 
             with tempfile.TemporaryDirectory() as first, \
                     tempfile.TemporaryDirectory() as second:

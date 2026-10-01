@@ -27,7 +27,7 @@ import git_fixture
 REPO = "owner/project"
 NOW = dt.datetime(2026, 9, 28, 12, tzinfo=dt.timezone.utc)
 POLICY = {"schema_version": 1, "runner_os": "macos-latest", "python": "3.14", "node": "24"}
-VERSIONS = {"claude_code": "2.1.234", "codex": "0.147.0"}
+VERSIONS = {"claude_code": "2.1.284", "codex": "0.159.1"}
 RUNTIME = {"os": "Darwin", "os_release": "25.0.0", "machine": "arm64", "python": "3.14.1",
            "python_implementation": "CPython", "node": "24.1.0", **VERSIONS}
 

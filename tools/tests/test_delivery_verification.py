@@ -7,11 +7,13 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -607,6 +609,222 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
                     self.assertEqual(history[-1]["verb"], "up")
         verification.register_result(self.root, cancelled)
 
+    # Parallel lanes share one Item environment, so its lock serializes their commands (#327).
+    HOLDING_ENVIRONMENT = """import pathlib, sys, time
+here = pathlib.Path(__file__).resolve().parent
+if sys.argv[1] == "up":
+    (here / "holding").write_text("up")
+    deadline = time.monotonic() + 60
+    while not (here / "release").exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+(here / ("done-" + sys.argv[1])).write_text("done")
+print(sys.argv[1])
+"""
+
+    def lane_fixture(self):
+        """Give the Item two lanes and an approved environment whose `up` holds until released."""
+        markers = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, markers)
+        self.markers = Path(markers.name).resolve()
+        script = self.markers / "environment.py"
+        script.write_text(self.HOLDING_ENVIRONMENT, encoding="utf-8")
+        arguments = [sys.executable, str(script)]
+        command = subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
+        item, body = delivery.split_note(self.root / self.item_path)
+        item.update(runtime_required=True, environment_contract_ref="operation/environment-contract",
+                    implementation_schedule="parallel_lanes_v1",
+                    role_sequence=["backend_developer", "devops_engineer", "code_reviewer", "qa_engineer"],
+                    lane_scopes=["backend_developer:src", "devops_engineer:deploy"], lane_seams=[])
+        self.write(self.item_path, delivery.frontmatter(item, body))
+        self.note("workspace/docs/operation/environment-contract.md",
+                  {"status": "approved", "env_command": command, "env_workdir": ".",
+                   "scenarios": ["baseline"], "service_catalog": ["api"]})
+        self.commit()
+
+    def start_lane_holder(self) -> subprocess.Popen:
+        """Run devops_engineer's `environment --verb up` in another process until the test releases it."""
+        process = subprocess.Popen(
+            [sys.executable, str(ROOT / "plugins/software-engineering-team/scripts/delivery_verification.py"),
+             "--worktree", str(self.root), "lane-run", "--delivery", "DLV-001", "--story", "AUTH-01",
+             "--role", "devops_engineer", "--kind", "environment", "--verb", "up"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        def finish():
+            (self.markers / "release").write_text("go", encoding="utf-8")
+            try:
+                process.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+            # A killed holder's environment command outlives it; let it leave the worktree.
+            deadline = time.monotonic() + 10
+            while not (self.markers / "done-up").exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+
+        self.addCleanup(finish)
+        deadline = time.monotonic() + 60
+        while not (self.markers / "holding").exists():
+            if process.poll() is not None or time.monotonic() > deadline:
+                self.fail("the lane holder never took the Item environment")
+            time.sleep(0.02)
+        return process
+
+    def lane(self, role: str, kind: str, verb: str | None = None, value: str | None = None) -> dict:
+        return verification.lane_run(self.root, "DLV-001", "AUTH-01", role, kind, verb, value)
+
+    def assert_environment_free(self) -> None:
+        self.assertIsNone(verification.environment_holder(self.root))
+        self.assertFalse(verification.environment_lock_paths(self.root)[1].exists())
+
+    def test_parallel_lanes_run_environment_verbs_and_verification_commands_one_at_a_time(self):
+        """While one lane runs an environment verb, every other environment verb and verification
+        command of the Item is refused with its holder named (rv-accept-ideas-24)."""
+        self.lane_fixture()
+        holder = self.start_lane_holder()
+        busy = (r"^DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by devops_engineer, running"
+                rf" `environment --verb up` in process {holder.pid} since \S+; run this after it finishes$")
+        with self.assertRaisesRegex(RuntimeError, busy):
+            self.lane("backend_developer", "test")
+        with self.assertRaisesRegex(RuntimeError, busy):
+            self.lane("backend_developer", "environment", "seed", "baseline")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = verification.main(["--worktree", str(self.root), "lane-run", "--delivery", "DLV-001",
+                                      "--story", "AUTH-01", "--role", "backend_developer", "--kind", "test"])
+        self.assertEqual(code, 2)
+        self.assertRegex(json.loads(output.getvalue())["errors"][0], busy)
+        self.assertEqual(verification.environment_holder(self.root)["holder"], "devops_engineer")
+        (self.markers / "release").write_text("go", encoding="utf-8")
+        finished, _ = holder.communicate(timeout=60)
+        self.assertEqual(holder.returncode, 0, finished)
+        self.assertEqual(json.loads(finished)["exit_code"], 0)
+        # The holder released the lock as it finished, so the next lane runs.
+        self.assert_environment_free()
+        result = self.lane("backend_developer", "test")
+        self.assertEqual((result["exit_code"], result["interrupted_holder"]), (0, None))
+        self.assertEqual(Path(result["output_file"]).read_text(encoding="utf-8").strip(), "123")
+        # After the freeze the reader's verification commands and environment verbs take the same lock.
+        self.freeze()
+        with verification.environment_lock(self.root, "devops_engineer", "environment --verb down"):
+            held = (r"^DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by devops_engineer,"
+                    rf" running `environment --verb down` in process {os.getpid()} since ")
+            with self.assertRaisesRegex(RuntimeError, held):
+                verification.run_check(self.root, "test")
+            with self.assertRaisesRegex(RuntimeError, held):
+                verification.run_environment(self.root, "down")
+        self.assertNotIn("test", verification.read_session(self.root)["raw_evidence"])
+        self.assertNotIn("runtime", verification.read_session(self.root))
+
+    def test_the_environment_lock_is_released_on_every_exit_path(self):
+        self.lane_fixture()
+        original = subprocess.run
+
+        def command_ends(outcome):
+            def run(command, *args, **kwargs):
+                if not kwargs.get("shell"):
+                    return original(command, *args, **kwargs)
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                return subprocess.CompletedProcess(command, outcome, b"failed\n")
+            return mock.patch.object(verification.subprocess, "run", side_effect=run)
+
+        self.assertEqual(self.lane("backend_developer", "test")["exit_code"], 0)
+        self.assert_environment_free()
+        with command_ends(3):
+            self.assertEqual(self.lane("devops_engineer", "environment", "down")["exit_code"], 3)
+        self.assert_environment_free()
+        for failure in (OSError("command could not start"), KeyboardInterrupt()):
+            with self.subTest(failure=type(failure).__name__):
+                with command_ends(failure), self.assertRaises(type(failure)):
+                    self.lane("devops_engineer", "environment", "up")
+                self.assert_environment_free()
+        with mock.patch.object(verification.atomic_file, "replace_text", side_effect=OSError("disk full")), \
+                self.assertRaisesRegex(OSError, "disk full"):
+            self.lane("backend_developer", "test")
+        self.assert_environment_free()
+        for refused in (("backend_developer", "environment", "seed", "unknown"),
+                        ("qa_engineer", "test"), ("backend_developer", "test", "up")):
+            with self.subTest(refused=refused), self.assertRaises(RuntimeError):
+                self.lane(*refused)
+            self.assert_environment_free()
+        self.freeze()
+        self.assertEqual(verification.run_check(self.root, "test")["exit_code"], 0)
+        self.assert_environment_free()
+        with self.assertRaisesRegex(RuntimeError, "down before up"):
+            verification.run_environment(self.root, "up")
+        self.assert_environment_free()
+        self.assertEqual(verification.run_environment(self.root, "down")["exit_code"], 0)
+        self.assert_environment_free()
+        with self.assertRaisesRegex(RuntimeError, "READERS_ACTIVE"):
+            self.lane("backend_developer", "test")
+        self.assert_environment_free()
+
+    def test_only_the_operating_system_frees_a_dead_holders_lock(self):
+        """A holder that dies loses the lock with its process; its owner record never holds it."""
+        self.lane_fixture()
+        holder = self.start_lane_holder()
+        with self.assertRaisesRegex(RuntimeError, "^DELIVERY_ENVIRONMENT_BUSY: "):
+            self.lane("backend_developer", "test")
+        holder.kill()
+        holder.communicate()
+        owner = verification.environment_lock_paths(self.root)[1]
+        self.assertEqual(json.loads(owner.read_text(encoding="utf-8"))["pid"], holder.pid)
+        self.assertIsNone(verification.environment_holder(self.root))
+        (self.markers / "release").write_text("go", encoding="utf-8")
+        result = self.lane("backend_developer", "test")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual({key: result["interrupted_holder"][key] for key in ("holder", "command", "pid")},
+                         {"holder": "devops_engineer", "command": "environment --verb up", "pid": holder.pid})
+        self.assert_environment_free()
+        # A record naming a live process holds nothing without its process's lock.
+        record = {"holder": "devops_engineer", "command": "environment --verb up", "pid": os.getpid(),
+                  "started_at": "2026-01-01T00:00:00Z"}
+        owner.write_text(json.dumps(record), encoding="utf-8")
+        self.assertIsNone(verification.environment_holder(self.root))
+        self.assertEqual(self.lane("backend_developer", "test")["interrupted_holder"], record)
+        self.assert_environment_free()
+
+    def test_lane_commands_drop_interpreter_search_paths_outside_the_item_worktree(self):
+        """A lane command never inherits a search path that names another checkout, so a fixture run
+        cannot import that checkout's code; entries inside the Item worktree stay (#327)."""
+        self.lane_fixture()
+        names = ("PYTHONPATH", "PYTHONHOME", "NODE_PATH")
+        script = self.markers / "search_paths.py"
+        script.write_text(f"import json, os\nprint(json.dumps({{name: os.environ.get(name) for name in {names!r}}}))\n",
+                          encoding="utf-8")
+        arguments = [sys.executable, str(script)]
+        contract_path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(contract_path)
+        contract["test_command"] = subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
+        self.write(contract_path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
+        self.commit()
+        outside = self.markers / "other-checkout"
+        outside.mkdir()
+        inside = [str(self.root / "src"), "src"]
+        escaping = [str(outside / "scripts"), os.path.join("..", "escape")]
+        try:
+            (self.root / "linked").symlink_to(outside, target_is_directory=True)
+            escaping.append("linked")
+        except OSError:
+            pass  # A host without symlinks still checks every other entry.
+        inherited = {"PYTHONPATH": os.pathsep.join([*escaping[:1], *inside, *escaping[1:]]),
+                     "PYTHONHOME": str(outside), "NODE_PATH": str(outside / "node_modules")}
+        with mock.patch.dict(os.environ, inherited):
+            result = self.lane("backend_developer", "test")
+        output = Path(result["output_file"]).read_text(encoding="utf-8")
+        self.assertEqual(result["exit_code"], 0, output)
+        self.assertEqual(json.loads(output), {"PYTHONPATH": os.pathsep.join(inside), "PYTHONHOME": None,
+                                              "NODE_PATH": None})
+        self.assertEqual(result["dropped_search_paths"], {
+            "PYTHONPATH": escaping, "PYTHONHOME": [str(outside)], "NODE_PATH": [str(outside / "node_modules")]})
+        reference = " ".join((ROOT / "plugins/software-engineering-team/skill-content/deliver/references"
+                              / "switch-implementation_schedule-parallel_lanes_v1.md")
+                             .read_text(encoding="utf-8").split())
+        self.assertEqual(verification.LANE_SEARCH_PATH_VARIABLES, names)
+        self.assertIn("The interpreter search paths `PYTHONPATH`, `PYTHONHOME` and `NODE_PATH` are unset or"
+                      " point only inside the Item worktree.", reference)
+        self.assertIn("keeps every entry inside the worktree", reference)
+
     def test_runtime_evidence_requires_unchanged_environment_and_fresh_events(self):
         item, body = delivery.split_note(self.root / self.item_path)
         item.update(runtime_required=True, environment_contract_ref="operation/environment-contract")
@@ -715,6 +933,247 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertTrue(set(names).issubset(frozen["candidate"]["source_observations"]))
         self.assertEqual(verification.require_current(self.root, frozen), frozen["candidate"])
 
+
+    def review_loop(self, value="blocking_delta"):
+        import process_policy
+        docs = self.root / "workspace/docs"
+        def policy(*argv):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+        policy("init")
+        policy("set", "--switch", "review_loop", "--value", value)
+        policy("approve")
+        self.commit()
+
+    def approve_evidence(self):
+        args = type("Args", (), {"docs": ".", "worktree": str(self.root), "delivery": "DLV-001", "story": "AUTH-01"})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery.approve_item_evidence(args)
+        self.assertEqual(code, 0, output.getvalue())
+        return delivery.section_bodies(delivery.split_note(self.root / self.directory / "items/auth-01/code-review.md")[1])
+
+    def test_current_keeps_code_review_minors_as_notes(self):
+        self.freeze()
+        result = self.result()
+        result["findings"] = [{"id": "CR-2", "severity": "minor", "status": "open", "verification": "Rename it"}]
+        verification.register_result(self.root, result)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
+        self.assertEqual(self.approve_evidence()["Deviations and Follow-ups"], delivery.SECTION_PLACEHOLDER)
+
+    def test_blocking_delta_code_review_minors_are_follow_ups_on_the_record(self):
+        self.review_loop()
+        self.freeze()
+        item = (self.root / self.item_path).read_bytes()
+        result = self.result()
+        minor = {"id": "CR-2", "severity": "MINOR", "status": "open", "verification": "Rename it"}
+        result["findings"] = [dict(minor)]
+        with self.assertRaisesRegex(RuntimeError, "code review follow-ups are incomplete: CR-2 needs its file; "
+                                                  "CR-2 needs its description; CR-2 owner_role must be one of: "
+                                                  "backend_developer; CR-2 needs a concrete revisit_trigger"):
+            verification.register_result(self.root, result)
+        minor.update(file="src/product.py:1", description="The name value hides | its unit.",
+                     owner_role="frontend_developer", revisit_trigger="Revisit at the next change to src/product.py.")
+        result["findings"] = [dict(minor)]
+        with self.assertRaisesRegex(RuntimeError, "CR-2 owner_role must be one of: backend_developer$"):
+            verification.register_result(self.root, result)
+        minor["owner_role"] = "backend_developer"
+        # A resolved minor is no follow-up, so it needs no follow-up fields.
+        result["findings"] = [dict(minor), {"id": "CR-1", "severity": "minor", "status": "resolved",
+                                            "verification": "Renamed"}]
+        verification.register_result(self.root, result)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
+        self.assertEqual(self.approve_evidence()["Deviations and Follow-ups"], "\n".join([
+            delivery.ITEM_FOLLOW_UPS, "",
+            "| finding | severity | file | description | owner_role | revisit_trigger |",
+            "|---|---|---|---|---|---|",
+            "| CR-2 | MINOR | src/product.py:1 | The name value hides \\| its unit. | backend_developer "
+            "| Revisit at the next change to src/product.py. |"]))
+        # Evidence approval writes only the two reports; the Item keeps its approved bytes.
+        self.assertEqual((self.root / self.item_path).read_bytes(), item)
+
+    def test_blocking_delta_records_that_no_follow_up_is_open(self):
+        self.review_loop()
+        self.freeze()
+        self.settle()
+        self.assertEqual(self.approve_evidence()["Deviations and Follow-ups"], delivery.ITEM_FOLLOW_UPS + " none.")
+
+    def claim(self, identifier="CR-1", severity="major", **extra):
+        return {"id": identifier, "severity": severity, "status": "open", "verification": "Rerun the regression",
+                "file": "src/product.py:1", "description": "The value can overflow its column.", **extra}
+
+    def ruling(self, finding="CR-1", claimed="major", ruling="minor",
+               reason="src/product.py:1 assigns a constant, so no input reaches the column.", **extra):
+        row = {"finding": finding, "claimed_severity": claimed, "calibrated_severity": ruling, "reason": reason}
+        if ruling == "minor":
+            row.update(owner_role="backend_developer", revisit_trigger="Revisit at the next change to src/product.py.")
+        return {**row, **extra}
+
+    def calibration(self, claims, rows):
+        """The calibration reader's own result: its rulings on the claims as returned."""
+        session = verification.read_session(self.root)
+        return {"candidate_hash": session["candidate"]["candidate_hash"], "session_id": session["session_id"],
+                "role": "code_reviewer", "mode": "calibration", "report": "Independent calibration of the claims",
+                "claims": claims, "calibration": rows}
+
+    def test_blocking_delta_calibrates_every_open_blocking_claim_before_it_gates(self):
+        self.review_loop()
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [self.claim(), self.claim("CR-2", "critical")]
+        invalid = self.ruling("CR-2", "critical", "invalid",
+                              reason="src/product.py:1 is the only write, and it holds no secret or input.")
+        missing = "exactly one row for each open critical or major claim no earlier calibration ruled: CR-1, CR-2"
+        refusals = (
+            (missing, [self.ruling()]),
+            (missing, [self.ruling(), invalid, self.ruling()]),
+            ("CR-2 calibration must record the claimed severity critical",
+             [self.ruling(), {**invalid, "claimed_severity": "major"}]),
+            ("CR-1 calibrated_severity must confirm major or be minor or invalid",
+             [self.ruling(ruling="critical"), invalid]),
+            ("CR-1 calibration reason must cite the candidate text as path:line",
+             [self.ruling(reason="The value is a constant, so no input reaches the column."), invalid]),
+            ("CR-2 calibration reason must cite the candidate text as path:line",
+             [self.ruling(), {**invalid, "reason": "src/missing.py:1 is the only write of the value."}]),
+            # The frozen candidate's src/product.py holds one line.
+            ("CR-1 calibration reason must cite the candidate text as path:line",
+             [self.ruling(reason="src/product.py:12 assigns a constant, so no input reaches the column."),
+              invalid]),
+            ("CR-1 calibrated minor needs an owner_role of backend_developer and a concrete revisit_trigger",
+             [self.ruling(owner_role="qa_engineer"), invalid]),
+        )
+        for message, rows in refusals:
+            with self.subTest(message=message, rows=len(rows)):
+                with self.assertRaisesRegex(RuntimeError, re.escape(message)):
+                    verification.register_calibration(self.root, self.calibration(failed["findings"], rows))
+        # The claiming result registers only after the calibration reader's own result.
+        with self.assertRaisesRegex(RuntimeError, "register the calibration reader's result with calibrate"
+                                                  " for exactly the open critical or major claims no earlier"
+                                                  " calibration ruled, as returned: CR-1, CR-2"):
+            verification.register_result(self.root, failed)
+        verification.register_calibration(self.root, self.calibration(failed["findings"], [self.ruling(), invalid]))
+        # A calibrated pass still proves that every review pass ran.
+        with self.assertRaisesRegex(RuntimeError, "a calibrated code_reviewer pass requires correctness evidence"):
+            verification.register_result(self.root, {**failed, "checks": {}})
+        # Every claim lowered or disproved: the review passes without a repair cycle.
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
+        verification.validate(self.root, "DLV-001", "AUTH-01")
+        section = self.approve_evidence()["Deviations and Follow-ups"]
+        self.assertEqual(section.split("\n\n" + delivery.ITEM_CALIBRATION, 1), ["\n".join([
+            delivery.ITEM_FOLLOW_UPS, "",
+            "| finding | severity | file | description | owner_role | revisit_trigger |",
+            "|---|---|---|---|---|---|",
+            "| CR-1 | minor | src/product.py:1 | The value can overflow its column. | backend_developer "
+            "| Revisit at the next change to src/product.py. |"]), "\n".join([
+            "", "",
+            "| finding | claimed_severity | calibrated_severity | reason |",
+            "|---|---|---|---|",
+            "| CR-1 | major | minor | src/product.py:1 assigns a constant, so no input reaches the column. |",
+            "| CR-2 | critical | invalid | src/product.py:1 is the only write, and it holds no secret or input. |"])])
+
+    def test_the_claiming_reviewer_never_calibrates_its_own_claims(self):
+        # The reviewer that claimed two majors lowers both in its own result.
+        self.review_loop()
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [self.claim(), self.claim("CR-2")]
+        failed["calibration"] = [self.ruling(), self.ruling("CR-2")]
+        with self.assertRaisesRegex(RuntimeError, "calibration rows come only from the calibration reader's own"
+                                                  " result, registered with calibrate; the claiming result"
+                                                  " carries none"):
+            verification.register_result(self.root, failed)
+        del failed["calibration"]
+        # A calibration of other claims, or of edited claims, never stands in.
+        verification.register_calibration(self.root, self.calibration(
+            [self.claim(), self.claim("CR-2", description="The value is unused.")],
+            [self.ruling(), self.ruling("CR-2")]))
+        with self.assertRaisesRegex(RuntimeError, "for exactly the open critical or major claims no earlier"
+                                                  " calibration ruled, as returned: CR-1, CR-2"):
+            verification.register_result(self.root, failed)
+        with self.assertRaisesRegex(RuntimeError, "already calibrated; each claim is ruled once"):
+            verification.register_calibration(self.root, self.calibration(
+                failed["findings"], [self.ruling(), self.ruling("CR-2")]))
+        stored = verification.read_session(self.root)["calibration"]["result"]
+        self.assertEqual(stored["result_hash"], verification.digest(
+            {key: item for key, item in stored.items() if key != "result_hash"}))
+        # A calibration comes before the claiming result settles, never after it.
+        self.freeze_fresh()
+        verification.register_result(self.root, self.result())
+        with self.assertRaisesRegex(RuntimeError, "calibrate the claims before the claiming code review result"
+                                                  " is registered"):
+            verification.register_calibration(self.root, self.calibration(
+                failed["findings"], [self.ruling(), self.ruling("CR-2")]))
+
+    def freeze_fresh(self):
+        session = verification.read_session(self.root)
+        for role, worker in session["workers"].items():
+            if worker["state"] == "running":
+                cancelled = self.result(role, "review_initial" if role == "code_reviewer" else "qa_final", "cancelled")
+                verification.register_result(self.root, {**cancelled, "cancellation_confirmed": True})
+        return verification.freeze(self.root, "DLV-001", "AUTH-01", fresh=True)
+
+    def test_calibration_runs_only_on_an_open_blocking_claim(self):
+        self.review_loop()
+        self.freeze()
+        result = self.result()
+        result["findings"] = [self.claim(severity="minor", owner_role="backend_developer",
+                                         revisit_trigger="Revisit at the next change to src/product.py.")]
+        with self.assertRaisesRegex(RuntimeError, "calibration claims must list each open critical or major"
+                                                  " claim once, as returned"):
+            verification.register_calibration(self.root, self.calibration(result["findings"], [self.ruling()]))
+        verification.register_calibration(self.root, self.calibration([self.claim()], [self.ruling()]))
+        with self.assertRaisesRegex(RuntimeError, "no earlier calibration ruled, as returned: none"):
+            verification.register_result(self.root, result)
+
+    def test_a_confirmed_claim_gates_and_each_ruling_carries_to_the_next_cycle(self):
+        self.review_loop()
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [self.claim(), self.claim("CR-2"), self.claim("CR-3")]
+        verification.register_calibration(self.root, self.calibration(failed["findings"], [
+            self.ruling(ruling="major", reason="src/product.py:1 writes the value from user input unchecked."),
+            self.ruling("CR-2"),
+            self.ruling("CR-3", ruling="invalid", reason="src/product.py:1 never reads the value it is said to read.")]))
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        with self.assertRaisesRegex(RuntimeError, "same-candidate final passed code_reviewer"):
+            verification.validate(self.root, "DLV-001", "AUTH-01")
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        self.freeze()
+        unresolved = {finding["id"]: finding for finding in verification.manifest(
+            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["unresolved_findings"]}
+        self.assertEqual(sorted(unresolved), ["CR-1", "CR-2"])
+        self.assertEqual((unresolved["CR-1"]["severity"], unresolved["CR-1"]["calibrated_severity"]),
+                         ("major", "major"))
+        self.assertEqual((unresolved["CR-2"]["severity"], unresolved["CR-2"]["claimed_severity"],
+                          unresolved["CR-2"]["owner_role"]), ("minor", "major", "backend_developer"))
+        follow_up = {key: unresolved["CR-2"][key] for key in (
+            "id", "severity", "status", "verification", "file", "description", "owner_role", "revisit_trigger")}
+        repeat = self.result(mode="review_repair", verdict="failed")
+        repeat["findings"] = [self.claim(), follow_up]
+        with self.assertRaisesRegex(RuntimeError, "an earlier calibration already ruled CR-1"):
+            verification.register_calibration(self.root, self.calibration([self.claim()], [
+                self.ruling(reason="src/product.py:1 assigns a constant, so no input reaches it.")]))
+        with self.assertRaisesRegex(RuntimeError, "inherited finding severity must be preserved"):
+            verification.register_result(self.root, {**repeat, "findings": [self.claim(), {**follow_up, "severity": "major"}]})
+        repair = self.result(mode="review_repair")
+        repair["findings"] = [self.claim(status="resolved"), follow_up]
+        verification.register_result(self.root, repair)
+
+    def test_current_ignores_calibration_rows(self):
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [self.claim()]
+        with self.assertRaisesRegex(RuntimeError, "severity calibration runs only at review_loop blocking_delta"):
+            verification.register_calibration(self.root, self.calibration([self.claim()], [self.ruling()]))
+        self.assertNotIn("calibration", verification.read_session(self.root))
+        failed["calibration"] = [self.ruling()]
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
+        with self.assertRaisesRegex(RuntimeError, "same-candidate final passed code_reviewer"):
+            verification.validate(self.root, "DLV-001", "AUTH-01")
 
     def test_durable_diagnostic_or_mismatched_report_cannot_integrate(self):
         item = {"verification_schedule": "parallel_snapshot_v1"}

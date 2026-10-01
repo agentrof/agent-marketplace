@@ -1,0 +1,4 @@
+{
+  "summary": "`tools/release.py check-pr` no longer lets a pull request skip a package's release impact when that package's only `dist/` change is its `.agent-marketplace-package.json` provenance. The exemption covered the shared build identity that every source change rewrote; schema-4 provenance carries none, so the file now changes only when what the package declares changes, such as a host runtime contract or the Delivery protocol capability.",
+  "components": {}
+}

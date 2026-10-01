@@ -251,6 +251,13 @@
         "a": 1,
         "rgb": 2388387
       }
+    },
+    {
+      "query": "tag:#doc/process-policy",
+      "color": {
+        "a": 1,
+        "rgb": 2388387
+      }
     }
   ],
   "collapse-display": false,

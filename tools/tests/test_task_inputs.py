@@ -2,20 +2,34 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 sys.path.insert(0, str(ROOT / "tools/tests"))
+import backlog_compile
+import process_policy
 import task_inputs
-from git_fixture import init_repository
+from backlog_fixture import CONSTRAINT, CRITERION, DESIGN, EXPERIENCE, _author_story, make_approved_backlog
+from git_fixture import init_repository, remove_temporary
+from test_default_equivalence import SWITCH_DATA, SWITCH_FILES, build_task_package, build_task_project
+
+
+def commit_all(root):
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                    "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture"], check=True, capture_output=True)
 
 
 class TaskInputTests(unittest.TestCase):
@@ -47,9 +61,7 @@ class TaskInputTests(unittest.TestCase):
         self.commit(root)
 
     def commit(self, root):
-        subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                        "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture"], check=True, capture_output=True)
+        commit_all(root)
 
     def note(self, root, relative, kind, owner, extra=""):
         path = root / relative
@@ -96,7 +108,8 @@ class TaskInputTests(unittest.TestCase):
                 self.note(root, "workspace/docs/" + path, kind, owner)
             self.commit(root)
             closure = {"scope": rows[1][0], "primary_paths": [row[0] for row in rows[:4]],
-                       "paths": [row[0] for row in rows], "review": {"path": rows[4][0]}}
+                       "paths": [row[0] for row in rows], "review": {"path": rows[4][0]},
+                       "check": {}}
             unscoped = task_inputs.manifest(entry="backlog-plan", mode="revise", project=root,
                                             role="product-owner", inputs=["workspace/docs/" + row[0] for row in rows])
             self.assertEqual(unscoped["write_scope"]["status"], "unresolved")
@@ -110,6 +123,36 @@ class TaskInputTests(unittest.TestCase):
                     reader = task_inputs.manifest(**kwargs, role=role)
                     self.assertEqual(reader["write_scope"]["status"], "read_only")
                     self.assertEqual(reader["write_scope"]["allowed_write_area"], [])
+
+    def test_product_owner_scope_covers_a_story_right_after_stub_story(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            docs = root / "workspace/docs"
+            (docs / "maps").mkdir(parents=True)
+            (root / "workspace/config.json").write_text(json.dumps({
+                "schema_version": 2, "team_id": "software-engineering-team",
+                "output_language": "English", "terminology_language": "English",
+            }), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                make_approved_backlog(docs)
+                self.commit(root)
+                self.assertEqual(backlog_compile.stub_story(SimpleNamespace(
+                    docs=str(docs), epic="delivery-fixture", slug="job-worker", id="AUTH-02",
+                    title="Job worker", scope=None, work_kind="technical", criterion_ref=[],
+                    experience_ref=[], evidence_ref=["[[solution-design/decisions/fixture-api|Fixture API]]"],
+                    uses_design=[], constrained_by=[], implements=[])), 0)
+            folder = "workspace/docs/backlog/epics/delivery-fixture/stories/job-worker/"
+            kwargs = dict(entry="backlog-plan", project=root, epic="EP-001")
+            writer = task_inputs.manifest(**kwargs, role="product-owner", mode="revise")
+            self.assertEqual(writer["write_scope"]["status"], "resolved")
+            area = [row["path"] for row in writer["write_scope"]["allowed_write_area"]]
+            self.assertIn(folder + "story.md", area)
+            self.assertIn(folder + "test-plan.md", area)
+            self.assertTrue(writer["backlog_scope"]["check"]["scaffold_findings"])
+            for role, mode in (("backlog-reviewer", "review"), ("product-owner", "review")):
+                with self.assertRaisesRegex(ValueError, "untouched"):
+                    task_inputs.manifest(**kwargs, role=role, mode=mode)
 
     def test_item_claims_bind_one_item_and_role_without_granting_runtime_or_vault_writes(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -132,6 +175,77 @@ class TaskInputTests(unittest.TestCase):
             self.assertEqual(task_inputs.manifest(**kwargs)["write_scope"]["status"], "unresolved")
             with self.assertRaisesRegex(ValueError, "stale"):
                 task_inputs.manifest(**kwargs, expected_hash=result["source_hash"])
+
+    def test_lane_roles_bind_only_their_lane_scope_while_the_architect_keeps_every_claim(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            lanes = ("implementation_schedule: parallel_lanes_v1\nrole_sequence:\n  - software_architect\n"
+                     "  - backend_developer\n  - devops_engineer\n  - code_reviewer\n  - qa_engineer\n"
+                     "path_claims:\n  - deploy\n  - src/api\n  - workspace/docs\n"
+                     "lane_scopes:\n  - backend_developer:src/api\n  - devops_engineer:deploy\n"
+                     "lane_seams:\n")
+            item = self.note(root, "workspace/docs/delivery/deliveries/one/items/st-001/item.md",
+                             "delivery-item", "backend_developer", lanes)
+            self.commit(root)
+            kwargs = dict(entry="deliver", mode="create", project=root, inputs=[item])
+
+            def scope(role):
+                return task_inputs.manifest(role=role, **kwargs)["write_scope"]
+
+            lane_note = [constraint for constraint in scope("backend-developer")["constraints"]
+                         if constraint.startswith("parallel lane:")]
+            self.assertEqual(len(lane_note), 1)
+            for role, paths in (("backend-developer", ["src/api"]), ("devops-engineer", ["deploy"])):
+                with self.subTest(role=role):
+                    self.assertEqual(scope(role)["allowed_write_area"], [
+                        {"path": path, "coverage": "path_and_descendants", "source": item} for path in paths])
+                    self.assertIn(lane_note[0], scope(role)["constraints"])
+            # The architect runs alone before the lanes, so its area is the Item's claims.
+            architect = scope("software-architect")
+            self.assertEqual([area["path"] for area in architect["allowed_write_area"]], ["deploy", "src/api"])
+            self.assertNotIn(lane_note[0], architect["constraints"])
+            content = (root / item).read_text(encoding="utf-8")
+            for broken in (content.replace("backend_developer:src/api", "backend_developer:src\\api"),
+                           content.replace("backend_developer:src/api", "backend_developer:elsewhere"),
+                           content.replace("parallel_lanes_v1", "parallel_lanes_v2")):
+                with self.subTest(broken=broken):
+                    (root / item).write_text(broken, encoding="utf-8")
+                    self.assertEqual(scope("backend-developer")["status"], "unresolved")
+            # Without the schedule every implementation role holds every claim, as before.
+            (root / item).write_text(content.replace("implementation_schedule: parallel_lanes_v1\n", ""),
+                                     encoding="utf-8")
+            self.assertEqual([area["path"] for area in scope("backend-developer")["allowed_write_area"]],
+                             ["deploy", "src/api"])
+
+    def test_parallel_lane_instructions_are_bound_only_at_parallel_lanes(self):
+        planning = "skill-content/execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md"
+        execution = "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            tasks = (("execution-plan", "software-architect", planning),
+                     ("deliver", "backend-developer", execution),
+                     ("deliver", "code-reviewer", execution),
+                     ("deliver", None, execution))
+
+            def bound(entry, role):
+                result = task_inputs.manifest(entry=entry, role=role, mode="review", project=root)
+                return set(result["required_reads"]) | {item["path"] for item in result["instructions"]}
+
+            for entry, role, reference in tasks:
+                with self.subTest(entry=entry, role=role, policy=False):
+                    self.assertFalse({planning, execution} & bound(entry, role))
+            docs = root / "workspace/docs"
+            def policy(*argv):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+            policy("init")
+            policy("set", "--switch", "implementation_schedule", "--value", "parallel_lanes_v1")
+            policy("approve")
+            for entry, role, reference in tasks:
+                with self.subTest(entry=entry, role=role, policy=True):
+                    self.assertEqual({planning, execution} & bound(entry, role), {reference})
 
     def test_unknown_write_scope_remains_empty_with_unresolved_transition_condition(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -268,6 +382,210 @@ class TaskInputTests(unittest.TestCase):
         qa = task_inputs.manifest(entry="deliver", role="qa-engineer", mode="create")
         self.assertEqual(qa["write_boundary"], "read_only")
 
+    def test_review_panel_protocol_is_bound_only_at_lens_panel(self):
+        protocol = "skill-content/challenge-review/references/switch-review_panels-lens_panel.md"
+        panels = "skill-content/challenge-review/data/review-panels.json"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            tasks = (("configure", "devops-engineer", ["challenge-review"]),
+                     ("configure", "qa-engineer", ["challenge-review"]),
+                     ("backlog-plan", "backlog-reviewer", []),
+                     ("backlog-plan", "product-owner", ["challenge-review"]))
+            for entry, role, skills in tasks:
+                with self.subTest(entry=entry, role=role, policy=False):
+                    result = task_inputs.manifest(entry=entry, role=role, mode="review",
+                                                  project=root, skills=skills)
+                    self.assertIn("skill-content/challenge-review/SKILL.md", result["required_reads"])
+                    # The lens data is read only by the values that list it.
+                    self.assertNotIn(panels, [item["path"] for item in result["instructions"]])
+                    self.assertNotIn(protocol, [item["path"] for item in result["instructions"]])
+            plain = task_inputs.manifest(entry="configure", role="devops-engineer", mode="review")
+            self.assertNotIn("skill-content/challenge-review/SKILL.md", plain["required_reads"])
+            docs = root / "workspace/docs"
+            def policy(*argv):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+            policy("init")
+            policy("set", "--switch", "review_panels", "--value", "lens_panel")
+            policy("approve")
+            for entry, role, skills in tasks:
+                with self.subTest(entry=entry, role=role, policy=True):
+                    result = task_inputs.manifest(entry=entry, role=role, mode="review",
+                                                  project=root, skills=skills)
+                    self.assertIn(protocol, result["required_reads"])
+                    self.assertIn(panels, result["required_reads"])
+                    self.assertEqual(result["write_boundary"], "read_only")
+
+    def test_process_policy_binds_only_the_chosen_switch_references(self):
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw).resolve()
+            package, project = base / "package", base / "project"
+            build_task_package(package, switch_files=True)
+            build_task_project(project)
+            docs = project / "workspace/docs"
+            reader = dict(entry="fixture-entry", role="fixture-reader", mode="review",
+                          project=project, package=package)
+            plain = task_inputs.manifest(**reader)
+
+            def policy(*argv):
+                output = io.StringIO()
+                with mock.patch.object(process_policy, "PACKAGE", package), \
+                        contextlib.redirect_stdout(output):
+                    self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]),
+                                     0, output.getvalue())
+
+            policy("init")
+            policy("set", "--switch", "fixture_mode", "--value", "fast")
+            with self.assertRaisesRegex(ValueError, "Process Policy revision 1 is a draft"):
+                task_inputs.manifest(**reader)
+            policy("approve")
+            chosen = task_inputs.manifest(**reader)
+            # The value's data travels with its references as a required read.
+            self.assertEqual(sorted(set(chosen["required_reads"]) - set(plain["required_reads"])),
+                             sorted([*SWITCH_FILES, SWITCH_DATA]))
+            self.assertEqual(chosen["conditional_reads"], plain["conditional_reads"])
+            self.assertIn("workspace/docs/delivery/process-policy.md",
+                          [record["path"] for record in chosen["project_inputs"]])
+            self.assertTrue({*SWITCH_FILES, SWITCH_DATA}
+                            <= {record["path"] for record in chosen["instructions"]})
+            self.assertNotIn(SWITCH_DATA, [record["path"] for record in plain["instructions"]])
+
+            policy("begin-revision")
+            policy("set", "--switch", "fixture_mode", "--default")
+            policy("approve")
+            default = task_inputs.manifest(**reader)
+            self.assertEqual(default["required_reads"], plain["required_reads"])
+            self.assertEqual(default["instructions"], plain["instructions"])
+            self.assertEqual([record["path"] for record in default["project_inputs"]],
+                             ["workspace/docs/delivery/process-policy.md"])
+            (docs / "delivery/process-policy.md").write_text("changed\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "process policy cannot bind switch instructions"):
+                task_inputs.manifest(**reader, expected_hash=default["source_hash"])
+
+    def test_a_task_inside_a_pinned_delivery_refuses_a_policy_changed_since_the_pin(self):
+        import delivery_compile
+
+        lanes = "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            docs = root / "workspace/docs"
+            (docs / "maps").mkdir(parents=True)
+            make_approved_backlog(docs)
+            self.make_project(root)
+
+            def run(call, *args):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(call(*args), 0)
+
+            def policy(*argv):
+                run(process_policy.main, [argv[0], "--docs", str(docs), *argv[1:]])
+
+            dod = SimpleNamespace(docs=str(docs), title="Project", file=None)
+            run(delivery_compile.init_dod, dod)
+            run(delivery_compile.approve_dod, dod)
+            policy("init")
+            policy("approve")
+            run(delivery_compile.init_delivery, SimpleNamespace(
+                docs=str(docs), id=None, slug="auth", goal="Authenticate", outcome=None,
+                target_branch="main", story=["AUTH-01"]))
+            run(delivery_compile.approve_scope, SimpleNamespace(docs=str(docs), delivery="DLV-001"))
+            self.commit(root)
+            item = "workspace/docs/delivery/deliveries/dlv-001-auth/items/auth-01/item.md"
+            pinned = process_policy.path_for(docs).read_bytes()
+
+            def bound(**kwargs):
+                result = task_inputs.manifest(entry="deliver", role="backend-developer",
+                                              mode="create", project=root, **kwargs)
+                return set(result["required_reads"])
+
+            inside = ({"inputs": [item]}, {"delivery": "DLV-001"})
+            for kwargs in inside:
+                self.assertNotIn(lanes, bound(**kwargs))
+            policy("begin-revision")
+            policy("set", "--switch", "implementation_schedule", "--value", "parallel_lanes_v1")
+            policy("approve")
+            # The Delivery runs under the values it pinned; its tasks never bind a later one.
+            drift = ("process policy cannot bind switch instructions: DLV-001: Delivery runs switch"
+                     " implementation_schedule at sequential_v1 under its pinned Process Policy"
+                     " revision 1, but the approved revision 2 sets parallel_lanes_v1")
+            for kwargs in inside:
+                with self.subTest(context=kwargs), self.assertRaisesRegex(ValueError, drift):
+                    bound(**kwargs)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = task_inputs.main(["--entry", "deliver", "--role", "backend-developer",
+                                         "--mode", "create", "--project-root", str(root),
+                                         "--delivery", "DLV-001"])
+            self.assertEqual(code, 1)
+            self.assertIn("Delivery runs switch implementation_schedule at sequential_v1",
+                          output.getvalue())
+            # A task outside any Delivery follows the project's current policy.
+            self.assertIn(lanes, bound())
+            # Restoring the pinned policy, or re-pinning through a new execution
+            # approval, lets the Delivery's tasks bind again.
+            current = process_policy.path_for(docs).read_bytes()
+            process_policy.path_for(docs).write_bytes(pinned)
+            for kwargs in inside:
+                self.assertNotIn(lanes, bound(**kwargs))
+            # Without a policy every switch is at its default, as the pinned revision sets it.
+            process_policy.path_for(docs).unlink()
+            for kwargs in inside:
+                self.assertNotIn(lanes, bound(**kwargs))
+            # From the Delivery Review on the Delivery reads the revision it pinned,
+            # so a policy set for the next Delivery never changes what its tasks bind.
+            process_policy.path_for(docs).write_bytes(current)
+            path = docs / "delivery/deliveries/dlv-001-auth/delivery.md"
+            props, body = delivery_compile.split_note(path)
+            props["status"] = "review"
+            delivery_compile.atomic_text(path, delivery_compile.frontmatter(props, body))
+            self.assertNotIn(lanes, bound(inputs=[item]))
+            with self.assertRaisesRegex(ValueError, "Delivery not found: DLV-404"):
+                bound(delivery="DLV-404")
+
+    def test_a_switch_reference_binds_only_for_tasks_of_its_owning_flows(self):
+        values = {"review_panels": "lens_panel", "review_loop": "blocking_delta",
+                  "mechanical_pass_tier": "mechanical"}
+        references = {switch: f"skill-content/challenge-review/references/switch-{switch}-{value}.md"
+                      for switch, value in values.items()}
+        # Every task below selects challenge-review; only the switches whose
+        # owning flows its entry runs reach it.
+        tasks = {("business-analysis", "analysis-challenger"): set(),
+                 ("experience-design", "experience-reviewer"): set(),
+                 ("backlog-plan", "backlog-reviewer"): set(references),
+                 ("solution-design", "solution-reviewer"): set(references),
+                 ("design-system", "design-system-reviewer"): {"review_panels", "review_loop"}}
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            docs = root / "workspace/docs"
+
+            def policy(command, *argv):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(process_policy.main([command, "--docs", str(docs), *argv]), 0)
+
+            policy("init")
+            for switch, value in values.items():
+                policy("set", "--switch", switch, "--value", value)
+            policy("approve")
+            for (entry, role), owned in tasks.items():
+                with self.subTest(entry=entry, role=role):
+                    result = task_inputs.manifest(entry=entry, role=role, mode="review", project=root)
+                    self.assertIn("skill-content/challenge-review/SKILL.md", result["required_reads"])
+                    self.assertEqual({switch for switch, path in references.items()
+                                      if path in result["required_reads"]}, owned)
+
+    def test_no_shipped_manifest_binds_a_switch_reference_without_a_policy(self):
+        policy = task_inputs.catalog()
+        for entry, route in policy["entries"].items():
+            for role in route["roles"] or [None]:
+                with self.subTest(entry=entry, role=role):
+                    result = task_inputs.manifest(entry=entry, role=role, mode="review")
+                    paths = [*result["required_reads"],
+                             *(item["path"] for item in result["conditional_reads"]),
+                             *(item["path"] for item in result["instructions"])]
+                    self.assertFalse([path for path in paths if "/references/switch-" in path])
+
     def test_changed_project_input_invalidates_manifest_without_runtime_writes(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -323,6 +641,169 @@ class TaskInputTests(unittest.TestCase):
             task_inputs.manifest(entry="issue-report", role=None, mode="create", project=ROOT)
         with self.assertRaisesRegex(ValueError, "role does not belong"):
             task_inputs.manifest(entry="business-analysis", role="frontend-developer", mode="create")
+
+
+class EpicTaskScopeTests(unittest.TestCase):
+    """EP-001 holds ST-001; EP-002's writer still has to finish the stubs of ST-002."""
+
+    ROLES = (("backlog-reviewer", "review"), ("product-owner", "revise"))
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        self.root = Path(temporary.name).resolve()
+        self.docs = self.root / "workspace/docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.root / "workspace/config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English",
+        }), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            make_approved_backlog(self.docs, "ST-001")
+            backlog_compile.stub_epic(SimpleNamespace(
+                docs=str(self.docs), slug="second", id="EP-002", title="Second",
+                goal="Deliver a separate customer outcome."))
+            backlog_compile.stub_story(SimpleNamespace(
+                docs=str(self.docs), epic="second", slug="st-002", id="ST-002", title=None,
+                scope=None, work_kind="feature", criterion_ref=[CRITERION],
+                experience_ref=[EXPERIENCE], evidence_ref=[], uses_design=[DESIGN],
+                constrained_by=[CONSTRAINT]))
+        init_repository(self.root)
+        subprocess.run(["git", "-C", str(self.root), "config", "core.autocrlf", "false"],
+                       check=True, capture_output=True)
+        commit_all(self.root)
+
+    def task(self, role, mode, epic="EP-001", **extra):
+        return task_inputs.manifest(entry="backlog-plan", role=role, mode=mode,
+                                    project=self.root, epic=epic, **extra)
+
+    def story(self, slug):
+        epic = "delivery-fixture" if slug == "st-001" else "second"
+        return self.docs / f"backlog/epics/{epic}/stories/{slug}"
+
+    def finish_second_story(self):
+        """EP-002's writer replaces every placeholder stub-story wrote."""
+        folder = self.story("st-002")
+        _author_story(folder / "story.md", folder / "test-plan.md", "ST-002")
+
+    def test_another_epics_writer_leaves_an_epic_task_fresh(self):
+        tasks = {role: self.task(role, mode) for role, mode in self.ROLES}
+        self.assertTrue(tasks["backlog-reviewer"]["backlog_scope"]["check"]["scaffold_findings"])
+        # The root package, bare --epic, and an unscoped writer keep every source.
+        whole = {"root": dict(role="product-owner", mode="revise", epic=""),
+                 "unscoped": dict(role="product-owner", mode="revise", epic=None)}
+        previous = {name: self.task(**kwargs) for name, kwargs in whole.items()}
+        self.finish_second_story()
+        aside = self.docs / "solution-design/aside.md"
+        aside.write_text("---\ntype: note\n---\n\n# A source no closure reads\n", encoding="utf-8")
+        outside = {self.story("st-002").relative_to(self.root).as_posix() + name
+                   for name in ("/story.md", "/test-plan.md")} | {"workspace/docs/solution-design/aside.md"}
+        for role, mode in self.ROLES:
+            with self.subTest(role=role):
+                fresh = self.task(role, mode, expected_hash=tasks[role]["source_hash"])
+                closure = {"workspace/docs/" + path for path in fresh["backlog_scope"]["paths"]}
+                self.assertLessEqual({record["path"] for record in fresh["canonical_source_inventory"]},
+                                     closure)
+                self.assertFalse(outside & {record["path"] for record in fresh["working_inputs"]})
+                self.assertFalse(outside & set(fresh["changed_paths"]))
+                self.assertFalse(fresh["backlog_scope"].get("check", {}).get("scaffold_findings"))
+        for name, kwargs in whole.items():
+            with self.subTest(scope=name):
+                with self.assertRaisesRegex(ValueError, "stale"):
+                    self.task(**kwargs, expected_hash=previous[name]["source_hash"])
+                self.assertIn("workspace/docs/solution-design/aside.md", {
+                    record["path"] for record in self.task(**kwargs)["canonical_source_inventory"]})
+
+    def test_another_epics_partial_edit_leaves_an_epic_task_fresh(self):
+        tasks = {role: self.task(role, mode) for role, mode in self.ROLES}
+        # EP-002's writer replaces the coverage-row stubs and nothing else.
+        plan = self.story("st-002") / "test-plan.md"
+        text = plan.read_text(encoding="utf-8")
+        for coverage in backlog_compile.SCENARIO_COVERAGE_CLASSES:
+            text = text.replace(
+                f"| {coverage} | not_applicable | - | {backlog_compile.COVERAGE_REASON_STUB} |",
+                f"| {coverage} | not_applicable | - | ST-002 exposes no {coverage} behavior. |")
+        plan.write_text(text, encoding="utf-8")
+        unclassified = ("backlog/epics/second/stories/st-002/test-plan.md scenarios are not"
+                        " classified by Coverage Classes: ST-002-TS-001")
+        for role, mode in self.ROLES:
+            with self.subTest(role=role):
+                fresh = self.task(role, mode, expected_hash=tasks[role]["source_hash"])
+                self.assertIn(unclassified, fresh["backlog_scope"]["check"]["scaffold_findings"])
+        with self.assertRaisesRegex(ValueError, "not classified by Coverage Classes"):
+            self.task("backlog-reviewer", "review", epic="EP-002")
+
+    def test_a_change_inside_an_epic_tasks_closure_still_makes_it_stale(self):
+        self.finish_second_story()
+        commit_all(self.root)
+        first = self.story("st-001") / "story.md"
+        for role, mode in self.ROLES:
+            with self.subTest(role=role, change="inside"):
+                previous = self.task(role, mode)
+                first.write_text(first.read_text(encoding="utf-8").replace(
+                    "Administrative bulk operations", "Administrative batch operations"),
+                    encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "stale"):
+                    self.task(role, mode, expected_hash=previous["source_hash"])
+                subprocess.run(["git", "-C", str(self.root), "checkout", "--", "."],
+                               check=True, capture_output=True)
+        # ST-002 of EP-002 gains a dependency on ST-001: a new incoming edge
+        # brings ST-002 into EP-001's closure, so every EP-001 task goes stale.
+        previous = {role: self.task(role, mode) for role, mode in self.ROLES}
+        path = self.story("st-002") / "story.md"
+        props, body = backlog_compile.parse_front_matter(path)
+        link = "[[backlog/epics/delivery-fixture/stories/st-001/story|ST-001]]"
+        props["depends_on"] = [link]
+        body = body.replace("## Dependencies\n\nNone.",
+                            "## Dependencies\n\n- " + link + ": Supplies the account boundary.")
+        path.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+        for role, mode in self.ROLES:
+            with self.subTest(role=role, change="incoming edge"):
+                with self.assertRaisesRegex(ValueError, "stale"):
+                    self.task(role, mode, expected_hash=previous[role]["source_hash"])
+                current = self.task(role, mode)
+                self.assertIn(path.relative_to(self.root).as_posix(),
+                              {record["path"] for record in current["canonical_source_inventory"]})
+
+
+class BuiltPackageTaskInputTests(unittest.TestCase):
+    """A built host package derives tasks with its own scripts and agents."""
+
+    def test_every_built_package_checks_its_catalog_and_derives_a_role_task(self):
+        # The catalog reads the switch registry without importing its compiler.
+        self.assertEqual(task_inputs.SWITCH_REGISTRY, process_policy.REGISTRY)
+        sys.path.insert(0, str(ROOT / "tools"))
+        try:
+            import build_distributions as builder
+        finally:
+            sys.path.remove(str(ROOT / "tools"))
+        with tempfile.TemporaryDirectory() as raw:
+            output = Path(raw) / "dist"
+            builder.build(ROOT, output)
+            for host in builder.HOSTS:
+                package = output / host / "software-engineering-team"
+                # The build writes each switch's agent variants beside their base agents.
+                self.assertTrue((package / "agents/product-owner-mechanical.md").is_file())
+                self.assertTrue((package / "agents/backlog-reviewer-lens.md").is_file())
+                for argv in (["--check-catalog"],
+                             ["--entry", "backlog-plan", "--role", "backlog-reviewer",
+                              "--mode", "review"]):
+                    with self.subTest(host=host, argv=argv):
+                        result = subprocess.run(
+                            [sys.executable, str(package / "scripts/task_inputs.py"), *argv],
+                            capture_output=True, text=True, check=False,
+                            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        self.assertNotEqual(json.loads(result.stdout).get("ok"), False)
+            # A variant is never a task role: its task is derived as its base role.
+            script = output / "claude/software-engineering-team/scripts/task_inputs.py"
+            refused = subprocess.run(
+                [sys.executable, str(script), "--entry", "backlog-plan",
+                 "--role", "product-owner-mechanical", "--mode", "revise"],
+                capture_output=True, text=True, check=False,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn("derive its task as product-owner", json.loads(refused.stdout)["error"])
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 ---
 name: domain-expert
 description: Cast expert role for analysis spaces. Spawned fresh-context by the business-analysis entry with one named expert profile and specific open questions; returns proposals with rationale, never facts.
-model_reasoning_effort: high
+model: gpt-6.1-sol
+model_reasoning_effort: xhigh
 output_contract: prose
 tools: Read, Grep, Glob
 ---

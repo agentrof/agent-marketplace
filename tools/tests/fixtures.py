@@ -42,6 +42,7 @@ def make_valid_root(
     copy("package-modes.json", root)
     copy("tools/data/limits.json", root)
     copy("tools/data/models.json", root)
+    copy("tools/data/host-cli-versions.json", root)
     copy("AGENTS.md", root)
     copy("CLAUDE.md", root)
     copy(".gitattributes", root)

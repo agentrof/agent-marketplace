@@ -482,6 +482,15 @@ class TimingHistoryTests(unittest.TestCase):
                 self.assertEqual(result["durations"], {})
                 self.assertTrue(result["fallback_reasons"])
 
+    def test_merge_queue_runs_supply_timing_hints_but_other_events_do_not(self):
+        for event, restored in (("merge_group", True), ("issue_comment", False)):
+            with self.subTest(event=event):
+                api = self.source()
+                api.run["event"] = event
+                result = self.restore(api)
+                self.assertEqual(result["durations"] == self.payload["durations"], restored)
+                self.assertEqual(not result["fallback_reasons"], restored)
+
     def test_history_lookup_is_bounded_to_five_sources(self):
         api = self.source()
         api.runs = [api.run] * 7

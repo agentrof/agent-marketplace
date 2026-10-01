@@ -1,0 +1,6 @@
+{
+  "summary": "`backlog_compile.py stub-story` in a backlog without `planning_mode` (a `legacy_contract` backlog) no longer writes an empty `origin_mode`, which the vault read as a list and the per-write vault check rejected as the wrong property type. When a later `begin-revision` gives such a backlog a planning mode, its older stories without `origin_mode` stay valid only while the backlog carries `legacy_contract`, so revising a legacy backlog keeps its frozen story bytes; every other planning-mode backlog still requires `origin_mode` on each story.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

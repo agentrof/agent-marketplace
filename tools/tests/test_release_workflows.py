@@ -175,6 +175,42 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertNotIn("compatibility", jobs["check"]["needs"])
         self.assertIn("name: compatibility (${{ matrix.os }}, Python ${{ matrix.python }})", validate)
 
+    def test_required_contexts_also_report_on_merge_queue_groups(self):
+        trigger = "  merge_group:\n    types: [checks_requested]\n"
+        for workflow, contexts in (
+            ("validate.yml", ("name: check\n", "name: compatibility (")),
+            ("codeql.yml", ("  analyze-python:\n",)),
+            ("release-hosts.yml", ("name: Claude Code and Codex lifecycle\n",)),
+        ):
+            text = self.text(workflow)
+            events = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+            with self.subTest(workflow=workflow):
+                self.assertIn(trigger, events)
+                self.assertIn("  pull_request:\n", events)
+                self.assertNotIn("    branches:", events.split("  merge_group:\n", 1)[1])
+                for context in contexts:
+                    self.assertIn(context, text)
+        for workflow in ("prepare-stable-release.yml", "publish-stable-release.yml"):
+            with self.subTest(workflow=workflow):
+                self.assertNotIn("merge_group", self.text(workflow))
+
+    def test_queue_gate_runs_trusted_base_code_for_merge_groups_only(self):
+        text = self.text("validate.yml")
+        jobs = workflow_jobs(text)
+        self.assertEqual(jobs["release-queue-policy"]["if"], "github.event_name == 'merge_group'")
+        self.assertEqual(jobs["release-queue-policy"]["needs"], [])
+        gate = text.split("\n  release-queue-policy:\n", 1)[1].split("\n  plan:\n", 1)[0]
+        self.assertIn("ref: ${{ github.event.merge_group.base_sha }}", gate)
+        self.assertIn("persist-credentials: false", gate)
+        self.assertNotIn("permissions:", gate)
+        self.assertIn('"+${HEAD_REF}:refs/remotes/origin/merge-group"', gate)
+        self.assertIn('test "$(git rev-parse refs/remotes/origin/merge-group)" = "$HEAD_SHA"', gate)
+        self.assertIn("git ls-remote --heads origin refs/heads/release/stable", gate)
+        self.assertIn('args+=(--release-sha "$release_sha")', gate)
+        self.assertIn('python3 tools/release.py verify-merge-group "${args[@]}"', gate)
+        self.assertLess(gate.index("git fetch"), gate.index("verify-merge-group"))
+        self.assertEqual(gate.count("ref: "), 1)
+
     def test_bootstrap_requires_empty_tag_space_and_uses_atomic_refs(self):
         text = self.text("prepare-stable-release.yml")
         self.assertIn("verify-bootstrap", text)
@@ -231,6 +267,25 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertLess(text.index("public-stable-smoke:"),
                         text.index("finalize-publication:"))
         self.assertIn("EXPECTED_RELEASE_SHA", text)
+
+    def test_finalize_requires_a_release_github_reports_immutable(self):
+        for workflow, job in (
+            ("publish-stable-release.yml", "finalize-publication"),
+            ("prepare-stable-release.yml", "bootstrap-finalize"),
+        ):
+            text = self.text(workflow)
+            block = text.split(f"\n  {job}:\n", 1)[1]
+            with self.subTest(workflow=workflow):
+                self.assertEqual(text.count("release_publish.py\" finalize")
+                                 + text.count("release_publish.py finalize"), 1)
+                self.assertIn("--require-immutable", block)
+                self.assertEqual(text.count("--require-immutable"), 1)
+        workflow_root = REPO / ".github" / "workflows"
+        for workflow in sorted(workflow_root.glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow.name):
+                for mutation in ("gh release edit", "gh release delete", "gh release upload"):
+                    self.assertNotIn(mutation, text)
 
     def test_publish_refuses_fork_or_wrong_base_release_prs(self):
         text = self.text("publish-stable-release.yml")
@@ -294,8 +349,8 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         validate = workflow_jobs(self.text("validate.yml"))
         self.assertEqual(validate["check"]["if"], "always()")
         self.assertEqual(validate["check"]["needs"], [
-            "changeset", "release-pr-policy", "plan", "test-shards",
-            "deterministic-check",
+            "changeset", "release-pr-policy", "release-queue-policy", "plan",
+            "test-shards", "deterministic-check",
         ])
         self.assertIn("github.event_name == 'pull_request' &&",
                       validate["changeset"]["if"])
@@ -611,6 +666,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         baseline = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main",
                         HEAD_REF="feature", HEAD_REPOSITORY="owner/repo", REPOSITORY="owner/repo",
                         CHANGESET_RESULT="success", RELEASE_POLICY_RESULT="skipped",
+                        RELEASE_QUEUE_RESULT="skipped",
                         PLAN_RESULT="success", DETERMINISTIC_RESULT="success",
                         HAS_TESTS="true", TEST_RESULT="success")
         def execute(values):
@@ -626,12 +682,28 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                                       RELEASE_POLICY_RESULT="success")), 0)
         self.assertNotEqual(execute(dict(baseline, HEAD_REF="release/stable", CHANGESET_RESULT="skipped",
                                          RELEASE_POLICY_RESULT="skipped")), 0)
+        self.assertNotEqual(execute(dict(baseline, RELEASE_QUEUE_RESULT="success")), 0)
+        queue = dict(baseline, EVENT_NAME="merge_group", BASE_REF="", HEAD_REF="",
+                     HEAD_REPOSITORY="", CHANGESET_RESULT="skipped",
+                     RELEASE_QUEUE_RESULT="success")
+        self.assertEqual(execute(queue), 0)
+        for key in ("RELEASE_QUEUE_RESULT", "PLAN_RESULT", "DETERMINISTIC_RESULT", "TEST_RESULT"):
+            for status in ("failure", "cancelled", "skipped", ""):
+                with self.subTest(event="merge_group", key=key, status=status):
+                    self.assertNotEqual(execute(dict(queue, **{key: status})), 0)
+        for key in ("CHANGESET_RESULT", "RELEASE_POLICY_RESULT"):
+            with self.subTest(event="merge_group", key=key, status="success"):
+                self.assertNotEqual(execute(dict(queue, **{key: "success"})), 0)
 
     def test_receipts_require_verified_reports_and_are_not_emitted_for_forks_or_schedule(self):
         text = self.text("validate.yml")
         self.assertLess(text.index("tools/ci_tests.py verify-reports"), text.index("tools/ci_evidence.py create"))
         self.assertIn("ci-evidence-${{ github.run_id }}-${{ github.run_attempt }}", text)
         self.assertIn("github.event_name != 'schedule'", text)
+        # Receipt creation accepts no merge_group event; a queue run must skip it, not fail.
+        receipt_guard = "github.event_name != 'schedule' && github.event_name != 'merge_group' &&"
+        self.assertEqual(text.count(receipt_guard), 2)
+        self.assertEqual(text.count("github.event_name != 'schedule'"), 2)
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", text)
         self.assertIn('args+=(--inherited "$RUNNER_TEMP/ci-plan/ci-reuse.json")', text)
         self.assertIn("if-no-files-found: error", text)

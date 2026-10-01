@@ -779,7 +779,6 @@ def check_pr_changeset(root: Path, base: str) -> None:
     declared = {component for item in selected for component in item.components}
     required: set[str] = set()
     adapters = build_distributions.load_adapters(root)
-    _, provenance_name = build_distributions.packaging_names(root)
     for _status, path in changed:
         parts = Path(path).parts
         if len(parts) >= 2 and parts[0] == "plugins" and parts[1] in versions["plugins"]:
@@ -787,9 +786,7 @@ def check_pr_changeset(root: Path, base: str) -> None:
         if len(parts) >= 3 and parts[0] == "platforms" and parts[1] in adapters and parts[2] in versions["plugins"]:
             required.add(parts[2])
         if len(parts) >= 3 and parts[0] == "dist" and parts[1] in adapters and parts[2] in versions["plugins"]:
-            derived_provenance = len(parts) == 4 and parts[3] == provenance_name
-            if not derived_provenance:
-                required.add(parts[2])
+            required.add(parts[2])
         if path in {".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"}:
             required.add(MARKETPLACE_COMPONENT)
     if not added:
@@ -887,6 +884,7 @@ def prepare(
         "version": plan["marketplace"],
         "stable_base": stable_sha,
         "main_source": main_sha,
+        "build_id": build_distributions.marketplace_snapshot(root)["build_id"],
         "impacts": plan["impacts"],
         "summaries": plan["summaries"],
     }
@@ -904,6 +902,8 @@ def verify_release(root: Path, version: str | None = None) -> dict:
     if metadata.get("version") != expected or versions["marketplace"] != expected:
         raise ReleaseError("release metadata, requested tag, and marketplace version differ")
     parse_semver(expected, "release version")
+    if metadata.get("build_id") != build_distributions.marketplace_snapshot(root)["build_id"]:
+        raise ReleaseError("release metadata build identity differs from the release sources")
     return metadata
 
 
@@ -950,7 +950,7 @@ def verify_release_pr(
         raise ReleaseError("release PR metadata is invalid JSON") from exc
     expected_keys = {
         "schema_version", "version", "stable_base", "main_source",
-        "impacts", "summaries",
+        "build_id", "impacts", "summaries",
     }
     if not isinstance(metadata, dict) or set(metadata) != expected_keys:
         raise ReleaseError("release PR metadata has unknown or missing keys")
@@ -1043,6 +1043,130 @@ def verify_release_pr(
         "expected_tree": expected_tree,
         "head_tree": head_tree,
     }
+
+
+def release_identity(
+    root: Path, revision: str, environment: dict[str, str],
+) -> object:
+    """Return the release a commit attests, or None before the first one."""
+    path = f"{revision}:.release/stable.json"
+    if not git_ok(root, "cat-file", "-e", path, environment=environment):
+        return None
+    raw = git(root, "show", path, environment=environment)
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if not isinstance(value, dict):
+        return raw
+    # Plugin retirement may prune impacts; only a release changes these.
+    return tuple(
+        value.get(key)
+        for key in ("version", "stable_base", "main_source", "build_id")
+    )
+
+
+def verify_merge_group(
+    root: Path, *, base_sha: str, head_sha: str, stable_sha: str,
+    release_sha: str | None = None,
+) -> dict:
+    """Keep a queued release PR on the exact merge publication verifies.
+
+    The repository must be checked out at ``base_sha``, the merge group's
+    parent commit. Queue commits are inspected by object ID and never
+    executed. ``release_sha`` is the observed ``release/stable`` head. The
+    only entry that may merge it or change the attested release is the
+    group's first entry: a two-parent merge of that head onto its
+    ``main_source`` with the head's exact tree.
+    """
+    git_environment = hermetic_git_environment()
+    base_sha = require_sha(base_sha, "merge group base")
+    head_sha = require_sha(head_sha, "merge group head")
+    stable_sha = require_sha(stable_sha, "stable base")
+    if release_sha is not None:
+        release_sha = require_sha(release_sha, "release/stable head")
+    reject_graph_overlays(root, git_environment)
+    if git(root, "rev-parse", "HEAD", environment=git_environment) != base_sha:
+        raise ReleaseError(
+            "merge group verification must run from the exact base SHA"
+        )
+    if git(root, "status", "--porcelain", environment=git_environment):
+        raise ReleaseError("merge group verification requires a clean base worktree")
+    entries = git(
+        root, "rev-list", "--first-parent", "--reverse",
+        f"{base_sha}..{head_sha}", environment=git_environment,
+    ).split()
+    previous = base_sha
+    release_entries: list[tuple[str, list[str]]] = []
+    for entry in entries:
+        parents = git(
+            root, "rev-list", "--parents", "-n", "1", entry,
+            environment=git_environment,
+        ).split()[1:]
+        if not parents or parents[0] != previous:
+            raise ReleaseError(
+                "merge group entries must form one first-parent chain on its base"
+            )
+        previous = entry
+        merges_release = release_sha is not None and release_sha in (
+            entry, *parents[1:]
+        )
+        if merges_release or release_identity(
+            root, parents[0], git_environment,
+        ) != release_identity(root, entry, git_environment):
+            release_entries.append((entry, parents))
+    if not entries or previous != head_sha:
+        raise ReleaseError(
+            "merge group head must add first-parent commits to its base"
+        )
+    result: dict = {
+        "schema_version": 1,
+        "base": base_sha,
+        "head": head_sha,
+        "entries": len(entries),
+        "release_entry": None,
+    }
+    if not release_entries:
+        return result
+    if len(release_entries) != 1:
+        raise ReleaseError(
+            "merge group changes the attested release in more than one entry"
+        )
+    entry, parents = release_entries[0]
+    if release_sha is None:
+        raise ReleaseError(
+            "merge group changes the attested release without a release/stable PR"
+        )
+    if entry == release_sha or parents[1:] != [release_sha]:
+        raise ReleaseError(
+            "only the release/stable PR may change the attested release, as a "
+            "two-parent merge commit of its head; set the queue merge method "
+            "to MERGE"
+        )
+    if parents[0] != base_sha:
+        raise ReleaseError(
+            "a queued release PR must be the first entry of its merge group"
+        )
+    release_parents = git(
+        root, "rev-list", "--parents", "-n", "1", release_sha,
+        environment=git_environment,
+    ).split()[1:]
+    if release_parents != [base_sha]:
+        raise ReleaseError(
+            "the release head is not one commit on the merge group base; main "
+            "advanced after preparation, so prepare the release again"
+        )
+    if git(
+        root, "rev-parse", f"{entry}^{{tree}}", environment=git_environment,
+    ) != git(
+        root, "rev-parse", f"{release_sha}^{{tree}}", environment=git_environment,
+    ):
+        raise ReleaseError("queued release merge tree differs from the release head")
+    result["release_entry"] = entry
+    result["release"] = verify_release_pr(
+        root, base_sha=base_sha, head_sha=release_sha, stable_sha=stable_sha,
+    )
+    return result
 
 
 def verify_bootstrap(
@@ -1191,6 +1315,11 @@ def main() -> int:
     release_pr_parser.add_argument("--base-sha", required=True)
     release_pr_parser.add_argument("--head-sha", required=True)
     release_pr_parser.add_argument("--stable-sha", required=True)
+    merge_group_parser = sub.add_parser("verify-merge-group")
+    merge_group_parser.add_argument("--base-sha", required=True)
+    merge_group_parser.add_argument("--head-sha", required=True)
+    merge_group_parser.add_argument("--stable-sha", required=True)
+    merge_group_parser.add_argument("--release-sha")
     branch_parser = sub.add_parser("publish-release-branch")
     branch_parser.add_argument("--main-sha", required=True)
     branch_parser.add_argument("--release-sha", required=True)
@@ -1233,6 +1362,14 @@ def main() -> int:
             base_sha=args.base_sha,
             head_sha=args.head_sha,
             stable_sha=args.stable_sha,
+        ), indent=2))
+    elif args.command == "verify-merge-group":
+        print(json.dumps(verify_merge_group(
+            root,
+            base_sha=args.base_sha,
+            head_sha=args.head_sha,
+            stable_sha=args.stable_sha,
+            release_sha=args.release_sha,
         ), indent=2))
     elif args.command == "publish-release-branch":
         print(json.dumps(publish_release_branch(

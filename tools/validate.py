@@ -2601,8 +2601,10 @@ def mechanical_variant_problems(plugin: Path, switches: dict) -> list[str]:
 def parameter_problems(where: str, parameters: object, values: list[str], default: object,
                        plugin: Path | None) -> list[str]:
     """Return the problems of one switch's owner-set parameter declaration."""
-    if not isinstance(parameters, dict) or set(parameters) != SWITCH_PARAMETER_KEYS:
-        return [f"{where}: parameters hold exactly summary, values, declared_by, type and min_count"]
+    if not isinstance(parameters, dict) or not SWITCH_PARAMETER_KEYS <= set(parameters) \
+            or set(parameters) - SWITCH_PARAMETER_KEYS - {"package_limits"}:
+        return [f"{where}: parameters hold exactly summary, values, declared_by, type and"
+                " min_count, and package_limits once a promotion ships them"]
     problems: list[str] = []
     if not _nonblank(parameters["summary"]):
         problems.append(f"{where}: parameters need a summary the choice gate shows")
@@ -2645,6 +2647,14 @@ def parameter_problems(where: str, parameters: object, values: list[str], defaul
             or (declared is not None and minimum > len(declared)):
         problems.append(f"{where}: min_count must be a whole number no larger than the declared"
                         " parameters")
+    # A promoted value that takes parameters stays non-default and ships limits.
+    limits = parameters.get("package_limits", {})
+    if not isinstance(limits, dict) or any(
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
+            for limit in limits.values()) or (
+            declared is not None and set(limits) - set(declared)):
+        problems.append(f"{where}: package_limits must map declared parameter ids to"
+                        " positive whole numbers")
     return problems
 
 

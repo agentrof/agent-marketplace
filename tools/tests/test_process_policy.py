@@ -439,6 +439,39 @@ class ProcessPolicyParameterTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertNotIn("undeclared", listed)
 
+    def test_a_promoted_value_ships_package_limits_and_stays_non_default(self):
+        registry = json.loads((self.package / process_policy.REGISTRY).read_text(encoding="utf-8"))
+        registry["switches"]["limit_mode"]["parameters"]["package_limits"] = {"criteria": 8}
+        self.write_registry(registry)
+        declared = process_policy.load_registry()["limit_mode"]
+        self.assertEqual((declared["default"], declared["parameters"]["package_limits"]),
+                         ("open", {"criteria": 8}))
+        self.assertEqual(self.cli("init")[0], 0)
+        self.assertEqual(self.cli("set", "--switch", "limit_mode", "--value", "capped")[0], 0)
+        # A package limit counts towards min_count and applies while the row is unset.
+        self.assertEqual(self.cli("approve")[0], 0)
+        self.assertEqual(self.cli("value", "--switch", "limit_mode")[1]["parameters"],
+                         {"criteria": 8})
+        self.assertEqual(self.cli("begin-revision")[0], 0)
+        self.cli("set", "--switch", "limit_mode", "--parameter", "criteria", "--value", "12")
+        self.cli("set", "--switch", "limit_mode", "--parameter", "scenarios", "--value", "30")
+        self.assertEqual(self.cli("approve")[0], 0)
+        self.assertEqual(self.cli("value", "--switch", "limit_mode")[1]["parameters"],
+                         {"criteria": 12, "scenarios": 30})
+        listed = {item["switch"]: item for item in self.cli("switches")[1]["switches"]}
+        self.assertEqual(listed["limit_mode"]["parameters"]["package_limits"], {"criteria": 8})
+        # At the default no parameter applies.
+        self.assertEqual(self.cli("begin-revision")[0], 0)
+        self.cli("set", "--switch", "limit_mode", "--default")
+        self.assertEqual(self.cli("approve")[0], 0)
+        self.assertEqual(self.cli("value", "--switch", "limit_mode")[1]["parameters"], {})
+        for limits in ({"ghost": 3}, {"criteria": 0}, {"criteria": True}, {"criteria": "8"}):
+            with self.subTest(limits=limits):
+                registry["switches"]["limit_mode"]["parameters"]["package_limits"] = limits
+                self.write_registry(registry)
+                with self.assertRaisesRegex(ValueError, "declares invalid parameters"):
+                    process_policy.load_registry()
+
     def test_an_invalid_parameter_declaration_fails_the_registry(self):
         cases = (
             ({"declared_by": {"path": "../outside.json", "key": "measures"}}, "cannot be read"),
@@ -531,6 +564,49 @@ class ConfigureProcessContractTests(unittest.TestCase):
         self.assertIn("No `scale`, `limits`, stack, source-directory, command or process switch"
                       " field is accepted in config: the config stays closed, and the Process"
                       " Policy is the one place for process choices", contract)
+
+
+class PromotionRuleTests(unittest.TestCase):
+    """The promotion rule says which choices survive a flip, how a value that
+    takes parameters is promoted and who sets a unit other than 3 Deliveries."""
+
+    def test_only_a_non_default_choice_survives_a_flip(self):
+        authoring = " ".join((ROOT / "docs/authoring.md").read_text(encoding="utf-8").split())
+        self.assertIn("Only a non-default choice survives a flip. The Process Policy keeps a row"
+                      " only for a value other than the default", authoring)
+        self.assertIn("also one whose owner answered the previous default at the choice gate",
+                      authoring)
+        self.assertNotIn("a project that chose either value explicitly keeps it", authoring)
+        reference = flat("skill-content/configure/references/process-policy.md")
+        self.assertIn("The default option's description says that it records no row, so a"
+                      " later promoted default reaches the project", reference)
+
+    def test_a_value_that_takes_parameters_is_promoted_with_package_limits(self):
+        authoring = " ".join((ROOT / "docs/authoring.md").read_text(encoding="utf-8").split())
+        self.assertIn("A value that takes owner-set parameters stays non-default", authoring)
+        self.assertIn("the switch's `parameters` gain `package_limits`", authoring)
+        switch = json.loads((TEAM / process_policy.REGISTRY).read_text(
+            encoding="utf-8"))["switches"]["story_size_budget"]
+        self.assertIn("A promotion keeps off as the default, since only a value the owner"
+                      " chooses takes parameters, and ships package_limits for propose_split",
+                      switch["promotion"]["threshold"])
+
+    def test_a_unit_other_than_three_deliveries_needs_its_issue_or_an_owner_decision(self):
+        authoring = " ".join((ROOT / "docs/authoring.md").read_text(encoding="utf-8").split())
+        self.assertIn("The unit is at least 3 Deliveries. Another unit needs the switch's idea"
+                      " issue or an owner decision to declare it", authoring)
+        self.assertIn("the owner confirmed that unit on 1 Oct 2026", authoring)
+        self.assertNotIn("unless the switch declares another unit", authoring)
+        switches = json.loads((TEAM / process_policy.REGISTRY).read_text(encoding="utf-8"))
+        units = {name: spec["promotion"]["unit"] for name, spec in switches["switches"].items()}
+        # Every other switch keeps a unit of Deliveries, or Items from Deliveries.
+        self.assertIn("5 epic review passes", units.pop("review_manifest_scope"))
+        self.assertIn("5 panel review passes", units.pop("review_panels"))
+        self.assertIn("5 reviewed documents", units.pop("review_loop"))
+        for name, unit in units.items():
+            with self.subTest(switch=name):
+                self.assertIn("3", unit)
+                self.assertRegex(unit, "Deliveries")
 
 
 if __name__ == "__main__":

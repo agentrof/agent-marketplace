@@ -611,6 +611,12 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.anchor()
         self.declare(fixture_mode=dict(FIXTURE_SWITCH, parameters=declared))
         self.assertEqual(self.messages(), [])
+        # A promotion of a value that takes parameters ships package limits.
+        measure = sorted(json.loads((self.root / PLUGIN_ROOT / MEASURES_RELPATH).read_text(
+            encoding="utf-8"))["measures"])[0]
+        self.declare(fixture_mode=dict(FIXTURE_SWITCH, parameters=dict(
+            declared, package_limits={measure: 8})))
+        self.assertEqual(self.messages(), [])
         cases = (
             (dict(declared, values=["current"]),
              "parameters belong to a declared value other than the default, not 'current'"),
@@ -631,6 +637,12 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
             (dict(declared, summary=" "), "parameters need a summary"),
             ({key: value for key, value in declared.items() if key != "type"},
              "parameters hold exactly summary, values, declared_by, type and min_count"),
+            (dict(declared, limits={}),
+             "parameters hold exactly summary, values, declared_by, type and min_count"),
+            (dict(declared, package_limits={"ghost": 3}),
+             "package_limits must map declared parameter ids to positive whole numbers"),
+            (dict(declared, package_limits={"acceptance_criteria": 0}),
+             "package_limits must map declared parameter ids to positive whole numbers"),
         )
         for parameters, fragment in cases:
             with self.subTest(fragment=fragment):

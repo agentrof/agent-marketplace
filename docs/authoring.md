@@ -290,16 +290,34 @@ no owning flow names, or that a SKILL.md links.
 ### Promotion rule
 
 A default flips only when the switch's component metric meets its threshold
-over its promotion unit, at least 3 Deliveries unless the switch declares
-another unit; when every shared quality guard holds: valid critical or major
-findings found after an approval, Item reopens, code review cycles and QA
-rounds per Item, Delivery Review deviations and defects reported after merge;
-and when the owner approves the flip. One default flips per release, so the
-following Deliveries attribute a change to one flip. A flipped default that
-later breaks a quality guard flips back in the next release. A flip changes
-`default`, keeps every value, moves the promoted value's instructions into
-the default path and moves the previous default's path into its own switch
-reference, so a project that chose either value explicitly keeps it.
+over its promotion unit; when every shared quality guard holds: valid critical
+or major findings found after an approval, Item reopens, code review cycles
+and QA rounds per Item, Delivery Review deviations and defects reported after
+merge; and when the owner approves the flip. The unit is at least 3
+Deliveries. Another unit needs the switch's idea issue or an owner decision to
+declare it: `review_manifest_scope` counts 5 epic review passes across 2
+backlog revisions because the owner confirmed that unit on 1 Oct 2026, the
+switch acting only in backlog planning, outside any Delivery. One default
+flips per release, so the following Deliveries attribute a change to one flip.
+A flipped default that later breaks a quality guard flips back in the next
+release. A flip changes `default`, keeps every value, moves the promoted
+value's instructions into the default path and moves the previous default's
+path into its own switch reference.
+
+Only a non-default choice survives a flip. The Process Policy keeps a row only
+for a value other than the default, so a project whose row names the promoted
+value keeps it, now as the default, while every switch without a row follows
+the promoted default, also one whose owner answered the previous default at
+the choice gate. A project that wants the previous default back sets it
+through `/configure process`, where it is then a non-default choice.
+
+A value that takes owner-set parameters stays non-default, since only a value
+the owner chooses takes parameters. Its promotion ships package limits
+instead: the switch's `parameters` gain `package_limits`, one positive value
+per declared parameter id it covers, which a project at that value applies to
+each parameter its Parameters table leaves unset and which count towards
+`min_count`. `process_policy.py` and the validator accept that form, and
+`story_size_budget`'s promotion text says so.
 
 ## Review panels
 

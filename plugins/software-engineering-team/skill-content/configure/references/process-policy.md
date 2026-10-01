@@ -9,7 +9,8 @@ explicit choices, one row per switch. A missing document, or a switch without
 a row, follows the package default. A switch may declare owner-set parameters
 for the values that take them, such as the limits of `story_size_budget`; its
 Parameters table holds one row per parameter the owner sets, and the package
-sets none.
+sets none until a promotion ships package limits, which apply to each
+parameter the table leaves unset.
 
 ## Procedure
 
@@ -24,11 +25,14 @@ sets none.
    measured behaviour, and every other value is an experiment that its
    promotion rule measures. Each option's description carries that value's
    registry tradeoffs; the question names the switch's metric and promotion
-   unit. Never choose for the user and never skip a switch. When the chosen
-   value takes parameters, ask one question per declared parameter with its
-   summary and type, and take the number from the owner's own answer: the
-   package recommends none. Offer the value in force, if any, and unset. At
-   least the declared `min_count` must be set.
+   unit. The default option's description says that it records no row, so a
+   later promoted default reaches the project. Never choose for the user and
+   never skip a switch. When the chosen value takes parameters, ask one
+   question per declared parameter with its summary and type, and take the
+   number from the owner's own answer: the package recommends none. Offer the
+   value in force, if any, and unset, which leaves a package limit in force
+   where the switch ships one. At least the declared `min_count` must be set,
+   package limits included.
 3. When no answer changes a value in force and `undeclared` lists no row,
    write nothing and stop.
 4. Present the planned delta, each switch's value in force and the chosen

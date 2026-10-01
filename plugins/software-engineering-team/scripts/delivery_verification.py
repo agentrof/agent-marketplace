@@ -1108,6 +1108,37 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             return {**event, "output": completed.stdout.decode("utf-8", errors="replace")}
 
 
+# The interpreter search paths a lane command never inherits from outside the Item worktree.
+LANE_SEARCH_PATH_VARIABLES = ("PYTHONPATH", "PYTHONHOME", "NODE_PATH")
+
+
+def lane_command_environment(root: Path, directory: Path) -> tuple[dict, dict[str, list[str]]]:
+    """Return the inherited environment without search path entries outside the Item worktree.
+
+    An entry is kept when it resolves inside the worktree, a relative entry
+    against the command's working directory and a link through its target. A
+    variable left with no entry is unset. The second value lists the dropped
+    entries of each variable.
+    """
+    environment = dict(os.environ)
+    dropped: dict[str, list[str]] = {}
+    for name in LANE_SEARCH_PATH_VARIABLES:
+        if name not in environment:
+            continue
+        kept: list[str] = []
+        for entry in environment[name].split(os.pathsep):
+            resolved = (directory / entry).resolve()
+            if resolved == root or root in resolved.parents:
+                kept.append(entry)
+            else:
+                dropped.setdefault(name, []).append(entry)
+        if kept:
+            environment[name] = os.pathsep.join(kept)
+        else:
+            del environment[name]
+    return environment, dropped
+
+
 def lane_run(root: Path, delivery_id: str, story: str, role: str, kind: str,
              verb: str | None = None, value: str | None = None) -> dict:
     """Run the approved full test command or an approved environment verb for one lane.
@@ -1162,16 +1193,17 @@ def lane_run(root: Path, delivery_id: str, story: str, role: str, kind: str,
         raise RuntimeError("lane command workdir must remain inside the Item worktree")
     output = safe_runtime_path(root, session_path(root).parent / "lanes" / f"{role}-{uuid.uuid4().hex}.log",
                                file_only=True)
+    environment, dropped = lane_command_environment(root, directory)
     with environment_lock(root, role, label) as interrupted:
         output.parent.mkdir(exist_ok=True)
         started = time.monotonic()
-        completed = subprocess.run(command, cwd=directory, shell=True,
+        completed = subprocess.run(command, cwd=directory, env=environment, shell=True,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         duration = time.monotonic() - started
         atomic_file.replace_bytes(output, completed.stdout)
     return {"delivery": delivery_id, "story": story, "holder": role, "kind": kind, "command": command,
             "exit_code": completed.returncode, "output_file": str(output), "duration_seconds": duration,
-            "interrupted_holder": interrupted}
+            "interrupted_holder": interrupted, "dropped_search_paths": dropped}
 
 
 def require_runtime_evidence(root: Path, session: dict, evidence: dict) -> None:

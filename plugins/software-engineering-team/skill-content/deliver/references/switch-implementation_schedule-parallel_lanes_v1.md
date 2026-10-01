@@ -60,10 +60,15 @@ stops that part of its work and reports it; only the architect revises it.
 Lanes run tests in the same worktree at the same time, so every test process
 gets an explicit environment:
 
-- Interpreter search paths such as `PYTHONPATH` and `NODE_PATH` are unset or
-  point only inside the Item worktree. Never inherit them from the
+- The interpreter search paths `PYTHONPATH`, `PYTHONHOME` and `NODE_PATH` are
+  unset or point only inside the Item worktree. Never inherit them from the
   coordinator's, a gate's or a hook's process: a value that names another
-  checkout makes fixture runs import that checkout's code.
+  checkout makes fixture runs import that checkout's code. `lane-run` enforces
+  this for the commands it runs: it drops every entry of these variables that
+  resolves outside the Item worktree, a relative entry against the command's
+  working directory and a link through its target, keeps every entry inside
+  the worktree, unsets a variable left with none and reports the dropped
+  entries as `dropped_search_paths`.
 - Caches, coverage data, build output and scratch go to a lane-private,
   Git-ignored directory.
 - Before trusting a result, confirm that the modules under test resolve inside

@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/skill-content/autopilot/scripts/autopilot.py hook user-prompt --host claude --entry software-engineering-team:autopilot",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/skill-content/autopilot/scripts/autopilot.py hook user-prompt --host claude --entry software-engineering-team:autopilot --session-env CLAUDE_CODE_SESSION_ID",
             "timeout": 10
           }
         ]
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/skill-content/autopilot/scripts/autopilot.py hook pre-question",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/skill-content/autopilot/scripts/autopilot.py hook pre-question --host claude",
             "timeout": 10
           }
         ]

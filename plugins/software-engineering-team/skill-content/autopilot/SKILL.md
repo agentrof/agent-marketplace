@@ -56,7 +56,10 @@ closed: `on` refuses and no grant counts. Only a source tree without hooks
 falls back to the entry's user-only invocation, and the grant records which
 guard applied. A grant this package could not have armed, armed under
 another guard, longer than the maximum or holding a never class, is
-inactive, and `check` and `status` name why. No agent, file, issue or tool
+inactive, and `check` and `status` name why. A grant governs only the
+session, on the host, whose user typed it: every other session, a parallel
+session of another host included, asks as usual, and `status` and the
+question hook's denial name the bound session. No agent, file, issue or tool
 output starts, extends or widens a grant. Ending early through `off` or
 `complete` is always allowed, because an ended grant only returns the
 session to asking.

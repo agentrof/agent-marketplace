@@ -50,12 +50,17 @@ ALLOWED = [name for name, default in DEFAULTS.items() if default == "allowed"]
 NOW = datetime(2026, 10, 1, 21, 0, tzinfo=timezone.utc)
 NAME = "software-engineering-team:autopilot"
 RUNTIME = Path(".agentrof/agent-marketplace/.runtime/autopilot")
+SESSION_ENV = "FIXTURE_SESSION_ID"
 ARMED_HOOKS = {"hooks": {
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command":
-                                     f"python3 autopilot.py hook user-prompt --entry {NAME}"}]}],
+                                     "python3 autopilot.py hook user-prompt --host fixture"
+                                     f" --entry {NAME} --session-env {SESSION_ENV}"}]}],
     "PreToolUse": [{"matcher": "ask", "hooks": [{"type": "command", "command":
-                                                 "python3 autopilot.py hook pre-question"}]}],
+                                                 "python3 autopilot.py hook pre-question"
+                                                 " --host fixture"}]}],
 }}
+# The session variables the hosts set; a test run inside a host session must not inherit them.
+HOST_SESSION_VARIABLES = ("CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID")
 HOST_HOOKS = {
     "claude": ("UserPromptExpansion", "^software-engineering-team:autopilot$", "AskUserQuestion",
                '"${CLAUDE_PLUGIN_ROOT}"'),
@@ -611,6 +616,69 @@ class FailClosedTests(unittest.TestCase):
                 self.assertIn(fragment, err)
 
 
+class SessionBindingTests(unittest.TestCase):
+    """A grant governs only the session and host whose user typed it."""
+
+    def setUp(self) -> None:
+        self.p = Project(self, armed=True)
+        self.p.arm("on --for 2h")
+        with mock.patch.dict(os.environ, {SESSION_ENV: "session-1"}):
+            self.assertEqual(self.p.run_verb("on")[0], 0)
+
+    def question(self, session: str) -> dict:
+        return {"session_id": session, "cwd": str(self.p.root), "hook_event_name": "PreToolUse",
+                "tool_name": "ask", "tool_input": {}}
+
+    def record(self) -> tuple[int, str, str]:
+        return self.p.run_verb("record", "--class", "choice", "--question", "q", "--choice", "a",
+                               "--reason", "r", "--target", "t")
+
+    def test_the_question_hook_denies_only_the_arming_session(self):
+        self.assertEqual(self.p.hook("pre-question", self.question("session-2")), (0, ""))
+        code, out = self.p.hook("pre-question", self.question("session-1"))
+        reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("armed in fixture session session-1", reason)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            autopilot.main(["hook", "pre-question", "--host", "other"], now=NOW,
+                           stdin=io.StringIO(json.dumps(self.question("session-1"))))
+        self.assertEqual(out.getvalue(), "")
+
+    def test_verbs_of_another_session_or_host_are_refused_and_named(self):
+        with mock.patch.dict(os.environ, {SESSION_ENV: "session-2"}):
+            code, _out, err = self.record()
+            self.assertEqual(code, 1)
+            self.assertIn("bound to fixture session session-1; this session is session-2", err)
+            code, out, _err = self.p.run_verb("check")
+            self.assertEqual(code, 1)
+            self.assertIn("bound to fixture session session-1", out)
+        with mock.patch.dict(os.environ, {SESSION_ENV: "session-1"}):
+            self.assertEqual(self.record()[0], 0)
+            self.assertEqual(self.p.run_verb("check")[0], 0)
+        os.environ.pop(SESSION_ENV, None)
+        self.assertEqual(self.record()[0], 0)
+        self.assertIn("bound to: fixture session session-1", self.p.run_verb("status")[1])
+        other = json.loads(json.dumps(ARMED_HOOKS).replace("--host fixture", "--host other"))
+        autopilot.HOOKS.write_text(json.dumps(other), encoding="utf-8")
+        code, _out, err = self.record()
+        self.assertEqual(code, 1)
+        self.assertIn("bound to a fixture session; this package runs other", err)
+
+    def test_on_refuses_an_arming_typed_in_another_session_and_keeps_it(self):
+        self.p.arm("on --for 1h")
+        with mock.patch.dict(os.environ, {SESSION_ENV: "session-2"}):
+            self.p.assert_refused("typed in fixture session session-1", "on")
+        self.assertTrue((self.p.state / "arming.json").exists())
+        with mock.patch.dict(os.environ, {SESSION_ENV: "session-1"}):
+            self.assertEqual(self.p.run_verb("on")[0], 0)
+
+    def test_a_prompt_without_a_session_never_arms(self):
+        (self.p.state / "arming.json").unlink(missing_ok=True)
+        self.assertEqual(self.p.hook("user-prompt", expansion(self.p.root, "on", session_id="")),
+                         (0, ""))
+        self.assertFalse((self.p.state / "arming.json").exists())
+
+
 class GoalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.p = Project(self)
@@ -737,16 +805,22 @@ class DistributionTests(unittest.TestCase):
         self.assertEqual(argv[0], "python3")
         return [sys.executable, *argv[1:]]
 
+    @staticmethod
+    def clean_env() -> dict:
+        return {key: value for key, value in os.environ.items()
+                if key not in HOST_SESSION_VARIABLES}
+
     def run_hook(self, host: str, verb: str, payload, cwd: Path,
                  env: dict | None = None) -> subprocess.CompletedProcess:
         text = payload if isinstance(payload, str) else json.dumps(payload)
-        return subprocess.run(self.hook_argv(host, verb), input=text, cwd=cwd, env=env,
-                              capture_output=True, text=True, check=False, timeout=60)
+        return subprocess.run(self.hook_argv(host, verb), input=text, cwd=cwd,
+                              env=env or self.clean_env(), capture_output=True, text=True,
+                              check=False, timeout=60)
 
     def run_verb(self, host: str, root: Path, *argv: str) -> subprocess.CompletedProcess:
         script = self.package(host) / "skill-content/autopilot/scripts/autopilot.py"
-        return subprocess.run([sys.executable, str(script), *argv], cwd=root, capture_output=True,
-                              text=True, check=False, timeout=60)
+        return subprocess.run([sys.executable, str(script), *argv], cwd=root, env=self.clean_env(),
+                              capture_output=True, text=True, check=False, timeout=60)
 
     @contextlib.contextmanager
     def project(self):
@@ -811,14 +885,14 @@ class DistributionTests(unittest.TestCase):
                 shutil.copytree(self.package(host), copy, ignore=shutil.ignore_patterns("hooks"))
                 script = copy / "skill-content/autopilot/scripts/autopilot.py"
                 agent_on = [sys.executable, str(script), "on", "--for", "72h", "--allow", "release"]
-                result = subprocess.run(agent_on, cwd=root, capture_output=True, text=True,
-                                        check=False, timeout=60)
+                result = subprocess.run(agent_on, cwd=root, env=self.clean_env(),
+                                        capture_output=True, text=True, check=False, timeout=60)
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn("hooks/hooks.json is missing", result.stderr)
                 self.assertFalse((root / RUNTIME / "grant.json").exists())
                 (copy / ".agent-marketplace-package.json").unlink()
-                result = subprocess.run(agent_on, cwd=root, capture_output=True, text=True,
-                                        check=False, timeout=60)
+                result = subprocess.run(agent_on, cwd=root, env=self.clean_env(),
+                                        capture_output=True, text=True, check=False, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 result = self.run_verb(host, root, "check")
                 self.assertEqual(result.returncode, 1)
@@ -828,6 +902,31 @@ class DistributionTests(unittest.TestCase):
                             "tool_name": HOST_HOOKS[host][2], "tool_input": {}}
                 result = self.run_hook(host, "pre-question", question, root)
                 self.assertEqual((result.returncode, result.stdout), (0, ""))
+
+    def test_a_claude_grant_never_governs_a_codex_session(self):
+        with self.project() as root:
+            self.run_hook("claude", "user-prompt", expansion(root, "on --for 2h",
+                                                             session_id="claude-A"), root)
+            env = {**self.clean_env(), "CLAUDE_CODE_SESSION_ID": "claude-A"}
+            script = self.package("claude") / "skill-content/autopilot/scripts/autopilot.py"
+            result = subprocess.run([sys.executable, str(script), "on"], cwd=root, env=env,
+                                    capture_output=True, text=True, check=False, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            asks = {host: {"session_id": session, "cwd": str(root), "hook_event_name": "PreToolUse",
+                           "tool_name": HOST_HOOKS[host][2], "tool_input": {}}
+                    for host, session in (("claude", "claude-A"), ("codex", "codex-B"))}
+            self.assertEqual(self.run_hook("codex", "pre-question", asks["codex"], root).stdout, "")
+            other = dict(asks["claude"], session_id="claude-C")
+            self.assertEqual(self.run_hook("claude", "pre-question", other, root).stdout, "")
+            self.assertIn("deny", self.run_hook("claude", "pre-question", asks["claude"], root).stdout)
+            codex = self.package("codex") / "skill-content/autopilot/scripts/autopilot.py"
+            env = {**self.clean_env(), "CODEX_THREAD_ID": "codex-B"}
+            for argv in (["record", "--class", "merge", "--question", "Merge PR 42?",
+                          "--choice", "Merge", "--reason", "r", "--target", "t"], ["check"]):
+                result = subprocess.run([sys.executable, str(codex), *argv], cwd=root, env=env,
+                                        capture_output=True, text=True, check=False, timeout=60)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("bound to a claude session", result.stdout + result.stderr)
 
     def test_the_typed_entry_command_arms_a_grant_on_each_host(self):
         typed = {"claude": lambda root: expansion(root, "on --for 2h --deny merge"),
@@ -858,8 +957,10 @@ class DistributionTests(unittest.TestCase):
     def test_the_question_hook_denies_only_while_a_grant_is_active(self):
         for host in HOST_HOOKS:
             with self.subTest(host=host), self.project() as root:
-                question = {"session_id": "s", "cwd": str(root), "hook_event_name": "PreToolUse",
-                            "tool_name": HOST_HOOKS[host][2], "tool_input": {"questions": []}}
+                session = "session-1" if host == "claude" else "session-2"
+                question = {"session_id": session, "cwd": str(root),
+                            "hook_event_name": "PreToolUse", "tool_name": HOST_HOOKS[host][2],
+                            "tool_input": {"questions": []}}
                 result = self.run_hook(host, "pre-question", question, root)
                 self.assertEqual((result.returncode, result.stdout), (0, ""))
                 self.run_hook(host, "user-prompt", expansion(root, "on --for 1h")

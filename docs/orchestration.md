@@ -222,7 +222,11 @@ show its arming hook fails closed: `on` refuses and no grant counts. Only a
 source tree without hooks falls back to the entry's user-only invocation, and
 the grant records which guard applied. A grant armed under another guard,
 longer than `max_duration_hours` or holding a never class is inactive, and
-`check` and `status` name why. A pre-tool hook denies the host question tool while a grant is
+`check` and `status` name why. A grant governs only the session, on the host,
+whose user typed it: the arming hook records the session id, the question hook
+denies only that session, and `on`, `record` and `queue` refuse a session whose
+host or session variable differs, so a parallel session of either host asks as
+usual. A pre-tool hook denies the host question tool while a grant is
 active and states the procedure; a host whose question tool cannot be hooked
 relies on the instructions, and `status` reports which guards run. The hooks
 are workflow-integrity controls, not an operating-system sandbox: a process

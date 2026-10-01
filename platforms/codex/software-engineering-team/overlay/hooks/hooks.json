@@ -3,7 +3,7 @@
     "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/scripts/team_guard.py register"}]}],
     "UserPromptSubmit": [
       {
-        "hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/skill-content/autopilot/scripts/autopilot.py hook user-prompt --host codex --entry software-engineering-team:autopilot", "timeout": 10}]
+        "hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/skill-content/autopilot/scripts/autopilot.py hook user-prompt --host codex --entry software-engineering-team:autopilot --session-env CODEX_THREAD_ID", "timeout": 10}]
       }
     ],
     "PreToolUse": [
@@ -13,7 +13,7 @@
       },
       {
         "matcher": "^request_user_input(_async)?$",
-        "hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/skill-content/autopilot/scripts/autopilot.py hook pre-question", "timeout": 10}]
+        "hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/skill-content/autopilot/scripts/autopilot.py hook pre-question --host codex", "timeout": 10}]
       }
     ],
     "PostToolUse": [

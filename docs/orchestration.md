@@ -219,7 +219,8 @@ agreed.
 Only the user arms a grant. Each host's user-prompt hook records the `on`
 command the user typed as a short-lived arming record; `on` refuses without
 one and takes the grant's options only from it, so no agent, file, issue or
-tool output can start, extend or widen a grant. A built package that cannot
+tool output can start, extend or widen a grant through the packaged script. A
+built package that cannot
 show its arming hook fails closed: `on` refuses and no grant counts. Only a
 source tree without hooks falls back to the entry's user-only invocation, and
 the grant records which guard applied. A grant armed under another guard,
@@ -230,9 +231,15 @@ denies only that session, and `on`, `record` and `queue` refuse a session whose
 host or session variable differs, so a parallel session of either host asks as
 usual. A pre-tool hook denies the host question tool while a grant is
 active and states the procedure; a host whose question tool cannot be hooked
-relies on the instructions, and `status` reports which guards run. The hooks
-are workflow-integrity controls, not an operating-system sandbox: a process
-that writes the runtime files directly has the user's filesystem authority.
+relies on the instructions, and `status` reports which guards run. The guard
+stops an agent that runs the packaged script, not a process that writes the
+runtime files with the user's filesystem authority: the hooks are
+workflow-integrity controls, not an operating-system sandbox. `vault_hook.py`
+narrows the gap. It denies a tool write into the autopilot runtime directory
+and puts back what a shell command adds to the grant or the arming record,
+while a command may still end the grant or delete the files; a process outside
+the host's tool calls, or a command that overlaps a run of `autopilot.py`,
+escapes or undoes that check.
 
 Autopilot is an entry, not a process switch. A switch is a project rule that a
 Delivery pins at scope approval, and changing it inside a pinned Delivery is

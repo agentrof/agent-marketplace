@@ -100,6 +100,14 @@
   never retry a refused `on` with options of your own. `off` and `complete`
   may end a grant at any time. `autopilot.py` is the packaged
   `skill-content/autopilot/scripts/autopilot.py`.
+- The guard stops an agent that runs the packaged script, not a process that
+  writes the runtime files with the user's filesystem authority. `vault_hook.py`
+  narrows the gap: it denies `apply_patch` into
+  `.agentrof/agent-marketplace/.runtime/autopilot/` and puts back what a shell
+  command adds to the grant or the arming record there, while a command may
+  still end the grant or delete the files. A command that overlaps a run of
+  `autopilot.py` can undo that run's write, so run `autopilot.py` on its own,
+  never in a parallel batch.
 - A grant governs only the Codex session whose user typed it: the hook
   records its session id, the question hook denies only that session, and
   `on`, `record` and `queue` refuse when `CODEX_THREAD_ID` differs, as it does

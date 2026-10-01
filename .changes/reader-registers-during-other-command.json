@@ -1,6 +1,0 @@
-{
-  "summary": "A Delivery reader that has finished registers its result while the other reader's verification command runs. `delivery_verification.py run` and `environment` record beside the verification command lock which role runs which command, in which process and since when, and `regression-run` records the coordinator for the moment it holds the lock. `result`, `panel-result`, `calibrate` and `merge-panel` take only the short session lock and refuse only while the settling reader's own command runs, so its evidence still cannot change after its verdict; a command that has not recorded its owner yet holds every reader. The code reviewer, which runs no command, no longer waits for QA's suite: in one measured Delivery a finished code review waited for QA's gate for 88 minutes of one round and polled the whole time. The writer barrier, which holds while QA still reads, the approval that waits for a running command, and the record a command writes into the session when it exits are unchanged.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

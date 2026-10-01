@@ -1,4 +1,0 @@
-{
-  "summary": "The validator's `finding_code_references` check also reads the Markdown under `platforms/`, the host contracts and project-instruction overlays, so a host contract that tells a role to expect a Delivery finding code the result contract does not declare fails validation as a flow or skill reference does.",
-  "components": {}
-}

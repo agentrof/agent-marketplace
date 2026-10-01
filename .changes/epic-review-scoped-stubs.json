@@ -1,6 +1,0 @@
-{
-  "summary": "`backlog_review_inputs.py --epic <EP-ID>` no longer fails because another epic's writer is still at work. An epic manifest, a reader's or a writer's, fails on a source finding only in a note it reads, its epic and that epic's dependency and source closure, or on a finding about the backlog as a whole, such as a dependency cycle, a duplicate id or the backlog root. It lists the findings of every other backlog note in `check.scaffold_findings`, untouched `stub-epic` and `stub-story` placeholders and a partial edit's authored gaps alike, so one epic's unfinished writer no longer holds back the review of each finished epic, and those findings stay out of the manifest's hash. The root manifest, `backlog_compile.py check` and approval still require every source finished.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

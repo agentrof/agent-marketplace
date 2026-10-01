@@ -1,4 +1,0 @@
-{
-  "summary": "Tests that check a pending release note now read its `.changes` file only while it exists, so release preparation, which consumes those files, no longer fails them; after a release `CHANGELOG.md` keeps the text.",
-  "components": {}
-}

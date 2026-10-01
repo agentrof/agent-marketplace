@@ -1,6 +1,0 @@
-{
-  "summary": "`architecture_compile.py --item-ref DLV-###:<story>` now resolves when the Delivery folder carries a slug: the Delivery id comes from the package's `delivery.md` `id`, and the folder's `dlv-###` prefix is used only when that id is missing. Whichever form selects the Item, every verb records the Item's story id in `introduced_by` and keys the Item delta by it, which is the delta `push-item` reads. A bare story id that more than one Delivery holds is refused with a message naming the qualified candidates, and an empty `--item-ref` no longer selects the only Item in the tree.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

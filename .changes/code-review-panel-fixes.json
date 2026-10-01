@@ -1,6 +1,0 @@
-{
-  "summary": "At process switch `code_review_panel` value `beside_official`, the shipped reader barrier hook lets `delivery_verification.py` `panel-result`, `calibrate` and `merge-panel` run while the readers run, under the same installed-script and single `--worktree` checks as `result`, so a panel pass settles from a shell in the Item worktree; `calibrate` at `review_loop` `blocking_delta` passes the same way. A panel finding that the official reviewer re-lists in a repair pass keeps `source` `panel` and its lens, and the pass's panel record lists those still open and blocking in `carried_panel_blocking`, apart from the official reviewer's own in `official_blocking`. Each panel record keeps every lens claim with its lens, severity, ruling, file, description, calibration reason and a minor ruling's follow-up fields, and `approve-item-evidence` writes the claims of every pass of the Item into its code review record at either `review_loop` value. `calibrate` refuses a `duplicate` ruling whose `duplicate_of` names a finding less severe than the claim, so a critical claim is never recorded at major through a duplicate.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

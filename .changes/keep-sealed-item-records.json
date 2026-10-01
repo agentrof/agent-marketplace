@@ -1,6 +1,0 @@
-{
-  "summary": "`delivery_git.py publish-execution-plan` no longer puts a sealed Item back to a checkout's earlier copy. After `integrate-item`, publishing the same plan again, from the integrating checkout or any other, wrote the checkout's `in_scope` Item record and draft review and verification records over the sealed ones and reported `ok`. For an Item the Integration holds `integrated` or `cancelled`, publication now keeps its review and verification records as the Integration holds them, and keeps its Item record unless the checkout's copy has the same lifecycle, base and stamp, the sealed record an approval started from, such as one that rebinds the Item for reopen. Every other Item publishes as before.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

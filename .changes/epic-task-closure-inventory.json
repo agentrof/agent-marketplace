@@ -1,6 +1,0 @@
-{
-  "summary": "A backlog task derived with `task_inputs.py --epic <EP-ID>` no longer goes stale when another epic's writer edits its own notes. Its manifest bound every canonical source in the project, every uncommitted file and the placeholders of other epics that its closure lists, so any save in a parallel epic failed the `--expected-hash` recheck, which brought back the reruns the epic review manifest had shed. An epic task now binds its closure the way that epic's review manifest does: the notes it reads and the story identities and dependency edges that reach them, while canonical sources outside the closure leave its source inventory, working inputs and changed paths. A change inside the closure, a new incoming dependency edge from another epic included, still makes it stale. The root scope (bare `--epic`), backlog tasks without `--epic` and every other entry keep binding the whole canonical source inventory.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

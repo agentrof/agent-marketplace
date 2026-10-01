@@ -1,6 +1,0 @@
-{
-  "summary": "While a pre-handoff regression run at process switch `pre_handoff_regression` value `touched_suites` holds an Item's verification command lock before any freeze, a write to the Item worktree that the reader barrier guards, through the shipped hook, `prepare-item-transition` or the `delivery_git.py` worktree verbs, refuses with `DELIVERY_ENVIRONMENT_BUSY` and names the run from the environment owner record: its holder, `regression-run`, its process and its start. It said `DELIVERY_VERIFICATION_READERS_ACTIVE` and asked to settle readers that did not exist. A second `regression-run` started meanwhile refuses the same way. With readers running, the refusal still names the readers, and the verification scratch stays writable in both cases.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

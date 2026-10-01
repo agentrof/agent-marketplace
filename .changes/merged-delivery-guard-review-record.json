@@ -1,6 +1,0 @@
-{
-  "summary": "Before a `delivery_git.py` verb changes a Delivery's refs, its check for a merged Delivery now reads the Review published at the Integration tip as `delivery_compile.py` reads a Delivery's Review. While the published Delivery is in `awaiting_merge`, which only the PR record sets, a Review missing there or without `pull_request_url` refuses with `DELIVERY_COORDINATION_CORRUPT`, naming the record and the Integration branch; it read as a Delivery that recorded no PR, so after the target merged the PR, `refresh-target` merged the target into that Delivery's Integration. A Review that cannot be read, for example after an editor wrote a byte order mark, refuses the same way instead of with `DELIVERY_INPUT_INVALID` and the parser's words. A host that lacks the Integration tip, such as one that has not fetched since another host recorded the PR, fetches it before reading that Review, so it refuses a merged Delivery with `DELIVERY_POST_MERGE_TRANSITION` like the recording host; it read the record it could not see as no Review. An Integration without a Review, or whose Review has no `pull_request_url` in any other status, recorded no PR yet and passes as before.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

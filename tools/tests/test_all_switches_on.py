@@ -3,7 +3,8 @@ non-default value at once, story_size_budget with owner-set limits.
 
 Each switch is tested on its own elsewhere. This run proves the values compose:
 every shipped task binds exactly the switch references of the switches its
-entry's flows own, and one Delivery runs through its Review under them.
+entry's flows own, an approved backlog checks and derives an epic review
+manifest under them, and one Delivery runs through its Review under them.
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 sys.path.insert(0, str(ROOT / "tools/tests"))
+import backlog_compile  # noqa: E402
+import backlog_review_inputs  # noqa: E402
 import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
 import operation_compile  # noqa: E402
@@ -149,6 +152,23 @@ class AllSwitchesOnTests(unittest.TestCase):
                    .as_posix() for path in (ROOT / "plugins/software-engineering-team/skill-content")
                    .glob("*/references/switch-*.md")}
         self.assertEqual(shipped, {path for paths in bound.values() for path in paths})
+
+    def test_the_backlog_checks_and_derives_an_epic_review_manifest_with_every_switch_on(self):
+        make_approved_backlog(self.docs)
+        code, output = quiet(backlog_compile.main,
+                             ["check", "--docs", str(self.docs), "--json", "--approved"])
+        result = json.loads(output)
+        self.assertEqual((code, result["errors"]), (0, []), result)
+        self.assertEqual(result["story_size"]["limits"], LIMITS)
+        manifest = backlog_review_inputs.manifest(self.docs, epic="EP-001")
+        # The manifest names the panel and the bounded scope it was derived
+        # under and carries the panel's compiler facts and the story measures.
+        self.assertEqual((manifest["review_panels"], manifest["review_manifest_scope"]),
+                         ("lens_panel", "bounded"))
+        self.assertEqual(sorted(manifest["check"]), ["counts", "relation_audit", "review_note",
+                                                     "source_errors", "stories", "story_size"])
+        self.assertEqual(backlog_review_inputs.manifest(
+            self.docs, epic="EP-001", expected_hash=manifest["source_hash"]), manifest)
 
     def test_a_delivery_runs_through_its_review_with_every_switch_on(self):
         (self.project / "workspace/config.json").write_text(json.dumps({

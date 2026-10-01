@@ -253,10 +253,15 @@ Delivery's tasks never bind the switch references of values it did not pin. The
 Delivery stays `execution_approved` while its Items run, so the pin holds
 through Item execution. An Item worktree reads the switch values from its own
 tree, so reservation and every publication of the execution plan carry the
-pinned policy file onto the Integration with the package, as publication
+pinned policy revision onto the Integration with the package, as publication
 carries a pinned Operation contract, and activation refreshes it in the Item:
 the worktree holds the policy its Delivery pinned even before the policy's own
-commit reaches the target.
+commit reaches the target. Because the pin is compared by value, the checkout
+may hold a later revision that sets every Delivery switch the same way; the
+checkout's file is carried only when it is the pinned revision, otherwise the
+approved file the Git history of the policy file holds under the pinned source
+hash, and publication refuses, naming how to restore it, when neither holds
+it.
 
 Process switch `owner_gates` decides when the owner answers a Delivery's
 questions. At `per_step`, the default, each is asked when it comes up and

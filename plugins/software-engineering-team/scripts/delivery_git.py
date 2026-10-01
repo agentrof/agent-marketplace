@@ -705,8 +705,13 @@ def git_with_input(root: Path, args: list[str], data: str,
 
 def commit_tree(root: Path, base: str, paths: list[str], subject: str,
                 trailers: dict[str, str], *, delivery_projections: bool = False,
-                operation_bindings: dict[str, dict] | None = None) -> str:
-    """Create an unreferenced candidate tree from *base* plus exact paths."""
+                operation_bindings: dict[str, dict] | None = None,
+                blobs: dict[str, str] | None = None) -> str:
+    """Create an unreferenced candidate tree from *base* plus exact paths.
+
+    *blobs* maps further paths to the existing blob each one carries, whatever
+    the checkout holds there.
+    """
     trailers = _normalise_control_trailers(trailers)
     with tempfile.TemporaryDirectory(prefix="agentrof-index-") as temporary:
         index = Path(temporary) / "index"
@@ -721,6 +726,7 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
                                  encoding="utf-8", capture_output=True, check=False)
             if add.returncode:
                 raise RuntimeError(add.stderr.strip() or "cannot stage candidate package")
+        update_candidate_index(root, env, [("100644", oid, path) for path, oid in sorted((blobs or {}).items())])
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
                               encoding="utf-8", capture_output=True, check=False)
         if tree.returncode:
@@ -2178,13 +2184,14 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
         if values["Governance-Hash"] != governed_governance_hash(root):
             raise RuntimeError("DELIVERY_FENCE_GOVERNANCE: the Fence does not carry the approved Governance; "
                                "apply it with apply-governance before reserving")
-    package = package_paths(root, directory, docs, include_map=False) + carried_policy_paths(root, directory, docs)
+    package = package_paths(root, directory, docs, include_map=False)
+    policy = carried_policy_blobs(root, directory, docs)
     integration_oid = commit_tree(
         root, target_oid, sorted(set(package)),
         f"Reserve Delivery {delivery_id}",
         {"Record": "delivery-reservation-v1", "Protocol": "1", "Delivery": delivery_id,
          "Slug": directory.name.removeprefix(delivery_id.lower() + "-"), "Target": target_oid},
-        delivery_projections=True,
+        delivery_projections=True, blobs=policy,
     )
     if fence_exists:
         leased_fence = previous_fence
@@ -2244,21 +2251,47 @@ def pinned_policy_paths(root: Path, directory: Path, docs: Path) -> list[str]:
     return [rel_posix(root, process_policy.path_for(docs))]
 
 
-def carried_policy_paths(root: Path, directory: Path, docs: Path) -> list[str]:
-    """Select the pinned Process Policy that the Integration carries with the package.
+def carried_policy_blobs(root: Path, directory: Path, docs: Path) -> dict[str, str]:
+    """Select the blob of the pinned Process Policy revision that the Integration carries.
 
     An Item worktree reads the switch values from its own tree, which comes from
-    the Integration, so the pinned policy reaches the Integration with the
+    the Integration, so the pinned revision reaches the Integration with the
     package, as a pinned Operation contract does, even before its own commit
-    reaches the target. The package checks that run first prove the checkout's
-    file is the pinned revision.
+    reaches the target. The package checks that run first compare the pin by
+    value, so they also pass a later revision that sets every Delivery switch
+    the same way. The checkout's file is therefore carried only when it is the
+    pinned revision; otherwise the approved file that the Git history of the
+    policy holds under the pinned source hash is, and publication is refused
+    when neither holds it.
     """
+    import process_policy
+    from delivery_compile import split_note
+
     paths = pinned_policy_paths(root, directory, docs)
-    for relative in paths:
-        path = root / relative
-        if not path.is_file() or path.is_symlink() or path.parent.is_symlink():
-            raise RuntimeError("Delivery publication requires the pinned Process Policy as a regular file")
-    return paths
+    if not paths:
+        return {}
+    relative = paths[0]
+    path = root / relative
+    if path.is_symlink() or path.parent.is_symlink() or (path.exists() and not path.is_file()):
+        raise RuntimeError("Delivery publication requires the pinned Process Policy as a regular file")
+    props = split_note(directory / "delivery.md")[0]
+    pin = {key: props.get(key) for key in process_policy.PIN_FIELDS}
+    if path.is_file():
+        try:
+            current = process_policy.pinned_revision(*process_policy.parse(path), pin)
+        except (OSError, ValueError):
+            current = False
+        if current:
+            return {relative: run_git(root, "hash-object", "-w", "--", relative)}
+    found = process_policy.history_revision(docs, pin)
+    if found is None:
+        raise RuntimeError(
+            f"Delivery publication requires the pinned Process Policy revision"
+            f" {pin['process_policy_revision']} ({pin['process_policy_source_hash']}), which is neither"
+            f" the checkout's policy nor an approved file in the Git history of {relative}; fetch the"
+            " history that holds it, for example by unshallowing a shallow clone, or restore that"
+            " approved file from the commit or backup that holds it")
+    return {relative: run_git(root, "rev-parse", f"{found[0]}:{relative}")}
 
 
 def uncarried_operation_contracts(root: Path, docs: Path, integration_oid: str,
@@ -2426,7 +2459,8 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
         raise RuntimeError("DELIVERY_FENCE_MODE: publish-execution-plan requires an open Fence")
     refuse_cancelled_delivery(root, directory, integration_oid, "publish-execution-plan")
     refuse_reviewed_delivery(root, directory, integration_oid, delivery_id)
-    package = package_paths(root, directory, docs, include_map=False) + carried_policy_paths(root, directory, docs)
+    package = package_paths(root, directory, docs, include_map=False)
+    policy = carried_policy_blobs(root, directory, docs)
     operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
     refuse_superseded_approval(root, directory, docs, integration_oid, operation_paths)
     not_carried = uncarried_operation_contracts(root, docs, integration_oid, operation_paths)
@@ -2439,6 +2473,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
         delivery_projections=True,
         operation_bindings={relative: binding for relative, binding in operation_bindings.items()
                             if rel_posix(root, docs / relative) not in sealed},
+        blobs=policy,
     )
     epoch = trailer(fence_message, "Epoch") or epoch_token()
     fence_candidate = commit_tree(

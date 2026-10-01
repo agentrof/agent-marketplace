@@ -4032,6 +4032,72 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.published_plan_blobs(project, reserved["integration"], [relative]),
                          {relative: policy.read_text(encoding="utf-8")})
 
+    def test_reservation_carries_the_pinned_policy_revision_not_a_later_value_equal_one(self):
+        """The package checks compare the pin by value, so they pass a later policy revision that
+        sets every Delivery switch the same way, and reservation carried that revision onto the
+        Integration instead of the one the Delivery pinned. It carries the pinned revision's bytes,
+        from the Git history once the checkout moved on, and refuses when neither holds them (#332)."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs)
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        self.change_process_policy(docs, ("review_panels", "lens_panel"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_delivery(type("Args", (), {
+                "docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication", "outcome": None,
+                "target_branch": "main", "story": ["AUTH-01"]})), 0)
+            self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs),
+                                                                              "delivery": "DLV-001"})), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve the scope under Process Policy revision 1")
+        delivery_git.run_git(project, "push", "-q")
+        policy = process_policy.path_for(docs)
+        relative = policy.relative_to(project).as_posix()
+        pinned = policy.read_text(encoding="utf-8")
+        # The owner approves a revision for the next Delivery that changes only a backlog switch.
+        self.change_process_policy(docs, ("review_manifest_scope", "bounded"))
+        self.assertNotEqual(policy.read_text(encoding="utf-8"), pinned)
+        self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], [])
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        self.assertEqual(delivery_git.published_plan_blobs(project, reserved["integration"], [relative]),
+                         {relative: pinned})
+        # The package checks read the pinned values from the same places, so only a history lost
+        # after they ran reaches this refusal.
+        directory = delivery_compile.find_delivery(docs, "DLV-001")
+        with mock.patch.object(process_policy, "history_revision", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "requires the pinned Process Policy revision 1 "
+                                                      r"\(sha256:[0-9a-f]{64}\), which is neither"):
+                delivery_git.carried_policy_blobs(project, directory, docs)
+
+    def test_publication_carries_the_pinned_policy_revision_not_a_later_value_equal_one(self):
+        """Publication carries the revision the execution approval pinned, so the Item worktree reads
+        that revision as its current policy even after the owner approved a later one that sets every
+        Delivery switch the same way (#332)."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        self.change_process_policy(docs, ("review_panels", "lens_panel"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(
+                type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        policy = process_policy.path_for(docs)
+        relative = policy.relative_to(project).as_posix()
+        pinned = policy.read_text(encoding="utf-8")
+        delivery_git.run_git(project, "add", "--", relative)
+        delivery_git.run_git(project, "commit", "-qm", "Approve Process Policy revision 1")
+        self.change_process_policy(docs, ("review_manifest_scope", "bounded"))
+        self.assertNotEqual(policy.read_text(encoding="utf-8"), pinned)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(delivery_git.published_plan_blobs(project, published["integration"], [relative]),
+                         {relative: pinned})
+        delivery_git.claim_items(project, "DLV-001")
+        worktree = Path(delivery_git.start_item(project, "DLV-001", "AUTH-01")["worktree"])
+        self.assertEqual((worktree / relative).read_text(encoding="utf-8"), pinned)
+        self.assertEqual(delivery_compile.delivery_switch_value(worktree / "workspace/docs", "DLV-001",
+                                                                "review_panels"), "lens_panel")
+
     def test_an_item_worktree_holds_the_process_policy_its_delivery_pinned(self):
         """A policy pinned by execution approval reaches the Integration with the plan, so the Item
         worktree holds the pinned bytes, reads the switch values from them, and a code reviewer's

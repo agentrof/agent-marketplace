@@ -3889,6 +3889,43 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertNotEqual(taken["writer_epoch"], active["writer_epoch"])
         self.assertFalse((Path(taken["worktree"]) / "src/api/handler.py").exists())
 
+    def test_takeover_never_names_a_discard_that_drops_committed_item_work(self):
+        """Item commits stay local until push-item, so a repair round can leave the Item worktree ahead of
+        the remote Item tip. The lane-work refusal named `reset --hard <tip>`, which deleted that committed
+        work as well. It names `reset --hard HEAD`, which drops only uncommitted work, and lists the commits
+        ahead of the tip; takeover then refuses on the divergence instead of dropping them (#327)."""
+        project, worktree, active = self.start_lane_item()
+        (worktree / "src/api").mkdir(parents=True)
+        (worktree / "src/api/handler.py").write_text("def handle():\n    return 1\n", encoding="utf-8")
+        delivery_git.run_git(worktree, "add", "--", "src/api/handler.py")
+        delivery_git.run_git(worktree, "-c", "user.name=Coordinator", "-c", "user.email=coordinator@example.com",
+                             "commit", "-qm", "Commit the first round")
+        head = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        (worktree / "deploy").mkdir()
+        (worktree / "deploy/run.sh").write_text("echo run\n", encoding="utf-8")
+        delivery_git.writer_receipt_paths(project, "DLV-001", "AUTH-01")[0].unlink()
+        remote_before = delivery_git.run_git(project, "ls-remote", "origin")
+        with self.assertRaises(RuntimeError) as refused:
+            delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertEqual(str(refused.exception), (
+            "DELIVERY_WORKTREE_UNSAFE: takeover would discard the uncommitted lane work in the Item worktree"
+            f" {worktree}: backend_developer: no work; devops_engineer: deploy/run.sh. This host holds no"
+            " verified writer receipt for the Item, so it cannot commit and publish that work: copy out any"
+            f" path to keep and discard it with `git -C {worktree} reset --hard HEAD` and"
+            f" `git -C {worktree} clean -fd`, then run takeover-item again. The worktree's HEAD also holds"
+            f" commits the remote Item tip {active['item']} does not, which no ref holds: {head} Commit the"
+            " first round. `reset --hard HEAD` keeps them, and takeover refuses while the worktree is ahead"
+            " of the tip, since it would drop them: discarding them is a separate, explicit choice."))
+        # The named commands drop only the uncommitted work, and takeover then refuses on the divergence.
+        delivery_git.run_git(worktree, "reset", "--hard", "HEAD")
+        delivery_git.run_git(worktree, "clean", "-fd")
+        with self.assertRaisesRegex(RuntimeError, "^DELIVERY_LOCAL_REF_DIVERGED: "):
+            delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertEqual(delivery_git.run_git(worktree, "rev-parse", "HEAD"), head)
+        self.assertTrue((worktree / "src/api/handler.py").is_file())
+        self.assertFalse((worktree / "deploy/run.sh").exists())
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), remote_before)
+
     def test_target_refresh_rejects_changed_descendant_of_claimed_directory(self):
         project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False, "src")
         delivery_git.publish_execution_plan(project, "DLV-001")

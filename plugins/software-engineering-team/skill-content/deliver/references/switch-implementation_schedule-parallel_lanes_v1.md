@@ -117,4 +117,8 @@ commit it as the coordinator on this host, which its verified writer receipt
 allows; or discard it with the `git reset --hard` and `git clean -fd` commands
 the refusal names, then take over. A host without a verified writer receipt
 cannot publish the work, so there only discarding remains, after copying out
-any path to keep.
+any path to keep. Item commits stay local until `push-item`, so a worktree can
+be ahead of the remote Item tip: the refusal then lists those commits and its
+commands reset to the worktree's own `HEAD`, which keeps them. Takeover refuses
+with `DELIVERY_LOCAL_REF_DIVERGED` while they remain, since it would drop them;
+discarding them is a separate, explicit choice.

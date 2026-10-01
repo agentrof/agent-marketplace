@@ -4553,7 +4553,13 @@ def lane_status(project_root: Path, delivery_id: str, story_id: str, remote: str
 
 def refuse_to_discard_lane_work(root: Path, delivery_id: str, story_id: str, worktree: Path,
                                 item_oid: str, slot_ref: str, item_props: dict) -> None:
-    """Refuse a takeover that would discard uncommitted lane work, naming it and the owner's choice."""
+    """Refuse a takeover that would discard uncommitted lane work, naming it and the owner's choice.
+
+    Item commits stay local until push-item, so a worktree ahead of the remote
+    Item tip holds committed work no ref holds. The discard commands then reset
+    to the worktree's own HEAD, which keeps those commits, and the refusal lists
+    them: dropping them is a separate choice.
+    """
     from delivery_compile import implementation_schedule
     if implementation_schedule(item_props) != "parallel_lanes_v1" or not worktree_pending_paths(root, worktree):
         return
@@ -4561,8 +4567,11 @@ def refuse_to_discard_lane_work(root: Path, delivery_id: str, story_id: str, wor
     report = "; ".join(f"{role}: {', '.join(paths) if paths else 'no work'}" for role, paths in lanes.items())
     if outside:
         report += "; outside every lane scope: " + ", ".join(outside)
-    discard = (f"discard it with `git -C {worktree} reset --hard {item_oid}` and `git -C {worktree} clean -fd`,"
-               " then run takeover-item again")
+    head = worktree_head(root, worktree)
+    diverged = head != item_oid
+    ahead = run_git(root, "-C", str(worktree), "log", "--format=%H %s", f"{item_oid}..{head}") if diverged else ""
+    discard = (f"discard it with `git -C {worktree} reset --hard {'HEAD' if diverged else item_oid}`"
+               f" and `git -C {worktree} clean -fd`, then run takeover-item again")
     if writer_receipt_state(root, delivery_id, story_id, item_oid, slot_ref) == "verified":
         choice = ("This host still holds the Item's verified writer receipt, so the choice is to keep it"
                   " without takeover: finish the lanes that have work and commit it as the coordinator in"
@@ -4570,6 +4579,11 @@ def refuse_to_discard_lane_work(root: Path, delivery_id: str, story_id: str, wor
     else:
         choice = ("This host holds no verified writer receipt for the Item, so it cannot commit and publish"
                   f" that work: copy out any path to keep and {discard}")
+    if ahead:
+        choice += (f". The worktree's HEAD also holds commits the remote Item tip {item_oid} does not, which no"
+                   f" ref holds: {'; '.join(ahead.splitlines())}. `reset --hard HEAD` keeps them, and takeover"
+                   " refuses while the worktree is ahead of the tip, since it would drop them: discarding them"
+                   " is a separate, explicit choice.")
     raise RuntimeError(f"DELIVERY_WORKTREE_UNSAFE: takeover would discard the uncommitted lane work in the Item"
                        f" worktree {worktree}: {report}. {choice}")
 

@@ -26,8 +26,11 @@ Type the entry in the host's own command spelling, which the host contract
 names, followed by one verb:
 
 - `on`: a grant for the default duration.
-- `on --for 9h`, `on --for 1h30m` or `on --until 07:00`: time-bound. `--until`
-  also takes an ISO time; a time without an offset is the local clock.
+- `on --for 9h`, `on --for 1h30m` or `on --until 07:00`: time-bound. A clock
+  time is its next occurrence after you typed it, in the system time zone,
+  across a daylight-saving change; one that passes before `on` runs is
+  refused. `--until` also takes an ISO time; a time without an offset is the
+  local clock.
 - `on --goal delivery:DLV-002`: until the owning compiler reads the Delivery
   as merged or cancelled. `--goal requirement:REQ-005` ends when the
   Requirement is incorporated into the approved backlog, resolved with no

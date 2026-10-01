@@ -28,7 +28,8 @@ import re
 import secrets
 import shlex
 import sys
-from datetime import datetime, timedelta, timezone
+import time
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -455,26 +456,40 @@ def names(values: list[str]) -> list[str]:
     return [item.strip() for value in values for item in value.split(",") if item.strip()]
 
 
-def duration(text: str) -> timedelta:
+def duration_minutes(text: str) -> int:
+    """A duration in whole minutes; Python integers hold any typed size without overflow."""
     match = DURATION_RE.match(text.strip().lower())
     if not text.strip() or match is None:
         raise Refusal(f"--for {text!r} is not a duration such as 9h, 90m, 1h30m or 2d")
     days, hours, minutes = (int(part or 0) for part in match.groups())
-    value = timedelta(days=days, hours=hours, minutes=minutes)
-    if value <= timedelta(0):
+    total = days * 24 * 60 + hours * 60 + minutes
+    if total <= 0:
         raise Refusal("--for must be longer than zero")
-    return value
+    return total
 
 
-def until(text: str, now: datetime) -> datetime:
+def next_clock_time(hour: int, minute: int, reference: datetime) -> datetime:
+    """The first moment after reference when the system clock reads hour:minute.
+
+    The system zone's own rules place the time, so a daylight-saving change
+    between reference and the target moves it by the clock, not by a fixed
+    offset.
+    """
+    start = time.localtime(reference.timestamp())
+    day = date(start.tm_year, start.tm_mon, start.tm_mday)
+    for offset in range(3):
+        target = day + timedelta(days=offset)
+        moment = time.mktime((target.year, target.month, target.day, hour, minute, 0, 0, 0, -1))
+        if moment > reference.timestamp():
+            return datetime.fromtimestamp(moment, timezone.utc)
+    raise Refusal(f"--until {hour:02d}:{minute:02d} cannot be placed on the system clock")
+
+
+def until(text: str, reference: datetime) -> datetime:
+    """The end a typed --until names, read from the moment the user typed it."""
     clock = CLOCK_RE.match(text.strip())
     if clock:
-        local = now.astimezone()
-        moment = local.replace(hour=int(clock.group(1)), minute=int(clock.group(2)),
-                               second=0, microsecond=0)
-        if moment <= local:
-            moment += timedelta(days=1)
-        return moment.astimezone(timezone.utc)
+        return next_clock_time(int(clock.group(1)), int(clock.group(2)), reference)
     try:
         # A time without an offset is the local wall clock.
         return datetime.fromisoformat(text.strip().replace("Z", "+00:00")).astimezone(timezone.utc)
@@ -519,21 +534,24 @@ def grant_goal(policy: dict, text: str, project: Path) -> dict:
     return goal
 
 
-def grant_terms(policy: dict, options: argparse.Namespace, now: datetime, project: Path) -> dict:
+def grant_terms(policy: dict, options: argparse.Namespace, now: datetime, project: Path,
+                typed: datetime | None = None) -> dict:
+    """The grant's end, goal and classes; a typed --until is read from when it was typed."""
     maximum = timedelta(hours=policy["max_duration_hours"])
     if options.duration and options.until:
         raise Refusal("give --for or --until, not both")
     goal = grant_goal(policy, options.goal, project) if options.goal else None
     if options.duration:
-        length = duration(options.duration)
-        if length > maximum:
+        minutes = duration_minutes(options.duration)
+        if minutes > policy["max_duration_hours"] * 60:
             raise Refusal(f"--for {options.duration} is above the {policy['max_duration_hours']} h"
                           " maximum")
-        expires = now + length
+        expires = now + timedelta(minutes=minutes)
     elif options.until:
-        expires = until(options.until, now)
+        expires = until(options.until, typed or now)
         if expires <= now:
-            raise Refusal(f"--until {options.until} is in the past")
+            raise Refusal(f"--until {options.until} is in the past: it fell at {stamp(expires)},"
+                          " before on ran")
         if expires - now > maximum:
             raise Refusal(f"--until {options.until} is more than the"
                           f" {policy['max_duration_hours']} h maximum away")
@@ -734,7 +752,8 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
         typed += [f"--deny {value}" for value in args.deny]
         armed_by = {"guard": "user_only_entry", "arguments": " ".join(["on", *typed])}
         host = args.host
-    terms = grant_terms(policy, options, now, project)
+    terms = grant_terms(policy, options, now, project,
+                        parse_stamp(armed_by["armed_at"]) if "armed_at" in armed_by else None)
     with locked(directory):
         previous = current(directory, now)
         grant = {"schema_version": 1,

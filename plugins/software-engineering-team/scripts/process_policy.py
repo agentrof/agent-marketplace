@@ -342,7 +342,7 @@ def integrity_findings(props: dict, body: str) -> list[str]:
     revision = props.get("revision")
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
         errors.append("Process Policy revision must be a positive integer")
-    present = {re.sub(r"\s*<!--.*?-->", "", match.group(1)).strip()
+    present = {re.sub(r"(?s)\s*<!--.*?-->", "", match.group(1)).strip()
                for match in re.finditer(r"(?m)^## (.+?)\s*$", body)}
     missing = sorted(set(SECTIONS) - present)
     if missing:

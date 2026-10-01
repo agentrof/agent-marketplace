@@ -167,6 +167,13 @@ class RegistryAndInstructionTests(unittest.TestCase):
                 " `references/flow-metrics.md` stand as written",
                 "A limit bounds a review unit, never time or effort",
                 "never recount them by hand",
+                "The budget skips a story that a merged Delivery records as integrated",
+                "When a Delivery's merge state cannot be read, for example in a shallow clone,"
+                " the budget measures only the stories this revision changes instead",
+                "`advisories` names each over-budget measure that no Size Exceptions row keeps",
+                "a split moves a criterion to one story, so a shared one stays only when each"
+                " story delivers a distinct slice",
+                "A row keeps its story in every later review round of the epic too",
                 "before any epic review manifest is derived",
                 "`references/slicing-patterns.md`",
                 "Too-Big and Too-Small tests",
@@ -381,6 +388,13 @@ class CheckTests(unittest.TestCase):
             "switch": SWITCH, "value": "propose_split",
             "limits": {"acceptance_criteria": 2, "test_scenarios": 5},
             "over_budget_stories": ["ST-001"],
+            "advisories": [
+                "ST-001 is over budget in acceptance_criteria and no Size Exceptions row keeps"
+                " it: propose a split, or record the owner's decision to keep it",
+                "delivery:AC-DEL-001 is covered by ST-001, ST-002; new in this revision:"
+                " ST-001, ST-002. A split moves a criterion to one story, so keep it in several"
+                " only when each delivers a distinct slice"],
+            "skipped_stories": {},
             "stories": {
                 "ST-001": {"measures": {
                     "acceptance_criteria": {"value": 3, "limit": 2},
@@ -605,6 +619,83 @@ class SizeExceptionApprovalTests(unittest.TestCase):
         code, output = self.fx.check("--approved")
         self.assertEqual((code, json.loads(output)["errors"]), (0, []))
 
+    def test_a_keep_decision_carries_into_the_next_round_and_an_unkept_story_is_advisory(self):
+        self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 1})
+        self.fx.add_criteria(1, "- [ ] A second observable result.")
+        unkept = ("ST-001 is over budget in acceptance_criteria and no Size Exceptions row keeps"
+                  " it: propose a split, or record the owner's decision to keep it")
+        code, output = self.fx.check()
+        self.assertIn(unkept, json.loads(output)["story_size"]["advisories"])
+        # The owner keeps the story; its row goes in the epic's current round.
+        link = f"[[{EPIC}/stories/st-001/story\\|ST-001]]"
+        review = self.fx.docs / f"{EPIC}/reviews/round-1-epic-review.md"
+        props, body = backlog_compile.parse_front_matter(review)
+        table = ("\n## Size Exceptions\n\n| story | measure | reason |\n|---|---|---|\n"
+                 f"| {link} | acceptance_criteria | Both results share one boundary one review"
+                 " covers. |\n")
+        review.write_text(backlog_compile.front_matter(
+            props, body.replace("\n## Findings", table + "\n## Findings", 1)), encoding="utf-8")
+        code, output = self.fx.check()
+        size = json.loads(output)["story_size"]
+        self.assertEqual(size["stories"]["ST-001"]["size_exceptions"], ["acceptance_criteria"])
+        self.assertNotIn(unkept, size["advisories"])
+        # A later round without the table still keeps it: the owner is not asked again.
+        next_round(review, body)
+        code, output = self.fx.check()
+        result = json.loads(output)
+        self.assertEqual((code, result["errors"]), (0, []))
+        self.assertEqual(result["story_size"]["stories"]["ST-001"]["size_exceptions"],
+                         ["acceptance_criteria"])
+        self.assertNotIn(unkept, result["story_size"]["advisories"])
+
+    def delivery(self, status: str, **review: str) -> None:
+        """Record ST-001 as an integrated Item of DLV-001 at the given status."""
+        root = self.fx.docs / "delivery/deliveries/dlv-001-auth"
+        (root / "items/st-001").mkdir(parents=True)
+        (root / "delivery.md").write_text(
+            f"---\ntype: delivery\nid: DLV-001\nstatus: {status}\n---\n\n# Delivery\n",
+            encoding="utf-8")
+        (root / "items/st-001/item.md").write_text(
+            "---\ntype: delivery-item\nstory_id: ST-001\nstatus: integrated\n---\n\n# Item\n",
+            encoding="utf-8")
+        if review:
+            (root / "delivery-review.md").write_text(
+                "---\n" + "".join(f"{key}: {value}\n" for key, value in review.items())
+                + "---\n\n# Review\n", encoding="utf-8")
+
+    def test_the_budget_skips_a_story_a_merged_delivery_integrated(self):
+        self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 1})
+        self.delivery("merged")
+        code, output = self.fx.check()
+        size = json.loads(output)["story_size"]
+        self.assertEqual(sorted(size["stories"]), ["ST-002"])
+        self.assertEqual(size["skipped_stories"], {"ST-001": "integrated by a merged Delivery"})
+        # A Delivery that has not merged leaves its stories measured.
+        (self.fx.docs / "delivery/deliveries/dlv-001-auth/delivery.md").write_text(
+            "---\ntype: delivery\nid: DLV-001\nstatus: active\n---\n\n# Delivery\n",
+            encoding="utf-8")
+        code, output = self.fx.check()
+        self.assertEqual(sorted(json.loads(output)["story_size"]["stories"]), ["ST-001", "ST-002"])
+
+    def test_without_a_readable_merge_state_the_budget_measures_the_revision_changes(self):
+        self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 1})
+        # The recorded PR's merge needs Git, which this project does not have.
+        self.delivery("awaiting_merge", pull_request_url="https://example.invalid/pr/1")
+        root = self.fx.docs / "backlog/backlog.md"
+        props, body = backlog_compile.parse_front_matter(root)
+        props["revision"] = 2
+        backlog_compile.status_tag(props, "draft")
+        for key in ("approved_at_utc", "source_hash", "package_hash"):
+            props.pop(key, None)
+        root.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+        self.fx.add_criteria(2, "- [ ] A second observable result.")
+        code, output = self.fx.check()
+        size = json.loads(output)["story_size"]
+        self.assertEqual(sorted(size["stories"]), ["ST-002"])
+        self.assertEqual(sorted(size["skipped_stories"]), ["ST-001"])
+        self.assertTrue(size["skipped_stories"]["ST-001"].startswith(
+            "unchanged in this revision while Delivery merge state cannot be evaluated"))
+
     def test_at_the_default_approval_never_reads_the_table(self):
         self.fx.choose()
         self.fx.commit()
@@ -797,6 +888,27 @@ class SplitTests(unittest.TestCase):
         self.assertEqual((code, result["errors"]), (0, []))
         self.assertEqual(result["story_size"]["over_budget_stories"], ["ST-001"])
         return moved_body
+
+    def test_a_split_that_copies_a_criterion_instead_of_moving_it_is_reported(self):
+        self.over_budget()
+        source = self.fx.story_path(1)
+        before = {path: path.read_bytes() for path in (source, source.with_name("test-plan.md"))}
+        self.split([])
+        copied = "delivery:AC-DEL-002 is covered by"
+        code, output = self.fx.check()
+        self.assertFalse([advisory for advisory in json.loads(output)["story_size"]["advisories"]
+                          if advisory.startswith(copied)])
+        # The Product Owner copies instead: the source keeps the criterion too.
+        for path, data in before.items():
+            path.write_bytes(data)
+        self.refresh_review()
+        code, output = self.fx.check()
+        result = json.loads(output)
+        self.assertEqual((code, result["errors"]), (0, []))
+        self.assertIn(
+            "delivery:AC-DEL-002 is covered by ST-001, ST-003; new in this revision: ST-001,"
+            " ST-003. A split moves a criterion to one story, so keep it in several only when"
+            " each delivers a distinct slice", result["story_size"]["advisories"])
 
     def test_a_split_in_a_legacy_backlog_moves_criteria_and_scenarios_verbatim(self):
         moved_body = self.over_budget()

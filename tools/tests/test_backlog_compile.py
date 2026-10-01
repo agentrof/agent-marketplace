@@ -1094,6 +1094,20 @@ class ReviewRecordTests(unittest.TestCase):
         self.record(self.epic_review, calibration=(), status="approved")
         self.assertIn(f"{path} returned major finding F-1 has no Severity Calibration row", self.errors())
 
+    def test_an_approved_note_without_returned_findings_never_reads_the_policy(self):
+        # Its record is never checked, so a draft Process Policy, which no
+        # check may read, leaves the approved backlog valid.
+        self.record(self.epic_review, returned=None, calibration=None,
+                    accepted=(self.ACCEPTED[1],), status="approved")
+        import process_policy
+        with redirect_stdout(StringIO()):
+            self.assertEqual(process_policy.main(["begin-revision", "--docs", str(self.docs)]), 0)
+        self.assertEqual(self.errors(), [])
+        # A draft note's record still needs the policy's review_loop value.
+        self.record(self.epic_review, returned=None, calibration=None,
+                    accepted=(self.ACCEPTED[1],))
+        self.assertIn("needs the review_loop value of the Process Policy", " ".join(self.errors()))
+
     def test_the_record_is_authored_text_unless_the_loop_is_blocking_delta(self):
         garbage = {"returned": ("| not an id | fatal | no citation |",),
                    "calibration": ("| F-3 | major | minor | not a real problem |",)}

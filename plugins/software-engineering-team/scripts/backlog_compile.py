@@ -1397,10 +1397,16 @@ def review_record_findings(docs: Path, body: str, path: str, *, approved: bool) 
 def review_loop_record(docs: Path, body: str, path: str, props: dict) -> list[str]:
     """Validate a review note's record when the project's review_loop keeps one.
 
-    A note without a record section never reads the Process Policy, and at
-    any value but blocking_delta a section of a record's name is authored text.
+    A note without a record section never reads the Process Policy, nor does
+    an approved note without Returned Findings, which was approved before its
+    review kept a record and stays as it was. At any value but blocking_delta
+    a section of a record's name is authored text.
     """
-    if not set(REVIEW_RECORD_SECTIONS) & headings(body):
+    present = headings(body)
+    if not set(REVIEW_RECORD_SECTIONS) & present:
+        return []
+    approved = props.get("status") == "approved"
+    if approved and RETURNED_FINDINGS not in present:
         return []
     try:
         loop = session_read(("review_loop", docs.resolve()), lambda: review_loop_value(docs))
@@ -1408,7 +1414,7 @@ def review_loop_record(docs: Path, body: str, path: str, props: dict) -> list[st
         return [f"{path} needs the review_loop value of the Process Policy: {exc}"]
     if loop != RECORDING_LOOP:
         return []
-    return review_record_findings(docs, body, path, approved=props.get("status") == "approved")
+    return review_record_findings(docs, body, path, approved=approved)
 
 
 def acceptance_checklist_lines(story: dict) -> int:

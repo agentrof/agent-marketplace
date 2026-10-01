@@ -711,6 +711,19 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
         self.assertEqual(len(self.errors()), 1)
         self.assertIn("Process Policy revision 2 is a draft", self.errors()[0])
 
+    def test_an_approved_contract_without_returned_findings_never_reads_the_policy(self):
+        # Approved before its review kept a record, the contract stays as it
+        # was, so a draft Process Policy, which no check may read, leaves it valid.
+        set_review_loop(self.docs, "current")
+        self.record(returned=None, calibration=None)
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+        import process_policy
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(process_policy.main(["begin-revision", "--docs", str(self.docs)]), 0)
+        receipt, errors = self.operation.check_contract(self.docs, "verification")
+        self.assertEqual((errors, receipt["current"]), ([], True))
+
     def test_complete_rows_approve_and_stay_current(self):
         self.accept(self.VALID, self.OTHER)
         self.assertEqual(self.errors(), [])

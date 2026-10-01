@@ -26,6 +26,9 @@ import file_lock
 
 POLICY_PATH = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/delivery-verification-policy.json"
 ROLES = ("code_reviewer", "qa_engineer")
+# At review_loop blocking_delta a fresh code reviewer registers its rulings on
+# the claims of a code review in this mode, apart from the claiming result.
+CALIBRATION_MODE = "calibration"
 
 
 def policy() -> dict:
@@ -127,6 +130,78 @@ def command_lock(root: Path):
             file_lock.unlock(fd)
     finally:
         os.close(fd)
+
+
+def environment_lock_paths(root: Path) -> tuple[Path, Path]:
+    """The Item's environment lock and the owner record beside it, in the Item's runtime state."""
+    directory = session_path(root).parent
+    return (safe_runtime_path(root, directory / "environment.lock", file_only=True),
+            safe_runtime_path(root, directory / "environment-owner.json", file_only=True))
+
+
+def environment_owner(path: Path) -> dict | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def environment_holder(root: Path) -> dict | None:
+    """The owner record of the process holding the Item's environment lock, or None when none does."""
+    lock, owner = environment_lock_paths(root)
+    if not lock.exists():
+        return None
+    descriptor = os.open(lock, os.O_RDWR)
+    try:
+        if file_lock.try_lock(descriptor):
+            file_lock.unlock(descriptor)
+            return None
+    finally:
+        os.close(descriptor)
+    return environment_owner(owner) or {}
+
+
+def describe_environment_holder(owner: dict) -> str:
+    if not all(isinstance(owner.get(key), str) for key in ("holder", "command", "started_at")) \
+            or type(owner.get("pid")) is not int:
+        return "a process that has not recorded its owner yet"
+    return (f"{owner['holder']}, running `{owner['command']}` in process {owner['pid']}"
+            f" since {owner['started_at']}")
+
+
+@contextlib.contextmanager
+def environment_lock(root: Path, holder: str, command: str):
+    """Hold the Item's environment lock while one environment verb or verification command runs.
+
+    The lock refuses at once while another process holds it and names that
+    holder from its owner record. As with every package lock, the operating
+    system ends the lock with the process holding it, so a holder that died
+    leaves only its owner record: the next holder replaces that record and
+    yields it as the interrupted holder. Neither a record's age nor its process
+    id frees a lock.
+    """
+    lock, owner = environment_lock_paths(root)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        if not file_lock.try_lock(descriptor):
+            raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
+                               + describe_environment_holder(environment_owner(owner) or {})
+                               + "; run this after it finishes")
+        try:
+            interrupted = environment_owner(owner)
+            atomic_file.replace_text(owner, json.dumps(
+                {"holder": holder, "command": command, "pid": os.getpid(),
+                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                indent=2, sort_keys=True) + "\n")
+            yield interrupted
+        finally:
+            with contextlib.suppress(OSError):
+                owner.unlink()
+            file_lock.unlock(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def read_session(root: Path, *, required: bool = True) -> dict | None:
@@ -412,7 +487,7 @@ def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
 def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None) -> dict:
     root = root.resolve()
     read_session(root)
-    with command_lock(root):
+    with environment_lock(root, "qa_engineer", "run --kind " + kind), command_lock(root):
         return _run_check(root, kind, fresh=fresh, selection_file=selection_file)
 
 
@@ -602,11 +677,23 @@ def calibrated_verdict(result: dict) -> str:
                            for finding in calibrated_findings(result)) else "passed"
 
 
+def candidate_line_count(root: Path, commit: str, path: str) -> int | None:
+    """The number of lines ``path`` holds in the frozen candidate, or None without that file."""
+    completed = subprocess.run(["git", "--no-replace-objects", "-C", str(root), "cat-file", "blob",
+                                f"{commit}:{path}"], capture_output=True, check=False)
+    if completed.returncode:
+        return None
+    data = completed.stdout
+    return data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
+
+
 def cites_candidate(root: Path, current: dict, reason: str) -> bool:
-    """Whether a calibration reason cites the candidate text as path:line."""
-    for path in re.findall(r"(?<![\w./-])([\w.-]+(?:/[\w.-]+)*):[1-9][0-9]*\b", reason):
-        if delivery._is_normalized_claim(path) and (path in current["changed_files"] or (root / path).is_file()):
-            return True
+    """Whether a calibration reason cites a line of the frozen candidate as path:line."""
+    for path, line in re.findall(r"(?<![\w./-])([\w.-]+(?:/[\w.-]+)*):([1-9][0-9]*)\b", reason):
+        if delivery._is_normalized_claim(path):
+            count = candidate_line_count(root, current["product_commit"], path)
+            if count is not None and int(line) <= count:
+                return True
     return False
 
 
@@ -634,13 +721,73 @@ def calibration_problems(root: Path, current: dict, result: dict, ruled: set[str
             problems.append(f"{label} calibrated_severity must confirm {claim['severity']} or be minor or invalid")
         reason = row.get("reason")
         if not isinstance(reason, str) or not meaningful_text(reason) or not cites_candidate(root, current, reason):
-            problems.append(f"{label} calibration reason must cite the candidate text as path:line")
+            problems.append(f"{label} calibration reason must cite the candidate text as path:line,"
+                            " a line the frozen candidate holds")
         if isinstance(ruling, str) and ruling.casefold() == "minor" and (
                 row.get("owner_role") not in roles or not isinstance(row.get("revisit_trigger"), str)
                 or not meaningful_text(row["revisit_trigger"])):
             problems.append(f"{label} calibrated minor needs an owner_role of {', '.join(roles)}"
                             " and a concrete revisit_trigger")
     return problems
+
+
+def open_claims(findings: list[dict], ruled: set[str]) -> list[dict]:
+    """The open critical or major claims that no earlier calibration ruled, by id."""
+    return sorted((finding for finding in findings
+                   if finding["status"] == "open" and blocking(finding) and finding["id"] not in ruled),
+                  key=lambda finding: finding["id"])
+
+
+def register_calibration(root: Path, result: dict) -> dict:
+    """Register a calibration reader's rulings as a result of their own.
+
+    At review_loop blocking_delta a fresh code reviewer, never the reviewer that
+    returned the claims, rules each open critical or major claim before the
+    claiming result is registered, so the implementation writer stays idle.
+    Its rows bind the exact claims it ruled, and they reach the claiming
+    result only through this registration: register_result refuses a claiming
+    result that carries rows of its own.
+    """
+    root = root.resolve()
+    with locked(root):
+        if command_active(root):
+            raise RuntimeError("wait for the verification command to exit before registering a calibration")
+        value = read_session(root)
+        current = require_current(root, value, allow_evidence=True)
+        if review_loop(root, current["delivery"]) != "blocking_delta":
+            raise RuntimeError("severity calibration runs only at review_loop blocking_delta")
+        if result.get("role") != "code_reviewer" or result.get("mode") != CALIBRATION_MODE:
+            raise RuntimeError(f"a calibration result names role code_reviewer and mode {CALIBRATION_MODE}")
+        if result.get("candidate_hash") != current["candidate_hash"] or result.get("session_id") != value["session_id"]:
+            raise RuntimeError("calibration does not bind this candidate and reader session")
+        if value["workers"]["code_reviewer"]["state"] != "running":
+            raise RuntimeError("calibrate the claims before the claiming code review result is registered")
+        if value.get("calibration"):
+            raise RuntimeError("this session's claims are already calibrated; each claim is ruled once")
+        if not isinstance(result.get("report"), str) or not result["report"].strip():
+            raise RuntimeError("calibration requires its independent report")
+        claims = result.get("claims")
+        if (not isinstance(claims, list) or not claims
+                or any(not isinstance(claim, dict) or not isinstance(claim.get("id"), str)
+                       or not isinstance(claim.get("severity"), str) or claim.get("status") != "open"
+                       or not blocking(claim) for claim in claims)
+                or len({claim["id"] for claim in claims}) != len(claims)):
+            raise RuntimeError("calibration claims must list each open critical or major claim once, as returned")
+        ruled = sorted({finding["id"] for finding in value.get("unresolved_findings", [])
+                        if finding["role"] == "code_reviewer" and "calibrated_severity" in finding}
+                       & {claim["id"] for claim in claims})
+        if ruled:
+            raise RuntimeError(f"an earlier calibration already ruled {', '.join(ruled)}")
+        item = item_record(root, current["delivery"], current["story"])
+        problems = calibration_problems(root, current, {"findings": claims, "calibration": result.get("calibration")},
+                                        set(), follow_up_roles(item))
+        if problems:
+            raise RuntimeError("severity calibration is incomplete: " + "; ".join(problems))
+        stored = dict(result)
+        stored["result_hash"] = digest(result)
+        value["calibration"] = {"state": "settled", "result": stored, "completed_at": time.time()}
+        write_session(root, value)
+        return value
 
 
 def follow_up_roles(item: dict) -> list[str]:
@@ -746,8 +893,20 @@ def register_result(root: Path, result: dict) -> dict:
             raise RuntimeError("final result must explicitly disposition every inherited finding and resolve blocking findings")
         if (role == "code_reviewer" and verdict != "cancelled"
                 and review_loop(root, current["delivery"]) == "blocking_delta"):
+            if "calibration" in result:
+                raise RuntimeError("calibration rows come only from the calibration reader's own result,"
+                                   " registered with calibrate; the claiming result carries none")
             item = item_record(root, current["delivery"], current["story"])
             ruled = {identifier for identifier, finding in inherited.items() if "calibrated_severity" in finding}
+            claims = open_claims(findings, ruled)
+            registered = (value.get("calibration") or {}).get("result")
+            if claims or registered:
+                if registered is None or sorted(registered["claims"], key=lambda claim: claim["id"]) != claims:
+                    raise RuntimeError("register the calibration reader's result with calibrate for exactly the"
+                                       " open critical or major claims no earlier calibration ruled, as returned: "
+                                       + (", ".join(claim["id"] for claim in claims) or "none"))
+                result = {**result, "calibration": registered["calibration"],
+                          "calibration_result_hash": registered["result_hash"]}
             problems = calibration_problems(root, current, result, ruled, follow_up_roles(item))
             if problems:
                 raise RuntimeError("severity calibration is incomplete: " + "; ".join(problems))
@@ -850,7 +1009,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
     root = root.resolve()
     if verb not in {"down", "up", "seed", "logs", "url"}:
         raise RuntimeError("unsupported environment verb")
-    with command_lock(root):
+    with environment_lock(root, "qa_engineer", "environment --verb " + verb), command_lock(root):
         with locked(root):
             session = read_session(root)
             current = session["candidate"] if verb == "down" else require_current(root, session, allow_evidence=True)
@@ -947,6 +1106,104 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             session["metrics"]["command_seconds"] += event["duration_seconds"]
             write_session(root, session)
             return {**event, "output": completed.stdout.decode("utf-8", errors="replace")}
+
+
+# The interpreter search paths a lane command never inherits from outside the Item worktree.
+LANE_SEARCH_PATH_VARIABLES = ("PYTHONPATH", "PYTHONHOME", "NODE_PATH")
+
+
+def lane_command_environment(root: Path, directory: Path) -> tuple[dict, dict[str, list[str]]]:
+    """Return the inherited environment without search path entries outside the Item worktree.
+
+    An entry is kept when it resolves inside the worktree, a relative entry
+    against the command's working directory and a link through its target. A
+    variable left with no entry is unset. The second value lists the dropped
+    entries of each variable.
+    """
+    environment = dict(os.environ)
+    dropped: dict[str, list[str]] = {}
+    for name in LANE_SEARCH_PATH_VARIABLES:
+        if name not in environment:
+            continue
+        kept: list[str] = []
+        for entry in environment[name].split(os.pathsep):
+            resolved = (directory / entry).resolve()
+            if resolved == root or root in resolved.parents:
+                kept.append(entry)
+            else:
+                dropped.setdefault(name, []).append(entry)
+        if kept:
+            environment[name] = os.pathsep.join(kept)
+        else:
+            del environment[name]
+    return environment, dropped
+
+
+def lane_run(root: Path, delivery_id: str, story: str, role: str, kind: str,
+             verb: str | None = None, value: str | None = None) -> dict:
+    """Run the approved full test command or an approved environment verb for one lane.
+
+    Parallel lanes share the Item worktree and its one environment, so the
+    coordinator runs these commands here, in that worktree and before the
+    candidate freeze, and each takes the Item's environment lock.
+    """
+    root = root.resolve()
+    item = item_record(root, delivery_id, story)
+    if item.get("status") != "active" or not item.get("item_plan_hash"):
+        raise RuntimeError("lane commands require an active, approved Item")
+    if delivery.implementation_schedule(item) != "parallel_lanes_v1":
+        raise RuntimeError("lane commands serve only an Item whose approved plan runs parallel_lanes_v1")
+    if role not in delivery.lane_roles(item):
+        raise RuntimeError(f"{role} is not a lane of {story}")
+    guard_write(root)
+    kinds = {"test": ("verification", "test_command", "test_workdir"),
+             "environment": ("environment", "env_command", "env_workdir")}
+    if kind not in kinds:
+        raise RuntimeError("unsupported lane command kind")
+    contract_kind, command_key, workdir_key = kinds[kind]
+    relative = f"workspace/docs/operation/{contract_kind}-contract.md"
+    try:
+        contract, _, error = delivery.parse_frontmatter(git(root, "show", "HEAD:" + relative))
+    except RuntimeError as exc:
+        raise RuntimeError(f"the Item worktree's HEAD holds no {relative}") from exc
+    if error:
+        raise RuntimeError(f"{relative} cannot be parsed")
+    command = contract.get(command_key)
+    if not isinstance(command, str) or not command.strip() or "{{" in command or "}}" in command:
+        raise RuntimeError("approved command is missing or contains unresolved parameters")
+    if kind == "test":
+        if verb is not None or value is not None:
+            raise RuntimeError("the test command takes no verb or value")
+        label = "test"
+    else:
+        if verb not in {"down", "up", "seed", "logs", "url"}:
+            raise RuntimeError("unsupported environment verb")
+        if verb in {"seed", "url"}:
+            allowed = contract.get("scenarios" if verb == "seed" else "service_catalog", [])
+            if (not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", value)
+                    or value not in allowed):
+                raise RuntimeError("environment argument must be an exact approved scenario or service identifier")
+        elif value is not None:
+            raise RuntimeError("this environment verb does not accept a value")
+        label = "environment --verb " + verb + (" " + value if value else "")
+        # Only fixed verbs and approved identifiers join the approved command bytes.
+        command = command + " " + verb + (" " + value if value else "")
+    directory = (root / str(contract.get(workdir_key, "."))).resolve()
+    if directory != root and root not in directory.parents:
+        raise RuntimeError("lane command workdir must remain inside the Item worktree")
+    output = safe_runtime_path(root, session_path(root).parent / "lanes" / f"{role}-{uuid.uuid4().hex}.log",
+                               file_only=True)
+    environment, dropped = lane_command_environment(root, directory)
+    with environment_lock(root, role, label) as interrupted:
+        output.parent.mkdir(exist_ok=True)
+        started = time.monotonic()
+        completed = subprocess.run(command, cwd=directory, env=environment, shell=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        duration = time.monotonic() - started
+        atomic_file.replace_bytes(output, completed.stdout)
+    return {"delivery": delivery_id, "story": story, "holder": role, "kind": kind, "command": command,
+            "exit_code": completed.returncode, "output_file": str(output), "duration_seconds": duration,
+            "interrupted_holder": interrupted, "dropped_search_paths": dropped}
 
 
 def require_runtime_evidence(root: Path, session: dict, evidence: dict) -> None:
@@ -1096,6 +1353,8 @@ def main(argv=None) -> int:
         subs.choices[name].add_argument("--mode", required=True)
     result = subs.add_parser("result")
     result.add_argument("--file", required=True)
+    calibrate = subs.add_parser("calibrate")
+    calibrate.add_argument("--file", required=True)
     run = subs.add_parser("run")
     run.add_argument("--kind", choices=("test", "mutation", "dependency_audit", "diagnostic_test"), required=True)
     run.add_argument("--selection-file", type=Path)
@@ -1103,6 +1362,13 @@ def main(argv=None) -> int:
     environment = subs.add_parser("environment")
     environment.add_argument("--verb", required=True, choices=("down", "up", "seed", "logs", "url"))
     environment.add_argument("--value")
+    lane = subs.add_parser("lane-run")
+    lane.add_argument("--delivery", required=True)
+    lane.add_argument("--story", required=True)
+    lane.add_argument("--role", required=True)
+    lane.add_argument("--kind", choices=("test", "environment"), required=True)
+    lane.add_argument("--verb", choices=("down", "up", "seed", "logs", "url"))
+    lane.add_argument("--value")
     inspect = subs.add_parser("inspect")
     selection = inspect.add_mutually_exclusive_group(required=True)
     selection.add_argument("--path")
@@ -1119,10 +1385,14 @@ def main(argv=None) -> int:
             value = freeze(root, args.delivery, args.story, fresh=args.fresh)
         elif args.command == "result":
             value = register_result(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
+        elif args.command == "calibrate":
+            value = register_calibration(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "validate":
             value = validate(root, args.delivery, args.story)
         elif args.command == "environment":
             value = run_environment(root, args.verb, args.value)
+        elif args.command == "lane-run":
+            value = lane_run(root, args.delivery, args.story, args.role, args.kind, args.verb, args.value)
         elif args.command == "inspect":
             value = inspect_instruction(root, args.instruction) if args.instruction else inspect_candidate(root, args.path, base=args.base)
         elif args.command == "diff":
@@ -1136,7 +1406,7 @@ def main(argv=None) -> int:
         else:
             value = read_session(root)
         print(json.dumps({"ok": True, **value}, indent=2))
-        return 0 if args.command not in {"run", "environment"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
+        return 0 if args.command not in {"run", "environment", "lane-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2))
         return 2

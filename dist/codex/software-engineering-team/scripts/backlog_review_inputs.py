@@ -78,6 +78,8 @@ def backlog_authored(path: str) -> bool:
 
 
 SCOPE_SWITCH = "review_manifest_scope"
+PANEL_SWITCH = "review_panels"
+PANEL_VALUE = "lens_panel"
 # Under the bounded scope a note this many links away from the scope's
 # epics, stories and test plans is read without expanding it.
 LEAF_HOP = 2
@@ -102,6 +104,22 @@ def read_scope(docs: Path) -> str:
     except ValueError as exc:
         raise InputError(f"process policy cannot set the review manifest scope: {exc}") from exc
     return values[SCOPE_SWITCH]["value"]
+
+
+def read_panels(docs: Path) -> bool:
+    """Return whether the project's Process Policy sets review_panels to lens_panel.
+
+    Only a panel's lens readers take the compiler facts as given, so only
+    then does a manifest carry them. At ``single_reader``, the default, the
+    reviewer receives the manifest it received before panels existed.
+    """
+    import process_policy
+
+    try:
+        values, _snapshot = process_policy.effective_values(docs)
+    except ValueError as exc:
+        raise InputError(f"process policy cannot set the review panels: {exc}") from exc
+    return values[PANEL_SWITCH]["value"] == PANEL_VALUE
 
 
 def links(value: str, source: str, unparsed: set[str]) -> list[tuple[bool, str]]:
@@ -169,12 +187,11 @@ def source_scenarios(story: dict) -> dict[str, list[str]]:
 def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: dict,
                    relations: dict[str, list[str]], root: bool,
                    budget: dict | None = None) -> dict:
-    """Report the compiler facts a reader would otherwise re-derive.
+    """Report the compiler facts a panel's lens reader would otherwise re-derive.
 
     Source errors already failed the manifest, so they are empty here. The
-    current review note gets the findings the final gate will report for it.
-    Under story_size_budget at propose_split, the story size measures of the
-    stories in scope are given facts as well.
+    current review note gets the findings the final gate will report for it,
+    the Size Exceptions findings included while story_size_budget is on.
     """
     contract = backlog.backlog_contract()
     sections = contract["required_backlog_review_sections" if root
@@ -217,12 +234,35 @@ def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: di
     if root:
         deferred, _findings = backlog.deferred_criteria(docs, review["body"], review["path"])
         counts["deferred_criteria"] = len(deferred)
-    result = {"source_errors": [], "review_note": {"path": review["path"],
-                                                   "pending_findings": sorted(set(pending))},
-              "relation_audit": audit, "counts": counts, "stories": facts}
-    if budget is not None:
-        result["story_size"] = backlog.story_size_report(record, docs, budget, set(facts))
-    return result
+    return {"source_errors": [], "review_note": {"path": review["path"],
+                                                 "pending_findings": sorted(set(pending))},
+            "relation_audit": audit, "counts": counts, "stories": facts}
+
+
+def finding_notes(record: dict) -> dict[str, str]:
+    """Map each backlog note's path, and each epic and story id, to that note."""
+    notes: dict[str, str] = {}
+    if record["backlog"] is not None:
+        notes[record["backlog"]["path"]] = record["backlog"]["path"]
+    for review in record["backlog_reviews"]:
+        notes[review["path"]] = review["path"]
+    for item in record["epics"]:
+        notes[item["id"]] = notes[item["path"]] = item["path"]
+        for review in item["reviews"]:
+            notes[review["path"]] = review["path"]
+    for story in record["stories"]:
+        notes[story["id"]] = notes[story["path"]] = story["path"]
+        notes[story["test_plan"]] = story["test_plan"]
+    return notes
+
+
+def finding_note(finding: str, notes: dict[str, str]) -> str | None:
+    """Return the backlog note a finding starts with, by its path or its id.
+
+    None marks a finding about the backlog as a whole, such as a dependency
+    cycle or a duplicate id, or about a file the backlog does not hold.
+    """
+    return notes.get(finding.split(" ", 1)[0])
 
 
 def epic_structure(record: dict, read: set[str]) -> dict:
@@ -246,11 +286,20 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
              writer: bool = False) -> dict:
     """Bound one review or writer task; a reader never reads an untouched stub.
 
-    Filling the placeholders the stub verbs write is the writer's task, so a
-    writer manifest carries them as ``check.scaffold_findings``. An epic
-    reader carries there only the stubs in notes outside its paths, so an
-    unfinished epic holds back only the reviews that read it. Every other
-    source finding still fails, and the root reader needs complete sources.
+    An epic manifest fails only on a finding in a note it reads, or on one
+    about the backlog as a whole: a dependency cycle, a duplicate id, the
+    backlog root or a file the backlog does not hold. A finding in a backlog
+    note outside its paths, stub or not, is another writer's work in
+    progress, listed in ``check.scaffold_findings`` as context, so an
+    unfinished epic holds back only the reviews that read it. Filling the
+    placeholders the stub verbs write is the writer's task, so a writer
+    manifest also carries the stubs in its own paths there. The root manifest
+    needs complete sources and fails on every finding.
+
+    ``check`` holds only what a switch or those stubs put there: the compiler
+    facts at review_panels ``lens_panel``, which the manifest then names, and
+    the story size measures at story_size_budget ``propose_split``. Without
+    any of them a manifest has no ``check``.
 
     ``source_hash`` binds what the task reads. The root manifest binds every
     backlog note. An epic manifest binds the notes it names and the story
@@ -267,15 +316,24 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     # Only an epic reader follows the switch; a writer and the root reader
     # keep the transitive closure.
     bounded = epic is not None and not writer and read_scope(docs) == "bounded"
+    panels = read_panels(docs)
     with stage_package.candidate_session(), backlog.experience_validation_session():
         record, errors = backlog.collect(docs, review_inputs=True)
-        stubs = record["scaffold_findings"]
-        carried = stubs if writer else []
-        errors = sorted(set(errors) - set(carried))
-        # Which stubs an epic reader reads is known once its closure is.
-        deferred = epic is not None and not writer and set(errors) <= set(stubs)
-        if errors and not deferred:
-            raise InputError("backlog structure is invalid: " + "; ".join(errors))
+        errors = sorted(set(errors))
+        stubs = set(record["scaffold_findings"])
+        notes = finding_notes(record)
+        # The root reads every note, so it fails on every finding but the
+        # stubs its writer carries. An epic manifest defers each finding that
+        # names a backlog note until its read set is known; a finding about
+        # the backlog as a whole fails every epic at once.
+        if epic is None:
+            carried = [finding for finding in errors if writer and finding in stubs]
+            blocking = [finding for finding in errors if finding not in carried]
+        else:
+            carried = []
+            blocking = [finding for finding in errors if finding_note(finding, notes) is None]
+        if blocking:
+            raise InputError("backlog structure is invalid: " + "; ".join(blocking))
         epics = record["epics"]
         if epic is not None:
             matches = [item for item in epics if epic in {item["id"], item["path"], item["folder"]}]
@@ -296,6 +354,9 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         adjacency = defaultdict(set)
         for story in record["stories"]:
             for target in story["dependency_targets"]:
+                # A target that is no story is its source story's finding.
+                if target + ".md" not in by_path:
+                    continue
                 dependency = by_path[target + ".md"]["id"]
                 adjacency[story["id"]].add(dependency)
                 adjacency[dependency].add(story["id"])
@@ -460,16 +521,18 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                 for match in matches:
                     include(match, f"declared analysis scope from {relative}", hop)
 
-        if deferred and errors:
-            notes = {item["path"] for item in epics} | {
-                path for story in record["stories"] for path in (story["path"], story["test_plan"])}
-            # Every stub finding starts with its note's path; one that names no
-            # backlog note outside the read set still fails.
-            carried = [finding for finding in errors
-                       if finding.split(" ", 1)[0] in notes - set(hashes)]
-            blocking = sorted(set(errors) - set(carried))
+        if epic is not None and errors:
+            # A finding in a note the manifest does not read is another
+            # writer's work: it is listed as context, never an input. A finding
+            # in a note it reads fails it, except an untouched stub, which a
+            # writer carries because filling it is the writer's task.
+            outside = [finding for finding in errors
+                       if finding_note(finding, notes) not in hashes]
+            inside = [finding for finding in errors if finding not in outside]
+            blocking = [finding for finding in inside if not (writer and finding in stubs)]
             if blocking:
                 raise InputError("backlog structure is invalid: " + "; ".join(blocking))
+            carried = sorted(outside + [finding for finding in inside if finding in stubs])
 
         if epic is None:
             current_review = backlog.latest(record["backlog_reviews"])
@@ -491,7 +554,11 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         except ValueError as exc:
             raise InputError(str(exc)) from exc
         check = compiler_check(docs, record, owning_epics, current_review, relations, epic is None,
-                               budget)
+                               budget) if panels else {}
+        if budget is not None:
+            check["story_size"] = backlog.story_size_report(
+                record, docs, budget, {story["id"] for item in owning_epics
+                                       for story in item["stories"]})
         if writer or carried:
             check["scaffold_findings"] = carried
 
@@ -514,10 +581,14 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
               "paths": sorted(hashes), "files": [{"path": path, "sha256": hashes[path],
                   "reasons": sorted(reasons[path])} for path in sorted(hashes)],
               "structure_hash": structure_hash, "contract_hash": contract,
-              "review": {"path": current_review["path"], "expected_relations": relations},
-              "check": check}
+              "review": {"path": current_review["path"], "expected_relations": relations}}
+    if check:
+        result["check"] = check
     if bounded:
         result[SCOPE_SWITCH] = "bounded"
+    # Naming the value makes a switch change stale every manifest it derived.
+    if panels:
+        result[PANEL_SWITCH] = PANEL_VALUE
     if unparsed:
         result["unparsed_link_sources"] = sorted(unparsed)
     result["source_hash"] = digest(bound_view(result, writer))
@@ -531,11 +602,12 @@ def bound_view(result: dict, writer: bool) -> dict:
 
     An epic manifest lists the stubs of notes outside its paths as
     information for its reader, never as an input, so they are left out; a
-    writer manifest keeps the stubs inside its paths. ``task_inputs.py``
-    binds an epic task's closure the same way.
+    writer manifest keeps the stubs inside its paths. A ``check`` that held
+    only such stubs binds as no ``check`` at all. ``task_inputs.py`` binds
+    an epic task's closure the same way.
     """
-    check = result["check"]
-    if result["scope"] == "backlog" or "scaffold_findings" not in check:
+    check = result.get("check")
+    if result["scope"] == "backlog" or check is None or "scaffold_findings" not in check:
         return result
     paths = set(result["paths"])
     inside = [finding for finding in check["scaffold_findings"]
@@ -543,6 +615,8 @@ def bound_view(result: dict, writer: bool) -> dict:
     bound_check = {key: value for key, value in check.items() if key != "scaffold_findings"}
     if inside or writer:
         bound_check["scaffold_findings"] = inside
+    if not bound_check:
+        return {key: value for key, value in result.items() if key != "check"}
     return dict(result, check=bound_check)
 
 

@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "default_duration_hours": 8,
+  "default_goal_cap_hours": 48,
+  "max_duration_hours": 72,
+  "arming_ttl_minutes": 10,
+  "classes": [
+    {
+      "id": "choice",
+      "default": "allowed",
+      "description": "A question with a recommended option about how to do the work inside the approved scope, such as a design, naming, ordering or tooling choice."
+    },
+    {
+      "id": "approval_gate",
+      "default": "allowed",
+      "description": "Approval at a named flow gate, such as a package, scope, plan or review approval the flow asks the user for."
+    },
+    {
+      "id": "merge",
+      "default": "allowed",
+      "description": "Merging a pull request the flow opened, once its required checks pass."
+    },
+    {
+      "id": "release",
+      "default": "excluded",
+      "description": "Publishing a release or a tag."
+    },
+    {
+      "id": "phase_start",
+      "default": "excluded",
+      "description": "Starting a Requirement, a Delivery or another phase that is not already in flight."
+    },
+    {
+      "id": "credentials",
+      "default": "never",
+      "description": "Creating, reading, entering or changing a credential, token, key or password."
+    },
+    {
+      "id": "security_settings",
+      "default": "never",
+      "description": "Changing a security, authorization, permission or sandbox setting, or granting access the work needs."
+    },
+    {
+      "id": "spending",
+      "default": "never",
+      "description": "Spending money, such as buying a paid service, seat or quota."
+    },
+    {
+      "id": "destructive",
+      "default": "never",
+      "description": "An action that cannot be undone, such as deleting data, rewriting published history or removing work the flow does not own."
+    },
+    {
+      "id": "scope_or_rule",
+      "default": "never",
+      "description": "A change to the approved scope or an external contract, an exception to an approved rule or project invariant, or a budget the approved documents leave open: the decisions a flow asks at once."
+    }
+  ],
+  "goal_kinds": [
+    {
+      "id": "delivery",
+      "description": "Until one Delivery reaches a terminal status: merged or cancelled.",
+      "end": {
+        "compiler": "scripts/delivery_compile.py",
+        "terminal_statuses": ["merged", "cancelled"]
+      }
+    },
+    {
+      "id": "requirement",
+      "description": "Until one Requirement ends its planning: incorporated into the approved backlog, resolved with no change, superseded or withdrawn.",
+      "end": {
+        "compiler": "scripts/requirement_compile.py",
+        "terminal_statuses": ["incorporated", "resolved_no_change", "superseded", "withdrawn"]
+      }
+    },
+    {
+      "id": "text",
+      "description": "A free-text goal that no compiler can read. It ends only through complete, off or its cap.",
+      "end": "none"
+    }
+  ]
+}

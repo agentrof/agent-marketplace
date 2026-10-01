@@ -4,27 +4,32 @@
     "verification_contract": {
       "type": "verification_contract",
       "title": "Verification Contract",
-      "flow": "operation"
+      "flow": "operation",
+      "sections_from": "scripts/operation_compile.py:init"
     },
     "environment_contract": {
       "type": "environment_contract",
       "title": "Environment Contract",
-      "flow": "operation"
+      "flow": "operation",
+      "sections_from": "scripts/operation_compile.py:init"
     },
     "architecture_decision": {
       "type": "decision",
       "title": "architecture decision record",
-      "flow": "execution-planning"
+      "flow": "execution-planning",
+      "sections_from": "scripts/architecture_compile.py:stub"
     },
     "item_topology": {
       "type": "delivery_item",
       "title": "Item topology",
-      "flow": "execution-planning"
+      "flow": "execution-planning",
+      "keys_from": "scripts/delivery_compile.py:LIGHT_TOPOLOGY_FIELDS"
     },
     "user_decisions": {
       "type": "delivery",
       "title": "User Decisions",
-      "flow": "execution-planning"
+      "flow": "execution-planning",
+      "sections_from": "scripts/delivery_compile.py:SECTIONS.delivery"
     }
   },
   "fact_classes": {
@@ -48,15 +53,30 @@
       "facts": "Each structural decision with the alternatives weighed and its rationale, recorded inside the active Item.",
       "owner": {
         "document": "architecture_decision",
-        "section": "Decision",
+        "section": "Scope",
         "writer": "software_architect"
       }
     },
     "item_topology": {
-      "facts": "An Item's execution order, path and contract claims, role sequence, Operation pins and its one-paragraph architecture_reason.",
+      "facts": "An Item's execution order, path and contract claims, whether it needs a live environment, which decides its Operation pins, its architecture impact with the one-paragraph architecture_reason, its role sequence, and its verification and implementation schedules with their lanes.",
       "owner": {
         "document": "item_topology",
-        "section": "front matter",
+        "keys": [
+          "execution_after",
+          "waits_for",
+          "path_claims",
+          "contract_claims",
+          "runtime_required",
+          "architecture_impact",
+          "architecture_components",
+          "architecture_record_kinds",
+          "architecture_reason",
+          "role_sequence",
+          "verification_schedule",
+          "implementation_schedule",
+          "lane_scopes",
+          "lane_seams"
+        ],
         "writer": "software_architect"
       }
     },

@@ -1,6 +1,6 @@
 ---
 name: product-owner-mechanical
-description: Product owner role that groups approved product knowledge into the project-local epic and story backlog; never auto-triggered. Lower-tier variant for mechanical passes that apply only the fixes a review verdict names.
+description: Product owner role that groups approved product knowledge into the project-local epic and story backlog; never auto-triggered. Mechanical-tier variant for passes that apply only the fixes a review verdict names.
 model: claude-sonnet-5-5
 effort: high
 output_contract: prose

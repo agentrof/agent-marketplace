@@ -38,6 +38,18 @@ the measures a Size Exceptions row keeps. `over_budget_stories` lists every
 story with a measure over budget. These counts are compiler facts; never
 recount them by hand.
 
+The budget skips a story that a merged Delivery records as integrated: it is
+delivered, and no split applies to it. When a Delivery's merge state cannot be
+read, for example in a shallow clone, the budget measures only the stories
+this revision changes instead: new ones, ones revised since their approval
+and ones approved with this revision. `skipped_stories` names each skipped
+story with the reason.
+
+`advisories` names each over-budget measure that no Size Exceptions row keeps,
+and each criterion that a story new in this revision shares with another
+story: a split moves a criterion to one story, so a shared one stays only when
+each story delivers a distinct slice. An advisory never fails the check.
+
 ## Proposing a split
 
 After the stories and Test Plans are authored and `check --json` reports no
@@ -91,7 +103,11 @@ that note from the owner's decision:
 
 `story` links a story of that epic with its id as the alias and the table
 pipe escaped, `measure` is a declared measure id and `reason` is concrete.
-The compiler validates every row and rejects a repeated story and measure.
+The compiler validates every row and rejects a repeated story and measure:
+`check` reports an invalid row, and `approve` refuses one before any write,
+since an approved review can no longer change. A row keeps its story in every
+later review round of the epic too, so a new round need not repeat it and the
+owner is not asked again.
 
 ## Reviews
 
@@ -101,9 +117,9 @@ raises a finding for a count alone. In its slicing lens it checks that each
 split moved its criteria and scenarios verbatim and that each kept story is
 still one review unit with a concrete Size Exceptions reason; a kept story
 over budget without its row is a minor finding. The epic review note's
-Slicing evidence names the limits its review ran under; the backlog approval
-records the Process Policy's path, revision and source hash in that note, as
-it does for every review it approves.
+Slicing evidence names the limits its review ran under; the note records the
+Process Policy's path, revision and source hash of the round, as every review
+round does.
 
 ## Delivery proposal
 

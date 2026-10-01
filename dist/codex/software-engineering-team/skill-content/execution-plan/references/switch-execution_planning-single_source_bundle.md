@@ -10,10 +10,12 @@ governs.
 ## Fact ownership
 
 `data/fact-ownership.json` names, for each fact class of an execution plan,
-the one document, section and writer role that own it. Write each fact once,
-in its owning section. Every other document links that section, or cites an
-owner ruling by its id, and never restates it: a copy is a second truth that
-some review then has to reconcile.
+the one document, the section or front-matter keys within it and the writer
+role that own it. A section is a heading that the document's compiler writes;
+the Item topology lives in the Item record's front-matter keys. Write each
+fact once, where it is owned. Every other document links that section or
+record, or cites an owner ruling by its id, and never restates it: a copy is a
+second truth that some review then has to reconcile.
 
 Four deliberate rules stay exactly as they are:
 
@@ -43,23 +45,27 @@ Four deliberate rules stay exactly as they are:
    time: each writes only its own contract.
 3. Bundle manifest. Once the drafts and the Item topology are ready, run
    `delivery_compile.py bundle-manifest --delivery DLV-###`. It lists every
-   contract the plan revises, or the current revision an Item pins, every Item
-   record with its Story and Test Plan, and the fact ownership data, each with
-   the hash of its bytes. `readers` names the counterpart of every revised
-   contract: the DevOps Engineer for the Verification Contract and the QA
-   Engineer for the Environment Contract. When it names none, the plan revises
-   no contract, no bundle review runs and approval follows as the flow
-   describes.
+   contract the plan revises, the current revision an Item pins and an
+   approved revision the plan still has to carry, every Item record with its
+   Story and Test Plan, and the fact ownership data, each with the hash of its
+   bytes. It also binds the Delivery's `User Decisions` section, which owns
+   every owner ruling, with the hash of its text. `readers` names the
+   counterpart of every revised contract as `task_inputs.py --role` takes it:
+   `devops-engineer` for the Verification Contract and `qa-engineer` for the
+   Environment Contract. When it names none, the plan revises no contract, no
+   bundle review runs and approval follows as the flow describes.
 4. Bundle review. One review layer reads the bundle. Start every reader
    together on the same manifest, as the host contract says, and derive each
-   reader's task with `task_inputs.py --entry configure --role <counterpart>
-   --mode review --skill challenge-review --delivery DLV-###` and one `--input`
-   per path in the manifest's `inputs`. Each prompt carries the manifest, the contract the
-   reader counterparts and `SELF-CHECK`. No separate counterpart review runs
-   for a contract inside the bundle. At `review_panels` `lens_panel`, review
-   panel `execution_bundle` replaces these readers. Recompute the manifest
-   with `--expected-hash <source_hash>` before accepting any finding; a
-   changed input needs a fresh read by every affected reader.
+   reader's task with `task_inputs.py --entry configure --role <reader>
+   --mode review --skill challenge-review --delivery DLV-###`, one value of
+   `readers` as `<reader>`, and one `--input` per path in the manifest's
+   `inputs`, which hold `delivery.md` for its rulings. Each prompt carries the
+   manifest, the contract the reader counterparts and `SELF-CHECK`. No separate
+   counterpart review runs for a contract inside the bundle. At
+   `review_panels` `lens_panel`, review panel `execution_bundle` replaces these
+   readers. Recompute the manifest with `--expected-hash <source_hash>` before
+   accepting any finding; a changed input, a changed ruling included, needs a
+   fresh read by every affected reader.
 5. Findings and verdict. A restatement of a fact outside its owning
    section is a finding that names the owning section; one that contradicts
    the owner is critical. The owning writer fixes its own document: a contract
@@ -69,12 +75,15 @@ Four deliberate rules stay exactly as they are:
    every revised contract and `delivery_compile.py check --delivery DLV-###`
    are green.
 6. Approval and publication. Approve each revised contract with
-   `operation_compile.py approve --kind <kind>`, then approve the plan. For a
-   path in the manifest's `unpinned_revisions`, a revised contract that no
-   Item pins, commit the approved contract to the target branch and run
-   `delivery_git.py refresh-target` before `publish-execution-plan`, in the
-   same step: publication refuses with `DELIVERY_OPERATION_UNCARRIED` a
-   revision the Integration does not hold.
+   `operation_compile.py approve --kind <kind>`, then approve the plan.
+   `unpinned_revisions` names each contract that no open Item pins and whose
+   bytes the Integration, or before reservation the target, does not hold;
+   `held_by` names the ref it compared. Approval does not clear it, so a
+   manifest recomputed after approval still names it. For each such path,
+   commit the approved contract to the target branch unless the target
+   already holds it, and run `delivery_git.py refresh-target` before
+   `publish-execution-plan`, in the same step: publication refuses with
+   `DELIVERY_OPERATION_UNCARRIED` a revision the Integration does not hold.
 
 ## Review loop
 
@@ -95,3 +104,6 @@ in the order the rulings are made. Every other document, a contract, an Item
 record or an architecture record, cites the id and never restates the ruling.
 At switch `owner_gates` `two_fixed_gates`, a ruling is the answer of its
 `answered` row in the decision table that switch keeps, under the same id.
+At every `owner_gates` value, `delivery_compile.py check` refuses a ruling id
+without two digits and an id that starts two rulings, a table row and a line
+included.

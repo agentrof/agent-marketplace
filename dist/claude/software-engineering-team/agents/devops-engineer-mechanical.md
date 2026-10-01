@@ -1,6 +1,6 @@
 ---
 name: devops-engineer-mechanical
-description: DevOps engineer role. Spawned by software-engineering-team flows to realize the approved architecture as a runnable containerized environment; never auto-triggered. Lower-tier variant for mechanical passes that apply only the fixes a review verdict names.
+description: DevOps engineer role. Spawned by software-engineering-team flows to realize the approved architecture as a runnable containerized environment; never auto-triggered. Mechanical-tier variant for passes that apply only the fixes a review verdict names.
 model: claude-sonnet-5-5
 effort: high
 output_contract: prose

@@ -45,6 +45,8 @@ escalation clause of your role stays as it is.
 
 `/execution-plan DLV-###` stays available on the light path: for a plan
 revision of a light Delivery and for a Delivery that left the light path. It
-then runs as the flow describes, with its own owner gate, and execution
-approval records the Delivery's path as `standard` unless the plan still binds
-the topology and the contract receipts that scope approval recorded.
+then runs as the flow describes, with its own owner gate. A plan that no
+longer binds the topology and the contract receipts that scope approval
+recorded is refused by execution approval until `light-path-check` records
+the fallback, after which execution approval records the Delivery's path as
+`standard`.

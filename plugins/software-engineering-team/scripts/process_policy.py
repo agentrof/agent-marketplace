@@ -10,7 +10,9 @@ that a later release promotes.
 
 A switch may declare owner-set parameters for the values that take them: the
 registry names their type, how many a value needs and the package data file
-that declares their ids. The package sets no parameter value. The optional
+that declares their ids. The package sets no parameter value until a promotion
+ships package limits, which a value that takes parameters applies to each one
+the owner leaves unset; such a value stays non-default. The optional
 Parameters table holds one row per parameter the owner sets, and a parameter
 exists only while its switch is at a value that takes it.
 """
@@ -111,14 +113,19 @@ def parameter_declaration(package: Path, name: str, spec: dict, values: list[str
         items = json.loads((package / relative).read_text(encoding="utf-8"))[source["key"]]
         ids = {key: str(item["summary"]) for key, item in items.items()}
         result = {"summary": str(declared["summary"]), "values": list(declared["values"]),
-                  "ids": ids, "type": declared["type"], "min_count": declared["min_count"]}
+                  "ids": ids, "type": declared["type"], "min_count": declared["min_count"],
+                  "package_limits": dict(declared.get("package_limits", {}))}
     except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError, ValueError) as exc:
         raise ValueError(f"process switch {name!r} parameters cannot be read: {exc}") from exc
+    limits = result["package_limits"]
     if (not ids or not all(NAME_RE.match(key) for key in ids)
             or result["type"] not in PARAMETER_TYPES
             or not result["values"] or not set(result["values"]) <= set(values) - {spec["default"]}
             or not isinstance(result["min_count"], int) or isinstance(result["min_count"], bool)
-            or not 0 <= result["min_count"] <= len(ids)):
+            or not 0 <= result["min_count"] <= len(ids)
+            or not set(limits) <= set(ids)
+            or any(isinstance(limit, bool) or parameter_value(result, str(limit)) != limit
+                   for limit in limits.values())):
         raise ValueError(f"process switch {name!r} declares invalid parameters")
     return result
 
@@ -300,16 +307,24 @@ def parameter_findings(rows: dict[str, str], parameters: dict[tuple[str, str], s
             if present:
                 errors.append(f"parameters of switch {switch!r} apply only at"
                               f" {' or '.join(declared['values'])}; its value is {value!r}")
-        elif len(present) < declared["min_count"]:
+        elif len(set(present) | set(declared["package_limits"])) < declared["min_count"]:
             errors.append(f"switch {switch!r} at {value!r} needs at least {declared['min_count']}"
                           f" of its parameters {sorted(declared['ids'])}")
     return errors
 
 
-def typed_parameters(switch: str, spec: dict, parameters: dict[tuple[str, str], str]) -> dict:
-    """Return one switch's parameter values in force as their declared types."""
-    return {parameter: parameter_value(spec["parameters"], raw)
-            for (name, parameter), raw in sorted(parameters.items()) if name == switch}
+def typed_parameters(switch: str, spec: dict, parameters: dict[tuple[str, str], str],
+                     value: str | None = None) -> dict:
+    """Return one switch's parameter values in force as their declared types.
+
+    At a value that takes parameters, a package limit applies to each one the
+    owner left unset.
+    """
+    declared = spec["parameters"]
+    limits = declared["package_limits"] if value in declared["values"] else {}
+    return dict(sorted({**limits, **{parameter: parameter_value(declared, raw)
+                                     for (name, parameter), raw in parameters.items()
+                                     if name == switch}}.items()))
 
 
 def integrity_findings(props: dict, body: str) -> list[str]:
@@ -419,7 +434,8 @@ def resolved_values(rows: dict[str, str], parameters: dict[tuple[str, str], str]
         # Only a switch that declares parameters reports them, so every other
         # switch reads exactly as before parameters existed.
         if "parameters" in spec:
-            values[switch]["parameters"] = typed_parameters(switch, spec, parameters)
+            values[switch]["parameters"] = typed_parameters(switch, spec, parameters,
+                                                            values[switch]["value"])
     return values
 
 
@@ -897,6 +913,9 @@ def switches(args) -> int:
                              for key, text in sorted(declared["ids"].items())],
                 "in_force": in_force,
             }
+            if declared["package_limits"]:
+                listed[-1]["parameters"]["package_limits"] = dict(sorted(
+                    declared["package_limits"].items()))
     policy = None if state is None else {key: state.get(key) for key in
                                          ("path", "status", "revision", "source_hash")}
     result = {"ok": not errors, "policy": policy, "switches": listed, "errors": errors}

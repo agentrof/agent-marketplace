@@ -93,6 +93,24 @@ class RegistryAndInstructionTests(unittest.TestCase):
         self.assertIn("never fails a check, blocks an approval or rewrites a criterion",
                       spec["values"][1]["tradeoffs"])
 
+    def test_a_promotion_in_the_documented_form_loads_and_validates(self):
+        # A promotion keeps off as the default and ships package limits (#325).
+        with tempfile.TemporaryDirectory() as raw:
+            package = Path(raw)
+            for relative in (REGISTRY, MEASURES):
+                (package / relative).parent.mkdir(parents=True, exist_ok=True)
+                (package / relative).write_bytes((TEAM / relative).read_bytes())
+            registry = json.loads(read(REGISTRY))
+            spec = registry["switches"][SWITCH]
+            spec["parameters"]["package_limits"] = {"acceptance_criteria": 12, "test_scenarios": 20}
+            (package / REGISTRY).write_text(json.dumps(registry), encoding="utf-8")
+            declared = process_policy.load_registry(package)[SWITCH]
+            self.assertEqual((declared["default"], declared["parameters"]["package_limits"]),
+                             ("off", {"acceptance_criteria": 12, "test_scenarios": 20}))
+            ids = [value["id"] for value in spec["values"]]
+            self.assertEqual(validate.parameter_problems(f"switch {SWITCH!r}", spec["parameters"],
+                                                         ids, spec["default"], package), [])
+
     def test_the_measures_are_the_policy_parameters_and_the_compiler_derives_each(self):
         measures = backlog_compile.story_size_measures()
         self.assertEqual(sorted(measures), ["acceptance_criteria", "contract_deltas",

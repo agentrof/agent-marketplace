@@ -1,4 +1,4 @@
 {
-  "summary": "The authoring guide describes how to add a process switch and the promotion rule for flipping a default, and the architecture gains the default-equivalence invariant: with every switch at its default, every compiler and coordinator output and every bound instruction stays as the previous release had it.",
+  "summary": "The authoring guide describes how to add a process switch and the promotion rule for flipping a default, and the architecture gains the default-equivalence invariant: with every switch at its default, every compiler and coordinator output and every bound instruction stays as the previous release had it. The promotion rule states that only a non-default choice survives a flip, that a unit other than 3 Deliveries needs the switch's idea issue or an owner decision, naming the owner's 1 Oct 2026 decision for `review_manifest_scope`, and how a value that takes parameters is promoted; the `/configure process` choice gate says that answering the default records no row.",
   "components": {}
 }

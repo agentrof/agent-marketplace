@@ -220,7 +220,7 @@
       "metric": "Per backlog revision run with propose_split, stories over budget, split proposals accepted and kept, criteria and scenarios moved with exact coverage, and epic review passes; per story, cycle time from start-item to integration, code review cycles, QA rounds and reopens, compared between stories within and over budget in the same period.",
       "promotion": {
         "unit": "At least 3 backlog revisions run with propose_split and 3 Deliveries that contain stories planned under it.",
-        "threshold": "The owner accepts at least half of the split proposals, stories within budget reach integration with a median cycle time at most half that of stories over budget in the same period, and no split loses, merges or rewords a criterion, creates a dependency cycle or yields a story verifiable only after a sibling lands, with every shared quality guard holding and the owner's approval."
+        "threshold": "The owner accepts at least half of the split proposals, stories within budget reach integration with a median cycle time at most half that of stories over budget in the same period, and no split loses, merges or rewords a criterion, creates a dependency cycle or yields a story verifiable only after a sibling lands, with every shared quality guard holding and the owner's approval. A promotion keeps off as the default, since only a value the owner chooses takes parameters, and ships package_limits for propose_split, which a project at that value applies to each limit it leaves unset."
       }
     }
   }

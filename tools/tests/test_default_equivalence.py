@@ -16,12 +16,15 @@ upstream notes and Verification Contract from the frozen
 ``default_equivalence_inputs.json`` instead of rebuilding them with the
 backlog and Operation compilers, whose own fixes would otherwise move every
 Delivery hash that covers them; the Operation run checks the same contract,
-and the backlog run checks the same backlog and derives its review manifests.
-``--harness inputs`` rebuilds that file. The approval run builds and approves
-the fixture backlog with ``root``'s own fixture and compiler, as the input
-harness does, and seals every backlog file it writes. Only the backlog golden
-hides a field: a review manifest's contract_hash hashes the package scripts,
-and its source_hash covers that hash. No Delivery record or Operation receipt
+the backlog run checks the same backlog and derives its review manifests, and
+the backlog task run derives an epic's reader and writer tasks and the root's
+writer task from it with ``task_inputs.py --epic``. ``--harness inputs``
+rebuilds that file. The approval run builds and approves the fixture backlog
+with ``root``'s own fixture and compiler, as the input harness does, and seals
+every backlog file it writes. Only the two backlog goldens hide fields: a
+review manifest's contract_hash hashes the package scripts, and its
+source_hash covers that hash; a backlog task also hashes its instructions,
+whose paths the shipped run seals. No Delivery record or Operation receipt
 carries a package script or instruction hash, and the task manifest run hashes
 a package the harness writes byte for byte, so release changes to scripts and
 contracts reach no other golden. No golden covers a rendered agent file.
@@ -167,6 +170,30 @@ APPROVAL_GOLDEN = {
         "sha256:ad38462e118bc1181066a5af8cd4bc9621f5efdb5bb290c63868827f2bec89a6",
 }
 
+BACKLOG_TASK_GOLDEN = {
+    "epic_reader": {
+        "backlog_scope": "sha256:f9b45d773fd3b467a84ee8b3676119acb8583c1c2572dc36dc7bc2cdb9283663",
+        "canonical_source_inventory":
+            "sha256:11227584170b32c54464b3316068efcd374964bbc77ba9103f9c2630a5fb882c",
+        "structure_hash": "sha256:536a05972e329c5d5c75beebd1d63a08e48625c5ba3fba37052e3319ea528cf3",
+        "task": "sha256:fba91d9ea2df62536e8bd4b491f44882722cf8466612ff526dff023f0a4b443f",
+    },
+    "epic_writer": {
+        "backlog_scope": "sha256:f9b45d773fd3b467a84ee8b3676119acb8583c1c2572dc36dc7bc2cdb9283663",
+        "canonical_source_inventory":
+            "sha256:11227584170b32c54464b3316068efcd374964bbc77ba9103f9c2630a5fb882c",
+        "structure_hash": "sha256:536a05972e329c5d5c75beebd1d63a08e48625c5ba3fba37052e3319ea528cf3",
+        "task": "sha256:c4d1165f344d7526c1f14f6062ac27ff135997b882d37869183180ce572b9c6a",
+    },
+    "root_writer": {
+        "backlog_scope": "sha256:66c7e2c341c3330d45264cf27f029fa964a506ff62bd16956e8148bcb3d8b342",
+        "canonical_source_inventory":
+            "sha256:11227584170b32c54464b3316068efcd374964bbc77ba9103f9c2630a5fb882c",
+        "structure_hash": "sha256:536a05972e329c5d5c75beebd1d63a08e48625c5ba3fba37052e3319ea528cf3",
+        "task": "sha256:cc2328e34e5ecde844cf8b18d83d244f0a1abe7f4431f078bac0a8c1100cc931",
+    },
+}
+
 MANIFEST_GOLDEN = {
     "entry:without_switch_files":
         "sha256:e0ca7b6f1cf42fd533887f93ac2591a4ba5de7ee44756e95eaadbe69614fc7de",
@@ -225,6 +252,18 @@ EXPECTED_DIFFERENCES = {
             "#340: an epic manifest's structure_hash binds the notes it reads and the story"
             " identities and dependency edges that reach them, no longer every backlog byte,"
             " so another epic's writer leaves the review fresh."),
+    },
+    "backlog_tasks": {
+        **{(task, "canonical_source_inventory"): (
+            "sha256:feac275c39338cdf361de164a4cedc2b771b33d7c6032ff3099f3f3d570dbcdc",
+            "#341: an exact epic's task lists only the canonical sources its closure reads,"
+            " so another epic's writer leaves the task fresh.")
+           for task in ("epic_reader", "epic_writer")},
+        **{(task, "structure_hash"): (
+            "sha256:690b0e1849e64908bc574d2f58185ec48809f187d5aabd31b932a3af7011783c",
+            "#340: the epic closure the task binds is the epic manifest, whose structure_hash"
+            " binds the notes it reads and the story identities and dependency edges that"
+            " reach them.") for task in ("epic_reader", "epic_writer")},
     },
     "approval": {
         ("backlog/epics/delivery-fixture/stories/auth-01/story.md",): (
@@ -302,6 +341,12 @@ class DefaultEquivalenceTests(unittest.TestCase):
         # its default reads the same.
         self.assertEqual({name.split(":", 1)[1]: value for name, value in actual.items()
                           if name.startswith("policy:")}, golden)
+
+    def test_backlog_tasks_match_the_base_on_frozen_inputs(self):
+        # A writer's closure carries a check only for the placeholders it lists.
+        self.assertEqual(run_harness("backlog_tasks"),
+                         expected("backlog_tasks", BACKLOG_TASK_GOLDEN),
+                         "run this file with --harness backlog_tasks --raw to read the tasks")
 
     def test_backlog_approval_without_a_policy_writes_the_base_bytes(self):
         # An approval records a Process Policy pin only when a policy exists.
@@ -692,6 +737,61 @@ def _manifest_harness(root: Path, raw_output: bool = False) -> dict:
     return result
 
 
+# The backlog tasks task_inputs.py derives with --epic: an epic's reader, that
+# epic's Product Owner writer and the writer of the root, which bare --epic names.
+BACKLOG_TASKS = {"epic_reader": ("backlog-reviewer", "review", "EP-001"),
+                 "epic_writer": ("product-owner", "revise", "EP-001"),
+                 "root_writer": ("product-owner", "revise", "")}
+
+
+def _backlog_task_harness(root: Path, raw_output: bool = False) -> dict:
+    """Derive the BACKLOG_TASKS with ``root``'s task_inputs.py on the frozen inputs.
+
+    The tasks bind ``root``'s own package, so every field that hashes it is
+    left out: the instructions, whose paths the shipped harness seals, the
+    task's source_hash, and the closure's contract_hash and source_hash, as
+    the backlog harness leaves them out. The canonical source inventory and
+    the closure's structure_hash are sealed apart from the rest of the task
+    and of its closure, so a listed difference names exactly one of them.
+    """
+    sys.path[:0] = [str(root / PLUGIN / "scripts"), str(root / "tools/tests")]
+    import task_inputs
+    from git_fixture import init_repository
+
+    def seal(value) -> str:
+        text = json.dumps(value, indent=2, sort_keys=True)
+        return text if raw_output else digest(text)
+
+    inputs = json.loads(INPUTS.read_text(encoding="utf-8"))
+    outputs = {}
+    with tempfile.TemporaryDirectory() as raw:
+        project = Path(raw).resolve()
+        for relative, text in inputs["files"].items():
+            path = project / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(text.encode("utf-8"))
+        (project / "workspace" / "config.json").write_bytes(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}).encode("utf-8"))
+        init_repository(project, initial_branch="main")
+        for args in (("config", "core.autocrlf", "false"), ("add", "--all"),
+                     ("commit", "-q", "-m", "fixture")):
+            subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True,
+                           env={**os.environ, **GIT_ENV})
+        for name, (role, mode, epic) in BACKLOG_TASKS.items():
+            task = task_inputs.manifest(entry="backlog-plan", role=role, mode=mode,
+                                        project=project, epic=epic)
+            closure = task["backlog_scope"]
+            outputs[name] = {
+                "task": seal({key: value for key, value in task.items() if key not in {
+                    "instructions", "source_hash", "canonical_source_inventory", "backlog_scope"}}),
+                "canonical_source_inventory": seal(task["canonical_source_inventory"]),
+                "backlog_scope": seal({key: value for key, value in closure.items() if key not in {
+                    "contract_hash", "source_hash", "structure_hash"}}),
+                "structure_hash": closure["structure_hash"]}
+    return outputs
+
+
 def _shipped_harness(root: Path, raw_output: bool = False) -> dict:
     """Bind every shipped task of ``root``'s package without a project.
 
@@ -728,7 +828,7 @@ def _shipped_harness(root: Path, raw_output: bool = False) -> dict:
 
 
 HARNESSES = {"approval": _approval_harness, "backlog": _backlog_harness,
-             "delivery": _delivery_harness,
+             "backlog_tasks": _backlog_task_harness, "delivery": _delivery_harness,
              "delivery_policy": lambda root, raw_output=False: _delivery_harness(root, raw_output, True),
              "inputs": _input_harness, "manifests": _manifest_harness,
              "operation": _operation_harness, "shipped": _shipped_harness}

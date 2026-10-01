@@ -1,6 +1,0 @@
-{
-  "summary": "At process switch `pre_handoff_regression` value `touched_suites`, `regression-run` holds an Item's verification command lock only while it derives the selection and clones the candidate, no longer for its whole run. Its command reads only its private clone of the exact commit, so once it runs, the writes to the Item worktree and the shell commands that the reader barrier guards go on instead of waiting for up to the run's whole wall clock; in one measured project, `make test` alone took 4060 s. The run still holds the Item's environment lock to its end: a second `regression-run`, `lane-run`, QA's `run` and `environment`, `regression-selection`, which now takes that lock while it writes the selection, and `freeze`, which at `touched_suites` refuses while any command holds it, refuse with `DELIVERY_ENVIRONMENT_BUSY` and name the run. A commit made while the run's command runs is a new candidate: the run is recorded against the tree it cloned and `freeze` checks the current one, so the new candidate needs a run of its own. A write refused while the run derives its selection and clones the candidate says it waits until then, not until the run finishes.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

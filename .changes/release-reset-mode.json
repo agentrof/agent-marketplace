@@ -1,4 +1,0 @@
-{
-  "summary": "`tools/release.py check-pr` has a one-time release reset mode, selected by adding `.release/reset.json`. It accepts only the complete restart of stable numbering at `0.0.1`: every version and version surface at `0.0.1`, `.release/stable.json` and every changeset deleted, `CHANGELOG.md` holding only the bootstrap note, and a marker that lists every release of the base `CHANGELOG.md`. It refuses every partial or mixed variant, a kept copy of a retired changelog entry included, and a later edit or deletion of the marker. The maintainer protocol gives the owner's ordered commands that delete the retired Releases, tags and branches before the bootstrap publishes `v0.0.1`.",
-  "components": {}
-}

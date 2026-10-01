@@ -1,6 +1,0 @@
-{
-  "summary": "Text sent to the public Agent Marketplace repository never identifies the project it comes from. `/issue-report` states the rule in a Confidentiality section and scans the exact title and body for the project's name, Git remote, checkout path, home-directory paths and the other listed details before the preview and again after each revision. Its filer `file_issue.py`, given the project with `--project-root`, then refuses before any request a title or body that holds a home-directory path, the project's checkout path, also written from the home directory, a Git remote URL or its owner/repo, or the project's repository or folder name, also inside percent-encoded, JSON-escaped and file URL text. It names each fragment's kind and position, never its value, lets the home of a system or service account such as a CI runner pass, and says when it found no Git checkout to check; the skill returns a refused payload to `Revise`. The constitution and the generated project instructions carry the same rule for every role and session.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

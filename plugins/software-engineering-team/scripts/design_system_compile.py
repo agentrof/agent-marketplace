@@ -72,7 +72,7 @@ V3_HEADINGS = (
     "product position", "brand and asset fidelity", "global rules", "component specs",
     "style guidelines", "anti-patterns", "pre-delivery checklist", "navigation",
 )
-FORBIDDEN_TEMPLATE_TERMS = ("moneydorfin", "finance", "azure", "inter", "fluent")
+FORBIDDEN_TEMPLATE_TERMS = ("azure", "inter", "fluent")
 # Switch review_loop at blocking_delta records a Design System review's
 # calibration rows in this section of MASTER.md.
 SEVERITY_CALIBRATION = "Severity Calibration"

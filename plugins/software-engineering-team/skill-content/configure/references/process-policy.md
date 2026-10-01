@@ -41,9 +41,10 @@ parameter the table leaves unset.
    revision removes, and name every Delivery whose pinned value of a switch
    it still reads the delta changes. A scope-approved Delivery reads every
    switch a Delivery flow owns; an execution-approved one reads only those its
-   `delivery-execution` flow owns: `execution_planning`,
-   `implementation_schedule`, `owner_gates` and `review_loop`. A switch no
-   Delivery flow owns is read from the current policy and stops no Delivery.
+   `delivery-execution` flow owns: `code_review_panel`, `execution_planning`,
+   `implementation_schedule`, `owner_gates`, `pre_handoff_regression` and
+   `review_loop`. A switch no Delivery flow owns is read from the current
+   policy and stops no Delivery.
    Such a Delivery runs under the values it pinned, so after the new
    revision is approved its checks refuse it until its execution plan is
    revised and approved again, which pins the new revision. Name that path in

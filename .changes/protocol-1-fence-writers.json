@@ -1,6 +1,0 @@
-{
-  "summary": "`delivery_git.py` `revise-unclaimed-scope`, `cancel-delivery`, `prepare-pr-creation`, `record-pr-remote`, `open-pr`, `invalidate-delivery-review`, `reopen-item` and `pause-item` now refuse a protocol-1 project Fence with `DELIVERY_PROTOCOL_UNSUPPORTED` and name `upgrade-fence-v1` before any ref or provider write. They checked only the Fence Mode, or nothing, and wrote a protocol-2 Fence with `Governance-Hash: none` directly over the protocol-1 one, which skipped the migration that requires free Slots and pins the approved Governance. A Fence record of neither protocol refuses with `DELIVERY_FENCE_CORRUPT`.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

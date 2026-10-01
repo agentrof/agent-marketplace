@@ -1,4 +1,0 @@
-{
-  "summary": "The required checks also run for merge queue groups: `validate`, CodeQL and the Claude Code and Codex lifecycle trigger on `merge_group`, a queue run selects impact coverage over the group's complete diff from its base and records no reusable receipt, and the `check` aggregate there requires a queue release gate, `tools/release.py verify-merge-group`, that admits the `release/stable` PR only as the first entry of its group, merged by a two-parent merge commit onto its attested `main_source`, the merge `Publish stable release` verifies. The maintainer protocol names the ruleset and branch protection settings the owner changes to require the queue.",
-  "components": {}
-}

@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import contextlib
 import hashlib
+import hmac
 import functools
 import fnmatch
 import json
 import os
 import platform
 import re
+import secrets
 import stat
 import time
 from pathlib import Path, PurePosixPath
@@ -20,24 +22,83 @@ import tempfile
 import uuid
 
 import atomic_file
-from backlog_compile import meaningful_text
+import backlog_compile
+from backlog_compile import meaningful_text, scenario_blocks, scenario_fields
 import delivery_compile as delivery
 import file_lock
+import operation_compile
 
 POLICY_PATH = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/delivery-verification-policy.json"
 ROLES = ("code_reviewer", "qa_engineer")
 # At review_loop blocking_delta a fresh code reviewer registers its rulings on
 # the claims of a code review in this mode, apart from the claiming result.
 CALIBRATION_MODE = "calibration"
+# At pre_handoff_regression touched_suites the coordinator runs the suites of the
+# earlier stories a candidate touches before the freeze, which needs that run.
+PRE_HANDOFF_SWITCH = "pre_handoff_regression"
+TOUCHED_SUITES = "touched_suites"
+PRE_HANDOFF_HOLDER = "delivery_coordinator"
+PRE_HANDOFF_RUN = "regression-run"
+PRE_HANDOFF_SELECTION = "scratch/pre-handoff-selection.json"
+# What a pre-handoff run must share with the selection derived for the candidate.
+PRE_HANDOFF_IDENTITY = ("candidate_tree", "kind", "command", "workdir", "affected_test_ids")
+# What the sessions carry of every pre-handoff run, until approve-item-evidence records it.
+PRE_HANDOFF_HISTORY_FIELDS = ("evidence_hash", "candidate_tree", "kind", "exit_code", "candidate_intact",
+                              "duration_seconds", "earlier_stories")
+# At process switch code_review_panel beside_official a lens panel reads the
+# frozen candidate beside the official code reviewer, and merge-panel
+# registers the one code review result from both.
+CODE_REVIEW_PANEL = "code_review_panel"
+BESIDE_OFFICIAL = "beside_official"
+PANEL_LENS_MODE = "panel_lens"
+PANEL_DATA_PATH = Path(__file__).resolve().parents[1] / "skill-content/code-review/data/code-review-panel.json"
+PANEL_STEP = "code_review"
+OFFICIAL = "official"
+DUPLICATE = "duplicate"
+PANEL_PASS_RE = re.compile(r"^P([1-9][0-9]*)-")
+# The blocking severities of the code-review skill's Severity Definitions, highest first.
+REVIEW_SEVERITY_ORDER = ("critical", "major")
+# A run identity covers the variables that can change a command's result, never
+# the shell that ran it: these, the ones the approved Verification Contract names
+# in command_variables, and every variable of the prefixed namespaces that the
+# command's environment holds. PWD, OLDPWD, SHLVL and session variables stay out,
+# so evidence recorded in one reader's shell binds in every other one (#356). It
+# keeps a hash of their values keyed with IDENTITY_KEY, which never leaves the
+# Item's verification runtime, since QA's result copies that hash into a tracked
+# record and a hash of a few guessable values would check a guess of a credential.
+COMMAND_VARIABLES = ("HOME", "LANG", "PATH", "TZ")
+COMMAND_VARIABLE_PREFIXES = ("AGENTROF_", "LC_")
+# The runner sets these for every command it runs.
+RUNNER_VARIABLES = ("AGENTROF_MUTATION_FILES", "AGENTROF_VERIFICATION_SCRATCH")
+# The runner's per-run inputs: an identity binds the data each carries, so it
+# names neither the variable nor its path.
+SELECTION_VARIABLES = ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS")
+# At touched_suites QA's final test run names here the earlier-story targets the
+# accepted pre-handoff run covered, for the approved test command to skip (#354).
+REUSED_TESTS = "reused-tests.json"
+# What every final run of one session shares, and what an identity records of its host.
+ENVIRONMENT_FIELDS = ("environment_variables", "environment_hash", "python", "platform", "git")
+IDENTITY_KEY = "identity.key"
+IDENTITY_KEY_BYTES = 32
+# A runner before #356 hashed the whole process environment and checked it against the checker's.
+LEGACY_ENVIRONMENT = ("carries the whole-environment hash of an earlier runner, which binds the shell that ran"
+                      " it; freeze the candidate again with freeze --fresh and rerun both readers")
 
 
 def policy() -> dict:
     return json.loads(POLICY_PATH.read_text(encoding="utf-8"))
 
 
+def canonical(value) -> bytes:
+    return json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()
+
+
 def digest(value) -> str:
-    return "sha256:" + hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=True,
-                                                 separators=(",", ":")).encode()).hexdigest()
+    return "sha256:" + hashlib.sha256(canonical(value)).hexdigest()
+
+
+def keyed_digest(key: bytes, value) -> str:
+    return "hmac-sha256:" + hmac.new(key, canonical(value), hashlib.sha256).hexdigest()
 
 
 def git(root: Path, *args: str) -> str:
@@ -117,19 +178,68 @@ def command_active(root: Path) -> bool:
         os.close(fd)
 
 
+def command_owner_path(root: Path) -> Path:
+    return safe_runtime_path(root, safe_runtime(root).with_name("command-owner.json"), file_only=True)
+
+
 @contextlib.contextmanager
-def command_lock(root: Path):
+def command_lock(root: Path, role: str, command: str):
+    """Hold the verification command lock while *role* runs *command*, with its owner record beside it.
+
+    The record names the role, so a reader's registration waits only for that
+    reader's own command (#355). As with the environment lock, the operating
+    system ends the lock with its holder, and a record is read only while the
+    lock is held.
+    """
     path = safe_runtime_path(root, safe_runtime(root).with_name("commands.lock"), file_only=True)
+    owner = command_owner_path(root)
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         if not file_lock.try_lock(fd):
             raise RuntimeError("another verification command is still running")
         try:
+            atomic_file.replace_text(owner, json.dumps(
+                {"role": role, "command": command, "pid": os.getpid(),
+                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                indent=2, sort_keys=True) + "\n")
             yield
         finally:
+            with contextlib.suppress(OSError):
+                owner.unlink()
             file_lock.unlock(fd)
     finally:
         os.close(fd)
+
+
+def command_holder(root: Path) -> dict | None:
+    """The owner record of the running verification command, {} before it records one, or None when none runs."""
+    if not command_active(root):
+        return None
+    return environment_owner(command_owner_path(root)) or {}
+
+
+def recorded_command_owner(owner: dict) -> bool:
+    return (all(isinstance(owner.get(key), str) for key in ("role", "command", "started_at"))
+            and type(owner.get("pid")) is int)
+
+
+def wait_for_own_command(root: Path, role: str, action: str) -> None:
+    """Refuse *action* of a reader in *role* while its own verification command runs.
+
+    A reader settles only once its own command has exited, so its evidence
+    cannot change after its verdict. Another role's command holds no other
+    reader: the code reviewer runs none and registers while QA's runs. A
+    command that has not recorded its owner yet holds every reader.
+    """
+    holder = command_holder(root)
+    if holder is None:
+        return
+    if not recorded_command_owner(holder):
+        raise RuntimeError("wait for a verification command that has not recorded its owner yet to exit"
+                           f" before {action}")
+    if holder["role"] == role:
+        raise RuntimeError(f"wait for {holder['role']}'s verification command `{holder['command']}` in process"
+                           f" {holder['pid']} since {holder['started_at']} to exit before {action}")
 
 
 def environment_lock_paths(root: Path) -> tuple[Path, Path]:
@@ -170,6 +280,12 @@ def describe_environment_holder(owner: dict) -> str:
             f" since {owner['started_at']}")
 
 
+def environment_busy(owner: dict) -> RuntimeError:
+    """The refusal of a command that finds the Item's environment lock held, naming its holder."""
+    return RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
+                        + describe_environment_holder(owner) + "; run this after it finishes")
+
+
 @contextlib.contextmanager
 def environment_lock(root: Path, holder: str, command: str):
     """Hold the Item's environment lock while one environment verb or verification command runs.
@@ -186,9 +302,7 @@ def environment_lock(root: Path, holder: str, command: str):
     descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         if not file_lock.try_lock(descriptor):
-            raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
-                               + describe_environment_holder(environment_owner(owner) or {})
-                               + "; run this after it finishes")
+            raise environment_busy(environment_owner(owner) or {})
         try:
             interrupted = environment_owner(owner)
             atomic_file.replace_text(owner, json.dumps(
@@ -230,17 +344,35 @@ def write_session(root: Path, value: dict) -> None:
 
 
 def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
-    """Refuse writes while either reader is active; only isolated scratch is writable."""
+    """Refuse writes while either reader or a verification command is active; only isolated scratch is writable.
+
+    The refusal names what holds the Item: its running readers, or else the
+    command that holds the verification command lock, which with no reader
+    running is a pre-handoff regression run before the freeze. That run holds
+    the lock only while it derives its selection and clones the candidate.
+    """
     root = Path(worktree).resolve()
     if not (root / ".git").exists():
         return
     value = read_session(root, required=False)
-    if not command_active(root) and (not value or not any(worker["state"] == "running" for worker in value["workers"].values())):
+    readers = bool(value) and any(worker["state"] == "running" for worker in value["workers"].values())
+    if not readers and not command_active(root):
         return
     scratch = session_path(root).parent / "scratch"
     if paths and all(scratch in (path if path.is_absolute() else root / path).resolve().parents
                      for path in paths):
         return
+    if not readers:
+        # Each command holds the environment lock around the command lock, so
+        # a command with no environment holder left has finished.
+        holder = environment_holder(root)
+        if holder is None and not command_active(root):
+            return
+        wait = ("it has derived its selection and cloned the candidate"
+                if (holder or {}).get("command") == PRE_HANDOFF_RUN else "it finishes")
+        raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
+                           + describe_environment_holder(holder or {})
+                           + f"; writes to the Item worktree wait until {wait}")
     raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing")
 
 
@@ -374,6 +506,15 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False) -> 
         if previous and any(worker["state"] == "running" for worker in previous["workers"].values()):
             raise RuntimeError("settle or cancel the existing readers before freezing a new candidate")
         current = candidate(root, delivery_id, story, allow_evidence=True)
+        # At touched_suites the readers start only on a candidate whose touched
+        # earlier suites and own Test Plan targets passed before the freeze.
+        pre_handoff = None
+        if pre_handoff_regression(root, delivery_id) == TOUCHED_SUITES:
+            # The latest run decides, and a run holds the environment lock until it is recorded.
+            holder = environment_holder(root)
+            if holder is not None:
+                raise environment_busy(holder)
+            pre_handoff = accepted_pre_handoff(root, delivery_id, story, current)
         if previous and not fresh and previous.get("candidate") == current:
             try:
                 validate(root, delivery_id, story)
@@ -404,6 +545,13 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False) -> 
                  "workers": {role: {"state": "running", "started_at": time.time()} for role in ROLES},
                  "metrics": {"freeze_seconds": time.monotonic() - started, "command_cache_hits": 0,
                              "command_seconds": 0.0, "model_seconds": None, "model_tokens": None}, "raw_evidence": {}}
+        if pre_handoff is not None:
+            value["pre_handoff"] = pre_handoff
+            value["pre_handoff_history"] = pre_handoff_history(root, previous, delivery_id, story)
+            value["metrics"]["pre_handoff_seconds"] = pre_handoff["duration_seconds"]
+        history = panel_history(previous)
+        if history:
+            value["panel_history"] = history
         write_session(root, value)
         scope = session_path(root).parent / "mutation-files.json"
         atomic_file.replace_text(scope, json.dumps({"candidate_hash": current["candidate_hash"],
@@ -448,11 +596,112 @@ def raw_output_path(root: Path, relative: str) -> Path:
 def command_environment(root: Path, *, diagnostic: bool = False) -> dict:
     environment = dict(os.environ)
     environment["AGENTROF_MUTATION_FILES"] = str(session_path(root).parent / "mutation-files.json")
-    environment.pop("AGENTROF_DIAGNOSTIC_TESTS", None)
+    for name in SELECTION_VARIABLES:
+        environment.pop(name, None)
     if diagnostic:
         environment["AGENTROF_DIAGNOSTIC_TESTS"] = str(session_path(root).parent / "diagnostic-tests.json")
     environment["AGENTROF_VERIFICATION_SCRATCH"] = str(session_path(root).parent / "scratch")
     return environment
+
+
+def verification_contract(root: Path) -> dict:
+    return delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")[0]
+
+
+def contract_variables(contract: dict) -> list[str]:
+    """The environment variables the approved Verification Contract declares for its commands.
+
+    The contract check refuses the same lists, so a hand-edited contract
+    refuses here before any command runs.
+    """
+    names = contract.get("command_variables", [])
+    problem = operation_compile.command_variable_problem(names)
+    if problem:
+        raise RuntimeError(problem)
+    return names
+
+
+def variable_value(environment: dict, name: str) -> str | None:
+    """A variable's value, or None while it is unset; Windows matches its names without case."""
+    if name in environment:
+        return environment[name]
+    if os.name == "nt":
+        return next((value for key, value in environment.items() if key.upper() == name.upper()), None)
+    return None
+
+
+def identity_key(root: Path) -> bytes:
+    """The random key of the Item's verification runtime that keys every run identity's environment hash.
+
+    The key never leaves the runtime, where every identity is compared, so a
+    hash copied into tracked evidence checks no guess of a value. The caller
+    holds the session lock, so one key is created once. A runtime that lost its
+    key starts a new one, and no identity hashed with the old key matches a new
+    one, so nothing recorded before is reused.
+    """
+    path = safe_runtime_path(root, session_path(root).parent / IDENTITY_KEY, file_only=True)
+    try:
+        key = path.read_bytes()
+    except FileNotFoundError:
+        key = b""
+    if len(key) != IDENTITY_KEY_BYTES:
+        key = secrets.token_bytes(IDENTITY_KEY_BYTES)
+        atomic_file.replace_bytes(path, key, mode=0o600)
+    return key
+
+
+def environment_identity(root: Path, environment: dict, contract: dict | None = None) -> dict:
+    """The identity of a command's environment: the declared variables it covers and the host.
+
+    It names every variable it covers, an unset one too, and keeps only a hash
+    of their values keyed with the runtime's identity key, so no value is
+    written and no guess of one can be checked against the hash. The caller
+    holds the session lock.
+    """
+    names = set(COMMAND_VARIABLES) | set(contract_variables(verification_contract(root) if contract is None
+                                                             else contract))
+    names |= {name for name in environment if name.startswith(COMMAND_VARIABLE_PREFIXES)}
+    values = {name: variable_value(environment, name) for name in sorted(names - set(SELECTION_VARIABLES))}
+    return {"environment_variables": sorted(values), "environment_hash": keyed_digest(identity_key(root), values),
+            "python": sys.version, "platform": platform.platform(), "git": git(root, "--version")}
+
+
+def environment_problem(identity: object, contract: dict) -> str | None:
+    """Why a recorded environment identity is incomplete or inconsistent with the approved contract, or None.
+
+    It is checked as recorded, never against the environment of the process that checks it.
+    """
+    if not isinstance(identity, dict):
+        return "records no environment identity"
+    names = identity.get("environment_variables")
+    if names is None and "environment_hash" in identity:
+        return LEGACY_ENVIRONMENT
+    if (not isinstance(names, list) or any(not isinstance(name, str) for name in names)
+            or names != sorted(set(names))):
+        return "must name each variable it covers once, in order"
+    declared = {*COMMAND_VARIABLES, *contract_variables(contract), *RUNNER_VARIABLES}
+    missing = sorted(declared - set(names))
+    if missing:
+        return "does not cover " + ", ".join(missing)
+    stray = [name for name in names if name not in declared
+             and (name in SELECTION_VARIABLES or not name.startswith(COMMAND_VARIABLE_PREFIXES))]
+    if stray:
+        return "covers " + ", ".join(stray) + ", which no declaration names"
+    if not isinstance(identity.get("environment_hash"), str) \
+            or not re.fullmatch(r"hmac-sha256:[0-9a-f]{64}", identity["environment_hash"]):
+        return "records no environment hash"
+    host = [key for key in ("python", "platform", "git")
+            if not isinstance(identity.get(key), str) or not identity[key].strip()]
+    if host:
+        return "records no " + ", ".join(host)
+    return None
+
+
+def literal_test_id(identifier) -> bool:
+    """Whether a test id passes as selection data: nonempty, unpadded, no option prefix or control character."""
+    return (isinstance(identifier, str) and bool(identifier) and identifier == identifier.strip()
+            and not identifier.startswith("-")
+            and not any(ord(character) < 32 or ord(character) == 127 for character in identifier))
 
 
 def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
@@ -472,10 +721,8 @@ def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
         raise RuntimeError("diagnostic selection must bind this candidate and declare only schema_version, candidate_hash, failed_test_ids and affected_test_ids")
     for name in ("failed_test_ids", "affected_test_ids"):
         identifiers = value[name]
-        if (not isinstance(identifiers, list) or any(not isinstance(identifier, str)
-                or not identifier or identifier != identifier.strip() or identifier.startswith("-")
-                or any(ord(character) < 32 or ord(character) == 127 for character in identifier)
-                for identifier in identifiers) or len(set(identifiers)) != len(identifiers)):
+        if (not isinstance(identifiers, list) or any(not literal_test_id(identifier) for identifier in identifiers)
+                or len(set(identifiers)) != len(identifiers)):
             raise RuntimeError("diagnostic test IDs must be unique nonempty literal identifiers, without option prefixes or control characters")
         value[name] = sorted(identifiers)
     value["selected_test_ids"] = sorted(set(value["failed_test_ids"]) | set(value["affected_test_ids"]))
@@ -484,10 +731,61 @@ def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
     return value
 
 
+def clone_private_checkout(root: Path, execution_root: Path, commit: str) -> None:
+    """Check *commit* out in a new clone of *root* with its own objects, index and files.
+
+    Git for Windows creates no file whose absolute path reaches MAX_PATH, 260
+    characters, unless core.longpaths is set, yet its checkout exits 0. A
+    clone deep in the verification scratch would then lack a tracked file the
+    project holds and never count as intact, so the clone sets core.longpaths
+    in its own config. Git on other hosts ignores the key.
+    """
+    git(root, "clone", "--config", "core.longpaths=true", "--no-local", "--no-hardlinks", "--no-checkout",
+        "--", str(root), str(execution_root))
+    git(execution_root, "checkout", "--detach", commit)
+
+
+def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, command: str, environment: dict,
+                         *, isolate_search_paths: bool = False,
+                         cloned=None) -> tuple[subprocess.CompletedProcess, bool, dict, dict]:
+    """Run an approved command verbatim in a private clone of one exact commit.
+
+    Returns the completed command, whether the clone still holds that commit
+    unchanged, with *isolate_search_paths* the interpreter search path entries
+    dropped because they resolve outside the clone, and the environment the
+    command ran in. *cloned*, when given, is called once the clone holds the
+    commit, before the command runs.
+    """
+    with tempfile.TemporaryDirectory(prefix="candidate-", dir=scratch) as temporary:
+        execution_root = Path(temporary) / "checkout"
+        # A private repository gives mutation tools their own index, objects and
+        # files; no transient mutant can enter the independent reviewer's view.
+        clone_private_checkout(root, execution_root, commit)
+        execution_directory = (execution_root / workdir).resolve()
+        if execution_directory != execution_root.resolve() and execution_root.resolve() not in execution_directory.parents:
+            raise RuntimeError("verification workdir escapes its isolated checkout")
+        if cloned is not None:
+            cloned()
+        dropped: dict[str, list[str]] = {}
+        if isolate_search_paths:
+            environment, dropped = lane_command_environment(execution_root.resolve(), execution_directory, environment)
+        completed = subprocess.run(command, cwd=execution_directory, env=environment, shell=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        from delivery_git import require_visible_item_index
+        try:
+            require_visible_item_index(execution_root)
+            intact = (git(execution_root, "rev-parse", "HEAD") == commit
+                      and not git(execution_root, "diff", "--name-only", "HEAD"))
+        except RuntimeError:
+            intact = False
+    return completed, intact, dropped, environment
+
+
 def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None) -> dict:
     root = root.resolve()
     read_session(root)
-    with environment_lock(root, "qa_engineer", "run --kind " + kind), command_lock(root):
+    with environment_lock(root, "qa_engineer", "run --kind " + kind), \
+            command_lock(root, "qa_engineer", "run --kind " + kind):
         return _run_check(root, kind, fresh=fresh, selection_file=selection_file)
 
 
@@ -528,53 +826,58 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         atomic_file.replace_text(Path(environment["AGENTROF_MUTATION_FILES"]), json.dumps(scope, indent=2) + "\n")
         scratch = safe_runtime_path(root, Path(environment["AGENTROF_VERIFICATION_SCRATCH"]))
         scratch.mkdir(exist_ok=True)
+        declared = environment_identity(root, environment, contract)
+        reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh) if kind == "test"
+                          else (None, None))
         identity = {"candidate_hash": current["candidate_hash"], "kind": kind, "command": command,
-                    "workdir": workdir, "environment_hash": digest(environment),
-                    "python": sys.version, "platform": platform.platform(), "git": git(root, "--version"),
-                    "execution_isolation": "private_clone_v1"}
+                    "workdir": workdir, **declared, "execution_isolation": "private_clone_v1"}
         if selection is not None:
             identity["diagnostic_selection_hash"] = digest(selection)
+        if reuse is not None:
+            identity["reused_pre_handoff"] = reuse
         key = digest(identity)
         old = session["raw_evidence"].get(kind)
         if (not fresh and old and old.get("identity") == identity and old.get("exit_code") == 0 and old.get("candidate_intact") is True
-                and 0 <= time.time() - old.get("completed_at", 0) <= policy()["raw_evidence_max_age_seconds"]):
+                and fresh_record(old)):
             output = raw_output_path(root, old["output_file"])
             if output.is_file() and not output.is_symlink() and hashlib.sha256(output.read_bytes()).hexdigest() == old["output_sha256"]:
                 session["metrics"]["command_cache_hits"] += 1
                 write_session(root, session)
                 return {**old, "reused": True}
+        if reuse is not None:
+            reused = safe_runtime_path(root, session_path(root).parent / REUSED_TESTS, file_only=True)
+            reused_bytes = (json.dumps(
+                {"schema_version": 1, "candidate_hash": current["candidate_hash"],
+                 "pre_handoff_evidence_hash": reuse["evidence_hash"], "reused_test_ids": reuse["test_ids"]},
+                indent=2, sort_keys=True) + "\n").encode("utf-8")
+            atomic_file.replace_bytes(reused, reused_bytes)
+            reused_generation = source_file_generation(reused)
+            environment["AGENTROF_REUSED_TESTS"] = str(reused)
         session["raw_evidence"].pop(kind, None)
         write_session(root, session)
         session_id = session["session_id"]
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix="candidate-", dir=scratch) as temporary:
-        execution_root = Path(temporary) / "checkout"
-        # A private repository gives mutation tools their own index, objects and
-        # files; no transient mutant can enter the independent reviewer's view.
-        git(root, "clone", "--no-local", "--no-hardlinks", "--no-checkout", "--", str(root), str(execution_root))
-        git(execution_root, "checkout", "--detach", current["product_commit"])
-        execution_directory = (execution_root / workdir).resolve()
-        if execution_directory != execution_root.resolve() and execution_root.resolve() not in execution_directory.parents:
-            raise RuntimeError("verification workdir escapes its isolated checkout")
-        completed = subprocess.run(command, cwd=execution_directory, env=environment, shell=True,
-                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
-        from delivery_git import require_visible_item_index
+    completed, intact, _dropped, _ran = private_checkout_run(root, scratch, current["product_commit"], workdir,
+                                                             command, environment)
+    selection_intact = None
+    if selection is not None:
         try:
-            require_visible_item_index(execution_root)
-            intact = (git(execution_root, "rev-parse", "HEAD") == current["product_commit"]
-                      and not git(execution_root, "diff", "--name-only", "HEAD"))
-        except RuntimeError:
-            intact = False
-        if selection is not None:
-            try:
-                selector = safe_runtime_path(root, Path(environment["AGENTROF_DIAGNOSTIC_TESTS"]), file_only=True)
-                selection_intact = (diagnostic_selection(root, selection_file, current) == selection
-                                    and selector.read_bytes() == selection_bytes
-                                    and source_file_generation(selection_file) == input_generation
-                                    and source_file_generation(selector) == selector_generation)
-            except (RuntimeError, ValueError, OSError):
-                selection_intact = False
-            intact = intact and selection_intact
+            selector = safe_runtime_path(root, Path(environment["AGENTROF_DIAGNOSTIC_TESTS"]), file_only=True)
+            selection_intact = (diagnostic_selection(root, selection_file, current) == selection
+                                and selector.read_bytes() == selection_bytes
+                                and source_file_generation(selection_file) == input_generation
+                                and source_file_generation(selector) == selector_generation)
+        except (RuntimeError, ValueError, OSError):
+            selection_intact = False
+    elif reuse is not None:
+        # A command that changed the reuse list it received skipped suites the reused run never covered.
+        try:
+            selection_intact = (safe_runtime_path(root, reused, file_only=True).read_bytes() == reused_bytes
+                                and source_file_generation(reused) == reused_generation)
+        except (RuntimeError, ValueError, OSError):
+            selection_intact = False
+    if selection_intact is not None:
+        intact = intact and selection_intact
     with locked(root):
         session = read_session(root)
         if session["session_id"] != session_id:
@@ -588,16 +891,129 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                   "duration_seconds": time.monotonic() - started, "completed_at": time.time()}
         if selection is not None:
             record["diagnostic_selection"] = selection
+        if selection_intact is not None:
             record["selection_intact"] = selection_intact
         record["evidence_hash"] = digest(record)
         session["raw_evidence"][kind] = record
         session["metrics"]["command_seconds"] += record["duration_seconds"]
         write_session(root, session)
-        return {**record, "reused": False}
+        return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {})}
 
 
-def require_raw_evidence(root: Path, session: dict, checks: dict) -> None:
+def pre_handoff_reuse(root: Path, session: dict, current: dict, environment: dict,
+                      *, fresh: bool = False) -> tuple[dict | None, str | None]:
+    """The earlier-story targets QA's final test run takes from the accepted pre-handoff run, or why it takes none.
+
+    At pre_handoff_regression touched_suites the run the freeze accepted covers
+    the targets of the earlier stories when it passed intact on the frozen
+    tree, with the selection and the approved command derived for the frozen
+    candidate, in the declared environment of QA's run, and is as fresh as
+    final evidence must be. The Item's own Test Plan targets stay QA's to run,
+    with every earlier target that overlaps one, and a *fresh* run reuses
+    nothing. At any other value it returns (None, None).
+    """
+    if pre_handoff_regression(root, current["delivery"]) != TOUCHED_SUITES:
+        return None, None
+    if fresh:
+        return None, "run --fresh runs every suite itself"
+    receipt = session.get("pre_handoff")
+    if not isinstance(receipt, dict):
+        return None, "the frozen session holds no accepted pre-handoff run"
+    if receipt.get("exit_code") != 0 or receipt.get("candidate_intact") is not True:
+        return None, "the accepted pre-handoff run did not pass intact"
+    if not fresh_record(receipt):
+        return None, "the accepted pre-handoff run expired"
+    try:
+        derived = derive_regression(root, current["delivery"], current["story"], current)
+    except RuntimeError as exc:
+        return None, f"the frozen candidate's selection cannot be derived again: {exc}"
+    for label, keys in (("candidate tree", ("candidate_tree",)), ("selection", ("affected_test_ids",)),
+                        ("approved command", ("kind", "command", "workdir"))):
+        if any(receipt.get(key) != derived[key] for key in keys):
+            return None, f"the pre-handoff run's {label} differs from the frozen candidate's"
+    if {key: receipt.get(key) for key in ENVIRONMENT_FIELDS} != environment:
+        return None, "the pre-handoff run's declared environment differs from this run's"
+    own = derived["own_targets"]
+    stories = [{"delivery": entry["delivery"], "story": entry["story"], "test_ids": test_ids}
+               for entry in derived["earlier_stories"]
+               for test_ids in [sorted(test for test in set(entry["automation_targets"]) if not overlaps(test, own))]
+               if test_ids]
+    test_ids = sorted({test for entry in stories for test in entry["test_ids"]})
+    if not test_ids:
+        return None, "the pre-handoff run covered no earlier story's target beyond the Item's own"
+    return {"evidence_hash": receipt["evidence_hash"], "earlier_stories": stories, "test_ids": test_ids}, None
+
+
+def overlaps(identifier: str, targets: list[str]) -> bool:
+    """Whether a test id is, prefixes or lies under one of *targets*, compared as text.
+
+    A command that skips the reused ids by node id prefix, as pytest's
+    --deselect does with no boundary, skips every target the id prefixes, so
+    an id that overlaps an own target is never reused.
+    """
+    return any(target.startswith(identifier) or identifier.startswith(target) for target in targets)
+
+
+def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> str | None:
+    """Why the pre-handoff reuse a final test run records does not bind its frozen session, or None.
+
+    It is checked as recorded: the reused run is the frozen session's accepted
+    run, passed intact on the frozen tree, as fresh as final evidence must be
+    now, of the approved command and in the declared environment of the final
+    run, and the reused test ids are earlier story targets that run selected,
+    none that is, prefixes or lies under one of the Item's own.
+    """
+    reuse, receipt = identity["reused_pre_handoff"], session.get("pre_handoff")
+    if (not isinstance(reuse, dict) or not isinstance(receipt, dict)
+            or reuse.get("evidence_hash") != receipt.get("evidence_hash")):
+        return "reuses a pre-handoff run the frozen session does not hold"
+    stories, test_ids = reuse.get("earlier_stories"), reuse.get("test_ids")
+    if (not isinstance(stories, list) or not stories or not isinstance(test_ids, list) or not test_ids
+            or any(not isinstance(entry, dict) or not isinstance(entry.get("test_ids"), list) or not entry["test_ids"]
+                   for entry in stories)
+            or test_ids != sorted({test for entry in stories for test in entry["test_ids"]})):
+        return "names its reused test ids apart from their earlier stories"
+    current = session["candidate"]
+    if (receipt.get("exit_code") != 0 or receipt.get("candidate_intact") is not True
+            or receipt.get("candidate_tree") != git(root, "rev-parse", current["product_commit"] + "^{tree}")):
+        return "reuses a pre-handoff run that did not pass intact on the frozen tree"
+    if not fresh_record(receipt):
+        return "reuses a pre-handoff run that expired"
+    kind = str(receipt.get("kind"))
+    if (kind not in {"test", "diagnostic_test"} or receipt.get("command") != contract.get(kind + "_command")
+            or receipt.get("workdir") != str(contract.get(kind + "_workdir", "."))):
+        return "reuses a pre-handoff run of another command than the approved one"
+    if not set(test_ids) <= set(receipt.get("affected_test_ids") or []):
+        return "reuses test ids the pre-handoff run did not select"
+    plan = str(item_record(root, current["delivery"], current["story"]).get("test_plan_path") or "")
+    own = plan_automation_targets(delivery.docs_root(root), plan, f"{current['story']} of {current['delivery']}")
+    if any(overlaps(test, own) for test in test_ids):
+        return ("reuses a test id that is, prefixes or lies under one of the Item's own Test Plan targets,"
+                " which QA runs itself")
+    if {key: receipt.get(key) for key in ENVIRONMENT_FIELDS} != {key: identity[key] for key in ENVIRONMENT_FIELDS}:
+        return "reuses a pre-handoff run of another declared environment"
+    return None
+
+
+def fresh_record(record: dict) -> bool:
+    """Whether a recorded command completed no longer ago than raw evidence stays fresh."""
+    completed = record.get("completed_at", 0)
+    return (isinstance(completed, (int, float))
+            and 0 <= time.time() - completed <= policy()["raw_evidence_max_age_seconds"])
+
+
+def require_raw_evidence(root: Path, session: dict, checks: dict) -> dict | None:
+    """Check QA's final command evidence as recorded and return the environment it shares.
+
+    Each record must be complete, run the approved command and stay fresh, and
+    every final record of the session shares the environment identity of its
+    full_test_suite evidence, the first check QA runs. No record is compared
+    with the environment of the process that checks it, so evidence recorded
+    in a reader's shell is approved from any other.
+    """
     kinds = {"full_test_suite": "test", "mutation_whole_changed_files": "mutation", "dependency_audit": "dependency_audit"}
+    contract = verification_contract(root)
+    shared: tuple[str, dict] | None = None
     for check in required_checks(root, session["candidate"], "qa_engineer"):
         if check not in kinds:
             continue
@@ -607,25 +1023,122 @@ def require_raw_evidence(root: Path, session: dict, checks: dict) -> None:
                 or raw.get("identity", {}).get("candidate_hash") != session["candidate"]["candidate_hash"]):
             raise RuntimeError(f"{check} requires successful same-candidate command evidence from run")
         identity = raw["identity"]
-        contract, _ = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
-        if (identity.get("command") != contract.get(kinds[check] + "_command")
+        problem = environment_problem(identity, contract)
+        if problem:
+            raise RuntimeError(f"{check} evidence {problem}")
+        if (identity.get("kind") != kinds[check] or identity.get("command") != contract.get(kinds[check] + "_command")
                 or identity.get("workdir") != contract.get(kinds[check] + "_workdir", ".")
-                or identity.get("environment_hash") != digest(command_environment(root))
-                or identity.get("python") != sys.version or identity.get("platform") != platform.platform()
-                or identity.get("git") != git(root, "--version")
-                or not 0 <= time.time() - raw.get("completed_at", 0) <= policy()["raw_evidence_max_age_seconds"]):
-            raise RuntimeError(f"{check} command environment changed or evidence expired")
+                or identity.get("execution_isolation") != "private_clone_v1"):
+            raise RuntimeError(f"{check} evidence does not run the approved command in its approved workdir")
+        if not fresh_record(raw):
+            raise RuntimeError(f"{check} evidence expired")
+        if "reused_pre_handoff" in identity:
+            problem = reuse_problem(root, session, identity, contract) if check == "full_test_suite" \
+                else "reuses a pre-handoff run, which only the full test suite does"
+            if problem:
+                raise RuntimeError(f"{check} evidence {problem}")
+        environment = {key: identity[key] for key in ENVIRONMENT_FIELDS}
+        if shared is None:
+            shared = (check, environment)
+        elif environment != shared[1]:
+            raise RuntimeError(f"{check} evidence ran in another environment than {shared[0]} evidence")
         if check == "full_test_suite" and checks[check].get("environment") != identity["environment_hash"]:
             raise RuntimeError("full suite environment must bind the recorded execution environment")
         output = raw_output_path(root, raw["output_file"])
         if (not output.is_file() or output.is_symlink()
                 or hashlib.sha256(output.read_bytes()).hexdigest() != raw.get("output_sha256")):
             raise RuntimeError(f"{check} raw command output is missing or changed")
+    return shared[1] if shared else None
 
 
 def review_loop(root: Path, delivery_id: str) -> str:
     """The review_loop value the Delivery runs under, as its pinned policy sets it."""
     return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, delivery.REVIEW_LOOP)
+
+
+def code_review_panel(root: Path, delivery_id: str) -> str:
+    """The code_review_panel value the Delivery runs under, as its pinned policy sets it."""
+    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, CODE_REVIEW_PANEL)
+
+
+def panel_assignments() -> list[dict]:
+    """The code review panel's lens assignments, each with its key, its lens ids and their focus."""
+    step = json.loads(PANEL_DATA_PATH.read_text(encoding="utf-8"))["review_steps"][PANEL_STEP]
+    focus = {lens["id"]: lens["focus"] for lens in step["lenses"]}
+    return [{"key": assignment[0], "lens": list(assignment), "focus": {lens: focus[lens] for lens in assignment}}
+            for assignment in step["default_panel"]]
+
+
+def panel_prefix(panel: dict, assignment: dict) -> str:
+    """The id prefix of a lens assignment's findings in one panel pass."""
+    return f"P{panel['pass']}-{assignment['key']}-"
+
+
+def code_review_panel_state(root: Path, value: dict) -> dict | None:
+    """The session's code review panel at code_review_panel beside_official, else None.
+
+    A session that registered no panel result yet gets the panel it would
+    start: its pass follows every earlier pass and every panel id the session
+    carries, so a lens finding id never repeats an earlier one. The Process
+    Policy is part of the frozen candidate, so the value holds for the session.
+    """
+    if code_review_panel(root, value["candidate"]["delivery"]) != BESIDE_OFFICIAL:
+        return None
+    if isinstance(value.get("panel"), dict):
+        return value["panel"]
+    passes = [record.get("pass", 0) for record in value.get("panel_history", [])]
+    passes += [int(match.group(1)) for finding in value.get("unresolved_findings", [])
+               for match in [PANEL_PASS_RE.match(str(finding.get("id", "")))] if match]
+    return {"pass": max(passes, default=0) + 1, "assignments": panel_assignments(), "members": {}}
+
+
+def panel_history(session: dict | None) -> list[dict]:
+    """The panel records of every code review panel pass of the Item that settled so far."""
+    if not session:
+        return []
+    history = list(session.get("panel_history", []))
+    worker = session["workers"]["code_reviewer"]
+    record = worker.get("result", {}).get("panel")
+    if worker["state"] == "settled" and isinstance(record, dict):
+        history.append(record)
+    return history
+
+
+def complete_members(panel: dict) -> dict:
+    """The panel's registered results, once the official result and every lens result are in."""
+    members = panel["members"]
+    missing = [key for key in [OFFICIAL, *(assignment["key"] for assignment in panel["assignments"])]
+               if key not in members]
+    if missing:
+        raise RuntimeError("register the official result and every lens result with panel-result first;"
+                           " missing: " + ", ".join(missing))
+    return members
+
+
+def panel_claims(panel: dict, value: dict, loop: str) -> tuple[list[dict], dict[str, dict[str, str]]]:
+    """The claims a code review panel's calibration rules, as returned, and the
+    findings each lens claim may be ruled a duplicate of, with their severity.
+
+    Every open critical or major finding of a lens result is a claim and, at
+    review_loop blocking_delta, every open critical or major claim of the
+    official result that no earlier calibration ruled. A lens claim duplicates
+    an open critical or major official finding or another lens claim.
+    """
+    members = complete_members(panel)
+    official = members[OFFICIAL]["result"]["findings"]
+    lens_claims = [finding for assignment in panel["assignments"]
+                   for finding in members[assignment["key"]]["result"]["findings"]
+                   if finding["status"] == "open" and blocking(finding)]
+    claims = list(lens_claims)
+    if loop == "blocking_delta":
+        ruled = {finding["id"] for finding in value.get("unresolved_findings", [])
+                 if finding["role"] == "code_reviewer" and "calibrated_severity" in finding}
+        claims += open_claims(official, ruled)
+    targets = {finding["id"]: finding["severity"] for finding in [*official, *lens_claims]
+               if finding["status"] == "open" and blocking(finding)}
+    return (sorted(claims, key=lambda claim: claim["id"]),
+            {claim["id"]: {identifier: severity for identifier, severity in targets.items()
+                           if identifier != claim["id"]} for claim in lens_claims})
 
 
 def item_record(root: Path, delivery_id: str, story: str) -> dict:
@@ -650,6 +1163,7 @@ def calibrated_findings(result: dict) -> list[dict]:
     follow-up with the row's owner role and trigger, and a claim calibrated
     invalid is closed by the row's cited evidence. Each keeps the severity it
     was claimed at and records its ruling, so no later session rules it again.
+    A merged panel finding already records the severity it was claimed at.
     """
     rows = {row["finding"]: row for row in result.get("calibration", [])}
     findings = []
@@ -659,7 +1173,8 @@ def calibrated_findings(result: dict) -> list[dict]:
             findings.append(finding)
             continue
         ruling = row["calibrated_severity"].casefold()
-        ruled = {**finding, "claimed_severity": finding["severity"], "calibrated_severity": ruling}
+        ruled = {**finding, "claimed_severity": finding.get("claimed_severity", finding["severity"]),
+                 "calibrated_severity": ruling}
         if ruling == "invalid":
             ruled["status"] = "resolved"
         elif ruling == "minor":
@@ -697,9 +1212,26 @@ def cites_candidate(root: Path, current: dict, reason: str) -> bool:
     return False
 
 
+def at_least_as_severe(severity: str, claimed: str) -> bool:
+    """Whether a blocking severity is the claimed one or above it on the code review scale.
+
+    Only the code review scale orders severities; any other declared severity
+    is at least as severe as itself alone.
+    """
+    severity, claimed = severity.casefold(), claimed.casefold()
+    return severity == claimed or (severity in REVIEW_SEVERITY_ORDER and claimed in REVIEW_SEVERITY_ORDER
+                                   and REVIEW_SEVERITY_ORDER.index(severity) < REVIEW_SEVERITY_ORDER.index(claimed))
+
+
 def calibration_problems(root: Path, current: dict, result: dict, ruled: set[str],
-                         roles: list[str]) -> list[str]:
-    """One row per open critical or major claim that no earlier calibration ruled."""
+                         roles: list[str], duplicates: dict[str, dict[str, str]] | None = None) -> list[str]:
+    """One row per open critical or major claim that no earlier calibration ruled.
+
+    *duplicates* maps each lens claim of a code review panel to the findings it
+    may be ruled a duplicate of, with their severity; only those claims take
+    that ruling, and only toward a finding at least as severe, since no ruling
+    lowers a claim to another blocking severity.
+    """
     rows = result.get("calibration", [])
     if not isinstance(rows, list) or any(not isinstance(row, dict) or not isinstance(row.get("finding"), str)
                                          for row in rows):
@@ -710,15 +1242,33 @@ def calibration_problems(root: Path, current: dict, result: dict, ruled: set[str
     if sorted(listed) != sorted(claims):
         return ["calibration must hold exactly one row for each open critical or major claim no earlier"
                 f" calibration ruled: {', '.join(sorted(claims)) or 'none'}"]
+    by_claim = {row["finding"]: row for row in rows}
     problems = []
     for row in rows:
         claim = claims[row["finding"]]
         label, severity = row["finding"], claim["severity"].casefold()
         claimed, ruling = row.get("claimed_severity"), row.get("calibrated_severity")
+        targets = (duplicates or {}).get(label)
         if not isinstance(claimed, str) or claimed.casefold() != severity:
             problems.append(f"{label} calibration must record the claimed severity {claim['severity']}")
-        if not isinstance(ruling, str) or ruling.casefold() not in {severity, "minor", "invalid"}:
+        if targets is None and (not isinstance(ruling, str) or ruling.casefold() not in {severity, "minor", "invalid"}):
             problems.append(f"{label} calibrated_severity must confirm {claim['severity']} or be minor or invalid")
+        elif targets is not None and (not isinstance(ruling, str)
+                                      or ruling.casefold() not in {severity, "minor", "invalid", DUPLICATE}):
+            problems.append(f"{label} calibrated_severity must confirm {claim['severity']} or be minor, invalid"
+                            " or duplicate")
+        if targets is not None and isinstance(ruling, str) and ruling.casefold() == DUPLICATE:
+            target = row.get("duplicate_of")
+            target_row = by_claim.get(target, {}) if isinstance(target, str) else {}
+            chained = str(target_row.get("calibrated_severity", "")).casefold() == DUPLICATE
+            if not isinstance(target, str) or target not in targets or chained:
+                problems.append(f"{label} duplicate_of must name an open critical or major official finding or"
+                                " another lens claim not ruled duplicate")
+            elif not at_least_as_severe(targets[target], claim["severity"]):
+                problems.append(f"{label} duplicate_of must name a finding at least as severe as the claim,"
+                                f" {claim['severity']}; {target} is {targets[target]}")
+        elif "duplicate_of" in row:
+            problems.append(f"{label} names duplicate_of without a duplicate ruling")
         reason = row.get("reason")
         if not isinstance(reason, str) or not meaningful_text(reason) or not cites_candidate(root, current, reason):
             problems.append(f"{label} calibration reason must cite the candidate text as path:line,"
@@ -746,16 +1296,20 @@ def register_calibration(root: Path, result: dict) -> dict:
     claiming result is registered, so the implementation writer stays idle.
     Its rows bind the exact claims it ruled, and they reach the claiming
     result only through this registration: register_result refuses a claiming
-    result that carries rows of its own.
+    result that carries rows of its own. At code_review_panel beside_official
+    it rules, once every panel result is registered, exactly the claims
+    panel_claims names, also at review_loop current.
     """
     root = root.resolve()
     with locked(root):
-        if command_active(root):
-            raise RuntimeError("wait for the verification command to exit before registering a calibration")
+        wait_for_own_command(root, "code_reviewer", "registering a calibration")
         value = read_session(root)
         current = require_current(root, value, allow_evidence=True)
-        if review_loop(root, current["delivery"]) != "blocking_delta":
-            raise RuntimeError("severity calibration runs only at review_loop blocking_delta")
+        loop = review_loop(root, current["delivery"])
+        panel = code_review_panel_state(root, value)
+        if loop != "blocking_delta" and panel is None:
+            raise RuntimeError("severity calibration runs only at review_loop blocking_delta or"
+                               " code_review_panel beside_official")
         if result.get("role") != "code_reviewer" or result.get("mode") != CALIBRATION_MODE:
             raise RuntimeError(f"a calibration result names role code_reviewer and mode {CALIBRATION_MODE}")
         if result.get("candidate_hash") != current["candidate_hash"] or result.get("session_id") != value["session_id"]:
@@ -778,9 +1332,15 @@ def register_calibration(root: Path, result: dict) -> dict:
                        & {claim["id"] for claim in claims})
         if ruled:
             raise RuntimeError(f"an earlier calibration already ruled {', '.join(ruled)}")
+        duplicates = None
+        if panel is not None:
+            expected, duplicates = panel_claims(panel, value, loop)
+            if sorted(claims, key=lambda claim: claim["id"]) != expected:
+                raise RuntimeError("calibration claims must be exactly the open critical or major claims to rule,"
+                                   " as returned: " + (", ".join(claim["id"] for claim in expected) or "none"))
         item = item_record(root, current["delivery"], current["story"])
         problems = calibration_problems(root, current, {"findings": claims, "calibration": result.get("calibration")},
-                                        set(), follow_up_roles(item))
+                                        set(), follow_up_roles(item), duplicates)
         if problems:
             raise RuntimeError("severity calibration is incomplete: " + "; ".join(problems))
         stored = dict(result)
@@ -825,78 +1385,109 @@ def open_follow_ups(result: dict, item: dict) -> list[dict]:
                   key=lambda finding: finding["id"])
 
 
+def check_findings(findings: object) -> None:
+    """Every finding has a unique stable id, a declared severity, a verification and a status."""
+    if (not isinstance(findings, list) or any(not isinstance(finding, dict)
+            or not all(isinstance(finding.get(key), str) and finding[key].strip()
+                       for key in ("id", "severity", "verification"))
+            or finding.get("status") not in {"open", "resolved"} for finding in findings)
+            or len({finding["id"] for finding in findings}) != len(findings)):
+        raise RuntimeError("findings require unique stable IDs, severity, verification and open/resolved status")
+    allowed_severities = {value.casefold() for value in policy()["blocking_severities"] + policy()["nonblocking_severities"]}
+    if any(finding["severity"].casefold() not in allowed_severities for finding in findings):
+        raise RuntimeError("finding severity is not declared in the verification policy")
+
+
+def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dict]:
+    """Check a reader's result against its session before its reader settles.
+
+    Returns the candidate the result binds, the role's inherited findings and
+    the result's findings by id. settle_result adds the review_loop checks.
+    """
+    if result.get("role") == "qa_engineer" and runtime_needs_cleanup(value):
+        raise RuntimeError("tear the environment down before settling the QA reader")
+    current = value["candidate"] if result.get("verdict") == "cancelled" else require_current(root, value, allow_evidence=True)
+    role, mode, verdict = (result.get(key) for key in ("role", "mode", "verdict"))
+    if role not in ROLES or mode not in policy()["role_modes"][role]:
+        raise RuntimeError("unsupported verification role or mode")
+    if result.get("candidate_hash") != current["candidate_hash"] or result.get("session_id") != value["session_id"]:
+        raise RuntimeError("result does not bind this candidate and reader session")
+    if value["workers"][role]["state"] != "running":
+        raise RuntimeError("reader already settled; freeze a new session to replace its result")
+    if verdict not in {"passed", "failed", "cancelled"}:
+        raise RuntimeError("verification verdict must be passed, failed or cancelled")
+    if not isinstance(result.get("report"), str) or not result["report"].strip():
+        raise RuntimeError("verification result requires its independent report")
+    if verdict == "cancelled":
+        if result.get("cancellation_confirmed") is not True:
+            raise RuntimeError("reader cancellation must be confirmed before reopening writes")
+    elif verdict == "passed" and mode != "qa_diagnostic":
+        checks = result.get("checks", {})
+        for check in required_checks(root, current, role):
+            evidence = checks.get(check, {}) if isinstance(checks, dict) else {}
+            if (not isinstance(evidence, dict) or evidence.get("passed") is not True
+                    or not isinstance(evidence.get("evidence"), str) or not evidence["evidence"].strip()):
+                raise RuntimeError(f"final {role} result requires passing {check} evidence")
+            if check == "mutation_whole_changed_files" and evidence.get("files") != current["mutation_files"]:
+                raise RuntimeError("mutation evidence must cover every compiler-selected changed file")
+        if role == "qa_engineer":
+            test = checks["full_test_suite"]
+            contract, _ = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+            if test.get("command") != contract.get("test_command") or test.get("exit_code") != 0:
+                raise RuntimeError("full suite evidence must identify the approved test command and successful exit")
+            if not isinstance(test.get("environment"), str) or not test["environment"].strip():
+                raise RuntimeError("full suite evidence requires the verification environment identity")
+            environment = require_raw_evidence(root, value, checks)
+            if current["runtime_required"]:
+                require_runtime_evidence(root, value, checks["fresh_runtime"], environment)
+    findings = result.get("findings", [])
+    check_findings(findings)
+    blocking_severities = {severity.casefold() for severity in policy()["blocking_severities"]}
+    if verdict == "passed" and any(finding["severity"].casefold() in blocking_severities
+                                   and finding["status"] == "open" for finding in findings):
+        raise RuntimeError("passing verification cannot retain an open blocking finding")
+    inherited = {finding["id"]: finding for finding in value.get("unresolved_findings", []) if finding["role"] == role}
+    dispositions = {finding["id"]: finding for finding in findings}
+    if any(finding["severity"].casefold() != inherited[identifier]["severity"].casefold()
+           for identifier, finding in dispositions.items() if identifier in inherited):
+        raise RuntimeError("inherited finding severity must be preserved")
+    if verdict == "passed" and mode != "qa_diagnostic" and (
+            not inherited.keys() <= dispositions.keys()
+            or any(finding["severity"].casefold() in blocking_severities
+                   and dispositions[identifier]["status"] != "resolved"
+                   for identifier, finding in inherited.items())):
+        raise RuntimeError("final result must explicitly disposition every inherited finding and resolve blocking findings")
+    return current, inherited, dispositions
+
+
 def register_result(root: Path, result: dict) -> dict:
     root = root.resolve()
     with locked(root):
-        if command_active(root):
-            raise RuntimeError("wait for the verification command to exit before settling its reader")
-        value = read_session(root)
-        if result.get("role") == "qa_engineer" and runtime_needs_cleanup(value):
-            raise RuntimeError("tear the environment down before settling the QA reader")
-        current = value["candidate"] if result.get("verdict") == "cancelled" else require_current(root, value, allow_evidence=True)
-        role, mode, verdict = (result.get(key) for key in ("role", "mode", "verdict"))
-        if role not in ROLES or mode not in policy()["role_modes"][role]:
-            raise RuntimeError("unsupported verification role or mode")
-        if result.get("candidate_hash") != current["candidate_hash"] or result.get("session_id") != value["session_id"]:
-            raise RuntimeError("result does not bind this candidate and reader session")
-        if value["workers"][role]["state"] != "running":
-            raise RuntimeError("reader already settled; freeze a new session to replace its result")
-        if verdict not in {"passed", "failed", "cancelled"}:
-            raise RuntimeError("verification verdict must be passed, failed or cancelled")
-        if not isinstance(result.get("report"), str) or not result["report"].strip():
-            raise RuntimeError("verification result requires its independent report")
-        if verdict == "cancelled":
-            if result.get("cancellation_confirmed") is not True:
-                raise RuntimeError("reader cancellation must be confirmed before reopening writes")
-        elif verdict == "passed" and mode != "qa_diagnostic":
-            checks = result.get("checks", {})
-            for check in required_checks(root, current, role):
-                evidence = checks.get(check, {}) if isinstance(checks, dict) else {}
-                if (not isinstance(evidence, dict) or evidence.get("passed") is not True
-                        or not isinstance(evidence.get("evidence"), str) or not evidence["evidence"].strip()):
-                    raise RuntimeError(f"final {role} result requires passing {check} evidence")
-                if check == "mutation_whole_changed_files" and evidence.get("files") != current["mutation_files"]:
-                    raise RuntimeError("mutation evidence must cover every compiler-selected changed file")
-            if role == "qa_engineer":
-                test = checks["full_test_suite"]
-                contract, _ = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
-                if test.get("command") != contract.get("test_command") or test.get("exit_code") != 0:
-                    raise RuntimeError("full suite evidence must identify the approved test command and successful exit")
-                if not isinstance(test.get("environment"), str) or not test["environment"].strip():
-                    raise RuntimeError("full suite evidence requires the verification environment identity")
-                require_raw_evidence(root, value, checks)
-                if current["runtime_required"]:
-                    require_runtime_evidence(root, value, checks["fresh_runtime"])
-        findings = result.get("findings", [])
-        if (not isinstance(findings, list) or any(not isinstance(finding, dict)
-                or not all(isinstance(finding.get(key), str) and finding[key].strip()
-                           for key in ("id", "severity", "verification"))
-                or finding.get("status") not in {"open", "resolved"} for finding in findings)
-                or len({finding["id"] for finding in findings}) != len(findings)):
-            raise RuntimeError("findings require unique stable IDs, severity, verification and open/resolved status")
-        allowed_severities = {value.casefold() for value in policy()["blocking_severities"] + policy()["nonblocking_severities"]}
-        if any(finding["severity"].casefold() not in allowed_severities for finding in findings):
-            raise RuntimeError("finding severity is not declared in the verification policy")
-        if verdict == "passed" and any(finding["severity"].casefold() in {value.casefold() for value in policy()["blocking_severities"]}
-                                       and finding["status"] == "open" for finding in findings):
-            raise RuntimeError("passing verification cannot retain an open blocking finding")
-        inherited = {finding["id"]: finding for finding in value.get("unresolved_findings", []) if finding["role"] == role}
-        dispositions = {finding["id"]: finding for finding in findings}
-        if any(finding["severity"].casefold() != inherited[identifier]["severity"].casefold()
-               for identifier, finding in dispositions.items() if identifier in inherited):
-            raise RuntimeError("inherited finding severity must be preserved")
-        blocking = {severity.casefold() for severity in policy()["blocking_severities"]}
-        if verdict == "passed" and mode != "qa_diagnostic" and (
-                not inherited.keys() <= dispositions.keys()
-                or any(finding["severity"].casefold() in blocking and dispositions[identifier]["status"] != "resolved"
-                       for identifier, finding in inherited.items())):
-            raise RuntimeError("final result must explicitly disposition every inherited finding and resolve blocking findings")
-        if (role == "code_reviewer" and verdict != "cancelled"
-                and review_loop(root, current["delivery"]) == "blocking_delta"):
+        wait_for_own_command(root, str(result.get("role")), "settling its reader")
+        return settle_result(root, read_session(root), result)
+
+
+def settle_result(root: Path, value: dict, result: dict, *, merged: bool = False) -> dict:
+    """Check a reader's result and settle its reader with it.
+
+    At code_review_panel beside_official a code review settles only with the
+    result merge_panel builds, *merged*, whose calibration merge_panel matched
+    to the claims as returned; a confirmed cancellation settles as before.
+    """
+    current, inherited, dispositions = check_result(root, value, result)
+    role, verdict = result["role"], result["verdict"]
+    findings = result.get("findings", [])
+    if (role == "code_reviewer" and verdict != "cancelled" and not merged
+            and code_review_panel(root, current["delivery"]) == BESIDE_OFFICIAL):
+        raise RuntimeError("at code_review_panel beside_official the code review settles through merge-panel:"
+                           " register the official result and every lens result with panel-result")
+    if (role == "code_reviewer" and verdict != "cancelled"
+            and review_loop(root, current["delivery"]) == "blocking_delta"):
+        item = item_record(root, current["delivery"], current["story"])
+        if not merged:
             if "calibration" in result:
                 raise RuntimeError("calibration rows come only from the calibration reader's own result,"
                                    " registered with calibrate; the claiming result carries none")
-            item = item_record(root, current["delivery"], current["story"])
             ruled = {identifier for identifier, finding in inherited.items() if "calibrated_severity" in finding}
             claims = open_claims(findings, ruled)
             registered = (value.get("calibration") or {}).get("result")
@@ -910,25 +1501,211 @@ def register_result(root: Path, result: dict) -> dict:
             problems = calibration_problems(root, current, result, ruled, follow_up_roles(item))
             if problems:
                 raise RuntimeError("severity calibration is incomplete: " + "; ".join(problems))
-            if calibrated_verdict(result) != verdict:
-                checks = result.get("checks", {})
-                for check in required_checks(root, current, role):
-                    evidence = checks.get(check, {}) if isinstance(checks, dict) else {}
-                    if not isinstance(evidence, dict) or not isinstance(evidence.get("evidence"), str) \
-                            or not evidence["evidence"].strip():
-                        raise RuntimeError(f"a calibrated {role} pass requires {check} evidence")
-                if not inherited.keys() <= dispositions.keys():
-                    raise RuntimeError("final result must explicitly disposition every inherited finding"
-                                       " and resolve blocking findings")
-            # Refuses an open minor finding that is not a complete follow-up.
-            open_follow_ups(result, item)
+        if calibrated_verdict(result) != verdict:
+            checks = result.get("checks", {})
+            for check in required_checks(root, current, role):
+                evidence = checks.get(check, {}) if isinstance(checks, dict) else {}
+                if not isinstance(evidence, dict) or not isinstance(evidence.get("evidence"), str) \
+                        or not evidence["evidence"].strip():
+                    raise RuntimeError(f"a calibrated {role} pass requires {check} evidence")
+            if not inherited.keys() <= dispositions.keys():
+                raise RuntimeError("final result must explicitly disposition every inherited finding"
+                                   " and resolve blocking findings")
+        # Refuses an open minor finding that is not a complete follow-up.
+        open_follow_ups(result, item)
+    stored = dict(result)
+    stored["result_hash"] = digest(result)
+    value["workers"][role] = {"state": "cancelled" if verdict == "cancelled" else "settled", "result": stored,
+                              "completed_at": time.time(),
+                              "reader_elapsed_seconds": max(0.0, time.time() - value["workers"][role].get("started_at", time.time()))}
+    write_session(root, value)
+    return value
+
+
+def register_panel_result(root: Path, result: dict) -> dict:
+    """Register one result of a code review panel pass at code_review_panel beside_official.
+
+    The official reviewer's result is checked as register_result checks it. A
+    lens reader's result names its assignment and holds only new, open
+    findings under the assignment's id prefix. Each records when it returned;
+    neither settles the code review, so the implementation writer stays idle
+    until merge_panel does.
+    """
+    root = root.resolve()
+    with locked(root):
+        wait_for_own_command(root, "code_reviewer", "registering a panel result")
+        value = read_session(root)
+        current = require_current(root, value, allow_evidence=True)
+        panel = code_review_panel_state(root, value)
+        if panel is None:
+            raise RuntimeError("panel-result registers a code review panel result only at code_review_panel"
+                               " beside_official")
+        if result.get("role") != "code_reviewer":
+            raise RuntimeError("a code review panel result names role code_reviewer")
+        if result.get("candidate_hash") != current["candidate_hash"] or result.get("session_id") != value["session_id"]:
+            raise RuntimeError("result does not bind this candidate and reader session")
+        if value["workers"]["code_reviewer"]["state"] != "running":
+            raise RuntimeError("the code review already settled; freeze a new session to replace it")
+        mode = result.get("mode")
+        if mode != PANEL_LENS_MODE and mode not in policy()["role_modes"]["code_reviewer"]:
+            raise RuntimeError("a code review panel result names mode review_initial or review_repair for the"
+                               " official reviewer, or panel_lens for a lens reader")
+        if result.get("verdict") not in {"passed", "failed"}:
+            raise RuntimeError("a code review panel result's verdict is passed or failed")
+        members = panel["members"]
+        inherited = {finding["id"] for finding in value.get("unresolved_findings", [])
+                     if finding["role"] == "code_reviewer"}
+        if mode == PANEL_LENS_MODE:
+            assignment = next((assignment for assignment in panel["assignments"]
+                               if assignment["lens"] == result.get("lens")), None)
+            if assignment is None:
+                raise RuntimeError("lens must name one assignment of the code review panel: "
+                                   + "; ".join(", ".join(item["lens"]) for item in panel["assignments"]))
+            key = assignment["key"]
+            if key in members:
+                raise RuntimeError(f"lens assignment {key} is already registered")
+            if not isinstance(result.get("report"), str) or not result["report"].strip():
+                raise RuntimeError("verification result requires its independent report")
+            findings = result.get("findings", [])
+            check_findings(findings)
+            if result["verdict"] == "passed" and any(blocking(finding) for finding in findings):
+                raise RuntimeError("passing verification cannot retain an open blocking finding")
+            prefix = panel_prefix(panel, assignment)
+            for finding in findings:
+                identifier = finding["id"]
+                if finding["status"] != "open":
+                    raise RuntimeError(f"{identifier} must be a new open finding")
+                if not identifier.startswith(prefix):
+                    raise RuntimeError(f"{identifier} must start with its assignment's id_prefix {prefix}")
+                if not all(isinstance(finding.get(field), str) and finding[field].strip()
+                           for field in ("file", "description")):
+                    raise RuntimeError(f"{identifier} needs its file and description")
+            held = inherited | {finding["id"] for member in members.values()
+                                for finding in member["result"].get("findings", [])}
+        else:
+            if OFFICIAL in members:
+                raise RuntimeError("the official code review result is already registered")
+            check_result(root, value, result)
+            if "calibration" in result:
+                raise RuntimeError("calibration rows come only from the calibration reader's own result,"
+                                   " registered with calibrate; the claiming result carries none")
+            if review_loop(root, current["delivery"]) == "blocking_delta":
+                problems = follow_up_problems(result.get("findings", []), follow_up_roles(
+                    item_record(root, current["delivery"], current["story"])))
+                if problems:
+                    raise RuntimeError("code review follow-ups are incomplete: " + "; ".join(problems))
+            key, findings = OFFICIAL, result.get("findings", [])
+            held = {finding["id"] for member in members.values() for finding in member["result"].get("findings", [])}
+        for finding in findings:
+            if finding["id"] in held:
+                raise RuntimeError(f"{finding['id']} is already held by another result of this pass or an"
+                                   " earlier cycle")
         stored = dict(result)
         stored["result_hash"] = digest(result)
-        value["workers"][role] = {"state": "cancelled" if verdict == "cancelled" else "settled", "result": stored,
-                                  "completed_at": time.time(),
-                                  "reader_elapsed_seconds": max(0.0, time.time() - value["workers"][role].get("started_at", time.time()))}
+        completed = time.time()
+        started = value["workers"]["code_reviewer"].get("started_at", completed)
+        value["panel"] = {**panel, "members": {**members, key: {
+            "result": stored, "completed_at": completed, "elapsed_seconds": max(0.0, completed - started)}}}
         write_session(root, value)
         return value
+
+
+def merge_panel(root: Path) -> dict:
+    """Register the one code review result of a code review panel pass and settle the code review.
+
+    Its findings are the official result's, with source official, except that
+    a panel finding of an earlier pass the official result re-lists keeps its
+    source and lens, and each lens claim that calibration confirmed or lowered
+    to minor, with source panel, its lens and its claimed and calibrated
+    severity. A claim ruled invalid or duplicate and a lens finding that does
+    not block stay out; the calibration rows on the result keep every ruling.
+    The result keeps the official report, mode and checks, fails when the
+    official result fails or a lens claim is confirmed, and settles through
+    every check register_result applies. Its panel record keeps the combined
+    step's wall clock from the freeze to this merge against the official
+    reviewer's, the open blocking findings of the official result by source,
+    and every lens claim with its text and ruling, which no later session
+    holds otherwise.
+    """
+    root = root.resolve()
+    with locked(root):
+        wait_for_own_command(root, "code_reviewer", "merging the code review panel")
+        value = read_session(root)
+        current = require_current(root, value, allow_evidence=True)
+        panel = code_review_panel_state(root, value)
+        if panel is None:
+            raise RuntimeError("merge-panel settles a code review only at code_review_panel beside_official")
+        worker = value["workers"]["code_reviewer"]
+        if worker["state"] != "running":
+            raise RuntimeError("the code review already settled; freeze a new session to replace it")
+        claims, _targets = panel_claims(panel, value, review_loop(root, current["delivery"]))
+        registered = (value.get("calibration") or {}).get("result")
+        if (claims or registered) and (registered is None or sorted(
+                registered["claims"], key=lambda claim: claim["id"]) != claims):
+            raise RuntimeError("register the calibration reader's result with calibrate for exactly the open"
+                               " critical or major claims to rule, as returned: "
+                               + (", ".join(claim["id"] for claim in claims) or "none"))
+        rows = {row["finding"]: row for row in registered["calibration"]} if registered else {}
+        members = panel["members"]
+        official = members[OFFICIAL]["result"]
+        carried = {finding["id"]: finding for finding in value.get("unresolved_findings", [])
+                   if finding["role"] == "code_reviewer" and finding.get("source") == "panel"}
+        findings = [{**finding, "source": "panel", "lens": carried[finding["id"]]["lens"]}
+                    if finding["id"] in carried else {**finding, "source": OFFICIAL}
+                    for finding in official["findings"]]
+        gating = {source: sorted(finding["id"] for finding in findings if finding["source"] == source
+                                 and finding["status"] == "open" and blocking(finding))
+                  for source in (OFFICIAL, "panel")}
+        rulings: dict = {"confirmed": [], "minor": [], "invalid": [], DUPLICATE: {}}
+        claims = []
+        for assignment in panel["assignments"]:
+            for finding in members[assignment["key"]]["result"]["findings"]:
+                if not blocking(finding):
+                    continue
+                row = rows[finding["id"]]
+                ruling = row["calibrated_severity"].casefold()
+                claim = {"finding": finding["id"], "lens": assignment["lens"], "severity": finding["severity"],
+                         "ruling": ruling if ruling in {DUPLICATE, "invalid", "minor"} else "confirmed",
+                         "file": finding["file"], "description": finding["description"], "reason": row["reason"]}
+                claims.append(claim)
+                if ruling == DUPLICATE:
+                    claim["duplicate_of"] = row["duplicate_of"]
+                    rulings[DUPLICATE][finding["id"]] = row["duplicate_of"]
+                    continue
+                if ruling == "invalid":
+                    rulings["invalid"].append(finding["id"])
+                    continue
+                entry = {**finding, "source": "panel", "lens": assignment["lens"],
+                         "claimed_severity": finding["severity"], "calibrated_severity": ruling}
+                if ruling == "minor":
+                    follow_up = {"owner_role": row.get("owner_role"), "revisit_trigger": row.get("revisit_trigger")}
+                    entry.update(severity="minor", **follow_up)
+                    claim.update(follow_up)
+                    rulings["minor"].append(finding["id"])
+                else:
+                    rulings["confirmed"].append(finding["id"])
+                findings.append(entry)
+        official_seconds = members[OFFICIAL]["elapsed_seconds"]
+        combined = max(0.0, time.time() - worker.get("started_at", time.time()))
+        record = {"pass": panel["pass"], "mode": official["mode"],
+                  "official_result_hash": official["result_hash"],
+                  "lens_result_hashes": {assignment["key"]: members[assignment["key"]]["result"]["result_hash"]
+                                         for assignment in panel["assignments"]},
+                  "official_seconds": round(official_seconds, 1),
+                  "panel_seconds": round(max(members[assignment["key"]]["elapsed_seconds"]
+                                             for assignment in panel["assignments"]), 1),
+                  "combined_seconds": round(combined, 1),
+                  "combined_ratio": round(combined / official_seconds, 2) if official_seconds > 0 else None,
+                  "official_blocking": gating[OFFICIAL], "carried_panel_blocking": gating["panel"],
+                  "confirmed": sorted(rulings["confirmed"]), "minor": sorted(rulings["minor"]),
+                  "invalid": sorted(rulings["invalid"]), DUPLICATE: dict(sorted(rulings[DUPLICATE].items())),
+                  "claims": sorted(claims, key=lambda claim: claim["finding"])}
+        result = {key: item for key, item in official.items() if key not in {"result_hash", "findings", "verdict"}}
+        result.update(verdict="failed" if official["verdict"] == "failed" or rulings["confirmed"] else "passed",
+                      findings=findings, panel=record)
+        if registered:
+            result.update(calibration=registered["calibration"], calibration_result_hash=registered["result_hash"])
+        return settle_result(root, value, result, merged=True)
 
 
 def resume_qa(root: Path) -> dict:
@@ -988,9 +1765,9 @@ def validate(root: Path, delivery_id: str, story: str) -> dict:
                 or result.get("result_hash") != digest({key: item for key, item in result.items() if key != "result_hash"})):
             raise RuntimeError(f"same-candidate final passed {role} result is required")
         if role == "qa_engineer":
-            require_raw_evidence(root, value, result["checks"])
+            environment = require_raw_evidence(root, value, result["checks"])
             if current["runtime_required"]:
-                require_runtime_evidence(root, value, result["checks"]["fresh_runtime"])
+                require_runtime_evidence(root, value, result["checks"]["fresh_runtime"], environment)
     return value
 
 
@@ -1000,8 +1777,7 @@ def runtime_needs_cleanup(session: dict) -> bool:
 
 
 def runtime_environment_identity(root: Path) -> dict:
-    return {"environment_hash": digest(command_environment(root)), "python": sys.version,
-            "platform": platform.platform(), "git": git(root, "--version")}
+    return environment_identity(root, command_environment(root))
 
 
 def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
@@ -1009,7 +1785,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
     root = root.resolve()
     if verb not in {"down", "up", "seed", "logs", "url"}:
         raise RuntimeError("unsupported environment verb")
-    with environment_lock(root, "qa_engineer", "environment --verb " + verb), command_lock(root):
+    with environment_lock(root, "qa_engineer", "environment --verb " + verb), \
+            command_lock(root, "qa_engineer", "environment --verb " + verb):
         with locked(root):
             session = read_session(root)
             current = session["candidate"] if verb == "down" else require_current(root, session, allow_evidence=True)
@@ -1044,8 +1821,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             execution_root = safe_runtime_path(root, session_path(root).parent / "scratch" / ("runtime-" + namespace))
             if not execution_root.exists():
                 execution_root.parent.mkdir(parents=True, exist_ok=True)
-                git(root, "clone", "--no-local", "--no-hardlinks", "--no-checkout", "--", str(root), str(execution_root))
-                git(execution_root, "checkout", "--detach", current["product_commit"])
+                clone_private_checkout(root, execution_root, current["product_commit"])
             if execution_root.is_symlink() or (verb != "down" and git(execution_root, "rev-parse", "HEAD") != current["product_commit"]):
                 raise RuntimeError("runtime checkout no longer binds the frozen candidate")
             workdir = (execution_root / str(contract.get("env_workdir", "."))).resolve()
@@ -1112,15 +1888,16 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
 LANE_SEARCH_PATH_VARIABLES = ("PYTHONPATH", "PYTHONHOME", "NODE_PATH")
 
 
-def lane_command_environment(root: Path, directory: Path) -> tuple[dict, dict[str, list[str]]]:
-    """Return the inherited environment without search path entries outside the Item worktree.
+def lane_command_environment(root: Path, directory: Path,
+                             base: dict | None = None) -> tuple[dict, dict[str, list[str]]]:
+    """Return the inherited environment, or *base*, without search path entries outside *root*.
 
     An entry is kept when it resolves inside the worktree, a relative entry
     against the command's working directory and a link through its target. A
     variable left with no entry is unset. The second value lists the dropped
     entries of each variable.
     """
-    environment = dict(os.environ)
+    environment = dict(os.environ if base is None else base)
     dropped: dict[str, list[str]] = {}
     for name in LANE_SEARCH_PATH_VARIABLES:
         if name not in environment:
@@ -1194,6 +1971,9 @@ def lane_run(root: Path, delivery_id: str, story: str, role: str, kind: str,
     output = safe_runtime_path(root, session_path(root).parent / "lanes" / f"{role}-{uuid.uuid4().hex}.log",
                                file_only=True)
     environment, dropped = lane_command_environment(root, directory)
+    # Only the run that writes a selection file names it; an inherited one would skip suites unseen.
+    for name in SELECTION_VARIABLES:
+        environment.pop(name, None)
     with environment_lock(root, role, label) as interrupted:
         output.parent.mkdir(exist_ok=True)
         started = time.monotonic()
@@ -1206,7 +1986,394 @@ def lane_run(root: Path, delivery_id: str, story: str, role: str, kind: str,
             "interrupted_holder": interrupted, "dropped_search_paths": dropped}
 
 
-def require_runtime_evidence(root: Path, session: dict, evidence: dict) -> None:
+def pre_handoff_regression(root: Path, delivery_id: str) -> str:
+    """The pre_handoff_regression value the Delivery runs under, as its pinned policy sets it."""
+    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, PRE_HANDOFF_SWITCH)
+
+
+def require_touched_suites(root: Path, delivery_id: str) -> None:
+    value = pre_handoff_regression(root, delivery_id)
+    if value != TOUCHED_SUITES:
+        raise RuntimeError(f"pre-handoff regression runs only at process switch {PRE_HANDOFF_SWITCH}"
+                           f" {TOUCHED_SUITES}; {delivery_id} runs it at {value}")
+
+
+def automation_targets(body: str) -> list[str]:
+    """The automation targets of a Test Plan body's automation-required scenarios, in plan order."""
+    targets = []
+    for _scenario, block in scenario_blocks(body):
+        fields, _duplicates = scenario_fields(block)
+        target = fields.get("automation_target", "").strip()
+        if fields.get("automation", "").strip().casefold() == "required" and target:
+            targets.append(target)
+    return targets
+
+
+def plan_automation_targets(docs: Path, relative: str, label: str) -> list[str]:
+    """The automation targets of a Test Plan's automation-required scenarios, in plan order."""
+    if not relative:
+        raise RuntimeError(f"{label} records no Test Plan; its suite cannot be selected")
+    path = docs / relative
+    if not delivery._is_normalized_claim(relative) or path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"{label} records Test Plan {relative}, which the candidate does not hold;"
+                           " its suite cannot be selected")
+    return automation_targets(delivery.split_note(path)[1])
+
+
+def integrated_plan(root: Path, commit: str, plans: list[str], hashes: set[str]) -> dict | None:
+    """The newest revision of a story's Test Plans whose backlog digest is one of *hashes*, or None.
+
+    An Item records the digest of the Test Plan revision it integrated as
+    test_plan_source_hash. The candidate's own file is the newest revision;
+    after it come the revisions the candidate's history wrote, newest first.
+    The result names the plan, its digest, the commit that holds it and its
+    automation targets.
+    """
+    docs = delivery.docs_root(root)
+
+    def integrated(relative: str, text: str, holder: str) -> dict | None:
+        value = backlog_compile.digest_text(text)
+        if value not in hashes:
+            return None
+        return {"test_plan": relative, "source_hash": value, "commit": holder,
+                "targets": automation_targets(backlog_compile.parse_front_matter_text(text)[1])}
+
+    for relative in plans:
+        path = docs / relative
+        try:
+            text = path.read_text(encoding="utf-8") if path.is_file() and not path.is_symlink() else None
+        except (OSError, ValueError):
+            text = None
+        revision = integrated(relative, text, commit) if text is not None else None
+        if revision is not None:
+            return revision
+    names = {(docs / relative).relative_to(root).as_posix(): relative for relative in plans}
+    history = git(root, "--literal-pathspecs", "log", "--full-history", "--topo-order", "--format=%H",
+                  commit, "--", *names)
+    for holder in history.split():
+        for name, relative in names.items():
+            shown = subprocess.run(["git", "--no-replace-objects", "-C", str(root), "cat-file", "blob",
+                                    f"{holder}:{name}"], capture_output=True, check=False)
+            if shown.returncode:
+                continue
+            try:
+                revision = integrated(relative, shown.stdout.decode("utf-8"), holder)
+            except UnicodeDecodeError:
+                continue
+            if revision is not None:
+                return revision
+    return None
+
+
+def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -> dict:
+    """Derive the pre-handoff regression selection of an Item's exact candidate.
+
+    An earlier story is one whose Item is integrated in a Delivery that the
+    candidate holds as merged and whose path claims hold or lie under a path
+    the candidate changes against its integration base. The selection is the
+    automation targets of the automation-required scenarios in those stories'
+    Test Plans and in the Item's own, as affected_test_ids of the approved
+    diagnostic adapter; without that adapter, or with no target, the full
+    approved test command runs.
+
+    An earlier story's targets come from the newest Test Plan revision that an
+    integrated Item the candidate holds, of a merged Delivery or of the current
+    one, records as its test_plan_source_hash: the candidate's own Test Plan
+    when it is that revision, else that revision from the candidate's history.
+    A backlog revision no integration bound yet changes no selection. A record
+    that cannot be read, a merge state Git cannot decide and an integrated
+    revision neither the candidate nor its history holds refuse, so no suite
+    is dropped silently.
+    """
+    docs = delivery.docs_root(root)
+    changed = current["changed_files"]
+    touched_items = []
+    integrations: dict[str, dict] = {}
+    for directory in delivery.delivery_dirs(docs):
+        record = directory / "delivery.md"
+        if not record.is_file():
+            continue
+        try:
+            props, _ = delivery.split_note(record)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"{record.relative_to(root).as_posix()} cannot be read, so the suites it"
+                               f" merged cannot be selected: {exc}") from exc
+        identifier = str(props.get("id", ""))
+        # The current Delivery's integrated Items are no earlier stories, but a
+        # story one of them integrated again takes the revision it integrated.
+        current_delivery = identifier == delivery_id
+        if not current_delivery:
+            # An unreadable Delivery Review record is an unknown merge state as well.
+            status, unknown = delivery.delivery_state(directory, props)
+            if unknown is not None:
+                raise RuntimeError(f"whether {identifier} merged decides which earlier suites the candidate"
+                                   f" touches: {unknown}")
+            if status != "merged":
+                continue
+        for item_path in sorted(directory.glob("items/*/item.md")):
+            try:
+                item, _ = delivery.split_note(item_path)
+            except (OSError, ValueError) as exc:
+                raise RuntimeError(f"{item_path.relative_to(root).as_posix()} cannot be read, so its suite"
+                                   f" cannot be selected: {exc}") from exc
+            if item.get("status") != "integrated":
+                continue
+            earlier_story = str(item.get("story_id", ""))
+            plan = str(item.get("test_plan_path") or "")
+            recorded = item.get("test_plan_source_hash")
+            if plan and delivery._is_normalized_claim(plan) and isinstance(recorded, str) and recorded:
+                integration = integrations.setdefault(earlier_story, {"plans": [], "hashes": set()})
+                if plan not in integration["plans"]:
+                    integration["plans"].append(plan)
+                integration["hashes"].add(recorded)
+            claims = item.get("path_claims")
+            if current_delivery or not isinstance(claims, list):
+                continue
+            touched = sorted({claim for claim in claims if isinstance(claim, str)
+                              and any(delivery._claims_overlap(claim, path) for path in changed)})
+            if not touched:
+                continue
+            label = f"{earlier_story} of {identifier}"
+            if not plan:
+                raise RuntimeError(f"{label} records no Test Plan; its suite cannot be selected")
+            if not delivery._is_normalized_claim(plan):
+                raise RuntimeError(f"{label} records Test Plan {plan}, which is no normalized docs path; its suite"
+                                   " cannot be selected")
+            if not isinstance(recorded, str) or not recorded:
+                raise RuntimeError(f"{label} records no test_plan_source_hash, so the Test Plan revision it"
+                                   " integrated cannot be selected")
+            touched_items.append({"delivery": identifier, "story": earlier_story, "label": label,
+                                  "item": item_path.relative_to(root).as_posix(), "plan": plan,
+                                  "recorded": recorded, "touched": touched})
+    revisions: dict[str, dict | None] = {}
+    earlier = []
+    for entry in touched_items:
+        if entry["story"] not in revisions:
+            integration = integrations[entry["story"]]
+            revisions[entry["story"]] = integrated_plan(root, current["product_commit"], integration["plans"],
+                                                        integration["hashes"])
+        revision = revisions[entry["story"]]
+        if revision is None:
+            raise RuntimeError(f"{entry['label']} integrated Test Plan {entry['plan']} at {entry['recorded']},"
+                               " a revision neither the candidate nor its history holds; its suite cannot be"
+                               " selected")
+        earlier.append({"delivery": entry["delivery"], "story": entry["story"], "item": entry["item"],
+                        "test_plan": (docs / revision["test_plan"]).relative_to(root).as_posix(),
+                        "test_plan_source_hash": revision["source_hash"], "test_plan_commit": revision["commit"],
+                        "touched_claims": entry["touched"],
+                        "touched_paths": sorted({path for path in changed for claim in entry["touched"]
+                                                 if delivery._claims_overlap(claim, path)}),
+                        "automation_targets": sorted(set(revision["targets"]))})
+    earlier.sort(key=lambda entry: (entry["delivery"], entry["story"]))
+    plan = str(item_record(root, delivery_id, story).get("test_plan_path") or "")
+    own = sorted(set(plan_automation_targets(docs, plan, f"{story} of {delivery_id}")))
+    for label, targets in [*((entry["story"], entry["automation_targets"]) for entry in earlier), (story, own)]:
+        for target in targets:
+            if not literal_test_id(target):
+                raise RuntimeError(f"automation target {target} of {label} is no literal test id: it is padded,"
+                                   " starts with '-' or holds a control character")
+    selected = sorted(set(own).union(*(entry["automation_targets"] for entry in earlier)))
+    contract, _ = delivery.split_note(docs / "operation/verification-contract.md")
+
+    def approved(kind: str) -> str | None:
+        command = contract.get(kind + "_command")
+        resolved = isinstance(command, str) and command.strip() and "{{" not in command and "}}" not in command
+        return command if resolved else None
+
+    kind = "diagnostic_test" if selected and approved("diagnostic_test") else "test"
+    command = approved(kind)
+    if command is None:
+        raise RuntimeError("approved verification command is missing or contains unresolved parameters")
+    return {"delivery": delivery_id, "story": story, "candidate_hash": current["candidate_hash"],
+            "product_commit": current["product_commit"],
+            "candidate_tree": git(root, "rev-parse", current["product_commit"] + "^{tree}"),
+            "earlier_stories": earlier, "own_targets": own, "affected_test_ids": selected,
+            "kind": kind, "command": command, "workdir": str(contract.get(kind + "_workdir", "."))}
+
+
+def write_pre_handoff_selection(root: Path, derived: dict) -> Path | None:
+    """Write the derived selection in the diagnostic adapter's input schema, which QA's run reads too.
+
+    Unchanged bytes are left in place, so deriving the selection again never
+    invalidates a QA diagnostic that reads the same file.
+    """
+    if not derived["affected_test_ids"]:
+        return None
+    path = raw_output_path(root, PRE_HANDOFF_SELECTION)
+    text = json.dumps({"schema_version": 1, "candidate_hash": derived["candidate_hash"], "failed_test_ids": [],
+                       "affected_test_ids": derived["affected_test_ids"]}, indent=2, sort_keys=True) + "\n"
+    if not path.is_file() or path.read_bytes() != text.encode("utf-8"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_file.replace_text(path, text)
+    return path
+
+
+def regression_selection(root: Path, delivery_id: str, story: str) -> dict:
+    """Derive and write the pre-handoff regression selection of the Item's committed candidate.
+
+    It holds the Item's environment lock meanwhile, which a pre-handoff run
+    and QA's diagnostic hold while their command runs, so it never rewrites the
+    selection a running command reads.
+    """
+    root = root.resolve()
+    require_touched_suites(root, delivery_id)
+    with environment_lock(root, PRE_HANDOFF_HOLDER, "regression-selection") as interrupted:
+        derived = derive_regression(root, delivery_id, story, candidate(root, delivery_id, story, allow_evidence=True))
+        path = write_pre_handoff_selection(root, derived)
+    return {**derived, "selection_file": str(path) if path else None, "interrupted_holder": interrupted}
+
+
+def pre_handoff_record_path(root: Path) -> Path:
+    return safe_runtime_path(root, session_path(root).parent / "pre-handoff.json", file_only=True)
+
+
+def pre_handoff_runs(root: Path) -> list[dict]:
+    """The pre-handoff regression runs recorded in this Item worktree's runtime, oldest first."""
+    path = pre_handoff_record_path(root)
+    if not path.exists():
+        return []
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        runs = value["runs"]
+        if (value.get("schema_version") != 1 or not isinstance(runs, list)
+                or any(not isinstance(run, dict) or run.get("evidence_hash") != digest(
+                    {key: item for key, item in run.items() if key != "evidence_hash"}) for run in runs)):
+            raise ValueError("invalid schema or evidence hash")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise RuntimeError(f"pre-handoff run record is invalid: {exc}; move {path} aside and run"
+                           " regression-run again") from exc
+    return runs
+
+
+def regression_run(root: Path, delivery_id: str, story: str) -> dict:
+    """Run the pre-handoff regression selection on the Item's exact committed candidate.
+
+    The coordinator runs it before the freeze, under the Item's environment
+    lock for the whole run, in a private clone of the candidate commit without
+    interpreter search paths that resolve outside that clone: the approved
+    diagnostic adapter with the selection in AGENTROF_DIAGNOSTIC_TESTS, or the
+    full approved test command without one. Only deriving the selection and
+    cloning the candidate read the Item worktree, so the verification command
+    lock, which guarded writes to it wait for, is held for those alone. The run
+    and its result are recorded against the tree it cloned, so a commit made
+    while the command runs is a new candidate that this run does not bind.
+    """
+    root = root.resolve()
+    require_touched_suites(root, delivery_id)
+    guard_write(root)
+    pre_handoff_runs(root)
+    with environment_lock(root, PRE_HANDOFF_HOLDER, PRE_HANDOFF_RUN) as interrupted, \
+            contextlib.ExitStack() as reading:
+        reading.enter_context(command_lock(root, PRE_HANDOFF_HOLDER, PRE_HANDOFF_RUN))
+        current = candidate(root, delivery_id, story, allow_evidence=True)
+        derived = derive_regression(root, delivery_id, story, current)
+        # Read while the run still holds the worktree, which may change once its command runs,
+        # and checked now, so a malformed contract costs no run of the selection.
+        contract = verification_contract(root)
+        contract_variables(contract)
+        shared = write_pre_handoff_selection(root, derived)
+        environment = command_environment(root, diagnostic=derived["kind"] == "diagnostic_test")
+        selections: dict[Path, tuple[bytes, list[int]]] = {}
+        if derived["kind"] == "diagnostic_test":
+            selector = safe_runtime_path(root, session_path(root).parent / "pre-handoff-tests.json", file_only=True)
+            atomic_file.replace_text(selector, json.dumps(
+                {"schema_version": 1, "candidate_hash": current["candidate_hash"], "failed_test_ids": [],
+                 "affected_test_ids": derived["affected_test_ids"],
+                 "selected_test_ids": derived["affected_test_ids"]}, indent=2, sort_keys=True) + "\n")
+            environment["AGENTROF_DIAGNOSTIC_TESTS"] = str(selector)
+            # As in QA's diagnostic run, neither the selection the command
+            # receives nor the one QA's diagnostic reads may change while it runs.
+            selections = {path: (path.read_bytes(), source_file_generation(path)) for path in (selector, shared)}
+        scratch = safe_runtime_path(root, Path(environment["AGENTROF_VERIFICATION_SCRATCH"]))
+        scratch.mkdir(parents=True, exist_ok=True)
+        started = time.monotonic()
+        completed, intact, dropped, ran = private_checkout_run(
+            root, scratch, current["product_commit"], derived["workdir"], derived["command"], environment,
+            isolate_search_paths=True, cloned=reading.close)
+        duration = time.monotonic() - started
+        selection_intact = None
+        if selections:
+            try:
+                selection_intact = all(
+                    safe_runtime_path(root, path, file_only=True).read_bytes() == data
+                    and source_file_generation(path) == generation for path, (data, generation) in selections.items())
+            except (RuntimeError, ValueError, OSError):
+                selection_intact = False
+            intact = intact and selection_intact
+        with locked(root):
+            runs = pre_handoff_runs(root)
+            output_name = "scratch/pre-handoff-" + uuid.uuid4().hex + ".log"
+            atomic_file.replace_bytes(raw_output_path(root, output_name), completed.stdout)
+            record = {**{key: derived[key] for key in ("delivery", "story", "product_commit", *PRE_HANDOFF_IDENTITY)},
+                      "earlier_stories": [{"delivery": entry["delivery"], "story": entry["story"]}
+                                          for entry in derived["earlier_stories"]],
+                      "exit_code": completed.returncode, "candidate_intact": intact, "output_file": output_name,
+                      "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
+                      "duration_seconds": duration, "completed_at": time.time(), "dropped_search_paths": dropped,
+                      **environment_identity(root, ran, contract)}
+            if selection_intact is not None:
+                record["selection_intact"] = selection_intact
+            record["evidence_hash"] = digest(record)
+            atomic_file.replace_text(pre_handoff_record_path(root), json.dumps(
+                {"schema_version": 1, "runs": [*runs, record]}, indent=2, sort_keys=True) + "\n")
+    return {**record, "output_path": str(raw_output_path(root, output_name)), "interrupted_holder": interrupted}
+
+
+def accepted_pre_handoff(root: Path, delivery_id: str, story: str, current: dict) -> dict:
+    """The passing pre-handoff run that lets the exact candidate freeze, or the refusal that names why none does.
+
+    The latest run on the candidate's tree with the selection and command
+    derived for it decides: a new commit, a changed selection or a changed
+    approved command needs a new run. The session keeps it with the bindings
+    and the declared environment QA's final test run compares to reuse it.
+    """
+    derived = derive_regression(root, delivery_id, story, current)
+    identity = {key: derived[key] for key in PRE_HANDOFF_IDENTITY}
+    runs = [run for run in pre_handoff_runs(root) if (run.get("delivery"), run.get("story")) == (delivery_id, story)
+            and {key: run.get(key) for key in PRE_HANDOFF_IDENTITY} == identity]
+    tree = derived["candidate_tree"]
+    if not runs:
+        raise RuntimeError(f"DELIVERY_PRE_HANDOFF_MISSING: no pre-handoff regression run binds candidate tree {tree}"
+                           f" with the selection and command derived for it; run regression-run --delivery"
+                           f" {delivery_id} --story {story}, repair what it finds and commit, then freeze")
+    latest = runs[-1]
+    if latest.get("exit_code") != 0 or latest.get("candidate_intact") is not True:
+        changed = ("" if latest.get("candidate_intact") is True
+                   else " and changed the selection it ran" if latest.get("selection_intact") is False
+                   else " and changed its checkout")
+        raise RuntimeError(f"DELIVERY_PRE_HANDOFF_MISSING: the latest pre-handoff regression run on candidate tree"
+                           f" {tree} exited {latest.get('exit_code')}{changed}; repair what it found and commit,"
+                           " then run regression-run on the new candidate, or run it again once a cause outside"
+                           " the candidate is fixed")
+    receipt = {key: latest[key] for key in ("evidence_hash", *PRE_HANDOFF_IDENTITY, "earlier_stories", "exit_code",
+                                            "candidate_intact", "duration_seconds", "completed_at")}
+    # A run recorded before runs named their declared environment has none, so QA reuses no such run.
+    receipt.update({key: latest[key] for key in ENVIRONMENT_FIELDS if key in latest})
+    return receipt
+
+
+def pre_handoff_history(root: Path, session: dict | None, delivery_id: str, story: str) -> list[dict]:
+    """Every pre-handoff regression run of the Item so far, oldest first.
+
+    It is the history the session carries, then each run of the Item's runtime
+    record that the history does not hold yet, by evidence hash. Each freeze
+    carries it into the next session and approve-item-evidence records it, so
+    a freeze of the same tree never counts a run twice, and a runtime record
+    moved aside loses no run a freeze already carried.
+    """
+    history = list(session.get("pre_handoff_history", [])) if session else []
+    held = {run.get("evidence_hash") for run in history}
+    for run in pre_handoff_runs(root):
+        if (run.get("delivery"), run.get("story")) == (delivery_id, story) and run["evidence_hash"] not in held:
+            history.append({key: run.get(key) for key in PRE_HANDOFF_HISTORY_FIELDS})
+            held.add(run["evidence_hash"])
+    return history
+
+
+def require_runtime_evidence(root: Path, session: dict, evidence: dict, environment: dict | None = None) -> None:
+    """Check the fresh runtime events as recorded: every event of the attempt shares one complete
+    environment identity, the one *environment* names when QA's final command evidence gives it, and
+    none is compared with the environment of the process that checks it."""
     state = session.get("runtime", {})
     events = state.get("events", [])
     attempt_id = state.get("attempt_id")
@@ -1217,16 +2384,26 @@ def require_runtime_evidence(root: Path, session: dict, evidence: dict) -> None:
             or any(verb not in verbs for verb in ("up", "seed", "logs"))
             or evidence.get("event_hashes") != [event["evidence_hash"] for event in events]):
         raise RuntimeError("fresh runtime evidence requires recorded down/up/seed/logs/down and exact event hashes")
-    environment_identity = runtime_environment_identity(root)
+    contract = verification_contract(root)
+    shared = None
     for event in events:
         path = raw_output_path(root, event["output_file"])
         if (event.get("exit_code") != 0 or event.get("candidate_intact") is not True or event.get("candidate_hash") != session["candidate"]["candidate_hash"]
                 or event.get("attempt_id") != attempt_id
-                or event.get("environment_identity") != environment_identity
-                or not 0 <= time.time() - event.get("completed_at", 0) <= policy()["raw_evidence_max_age_seconds"]
+                or not fresh_record(event)
                 or event.get("evidence_hash") != digest({key: value for key, value in event.items() if key != "evidence_hash"})
                 or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != event["output_sha256"]):
             raise RuntimeError("runtime command evidence is failed, stale or missing")
+        identity = event.get("environment_identity")
+        problem = environment_problem(identity, contract)
+        if problem:
+            raise RuntimeError(f"runtime command evidence {problem}")
+        if shared is None:
+            shared = {key: identity[key] for key in ENVIRONMENT_FIELDS}
+        elif {key: identity[key] for key in ENVIRONMENT_FIELDS} != shared:
+            raise RuntimeError("runtime command evidence ran in more than one environment")
+    if environment is not None and shared is not None and shared != environment:
+        raise RuntimeError("runtime command evidence ran in another environment than full_test_suite evidence")
 
 
 def inspect_instruction(root: Path, relative: str) -> dict:
@@ -1319,31 +2496,45 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str) -> 
         checks["mutation_whole_changed_files"]["files"] = current["mutation_files"]
     if "fresh_runtime" in checks:
         checks["fresh_runtime"]["event_hashes"] = []
-    return {"schema_version": 1, "role": role, "mode": mode, "session_id": value["session_id"],
-            **current, "required_checks": list(checks),
-            "full_read": sorted(set(current["inputs"]) | set(current["changed_files"])),
-            "repair_delta": delta, "scope_expanded": scope_expanded, "unresolved_findings": value.get("unresolved_findings", []),
-            "read_interface": {"inspect": "inspect --path <repository-relative-path> [--base]", "diff": "diff [--path <repository-relative-path>]"},
-            "review_passes": policy()["review_checks"], "allowed_writes": [str(session_path(root).parent / "scratch")],
-            "mutation_scope_file": str(session_path(root).parent / "mutation-files.json"),
-            "result_interface": {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
-                                 "role": role, "mode": mode, "verdict": "passed|failed|cancelled",
-                                 "report": "Independent findings and conclusion", "checks": checks, "findings": []},
-            "diagnostic_interface": {"available": bool(contract.get("diagnostic_test_command")),
-                                     "command": "run --kind diagnostic_test --selection-file <scratch-selection.json>",
-                                     "selection": {"schema_version": 1, "candidate_hash": current["candidate_hash"],
-                                                   "failed_test_ids": [], "affected_test_ids": []},
-                                     "environment_variable": "AGENTROF_DIAGNOSTIC_TESTS",
-                                     "terminal_evidence": False},
-            "execution_note": "Commands run in private clones containing tracked files only. Approved commands must provision dependencies or use a fixed external environment; ignored dependencies are never copied. The clone is not an operating-system sandbox for trusted commands with absolute paths.",
-            "next_transition": "Register independent result; owner writes reports only after both readers settle"}
+    result = {"schema_version": 1, "role": role, "mode": mode, "session_id": value["session_id"],
+              **current, "required_checks": list(checks),
+              "full_read": sorted(set(current["inputs"]) | set(current["changed_files"])),
+              "repair_delta": delta, "scope_expanded": scope_expanded, "unresolved_findings": value.get("unresolved_findings", []),
+              "read_interface": {"inspect": "inspect --path <repository-relative-path> [--base]", "diff": "diff [--path <repository-relative-path>]"},
+              "review_passes": policy()["review_checks"], "allowed_writes": [str(session_path(root).parent / "scratch")],
+              "mutation_scope_file": str(session_path(root).parent / "mutation-files.json"),
+              "result_interface": {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
+                                   "role": role, "mode": mode, "verdict": "passed|failed|cancelled",
+                                   "report": "Independent findings and conclusion", "checks": checks, "findings": []},
+              "diagnostic_interface": {"available": bool(contract.get("diagnostic_test_command")),
+                                       "command": "run --kind diagnostic_test --selection-file <scratch-selection.json>",
+                                       "selection": {"schema_version": 1, "candidate_hash": current["candidate_hash"],
+                                                     "failed_test_ids": [], "affected_test_ids": []},
+                                       "environment_variable": "AGENTROF_DIAGNOSTIC_TESTS",
+                                       "terminal_evidence": False},
+              "execution_note": "Commands run in private clones containing tracked files only. Approved commands must provision dependencies or use a fixed external environment; ignored dependencies are never copied. The clone is not an operating-system sandbox for trusted commands with absolute paths.",
+              "next_transition": "Register independent result; owner writes reports only after both readers settle"}
+    panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
+    if panel is not None:
+        # Every reader of the panel pass receives this same manifest and one assignment.
+        result["code_review_panel"] = {
+            "pass": panel["pass"],
+            "assignments": [{"lens": assignment["lens"], "focus": assignment["focus"],
+                             "id_prefix": panel_prefix(panel, assignment)} for assignment in panel["assignments"]],
+            "lens_result_interface": {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
+                                      "role": role, "mode": PANEL_LENS_MODE, "lens": "The assignment's lens ids",
+                                      "verdict": "passed|failed", "report": "Independent findings through the lens",
+                                      "findings": []},
+            "registration": "Every reader registers its own result with panel-result --file <result.json>;"
+                            " merge-panel then registers the one code review result"}
+    return result
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", required=True)
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("freeze", "manifest", "validate"):
+    for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
@@ -1355,6 +2546,9 @@ def main(argv=None) -> int:
     result.add_argument("--file", required=True)
     calibrate = subs.add_parser("calibrate")
     calibrate.add_argument("--file", required=True)
+    panel_result = subs.add_parser("panel-result")
+    panel_result.add_argument("--file", required=True)
+    subs.add_parser("merge-panel")
     run = subs.add_parser("run")
     run.add_argument("--kind", choices=("test", "mutation", "dependency_audit", "diagnostic_test"), required=True)
     run.add_argument("--selection-file", type=Path)
@@ -1387,12 +2581,20 @@ def main(argv=None) -> int:
             value = register_result(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "calibrate":
             value = register_calibration(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
+        elif args.command == "panel-result":
+            value = register_panel_result(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
+        elif args.command == "merge-panel":
+            value = merge_panel(root)
         elif args.command == "validate":
             value = validate(root, args.delivery, args.story)
         elif args.command == "environment":
             value = run_environment(root, args.verb, args.value)
         elif args.command == "lane-run":
             value = lane_run(root, args.delivery, args.story, args.role, args.kind, args.verb, args.value)
+        elif args.command == "regression-selection":
+            value = regression_selection(root, args.delivery, args.story)
+        elif args.command == "regression-run":
+            value = regression_run(root, args.delivery, args.story)
         elif args.command == "inspect":
             value = inspect_instruction(root, args.instruction) if args.instruction else inspect_candidate(root, args.path, base=args.base)
         elif args.command == "diff":
@@ -1406,7 +2608,7 @@ def main(argv=None) -> int:
         else:
             value = read_session(root)
         print(json.dumps({"ok": True, **value}, indent=2))
-        return 0 if args.command not in {"run", "environment", "lane-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
+        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2))
         return 2

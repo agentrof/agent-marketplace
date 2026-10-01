@@ -1,0 +1,218 @@
+{
+  "hosts": {
+    "claude": {
+      "confirm": {
+        "max": {
+          "evidence": "On Anthropic's own charts Opus 5.5 at max scores at most 1.8 points above high on Terminal-Bench 4.0, FrontierCode and CursorBench for 2.9 to 5.7 times the cost per task; Sonnet 5.5 at max scores 46.2% on FrontierCode against 52.1% at xhigh for 13 times the cost and more often splits a review across subagents of its own; in Anthropic's effort post one build took 79 minutes at max against 33 at high.",
+          "sources": [
+            "https://www.anthropic.com/claude-opus-5-5",
+            "https://www.anthropic.com/claude-sonnet-5-5",
+            "https://claude.dev/blog/spending-your-effort/"
+          ],
+          "verified": "2026-10-01"
+        }
+      },
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "model_id_shape": "claude-(?P<family>[a-z]+)-(?P<major>[0-9]+)(?:-(?P<minor>[0-9]{1,2}))?(?:-(?P<snapshot>[0-9]{8}))?",
+      "models": {
+        "claude-haiku-4-5-20251001": {
+          "efforts": [],
+          "min_cli_version": "2.1.74"
+        },
+        "claude-opus-5-5": {
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "min_cli_version": "2.1.280"
+        },
+        "claude-sonnet-5-5": {
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "min_cli_version": "2.1.284"
+        }
+      },
+      "refuse": {},
+      "tiers": {
+        "high": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-opus-5-5"
+        },
+        "inherit": {},
+        "low": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-sonnet-5-5"
+        },
+        "medium": {
+          "effort": "medium",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-opus-5-5"
+        }
+      }
+    },
+    "codex": {
+      "confirm": {
+        "max": {
+          "evidence": "On OpenAI's own charts GPT-6.1 Sol at max scores 71.9% on DeepSWE v1.1 against 75.2% at high for 2.4 times the cost per task, while GPT-6 Luna at max scores 66.6% against 59.3% at high for 2.6 times; OpenAI keeps max for its most complex tasks and says most tasks need neither Max nor Ultra.",
+          "sources": [
+            "https://openai.com/index/introducing-gpt-6-1-sol/",
+            "https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+            "https://developers.openai.com/api/docs/guides/reasoning",
+            "https://learn.chatgpt.com/docs/models"
+          ],
+          "verified": "2026-10-01"
+        }
+      },
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "model_id_shape": "[a-z0-9]+(?:[.-][a-z0-9]+)*",
+      "models": {
+        "gpt-6-luna": {
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "min_cli_version": "0.157.0"
+        },
+        "gpt-6.1-sol": {
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "min_cli_version": "0.159.1"
+        }
+      },
+      "refuse": {
+        "ultra": {
+          "reason": "Ultra runs a request at the model's multi-agent effort and splits the task across parallel subagents, so a role at ultra would start subagents of its own.",
+          "sources": [
+            "https://learn.chatgpt.com/docs/models",
+            "https://github.com/openai/codex/blob/rust-v0.159.3/codex-rs/protocol/src/openai_models/reasoning_effort.rs"
+          ],
+          "verified": "2026-10-01"
+        }
+      },
+      "tiers": {
+        "high": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "inherit": {},
+        "low": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "medium": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        }
+      }
+    }
+  },
+  "roles": {
+    "high": [
+      "analysis-challenger",
+      "backlog-reviewer",
+      "business-analyst",
+      "code-reviewer",
+      "design-system-reviewer",
+      "domain-expert",
+      "experience-reviewer",
+      "software-architect",
+      "solution-architect",
+      "solution-reviewer"
+    ],
+    "inherit": [],
+    "low": [
+      "backlog-reviewer-lens",
+      "code-reviewer-lens",
+      "design-system-reviewer-lens",
+      "devops-engineer-mechanical",
+      "product-owner-mechanical",
+      "qa-engineer-mechanical",
+      "solution-architect-mechanical",
+      "solution-reviewer-lens"
+    ],
+    "medium": [
+      "backend-developer",
+      "delivery-coordinator",
+      "devops-engineer",
+      "frontend-developer",
+      "product-owner",
+      "qa-engineer",
+      "ux-designer"
+    ]
+  },
+  "schema_version": 2
+}

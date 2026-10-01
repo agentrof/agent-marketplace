@@ -25,7 +25,6 @@ from typing import Callable, Optional, Sequence
 SEMVER_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REMOTE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
-RELEASE_PREFIX = "Agent Marketplace v"
 
 
 class PublishError(RuntimeError):
@@ -106,7 +105,8 @@ class ReleaseSpec:
 
     @property
     def title(self) -> str:
-        return f"{RELEASE_PREFIX}{self.version}"
+        """The Release title and tag message: the version tag alone."""
+        return self.tag
 
     @property
     def bootstrap(self) -> bool:

@@ -350,17 +350,18 @@ class ReviewLoopReferenceTests(unittest.TestCase):
         self.assertIn("It runs as the claiming reviewer's role, or for an Operation contract or bundle claim"
                       " the counterpart of the contract it concerns, on that role's own tier, never as a"
                       " `-lens` or a `-mechanical` variant", orchestration)
+        # Every generated variant runs on `low`, a tier no calibration reader takes.
         for step, (_entry, role, _skills, _kind) in CALIBRATION_READERS.items():
             with self.subTest(step=step):
                 tier = re.search(r"(?m)^reasoning: (\S+)$", read(f"agents/{role}.md")).group(1)
-                self.assertNotIn(tier, {"lens", "mechanical"})
+                self.assertNotIn(tier, {"low", "lens", "mechanical"})
 
     def test_only_review_panels_start_the_lens_variants(self):
         variants = json.loads(read(REGISTRY))["switches"]["review_panels"]["agent_variants"]
         self.assertEqual(variants["lens_panel"]["agents"],
                          ["backlog-reviewer", "design-system-reviewer", "solution-reviewer"])
         self.assertEqual(variants["lens_panel"]["description"],
-                         "Lens-tier reader variant for review panels.")
+                         "Lens reader variant for review panels.")
         verbs = {"claude": "spawn", "codex": "start"}
         for host, verb in verbs.items():
             contract = " ".join((ROOT / "platforms" / host / "software-engineering-team"

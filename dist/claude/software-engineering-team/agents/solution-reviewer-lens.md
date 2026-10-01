@@ -1,6 +1,6 @@
 ---
 name: solution-reviewer-lens
-description: Read-only challenger for the approved Solution Design package. Lens-tier reader variant for review panels.
+description: Read-only challenger for the approved Solution Design package. Lens reader variant for review panels.
 model: claude-sonnet-5-5
 effort: high
 output_contract: prose

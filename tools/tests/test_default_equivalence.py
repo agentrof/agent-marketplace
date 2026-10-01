@@ -231,6 +231,13 @@ SHIPPED_ADDITIONS = {
     "skill-content/configure/references/process-policy.md": (
         6, "#332: the /configure process procedure, the configure entry's new process"
            " target, which every configure task binds with the rest of its skill."),
+    "skill-content/configure/references/role-models.md": (
+        6, "#349: the /configure models procedure, the configure entry's new models"
+           " target, which every configure task binds with the rest of its skill."),
+    "scripts/role_settings.py": (
+        72, "#349: the one resolution of each role's tier, model and effort, which"
+            " project_config.py and the host project generators import, so every task"
+            " binds it with the other package scripts."),
 }
 
 # Every default-path output that differs from e47dbe0, by harness and by the

@@ -68,7 +68,7 @@ class FakeCommands:
     def _release_json(self) -> str:
         return json.dumps({
             "tagName": "v1.2.3",
-            "name": "Agent Marketplace v1.2.3",
+            "name": "v1.2.3",
             "isDraft": False,
             "isPrerelease": False,
             "isImmutable": self.immutable,
@@ -341,7 +341,7 @@ class PublicationStateMachineTests(unittest.TestCase):
         )
         fake.release_json = {
             "tagName": "v1.2.3",
-            "name": "Agent Marketplace v1.2.3",
+            "name": "v1.2.3",
             "isDraft": True,
             "isPrerelease": False,
             "isImmutable": True,
@@ -591,6 +591,56 @@ class ReleaseImmutabilityTests(unittest.TestCase):
             "--prior-stable-sha", PRIOR, "--notes-file", "notes.md",
         ])
         self.assertFalse(args.require_immutable)
+
+
+class ReleaseTitleTests(unittest.TestCase):
+    """A Release is titled with its version tag alone."""
+
+    def test_the_title_is_the_version_tag(self):
+        self.assertEqual(spec().title, "v1.2.3")
+        self.assertEqual(spec(bootstrap=True).title, "v1.2.3")
+
+    def test_the_created_release_and_its_tag_message_carry_only_the_version(self):
+        fake = FakeCommands(stable=PRIOR)
+        publisher = release_publish.Publisher(fake)
+        publisher.stage(spec())
+        publisher.finalize(spec(), "release-notes.md", require_immutable=True)
+        tag = next(command for command in fake.commands
+                   if command[:3] == ("git", "tag", "-a"))
+        self.assertEqual(tag[tag.index("-m") + 1], "v1.2.3")
+        create = next(command for command in fake.commands
+                      if command[:3] == ("gh", "release", "create"))
+        self.assertEqual(create[create.index("--title") + 1], "v1.2.3")
+
+    def test_a_release_with_the_retired_product_title_is_never_adopted(self):
+        # Releases published before the title change named the product too.
+        for operation in ("stage", "finalize"):
+            with self.subTest(operation=operation):
+                fake = FakeCommands(
+                    stable=CANDIDATE, tag_target=CANDIDATE,
+                    tag_object=TAG_OBJECT, release="exists",
+                    release_branch=RELEASE_BRANCH,
+                )
+                fake.release_json = {
+                    **json.loads(fake._release_json()),
+                    "name": "Agent Marketplace v1.2.3",
+                }
+                publisher = release_publish.Publisher(fake)
+                with self.assertRaisesRegex(
+                    release_publish.PublishError,
+                    "name mismatch: expected 'v1.2.3', "
+                    "got 'Agent Marketplace v1.2.3'",
+                ):
+                    if operation == "stage":
+                        publisher.stage(spec())
+                    else:
+                        publisher.finalize(
+                            spec(), "release-notes.md", RELEASE_BRANCH,
+                            require_immutable=True,
+                        )
+                self.assertEqual(fake.release_branch, RELEASE_BRANCH)
+                self.assertFalse(any(command[:2] == ("git", "push")
+                                     for command in fake.commands))
 
 
 class ValidationTests(unittest.TestCase):

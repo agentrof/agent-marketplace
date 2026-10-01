@@ -7,9 +7,11 @@ CONTRIBUTING.md, .claude-plugin/, .agents/plugins/) and emits deterministic
 findings. One error finding fails
 the run.
 
-Scope is an explicit allowlist; assets/, memory/, tools/ and .git/ are never
-scanned. VALIDATOR_BUILDERS in tools/tests/test_validator_contract.py breaks a
-valid fixture repository once per check, in lockstep with CHECKS.
+Scope is an explicit allowlist; assets/ and .git/ are never scanned. The
+home-directory path check alone reads every file the repository would
+publish, generated dist/ and memory/ included.
+VALIDATOR_BUILDERS in tools/tests/test_validator_contract.py breaks a valid
+fixture repository once per check, in lockstep with CHECKS.
 
 Stdlib only. Deterministic output: findings sorted by (path, line, check).
 """
@@ -20,6 +22,7 @@ import argparse
 import ast
 import json
 import re
+import subprocess
 import sys
 import unicodedata
 from dataclasses import dataclass, field
@@ -39,7 +42,7 @@ LIMITS_CONFIG_RELPATH = "tools/data/limits.json"
 PRODUCT_CONFIG_RELPATH = "product.json"
 
 AGENT_REQUIRED_KEYS = {"name", "description", "reasoning", "output_contract"}
-AGENT_REASONING_ENUM = {"high", "medium", "low", "lens", "mechanical", "inherit"}
+AGENT_REASONING_ENUM = {"high", "medium", "low", "inherit"}
 # How the role hands results back. prose: findings/artifacts in the reply
 # text (every current persona). structured: a forced tool call. Declared so
 # a composer can refuse pairing a prose persona with schema forcing; the
@@ -106,6 +109,45 @@ MODEL_NAME_RE = re.compile(
 )
 
 ABSOLUTE_PATH_RE = re.compile(r"(?:^|[\s\"'`(=])(?:/Users/|/home/|[A-Za-z]:\\\\|~/)")
+
+# A home directory with its user name, /Users/<name>, /home/<name> or
+# C:\Users\<name>, names a person and often the project a path was copied
+# from. The POSIX form may follow a WSL, Cygwin or Git Bash drive segment
+# (/mnt/c, /cygdrive/c, /c) and the Windows form may use forward slashes.
+# A Claude Code project folder encodes a home as -Users-<name>-, and again
+# after a dash when a session starts in a folder already named that way;
+# -Users-<name> and, right after projects/, -home-<name> may end the folder
+# name. The lowercase -home- form needs its trailing dash elsewhere, so a
+# flag such as --home-dir never matches. The name must be written out, so a
+# placeholder such as <name>, $USER or %USERNAME%, and a regex that detects
+# such paths, never match. scripts/file_issue.py refuses the same paths in
+# an issue it files.
+HOME_PATH_RE = re.compile(
+    r"(?:(?<![\w.~$/-])|(?<=file://)|(?<=/mnt/[a-z])|(?<=/cygdrive/[a-z])"
+    r"|(?<=(?<![\w.~$/-])/[a-z]))/(?:Users|home)/(?P<posix>[A-Za-z0-9._-]+)"
+    r"|(?<![A-Za-z0-9])[A-Za-z]:[\\/]+(?i:users)[\\/]+"
+    r"(?P<windows>[^\\/:*?\"<>|\s%${}]+(?: [^\\/:*?\"<>|\s%${}]+)*)"
+    r"|(?:(?<![A-Za-z0-9-])|(?<![A-Za-z0-9])[A-Za-z]-|(?<=[0-9-]-))"
+    r"-(?:Users-(?P<encoded>[A-Za-z0-9]+)|home-(?P<encoded_home>[A-Za-z0-9]+)-)"
+    r"|(?<=projects[/\\])-home-(?P<projects_home>[A-Za-z0-9]+)"
+)
+# Every HOME_PATH_RE match holds "home" or, in any case, "users"; this cheap
+# search spares the full pattern text that holds neither.
+HOME_PATH_HINT_RE = re.compile(r"home|(?i:users)")
+# The homes of system and service accounts, which name no person: the
+# GitHub Actions runner, the Node.js image user, Homebrew on Linux, the dev
+# container user, the Ubuntu cloud image user, and the shared and default
+# profiles of macOS and Windows. scripts/file_issue.py passes the same.
+SYSTEM_HOMES = frozenset({"runner", "node", "linuxbrew", "vscode", "ubuntu",
+                          "Shared", "Public", "Default"})
+# Besides SYSTEM_HOMES, the check's one exception: a test fixture that
+# needs a fake home declares its file and fake user names, which pass only
+# in that file.
+HOME_PATH_FIXTURES = {
+    "tools/tests/test_issue_report.py": frozenset({"fixture"}),
+    "tools/tests/test_model_fallback.py": frozenset({"dev"}),
+    "tools/tests/test_validator_contract.py": frozenset({"fixture"}),
+}
 
 HANDWRITTEN_COUNT_RE = re.compile(
     r"\b\d+\s+(?:agents?|skills?|plugins?|commands?)\b", re.IGNORECASE
@@ -689,6 +731,75 @@ def check_content_bans(tree: Tree, findings: list[Finding]) -> None:
                 ))
 
 
+def home_path_user(match: re.Match) -> str:
+    """The user name a HOME_PATH_RE match writes out, whichever form it has."""
+    return next((value for value in match.groupdict().values() if value), "")
+
+
+def refused_home_paths(text: str, relative: str = "") -> list[re.Match]:
+    """Each home-directory path in text that names a person. A system or
+    service home passes, and so does a fake user HOME_PATH_FIXTURES declares
+    for the file at relative."""
+    if HOME_PATH_HINT_RE.search(text) is None:
+        return []
+    passing = SYSTEM_HOMES | HOME_PATH_FIXTURES.get(relative, frozenset())
+    return [match for match in HOME_PATH_RE.finditer(text)
+            if home_path_user(match) not in passing]
+
+
+def git_listed_files(root: Path) -> list[str] | None:
+    """The files Git would commit at the top of a checkout: tracked ones and
+    untracked ones it does not ignore. None when root is no checkout top."""
+    try:
+        top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, check=False)
+        if top.returncode or Path(top.stdout.strip()).resolve() != root.resolve():
+            return None
+        listed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others",
+             "--exclude-standard"], capture_output=True, check=False)
+    except OSError:
+        return None
+    if listed.returncode:
+        return None
+    return sorted({name for name in listed.stdout.decode("utf-8", "surrogateescape").split("\0")
+                   if name})
+
+
+def home_path_files(tree: Tree) -> list[Path]:
+    """Every file the repository publishes: in a checkout, what Git would
+    commit, generated dist/ and memory/ included; in an export, every file."""
+    listed = git_listed_files(tree.root)
+    if listed is None:
+        paths = sorted(path for path in tree.root.rglob("*")
+                       if not {".git", "__pycache__"} & set(path.relative_to(tree.root).parts))
+    else:
+        paths = [tree.root / name for name in listed]
+    return [path for path in paths if path.is_file() and not path.is_symlink()]
+
+
+def check_home_paths(tree: Tree, findings: list[Finding]) -> None:
+    """No published file carries an absolute home-directory path (#357). The
+    check names no project; only SYSTEM_HOMES and HOME_PATH_FIXTURES pass."""
+    for path in home_path_files(tree):
+        relative = rel(tree, path)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if HOME_PATH_HINT_RE.search(text) is None:
+            continue
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            for _match in refused_home_paths(line, relative):
+                findings.append(Finding(
+                    "error", relative, lineno, "home_paths",
+                    "absolute home-directory path found",
+                    "write a project-relative path or a placeholder such as /home/<user>/;"
+                    " a test fixture that needs a fake home declares its file and user in"
+                    " HOME_PATH_FIXTURES",
+                ))
+
+
 def check_agent_tech_nouns(tree: Tree, findings: list[Finding]) -> None:
     for plugin in plugin_dirs(tree):
         for path in agent_files(plugin):
@@ -990,7 +1101,8 @@ def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
                 "Claude",
                 tree.root / "platforms" / "claude" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py register", "vault_hook.py pre", "vault_hook.py post", "Write|Edit|Bash|PowerShell"),
+                ("team_guard.py register", "vault_hook.py pre", "vault_hook.py post", "Write|Edit|Bash|PowerShell",
+                 "model_fallback.py"),
             ),
             (
                 "Codex",
@@ -1087,6 +1199,10 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
         # app's own key schema (camelCase settings, kebab plugin ids); only
         # the parse requirement applies there.
         is_vault_payload = "templates" in path.parts and ".obsidian" in path.parts
+        # A host's model catalog is keyed by the host's exact model IDs, which
+        # the execution_profiles check validates against the adapter's format.
+        is_model_catalog = path.name == build_distributions.MODEL_CATALOG_FILE \
+            and "platforms" in path.parts
         keys: list[tuple[str, str]] = []
         _walk_keys(data, "$", keys)
         for where, key in keys:
@@ -1095,6 +1211,8 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
             if (is_hooks_manifest and where == "$.hooks"
                     and HOOK_EVENT_KEY_RE.match(key)):
                 continue  # hook event names are the host platform's schema
+            if is_model_catalog and where == "$.models":
+                continue
             if not SNAKE_KEY_RE.match(key):
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "json_hygiene",
@@ -1895,6 +2013,35 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                         if key not in prop_types:
                             err(f"lazy_fragments['{fragment}'] names property '{key}' missing from property_types",
                                 "declare every lazy fragment property in the vault-wide property type map")
+            # The backlog compiler validates a story's optional classification
+            # from this declaration, and the vault's closed property schema
+            # must take the classification and its reason alike.
+            backlog_contract = policy.get("backlog_contract")
+            classifications = (backlog_contract.get("optional_story_classifications")
+                               if isinstance(backlog_contract, dict) else None)
+            if classifications is not None and not isinstance(classifications, dict):
+                err("backlog_contract.optional_story_classifications must be an object",
+                    "declare each optional story classification under its property name")
+                classifications = None
+            for key, spec in sorted((classifications or {}).items()):
+                spec = spec if isinstance(spec, dict) else {}
+                values, reason = spec.get("values"), spec.get("reason")
+                if (set(spec) != {"values", "reason"} or not isinstance(values, list) or not values
+                        or not all(isinstance(value, str) and SNAKE_KEY_RE.match(value)
+                                   for value in values)
+                        or len(values) != len(set(values))
+                        or not isinstance(reason, str) or reason == key):
+                    err(f"optional story classification '{key}' must declare distinct snake_case"
+                        " values and a reason property other than itself",
+                        "list the classification's values and name the property that carries"
+                        " its reason")
+                    continue
+                for name in (key, reason):
+                    if prop_types.get(name) != "text":
+                        err(f"optional story classification '{key}' names property '{name}', which"
+                            " property_types does not type 'text'",
+                            "declare the classification and its reason as vault-wide text"
+                            " properties")
             extra_types = policy.get("extra_doc_types")
             if (not isinstance(extra_types, list)
                     or not all(isinstance(s, str) and KEBAB_RE.match(s)
@@ -2214,9 +2361,9 @@ def declared_tiers(tree: Tree) -> set[str]:
 
 
 def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
-    """Every host pins its model classes to documented exact IDs and maps
-    exactly the canonical reasoning tiers to a class and a supported effort;
-    model names stay under platforms/."""
+    """Every host pins its catalog models by documented exact IDs and maps
+    exactly the canonical reasoning tiers to a catalog model and a supported
+    effort; model names stay under platforms/."""
     try:
         adapters = build_distributions.load_adapters(tree.root)
     except ValueError:
@@ -2226,11 +2373,11 @@ def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
         tables = {}
         for kind, path, hint in (
                 ("catalog", build_distributions.model_catalog_path(tree.root, host),
-                 "pin each model class to an exact ID the host documents, with"
-                 " its supported efforts, sources and verified date"),
+                 "key each catalog model by an exact ID the host documents, with"
+                 " its family, supported efforts, sources and verified date"),
                 ("profile", build_distributions.execution_profile_path(tree.root, host),
-                 "map every reasoning tier in tools/data/models.json to a class"
-                 " of the host's model catalog and an effort that class supports")):
+                 "map every reasoning tier in tools/data/models.json to a model"
+                 " of the host's model catalog and an effort that model supports")):
             try:
                 tables[kind] = (path, json.loads(read_text(path)), hint)
             except (OSError, json.JSONDecodeError):
@@ -2255,7 +2402,7 @@ def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
 
 
 def check_host_cli_versions(tree: Tree, findings: list[Finding]) -> None:
-    """The host CLIs CI installs are no older than any model class's
+    """The host CLIs CI installs are no older than any catalog model's
     min_cli_version: the host gates start no role, so a lower pin would pass
     on a version whose roles cannot run their pinned model."""
     try:
@@ -2264,7 +2411,7 @@ def check_host_cli_versions(tree: Tree, findings: list[Finding]) -> None:
         return  # registration and product_namespace report adapter failures
     path = tree.root / build_distributions.HOST_CLI_VERSIONS_RELPATH
     hint = ("pin in tools/data/host-cli-versions.json a host CLI no older than every"
-            " model class's min_cli_version")
+            " catalog model's min_cli_version")
     try:
         pins = json.loads(read_text(path))
     except (OSError, json.JSONDecodeError):
@@ -2281,6 +2428,35 @@ def check_host_cli_versions(tree: Tree, findings: list[Finding]) -> None:
     findings.extend(
         Finding("error", rel(tree, path), 1, "host_cli_versions", problem, hint)
         for problem in build_distributions.host_cli_problems(pins, catalogs, adapters))
+
+
+def check_effort_policy(tree: Tree, findings: list[Finding]) -> None:
+    """Each host's effort policy confirms and refuses only efforts of its
+    vocabulary, states its evidence with sources and a verified date, and
+    refuses no effort the package profile pins: a project may override a role
+    tier's effort only within it."""
+    try:
+        adapters = build_distributions.load_adapters(tree.root)
+    except ValueError:
+        return  # registration and product_namespace report adapter failures
+    hint = ("name only the host's efforts; give each confirmed effort its evidence and each"
+            " refused effort its reason, with official https sources and a verified date")
+    for host, adapter in adapters.items():
+        path = build_distributions.effort_policy_path(tree.root, host)
+        try:
+            policy = json.loads(read_text(path))
+        except (OSError, json.JSONDecodeError):
+            findings.append(Finding("error", rel(tree, path), 1, "effort_policy",
+                                    f"{path.name} is missing or not valid JSON", hint))
+            continue
+        try:
+            profile = json.loads(read_text(
+                build_distributions.execution_profile_path(tree.root, host)))
+        except (OSError, json.JSONDecodeError):
+            profile = None  # execution_profiles reports a missing or broken table
+        findings.extend(
+            Finding("error", rel(tree, path), 1, "effort_policy", problem, hint)
+            for problem in build_distributions.effort_policy_problems(policy, adapter, profile))
 
 
 REVIEW_PANELS_RELPATH = "skill-content/challenge-review/data/review-panels.json"
@@ -2500,6 +2676,67 @@ def check_review_panels(tree: Tree, findings: list[Finding]) -> None:
             if lens not in declared_lenses:
                 err(sources[0], f"prose names unknown lens {lens!r}",
                     "name a lens id the review-panel data declares")
+
+
+CODE_REVIEW_PANEL_RELPATH = "skill-content/code-review/data/code-review-panel.json"
+CODE_REVIEW_PANEL_SWITCH = "code_review_panel"
+CODE_REVIEW_PANEL_VALUE = "beside_official"
+# The one review step scripts/delivery_verification.py reads from the panel data.
+CODE_REVIEW_PANEL_STEP = "code_review"
+
+
+def code_review_panel_problems(plugin: Path, data: object, agents: set[str], policy: object) -> list[str]:
+    """The code review panel's lens data has the review-panel shape and holds
+    exactly the step delivery_verification.py reads, its readers run as the
+    switch value's agent variant, which serves no other reader, and only that
+    value binds the data."""
+    problems = review_panel_problems(data, agents, policy)
+    steps = data.get("review_steps") if isinstance(data, dict) else None
+    steps = steps if isinstance(steps, dict) else {}
+    if set(steps) != {CODE_REVIEW_PANEL_STEP}:
+        problems.append("code review panel data must declare exactly the review step"
+                        f" {CODE_REVIEW_PANEL_STEP!r}")
+    try:
+        spec = json.loads(read_text(plugin / PROCESS_SWITCHES_RELPATH))["switches"][CODE_REVIEW_PANEL_SWITCH]
+        variant = (spec.get("agent_variants") or {}).get(CODE_REVIEW_PANEL_VALUE) or {}
+        variants = set(variant.get("agents") or [])
+        bound = (spec.get("value_data") or {}).get(CODE_REVIEW_PANEL_VALUE) or []
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        return problems + [f"switch {CODE_REVIEW_PANEL_SWITCH!r} must declare the"
+                           f" {CODE_REVIEW_PANEL_VALUE!r} agent variant of the code review panel readers"]
+    readers = {step.get("reader_role") for step in steps.values() if isinstance(step, dict)}
+    problems += [f"reader {reader!r} of the code review panel has no {CODE_REVIEW_PANEL_VALUE!r} agent"
+                 " variant" for reader in sorted(readers - variants, key=str)]
+    problems += [f"{CODE_REVIEW_PANEL_VALUE!r} agent variant {agent!r} reads no code review panel step"
+                 for agent in sorted(variants - readers, key=str)]
+    if CODE_REVIEW_PANEL_RELPATH not in bound:
+        problems.append(f"switch {CODE_REVIEW_PANEL_SWITCH!r} must bind {CODE_REVIEW_PANEL_RELPATH} as"
+                        f" {CODE_REVIEW_PANEL_VALUE!r} value data")
+    return problems
+
+
+def check_code_review_panel(tree: Tree, findings: list[Finding]) -> None:
+    """The code review panel's lenses are validated data that only its switch
+    value binds, read by the `-lens` variant of its reader role."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / CODE_REVIEW_PANEL_RELPATH
+        if not path.is_file():
+            continue  # process_switches reports value data that does not exist
+        fix = ("declare the code review step, its lenses and assignments once, its reader's"
+               " beside_official variant and the data as that value's value_data")
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            findings.append(Finding("error", rel(tree, path), 1, "code_review_panel",
+                                    f"code review panel data is not valid unique-key JSON: {exc}", fix))
+            continue
+        try:
+            policy = json.loads(read_text(plugin / VAULT_POLICY_RELPATH))
+        except (OSError, json.JSONDecodeError):
+            policy = None  # vault_policy_shape reports a broken policy
+        agents = {agent.stem for agent in agent_files(plugin)}
+        findings.extend(Finding("error", rel(tree, path), 1, "code_review_panel", problem, fix)
+                        for problem in code_review_panel_problems(plugin, data, agents, policy))
 
 
 PROCESS_SWITCHES_RELPATH = build_distributions.PROCESS_SWITCHES_RELPATH
@@ -3556,6 +3793,38 @@ def check_delivery_contract_shape(
         ))
 
 
+def check_finding_code_references(tree: Tree, findings: list[Finding]) -> None:
+    """Every Delivery finding code that authored Markdown names is one the
+    Delivery result contract declares, so a refusal an instruction tells a
+    role to expect is one the result envelope can carry. Authored Markdown
+    includes the host contracts and overlays under platforms/. A token of a
+    declared code family that the contract does not declare is reported."""
+    path = tree.root / DELIVERY_CONTRACT_ROOT / "delivery-result-contract.json"
+    try:
+        codes = json.loads(read_text(path))["finding_codes"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return  # delivery_contract_shape reports a missing or broken contract
+    if not isinstance(codes, list) or not codes or not all(isinstance(code, str) for code in codes):
+        return
+    families = sorted({code.split("_", 1)[0] for code in codes})
+    token = re.compile(r"(?<![A-Za-z0-9_])((?:" + "|".join(map(re.escape, families))
+                       + r")_[A-Z0-9_]*[A-Z0-9])(?![A-Za-z0-9_])")
+    declared = set(codes)
+    platforms = tree.root / "platforms"
+    sources = [*iter_scope_files(tree, ".md"),
+               *(sorted(platforms.rglob("*.md")) if platforms.is_dir() else [])]
+    for source in sources:
+        for lineno, line in enumerate(read_text(source).splitlines(), start=1):
+            for code in token.findall(line):
+                if code not in declared:
+                    findings.append(Finding(
+                        "error", rel(tree, source), lineno, "finding_code_references",
+                        f"names finding code {code}, which the Delivery result contract does not declare",
+                        "name a declared code, or declare it in delivery-result-contract.json and"
+                        " delivery_result.FINDING_CODES with the refusal that emits it",
+                    ))
+
+
 def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
     """The vendor identity and product runtime namespace stay distinct."""
     if tree.product is None:
@@ -3621,6 +3890,7 @@ CHECKS = {
     "size_caps": check_size_caps,
     "section_contract": check_section_contract,
     "content_bans": check_content_bans,
+    "home_paths": check_home_paths,
     "agent_tech_nouns": check_agent_tech_nouns,
     "handwritten_counts": check_handwritten_counts,
     "dead_links": check_dead_links,
@@ -3646,7 +3916,9 @@ CHECKS = {
     "model_config_shape": check_model_config_shape,
     "execution_profiles": check_execution_profiles,
     "host_cli_versions": check_host_cli_versions,
+    "effort_policy": check_effort_policy,
     "review_panels": check_review_panels,
+    "code_review_panel": check_code_review_panel,
     "process_switches": check_process_switches,
     "switch_variant_references": check_switch_variant_references,
     "story_size_measures": check_story_size_measures,
@@ -3656,6 +3928,7 @@ CHECKS = {
     "autopilot_policy": check_autopilot_policy,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
+    "finding_code_references": check_finding_code_references,
     "product_namespace": check_product_namespace,
     "task_input_catalog": check_task_input_catalog,
 }

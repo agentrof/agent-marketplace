@@ -89,10 +89,23 @@ DELIVERY_FOLLOW_UPS = "Open code review follow-ups of the integrated Items, list
 CALIBRATION_COLUMNS = ("finding", "claimed_severity", "calibrated_severity", "reason")
 ITEM_CALIBRATION = ("Severity calibration of the open critical and major claims,"
                     " recorded by approve-item-evidence:")
+# At code_review_panel beside_official every code review pass keeps its panel record.
+ITEM_PANEL_PASSES = "Code review panel passes, recorded by approve-item-evidence:"
+PANEL_PASS_COLUMNS = ("pass", "mode", "official_seconds", "panel_seconds", "combined_seconds", "combined_ratio",
+                      "official_blocking", "carried_panel_blocking", "confirmed", "minor", "invalid", "duplicate")
+ITEM_PANEL_CLAIMS = "Code review panel claims of every pass, recorded by approve-item-evidence:"
+PANEL_CLAIM_COLUMNS = ("pass", "finding", "lens", "severity", "ruling", "file", "description", "reason",
+                       "owner_role", "revisit_trigger")
 OWNER_GATES = "owner_gates"
 TWO_FIXED_GATES = "two_fixed_gates"
 USER_DECISION_COLUMNS = ("id", "class", "question", "options", "recommendation", "status",
                          "answer", "blocks", "wait_minutes")
+# At pre_handoff_regression touched_suites the verification record keeps every pre-handoff run.
+ITEM_PRE_HANDOFF_RUNS = "Pre-handoff regression runs, recorded by approve-item-evidence:"
+PRE_HANDOFF_RUN_COLUMNS = ("run", "candidate_tree", "kind", "result", "exit_code", "seconds", "earlier_stories")
+# And what QA's final test run reused of the accepted run, which only the disposable runtime holds otherwise.
+ITEM_REUSED_TARGETS = "Earlier-story targets QA's final test run reused, recorded by approve-item-evidence:"
+REUSED_TARGET_COLUMNS = ("story", "test_ids", "pre_handoff_run", "evidence_hash")
 USER_DECISION_STATUSES = ("pending", "answered")
 USER_DECISION_ID_RE = re.compile(r"^D-[0-9]{2,}$")
 QUEUED_DECISION_CLASS = "queued"
@@ -103,7 +116,7 @@ LIGHT_WHEN_ELIGIBLE = "light_when_eligible"
 # What a Delivery meets to plan its scope and its execution in one step with one
 # owner gate. topology_unchanged applies once scope approval recorded the light path.
 LIGHT_PATH_CONDITIONS = ("single_story", "no_architect_role", "architecture_not_applicable",
-                         "operation_contracts_unchanged", "dependencies_met",
+                         "no_operation_impact", "operation_contracts_unchanged", "dependencies_met",
                          "within_story_size_budget", "topology_unchanged")
 # The light path runs from the proposal until its Items are claimed.
 LIGHT_PATH_STATUSES = ("scope_proposed", "scope_approved", "execution_approved")
@@ -259,7 +272,9 @@ def approved_backlog_sources(
     accept caller-provided hashes or treat a generated registry as a source of
     truth, so this resolver checks the authored package and its approval stamps
     before exposing one selected Story. With a story size budget, each selected
-    Story also carries its measures under ``story_size`` for display only.
+    Story also carries its measures under ``story_size`` for display only. A
+    Story that classifies its Operation impact carries it under
+    ``operation_impact``; an unclassified one carries no such key.
     """
     errors: list[str] = []
     if not story_ids:
@@ -323,6 +338,8 @@ def approved_backlog_sources(
             "depends_on": sorted(set(dependencies)),
             "work_kind": str(story.get("work_kind", "")),
         }
+        if "operation_impact" in props:
+            selected[story_id]["operation_impact"] = props["operation_impact"]
     if errors:
         return {}, {}, sorted(set(errors))
     if story_size is not None:
@@ -950,18 +967,29 @@ def delivery_state(root: Path, props: dict) -> tuple[object, str | None]:
 
     A Delivery whose Review records its PR is merged once HEAD contains a merge
     of its recorded PR head. That holds in awaiting_merge and in review, where a
-    PR recorded before the record set awaiting_merge left it. When Git cannot
-    tell, the tracked status comes back with the finding that says why.
+    PR recorded before the record set awaiting_merge left it. In review, a
+    Delivery without a Review record, or whose Review has no pull_request_url,
+    recorded no PR yet. The commit that records the PR URL in the Review sets
+    awaiting_merge, so in awaiting_merge such a Review record is broken. Then,
+    and when the Review record exists but cannot be read or Git cannot tell,
+    the tracked status comes back with the finding that says why.
     """
     status = props.get("status")
     if status not in {"review", "awaiting_merge"}:
         return status, None
+    path = root / "delivery-review.md"
     try:
-        review, _ = split_note(root / "delivery-review.md")
-    except (OSError, ValueError):
-        return status, None
-    if not review.get("pull_request_url"):
-        return status, None
+        review, _ = split_note(path)
+    except FileNotFoundError:
+        review = None
+    except (OSError, ValueError) as exc:
+        return status, f"Delivery merge state cannot be evaluated: {path} cannot be read: {exc}"
+    if review is None or not review.get("pull_request_url"):
+        if status == "review":
+            return status, None
+        lacks = "is missing" if review is None else "records no pull_request_url"
+        return status, (f"Delivery merge state cannot be evaluated: {path} {lacks}, but a Delivery reaches"
+                        " awaiting_merge only with its PR recorded there")
     try:
         merged = recorded_pr_merged(root, str(props.get("id", "")))
     except MergeStateUnknown as exc:
@@ -2258,6 +2286,11 @@ def light_path_state(docs: Path, sources: dict[str, dict], items: dict[str, tupl
         elif reason in {"", NO_ARCHITECTURE_REASON}:
             fail("architecture_not_applicable", f"{story} declares no architecture impact without the"
                  " Software Architect's reason, since the reason init writes is a placeholder")
+    # The approved Story's own classification, read before any Operation draft exists.
+    for story in stories:
+        if sources[story].get("operation_impact") == "required":
+            fail("no_operation_impact", f"{story} classifies operation_impact required, and the light"
+                 " path revises no Operation contract")
     runtime = any(props.get("runtime_required") is True for props, _body in (items or {}).values())
     receipts, problems = reused_contract_receipts(docs, runtime)
     if recorded is not None and not problems and receipt_text(receipts) != receipt_text(recorded["receipts"]):
@@ -2826,6 +2859,43 @@ def item_evidence_file_findings(worktree: Path, head: str, paths: tuple[Path, Pa
     return []
 
 
+def pre_handoff_evidence(worktree: Path, delivery_id: str, story: str, session: dict, body: str) -> str:
+    """The Item's verification record body with every pre-handoff regression run of the Item.
+
+    At process switch pre_handoff_regression touched_suites, approve-item-evidence
+    records each run the frozen sessions carried and each later one of the Item's
+    runtime record, oldest first, failed runs included: its candidate tree, kind,
+    result, exit code, wall clock and the earlier stories it ran. Below them it
+    records what QA's final test run reused: each earlier story with its test
+    ids, the reused run's number in that list and its evidence hash, or none.
+    At the default the body is returned unchanged.
+    """
+    import delivery_verification
+    if delivery_verification.pre_handoff_regression(worktree, delivery_id) != delivery_verification.TOUCHED_SUITES:
+        return body
+    rows = []
+    history = delivery_verification.pre_handoff_history(worktree, session, delivery_id, story)
+    for number, run in enumerate(history, start=1):
+        result = ("passed" if run["exit_code"] == 0 and run["candidate_intact"] is True
+                  else "failed" if run["exit_code"] != 0 else "not intact")
+        stories = ", ".join(f"{entry['story']} of {entry['delivery']}" for entry in run["earlier_stories"])
+        rows.append("| " + " | ".join(table_cell(cell) for cell in (
+            number, run["candidate_tree"], run["kind"], result, run["exit_code"],
+            round(run["duration_seconds"], 1), stories or "none")) + " |")
+    # The session validate checked, so QA's final test evidence and its reuse bind the frozen session.
+    reuse = session["raw_evidence"]["test"]["identity"].get("reused_pre_handoff")
+    reused = []
+    if reuse is not None:
+        run = next((number for number, entry in enumerate(history, start=1)
+                    if entry["evidence_hash"] == reuse["evidence_hash"]), "none")
+        reused = ["| " + " | ".join(table_cell(cell) for cell in (
+            f"{entry['story']} of {entry['delivery']}", ", ".join(entry["test_ids"]), run,
+            reuse["evidence_hash"])) + " |" for entry in reuse["earlier_stories"]]
+    return with_compiler_block(body, "Implementation Evidence", ITEM_PRE_HANDOFF_RUNS,
+                               table_block(ITEM_PRE_HANDOFF_RUNS, PRE_HANDOFF_RUN_COLUMNS, rows) + "\n\n"
+                               + table_block(ITEM_REUSED_TARGETS, REUSED_TARGET_COLUMNS, reused))
+
+
 def table_cell(value: object) -> str:
     """One Markdown table cell: a single line with its pipes escaped."""
     return " ".join(str(value).split()).replace("|", "\\|")
@@ -2875,6 +2945,40 @@ def with_compiler_block(body: str, title: str, marker: str, block: str) -> str:
     if authored == SECTION_PLACEHOLDER:
         authored = ""
     return replace_section(body, title, f"{authored}\n\n{block}" if authored else block)
+
+
+def panel_pass_row(record: dict) -> str:
+    """One table row of a code review panel pass record: its finding ids, or none."""
+    def cell(column: str) -> object:
+        value = record.get(column)
+        if isinstance(value, dict):
+            return ", ".join(f"{finding} of {target}" for finding, target in sorted(value.items())) or "none"
+        if isinstance(value, list):
+            return ", ".join(str(item) for item in value) or "none"
+        return "none" if value is None else value
+    return "| " + " | ".join(table_cell(cell(column)) for column in PANEL_PASS_COLUMNS) + " |"
+
+
+def panel_claim_row(number: object, claim: dict) -> str:
+    """One table row of a lens claim of code review panel pass ``number``."""
+    values = {**claim, "pass": number, "lens": ", ".join(claim["lens"])}
+    if "duplicate_of" in claim:
+        values["ruling"] = f"{claim['ruling']} of {claim['duplicate_of']}"
+    return "| " + " | ".join(table_cell(values.get(column, "none")) for column in PANEL_CLAIM_COLUMNS) + " |"
+
+
+def with_panel_record(review_body: str, session: dict, review_result: dict) -> str:
+    """At code_review_panel beside_official, the code review record keeps the
+    panel record and the lens claims of every pass of the Item; the runtime
+    session that holds them is replaced at each freeze."""
+    record = review_result.get("panel")
+    if not isinstance(record, dict):
+        return review_body
+    passes = [*session.get("panel_history", []), record]
+    block = table_block(ITEM_PANEL_PASSES, PANEL_PASS_COLUMNS, [panel_pass_row(entry) for entry in passes])
+    block += "\n\n" + table_block(ITEM_PANEL_CLAIMS, PANEL_CLAIM_COLUMNS, [
+        panel_claim_row(entry.get("pass"), claim) for entry in passes for claim in entry.get("claims", [])])
+    return with_compiler_block(review_body, "Implementation Evidence", ITEM_PANEL_PASSES, block)
 
 
 def delivery_follow_ups(root: Path) -> list[str]:
@@ -2982,10 +3086,12 @@ def _approve_item_evidence(args) -> int:
                         for row in calibration])
                 review_body = with_compiler_block(review_body, "Deviations and Follow-ups",
                                                   ITEM_FOLLOW_UPS, block)
+            review_body = with_panel_record(review_body, session, review_result)
             for target, result in ((review_props, review_result), (verification_props, verification_result)):
                 target["verification_candidate_hash"] = session["candidate"]["candidate_hash"]
                 target["verification_mode"] = result["mode"]
                 target["verification_result_hash"] = result["result_hash"]
+            verification_body = pre_handoff_evidence(worktree, args.delivery, args.story, session, verification_body)
     except (RuntimeError, ValueError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 2
     reviewed = head

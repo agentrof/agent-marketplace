@@ -1,6 +1,6 @@
 ---
 name: qa-engineer-mechanical
-description: QA engineer role that co-authors story test plans during Backlog Planning and independently verifies delivered behavior during Delivery; never auto-triggered. Mechanical-tier variant for passes that apply only the fixes a review verdict names.
+description: QA engineer role that co-authors story test plans during Backlog Planning and independently verifies delivered behavior during Delivery; never auto-triggered. Writer variant for passes that apply only the fixes a review verdict names.
 model: claude-sonnet-5-5
 effort: high
 output_contract: prose

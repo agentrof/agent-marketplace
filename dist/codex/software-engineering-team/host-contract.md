@@ -3,9 +3,11 @@
 - Run state-changing entries only in Codex Code or Default mode. In Plan mode,
   stop before mutation and ask the user to switch modes.
 - `team_guard.py` announces the installed team and the exact absolute Python
-  and scripts-directory invocation binding at session start. It never
-  registers global state or blocks project work. `vault_hook.py` protects only
-  compiler-owned fields and immediately checks changed vault documents.
+  and scripts-directory invocation binding at session start, and reports the
+  project's role files in `.codex/agents/` whose stamp is not the installed
+  plugin's. It never registers global state or blocks project work.
+  `vault_hook.py` protects only compiler-owned fields and immediately checks
+  changed vault documents.
 - One Software Engineering Team owns a project. There is no shared project
   state service or cross-project work key.
 - Resolve every canonical "packaged script" reference relative to the installed
@@ -28,7 +30,8 @@
   setup, workspace configuration or a Git repository.
 - Use `request_user_input` only at declared choice gates, preserving options,
   recommendation and tradeoffs. `request_user_input` takes at most three
-  questions per call.
+  questions per call and two to three options per question, and Codex adds a
+  free-form `Other` option itself.
 - Under switch `owner_gates` at `two_fixed_gates`, ask the owner inside a
   Delivery only at gate A, gate B, an early gate or for an at-once class, and
   queue every other question in the Delivery's `User Decisions`. Present each
@@ -40,6 +43,10 @@
 - Under switch `review_panels` at `lens_panel`, run a review panel's lens
   readers in parallel: start every reader of the panel before waiting on any
   of them, then wait for all of them before triage.
+- Under switch `code_review_panel` at `beside_official`, run the code review
+  panel beside the official reviewer: start the official `code-reviewer`,
+  every `code-reviewer-lens` reader of the panel and QA before waiting on any
+  of them, then wait for all of them before the calibration and `merge-panel`.
 - Under switch `implementation_schedule` at `parallel_lanes_v1`, writers
   run at the same time only when their approved lane scopes are disjoint.
   Start every lane that waits for no producer before waiting on any of them,
@@ -50,36 +57,124 @@
   for all of them before triage.
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
-  only portable instruction roots and local project memory.
-- Role agents use the package's `auto` execution profile: each role tier
-  runs one class of the package's model catalog, pinned to an exact model, at
-  the tier's reasoning effort, and every role file carries both `model` and
-  `model_reasoning_effort`. Every build also ships the `-lens` variants of the
-  read-only document reviewers on the `lens` tier, the `strong` class (Sol)
-  at effort `high`; only review panels under switch `review_panels` at
-  `lens_panel` start them, and the reviewers themselves keep their own tier.
+  only portable instruction roots, local project memory and the role files it
+  renders into `.codex/agents/`, each with its generated header. The last line
+  of that header stamps the package version and source agent the file was
+  rendered from and the digest of the model and effort the project config
+  resolves for the role. When `team_guard.py` reports at session start that a
+  stamp does not match the installed plugin or the project's
+  `workspace/config.json`, as after a plugin update or a config change, such
+  as a pull, that setup has not rendered yet, those roles still run the role
+  definition, model and effort they were rendered with: the hook tells the
+  user once per session to run setup, which renders them again, and the next
+  start of a role reads its new file.
+- Role agents use the package's `auto` execution profile: each of the
+  three role tiers runs one model of the package's model catalog, named by
+  its exact model ID, at the tier's reasoning effort, and every role file
+  carries both `model` and `model_reasoning_effort`. The high, medium and low
+  tiers all run `gpt-6.1-sol` at effort `xhigh`; the catalog keeps
+  `gpt-6-luna`, which no tier runs. Every build also ships the `-lens`
+  variants of the read-only document reviewers on the `low` tier,
+  `gpt-6.1-sol` at effort `xhigh`; only review panels under switch
+  `review_panels` at `lens_panel` start them, and the reviewers themselves
+  keep their own tier.
+  Every build also ships `code-reviewer-lens` on the same tier; only the code
+  review panel under switch `code_review_panel` at `beside_official` starts
+  it, and `code-reviewer` keeps its own tier.
   The pinned models need Codex 0.159.1 or later, the first release whose
   bundled model catalog lists `gpt-6.1-sol`; `gpt-6-luna` is bundled from
   0.157.0.
-  When the account, the workspace or this Codex version cannot use a pinned
-  model, or the user wants every role to follow the parent session, run
-  `<absolute-python> <absolute-package-scripts>/generate_codex_project.py apply
-  --project-root <root> --scope local --execution-profile inherit`, which
-  omits both keys; `--execution-profile auto` restores the default. The
-  managed agent files record the choice and later refreshes keep it.
+  To make every role
+  follow the parent session's model, run `<absolute-python>
+  <absolute-package-scripts>/generate_codex_project.py apply --project-root
+  <root> --scope local --execution-profile inherit`, which omits `model` from
+  every role file and keeps `model_reasoning_effort`; `--execution-profile
+  auto` restores the pins and checks them again. The managed agent files
+  record the choice and later refreshes keep it.
+- A project sets a tier's model and effort and a role's tier through
+  `/configure models`, which records only overrides in
+  `workspace/config.json`: `tier_models`, per host and tier a `model`, an
+  exact model ID of this host's model list or `session`, and an `effort`,
+  either one optional, and `role_tiers`, which moves any role, the generated
+  variants included, between the high, medium and low tiers on every host.
+  Setup writes neither key. A role's tier comes from `role_tiers`, else the
+  package; the tier's model and effort come from `tier_models`, else the
+  package's `auto` profile, and a missing key keeps the package value.
+  `session` renders the role file without a `model` key, so the role runs on
+  the parent session's model at the tier's `model_reasoning_effort`. Setup
+  and refresh render each role's resolved model and effort into its role
+  file under the `auto` profile, keep its effort under `inherit` and a model
+  fallback, and report each role's tier, model, effort and source;
+  `project_config.py tiers` prints the config-level effective map. Generated
+  role files are never edited by hand: `/configure models` renders them
+  again. A role file's `model` and `model_reasoning_effort` take precedence
+  over a spawn request and the `[agents]` defaults; `ultra` is refused for
+  every tier, because a role at `ultra` starts subagents of its own.
+- A role whose pinned model cannot run falls back to this session's model
+  with a visible warning, by one strategy on both hosts:
+  - Setup and refresh read this host's own model list from the binary that
+    runs this session, without a model request, and judge each model a role
+    is pinned to, the project's `tier_models` included: `available` when the
+    list holds it and reflects the signed-in account,
+    `unavailable` when the list does not hold it, since this binary cannot
+    run it, and `unverified` when no list could be read or the list reflects
+    no account. Every probe has a time limit, and one that fails gives
+    `unverified`, never an error that stops setup.
+  - The roles of an `unavailable` model run on this session's model at their
+    own effort, and setup prints a warning that names the model, its tiers
+    and its roles; every setup or refresh judges the model again. An
+    `unverified` model keeps its pin with a note, and the run-time rule
+    covers it.
+  - At run time a role whose pinned model fails gets a warning that never
+    blocks work and at most one start again on this session's model, only
+    when the failed run changed nothing.
+  - On Codex the binary is the nearest `codex` process above setup, since
+    Codex exports no variable that names it, else the target of the
+    `apply_patch` alias on PATH, `CODEX_CLI_PATH` when the environment
+    carries it, `codex` on PATH or the ChatGPT app's bundled CLI, and its
+    version must equal `CODEX_VERSION` when that is set. The list is the
+    account catalog Codex caches in `models_cache.json` in its home when the
+    cache comes from this binary's version and is at most 24 hours old,
+    otherwise the output of `codex debug models`, which reflects no account
+    when it can only have printed the catalog bundled with the binary:
+    inside the command sandbox, with a `CODEX_SANDBOX` variable set, or when
+    it equals `codex debug models --bundled`. The role files of an
+    `unavailable` model omit `model` and keep `model_reasoning_effort`.
+    Codex has no hook event for a failed role, so the run-time warning comes
+    from the coordinator rule below.
+- When a role's spawn ends in `Agent errored: ...` and the error names its
+  pinned model as unknown, unsupported, not found or not supported with this
+  account, such as `Model not found <model>` or `The '<model>' model is not
+  supported when using Codex with a ChatGPT account.`, tell the user which
+  role, which model and why. Any other error, such as a rate limit whose text
+  names the model, moves no role: report it as it is. Start it again only
+  when the failed run changed nothing: its task manifest's `write_boundary`
+  is `read_only`, as a reader's is, or the `task_inputs.py` invocation that
+  derived that manifest, run again with `--expected-hash <source_hash>`,
+  still passes, since the manifest binds the content of its inputs and of
+  every modified or new source it covers; otherwise stop and report, and
+  record no fallback.
+  To start it again, run `<absolute-python>
+  <absolute-package-scripts>/generate_codex_project.py apply --project-root
+  <root> --scope local --inherit-model <model>`, which renders every role
+  pinned to that model the same way and records it, and start the same
+  `agent_type` again: Codex reads a role file each time it starts the role,
+  so the new file applies without a restart. If it errors again, run that
+  command with `--restore-model <model>` in place of `--inherit-model
+  <model>`, which renders those roles with their pin again and drops the
+  record, then stop and report both errors.
 - Every build also ships the `-mechanical` variants of the document writers
   `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
-  on the `mechanical` tier, the `fast` class (Luna) at effort `high`. Only
-  switch `mechanical_pass_tier` at `mechanical` starts them, for a pass that
-  applies the fixes a review names; the writers themselves keep their own
-  tier, and no review, re-check or calibration runs on a variant. Every
-  variant moves its writer from Sol to Luna, the lower class; its effort
-  `high` is above the `medium` of `product-owner`, `qa-engineer` and
-  `devops-engineer` and below the `xhigh` of `solution-architect`. These
-  values are placeholders until the tier's frozen-task A/B sets them. For the
-  tier's frozen-task A/B, apply `--execution-profile inherit` in a scratch
-  copy of the project and set the candidate model and effort as the
-  session's `model` and `model_reasoning_effort`.
+  on the `low` tier, `gpt-6.1-sol` at effort `xhigh`. Only switch
+  `mechanical_pass_tier` at `mechanical` starts them, for a pass that applies
+  the fixes a review names; the writers themselves keep their own tier, and
+  no review, re-check or calibration runs on a variant. Every variant runs
+  its writer's own model and effort, so it changes only the fresh context of
+  the pass. These values are placeholders until the variants' frozen-task A/B
+  sets them. For that A/B, apply `--execution-profile inherit` in a scratch
+  copy of the project, set the candidate model as the session's `model`, and
+  set a candidate effort as `model_reasoning_effort` in that copy's
+  `-mechanical` role files.
 - Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
   is planned inside `/delivery-plan` with one owner gate, presented through
   `request_user_input`, and handed over to `/deliver DLV-###`; `/execution-plan

@@ -102,7 +102,7 @@ class ExecutionPlanningRegistryTests(unittest.TestCase):
                          "At least 3 Deliveries that revise at least one Operation contract or"
                          " declare architecture impact, run with single_source_bundle.")
         for term in ("One review layer per plan", "at most 5 serial model passes",
-                     "a restated share under 5%", "at most 60% of the 342 min DLV-002 baseline",
+                     "a restated share under 5%", "at most 60% of the 342 min measured baseline",
                      "zero escaped valid critical or major findings", "the owner's approval"):
             with self.subTest(term=term):
                 self.assertIn(term, switch["promotion"]["threshold"])

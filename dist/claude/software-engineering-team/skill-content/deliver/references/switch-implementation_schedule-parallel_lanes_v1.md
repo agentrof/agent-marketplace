@@ -69,6 +69,10 @@ gets an explicit environment:
   working directory and a link through its target, keeps every entry inside
   the worktree, unsets a variable left with none and reports the dropped
   entries as `dropped_search_paths`.
+- `lane-run` also unsets the runner's selection variables
+  `AGENTROF_DIAGNOSTIC_TESTS` and `AGENTROF_REUSED_TESTS`, which only the run
+  that writes the file they name sets, so an inherited one never makes a
+  lane's test command skip suites.
 - Caches, coverage data, build output and scratch go to a lane-private,
   Git-ignored directory.
 - Before trusting a result, confirm that the modules under test resolve inside

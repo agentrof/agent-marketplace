@@ -99,13 +99,14 @@ def approve_verification_contract(docs: Path) -> None:
     quiet(operation_compile.approve, args)
 
 
-def story_author(roles: tuple[str, ...] = (), criteria: int = 1):
-    """Author each fixture Story with extra supporting roles and acceptance criteria."""
+def story_author(roles: tuple[str, ...] = (), criteria: int = 1, fields: dict | None = None):
+    """Author each fixture Story with extra supporting roles, acceptance criteria and front-matter fields."""
     original = backlog_fixture._author_story
 
     def author(story: Path, test_plan: Path, story_id: str) -> None:
         original(story, test_plan, story_id)
         props, body = backlog_compile.parse_front_matter(story)
+        props.update(fields or {})
         if roles:
             props["supporting_roles"] = list(roles)
             owner = "- backend_developer: Implement the validated account boundary and API integration."
@@ -119,7 +120,7 @@ def story_author(roles: tuple[str, ...] = (), criteria: int = 1):
 
 
 def build_project(root: Path, stories: tuple[str, ...] = ("AUTH-01",), *, roles: tuple[str, ...] = (),
-                  criteria: int = 1, remote: bool = False) -> Path:
+                  criteria: int = 1, fields: dict | None = None, remote: bool = False) -> Path:
     """Commit one approved backlog, Definition of Done and Verification Contract, and push them when asked."""
     init_repository(root, initial_branch="main")
     # The coordinator's own commits read the repository's identity.
@@ -135,7 +136,7 @@ def build_project(root: Path, stories: tuple[str, ...] = ("AUTH-01",), *, roles:
     workflow.write_text("on:\n  pull_request:\n", encoding="utf-8")
     quiet(delivery_governance.init, type("Args", (), {"docs": str(docs), "max_parallel": 1}))
     quiet(delivery_governance.approve, type("Args", (), {"docs": str(docs)}))
-    with mock.patch.object(backlog_fixture, "_author_story", story_author(roles, criteria)):
+    with mock.patch.object(backlog_fixture, "_author_story", story_author(roles, criteria, fields)):
         backlog_fixture.make_approved_backlog(docs, *stories)
     dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
     for call in (delivery_compile.init_dod, delivery_compile.approve_dod):
@@ -480,6 +481,27 @@ class LightPathCompilerTests(unittest.TestCase):
         report = self.propose(docs)[SWITCH]
         self.assertEqual(failed(report), {"no_architect_role": [
             "AUTH-01 lists software_architect among its roles"]})
+
+    def test_a_story_classified_with_operation_impact_is_not_eligible(self):
+        # The approved Story's classification decides it before any Operation draft exists (#348).
+        reason = "Delivering the story needs a queue service the Environment Contract lacks."
+        finding = "AUTH-01 classifies operation_impact required, and the light path revises no Operation contract"
+        for impact in ("required", "not_applicable"):
+            with self.subTest(impact=impact):
+                docs = self.project(fields={"operation_impact": impact, "operation_reason": reason})
+                set_policy(docs, LIGHT, LIMITS)
+                report = self.propose(docs)[SWITCH]
+                author_topology(docs)
+                code, checked = self.check_proposal(docs)
+                if impact == "required":
+                    self.assertFalse(report["eligible"])
+                    self.assertEqual(failed(report), {"no_operation_impact": [finding]})
+                    self.assertEqual((code, checked["path"], failed(checked)),
+                                     (1, "standard", {"no_operation_impact": [finding]}))
+                else:
+                    self.assertTrue(report["eligible"], report)
+                    self.assertEqual((code, checked["path"], checked["failed"]), (0, "light", []),
+                                     checked)
 
     def test_architecture_impact_needs_the_architects_own_reason(self):
         docs = self.project()

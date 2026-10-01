@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "review_steps": {
+    "code_review": {
+      "reader_role": "code-reviewer",
+      "lenses": [
+        {
+          "id": "correctness-contract",
+          "focus": "Logic, edge cases and error propagation of the changed code against the Item's interface contracts and acceptance criteria: every exit path, failure part way through and refusal returns or records what the contract states, and every resource the change starts is released on each of those paths."
+        },
+        {
+          "id": "security-isolation",
+          "focus": "Authorization, input validation, secrets and isolation: no input, path or identifier crosses a trust boundary unchecked, no secret reaches a log or a client artifact, and no step reads, changes or deletes a resource that another owner, project, run or user holds; a destructive step proves its own ownership first."
+        },
+        {
+          "id": "conformance-tests",
+          "focus": "Conformance with the approved architecture, the Operation contracts, the Item's path and contract claims and the ownership map, and the fitness of the tests: every Test Plan scenario the Item claims runs, can fail for the reason it names and observes the outcome its criterion states, and no test passes for the wrong reason."
+        }
+      ],
+      "default_panel": [
+        ["correctness-contract"],
+        ["security-isolation"],
+        ["conformance-tests"]
+      ]
+    }
+  }
+}

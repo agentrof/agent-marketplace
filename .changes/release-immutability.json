@@ -1,4 +1,0 @@
-{
-  "summary": "`Publish stable release` and the bootstrap in `Prepare stable release` now finish only when GitHub reports the created or reconciled Release immutable: `tools/release_publish.py finalize --require-immutable` reads `isImmutable` and otherwise fails before it removes `release/stable`, and every publication result reports `github_release_immutable`. The maintainer protocol requires the repository's release immutability setting before a release and names the owner steps that enable it. The refusal names the recovery, since the setting never locks a Release published before it: enable the setting, delete the mutable Release (never its tag) and re-run finalize. When the owner keeps that Release instead, the protocol completes the publication with a manual finalize without `--require-immutable`, which deletes `release/stable` with an exact lease.",
-  "components": {}
-}

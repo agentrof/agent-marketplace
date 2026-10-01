@@ -1,6 +1,0 @@
-{
-  "summary": "Process switch `review_manifest_scope` sets how far a backlog epic review's input manifest reads. At the default, `transitive`, every manifest reads as before: each note it includes expands its own links. At `bounded`, `backlog_review_inputs.py --epic` follows links only from the epics, stories and test plans of the epic and its dependency closure, reads each note they link to or cite, an Experience record cited as `<experience>:<ID>@rN` included, with that note's front-matter relations one hop further, reads the backlog root and the review notes without their links, binds its hash to the dependency edges that reach that closure alone, and records the value in the manifest's `review_manifest_scope` field, so a review taken under the other value is stale. The root manifest, writer manifests and backlog approval keep the whole backlog, and a draft or invalid Process Policy refuses an epic reader's manifest. On a backlog of 8 epics and 106 stories an epic manifest falls from 982 to 993 paths and 6.8 to 7.1 MB to 520 to 525 paths and 0.46 to 0.52 MB.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

@@ -211,7 +211,7 @@ class DeliveryPolicyPinTests(unittest.TestCase):
             self.assertIsNone(process_policy.history_revision(self.docs, pin))
 
     def test_a_policy_at_every_default_is_no_drift_for_a_delivery_that_pinned_none(self):
-        # HAN's DLV-002 was execution-approved before any Process Policy existed.
+        # A Delivery execution-approved before any Process Policy existed pins none.
         self.propose_and_approve_scope()
         self.approve_execution()
         props, _body = delivery_compile.split_note(self.delivery_note())

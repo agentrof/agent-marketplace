@@ -1,9 +1,8 @@
 {
-  "schema_version": 1,
-  "classes": {
-    "frontier": {
+  "schema_version": 2,
+  "models": {
+    "claude-opus-5-5": {
       "family": "opus",
-      "id": "claude-opus-5-5",
       "efforts": [
         "low",
         "medium",
@@ -18,9 +17,8 @@
       ],
       "verified": "2026-10-01"
     },
-    "strong": {
+    "claude-sonnet-5-5": {
       "family": "sonnet",
-      "id": "claude-sonnet-5-5",
       "efforts": [
         "low",
         "medium",
@@ -35,9 +33,8 @@
       ],
       "verified": "2026-10-01"
     },
-    "fast": {
+    "claude-haiku-4-5-20251001": {
       "family": "haiku",
-      "id": "claude-haiku-4-5-20251001",
       "efforts": [],
       "min_cli_version": "2.1.74",
       "sources": [

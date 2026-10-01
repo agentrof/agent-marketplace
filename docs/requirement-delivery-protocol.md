@@ -294,8 +294,9 @@ the table checked. Each gate asks every queued question: `approve-scope`,
 `approve-review` and `publish-delivery-review` refuse while a row is `pending`
 and name it, and `check-plan` lists the pending rows under
 `pending_decisions`. Between the gates a pending row holds only the Items its
-`blocks` names: `claim-items`, `start-item`, `resume-item` and `reopen-item`
-refuse such an Item with `DELIVERY_DECISION_PENDING` before any ref moves. No
+`blocks` names: `start-item`, `resume-item` and `reopen-item` refuse such an
+Item with `DELIVERY_DECISION_PENDING` before any ref moves, while `claim-items`
+claims it, since a claim starts no work. No
 approved document changes between the gates without an answered row that names
 it: from the Delivery's first execution approval until `approve-review`,
 `operation_compile.py approve`, `delivery_governance.py approve` and

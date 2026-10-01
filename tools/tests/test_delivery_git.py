@@ -2154,9 +2154,10 @@ class DeliveryGitTests(unittest.TestCase):
                 f" store | The current store | {status} | {answer} | {blocks} | {wait} |")
 
     def test_a_pending_question_holds_the_items_it_blocks_and_the_review(self):
-        """Only the owner's answer closes a queued question. claim-items, start-item and reopen-item refuse an
-        Item a pending User Decisions row blocks, and publish-delivery-review refuses while any row is
-        pending, each before any ref moves; a row that blocks no Item holds none (#329)."""
+        """Only the owner's answer closes a queued question. start-item and reopen-item refuse an Item a
+        pending User Decisions row blocks, while claim-items claims it, since a claim starts no work, and
+        publish-delivery-review refuses while any row is pending, each before any ref moves; a row that
+        blocks no Item holds none (#329)."""
         project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.publish_execution_plan(project, "DLV-001")
 
@@ -2166,17 +2167,17 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
 
         self.log_decisions(directory, self.decision("D-01", "pending"))
-        refuses(lambda: delivery_git.claim_items(project, "DLV-001"),
-                "AUTH-01 waits for the owner's answer to User Decisions D-01; record it before claim-items")
-        self.log_decisions(directory, self.decision("D-01", "pending", blocks=""))
-        delivery_git.claim_items(project, "DLV-001")
+        self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-01"])
+        refuses(lambda: delivery_git.start_item(project, "DLV-001", "AUTH-01"),
+                "AUTH-01 waits for the owner's answer to User Decisions D-01; record it before start-item")
         self.log_decisions(directory, self.decision("D-01", "answered"), self.decision("D-02", "pending"))
         refuses(lambda: delivery_git.start_item(project, "DLV-001", "AUTH-01"),
                 "AUTH-01 waits for the owner's answer to User Decisions D-02; record it before start-item")
         self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
-        answered = [self.decision("D-01", "answered"), self.decision("D-02", "answered")]
-        self.log_decisions(directory, *answered)
+        self.log_decisions(directory, self.decision("D-01", "answered"), self.decision("D-02", "pending", blocks=""))
         active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        answered = [self.decision("D-01", "answered"), self.decision("D-02", "answered", blocks="")]
+        self.log_decisions(directory, *answered)
         self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
         self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
         delivery_git.push_item(project, "DLV-001", "AUTH-01")
@@ -2199,6 +2200,47 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.trailer(delivery_git.commit_message(
             project, delivery_git.publish_delivery_review(project, "DLV-001")["integration"]), "Record"),
             "delivery-review-published-v1")
+
+    def test_a_pending_question_holds_only_the_item_it_blocks_from_starting(self):
+        """claim-items claims every Item in one push, so a pending row that blocked one Item refused the
+        claims of all of them and no Item could start. A claim starts no work: claim-items claims every
+        Item, and only the Item the row blocks waits to start (#329)."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs, "AUTH-01", "AUTH-02")
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_dod(dod), 0)
+            self.assertEqual(delivery_compile.approve_dod(dod), 0)
+            self.assertEqual(delivery_compile.init_delivery(type("Args", (), {
+                "docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication", "outcome": None,
+                "target_branch": "main", "story": ["AUTH-01", "AUTH-02"]})), 0)
+            self.assertEqual(delivery_compile.approve_scope(scope), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve the scope")
+        delivery_git.run_git(project, "push", "-q")
+        delivery_git.reserve_delivery(project, "DLV-001")
+        self.author_execution_topology(docs)
+        directory = delivery_compile.find_delivery(docs, "DLV-001")
+        later = directory / "items" / "auth-02" / "item.md"
+        props, body = delivery_compile.split_note(later)
+        props["path_claims"] = ["src/session.py"]
+        delivery_compile.atomic_text(later, delivery_compile.frontmatter(props, body))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        self.log_decisions(directory, self.decision("D-01", "pending", blocks="AUTH-02"))
+        self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-01", "AUTH-02"])
+        self.assertEqual(delivery_git.start_item(project, "DLV-001", "AUTH-01")["story"], "AUTH-01")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.start_item(project, "DLV-001", "AUTH-02")), (
+            "DELIVERY_DECISION_PENDING",
+            "AUTH-02 waits for the owner's answer to User Decisions D-01; record it before start-item"))
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-02"))
 
     def test_record_pr_remote_checks_the_local_mirror_and_the_adoption_intent(self):
         """record-pr-remote refuses a URL that an existing local Review does not mirror, as it did

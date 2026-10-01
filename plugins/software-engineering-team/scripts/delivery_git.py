@@ -3652,8 +3652,8 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     delivery_props, _ = split_note(directory / "delivery.md")
     if delivery_props.get("status") != "execution_approved":
         raise RuntimeError("claim-items requires an execution-approved Delivery")
-    refuse_pending_decisions(root, directory, "claim-items",
-                             [path.parent.name.upper() for path in sorted(directory.glob("items/*/item.md"))])
+    # A claim starts no work: start-item, resume-item and reopen-item hold an
+    # Item a pending User Decisions row blocks.
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])

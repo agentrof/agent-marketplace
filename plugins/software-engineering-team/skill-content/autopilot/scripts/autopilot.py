@@ -592,7 +592,14 @@ def goal_line(goal: dict | None, read: dict | None = None) -> str:
     return text
 
 
-def summary(grant: dict, now: datetime, read: dict | None = None) -> list[str]:
+def class_descriptions(grant: dict) -> list[tuple[str, str]]:
+    described = {entry["id"]: entry["description"] for entry in load_policy()["classes"]}
+    return [(name, described.get(name, "not declared by this package"))
+            for name in grant.get("classes", [])]
+
+
+def summary(grant: dict, now: datetime, read: dict | None = None, *,
+            describe: bool = False) -> list[str]:
     lines = []
     if grant.get("state") == "active":
         expires = parse_stamp(grant["expires_at"])
@@ -601,8 +608,18 @@ def summary(grant: dict, now: datetime, read: dict | None = None) -> list[str]:
     else:
         lines.append(f"autopilot: {grant.get('state')} {grant.get('id')} at {grant.get('ended_at')}")
     lines.append(goal_line(grant.get("goal"), read))
-    lines.append("allowed classes: " + (", ".join(grant.get("classes", [])) or "none"))
+    if describe:
+        lines.append("allowed classes:" if grant.get("classes") else "allowed classes: none")
+        lines.extend(f"- {name}: {text}" for name, text in class_descriptions(grant))
+    else:
+        lines.append("allowed classes: " + (", ".join(grant.get("classes", [])) or "none"))
     return lines
+
+
+def entry_classes(entry: dict) -> list[str]:
+    """The classes a ledger entry names; an older entry holds one class."""
+    classes = entry.get("classes")
+    return list(classes) if isinstance(classes, list) else [str(entry.get("class"))]
 
 
 def report_payload(directory: Path, grant: dict) -> dict:
@@ -628,13 +645,14 @@ def report_lines(payload: dict) -> list[str]:
                      f" compiler agreed: {completion.get('compiler_agreed')})")
     for number, entry in enumerate(payload["entries"], 1):
         options = "; ".join(entry.get("options", []))
+        classes = ", ".join(entry_classes(entry))
         if entry["event"] == "decision":
-            lines.append(f"{number}. {entry['time']} decision [{entry['class']}]"
+            lines.append(f"{number}. {entry['time']} decision [{classes}]"
                          f" {entry['question']} -> {entry['choice']}")
             lines.append(f"   options: {options or 'none offered'}; reason: {entry['reason']};"
                          f" written to: {entry['target']}")
         else:
-            lines.append(f"{number}. {entry['time']} queued [{entry['class']}]"
+            lines.append(f"{number}. {entry['time']} queued [{classes}]"
                          f" {entry['question']} -> recommended: {entry['recommendation']}")
             lines.append(f"   options: {options or 'none offered'}"
                          + (f"; blocks: {entry['blocks']}" if entry.get("blocks") else ""))
@@ -770,7 +788,7 @@ def cmd_check(args: argparse.Namespace, now: datetime) -> int:
     if problem:
         print(f"autopilot: active {grant['id']} is {problem}; this session asks as usual")
         return 1
-    print("\n".join(summary(grant, now, read)))
+    print("\n".join(summary(grant, now, read, describe=True)))
     return 0
 
 
@@ -836,11 +854,12 @@ def active_grant(directory: Path, now: datetime, project: Path | None = None) ->
     return grant
 
 
-def declared_class(policy: dict, name: str) -> str:
+def declared_classes(policy: dict, names: list[str]) -> list[str]:
     declared = [entry["id"] for entry in policy["classes"]]
-    if name not in declared:
-        raise Refusal(f"unknown class {name!r}; declared classes: {', '.join(declared)}")
-    return name
+    for name in names:
+        if name not in declared:
+            raise Refusal(f"unknown class {name!r}; declared classes: {', '.join(declared)}")
+    return list(dict.fromkeys(names))
 
 
 def split_options(text: str | None) -> list[str]:
@@ -854,12 +873,18 @@ def cmd_record(args: argparse.Namespace, now: datetime) -> int:
     require_state(directory, "no active grant")
     with locked(directory):
         grant = active_grant(directory, now, Path(args.project_root))
-        name = declared_class(policy, args.class_)
-        if name not in grant["classes"]:
-            raise Refusal(f"class {name!r} is not allowed by grant {grant['id']}; queue the question")
+        # A decision is taken only when every class its recommended option touches is allowed.
+        names = declared_classes(policy, args.class_)
+        defaults = {entry["id"]: entry["default"] for entry in policy["classes"]}
+        for name in names:
+            if defaults[name] == "never":
+                raise Refusal(f"class {name!r} is never delegated; queue the question")
+            if name not in grant["classes"]:
+                raise Refusal(f"class {name!r} is not allowed by grant {grant['id']};"
+                              " queue the question")
         if options and args.choice not in options:
             raise Refusal("the choice must be one of the options")
-        log(directory, now, grant, "decision", **{"class": name}, question=args.question,
+        log(directory, now, grant, "decision", classes=names, question=args.question,
             options=options, choice=args.choice, reason=args.reason, target=args.target)
         number = sum(event.get("event") == "decision" for event in ledger(directory, grant["id"]))
     print(f"autopilot: recorded decision {number} under {grant['id']}; write it to {args.target}"
@@ -874,17 +899,16 @@ def cmd_queue(args: argparse.Namespace, now: datetime) -> int:
     require_state(directory, "no active grant")
     with locked(directory):
         grant = active_grant(directory, now, Path(args.project_root))
-        name = declared_class(policy, args.class_)
-        if name in grant["classes"]:
-            raise Refusal(f"class {name!r} is allowed by grant {grant['id']}; take the recommended"
-                          " option and record it")
+        names = declared_classes(policy, args.class_)
         if options and args.recommendation not in options:
             raise Refusal("the recommendation must be one of the options")
-        log(directory, now, grant, "queued", **{"class": name}, question=args.question,
+        log(directory, now, grant, "queued", classes=names, question=args.question,
             options=options, recommendation=args.recommendation, blocks=args.blocks or "")
         number = sum(event.get("event") == "queued" for event in ledger(directory, grant["id"]))
-    print(f"autopilot: queued question {number} under {grant['id']}; continue the work that does"
-          " not depend on it")
+    doubt = all(name in grant["classes"] for name in names)
+    print(f"autopilot: queued question {number} under {grant['id']}"
+          + (", in doubt, though every class it names is allowed" if doubt else "")
+          + "; continue the work that does not depend on it")
     return 0
 
 
@@ -981,17 +1005,20 @@ def hook_user_prompt(options: dict, payload: dict, now: datetime) -> None:
 
 def denial(grant: dict, now: datetime) -> str:
     command = command_line()
-    classes = ", ".join(grant.get("classes", [])) or "none"
+    classes = "; ".join(f"{name} ({text})" for name, text in class_descriptions(grant)) or "none"
     return (
         f"Autopilot grant {grant['id']}, armed in {bound_line(grant)}, is active until"
         f" {grant['expires_at']} ({span(parse_stamp(grant['expires_at']) - now)} left) and"
         f" allows: {classes}."
         f" Do not ask the user. Run `{command} check` first; if it exits 1, ask the user as"
-        " usual. If the question's class is allowed, take the recommended option (answer an"
-        " open question with the recommendation you would offer), first run"
-        f" `{command} record` with --class, --question, --options, --choice, --reason and"
-        " --target, then apply it and write the decision into the governing document where"
-        f" the flow records the user's answer, marked {grant['id']}. Otherwise run `{command} queue` with --class, --question, --options"
+        " usual. Classify the question by every effect of its recommended option: any never"
+        " effect makes it never, an excluded effect the grant does not allow queues it, and"
+        " doubt queues it. If every class it touches is allowed, take the recommended option"
+        " (answer an open question with the recommendation you would offer), first run"
+        f" `{command} record` with --class once per class it touches, --question, --options,"
+        " --choice, --reason and --target, then apply it and write the decision into the"
+        " governing document where the flow records the user's answer, marked"
+        f" {grant['id']}. Otherwise run `{command} queue` with --class, --question, --options"
         " and --recommendation, and continue the work that does not depend on it; stop only"
         " when every remaining task waits on a queued question, then end with the queued list.")
 
@@ -1060,7 +1087,8 @@ def parser() -> argparse.ArgumentParser:
     queue.add_argument("--blocks")
     queue.set_defaults(handler=cmd_queue)
     for verb in (record, queue):
-        verb.add_argument("--class", dest="class_", required=True)
+        verb.add_argument("--class", dest="class_", action="append", required=True,
+                          help="a class the question touches; give it once per class")
         verb.add_argument("--question", required=True)
         verb.add_argument("--options")
     complete = verbs.add_parser("complete")

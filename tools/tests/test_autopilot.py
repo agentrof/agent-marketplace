@@ -1182,6 +1182,21 @@ class ContractTests(unittest.TestCase):
         skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split()).lower()
         self.assertIn(rule, skill)
 
+    def test_every_autopilot_document_states_the_same_user_limit(self):
+        limit = ("The guard stops an agent that runs the packaged script, not a process that"
+                 " writes the runtime files with the user's filesystem authority")
+        documents = [ENTRY / "SKILL.md", ROOT / "docs/orchestration.md",
+                     *(ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md"
+                       for host in ("claude", "codex"))]
+        for document in documents:
+            with self.subTest(document=document.name):
+                text = " ".join(document.read_text(encoding="utf-8").split())
+                self.assertIn(limit, text)
+                self.assertNotIn("can start, extend or widen a grant.", text)
+        changes = ROOT / ".changes/autopilot-entry.json"
+        if changes.is_file():
+            self.assertIn(limit, json.loads(changes.read_text(encoding="utf-8"))["summary"])
+
     def test_the_entry_skill_states_that_only_the_user_arms_a_grant(self):
         text = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
         self.assertIn("## Only the user arms a grant", (ENTRY / "SKILL.md").read_text(encoding="utf-8"))

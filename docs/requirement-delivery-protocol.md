@@ -348,17 +348,24 @@ set no Story is eligible. An eligible Delivery gets a topology-only pass inside
 `/delivery-plan` and one owner gate for the scope, the Item topology and the
 reused contract receipts. Then `approve-scope`, `reserve-delivery`,
 `approve-execution`, `publish-execution-plan` and `claim-items` run in that
-order with every check and refusal unchanged. A failed check falls back to the
-standard path and keeps every approval already made; a
-`DELIVERY_TRANSACTION_UNCERTAIN` from reservation or publication is resolved by
-reading the refs again, not by a second gate. `approve-scope` writes one
-`Delivery path:` line first in `User Decisions`, inside the scope hash: `light`
-with the Item topology hash and the contract receipts it approved, or
-`standard` with each failed condition. `approve-execution` keeps a light line
-only while every condition holds and the plan binds that topology and those
-receipts, and otherwise records `standard`. With the pinned Process Policy,
-the line names the path the Delivery ran. At `owner_gates` `two_fixed_gates`
-the one gate is gate A.
+order with every check and refusal unchanged. A failed check or any refused
+step falls back to the standard path and keeps every approval already made,
+and the Delivery records the fallback for good: the first failed
+`light-path-check` rewrites its `Delivery path:` line to `standard` with each
+failed condition, and `light-path-check --refused <step>` does so for a refused
+step of the sequence, so a failure that clears again never returns the Delivery
+to the light path. A `DELIVERY_TRANSACTION_UNCERTAIN` from reservation or
+publication is no fallback: it is resolved by reading the refs again, not by a
+second gate. `approve-scope` writes the `Delivery path:` line first in `User
+Decisions`, inside the scope hash: `light` with the Item topology hash and the
+contract receipts it approved, or `standard` with each failed condition.
+`approve-execution` and `check-plan` refuse a plan whose Item topology or bound
+contract receipts differ from a light line, since its owner never saw it, and
+name `light-path-check`, which records the fallback, and the owner gate of
+`/execution-plan DLV-###`. Otherwise `approve-execution` keeps a light line
+only while every condition holds, and records `standard` when one fails. With
+the pinned Process Policy, the line names the path the Delivery ran. At
+`owner_gates` `two_fixed_gates` the one gate is gate A.
 
 ## Execution Planning
 

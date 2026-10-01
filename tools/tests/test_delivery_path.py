@@ -398,6 +398,19 @@ class LightPathCompilerTests(unittest.TestCase):
     def check(self, docs: Path) -> tuple[int, dict]:
         return run(delivery_compile.light_path_check, plan_args(docs))
 
+    def check_proposal(self, docs: Path) -> tuple[int, dict]:
+        """Check the proposal as it stands, then take back the fallback a failed check records.
+
+        Each case of an eligibility test checks the same proposal; the recorded
+        fallback has tests of its own.
+        """
+        path = delivery_compile.find_delivery(docs, DELIVERY) / "delivery.md"
+        before = path.read_bytes()
+        try:
+            return self.check(docs)
+        finally:
+            path.write_bytes(before)
+
     def test_the_standard_value_leaves_every_output_and_record_alone(self):
         for state in ("no policy", "standard"):
             with self.subTest(state=state):
@@ -484,7 +497,7 @@ class LightPathCompilerTests(unittest.TestCase):
         ):
             with self.subTest(finding=finding, fields=fields):
                 author_topology(docs, **fields)
-                code, report = self.check(docs)
+                code, report = self.check_proposal(docs)
                 self.assertEqual(code, 1)
                 self.assertEqual(failed(report), {"architecture_not_applicable": [finding]})
                 self.assertEqual(report["path"], "standard")
@@ -537,7 +550,7 @@ class LightPathCompilerTests(unittest.TestCase):
         set_policy(docs, LIGHT, LIMITS)
         self.assertTrue(self.propose(docs)[SWITCH]["eligible"])
         author_topology(docs, waits_for=["AUTH-02"])
-        code, report = self.check(docs)
+        code, report = self.check_proposal(docs)
         self.assertEqual(code, 1)
         self.assertEqual(failed(report), {"dependencies_met": [
             "AUTH-02 is recorded integrated by no Delivery that the target branch holds merged"]})
@@ -564,7 +577,7 @@ class LightPathCompilerTests(unittest.TestCase):
             " as small"]})
         set_policy(docs, LIGHT, {"acceptance_criteria": 1, "test_scenarios": 3})
         author_topology(docs)
-        self.assertEqual(failed(self.check(docs)[1]), {"within_story_size_budget": [
+        self.assertEqual(failed(self.check_proposal(docs)[1]), {"within_story_size_budget": [
             "AUTH-01 acceptance_criteria is 2, over its limit of 1"]})
         set_policy(docs, LIGHT, {"acceptance_criteria": 2})
         self.assertEqual(self.check(docs)[1]["failed"], [])
@@ -614,22 +627,94 @@ class LightPathCompilerTests(unittest.TestCase):
         code, report = self.check(docs)
         self.assertEqual((code, report["path"], report["recorded"]), (1, "standard", "standard"))
 
-    def test_execution_approval_leaves_the_light_path_when_the_plan_changed(self):
+    def test_execution_approval_refuses_a_plan_the_light_gate_did_not_show(self):
+        """A topology changed after the light path's one gate is a plan its owner never saw: execution
+        approval and check-plan refuse it and name /execution-plan with its gate, and it is approved
+        only once light-path-check recorded the fallback (#328)."""
         docs = self.project()
         set_policy(docs, LIGHT, LIMITS)
         self.propose(docs)
         author_topology(docs)
         self.assertEqual(run(delivery_compile.approve_scope, plan_args(docs))[0], 0)
         author_topology(docs, path_claims=["src/auth.py", "src/session.py"])
+        root = delivery_compile.find_delivery(docs, DELIVERY)
+        before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+        refusal = [f"{DELIVERY} left the light path after its one owner gate: topology_unchanged: the Item"
+                   " topology differs from the one scope approval recorded; the owner has not seen this plan,"
+                   " so run light-path-check, which records the fallback, and take the plan to the owner gate"
+                   f" of /execution-plan {DELIVERY}"]
+        code, refused = run(delivery_compile.approve_execution, plan_args(docs))
+        self.assertEqual((code, refused["errors"]), (1, refusal))
+        self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, before)
+        code, checked = run(delivery_compile.check_plan, type("Args", (), {
+            "docs": str(docs), "delivery": DELIVERY, "reopen": [], "remote": "origin"}))
+        self.assertEqual((code, checked["errors"]), (1, refusal))
+        # The first failed check records the fallback, and the standard path approves the plan.
         code, report = self.check(docs)
-        self.assertEqual((code, failed(report)), (1, {"topology_unchanged": [
-            "the Item topology differs from the one scope approval recorded"]}))
+        line = ("Delivery path: standard. light-path-check recorded that the Delivery left the light path:"
+                " topology_unchanged: the Item topology differs from the one scope approval recorded.")
+        self.assertEqual((code, failed(report), report["recorded"], report["fallback"]), (1, {
+            "topology_unchanged": ["the Item topology differs from the one scope approval recorded"]},
+            "standard", line))
+        self.assertEqual(report["plan_findings"], [])
+        self.assertEqual(user_decisions(docs).split("\n\n")[0], line)
         code, execution = run(delivery_compile.approve_execution, plan_args(docs))
-        self.assertEqual((code, execution[SWITCH]["path"]), (0, "standard"))
-        self.assertEqual(user_decisions(docs).split("\n\n")[0],
-                         "Delivery path: standard. approve-execution recorded that the Delivery left the light"
-                         " path: topology_unchanged: the Item topology differs from the one scope approval"
-                         " recorded.")
+        self.assertEqual((code, execution[SWITCH]), (0, {"path": "standard", "failed": [], "line": line}))
+        self.assertEqual(user_decisions(docs).split("\n\n")[0], line)
+
+    def test_a_transient_failure_ends_the_light_path_for_good(self):
+        """A failure that clears again leaves the fallback in place, so execution approval records the
+        standard path the Delivery took and a later check never returns it to the light path (#328)."""
+        docs = self.project()
+        set_policy(docs, LIGHT, LIMITS)
+        self.propose(docs)
+        author_topology(docs)
+        self.assertEqual(run(delivery_compile.approve_scope, plan_args(docs))[0], 0)
+        contract = operation_compile.contract_path(docs, "verification")
+        approved = contract.read_bytes()
+        quiet(operation_compile.revise, contract_args(docs))
+        code, report = self.check(docs)
+        line = ("Delivery path: standard. light-path-check recorded that the Delivery left the light path:"
+                " operation_contracts_unchanged: Verification Contract revision 2 is open.")
+        self.assertEqual((code, report["path"], report["recorded"], report["fallback"]),
+                         (1, "standard", "standard", line))
+        # The parallel session discards its draft, and every condition holds again.
+        contract.write_bytes(approved)
+        code, report = self.check(docs)
+        self.assertEqual((code, report["eligible"], report["failed"], report["path"], report["recorded"]),
+                         (1, True, [], "standard", "standard"))
+        self.assertNotIn("fallback", report)
+        code, execution = run(delivery_compile.approve_execution, plan_args(docs))
+        self.assertEqual((code, execution[SWITCH]), (0, {"path": "standard", "failed": [], "line": line}))
+        self.assertEqual(user_decisions(docs).split("\n\n")[0], line)
+
+    def test_a_refused_step_ends_the_light_path(self):
+        """Any refused step of the light sequence ends the light path, whatever its remedy: the host names
+        it with --refused, the Delivery records it, and the gate's approval no longer drives the plan (#328)."""
+        docs = self.project()
+        set_policy(docs, LIGHT, LIMITS)
+        self.propose(docs)
+        author_topology(docs)
+        self.assertEqual(run(delivery_compile.approve_scope, plan_args(docs))[0], 0)
+        self.assertEqual(self.check(docs)[0], 0)
+        code, output = quiet(delivery_compile.main, ["--docs", str(docs), "light-path-check", "--delivery",
+                                                    DELIVERY, "--refused", "reserve-delivery"])
+        line = ("Delivery path: standard. light-path-check recorded that the Delivery left the light path:"
+                " delivery_path: reserve-delivery was refused.")
+        self.assertEqual((code, json.loads(output)), (1, {
+            "ok": False, "delivery": DELIVERY, "status": "scope_approved", "path": "standard",
+            "recorded": "standard", "fallback": line}))
+        self.assertEqual(user_decisions(docs).split("\n\n")[0], line)
+        code, report = self.check(docs)
+        self.assertEqual((code, report["eligible"], report["path"], report["recorded"]),
+                         (1, True, "standard", "standard"))
+        code, execution = run(delivery_compile.approve_execution, plan_args(docs))
+        self.assertEqual((code, execution[SWITCH]["line"]), (0, line))
+        # Only the light sequence's own steps are named.
+        with self.assertRaises(SystemExit) as exited, contextlib.redirect_stderr(io.StringIO()):
+            delivery_compile.main(["--docs", str(docs), "light-path-check", "--delivery", DELIVERY,
+                                   "--refused", "start-item"])
+        self.assertEqual(exited.exception.code, 2)
 
     def test_execution_approval_records_standard_for_a_scope_approved_without_the_light_path(self):
         docs = self.project()
@@ -693,6 +778,10 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertIn(f"Delivery runs switch {SWITCH} at light_when_eligible under its pinned Process"
                       " Policy revision 1, but the approved revision 3 sets standard",
                       refused["errors"][0])
+        # The refused check ends the light path the Delivery was on.
+        self.assertEqual(refused["fallback"], "Delivery path: standard. light-path-check recorded that the"
+                         f" Delivery left the light path: delivery_path: {refused['errors'][0]}.")
+        self.assertEqual(user_decisions(docs).split("\n\n")[0], refused["fallback"])
         path = delivery_compile.find_delivery(docs, DELIVERY) / "delivery.md"
         props, body = delivery_compile.split_note(path)
         props["status"] = "review"
@@ -781,23 +870,19 @@ class LightPathRemoteTests(unittest.TestCase):
         reserved = delivery_git.remote_oid(self.root, "origin", self.integration)
         quiet(operation_compile.revise, contract_args(self.docs))
         code, report = run(delivery_compile.light_path_check, plan_args(self.docs))
-        self.assertEqual((code, report["path"], report["recorded"], failed(report)["operation_contracts_unchanged"]),
-                         (1, "standard", "light", ["Verification Contract revision 2 is open"]))
+        line = ("Delivery path: standard. light-path-check recorded that the Delivery left the light path:"
+                " operation_contracts_unchanged: Verification Contract revision 2 is open.")
+        self.assertEqual((code, report["path"], report["recorded"], failed(report)["operation_contracts_unchanged"],
+                          report["fallback"]),
+                         (1, "standard", "standard", ["Verification Contract revision 2 is open"], line))
         # The scope approval and the reservation stay; the standard path continues from there.
         props, _body = delivery_compile.split_note(delivery_compile.find_delivery(self.docs, DELIVERY) / "delivery.md")
         self.assertEqual((props["status"], props["scope_hash"]), ("scope_approved", scope["scope_hash"]))
         self.assertEqual(delivery_git.remote_oid(self.root, "origin", self.integration), reserved)
         approve_verification_contract(self.docs)
-        revision = operation_compile.check_contract(self.docs, "verification")[0]
         code, execution = run(delivery_compile.approve_execution, plan_args(self.docs))
         self.assertEqual(code, 0, execution)
-        self.assertEqual(execution[SWITCH]["path"], "standard")
-        self.assertEqual(execution[SWITCH]["line"], (
-            "Delivery path: standard. approve-execution recorded that the Delivery left the light path:"
-            " operation_contracts_unchanged: the plan binds verification revision 2"
-            f" {revision['source_hash']}, not verification revision 1"
-            f" {scope[SWITCH]['line'].split('verification revision 1 ')[1].rstrip('.')} that scope approval"
-            " recorded."))
+        self.assertEqual(execution[SWITCH], {"path": "standard", "failed": [], "line": line})
         delivery_git.publish_execution_plan(self.root, DELIVERY)
         self.assertEqual(delivery_git.claim_items(self.root, DELIVERY)["claims"], ["AUTH-01"])
         code, report = run(delivery_compile.light_path_check, plan_args(self.docs))

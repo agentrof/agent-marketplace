@@ -612,6 +612,8 @@ class DeliveryCompilerTests(unittest.TestCase):
                   for key in process_policy.PIN_FIELDS}
         self.policy("begin-revision")
         self.policy("set", "--switch", "review_panels", "--value", "lens_panel")
+        # Only a switch delivery-execution reads is drift for an execution-approved Delivery.
+        self.policy("set", "--switch", "review_loop", "--value", "blocking_delta")
         self.policy("approve")
         self.assertTrue(delivery_compile.delivery_findings(self.docs, "DLV-001")[1])
         for status in ("review", "pr_handoff", "awaiting_merge", "cancelled"):
@@ -632,9 +634,14 @@ class DeliveryCompilerTests(unittest.TestCase):
         package = self.root / "fixture-package"
         registry = package / process_policy.REGISTRY
         registry.parent.mkdir(parents=True)
+        # Only a switch a Delivery flow owns is pinned, so the fixture switch has one.
         registry.write_text(json.dumps({"schema_version": 1, "switches": {"fixture_mode": {
             "values": [{"id": "current", "tradeoffs": "Today."}, {"id": "fast", "tradeoffs": "New."}],
-            "default": "current"}}}), encoding="utf-8")
+            "flows": ["delivery-execution"], "default": "current"}}}), encoding="utf-8")
+        policy = package / process_policy.TASK_INPUT_POLICY
+        policy.parent.mkdir(parents=True)
+        policy.write_text(json.dumps({"entries": {"deliver": {
+            "flows": ["delivery-execution"], "scope_kind": "delivery"}}}), encoding="utf-8")
         with mock.patch.object(process_policy, "PACKAGE", package):
             self.policy("init")
             self.policy("set", "--switch", "fixture_mode", "--value", "fast")

@@ -38,9 +38,13 @@ parameter the table leaves unset.
    write nothing and stop.
 4. Present the planned delta, each switch's value in force and the chosen
    value, each parameter set, changed or unset, each undeclared row the
-   revision removes, and name every Delivery that
-   is scope- or execution-approved whose pinned value of a switch its flows
-   own the delta changes: it runs under the values it pinned, so after the new
+   revision removes, and name every Delivery whose pinned value of a switch
+   it still reads the delta changes. A scope-approved Delivery reads every
+   switch a Delivery flow owns; an execution-approved one reads only those its
+   `delivery-execution` flow owns: `execution_planning`,
+   `implementation_schedule`, `owner_gates` and `review_loop`. A switch no
+   Delivery flow owns is read from the current policy and stops no Delivery.
+   Such a Delivery runs under the values it pinned, so after the new
    revision is approved its checks refuse it until its execution plan is
    revised and approved again, which pins the new revision. Name that path in
    order: `begin-plan-revision`, the execution-plan tasks, which bind the new
@@ -71,5 +75,6 @@ parameter the table leaves unset.
   rule and the owner's approval; a project row is never a promotion.
 - Flows read a value with `process_policy.py value --switch <id>`, inside a
   Delivery with `--delivery DLV-###`, which refuses a drifted pin until the
-  Delivery Review and reads the pinned revision's value from then on. A draft
-  or invalid policy is refused, never read.
+  Delivery Review and reads the pinned revision's value from then on; a
+  switch no Delivery flow owns is read from the current policy. A draft or
+  invalid policy is refused, never read.

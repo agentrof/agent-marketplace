@@ -82,6 +82,7 @@
         }
       ],
       "default": "per_step",
+      "reference_scope": "owning_flows",
       "value_data": {
         "two_fixed_gates": ["skill-content/deliver/data/owner-decision-classes.json"]
       },

@@ -240,10 +240,15 @@ class OwnerGatesReferenceTests(unittest.TestCase):
 
 class OwnerGatesTaskInputTests(unittest.TestCase):
     # (entry, role): whether the task binds the gate instructions at two_fixed_gates.
-    TASKS = {("deliver", "delivery-coordinator"): True, ("deliver", "software-architect"): True,
-             ("deliver", "backend-developer"): True, ("deliver", "code-reviewer"): True,
-             ("setup", "delivery-coordinator"): False, ("configure", "qa-engineer"): False,
-             ("configure", "delivery-coordinator"): False, ("backlog-plan", "product-owner"): False,
+    # Every role of every entry that runs one of the switch's owning flows binds
+    # them, planning, Operation and Governance included; no other task does.
+    OWNING = sorted({(entry, role)
+                     for entry, route in task_inputs.catalog()["entries"].items()
+                     if set(route["flows"]) & set(json.loads((TEAM / REGISTRY).read_text(
+                         encoding="utf-8"))["switches"]["owner_gates"]["flows"])
+                     for role in route["roles"]})
+    TASKS = {**dict.fromkeys(OWNING, True),
+             ("setup", "delivery-coordinator"): False, ("backlog-plan", "product-owner"): False,
              ("requirement", "business-analyst"): False,
              ("business-analysis", "business-analyst"): False,
              ("solution-design", "solution-architect"): False,
@@ -266,7 +271,10 @@ class OwnerGatesTaskInputTests(unittest.TestCase):
         paths = set(result["required_reads"]) | {item["path"] for item in result["instructions"]}
         return paths & {REFERENCE, CLASSES}
 
-    def test_only_delivery_tasks_bind_the_gates_and_only_at_two_fixed_gates(self):
+    def test_every_owning_flow_task_binds_the_gates_and_only_at_two_fixed_gates(self):
+        self.assertEqual({entry for entry, _role in self.OWNING},
+                         {"configure", "deliver", "delivery-plan", "execution-plan"})
+        self.assertEqual(len(self.OWNING), 16)
         for state in ("no policy", "per_step", "two_fixed_gates"):
             if state != "no policy":
                 choose(self.docs, state)

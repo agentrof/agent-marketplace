@@ -2477,7 +2477,11 @@ PROCESS_SWITCHES_RELPATH = build_distributions.PROCESS_SWITCHES_RELPATH
 SWITCH_ANCHOR_RE = re.compile(r"\b[Ss]witch\s+`([a-z][a-z0-9_]*)`")
 SWITCH_REFERENCE_RE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}
-PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants", "parameters", "value_data"}
+PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants", "parameters", "value_data",
+                                "reference_scope"}
+# A switch whose references every task of its owning flows binds, whichever
+# skill holds them, declares this reference_scope.
+SWITCH_REFERENCE_SCOPES = {"owning_flows"}
 SWITCH_PARAMETER_KEYS = {"summary", "values", "declared_by", "type", "min_count"}
 SWITCH_PARAMETER_TYPES = {"positive_integer"}
 VALUE_DATA_RE = re.compile(r"^skill-content/[a-z0-9]+(?:-[a-z0-9]+)*/data/[a-z0-9]+(?:-[a-z0-9]+)*\.json$")
@@ -2704,6 +2708,9 @@ def process_switch_problems(data: object, flows: set[str], agents: set[str],
         issue = spec.get("issue")
         if "issue" in spec and (not isinstance(issue, int) or isinstance(issue, bool) or issue < 1):
             problems.append(f"{where}: issue must be a positive issue number")
+        if "reference_scope" in spec and spec["reference_scope"] not in SWITCH_REFERENCE_SCOPES:
+            problems.append(f"{where}: reference_scope must be one of"
+                            f" {sorted(SWITCH_REFERENCE_SCOPES)}")
         if "parameters" in spec:
             problems.extend(parameter_problems(where, spec["parameters"], ids, default, plugin))
         if "agent_variants" in spec:

@@ -256,14 +256,17 @@ To add a switch:
    value whose instructions read package data that nothing else reads declares
    it in `value_data`, a list of `skill-content/<skill>/data/<file>.json` paths
    per value; a task binds that data only together with the value's switch
-   references.
+   references. A switch whose instructions every task of its owning flows
+   follows, whichever skills the task selects, declares
+   `reference_scope: owning_flows`, as `owner_gates` does.
 2. Anchor it as switch `<id>` at each step it changes in its owning flows.
    The anchor names the switch reference that the other value follows and
    adds nothing else to the flow.
 3. Write each non-default value's instructions in
    `skill-content/<skill>/references/switch-<switch>-<value>.md`, in the skill
    that the tasks needing them select. `task_inputs.py` binds the file only
-   when the project's policy selects that value. Never link it from SKILL.md
+   when the project's policy selects that value, and only for a task whose
+   entry runs one of the switch's owning flows. Never link it from SKILL.md
    and never write one for the default value.
 4. Keep the default path unchanged: with the switch at its default, flows,
    skills, agents, manifests and compiler outputs stay byte-identical. Extend
@@ -278,7 +281,8 @@ To add a switch:
 The `process_switches` validator check rejects a default outside the values,
 a switch that an owning flow does not name, a flow that names an undeclared
 switch or one it does not own, a switch without a metric or promotion rule,
-malformed agent variants or parameters, value data that is missing, declared
+malformed agent variants or parameters, a `reference_scope` other than
+`owning_flows`, value data that is missing, declared
 twice, declared for the default or bound by no reference of its value, and a
 switch reference that names an undeclared switch or value or the default, that
 no owning flow names, or that a SKILL.md links.

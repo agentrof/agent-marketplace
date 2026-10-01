@@ -20,6 +20,9 @@ SWITCH_REGISTRY = "skill-content/configure/data/process-switches.json"
 # Entries whose tasks author what an execution approval then pins: the scope,
 # the Item topology and the Operation contracts a plan revises.
 PLANNING_ENTRIES = frozenset({"delivery-plan", "execution-plan", "configure"})
+# A switch whose instructions every task of its owning flows follows declares
+# this reference_scope; its references bind whichever skill holds them.
+OWNING_FLOWS_SCOPE = "owning_flows"
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
 SWITCH_REFERENCE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 DELIVERY_PACKAGE = re.compile(r"^workspace/docs/delivery/deliveries/([^/]+)/")
@@ -259,6 +262,12 @@ def registry_switches(package: Path) -> dict[str, dict]:
     return switches
 
 
+def owned_switches(registry: dict[str, dict], route: dict) -> set[str]:
+    """Return the switches that own one of the flows a task's entry runs."""
+    return {switch for switch, spec in registry.items()
+            if set(route["flows"]) & set(spec.get("flows") or [])}
+
+
 def plan_revision_held(project: Path, delivery: str, remote: str) -> bool:
     """Whether the remote Fence holds a plan-revision barrier that this Delivery began."""
     import delivery_git
@@ -308,8 +317,7 @@ def switch_choices(project: Path | None, route: dict, package: Path,
     policy_input = (["workspace/docs/" + process_policy.RELATIVE]
                     if process_policy.path_for(docs).exists() else [])
     if deliveries:
-        owned = {switch for switch, spec in registry_switches(package).items()
-                 if set(route["flows"]) & set(spec.get("flows") or [])}
+        owned = owned_switches(registry_switches(package), route)
         chosen = None
         for delivery in deliveries:
             try:
@@ -524,6 +532,10 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         chosen, policy_inputs = switch_choices(project, route, package, deliveries, entry, remote)
     except ValueError as exc:
         raise ValueError(f"process policy cannot bind switch instructions: {exc}") from exc
+    registry = registry_switches(package)
+    # A task follows only the switches that own one of its entry's flows.
+    owned = owned_switches(registry, route)
+    chosen = {pair for pair in chosen if pair[0] in owned}
     value_data = switch_data(package)
     switch_only = {path for paths in value_data.values() for path in paths}
     required = {"constitution.md", POLICY, "templates/task-input-contract.md"}
@@ -553,6 +565,12 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
             if pair in chosen:
                 required.add(path.relative_to(package).as_posix())
                 required.update(value_data.get(pair, []))
+    for switch, value in sorted(chosen):
+        if registry[switch].get("reference_scope") == OWNING_FLOWS_SCOPE:
+            for path in sorted((package / "skill-content").glob(
+                    f"*/references/switch-{switch}-{value}.md")):
+                required.add(path.relative_to(package).as_posix())
+                required.update(value_data.get((switch, value), []))
     instruction_inputs = required | set(references) | {"scripts/task_inputs.py"}
     # Tools and data influence the role's result even when they are not prose
     # reads. Bind them without turning an input index into extra reading work.

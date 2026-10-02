@@ -81,9 +81,9 @@ class MaintainerProtocolTests(unittest.TestCase):
         steps = (
             "python3 tools/release.py bump",
             "python3 tools/release.py check-pr --base origin/main",
-            "python3 tools/release.py ship --version X.Y.Z",
-            "gh release view vX.Y.Z",
-            "python3 tools/release.py finalize-local --version X.Y.Z",
+            "python3 tools/release.py ship --version YYYY.M.N",
+            "gh release view vYYYY.M.N",
+            "python3 tools/release.py finalize-local --version YYYY.M.N",
         )
         positions = []
         for step in steps:
@@ -106,12 +106,28 @@ class MaintainerProtocolTests(unittest.TestCase):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, protocol)
 
+    def test_releases_are_named_by_the_calendar(self):
+        protocol = PROTOCOL.read_text(encoding="utf-8")
+        self.assertIn("\n## Calendar versions\n", protocol)
+        section = protocol.split("\n## Calendar versions\n", 1)[1].split("\n## ", 1)[0]
+        flat = " ".join(section.split())
+        for term in ("A stable release is named `YYYY.M.N`",
+                     "The first release of October 2026 is `v2026.10.1`, the next"
+                     " `v2026.10.2` and the first of November `v2026.11.1`",
+                     "Changeset impacts no longer choose the number",
+                     "`check-pr` replays `bump` at that committer date",
+                     "A release commit is therefore valid for the month it was made in",
+                     "the release keeps that month's name"):
+            with self.subTest(term=term):
+                self.assertIn(term, flat)
+        self.assertNotIn("applies the highest impact", protocol)
+
     def test_the_release_audit_requires_the_version_only_title(self):
         protocol = PROTOCOL.read_text(encoding="utf-8")
         flat = " ".join(protocol.split())
         self.assertIn(
-            "`gh release view vX.Y.Z --json name,isDraft,isPrerelease,isImmutable`"
-            " must report the `name` `vX.Y.Z`", flat,
+            "`gh release view vYYYY.M.N --json name,isDraft,isPrerelease,isImmutable`"
+            " must report the `name` `vYYYY.M.N`", flat,
         )
         self.assertNotIn("Agent Marketplace v", protocol)
 

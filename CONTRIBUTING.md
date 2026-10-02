@@ -40,7 +40,10 @@ validation remain required; no Git hooks are installed. See
 Before running the gate, add `.changes/<short-kebab-summary>.json`. It must contain
 a non-empty `summary` and a `components` object. Use `patch`, `minor`, or
 `major` for every affected plugin or `agent-marketplace`; use an empty object
-for documentation, test, and CI changes with no stable release effect. Never
+for documentation, test, and CI changes with no stable release effect. The
+impact never chooses the version: a release is named `YYYY.M.N` by the
+[calendar](docs/maintainer-operations-protocol.md#calendar-versions), and the
+marketplace and every plugin carry that one version. Never
 edit `versions.json`, `CHANGELOG.md` or `.release/stable.json` by hand: only
 the release commit changes them, the last commit of a pull request, made by
 `python3 tools/release.py bump`, as the

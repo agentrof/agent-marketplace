@@ -223,10 +223,11 @@ validation workflows never publish refs or releases.
    release commit, the last commit of a pull request, changes only version
    surfaces, the changelog, release metadata, consumed changesets and
    `dist/`, so the same run tests the final release tree, and `check-pr`
-   proves the commit is the deterministic bump of its parent. When `main`
-   requires the merge queue, each queued group repeats the required checks on
-   the exact commit `main` moves to, selecting impact coverage over the
-   group's complete diff.
+   proves the commit is the deterministic bump of its parent at the commit's
+   own committer date, which names the release `YYYY.M.N` for that month
+   however late the pull request merges. When `main` requires the merge
+   queue, each queued group repeats the required checks on the exact commit
+   `main` moves to, selecting impact coverage over the group's complete diff.
 2. After merge, `main` runs fresh static gates and either verifies equivalent
    PR evidence, in about a minute, or executes full tests. A queued commit
    reuses PR evidence only when its tree equals the PR's tested merge. CodeQL
@@ -234,9 +235,12 @@ validation workflows never publish refs or releases.
 3. A release dispatches the `Release` workflow for one `main` commit. The
    `Auto release` workflow does so on the push that merges a release commit,
    when `versions.json` names a version no release tag holds yet; `ship`
-   does so by hand. The `Release` workflow checks the commit's release state, waits for that commit's own `main`
-   validation and requires its success, and never runs the tests or the host
-   lifecycles again. It then stages the version tag and `stable` with exact
+   does so by hand. The `Release` workflow checks the commit's release state,
+   including a version newer than every release tag or, with no tag at all,
+   than the version of the commit `stable` points to, an ancestor of the
+   release commit. It waits for that commit's own `main` validation and
+   requires its success, and never runs the tests or the host lifecycles
+   again. It then stages the version tag and `stable` with exact
    leases, installs both hosts from the real public `stable` channel and
    creates the immutable Release. Rollback, immutable Release reconciliation
    and clean-main completion keep their contracts.

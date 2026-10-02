@@ -165,10 +165,11 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     tested tree and current coverage contract; missing evidence runs fresh
     tests, and both host lifecycles always run fresh. Release-owned files
     change only in a release commit, the last commit of a pull request, whose
-    tree is the deterministic bump of its parent; the replay ignores ambient
-    Git attributes, excludes, replacement refs and graph overlays. A release
-    tags an approved `main` commit whose own push validation succeeded and
-    never runs the tests again. Snapshot records are prefix-free;
+    tree is the deterministic bump of its parent at its own commit date; the
+    replay ignores ambient Git attributes, excludes, replacement refs and
+    graph overlays. A release tags an approved `main` commit whose own push
+    validation succeeded and never runs the tests again. Snapshot records are
+    prefix-free;
     generated text uses LF, unknown/binary payloads remain byte-exact, and the
     tracked `package-modes.json` contract supplies platform-neutral executable
     modes. Schema-v4 package provenance binds the closed file inventory, hashes

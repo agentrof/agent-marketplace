@@ -17,7 +17,8 @@ exception files, no allowlists, no temporary waivers. If you believe a rule is
 wrong, change the rule in `tools/validate.py` in your PR and update its
 fixture; do not work around it.
 
-Before committing and opening a PR:
+Before committing and opening a PR, with `python3` running Python 3.14, the
+one version the plugin supports and CI tests:
 
 ```text
 python3 tools/build_distributions.py

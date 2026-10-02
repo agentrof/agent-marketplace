@@ -35,6 +35,8 @@ LIMITS = {"acceptance_criteria": 12, "test_scenarios": 20}
 OWNER_GATES = "deliver/references/switch-owner_gates-two_fixed_gates.md"
 LANES = "deliver/references/switch-implementation_schedule-parallel_lanes_v1.md"
 PRE_HANDOFF = "deliver/references/switch-pre_handoff_regression-touched_suites.md"
+OWN_TARGETS = "deliver/references/switch-own_target_reuse-spot_run.md"
+GATE_FIRST = "qa-verification/references/switch-qa_gate_order-gate_first.md"
 BUNDLE = "execution_planning-single_source_bundle.md"
 REVIEW = ("challenge-review/references/switch-mechanical_pass_tier-mechanical.md",
           "challenge-review/references/switch-review_loop-blocking_delta.md",
@@ -62,13 +64,14 @@ EXPECTED = {
     "backlog-plan:qa-engineer": [BOUNDED],
     **{f"configure:{role}": ["configure/references/switch-" + BUNDLE, OWNER_GATES]
        for role in ("delivery-coordinator", "devops-engineer", "qa-engineer")},
-    **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF]
+    **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS]
        for role in ("backend-developer", "delivery-coordinator", "devops-engineer",
-                    "frontend-developer", "qa-engineer")},
+                    "frontend-developer")},
+    "deliver:qa-engineer": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GATE_FIRST],
     "deliver:code-reviewer": ["code-review/references/switch-code_review_panel-beside_official.md",
                               "code-review/references/switch-review_loop-blocking_delta.md",
-                              LANES, OWNER_GATES, PRE_HANDOFF],
-    "deliver:software-architect": [LANES, OWNER_GATES, PRE_HANDOFF,
+                              LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS],
+    "deliver:software-architect": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS,
                                    "software-architecture/references/switch-" + BUNDLE],
     "delivery-plan:delivery-coordinator": [
         OWNER_GATES, "delivery-plan/references/switch-delivery_path-light_when_eligible.md"],

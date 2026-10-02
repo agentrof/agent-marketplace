@@ -104,7 +104,7 @@
       "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3"
     ,
     "flows/delivery-execution.md":
-      "d69db00bfde2d15874979a5e11a3a52865851a64db219642b2a3410a5e741821"
+      "2e3d6fe093324450baf7aaa574409b615e9b513291cc814f31340ad3ca95fc4d"
     ,
     "flows/delivery-governance.md":
       "ef2fa67262e0f500ba49b80d2865af6038638327745b989303acfaf1b1446fb7"
@@ -164,7 +164,7 @@
       "74f899b5a8bd01fb6520e2b0759cb6b991bf65147768893ddd439ccc01e6e399"
     ,
     "scripts/delivery_compile.py":
-      "39275d7cffbc3b8c33821f5f922373898677bfcf278e06cb26e4ab963d2e215f"
+      "296875bd6c03f5ad73eb80a93a6f7575af9a88a4c3f563ea912c088dda200437"
     ,
     "scripts/delivery_git.py":
       "1ee8e9238ac55c27a095035239026868235aaaa4b8b00998faf7a5742ff5617e"
@@ -179,7 +179,7 @@
       "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
     ,
     "scripts/delivery_verification.py":
-      "3c35e08ab9b69666042132cb6e7cd7f7334bad901d52bfa19e7f53a5b8854159"
+      "9870c769c50df568ab38bcee5c2be70e5ec04388081553deac50e7ad420855a5"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -332,13 +332,13 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "4fa25ca966fd2f251ac9e12e3e471d25bcd08a691fddd777c63c4fb60d526fcb"
+      "e5ae56e875e04eae28b8416379b25f9a630bd54719fc897e7750ea85317b6f9b"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "53d02b7aa2f4eee3fa991fc91c953ce315ede9cf73f32accd758a66712c17902"
+      "93488ac48a481e0b8faa1433c52001ed0000e0f0870167ebb95a9448c9df1fa7"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -376,11 +376,14 @@
     "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md":
       "ba72b5918302dbaf9d63f88c9854e0d7edfb329bb59e196935ddc54b35080691"
     ,
+    "skill-content/deliver/references/switch-own_target_reuse-spot_run.md":
+      "04cbf0a3cee8377d9a9ffe783b7372f7dda9ca5dac1fe5b853ffe65b01b900f0"
+    ,
     "skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md":
       "9b18128e9329d69c9ecda42be3df30bb2f7861561c6c4293748c7e3b33c2b9c2"
     ,
     "skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md":
-      "f52f5687ac6c0161733c069c58a41a15ebcc6d9afae52f41e04a3905cc9ee4af"
+      "38d22ac17e18d89edfa3cf2485467629eeef7c38b477b488d7cdf750eec7edd5"
     ,
     "skill-content/delivery-plan/SKILL.md":
       "bd1020b0afede9f2e7f28c47e49f9d28548ecc51d2ec84158c98a5dc360702fa"
@@ -549,6 +552,9 @@
     ,
     "skill-content/qa-verification/references/runtime-protocol.md":
       "7ddf13911059f2676d23cb1ae8a0e33e69f0f3cd7e2f2a9c3a7f4149761194d3"
+    ,
+    "skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md":
+      "bd1d5a658fb6901c4236202f92a9e5b6383973e08e4e1081ed5b482709ad30ff"
     ,
     "skill-content/qa-verification/references/test-design.md":
       "c8ef52eb9cbb30c14fcb905b49b92a9e88489ba9a842b75834da615d7fb330cd"

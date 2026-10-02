@@ -53,6 +53,10 @@ Plan targets, before `freeze`, which refuses until that run passed on the exact
 candidate, as
 `skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md`
 defines.
+Switch `own_target_reuse`: at `spot_run`, QA's final test run also takes the
+Item's own Test Plan targets from that run, but for the ones QA spot-runs, as
+`skill-content/deliver/references/switch-own_target_reuse-spot_run.md`
+defines.
 
 Invoke Code Review and QA independently through the host's native agent
 mechanism. Keep the implementation writer idle until both readers finish or
@@ -88,6 +92,10 @@ command, wait for it with `wait --role qa_engineer`, then read the record the
 command printed.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
+Switch `qa_gate_order`: at `gate_first`, QA starts its first test command of a
+round before it plans and drafts its result, as
+`skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md`
+defines.
 For failed or affected tests first, an optional approved
 `diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
 <scratch-selection.json>`. Copy the selector schema from the QA manifest,

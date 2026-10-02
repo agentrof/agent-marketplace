@@ -1,7 +1,11 @@
 """Pre-handoff regression: switch `pre_handoff_regression` keeps today's handoff at
 `off` and, at `touched_suites`, runs the suites of the earlier stories an Item's
 change touches, with the Item's own Test Plan targets, before `freeze`, which
-refuses until such a run passed on the exact candidate (#351)."""
+refuses until such a run passed on the exact candidate (#351). Switch
+`own_target_reuse` at `spot_run` lets QA's final test run take the Item's own
+targets from that run too, but for the ones QA spot-runs, and switch
+`qa_gate_order` at `gate_first` has QA start its gate before it plans and
+drafts its result."""
 
 from __future__ import annotations
 
@@ -33,9 +37,14 @@ import task_inputs  # noqa: E402
 from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 SWITCH = "pre_handoff_regression"
+OWN_SWITCH = "own_target_reuse"
+GATE_SWITCH = "qa_gate_order"
 REFERENCE = "skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md"
+OWN_REFERENCE = "skill-content/deliver/references/switch-own_target_reuse-spot_run.md"
+GATE_REFERENCE = "skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md"
 CODE = "DELIVERY_PRE_HANDOFF_MISSING"
 REUSED_MARKER = "Earlier-story targets QA's final test run reused, recorded by approve-item-evidence:"
+OWN_MARKER = "Own targets QA's final test run reused, recorded by approve-item-evidence:"
 PYTHON = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
 DOCS = "workspace/docs/"
 EARLIER = DOCS + "delivery/deliveries/dlv-001-core/"
@@ -118,6 +127,13 @@ def suite(path: str, name: str, expected: str) -> str:
             f"    assert pathlib.Path({path!r}).read_text(encoding='utf-8').strip() == {expected!r}\n")
 
 
+def suites(path: str, names: list[str], expected: str) -> str:
+    """A test module whose every function in *names* checks the same value."""
+    return "import pathlib\n" + "".join(
+        f"\n\ndef {name}():\n    assert pathlib.Path({path!r}).read_text(encoding='utf-8').strip() == {expected!r}\n"
+        for name in names)
+
+
 def read(relative: str) -> str:
     return (TEAM / relative).read_text(encoding="utf-8")
 
@@ -161,9 +177,27 @@ class BindingTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True)
         self.docs = self.root / "workspace" / "docs"
 
-    def bound(self, entry: str, role: str) -> bool:
+    def bound(self, entry: str, role: str, reference: str = REFERENCE) -> bool:
         result = task_inputs.manifest(entry=entry, role=role, mode="review", project=self.root)
-        return REFERENCE in result["required_reads"]
+        return reference in result["required_reads"]
+
+    def test_the_qa_gate_switch_references_bind_only_to_the_delivery_tasks_that_follow_them(self):
+        tasks = (("deliver", "delivery-coordinator"), ("deliver", "qa-engineer"),
+                 ("deliver", "backend-developer"), ("deliver", "code-reviewer"),
+                 ("execution-plan", "qa-engineer"), ("configure", "qa-engineer"))
+        for entry, role in tasks:
+            for reference in (OWN_REFERENCE, GATE_REFERENCE):
+                with self.subTest(value="default", task=(entry, role), reference=reference):
+                    self.assertFalse(self.bound(entry, role, reference))
+        policy(self.docs, "init")
+        policy(self.docs, "set", "--switch", OWN_SWITCH, "--value", "spot_run")
+        policy(self.docs, "set", "--switch", GATE_SWITCH, "--value", "gate_first")
+        policy(self.docs, "approve")
+        for entry, role in tasks:
+            with self.subTest(value="spot_run", task=(entry, role)):
+                self.assertEqual(self.bound(entry, role, OWN_REFERENCE), entry == "deliver")
+            with self.subTest(value="gate_first", task=(entry, role)):
+                self.assertEqual(self.bound(entry, role, GATE_REFERENCE), (entry, role) == ("deliver", "qa-engineer"))
 
     def test_only_delivery_execution_tasks_at_touched_suites_bind_the_reference(self):
         tasks = (("deliver", "delivery-coordinator"), ("deliver", "qa-engineer"),
@@ -242,8 +276,9 @@ class CandidateTests(unittest.TestCase):
                 props[key] = value
         self.write(path, delivery.frontmatter(props, body))
 
-    def build(self, value: str | None = "touched_suites") -> None:
-        """Merge DLV-001, leave DLV-003 open and commit DLV-002's Item ST-005 candidate."""
+    def build(self, value: str | None = "touched_suites", own: str | None = None) -> None:
+        """Merge DLV-001, leave DLV-003 open and commit DLV-002's Item ST-005 candidate, with
+        own_target_reuse at *own* when it is given."""
         init_repository(self.root, initial_branch="main")
         self.git("config", "core.autocrlf", "false")
         self.write(".gitignore", ".agentrof/\nignored.txt\n")
@@ -288,6 +323,8 @@ class CandidateTests(unittest.TestCase):
         if value is not None:
             policy(self.docs, "init")
             policy(self.docs, "set", "--switch", SWITCH, "--value", value)
+            if own is not None:
+                policy(self.docs, "set", "--switch", OWN_SWITCH, "--value", own)
             policy(self.docs, "approve")
         base = self.commit("Open DLV-003")
         self.note(CURRENT + "delivery.md", {"type": "delivery", "id": "DLV-002", "status": "active",
@@ -318,9 +355,9 @@ class CandidateTests(unittest.TestCase):
     def output(self, run: dict) -> str:
         return Path(run["output_path"]).read_text(encoding="utf-8")
 
-    def reader_result(self, role: str, verdict: str = "passed", fresh: bool = False) -> dict:
+    def reader_result(self, role: str, verdict: str = "passed", fresh: bool = False, spot: Path | None = None) -> dict:
         """A reader's result on the frozen session: passing with every required check, QA's test run *fresh*
-        when asked, or a confirmed cancellation."""
+        or with the spot-run selection *spot* when asked, or a confirmed cancellation."""
         session = verification.read_session(self.root)
         result = {"candidate_hash": session["candidate"]["candidate_hash"], "session_id": session["session_id"],
                   "role": role, "mode": "review_initial" if role == "code_reviewer" else "qa_final",
@@ -330,17 +367,17 @@ class CandidateTests(unittest.TestCase):
         result["checks"] = {name: {"passed": True, "evidence": "Independently verified"}
                             for name in verification.required_checks(self.root, session["candidate"], role)}
         if role == "qa_engineer":
-            raw = verification.run_check(self.root, "test", fresh=fresh)
+            raw = verification.run_check(self.root, "test", fresh=fresh, spot_file=spot)
             result["checks"]["full_test_suite"].update(command=PYTHON + " run_all.py", exit_code=0,
                                                        environment=raw["identity"]["environment_hash"],
                                                        raw_evidence_hash=raw["evidence_hash"])
         return result
 
-    def approve_evidence(self, fresh: bool = False) -> str:
-        """Settle both readers passing, QA's test run *fresh* when asked, approve the Item's evidence and return
-        its verification record body."""
+    def approve_evidence(self, fresh: bool = False, spot: Path | None = None) -> str:
+        """Settle both readers passing, QA's test run *fresh* or with the spot-run selection *spot* when asked,
+        approve the Item's evidence and return its verification record body."""
         for role in ("code_reviewer", "qa_engineer"):
-            verification.register_result(self.root, self.reader_result(role, fresh=fresh))
+            verification.register_result(self.root, self.reader_result(role, fresh=fresh, spot=spot))
         args = type("Args", (), {"docs": ".", "worktree": str(self.root), "delivery": "DLV-002", "story": "ST-005"})
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -1136,6 +1173,194 @@ class CandidateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "^full_test_suite evidence reuses a test id that is, prefixes or"
                                                   " lies under one of the Item's own Test Plan targets, which QA"
                                                   " runs itself$"):
+            self.validate()
+
+    # At own_target_reuse spot_run QA's final test run also reuses the Item's own targets but its spot run.
+    def frozen_with_own_targets(self, targets: list[str], own: str | None = "spot_run") -> tuple[dict, dict]:
+        """Plan ST-005 with own targets *targets*, functions of tests/st005 modules that pass on the candidate,
+        repair the earlier story's regression, pass the pre-handoff run and freeze; return the run and its
+        selection."""
+        self.build(own=own)
+        modules: dict[str, list[str]] = {}
+        for target in targets:
+            path, _, name = target.partition("::")
+            modules.setdefault(path, []).append(name)
+        for path, names in modules.items():
+            self.write(path, suites("src/api/total.txt", names, "30"))
+        self.plan("ST-005", *(scenario(f"ST-005-TS-{number:03d}", "required", target)
+                              for number, target in enumerate(targets, start=1)))
+        self.write("src/api/limit.txt", "10\n")
+        self.commit("Plan the own targets and repair the earlier story's regression")
+        passed = self.run_regression()
+        self.assertEqual((passed["exit_code"], passed["candidate_intact"]), (0, True), self.output(passed))
+        current = self.freeze()["candidate"]
+        selection = verification.derive_regression(self.root, current["delivery"], current["story"], current)
+        self.assertEqual(selection["own_targets"], sorted(targets))
+        return passed, selection
+
+    def spot_file(self, *targets: str, **changes) -> Path:
+        """A spot-run selection in the verification scratch that names *targets*, with *changes* applied."""
+        session = verification.read_session(self.root)
+        value = {"schema_version": 1, "candidate_hash": session["candidate"]["candidate_hash"],
+                 "spot_test_ids": list(targets), **changes}
+        path = verification.session_path(self.root).parent / "scratch/spot-run.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return path
+
+    def test_at_spot_run_qa_reuses_every_own_target_but_the_ones_it_spot_runs(self):
+        total, more = "tests/st005/test_new.py::test_total", "tests/st005/test_more.py::test_more"
+        passed, selection = self.frozen_with_own_targets([total, more])
+        earlier = selection["earlier_stories"][0]["automation_targets"]
+        raw = verification.run_check(self.root, "test", spot_file=self.spot_file(total))
+        self.assertEqual((raw["exit_code"], raw["candidate_intact"], raw["reused"]), (0, True, False))
+        self.assertNotIn("own_target_reuse", raw)
+        self.assertEqual(raw["identity"]["reused_pre_handoff"], {
+            "evidence_hash": passed["evidence_hash"], "test_ids": sorted([*earlier, more]),
+            "earlier_stories": [{"delivery": "DLV-001", "story": "ST-001", "test_ids": earlier}],
+            "own_targets": {"test_ids": [more], "spot_test_ids": [total]}})
+        output = self.suite_output(raw)
+        for target in (*earlier, more):
+            self.assertIn("REUSED " + target, output)
+        self.assertIn("PASS " + total, output)
+        reused = json.loads((verification.session_path(self.root).parent / "reused-tests.json")
+                            .read_text(encoding="utf-8"))
+        self.assertEqual(reused["reused_test_ids"], sorted([*earlier, more]))
+        section = delivery.section_bodies(self.approve_evidence(spot=self.spot_file(total)))["Implementation Evidence"]
+        self.assertTrue(section.endswith("\n".join([
+            "", OWN_MARKER, "", "| story | test_ids | spot_run_test_ids | pre_handoff_run | evidence_hash |",
+            "|---|---|---|---|---|", f"| ST-005 of DLV-002 | {more} | {total} | 1 | {passed['evidence_hash']} |"])),
+            section)
+        self.assertIn(REUSED_MARKER, section)
+
+    def test_at_spot_run_without_a_spot_run_file_qa_runs_every_own_target(self):
+        total, more = "tests/st005/test_new.py::test_total", "tests/st005/test_more.py::test_more"
+        _passed, selection = self.frozen_with_own_targets([total, more])
+        raw = verification.run_check(self.root, "test")
+        self.assertEqual(raw["own_target_reuse"], "no --spot-run-file names the own targets QA runs itself, so the"
+                                                  " run reuses none of the Item's own targets")
+        self.assertNotIn("own_targets", raw["identity"]["reused_pre_handoff"])
+        output = self.suite_output(raw)
+        for target in selection["own_targets"]:
+            self.assertIn("PASS " + target, output)
+        # A spot run that keeps every own target reuses none of them either.
+        raw = verification.run_check(self.root, "test", spot_file=self.spot_file(total, more))
+        self.assertEqual(raw["own_target_reuse"], "the spot-run targets, with every own target that is, prefixes or"
+                                                  " lies under one of them, cover every own target, so the run"
+                                                  " reuses none of them")
+        self.assertNotIn("own_targets", raw["identity"]["reused_pre_handoff"])
+        section = delivery.section_bodies(self.approve_evidence())["Implementation Evidence"]
+        self.assertTrue(section.endswith("\n\n" + OWN_MARKER + " none."), section)
+
+    def test_the_record_keeps_no_own_target_block_at_off(self):
+        self.frozen_after_a_passing_run()
+        raw = verification.run_check(self.root, "test")
+        self.assertNotIn("own_target_reuse", raw)
+        self.assertNotIn(OWN_MARKER, self.approve_evidence())
+
+    def test_a_spot_run_file_serves_only_qas_final_test_run_at_spot_run(self):
+        total = "tests/st005/test_new.py::test_total"
+        self.frozen_after_a_passing_run()
+        with self.assertRaisesRegex(RuntimeError, "^run --spot-run-file serves only process switch own_target_reuse"
+                                                  " spot_run; DLV-002 runs it at off$"):
+            verification.run_check(self.root, "test", spot_file=self.spot_file(total))
+        with self.assertRaisesRegex(RuntimeError, "^run --fresh reuses nothing, so it takes no --spot-run-file$"):
+            verification.run_check(self.root, "test", fresh=True, spot_file=self.spot_file(total))
+        with self.assertRaisesRegex(RuntimeError, "^only run --kind test takes --spot-run-file$"):
+            verification.run_check(self.root, "mutation", spot_file=self.spot_file(total))
+
+    def test_a_spot_run_file_names_own_targets_of_the_frozen_candidate_as_data(self):
+        total, more = "tests/st005/test_new.py::test_total", "tests/st005/test_more.py::test_more"
+        _passed, selection = self.frozen_with_own_targets([total, more])
+        earlier = selection["earlier_stories"][0]["automation_targets"][0]
+        shape = ("^spot-run selection must bind this candidate and declare only schema_version, candidate_hash"
+                 " and spot_test_ids$")
+        ids = ("^spot_test_ids must name at least one unique literal test id, without option prefixes or control"
+               " characters$")
+        for label, path, message in (
+                ("another candidate", lambda: self.spot_file(total, candidate_hash="sha256:" + "0" * 64), shape),
+                ("another key", lambda: self.spot_file(total, extra=True), shape),
+                ("no target", lambda: self.spot_file(), ids),
+                ("a target twice", lambda: self.spot_file(total, total), ids),
+                ("an option", lambda: self.spot_file("--collect-only"), ids),
+                ("an earlier target", lambda: self.spot_file(earlier),
+                 "^spot_test_ids must be automation targets of the Item's own Test Plan; "
+                 + re.escape(earlier) + " is not$")):
+            with self.subTest(selection=label), self.assertRaisesRegex(RuntimeError, message):
+                verification.run_check(self.root, "test", spot_file=path())
+        # Beside the Item's verification session, in ignored runtime, so the candidate stays clean.
+        outside = verification.session_path(self.root).parent.parent / "spot-run.json"
+        outside.write_text(self.spot_file(total).read_text(encoding="utf-8"), encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "^spot-run selection must be a regular file inside verification"
+                                                  " scratch$"):
+            verification.run_check(self.root, "test", spot_file=outside)
+
+    def test_own_targets_that_overlap_a_spot_run_target_in_turn_stay_with_the_command(self):
+        """A command that skips by node id prefix would skip part of a target it must run, so every own target
+        that is, prefixes or lies under a spot-run target, or under such a target in turn, runs."""
+        base = "tests/st005/test_new.py::test_t"
+        targets = [base, base + "1", base + "2", "tests/st005/test_more.py::test_more"]
+        _passed, _selection = self.frozen_with_own_targets(targets)
+        self.assertEqual(verification.kept_own_targets(targets, [base + "1"]), sorted(targets[:3]))
+        raw = verification.run_check(self.root, "test", spot_file=self.spot_file(base + "1"))
+        self.assertEqual(raw["identity"]["reused_pre_handoff"]["own_targets"],
+                         {"test_ids": [targets[3]], "spot_test_ids": [base + "1"]})
+        for target in targets[:3]:
+            self.assertIn("PASS " + target, self.suite_output(raw))
+
+    def test_approval_checks_an_own_target_reuse_as_recorded(self):
+        total, more = "tests/st005/test_new.py::test_total", "tests/st005/test_more.py::test_more"
+        # An own target whose id prefixes the spot-run target, which the command must run with it.
+        prefix = "tests/st005/test_new.py::test_tot"
+        self.frozen_with_own_targets([total, more, prefix])
+        spot = self.spot_file(total)
+        for role in ("code_reviewer", "qa_engineer"):
+            verification.register_result(self.root, self.reader_result(role, spot=spot))
+        self.validate()
+
+        def own_reuse(own: object):
+            def change(identity):
+                reuse = identity["reused_pre_handoff"]
+                reuse["own_targets"] = own
+                reused = own.get("test_ids", []) if isinstance(own, dict) else []
+                reuse["test_ids"] = sorted({test for entry in reuse["earlier_stories"] for test in entry["test_ids"]}
+                                           | set(reused))
+            return change
+
+        original = verification.session_path(self.root).read_bytes()
+        for message, own in (
+                ("names its reused own targets apart from its spot-run targets",
+                 {"test_ids": [more], "spot_test_ids": []}),
+                ("names its reused own targets apart from its spot-run targets", {"test_ids": [more]}),
+                ("names its reused own targets apart from its spot-run targets",
+                 {"test_ids": [more], "spot_test_ids": [1, total]}),
+                ("names spot-run targets or reused own targets that are no automation targets of the Item's own Test"
+                 " Plan, or one target as both", {"test_ids": [more], "spot_test_ids": [more]}),
+                ("reuses a test id that is, prefixes or lies under one of the Item's own Test Plan targets that QA's"
+                 " final test run spot-runs or keeps with them", {"test_ids": [prefix], "spot_test_ids": [total]})):
+            with self.subTest(message=message, own=own):
+                verification.session_path(self.root).write_bytes(original)
+                self.forge_test_evidence(own_reuse(own))
+                with self.assertRaisesRegex(RuntimeError, re.escape("full_test_suite evidence " + message)):
+                    self.validate()
+        verification.session_path(self.root).write_bytes(original)
+        self.validate()
+
+    def test_approval_refuses_an_own_target_reuse_outside_spot_run(self):
+        total = "tests/st005/test_new.py::test_total"
+        self.frozen_after_a_passing_run()
+        for role in ("code_reviewer", "qa_engineer"):
+            verification.register_result(self.root, self.reader_result(role))
+
+        def change(identity):
+            reuse = identity["reused_pre_handoff"]
+            reuse["own_targets"] = {"test_ids": [total], "spot_test_ids": ["tests/st005/test_new.py::test_other"]}
+            reuse["test_ids"] = sorted([*reuse["test_ids"], total])
+
+        self.forge_test_evidence(change)
+        with self.assertRaisesRegex(RuntimeError, "^full_test_suite evidence reuses the Item's own Test Plan targets,"
+                                                  " which only process switch own_target_reuse spot_run allows;"
+                                                  " DLV-002 runs it at off$"):
             self.validate()
 
     def test_the_command_line_reports_the_run_and_the_refusal(self):

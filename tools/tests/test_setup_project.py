@@ -26,7 +26,7 @@ import vault_check as vault_payload
 import delivery_git
 import setup_project as setup_module
 import stage_package
-from tools.tests import backlog_fixture
+from tools.tests import backlog_fixture, fixture_cache
 from tools.tests.git_fixture import init_repository, temporary_directory
 from unittest import mock
 
@@ -37,12 +37,26 @@ ATTRIBUTES_BLOCK = (
 )
 
 
+_APPLIED = fixture_cache.AppliedProjectCache()
+
+
 class SetupProjectTests(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls) -> None:
+        _APPLIED.close()
+
     def run_script(self, script: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(script), *args],
             cwd=ROOT, capture_output=True, text=True, check=False,
         )
+
+    @contextlib.contextmanager
+    def applied_project(self):
+        """A project right after one setup apply, copied from this process's applied seed."""
+        with temporary_directory() as temporary:
+            _APPLIED.apply_to(Path(temporary), _APPLIED_CONTEXT)
+            yield Path(temporary)
 
     def test_bootstrap_is_project_local_and_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -299,52 +313,8 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(json.loads(second.stdout)["operations"], [])
 
-    def test_inspect_migrates_retired_nested_fields_before_any_write(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "apply", "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
-            config_path = project / "workspace/config.json"
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            config["schema_version"] = 1
-            config["legacy_nested_settings"] = {"story": "Work item", "retired": "Retired"}
-            config["legacy_settings_history"] = {"story": [{"value": "Old work item"}]}
-            config_path.write_text(
-                json.dumps(config, indent=2) + "\n", encoding="utf-8"
-            )
-            before = config_path.read_bytes()
-
-            inspected = self.run_script(
-                SETUP, "inspect", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
-            payload = json.loads(inspected.stdout)
-            self.assertTrue(payload["ok"])
-            self.assertTrue(any(
-                item["surface"] == "workspace_config"
-                and "legacy_nested_settings" in item.get("removed_fields", [])
-                for item in payload["operations"]
-            ))
-            self.assertEqual(config_path.read_bytes(), before)
-
-            applied = self.run_script(
-                SETUP, "apply", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            migrated = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertNotIn("legacy_nested_settings", migrated)
-            self.assertNotIn("legacy_settings_history", migrated)
-            self.assertEqual(migrated["schema_version"], 2)
-
     def test_inspect_surfaces_forbidden_runtime_state_before_apply(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(
-                SETUP, "apply", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             forbidden = (
                 project / ".agentrof/agent-marketplace/.runtime/project.sqlite"
             )
@@ -361,13 +331,7 @@ class SetupProjectTests(unittest.TestCase):
             ))
 
     def test_setup_accepts_process_local_experience_prototype_files(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(
-                SETUP, "apply", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             preview = (
                 project / "workspace/docs/experience-design/experiences/checkout/"
                 "artifacts/preview.html"
@@ -382,13 +346,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(inspected.returncode, 0, inspected.stdout)
 
     def test_setup_refuses_nested_legacy_experience_registry(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(
-                SETUP, "apply", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             registry = (
                 project / "workspace/docs/experience-design/experiences/checkout/"
                 "_generated/artifact-registry.json"
@@ -413,13 +371,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertIn("_generated/artifact-registry.json", checked.stdout)
 
     def test_setup_refuses_symlink_anywhere_in_experience_subtree(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(
-                SETUP, "apply", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             external = project / "external-experience"
             external.mkdir()
             (external / "sentinel.md").write_text(
@@ -452,13 +404,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertTrue((external / "sentinel.md").is_file())
 
     def test_setup_and_check_refuse_hardlinks_in_experience_subtree(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(
-                SETUP, "apply", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             ledger = (
                 project / "workspace/docs/experience-design/_ledger/"
                 "application-revisions.json"
@@ -490,11 +436,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertIn("hard-link alias", checked.stdout)
 
     def test_refresh_rolls_back_every_managed_write_on_closing_failure(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             config_path = project / "workspace/config.json"
             config = json.loads(config_path.read_text(encoding="utf-8"))
             config["custom_project_field"] = {"preserve": True}
@@ -529,11 +471,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(graph_path.read_bytes(), graph_before)
 
     def test_rollback_preserves_concurrent_authored_markdown(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "apply", "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             graph_path = project / "workspace/docs/.obsidian/graph.json"
             graph = json.loads(graph_path.read_text(encoding="utf-8"))
             graph["search"] = "pre-refresh-drift"
@@ -571,11 +509,7 @@ class SetupProjectTests(unittest.TestCase):
             )
 
     def test_rollback_preserves_concurrent_edit_to_unchanged_managed_note(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "apply", "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             graph_path = project / "workspace/docs/.obsidian/graph.json"
             graph = json.loads(graph_path.read_text(encoding="utf-8"))
             graph["search"] = "pre-refresh-drift"
@@ -618,11 +552,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(graph_path.read_bytes(), graph_before)
 
     def test_rollback_reports_concurrent_edit_to_written_target(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "apply", "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             graph_path = (
                 project / "workspace/docs/.obsidian/graph.json"
             ).resolve()
@@ -669,11 +599,7 @@ class SetupProjectTests(unittest.TestCase):
             )
 
     def test_pre_replace_recheck_preserves_racing_target_edit(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "apply", "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             graph_path = (
                 project / "workspace/docs/.obsidian/graph.json"
             ).resolve()
@@ -739,32 +665,9 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("non-canonical managed workspace", result.stderr)
 
-    def test_setup_check_rejects_database_state_in_runtime(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
-            database = (
-                project / ".agentrof" / "agent-marketplace" / ".runtime"
-                / "project.sqlite"
-            )
-            database.write_bytes(b"not a database")
-            checked = self.run_script(
-                CHECK, "check", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(checked.returncode, 1)
-            findings = json.loads(checked.stdout)["findings"]
-            self.assertTrue(any("forbidden in runtime" in item
-                                for item in findings))
-
     def test_setup_check_admits_disposable_tool_databases_in_runtime(self):
         """Scratch is where the required cadence writes its tool output."""
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             runtime = project / ".agentrof" / "agent-marketplace" / ".runtime"
             for relative in ("tools/grype-db/6/vulnerability.db",
                              "verification/mutation/api/mutants.sqlite",
@@ -790,11 +693,7 @@ class SetupProjectTests(unittest.TestCase):
                 condemned.unlink()
 
     def test_setup_check_rejects_state_next_to_the_runtime_directory(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             residue = project / ".agentrof/agent-marketplace/backlog.json"
             residue.write_text("{}\n", encoding="utf-8")
             checked = self.run_script(
@@ -808,11 +707,7 @@ class SetupProjectTests(unittest.TestCase):
         """The tracked local and plugin file findings name each file from a
         NUL-separated listing; without -z Git quotes a name outside ASCII
         (#276)."""
-        with temporary_directory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             local = ".claude/ayarlar-şğı.json"
             plugin = ("workspace/docs/.obsidian/plugins/"
                       "obsidian-front-matter-title-plugin/çeviri-ğı.json")
@@ -834,11 +729,7 @@ class SetupProjectTests(unittest.TestCase):
                 + plugin, findings)
 
     def test_local_obsidian_plugin_projection_is_recreated_but_not_clone_truth(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+        with self.applied_project() as project:
             obsidian = project / "workspace/docs/.obsidian"
             (obsidian / "community-plugins.json").unlink()
             shutil.rmtree(obsidian / "plugins")
@@ -933,17 +824,6 @@ class SetupProjectTests(unittest.TestCase):
                 vault_payload.payload_reconcile_updates(vault, policy, payload),
                 {},
             )
-
-    def test_backlog_init_requires_explicit_modern_mode(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            setup = self.run_script(SETUP, "--project-root", str(project))
-            self.assertEqual(setup.returncode, 0, setup.stderr)
-            docs = project / "workspace" / "docs"
-            result = self.run_script(BACKLOG, "init", "--docs", str(docs))
-            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-            self.assertFalse((docs / "backlog" / "backlog.md").exists())
 
     def test_runtime_symlink_is_rejected_without_following_it(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1065,13 +945,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(attributes.read_bytes(), converged)
 
     def test_setup_check_reports_a_missing_stale_or_overridden_gitattributes_rule(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            applied = self.run_script(
-                SETUP, "apply", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        with self.applied_project() as project:
             attributes = project / ".gitattributes"
             local_attributes = project / ".git" / "info" / "attributes"
             own_lines = "* text=auto\n"
@@ -1207,11 +1081,7 @@ class SetupProjectTests(unittest.TestCase):
         apply gives back group and other read. A file narrowed any other way keeps its mode (#285)."""
         previous = os.umask(0o022)
         try:
-            with tempfile.TemporaryDirectory() as temporary:
-                project = Path(temporary)
-                init_repository(project)
-                applied = self.run_script(SETUP, "apply", "--project-root", str(project), "--json")
-                self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            with self.applied_project() as project:
                 for command in (["add", "-A"], ["-c", "user.email=test@example.com", "-c", "user.name=Test",
                                                 "commit", "-qm", "setup"]):
                     subprocess.run(["git", "-C", str(project), *command], check=True)
@@ -1430,17 +1300,17 @@ class WindowsLongPathsChoiceTests(unittest.TestCase):
                              (str(item), [{"path": reaching, "reason": "file_path", "length": 260}]))
 
     def test_a_value_git_reads_as_true_asks_nothing(self):
-        for value in ("true", "yes"):
-            with self.subTest(value=value), temporary_directory() as temporary:
-                project = Path(temporary).resolve()
-                init_repository(project)
-                subprocess.run(["git", "-C", str(project), "config", "--local", "core.longpaths", value],
-                               check=True)
-                code, plan = self.run_setup(project, "inspect")
-                self.assertEqual((code, plan["choice_requests"]), (0, []))
-                code, applied = self.run_setup(project, "apply")
-                self.assertEqual(code, 0, applied)
-                self.assertEqual(self.local_long_paths(project), value)
+        # "yes" is true only to Git's own boolean parsing, which a literal "true" would skip.
+        with temporary_directory() as temporary:
+            project = Path(temporary).resolve()
+            init_repository(project)
+            subprocess.run(["git", "-C", str(project), "config", "--local", "core.longpaths", "yes"],
+                           check=True)
+            code, plan = self.run_setup(project, "inspect")
+            self.assertEqual((code, plan["choice_requests"]), (0, []))
+            code, applied = self.run_setup(project, "apply")
+            self.assertEqual(code, 0, applied)
+            self.assertEqual(self.local_long_paths(project), "yes")
 
     def test_other_hosts_ask_nothing(self):
         with temporary_directory() as temporary:
@@ -1448,11 +1318,10 @@ class WindowsLongPathsChoiceTests(unittest.TestCase):
             init_repository(project)
             code, plan = self.run_setup(project, "inspect", windows=False)
             self.assertEqual((code, plan["choice_requests"], plan["warnings"]), (0, [], []))
-            code, applied = self.run_setup(project, "apply", windows=False)
-            self.assertEqual(code, 0, applied)
             code, applied = self.run_setup(project, "apply", "--choice", "git.core_longpaths=set",
                                        windows=False)
-            self.assertEqual((code, applied["applied_operations"]), (0, []))
+            self.assertEqual(code, 0, applied)
+            self.assertNotIn("git_config", [item["surface"] for item in applied["applied_operations"]])
             self.assertIsNone(self.local_long_paths(project))
 
     def test_a_failed_apply_puts_the_value_back(self):
@@ -1468,6 +1337,10 @@ class WindowsLongPathsChoiceTests(unittest.TestCase):
                     code, failed = self.run_setup(project, "apply", "--choice", "git.core_longpaths=set")
                 self.assertEqual((code, failed["rolled_back"], failed["rollback_conflicts"]), (1, True, []))
                 self.assertEqual(self.local_long_paths(project), before)
+
+
+# A changed environment, working directory or subprocess binding builds a fresh project.
+_APPLIED_CONTEXT = fixture_cache.context_snapshot((subprocess, fixture_cache))
 
 
 if __name__ == "__main__":

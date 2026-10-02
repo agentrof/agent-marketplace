@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.tests.git_fixture import init_repository
+from tools.tests import fixture_cache
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,17 +34,17 @@ BACKLOG_COLORS = {
 }
 
 
+_APPLIED = fixture_cache.AppliedProjectCache()
+
+
 class ProjectVaultContractTests(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls) -> None:
+        _APPLIED.close()
+
     def setup_project(self, root: Path) -> Path:
-        init_repository(root)
-        result = subprocess.run(
-            [sys.executable, str(SETUP), "--project-root", str(root)],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        """The workspace one setup apply leaves in the empty ``root``, from the applied seed."""
+        _APPLIED.apply_to(root, _APPLIED_CONTEXT)
         return root / "workspace"
 
     def check_vault(self, workspace: Path) -> subprocess.CompletedProcess[str]:
@@ -709,6 +709,10 @@ class AliasOwnershipTests(unittest.TestCase):
                 f" registry declares its owner as {rules}.md",
             ),
         ])
+
+
+# A changed environment, working directory or subprocess binding builds a fresh project.
+_APPLIED_CONTEXT = fixture_cache.context_snapshot((subprocess, fixture_cache))
 
 
 if __name__ == "__main__":

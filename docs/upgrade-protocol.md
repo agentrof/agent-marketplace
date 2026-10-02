@@ -103,9 +103,9 @@ recreate it without changing Requirement or Delivery state.
 
 ## Version and build identity
 
-- A `.changes/*.json` file declares release impact. The release workflow is the
-  only writer that bumps `versions.json`; host manifests expose that semantic
-  plugin version.
+- A `.changes/*.json` file declares release impact. The release commit, which
+  `python3 tools/release.py bump` makes, is the only writer that bumps
+  `versions.json`; host manifests expose that semantic plugin version.
 - Each generated package carries `.agent-marketplace-package.json` with its
   plugin and marketplace release versions, the closed file/hash inventory,
   executable paths and the closed `delivery_protocol` read/write capability.
@@ -120,10 +120,10 @@ recreate it without changing Requirement or Delivery state.
   changed last entry, a removal next to another removal or an add, and a
   removal of the last entry beside a change to the entry before it. The
   deterministic snapshot `build_id` of the canonical sources that every host
-  build shares is computed instead: release
-  preparation records it in `.release/stable.json`, the release replay
-  reproduces it, and `python3 tools/release.py verify-release` recomputes it
-  at a release commit.
+  build shares is computed instead: the release commit records it in
+  `.release/stable.json`, check-pr's replay reproduces it, and
+  `python3 tools/release.py verify-release` recomputes it at the commit a
+  release tags.
 - Setup never copies a package version or build ID into project configuration,
   and upgrade never compares an old project build ID with a new one. Active
   Delivery compatibility is proven from package metadata plus the remote Fence

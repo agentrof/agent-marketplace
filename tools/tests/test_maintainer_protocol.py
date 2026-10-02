@@ -25,6 +25,7 @@ class MaintainerProtocolTests(unittest.TestCase):
             "EXACT_SHA_REMOTE_GATES",
             "AWAIT_MERGE_APPROVAL",
             "RELEASE_REQUESTED",
+            "RELEASE_COMMIT",
             "MAIN_EXACT_SHA_GREEN",
             "PUBLISH_STABLE_RELEASE",
             "BOUNDED_BRANCH_CLEANUP",
@@ -85,15 +86,48 @@ class MaintainerProtocolTests(unittest.TestCase):
         section = protocol.split("### Release immutability", 1)[1].split("\n## ", 1)[0]
         command = section.split("python3 tools/release_publish.py finalize", 1)[1]
         command = command.split("```", 1)[0]
-        # Both workflows hard-code --require-immutable, so keeping the Release
-        # needs a manual finalize that reconciles it and removes release/stable.
-        self.assertIn("--release-branch-sha", command)
+        # The workflow hard-codes --require-immutable, so keeping the Release
+        # needs a manual finalize that reconciles it.
+        for argument in ('--candidate-sha "$CANDIDATE_SHA"',
+                         '--prior-stable-sha "$PRIOR_STABLE_SHA"', "--notes-file"):
+            self.assertIn(argument, command)
         self.assertNotIn("--require-immutable", command)
+        self.assertNotIn("--release-branch-sha", command)
         flat = " ".join(section.split())
         self.assertIn("delete that Release (never its tag) and re-run the failed finalize job",
                       flat)
         self.assertIn("To keep it, the maintainer completes the publication", flat)
-        self.assertIn("with an exact lease", flat)
+        self.assertIn("The finalize job of `Release` passes `--require-immutable`", flat)
+
+    def test_a_release_is_one_command_after_the_release_commit(self):
+        protocol = PROTOCOL.read_text(encoding="utf-8")
+        section = protocol.split("\n## Flow B", 1)[1].split("\n## ", 1)[0]
+        flat = " ".join(section.split())
+        steps = (
+            "python3 tools/release.py bump",
+            "python3 tools/release.py check-pr --base origin/main",
+            "python3 tools/release.py ship --version X.Y.Z",
+            "gh release view vX.Y.Z",
+            "python3 tools/release.py finalize-local --version X.Y.Z",
+        )
+        positions = []
+        for step in steps:
+            with self.subTest(step=step):
+                self.assertIn(step, section)
+                positions.append(section.index(step))
+        self.assertEqual(positions, sorted(positions))
+        for term in ("A release is a tag.", "it never runs the tests again",
+                     "a push to `stable` or a tag starts no workflow",
+                     "A release commit is never edited by hand",
+                     "two to three minutes from `ship` to the immutable Release"):
+            with self.subTest(term=term):
+                self.assertIn(term, flat)
+        # .release/stable.json stays; the release/stable branch is gone.
+        self.assertNotRegex(protocol, r"(?<![.])release/stable(?![.]json)")
+        for retired in ("Prepare stable release", "Publish stable release",
+                        "release PR", "main_source", "verify-merge-group"):
+            with self.subTest(retired=retired):
+                self.assertNotIn(retired, protocol)
 
     def test_the_release_audit_requires_the_version_only_title(self):
         protocol = PROTOCOL.read_text(encoding="utf-8")
@@ -104,35 +138,20 @@ class MaintainerProtocolTests(unittest.TestCase):
         )
         self.assertNotIn("Agent Marketplace v", protocol)
 
-    def test_the_one_time_release_reset_orders_the_owner_commands(self):
+    def test_the_one_time_release_reset_is_recorded_and_cannot_recur(self):
         protocol = PROTOCOL.read_text(encoding="utf-8")
         self.assertIn("\n## One-time release reset\n", protocol)
         section = protocol.split("\n## One-time release reset\n", 1)[1].split("\n## ", 1)[0]
         flat = " ".join(section.split())
-        for term in ("`.release/reset.json`", "refuses every partial or mixed variant",
-                     "The old history is not archived",
-                     "while `main` does not require the merge queue",
-                     "Every line must end in `false`"):
+        for term in ("`.release/reset.json` records the decision", "It cannot happen again",
+                     "refuses every partial or mixed variant",
+                     "the old history is not archived", "A pull request may only add the marker",
+                     "python3 tools/release.py ship --version 0.0.1"):
             with self.subTest(term=term):
                 self.assertIn(term, flat)
-        # A Release goes before its tag, and the bootstrap refuses to run
-        # while any version tag exists without `stable`.
-        steps = (
-            '"\\(.tag_name) \\(.immutable)"',
-            'gh release delete "v$version" --yes',
-            '--force-with-lease="refs/tags/v$version:$object"',
-            "origin :refs/heads/release/stable",
-            "origin :refs/heads/stable",
-            "git fetch origin --prune --prune-tags",
-            "gh workflow run prepare-stable-release.yml --ref main",
-            "finalize-local --version 0.0.1",
-        )
-        positions = []
-        for step in steps:
-            with self.subTest(step=step):
-                self.assertIn(step, section)
-                positions.append(section.index(step))
-        self.assertEqual(positions, sorted(positions))
+        # The reset ran once through owner commands that no longer apply.
+        self.assertNotIn("gh release delete", section)
+        self.assertNotIn("prepare-stable-release.yml", section)
 
     def test_upstream_text_never_identifies_a_consumer_project(self):
         protocol = PROTOCOL.read_text(encoding="utf-8")

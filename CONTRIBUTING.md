@@ -39,9 +39,13 @@ validation remain required; no Git hooks are installed. See
 Before running the gate, add `.changes/<short-kebab-summary>.json`. It must contain
 a non-empty `summary` and a `components` object. Use `patch`, `minor`, or
 `major` for every affected plugin or `agent-marketplace`; use an empty object
-for documentation, test, and CI changes with no stable release effect. Do not
-edit `versions.json` in a normal pull request. A local pass establishes the
-local candidate result; CI independently verifies its platform and host coverage.
+for documentation, test, and CI changes with no stable release effect. Never
+edit `versions.json`, `CHANGELOG.md` or `.release/stable.json` by hand: only
+the release commit changes them, the last commit of a pull request, made by
+`python3 tools/release.py bump`, as the
+[maintainer protocol](docs/maintainer-operations-protocol.md#flow-b-explicit-release-to-clean-main)
+describes. A local pass establishes the local candidate result; CI
+independently verifies its platform and host coverage.
 
 Security findings do not belong in public issues, pull requests or commit
 messages. Use the repository's [private vulnerability reporting form](https://github.com/agentrof/agent-marketplace/security/advisories/new)

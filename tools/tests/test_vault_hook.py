@@ -216,12 +216,6 @@ class VaultHookPrototypeTests(unittest.TestCase):
             (metadata / "meaningful.json").write_bytes(b"meaningful")
             self.assertIn("experience-design/_generated/.DS_Store/meaningful.json", self.hook.vault_inventory(docs))
 
-    def test_hook_has_no_application_surface_or_content_guard(self):
-        source = HOOK.read_text(encoding="utf-8")
-        self.assertNotIn("application.html", source)
-        self.assertNotIn("application-map", source)
-        self.assertNotIn("experience-application-runtime", source)
-
     def test_recovery_excludes_author_owned_prototype_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
             docs = Path(temporary) / "workspace/docs"

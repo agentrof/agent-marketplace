@@ -1574,6 +1574,45 @@ def verify_candidate(
     }
 
 
+def release_intent(root: Path, before: str, after: str) -> dict:
+    """Decide whether a push to main carries a release commit.
+
+    It does when the push changes the version that versions.json names and no
+    release tag holds that version yet. Every other push starts nothing, a
+    repeated run for an already released push included. ``before`` is the
+    main head the push replaced; when it is absent or unreadable, the first
+    parent of ``after`` stands in for it.
+    """
+    after = require_sha(after, "pushed main commit")
+    current = json_at_ref(root, after, "versions.json")
+    version = current.get("marketplace") if current else None
+    if not isinstance(version, str):
+        raise ReleaseError(f"versions.json at {after} names no marketplace version")
+    parse_semver(version, "marketplace version")
+    previous = None
+    if before.strip("0"):
+        previous = json_at_ref(
+            root, require_sha(before, "previous main head"), "versions.json",
+        )
+    if previous is None:
+        previous = json_at_ref(root, f"{after}^1", "versions.json")
+    if previous is not None and previous.get("marketplace") == version:
+        return {
+            "release": False, "version": version,
+            "reason": f"this push keeps v{version}; nothing to release",
+        }
+    tagged = observe_release_refs(root)["tags"].get(version)
+    if tagged:
+        return {
+            "release": False, "version": version,
+            "reason": f"v{version} already tags {tagged}",
+        }
+    return {
+        "release": True, "version": version,
+        "reason": f"this push moves the marketplace to v{version}",
+    }
+
+
 class Commands:
     """The gh calls ship makes; tests replace them."""
 
@@ -1684,6 +1723,26 @@ def ship(
     return result
 
 
+def auto_release(
+    root: Path,
+    before: str,
+    after: str,
+    *,
+    commands: Commands | None = None,
+    now: Callable[[], datetime.datetime] = utc_now,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict:
+    """Dispatch the Release for a push to main that carries a release commit."""
+    intent = release_intent(root, before, after)
+    if not intent["release"]:
+        return intent
+    started = ship(
+        root, intent["version"], after, commands=commands, watch=False,
+        now=now, sleep=sleep,
+    )
+    return {**intent, "run_id": started["run_id"]}
+
+
 def write_github_output(path: Path, values: dict[str, str]) -> None:
     with path.open("a", encoding="utf-8") as output:
         for key, value in values.items():
@@ -1733,6 +1792,12 @@ def main() -> int:
     ship_parser.add_argument("--version", required=True)
     ship_parser.add_argument("--sha")
     ship_parser.add_argument("--no-watch", action="store_true")
+    auto_parser = sub.add_parser(
+        "auto-release",
+        help="dispatch the Release when a push to main carries a release commit",
+    )
+    auto_parser.add_argument("--before", default="")
+    auto_parser.add_argument("--after", required=True)
     finalize_parser = sub.add_parser("finalize-local")
     finalize_parser.add_argument("--version", required=True)
     finalize_parser.add_argument("--branch", action="append", default=[])
@@ -1795,6 +1860,8 @@ def main() -> int:
         print(json.dumps(ship(
             root, args.version, args.sha, watch=not args.no_watch,
         ), indent=2))
+    elif args.command == "auto-release":
+        print(json.dumps(auto_release(root, args.before, args.after), indent=2))
     elif args.command == "finalize-local":
         print(json.dumps(finalize_local_release(
             root, args.version, args.branch, apply=args.apply

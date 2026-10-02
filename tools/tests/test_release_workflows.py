@@ -232,6 +232,31 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         events = self.text("release.yml").split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
         self.assertEqual(re.findall(r"(?m)^      ([a-z_]+):$", events), ["version", "sha"])
 
+    def test_a_main_push_dispatches_the_release_only_through_its_decision(self):
+        text = self.text("auto-release.yml")
+        events = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(events, "  push:\n    branches: [main]\n")
+        self.assertIn("permissions:\n  contents: read\n\njobs:", text)
+        jobs = workflow_jobs(text)
+        self.assertEqual(list(jobs), ["dispatch"])
+        self.assertEqual((jobs["dispatch"]["if"], jobs["dispatch"]["needs"]), ("", []))
+        block = text.split("\n  dispatch:\n", 1)[1]
+        self.assertIn(
+            "    permissions:\n      contents: read\n      actions: write\n    runs-on:", block,
+        )
+        self.assertIn("    timeout-minutes: 5\n", block)
+        self.assertIn("persist-credentials: false", block)
+        self.assertNotIn("ref:", block)
+        self.assertIn("python3 tools/release.py auto-release", block)
+        self.assertIn("BEFORE_SHA: ${{ github.event.before }}", block)
+        self.assertIn("AFTER_SHA: ${{ github.sha }}", block)
+        for run in re.findall(r"(?ms)^        run: [|>]-?\n(.*?)(?=^      - |^  [\w-]+:\n|\Z)", text):
+            self.assertNotIn("${{", run)
+        for forbidden in ("contents: write", "secrets.", "git push", "concurrency:",
+                          "unittest", "release_publish.py"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, text)
+
     def test_stable_and_tag_pushes_start_no_workflow(self):
         workflow_root = REPO / ".github" / "workflows"
         for workflow in sorted({*workflow_root.glob("*.yml"), *workflow_root.glob("*.yaml")}):

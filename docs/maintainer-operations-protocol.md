@@ -18,7 +18,8 @@ Requirement and Delivery flows shipped to consuming projects.
 or commenting on a GitHub issue does not start an AI agent, create a branch, or
 consume an external model API. The repository contains no issue-event workflow,
 poller, scheduled issue scan, API credential requirement, or GitHub App for this
-protocol.
+protocol. The `Auto release` workflow is no such trigger: it reacts only to a
+push to `main`, which an approved merge makes, and starts no agent.
 
 The user starts work from an active maintainer session with an unambiguous
 instruction such as:
@@ -51,6 +52,9 @@ gate, select other issues or pull requests, approve a merge, or start a release.
 | Implement and prepare a PR | An explicit request to solve the selected issue or start the issue-solution protocol |
 | Merge a candidate PR | Explicit user approval identifying that PR, or an explicit release instruction whose selected set contains it |
 | Start and complete a stable release | An explicit user instruction bound to an unambiguous PR set |
+
+Merging a pull request that carries a release commit starts that release, so
+that merge needs release authority.
 
 Statements such as “is it ready?”, “continue”, or “prepare the PR” do not grant
 merge or release authority. If an instruction could select more than one issue
@@ -259,8 +263,12 @@ approval unless scope becomes ambiguous or a gate fails:
    complete tree equals `bump` replayed on that parent in a disposable clone
    that ignores ambient Git configuration, attributes, excludes, replacement
    refs and graph overlays. The commits before it keep the normal changeset
-   rules. Merge the PR when green.
-4. Release the merge commit with one command:
+   rules. Merge the PR when green; the merge starts the release.
+4. On the merge's push the `Auto release` workflow finds that `versions.json`
+   names a version no release tag holds yet and dispatches the `Release`
+   workflow for that merge commit. Every other push to `main` starts
+   nothing. The same release starts by hand with one command, which also
+   resumes a failed or interrupted run:
 
    ```console
    python3 tools/release.py ship --version X.Y.Z
@@ -311,9 +319,10 @@ version, unbounded or duplicate branch names, names outside the declared host
 prefixes, branches checked out in another worktree, divergent local protected
 branches, and any selected branch not proven merged into `origin/main`.
 
-With the validation of `main` already green, a release takes two to three
-minutes from `ship` to the immutable Release: verify about 20 seconds, stage
-about 15, the public smoke about 70 on a macOS runner and finalize about 15.
+A release takes about three minutes from the merge to the immutable Release.
+The verify job waits for `main`'s validation of the merge commit, which
+reuses the pull request's evidence in about a minute; stage then takes about
+15 seconds, the public smoke about 70 on a macOS runner and finalize about 15.
 The validation wait adds time only while `main`'s own run of that commit is
 still running.
 

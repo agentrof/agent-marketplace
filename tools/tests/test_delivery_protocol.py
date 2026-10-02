@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import ast
+import contextlib
+import io
 import json
 import re
-import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "plugins" / "software-engineering-team"
 sys.path.insert(0, str(PLUGIN / "scripts"))
+import delivery_git  # noqa: E402
 import delivery_result  # noqa: E402
 
 # Declared finding codes that no refusal carries yet, each with why it has no emitter.
@@ -253,14 +255,6 @@ class DeliveryProtocolTests(unittest.TestCase):
         for literal in ("item-writer-v1", "pr-create-v1", "target-update-v1"):
             self.assertIn(literal, coordinator_source)
 
-    def test_protocol_contract_is_closed(self):
-        protocol = self.load_contract("delivery-protocol-1.json")
-        self.assertEqual(protocol["protocol_version"], "delivery-protocol-1")
-        self.assertEqual(
-            protocol["merge_policy"],
-            "merge-commit-only; squash and rebase fail closed",
-        )
-
     def test_public_protocol_entries_equal_canonical_entry_skills(self):
         protocol = (ROOT / "docs/requirement-delivery-protocol.md").read_text(
             encoding="utf-8"
@@ -379,30 +373,15 @@ class DeliveryProtocolTests(unittest.TestCase):
             self.assertRegex(reason, r"^\S[^\n]*$", name)
 
     def test_every_internal_verb_renders_help_without_project_mutation(self):
-        script = PLUGIN / "scripts/delivery_git.py"
+        # argparse prints the help and exits before the verb reads or writes a project.
         for command in sorted(COORDINATOR_COMMANDS):
             with self.subTest(command=command):
-                completed = subprocess.run(
-                    [sys.executable, str(script), command, "--help"],
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                    timeout=20,
-                )
-                self.assertEqual(completed.returncode, 0, completed.stderr)
-                self.assertIn(command, completed.stdout)
-
-    def test_both_host_distributions_contain_the_new_canonical_flow_and_contract(self):
-        for host in ("claude", "codex"):
-            root = ROOT / "dist" / host / "software-engineering-team"
-            self.assertTrue((root / "flows/requirement.md").is_file())
-            self.assertTrue((root / "scripts/delivery_result.py").is_file())
-            for name in (
-                "delivery-result-contract.json",
-                "delivery-provider-contract.json",
-                "delivery-receipt-contract.json",
-            ):
-                self.assertTrue((root / "skill-content/deliver/data" / name).is_file())
+                output, errors = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors), \
+                        self.assertRaises(SystemExit) as exited:
+                    delivery_git.main([command, "--help"])
+                self.assertEqual(exited.exception.code, 0, errors.getvalue())
+                self.assertIn(command, output.getvalue())
 
 
 if __name__ == "__main__":

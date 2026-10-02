@@ -1303,6 +1303,13 @@ FALLBACK_STDLIB = frozenset(
 
 
 def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
+    """Runtime scripts import only the standard library and their package's scripts.
+
+    Imports are read from each script's syntax tree, those inside functions
+    included, so prose that starts with "from " or "import " is never one. A
+    relative import names a package script. A script that does not parse is
+    its own finding, since its imports cannot be read.
+    """
     stdlib = set(getattr(sys, "stdlib_module_names", ())) or FALLBACK_STDLIB
     scanned: set[Path] = set()
 
@@ -1313,15 +1320,23 @@ def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
             if script in scanned:
                 continue
             scanned.add(script)
-            for lineno, line in enumerate(read_text(script).splitlines(), start=1):
-                stripped = line.strip()
-                module = ""
-                if stripped.startswith("import "):
-                    module = stripped[7:].split()[0].split(".")[0].rstrip(",")
-                elif stripped.startswith("from "):
-                    module = stripped[5:].split()[0].split(".")[0]
-                if not module or module in ("", "."):
-                    continue
+            try:
+                # Bytes, so a coding cookie or BOM reads as Python reads the file.
+                parsed = ast.parse(script.read_bytes(), filename=script.name)
+            except (SyntaxError, ValueError) as error:  # ValueError: a NUL byte before Python 3.12
+                findings.append(Finding(
+                    "error", rel(tree, script), getattr(error, "lineno", None) or 1, "stdlib_only",
+                    f"script does not parse, so its imports cannot be read: {getattr(error, 'msg', error)}",
+                    "fix the syntax; runtime scripts run on every supported Python",
+                ))
+                continue
+            imports: set[tuple[int, str]] = set()
+            for node in ast.walk(parsed):
+                if isinstance(node, ast.Import):
+                    imports.update((node.lineno, alias.name.split(".")[0]) for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    imports.add((node.lineno, node.module.split(".")[0]))
+            for lineno, module in sorted(imports):
                 if module in stdlib or module in local:
                     continue
                 findings.append(Finding(

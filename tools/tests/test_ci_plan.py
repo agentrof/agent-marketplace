@@ -183,6 +183,30 @@ class CIPlanIntegrationTests(unittest.TestCase):
                 self.assertEqual(self.choose(event_name=event), ("full", ""))
         self.assertEqual(self.queries, [])
 
+    def test_the_plan_job_outputs_the_policy_python_every_later_job_sets_up(self):
+        original = ci_plan.run
+
+        def run(*arguments):
+            if arguments[1:3] == ("tools/ci_evidence.py", "timings"):
+                output = Path(arguments[arguments.index("--output") + 1])
+                output.write_text(json.dumps({"schema_version": 1, "durations": {}}), encoding="utf-8")
+                return ""
+            return original(*arguments)
+
+        outputs = self.output / "github-output"
+        with mock.patch.object(ci_plan, "run", side_effect=run), mock.patch.dict(
+                os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch"}), \
+                mock.patch.object(sys, "argv", ["ci_plan.py", "--output-directory", str(self.output / "plan"),
+                                                "--github-output", str(outputs)]):
+            os.environ.pop("GITHUB_EVENT_PATH", None)
+            os.environ.pop("GITHUB_STEP_SUMMARY", None)
+            self.assertEqual(ci_plan.main(), 0)
+        values = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines())
+        version = ci_tests.policy_at(self.root)["python"]
+        self.assertEqual((sorted(values), values["python"], values["has_tests"], values["mode"]),
+                         (["has_tests", "matrix", "mode", "python"], version, "true", "full"))
+        self.assertEqual({row["python"] for row in json.loads(values["matrix"])["include"]}, {version})
+
 
 if __name__ == "__main__":
     unittest.main()

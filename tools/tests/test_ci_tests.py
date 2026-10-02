@@ -473,10 +473,254 @@ class CITestPlannerTests(unittest.TestCase):
         ids, _hash = ci_tests.inventory(ci_tests.ROOT)
         required = {"tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected",
                     "tools.tests.test_delivery_git.DeliveryGitTests.test_receipt_lock_is_released_when_its_holder_dies"}
-        for name in ("windows-current", "windows-minimum"):
+        for name, shards in (("windows-current", 11), ("windows-minimum", 13)):
             lane = policy["lanes"][name]
-            self.assertEqual(lane["shards"], 8)
+            self.assertEqual((lane["shards"], lane["workers"]), (shards, 3))
             self.assertTrue(required <= set(ci_tests.group_ids(lane["groups"], policy, ids)))
+
+    def parallel_fixture(self, bodies=None, workers=3):
+        """Six tests that each record the process, scratch and tripwire they ran under."""
+        records = Path(tempfile.mkdtemp(prefix="ci-worker-records-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(records, ignore_errors=True))
+        names = "abcdef"
+        bodies = bodies or {}
+        text = ("import json, os, sys, tempfile, unittest\nfrom pathlib import Path\n"
+                f"RECORDS = Path({str(records)!r})\n"
+                "def record(name):\n"
+                "    (RECORDS / name).write_text(json.dumps({'pid': os.getpid(), 'temp': tempfile.gettempdir(),\n"
+                "        'environment': [os.environ.get(key) for key in ('TMPDIR', 'TMP', 'TEMP')],\n"
+                "        'claude': os.environ.get('CLAUDE_CODE_EXECPATH')}), encoding='utf-8')\n"
+                "class Tests(unittest.TestCase):\n")
+        for name in names:
+            text += f"    def test_{name}(self):\n        record({name!r})\n"
+            text += "".join(f"        {line}\n" for line in bodies.get(name, []))
+        self.test_file.write_text(text, encoding="utf-8")
+        self.ids = sorted(f"{self.module}.Tests.test_{name}" for name in names)
+        self.policy["lanes"]["local"].update(shards=1, workers=workers)
+        self.save_policy()
+        return records
+
+    def worker_of(self, plan, test_id):
+        lane = plan["lanes"]["local"]
+        return lane["worker_assignments"][0][lane["shards"][0].index(test_id)]
+
+    def test_parallel_shard_runs_each_test_once_in_isolated_workers(self):
+        records = self.parallel_fixture()
+        plan = self.plan()
+        lane = plan["lanes"]["local"]
+        self.assertEqual((lane["workers"], sorted(set(lane["worker_assignments"][0]))), (3, [0, 1, 2]))
+        path = self.root / "report.json"
+        with mock.patch("sys.stdout", io.StringIO()) as output:
+            self.assertEqual(ci_tests.run_shard(self.root, plan, "local", 0, path, workers=3), 0)
+        self.assertIn("[worker 2] ", output.getvalue())
+        report = ci_tests.read_json(path)
+        self.assertEqual(report["status"], "complete")
+        self.assertEqual([row["id"] for row in report["tests"]], self.ids)
+        self.assertEqual([row["worker"] for row in report["workers"]], [0, 1, 2])
+        self.assertEqual([row["tests"] for row in report["workers"]],
+                         [lane["worker_assignments"][0].count(index) for index in range(3)])
+        self.assertEqual(set(ci_tests.verify_reports(plan, [report])["durations"]["local"]), set(self.ids))
+        seen = {name: json.loads((records / name).read_text(encoding="utf-8")) for name in "abcdef"}
+        by_worker = {}
+        for name, value in seen.items():
+            by_worker.setdefault(self.worker_of(plan, f"{self.module}.Tests.test_{name}"), []).append(value)
+        self.assertEqual(sorted(by_worker), [0, 1, 2])
+        temps, tripwires = set(), set()
+        for values in by_worker.values():
+            self.assertEqual(len({value["pid"] for value in values}), 1)
+            self.assertEqual(len({value["temp"] for value in values}), 1)
+            value = values[0]
+            self.assertEqual(value["environment"], [value["temp"]] * 3)
+            self.assertNotIn(self.root.resolve(), Path(value["temp"]).resolve().parents)
+            self.assertIn(Path(value["temp"]).resolve(), Path(value["claude"]).resolve().parents)
+            temps.add(value["temp"])
+            tripwires.add(value["claude"])
+        self.assertEqual((len(temps), len(tripwires)), (3, 3))
+        self.assertFalse(any(Path(temp).exists() for temp in temps))
+
+    def test_a_failed_or_crashed_worker_fails_the_shard(self):
+        for case in ("failure", "crash"):
+            with self.subTest(case=case):
+                sys.modules.pop(self.module, None)
+                body = ["self.fail('broken')"] if case == "failure" else ["os._exit(3)"]
+                self.parallel_fixture({"f": body})
+                plan = self.plan()
+                broken = self.worker_of(plan, f"{self.module}.Tests.test_f")
+                path = self.root / "report.json"
+                with mock.patch("sys.stdout", io.StringIO()):
+                    self.assertEqual(ci_tests.run_shard(self.root, plan, "local", 0, path, workers=3), 1)
+                report = ci_tests.read_json(path)
+                self.assertEqual(report["status"], "failed")
+                rows = {row["id"].rsplit(".", 1)[-1]: row for row in report["tests"]}
+                if case == "failure":
+                    self.assertEqual(report["error"], f"worker {broken} failed (exit 1)")
+                    self.assertEqual(rows["test_f"]["outcome"], "failure")
+                    self.assertEqual(len(rows), 6)
+                else:
+                    self.assertNotIn("test_f", rows)
+                    self.assertEqual(report["error"], "one or more planned tests did not finish")
+                    self.assertNotEqual(report["workers"][broken]["status"], "complete")
+                self.assertEqual(sum(row["status"] == "complete" for row in report["workers"]), 2)
+                with self.assertRaises(ci_tests.CIError):
+                    ci_tests.verify_reports(plan, [report])
+
+    @unittest.skipIf(os.name != "posix", "the stand-in host binary is a POSIX shell script")
+    def test_each_worker_keeps_its_own_host_tripwire(self):
+        own = Path(tempfile.mkdtemp(prefix="ci-own-hosts-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(own, ignore_errors=True))
+        (own / "claude").write_text(f"#!/bin/sh\necho \"$@\" >> {own / 'calls.log'}\nexit 0\n", encoding="utf-8")
+        (own / "claude").chmod(0o755)
+        probe = ["import subprocess", "subprocess.run([os.environ['CLAUDE_CODE_EXECPATH'], '--version'],"
+                 " capture_output=True)"]
+        self.parallel_fixture({"a": probe, "f": probe}, workers=2)
+        plan = self.plan()
+        path = self.root / "report.json"
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_EXECPATH": str(own / "claude")}), \
+                mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(ci_tests.run_shard(self.root, plan, "local", 0, path, workers=2), 1)
+            self.assertEqual(os.environ["CLAUDE_CODE_EXECPATH"], str(own / "claude"))
+        rows = {row["id"].rsplit(".", 1)[-1]: row for row in ci_tests.read_json(path)["tests"]}
+        self.assertEqual({name for name, row in rows.items() if row["outcome"] != "success"}, {"test_a", "test_f"})
+        self.assertIn("claude --version", rows["test_a"]["detail"])
+        self.assertFalse((own / "calls.log").exists())
+
+    def test_fewer_cpus_fold_planned_workers_in_a_fixed_order(self):
+        lane = {"shards": [["t0", "t1", "t2", "t3", "t4"]], "worker_assignments": [[0, 1, 2, 3, 0]]}
+        self.assertEqual(ci_tests.worker_groups(lane, 0, 2), [["t0", "t2", "t4"], ["t1", "t3"]])
+        self.assertEqual(ci_tests.worker_groups(lane, 0, 8), [["t0", "t4"], ["t1"], ["t2"], ["t3"]])
+        with mock.patch.object(ci_tests, "available_cpus", return_value=1):
+            self.assertEqual(ci_tests.worker_groups(lane, 0), [["t0", "t1", "t2", "t3", "t4"]])
+        with self.assertRaises(ci_tests.CIError):
+            ci_tests.worker_groups(lane, 0, 0)
+
+    def test_worker_partition_balances_processes_and_never_leaves_one_empty(self):
+        ids = [f"tools.tests.test_{module}.Tests.test_{index}" for module in "ab" for index in range(5)]
+        durations = {ids[0]: 9.0, ids[5]: 8.0}
+        groups = ci_tests.worker_partition(ids, 2, 3, durations, self.policy)
+        self.assertEqual(len(groups), 2)
+        self.assertTrue(all(1 <= len(group) <= 3 and all(group) for group in groups))
+        self.assertEqual(sorted(test for group in groups for tests in group for test in tests), ids)
+        self.assertEqual(groups, ci_tests.worker_partition(list(reversed(ids)), 2, 3, durations, self.policy))
+        heavy = [tests for group in groups for tests in group if ids[0] in tests or ids[5] in tests]
+        self.assertEqual([len(tests) for tests in heavy], [1, 1])
+        self.assertEqual(ci_tests.worker_partition(ids[:2], 4, 3, {}, self.policy), [[[ids[0]]], [[ids[1]]]])
+
+    def test_tampered_worker_partitions_and_reports_are_refused(self):
+        self.parallel_fixture()
+        original = self.plan()
+        for change in ("gap", "excess", "length", "type", "count"):
+            with self.subTest(change=change):
+                plan = copy.deepcopy(original)
+                lane = plan["lanes"]["local"]
+                owners = lane["worker_assignments"][0]
+                if change == "gap":
+                    owners[:] = [0 if owner == 1 else owner for owner in owners]
+                elif change == "excess":
+                    owners[0] = 3
+                elif change == "length":
+                    owners.pop()
+                elif change == "type":
+                    owners[0] = "0"
+                else:
+                    lane["workers"] = 2
+                self.rehash(plan)
+                with self.assertRaises(ci_tests.CIError):
+                    ci_tests.validate_plan(plan, self.root)
+        groups = ci_tests.worker_groups(original["lanes"]["local"], 0, 3)
+        runtime = ci_tests.runtime_identity()
+        directory = Path(tempfile.mkdtemp(prefix="ci-worker-reports-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(directory, ignore_errors=True))
+        for change in ("foreign", "plan", "runtime", "missing"):
+            with self.subTest(change=change):
+                paths = []
+                for index, tests in enumerate(groups):
+                    value = {"plan_hash": original["plan_hash"], "lane": "local", "shard": 0, "worker": index,
+                             "runtime": runtime, "status": "complete",
+                             "tests": [{"id": test, "outcome": "success", "seconds": 0.1} for test in tests]}
+                    if index == 1 and change == "foreign":
+                        value["tests"].append(dict(value["tests"][0], id=groups[0][0]))
+                    elif index == 1 and change == "plan":
+                        value["plan_hash"] = "other"
+                    elif index == 1 and change == "runtime":
+                        value["runtime"] = dict(runtime, python_version="0.0.0")
+                    path = directory / f"{change}-{index}.json"
+                    if not (index == 1 and change == "missing"):
+                        ci_tests.write_json(path, value)
+                    paths.append(path)
+                report = {}
+                passed, problems = ci_tests.merge_workers(original, "local", 0, groups, report, runtime,
+                                                          [0, 0, 0], paths)
+                self.assertFalse(passed)
+                self.assertEqual(problems, ["worker 1 left no valid report (exit 0)"])
+                self.assertEqual(report["workers"][1]["status"], "missing")
+
+    def test_policy_worker_counts_are_bounded(self):
+        for workers in (0, 17, True, "2"):
+            with self.subTest(workers=workers):
+                self.policy["lanes"]["local"]["workers"] = workers
+                self.save_policy()
+                with self.assertRaisesRegex(ci_tests.CIError, "worker count"):
+                    ci_tests.policy_at(self.root)
+
+    def test_a_pinned_interpreter_is_windows_only_exact_and_planned(self):
+        pin = {"source": "nuget", "package": "python", "version": "3.9.13", "sha512": "a" * 128}
+        lane = {"os": "windows-latest", "python": "3.9"}
+        self.assertTrue(ci_tests.valid_interpreter(pin, lane))
+        for change in ({"os": "ubuntu-latest"}, {"python": "3.14"}):
+            self.assertFalse(ci_tests.valid_interpreter(pin, dict(lane, **change)))
+        for change in ({"source": "url"}, {"version": "3.9"}, {"sha512": "A" * 128}, {"package": "../python"},
+                       {"extra": True}):
+            self.assertFalse(ci_tests.valid_interpreter(dict(pin, **change), lane))
+        self.policy["lanes"]["local"]["interpreter"] = pin
+        self.save_policy()
+        if platform.system() != "Windows":
+            with self.assertRaisesRegex(ci_tests.CIError, "pinned interpreter"):
+                ci_tests.policy_at(self.root)
+            del self.policy["lanes"]["local"]["interpreter"]
+            expected = ""
+        else:
+            self.policy["lanes"]["local"]["interpreter"] = dict(pin, version=platform.python_version())
+            expected = platform.python_version()
+        self.save_policy()
+        rows = self.plan()["matrix"]["include"]
+        self.assertEqual({row["interpreter_version"] for row in rows}, {expected})
+
+    def test_measured_history_outweighs_policy_estimates_which_outweigh_defaults(self):
+        runner = self.policy["lanes"]["local"]["os"]
+        self.policy["test_seconds"] = {runner: {self.ids[0]: 40.0}}
+        self.policy["lanes"]["local"]["workers"] = 1
+        self.save_policy()
+        estimated = self.plan()["lanes"]["local"]
+        self.assertEqual(sorted(estimated["estimated_shard_seconds"]), [2.0, 40.0])
+        self.assertEqual(estimated["measured_weights"], 0)
+        history = {"schema_version": 1, "durations": {"local": {self.ids[0]: 0.5, self.ids[1]: 3.0}}}
+        measured = self.plan(timings=history)["lanes"]["local"]
+        self.assertEqual(sorted(measured["estimated_shard_seconds"]), [1.5, 3.0])
+        self.assertEqual(measured["measured_weights"], 2)
+        for invalid in ({"self-hosted": {}}, {runner: {self.ids[0]: 0}}, {runner: {self.ids[0]: float("inf")}},
+                        {runner: []}):
+            with self.subTest(invalid=invalid):
+                self.policy["test_seconds"] = invalid
+                self.save_policy()
+                with self.assertRaisesRegex(ci_tests.CIError, "estimates"):
+                    ci_tests.policy_at(self.root)
+
+    def test_estimates_keep_the_slowest_lane_per_system_above_the_threshold(self):
+        runner = self.policy["lanes"]["local"]["os"]
+        self.policy["lanes"]["other"] = dict(self.policy["lanes"]["local"])
+        self.save_policy()
+        payload = {"schema_version": 1, "durations": {
+            "local": {self.ids[0]: 6.04, self.ids[1]: 4.9, self.ids[2]: 7.0},
+            "other": {self.ids[0]: 8.26, self.ids[2]: 2.0},
+            "retired": {self.ids[1]: 50.0}}}
+        self.assertEqual(ci_tests.refresh_estimates(self.root, payload), {runner: 2})
+        policy = ci_tests.policy_at(self.root)
+        self.assertEqual(policy["test_seconds"], {runner: {self.ids[0]: 8.3, self.ids[2]: 7.0}})
+        self.assertEqual({key: value for key, value in policy.items() if key != "test_seconds"}, self.policy)
+        for payload, threshold in ((dict(payload, schema_version=2), 5.0), (payload, 0.0),
+                                   ({"schema_version": 1, "durations": {"local": {self.ids[0]: -1}}}, 5.0)):
+            with self.subTest(payload=payload, threshold=threshold), self.assertRaises(ci_tests.CIError):
+                ci_tests.refresh_estimates(self.root, payload, threshold)
 
     def test_fixture_weights_keep_every_test_and_expose_estimates(self):
         ids = ["tools.tests.a.Tests.test_one", "tools.tests.a.Tests.test_two",

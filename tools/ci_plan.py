@@ -66,11 +66,14 @@ def main() -> int:
             output.write(f"## CI scope\n\nMode: `{plan['mode']}`\n\n")
             output.write(f"{plan['selection_reason']}\n\n")
             output.write(f"Selected test cases: {len(plan['selected_ids'])}. ")
-            output.write(f"Parallel groups: {sum(len(lane['shards']) for lane in plan['lanes'].values())}.\n")
-            output.write("\n| Lane | Measured weights | Total tests | Longest estimated shard (seconds) |\n")
-            output.write("| --- | ---: | ---: | ---: |\n")
+            output.write(f"Test jobs: {sum(len(lane['shards']) for lane in plan['lanes'].values())}, "
+                         f"worker processes: {sum(len(set(owners)) for lane in plan['lanes'].values() for owners in lane['worker_assignments'])}.\n")
+            output.write("\n| Lane | Measured weights | Total tests | Jobs | Workers per job | "
+                         "Longest estimated worker (seconds) |\n")
+            output.write("| --- | ---: | ---: | ---: | ---: | ---: |\n")
             for name, lane in plan['lanes'].items():
                 output.write(f"| {name} | {lane['measured_weights']} | {len(lane['selected_ids'])} | "
+                             f"{len(lane['shards'])} | {lane['workers']} | "
                              f"{max(lane['estimated_shard_seconds']):.1f} |\n")
             for source in plan['timing_provenance']['sources']:
                 output.write(f"\nTiming source: run {source['run_id']}, attempt {source['run_attempt']}, "

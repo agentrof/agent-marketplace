@@ -381,6 +381,20 @@ class LocalValidationTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ci_tests.CIError):
                 ci_local.verify_reports(plan, reports)
 
+    def test_workers_are_balanced_with_the_full_suite_lanes_measured_estimates(self):
+        self.test_path.write_text('import unittest\nclass Example(unittest.TestCase):\n'
+                                  '    def test_one(self): pass\n    def test_two(self): pass\n'
+                                  '    def test_three(self): pass\n')
+        self.git('add', '--all')
+        heavy = 'tools.tests.test_example.Example.test_one'
+        self.assertEqual(ci_local.make_plan(self.root)['shards'][0], [heavy, 'tools.tests.test_example.Example.test_two'])
+        self.policy['lanes'] = {'full': {'os': 'ubuntu-latest', 'python': '3.14', 'shards': 1, 'groups': ['all']}}
+        self.policy['test_seconds'] = {'ubuntu-latest': {heavy: 50.0}}
+        ci_tests.write_json(self.root / ci_tests.POLICY_PATH, self.policy)
+        self.git('add', '--all')
+        self.assertEqual(ci_local.make_plan(self.root)['shards'], [[heavy], [
+            'tools.tests.test_example.Example.test_three', 'tools.tests.test_example.Example.test_two']])
+
     def test_worker_policy_rejects_oversubscription(self):
         for jobs in (0, 5, True):
             with self.assertRaises(ci_tests.CIError):

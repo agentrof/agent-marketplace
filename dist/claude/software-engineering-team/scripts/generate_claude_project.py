@@ -503,29 +503,18 @@ def main() -> int:
         listing = functools.lru_cache(maxsize=None)(host_models.list_models)
     try:
         choices = project_instructions.parse_choices(args.choice)
-        if args.action == "inspect":
-            team = project_instructions.plugin_name(plugin_root)
-            surfaces = project_instructions.owned_portable_surfaces(
-                project, plugin_root, team, args.workspace
-            )
-            report: dict = {"tier_map": {}, "roles": {}, "model_check": {"status": "not_run"},
-                            "model_fallbacks": {}, "model_notes": []}
-            kept: list[str] = []
-            if args.scope in {"all", "local"}:
-                rendered, report = render_agents(plugin_root, project, team, args.workspace)
-                _changes, current, _target, kept = plan_agents(project, team, rendered)
-                surfaces.update(current)
-            result = {
-                "changes": [],
-                "choice_requests": [],
-                "current_surfaces": surfaces,
-                "target_surfaces": surfaces,
-                "kept": kept,
-                **report,
-            }
-            written: list[Path] = []
-        else:
-            result = preview(
+        result = preview(
+            project,
+            plugin_root,
+            args.workspace,
+            choices=choices,
+            seed_user_files=args.seed_user_files,
+            scope=args.scope,
+            model_listing=listing,
+        )
+        written: list[Path] = []
+        if args.action == "apply" and not result["choice_requests"]:
+            written, created = materialize(
                 project,
                 plugin_root,
                 args.workspace,
@@ -534,17 +523,6 @@ def main() -> int:
                 scope=args.scope,
                 model_listing=listing,
             )
-            written = []
-            if args.action == "apply" and not result["choice_requests"]:
-                written, created = materialize(
-                    project,
-                    plugin_root,
-                    args.workspace,
-                    choices=choices,
-                    seed_user_files=args.seed_user_files,
-                    scope=args.scope,
-                    model_listing=listing,
-                )
     except ValueError as exc:
         raise SystemExit(f"claude-project: {exc}") from exc
     if args.action == "apply":
@@ -556,7 +534,7 @@ def main() -> int:
         "changes": sorted(
             path.relative_to(project).as_posix()
             for path in result["changes"]
-        ) if isinstance(result.get("changes"), dict) else result["changes"],
+        ),
         "choice_requests": result["choice_requests"],
         "current_surfaces": result["current_surfaces"],
         "target_surfaces": result["target_surfaces"],

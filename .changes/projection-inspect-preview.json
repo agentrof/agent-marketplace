@@ -1,0 +1,6 @@
+{
+  "summary": "The Claude Code host projection's `inspect` now shows what `apply` will do. Setup step 4 runs `generate_claude_project.py inspect` to find and resolve every preserve or discard choice for a user-owned instruction companion, yet `inspect` reported only the surfaces the project already held: `changes` and `choice_requests` were always empty and `target_surfaces` equaled `current_surfaces`, so a hand-written `CLAUDE.md` showed no open choice and none of the instruction roots or role agents that `apply` then wrote were listed. `inspect` now builds the plan `check` builds, with the same `--choice`, `--seed-user-files` and `--scope`, and reports it the same way: the planned changes, the open choice requests and the target surfaces, and it stops where `check` stops, such as on a root another team owns. It still reads no model list and writes nothing, and `apply` still refuses to write while a choice is open. The Codex projection's `inspect` already built this plan.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

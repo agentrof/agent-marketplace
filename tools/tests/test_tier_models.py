@@ -1148,7 +1148,7 @@ class VaultHookTests(unittest.TestCase):
 
         def hook(mode: str, event: str) -> subprocess.CompletedProcess:
             return subprocess.run(
-                [sys.executable, str(package / "scripts" / "vault_hook.py"), mode],
+                [sys.executable, str(package / "scripts" / "hook_launcher.py"), "scripts/vault_hook.py", mode],
                 input=json.dumps({**payload, "hook_event_name": event}), capture_output=True,
                 text=True, check=False, timeout=120, env=env)
 
@@ -1536,7 +1536,7 @@ class RenderedAgentStampTests(unittest.TestCase):
         event = {"hook_event_name": "SessionStart", "source": source, "session_id": "stamp",
                  "cwd": str(self.project.root)}
         result = subprocess.run(
-            [sys.executable, str(package / "scripts" / "team_guard.py"), "register"],
+            [sys.executable, str(package / "scripts" / "hook_launcher.py"), "scripts/team_guard.py", "register"],
             input=json.dumps(event) if stdin is None else stdin, capture_output=True, text=True,
             check=False, timeout=60, env={**env, "PYTHONDONTWRITEBYTECODE": "1"})
         self.assertEqual((result.returncode, result.stderr), (0, ""))
@@ -1691,8 +1691,8 @@ class CodexRoleStampTests(unittest.TestCase):
         event = {"hook_event_name": "SessionStart", "source": source, "session_id": "stamp",
                  "cwd": str(cwd or self.project.root)}
         result = subprocess.run(
-            [sys.executable, str((package or self.package) / "scripts" / "team_guard.py"),
-             "register"], input=json.dumps(event), capture_output=True, text=True,
+            [sys.executable, str((package or self.package) / "scripts" / "hook_launcher.py"),
+             "scripts/team_guard.py", "register"], input=json.dumps(event), capture_output=True, text=True,
             check=False, timeout=60, env={**env, "PYTHONDONTWRITEBYTECODE": "1"})
         self.assertEqual((result.returncode, result.stderr), (0, ""))
         return json.loads(result.stdout)

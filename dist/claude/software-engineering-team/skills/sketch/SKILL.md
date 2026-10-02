@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Sketch
 
-Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/sketch/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before changing a project, confirm the workspace config and local docs contract are present; setup is the only entry that may create them.
+Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/sketch/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before changing a project, confirm the workspace config and local docs contract are present; setup is the only entry that may create them. When the session context reports `AGENT_MARKETPLACE_PYTHON: unsupported`, stop and tell the user the reason and the fix it gives.

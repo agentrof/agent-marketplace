@@ -34,7 +34,7 @@ import git_fixture  # noqa: E402
 import validate  # noqa: E402
 
 PREFIX = f"{fixtures.PLUGIN}:"
-HOOK = "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/model_fallback.py"
+HOOK = "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/model_fallback.py"
 # A role is spawned again only when its failed run changed nothing, judged by
 # the content its task manifest binds: `git status` reads the same after a
 # further edit to an already modified file.
@@ -143,7 +143,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         env = {key: value for key, value in os.environ.items()
                if key != "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"}
         return subprocess.run(
-            [sys.executable, str(self.package / "scripts/model_fallback.py")],
+            [sys.executable, str(self.package / "scripts/hook_launcher.py"), "scripts/model_fallback.py"],
             input=payload if isinstance(payload, str) else json.dumps(payload),
             capture_output=True, text=True, check=False, timeout=60,
             env={**env, "PYTHONDONTWRITEBYTECODE": "1", **environment})
@@ -318,7 +318,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         env = {key: value for key, value in os.environ.items()
                if key != "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"}
         result = subprocess.run(
-            [sys.executable, str(self.package / "scripts/model_fallback.py")],
+            [sys.executable, str(self.package / "scripts/hook_launcher.py"), "scripts/model_fallback.py"],
             input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             capture_output=True, check=False, timeout=60,
             env={**env, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "ascii"})
@@ -484,7 +484,7 @@ class RenderedRoleFallbackTests(unittest.TestCase):
         if project:
             env["CLAUDE_PROJECT_DIR"] = str(self.project)
         result = subprocess.run(
-            [sys.executable, str(self.package / "scripts/model_fallback.py")],
+            [sys.executable, str(self.package / "scripts/hook_launcher.py"), "scripts/model_fallback.py"],
             input=json.dumps(payload), capture_output=True, text=True, check=False,
             timeout=60, env={**env, "PYTHONDONTWRITEBYTECODE": "1"})
         self.assertEqual((result.returncode, result.stderr), (0, ""))
@@ -1029,7 +1029,7 @@ class ClaudeModelCheckTests(unittest.TestCase):
         self.assertEqual(len([call for call in self.claude.calls()
                               if call["argv"] != ["--version"]]), 1)
         guard = subprocess.run(
-            [sys.executable, str(self.package / "scripts/team_guard.py"), "register"],
+            [sys.executable, str(self.package / "scripts/hook_launcher.py"), "scripts/team_guard.py", "register"],
             input=json.dumps({"hook_event_name": "SessionStart", "source": "startup",
                               "session_id": "fallback", "cwd": str(self.project)}),
             capture_output=True, text=True, check=False, timeout=60,

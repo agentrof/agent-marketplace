@@ -42,7 +42,8 @@ class SingleTeamDistributionTests(unittest.TestCase):
                     / "scripts" / "team_guard.py"
                 )
                 result = subprocess.run(
-                    [sys.executable, str(script), "register"],
+                    [sys.executable, str(script.with_name("hook_launcher.py")),
+                     "scripts/team_guard.py", "register"],
                     stdin=subprocess.DEVNULL, capture_output=True, text=True,
                     check=False,
                 )

@@ -7,4 +7,4 @@ description: Prepare a stateless GitHub issue in chat and file the approved payl
 
 # Issue Report
 
-Read `../../host-contract.md` and `../../skill-content/issue-report/SKILL.md` completely, resolving both paths relative to this file. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter.
+Read `../../host-contract.md` and `../../skill-content/issue-report/SKILL.md` completely, resolving both paths relative to this file. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. When the session context reports `AGENT_MARKETPLACE_PYTHON: unsupported`, stop and tell the user the reason and the fix it gives.

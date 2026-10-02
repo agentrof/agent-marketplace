@@ -234,8 +234,9 @@ with the pin. A `scope_approved` Delivery reads every switch a Delivery flow
 owns. An `execution_approved` one runs only its `delivery-execution` flow
 until a plan revision, whose approval pins the policy anew, so it reads only
 the switches that flow owns: `code_review_panel`, `execution_planning`,
-`implementation_schedule`, `owner_gates`, `pre_handoff_regression` and
-`review_loop`. A switch no Delivery flow owns, such as
+`implementation_schedule`, `own_target_reuse`, `owner_gates`,
+`pre_handoff_regression`, `qa_gate_order` and `review_loop`. A switch no
+Delivery flow owns, such as
 `mechanical_pass_tier`, is no part of the pin: inside a Delivery it is read
 from the current policy. While a new execution approval can still re-pin the
 Delivery, that is while it is `scope_approved` or `execution_approved`, a
@@ -511,6 +512,28 @@ every earlier target that prefixes or lies under one for QA, records the reuse
 in the run's identity, and evidence approval checks it as recorded and writes
 it into the Item's verification record; when a binding differs, every suite
 runs.
+
+Process switch `own_target_reuse` decides whether that reuse covers the Item's
+own Test Plan targets too. At `off`, the default, QA's final test run runs
+them itself. At `spot_run`, QA names at least one own target in a spot-run
+selection, `run --kind test --spot-run-file <file>`, and the run takes every
+other own target from the accepted run as well, apart from the own targets
+that are, prefix or lie under a spot-run target, or under such a target in
+turn, which the approved test command runs with every target the run did not
+cover. The run's identity records the reused own targets and the spot-run
+targets, evidence approval checks that the Delivery runs `spot_run`, that both
+sets are disjoint automation targets of the Item's own Test Plan and that no
+reused id overlaps a target the command had to run, and
+`approve-item-evidence` writes both sets into the Item's verification record.
+Without a pre-handoff run, at `pre_handoff_regression` `off`, nothing is
+reused.
+
+Process switch `qa_gate_order` decides when QA starts its first test command
+of a round. At `plan_first`, the default, QA plans and maps every check before
+it executes anything. At `gate_first`, QA starts the command through the
+host's background command mechanism, then plans, maps and drafts its result
+while it runs, and reads its output only once the plan and the coverage matrix
+are written.
 
 Process switch `execution_planning` decides how the facts a plan needs are
 written and reviewed. At `per_document`, the default, each Operation contract

@@ -433,6 +433,7 @@
         "tools.tests.test_performance_contracts.PerformanceContractsTests.test_execution_seeds_preserve_draft_remote_and_isolate_each_copy",
         "tools.tests.test_performance_contracts.PerformanceContractsTests.test_snapshot_rejects_links_before_descending",
         "tools.tests.test_pre_handoff_regression.CandidateTests.test_a_regression_in_an_earlier_story_blocks_the_freeze_until_its_repair_passes",
+        "tools.tests.test_pre_handoff_regression.CandidateTests.test_at_spot_run_qa_reuses_every_own_target_but_the_ones_it_spot_runs",
         "tools.tests.test_pre_handoff_regression.CandidateTests.test_qa_reuses_the_pre_handoff_run_for_the_earlier_stories_on_the_frozen_tree",
         "tools.tests.test_pre_handoff_regression.CandidateTests.test_the_run_holds_the_environment_lock_and_reads_only_the_committed_candidate",
         "tools.tests.test_pre_handoff_regression.CandidateTests.test_while_its_command_runs_the_worktree_takes_writes_and_the_environment_stays_held",

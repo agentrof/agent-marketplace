@@ -518,8 +518,10 @@ RELEASED_DEFAULTS = {
     "execution_planning": "per_document",
     "implementation_schedule": "sequential_v1",
     "mechanical_pass_tier": "role_tier",
+    "own_target_reuse": "off",
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
+    "qa_gate_order": "plan_first",
     "review_loop": "current",
     "review_manifest_scope": "transitive",
     "review_panels": "single_reader",
@@ -631,6 +633,19 @@ SAFETY_RULES = {
         HOSTS["claude"]: ("`AskUserQuestion` takes at most four questions per call",),
         HOSTS["codex"]: ("`request_user_input` takes at most three questions per call",),
     },
+    "own_target_reuse": {
+        f"{SKILLS}/deliver/references/switch-own_target_reuse-spot_run.md": (
+            "At `off` of that switch no such run exists and nothing is reused",
+            "QA runs itself only the own targets it spot-runs and those the runner keeps with them",
+            "names a target that is no `automation_target` of an `automation: required` scenario in the Item's own"
+            " Test Plan",
+            "It refuses the option with `--fresh`, which reuses nothing, with any kind but `test` and at"
+            " `own_target_reuse` `off`",
+            "no reused id is, prefixes or lies under a target the command had to run",
+            "the audit then reports them as NO-TEST and fails, which is a finding for the Verification Contract",
+            "a skip, a retry or a warning it cannot explain is a finding",
+        ),
+    },
     "pre_handoff_regression": {
         f"{SKILLS}/deliver/references/switch-pre_handoff_regression-touched_suites.md": (
             "A failing run is repaired before the freeze",
@@ -641,6 +656,21 @@ SAFETY_RULES = {
             "No other command receives the variable, an inherited one included",
             "which QA always runs itself",
             "Evidence approval checks the reuse as recorded",
+            "Like QA's first gate below, the run reports every failing group of what it runs where the approved"
+            " command allows it, so one repair queue holds every failure, and a group that fails to collect is a"
+            " failed group, never one left out",
+            "A command that stops at its first failing group or drops a group it could not collect is a finding for"
+            " the Verification Contract",
+            "A group that fails to collect is a failed group: name it in a finding with its collection error, never"
+            " leave it out of the result",
+        ),
+    },
+    "qa_gate_order": {
+        f"{SKILLS}/qa-verification/references/switch-qa_gate_order-gate_first.md": (
+            "at the default, `plan_first`, QA plans and maps every check before it executes anything",
+            "start no other `run` or `environment` command until it ends",
+            "Read the command's output only once the plan and the matrix are written",
+            "no check is planned, or left out, because of what the run showed",
         ),
     },
     "review_loop": {
@@ -723,12 +753,16 @@ POLICY_RULES = {
     f"{SKILLS}/configure/references/config-contract.md": (
         "the config stays closed, and the Process Policy is the one place for process choices",),
 }
-# Steps whose order is the rule: the pre-handoff run sits between the freeze and the readers.
+# Steps whose order is the rule: the pre-handoff run and the own-target reuse sit
+# between the freeze and the readers, and gate-first follows QA's approved commands.
 ORDERED_STEPS = {
     f"{FLOWS}/delivery-execution.md": (
         "freeze --delivery DLV-### --story <story>",
         "Switch `pre_handoff_regression`",
+        "Switch `own_target_reuse`: at `spot_run`",
         "Invoke Code Review and QA independently",
+        "QA uses `run --kind test|mutation|dependency_audit`",
+        "Switch `qa_gate_order`: at `gate_first`",
     ),
 }
 
@@ -803,7 +837,8 @@ class MeasuredBaselineTests(unittest.TestCase):
                 with self.subTest(switch=name):
                     self.assertTrue(evidence.startswith(" in one measured project"), evidence)
         self.assertEqual(cited, ["code_review_panel", "delivery_path", "execution_planning",
-                                 "owner_gates", "pre_handoff_regression"])
+                                 "own_target_reuse", "owner_gates", "pre_handoff_regression",
+                                 "qa_gate_order"])
 
 
 if __name__ == "__main__":

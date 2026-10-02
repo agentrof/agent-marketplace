@@ -284,6 +284,46 @@
         "unit": "At least 3 Deliveries run with touched_suites.",
         "threshold": "Zero blocking findings that are regressions in an earlier story's suite after the first review round of any Item, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "own_target_reuse": {
+      "summary": "Whether QA's final test run on a frozen candidate runs every own Test Plan target of the Item itself, or takes them, but for the ones QA spot-runs, from the pre-handoff regression run that passed on the same tree.",
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "QA's final test run runs every own Test Plan target of the Item itself; at pre_handoff_regression touched_suites it takes only the earlier stories' targets from the accepted run. Today's behaviour and the baseline the reuse is measured against: in one measured project, QA's final test run took 227 minutes, 163 of them on the story's own cases, and about 94% of the run repeated tests the implementation had run on the identical tree in the hours before the handoff."
+        },
+        {
+          "id": "spot_run",
+          "tradeoffs": "Where the freeze accepted a pre-handoff run at pre_handoff_regression touched_suites, QA's final test run also takes the Item's own Test Plan targets from it, under the bindings the earlier stories' targets need: the frozen tree, the selection and approved command derived for it, the declared environment of QA's run and the age final evidence may have. QA names at least one own target in a spot-run selection, and the approved test command runs those, every own target that overlaps them and every target the run did not cover. QA's gate stops repeating the new story's cases the run covered, while a flaky own test outside the spot run passes on one green run, QA's coverage audit needs the accepted run's results, so the approved commands must keep each run's JUnit apart, and at pre_handoff_regression off nothing is reused."
+        }
+      ],
+      "default": "off",
+      "metric": "Per Delivery: the wall clock of QA's final test run, the own targets it reused and spot-ran per Item, and every defect found after a passing QA gate, in a later review round, in the Delivery Review or after merge, in an own target that gate reused.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with spot_run, each with pre_handoff_regression at touched_suites.",
+        "threshold": "No defect found after a passing QA gate in an own target that gate reused, and a median wall clock of QA's final test run at most half of the project's final test runs at off for stories of a similar suite, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "qa_gate_order": {
+      "summary": "Whether QA plans and maps every check before it starts its first test command of a round, or starts that command first and plans, maps and drafts its result while the command works.",
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "plan_first",
+          "tradeoffs": "QA derives its partitions and coverage matrix before it executes anything, then runs its gate and writes its result once the gate has ended. Today's behaviour and the baseline the order is measured against: in one measured project, QA spent 12 to 18 minutes per round writing its result after a gate of several hours, through most of which the model sat idle."
+        },
+        {
+          "id": "gate_first",
+          "tradeoffs": "QA starts its first test command of the round through the host's background command mechanism, then derives its partitions, maps its coverage matrix and drafts its verification record while the command works, and reads the command's output only once the plan and the matrix are written, so the plan-first rule keeps its intent. Most of QA's own work overlaps the gate, while any input the command needs, such as a spot-run selection, must be written before it starts, and the mutation, dependency audit and runtime commands still wait for it, since the runner runs one command at a time on an Item."
+        }
+      ],
+      "default": "plan_first",
+      "metric": "Per QA round: the wall clock from the end of QA's last runner command to the registration of QA's result, compared with plan_first rounds.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with gate_first.",
+        "threshold": "A median wall clock from the end of QA's last runner command to the registration of its result at most half of plan_first's, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

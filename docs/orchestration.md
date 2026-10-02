@@ -133,7 +133,16 @@ test command, under the Item's environment lock, and repairs every failure
 before the freeze, which refuses until that run passed on the exact candidate.
 QA's first gate run reports every failing group where the approved command
 allows it. `deliver/references/switch-pre_handoff_regression-touched_suites.md`
-defines the run.
+defines the run. At process switch `own_target_reuse` `spot_run`, QA's final
+test run also takes the Item's own Test Plan targets from that run, but for the
+ones QA names to spot-run itself, as
+`deliver/references/switch-own_target_reuse-spot_run.md` defines.
+
+When QA starts its first test command of a round is process switch
+`qa_gate_order`. At `plan_first`, the default, QA plans and maps every check
+first. At `gate_first`, QA starts the command in the background and plans,
+maps and drafts its result while the command runs, as
+`qa-verification/references/switch-qa_gate_order-gate_first.md` defines.
 
 Backlog planning measures story size as process switch `story_size_budget`
 selects. At `off`, the default, nothing is measured or shown. At

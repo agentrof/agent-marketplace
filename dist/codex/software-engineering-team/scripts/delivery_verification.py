@@ -47,6 +47,11 @@ PRE_HANDOFF_IDENTITY = ("candidate_tree", "kind", "command", "workdir", "affecte
 # What the sessions carry of every pre-handoff run, until approve-item-evidence records it.
 PRE_HANDOFF_HISTORY_FIELDS = ("evidence_hash", "candidate_tree", "kind", "exit_code", "candidate_intact",
                               "duration_seconds", "earlier_stories")
+# At own_target_reuse spot_run QA's final test run also takes the Item's own Test
+# Plan targets from the accepted pre-handoff run, but for the spot-run targets QA
+# names, which the approved test command runs with every target the run did not cover.
+OWN_TARGET_SWITCH = "own_target_reuse"
+SPOT_RUN = "spot_run"
 # At process switch code_review_panel beside_official a lens panel reads the
 # frozen candidate beside the official code reviewer, and merge-panel
 # registers the one code review result from both.
@@ -856,21 +861,27 @@ def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, c
     return completed, intact, difference, dropped, environment
 
 
-def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None) -> dict:
+def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
+              spot_file: Path | None = None) -> dict:
     root = root.resolve()
     read_session(root)
     with environment_lock(root, "qa_engineer", "run --kind " + kind), \
             command_lock(root, "qa_engineer", "run --kind " + kind):
-        return _run_check(root, kind, fresh=fresh, selection_file=selection_file)
+        return _run_check(root, kind, fresh=fresh, selection_file=selection_file, spot_file=spot_file)
 
 
-def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None) -> dict:
+def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
+               spot_file: Path | None = None) -> dict:
     """Run an approved command verbatim with a file-based mutation scope binding."""
     root = root.resolve()
     if kind not in {"test", "mutation", "dependency_audit", "diagnostic_test"}:
         raise RuntimeError("unsupported verification command kind")
     if (kind == "diagnostic_test") != (selection_file is not None):
         raise RuntimeError("diagnostic_test requires --selection-file; final commands do not accept a focused selection")
+    if spot_file is not None and kind != "test":
+        raise RuntimeError("only run --kind test takes --spot-run-file")
+    if spot_file is not None and fresh:
+        raise RuntimeError("run --fresh reuses nothing, so it takes no --spot-run-file")
     if selection_file is not None:
         selection_file = Path(selection_file)
         if not selection_file.is_absolute():
@@ -880,6 +891,13 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         current = require_current(root, session, allow_evidence=True)
         if session["workers"]["qa_engineer"]["state"] != "running":
             raise RuntimeError("verification commands require the active QA reader")
+        spot = None
+        if spot_file is not None:
+            value = own_target_reuse(root, current["delivery"])
+            if value != SPOT_RUN:
+                raise RuntimeError(f"run --spot-run-file serves only process switch {OWN_TARGET_SWITCH} {SPOT_RUN};"
+                                   f" {current['delivery']} runs it at {value}")
+            spot = spot_run_selection(root, Path(spot_file), current)
         contract, _ = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
         command = contract.get(kind + "_command")
         if not isinstance(command, str) or not command.strip() or "{{" in command or "}}" in command:
@@ -902,8 +920,15 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         scratch = safe_runtime_path(root, Path(environment["AGENTROF_VERIFICATION_SCRATCH"]))
         scratch.mkdir(exist_ok=True)
         declared = environment_identity(root, environment, contract)
-        reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh) if kind == "test"
-                          else (None, None))
+        reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
+                          if kind == "test" else (None, None))
+        own_note = None
+        if (reuse is not None and "own_targets" not in reuse
+                and own_target_reuse(root, current["delivery"]) == SPOT_RUN):
+            own_note = ("no --spot-run-file names the own targets QA runs itself, so the run reuses none of the"
+                        " Item's own targets" if spot is None else
+                        "the spot-run targets, with every own target that is, prefixes or lies under one of them,"
+                        " cover every own target, so the run reuses none of them")
         identity = {"candidate_hash": current["candidate_hash"], "kind": kind, "command": command,
                     "workdir": workdir, **declared, "execution_isolation": "private_clone_v1"}
         if selection is not None:
@@ -918,7 +943,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             if output.is_file() and not output.is_symlink() and hashlib.sha256(output.read_bytes()).hexdigest() == old["output_sha256"]:
                 session["metrics"]["command_cache_hits"] += 1
                 write_session(root, session)
-                return {**old, "reused": True}
+                return {**old, "reused": True, **({"own_target_reuse": own_note} if own_note else {})}
         if reuse is not None:
             reused = safe_runtime_path(root, session_path(root).parent / REUSED_TESTS, file_only=True)
             reused_bytes = (json.dumps(
@@ -974,12 +999,77 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         session["raw_evidence"][kind] = record
         session["metrics"]["command_seconds"] += record["duration_seconds"]
         write_session(root, session)
-        return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {})}
+        return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {}),
+                **({"own_target_reuse": own_note} if own_note else {})}
+
+
+def own_target_reuse(root: Path, delivery_id: str) -> str:
+    """The own_target_reuse value the Delivery runs under, as its pinned policy sets it."""
+    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, OWN_TARGET_SWITCH)
+
+
+def own_plan_targets(root: Path, current: dict) -> list[str]:
+    """The automation targets of the Item's own Test Plan, in plan order."""
+    plan = str(item_record(root, current["delivery"], current["story"]).get("test_plan_path") or "")
+    return plan_automation_targets(delivery.docs_root(root), plan, f"{current['story']} of {current['delivery']}")
+
+
+def spot_run_selection(root: Path, path: Path, current: dict) -> list[str]:
+    """The own Test Plan targets QA's final test run runs itself at own_target_reuse spot_run, read as data.
+
+    The file lies in the verification scratch, binds the frozen candidate and
+    names at least one automation target of the Item's own Test Plan, each
+    once; no command receives it, so its ids are bound by value in the run's
+    identity.
+    """
+    path = path if path.is_absolute() else root / path
+    try:
+        relative = path.relative_to(session_path(root).parent).as_posix()
+    except ValueError as exc:
+        raise RuntimeError("spot-run selection must be a regular file inside verification scratch") from exc
+    if not path.is_file():
+        raise RuntimeError("spot-run selection must be a regular file inside verification scratch")
+    value = json.loads(raw_output_path(root, relative).read_text(encoding="utf-8"))
+    if (not isinstance(value, dict) or set(value) != {"schema_version", "candidate_hash", "spot_test_ids"}
+            or type(value.get("schema_version")) is not int or value["schema_version"] != 1
+            or value.get("candidate_hash") != current["candidate_hash"]):
+        raise RuntimeError("spot-run selection must bind this candidate and declare only schema_version,"
+                           " candidate_hash and spot_test_ids")
+    identifiers = value["spot_test_ids"]
+    if (not isinstance(identifiers, list) or not identifiers
+            or any(not literal_test_id(identifier) for identifier in identifiers)
+            or len(set(identifiers)) != len(identifiers)):
+        raise RuntimeError("spot_test_ids must name at least one unique literal test id, without option prefixes"
+                           " or control characters")
+    stray = sorted(set(identifiers) - set(own_plan_targets(root, current)))
+    if stray:
+        raise RuntimeError("spot_test_ids must be automation targets of the Item's own Test Plan; "
+                           + ", ".join(stray) + (" is" if len(stray) == 1 else " are") + " not")
+    return sorted(identifiers)
+
+
+def kept_own_targets(own: list[str], spot: list[str]) -> list[str]:
+    """The own targets the approved test command must run when QA spot-runs *spot*.
+
+    They are the spot-run targets and every own target that is, prefixes or
+    lies under one of them or under such a target in turn: a command that skips
+    a reused id by node id prefix would otherwise skip part of a target it
+    must run.
+    """
+    kept = set(spot)
+    grown = True
+    while grown:
+        grown = False
+        for target in own:
+            if target not in kept and overlaps(target, sorted(kept)):
+                kept.add(target)
+                grown = True
+    return sorted(kept)
 
 
 def pre_handoff_reuse(root: Path, session: dict, current: dict, environment: dict,
-                      *, fresh: bool = False) -> tuple[dict | None, str | None]:
-    """The earlier-story targets QA's final test run takes from the accepted pre-handoff run, or why it takes none.
+                      *, fresh: bool = False, spot: list[str] | None = None) -> tuple[dict | None, str | None]:
+    """The targets QA's final test run takes from the accepted pre-handoff run, or why it takes none.
 
     At pre_handoff_regression touched_suites the run the freeze accepted covers
     the targets of the earlier stories when it passed intact on the frozen
@@ -987,10 +1077,16 @@ def pre_handoff_reuse(root: Path, session: dict, current: dict, environment: dic
     candidate, in the declared environment of QA's run, and is as fresh as
     final evidence must be. The Item's own Test Plan targets stay QA's to run,
     with every earlier target that overlaps one, and a *fresh* run reuses
-    nothing. At any other value it returns (None, None).
+    nothing. With *spot*, the own targets QA names at own_target_reuse
+    spot_run, the run also covers every other own target, and only those
+    *spot* keeps with kept_own_targets stay QA's, with every target that
+    overlaps one. At any other value it returns (None, None), or with *spot*
+    why it reuses nothing.
     """
-    if pre_handoff_regression(root, current["delivery"]) != TOUCHED_SUITES:
-        return None, None
+    value = pre_handoff_regression(root, current["delivery"])
+    if value != TOUCHED_SUITES:
+        return None, (f"own targets are reused only from an accepted pre-handoff run, which"
+                      f" {PRE_HANDOFF_SWITCH} {value} never runs" if spot is not None else None)
     if fresh:
         return None, "run --fresh runs every suite itself"
     receipt = session.get("pre_handoff")
@@ -1011,14 +1107,20 @@ def pre_handoff_reuse(root: Path, session: dict, current: dict, environment: dic
     if {key: receipt.get(key) for key in ENVIRONMENT_FIELDS} != environment:
         return None, "the pre-handoff run's declared environment differs from this run's"
     own = derived["own_targets"]
+    kept = own if spot is None else kept_own_targets(own, spot)
     stories = [{"delivery": entry["delivery"], "story": entry["story"], "test_ids": test_ids}
                for entry in derived["earlier_stories"]
-               for test_ids in [sorted(test for test in set(entry["automation_targets"]) if not overlaps(test, own))]
+               for test_ids in [sorted(test for test in set(entry["automation_targets"]) if not overlaps(test, kept))]
                if test_ids]
-    test_ids = sorted({test for entry in stories for test in entry["test_ids"]})
+    reused_own = sorted(set(own) - set(kept))
+    test_ids = sorted({test for entry in stories for test in entry["test_ids"]} | set(reused_own))
     if not test_ids:
-        return None, "the pre-handoff run covered no earlier story's target beyond the Item's own"
-    return {"evidence_hash": receipt["evidence_hash"], "earlier_stories": stories, "test_ids": test_ids}, None
+        return None, ("the pre-handoff run covered no earlier story's target beyond the Item's own" if spot is None
+                      else "the pre-handoff run covered no target beyond the own targets QA's run keeps")
+    reuse = {"evidence_hash": receipt["evidence_hash"], "earlier_stories": stories, "test_ids": test_ids}
+    if reused_own:
+        reuse["own_targets"] = {"test_ids": reused_own, "spot_test_ids": sorted(spot)}
+    return reuse, None
 
 
 def overlaps(identifier: str, targets: list[str]) -> bool:
@@ -1026,7 +1128,7 @@ def overlaps(identifier: str, targets: list[str]) -> bool:
 
     A command that skips the reused ids by node id prefix, as pytest's
     --deselect does with no boundary, skips every target the id prefixes, so
-    an id that overlaps an own target is never reused.
+    an id that overlaps an own target the command must run is never reused.
     """
     return any(target.startswith(identifier) or identifier.startswith(target) for target in targets)
 
@@ -1038,17 +1140,30 @@ def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> 
     run, passed intact on the frozen tree, as fresh as final evidence must be
     now, of the approved command and in the declared environment of the final
     run, and the reused test ids are earlier story targets that run selected,
-    none that is, prefixes or lies under one of the Item's own.
+    none that is, prefixes or lies under one of the Item's own. A reuse of own
+    targets is valid only at own_target_reuse spot_run, with its spot-run
+    targets and its reused own targets disjoint automation targets of the
+    Item's own Test Plan, and no reused id overlaps a target kept_own_targets
+    keeps for the command instead.
     """
     reuse, receipt = identity["reused_pre_handoff"], session.get("pre_handoff")
     if (not isinstance(reuse, dict) or not isinstance(receipt, dict)
             or reuse.get("evidence_hash") != receipt.get("evidence_hash")):
         return "reuses a pre-handoff run the frozen session does not hold"
     stories, test_ids = reuse.get("earlier_stories"), reuse.get("test_ids")
-    if (not isinstance(stories, list) or not stories or not isinstance(test_ids, list) or not test_ids
+    own_reuse = reuse.get("own_targets")
+    if own_reuse is not None and (
+            not isinstance(own_reuse, dict) or set(own_reuse) != {"test_ids", "spot_test_ids"}
+            or any(not isinstance(own_reuse[key], list) or not own_reuse[key]
+                   or any(not isinstance(test, str) for test in own_reuse[key])
+                   or own_reuse[key] != sorted(set(own_reuse[key])) for key in own_reuse)):
+        return "names its reused own targets apart from its spot-run targets"
+    reused_own = own_reuse["test_ids"] if own_reuse is not None else []
+    if (not isinstance(stories, list) or (not stories and own_reuse is None)
+            or not isinstance(test_ids, list) or not test_ids
             or any(not isinstance(entry, dict) or not isinstance(entry.get("test_ids"), list) or not entry["test_ids"]
                    for entry in stories)
-            or test_ids != sorted({test for entry in stories for test in entry["test_ids"]})):
+            or test_ids != sorted({test for entry in stories for test in entry["test_ids"]} | set(reused_own))):
         return "names its reused test ids apart from their earlier stories"
     current = session["candidate"]
     if (receipt.get("exit_code") != 0 or receipt.get("candidate_intact") is not True
@@ -1062,9 +1177,20 @@ def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> 
         return "reuses a pre-handoff run of another command than the approved one"
     if not set(test_ids) <= set(receipt.get("affected_test_ids") or []):
         return "reuses test ids the pre-handoff run did not select"
-    plan = str(item_record(root, current["delivery"], current["story"]).get("test_plan_path") or "")
-    own = plan_automation_targets(delivery.docs_root(root), plan, f"{current['story']} of {current['delivery']}")
-    if any(overlaps(test, own) for test in test_ids):
+    own = own_plan_targets(root, current)
+    if own_reuse is not None:
+        value = own_target_reuse(root, current["delivery"])
+        if value != SPOT_RUN:
+            return (f"reuses the Item's own Test Plan targets, which only process switch {OWN_TARGET_SWITCH}"
+                    f" {SPOT_RUN} allows; {current['delivery']} runs it at {value}")
+        spot = own_reuse["spot_test_ids"]
+        if not set(spot) | set(reused_own) <= set(own) or set(spot) & set(reused_own):
+            return ("names spot-run targets or reused own targets that are no automation targets of the Item's own"
+                    " Test Plan, or one target as both")
+        if any(overlaps(test, kept_own_targets(own, spot)) for test in test_ids):
+            return ("reuses a test id that is, prefixes or lies under one of the Item's own Test Plan targets that"
+                    " QA's final test run spot-runs or keeps with them")
+    elif any(overlaps(test, own) for test in test_ids):
         return ("reuses a test id that is, prefixes or lies under one of the Item's own Test Plan targets,"
                 " which QA runs itself")
     if {key: receipt.get(key) for key in ENVIRONMENT_FIELDS} != {key: identity[key] for key in ENVIRONMENT_FIELDS}:
@@ -2640,6 +2766,7 @@ def main(argv=None) -> int:
     run = subs.add_parser("run")
     run.add_argument("--kind", choices=("test", "mutation", "dependency_audit", "diagnostic_test"), required=True)
     run.add_argument("--selection-file", type=Path)
+    run.add_argument("--spot-run-file", type=Path)
     run.add_argument("--fresh", action="store_true")
     environment = subs.add_parser("environment")
     environment.add_argument("--verb", required=True, choices=("down", "up", "seed", "logs", "url"))
@@ -2695,7 +2822,8 @@ def main(argv=None) -> int:
         elif args.command == "wait":
             value = wait_for_release(root, args.role, args.seconds)
         elif args.command == "run":
-            value = run_check(root, args.kind, fresh=args.fresh, selection_file=args.selection_file)
+            value = run_check(root, args.kind, fresh=args.fresh, selection_file=args.selection_file,
+                              spot_file=args.spot_run_file)
         elif args.command == "manifest":
             value = manifest(root, args.delivery, args.story, args.role, args.mode)
         else:

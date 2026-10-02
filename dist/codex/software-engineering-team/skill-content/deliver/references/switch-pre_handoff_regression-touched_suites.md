@@ -80,6 +80,13 @@ the current one, so the new candidate needs a run of its own.
 - Without one, or when the selection is empty, it runs the full approved
   `test_command`, as the flow's fallback says.
 
+Like QA's first gate below, the run reports every failing group of what it
+runs where the approved command allows it, so one repair queue holds every
+failure, and a group that fails to collect is a failed group, never one left
+out. A command that stops at its first failing group or drops a group it could
+not collect is a finding for the Verification Contract, whose revision goes
+through the Operation flow; never edit, wrap or extend it in a task.
+
 The command runs in a private checkout of the exact candidate commit, under
 the Item's environment lock, so no ignored file of the Item worktree reaches
 it, and without any `PYTHONPATH`, `PYTHONHOME` or `NODE_PATH` entry that
@@ -174,7 +181,9 @@ surfaces every regression. When the approved test command stops at its first
 failing group, run the groups it did not reach through the approved diagnostic
 adapter, when there is one, before returning the result: the pre-handoff
 selection and the Test Plans of the earlier stories the change touches name
-them, and a group the final test run reused needs no such run. The command
+them, and a group the final test run reused needs no such run. A group that
+fails to collect is a failed group: name it in a finding with its collection
+error, never leave it out of the result. The command
 itself is the project's: never edit, wrap or extend it in a
 task. A command that cannot report every failing group is a finding for the
 Verification Contract, whose revision goes through the Operation flow. Name

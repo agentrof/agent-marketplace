@@ -44,7 +44,7 @@ edit `versions.json`, `CHANGELOG.md` or `.release/stable.json` by hand: only
 the release commit changes them, the last commit of a pull request, made by
 `python3 tools/release.py bump`, as the
 [maintainer protocol](docs/maintainer-operations-protocol.md#flow-b-explicit-release-to-clean-main)
-describes. A local pass establishes the local candidate result; CI
+describes; merging that pull request publishes the release. A local pass establishes the local candidate result; CI
 independently verifies its platform and host coverage.
 
 Security findings do not belong in public issues, pull requests or commit

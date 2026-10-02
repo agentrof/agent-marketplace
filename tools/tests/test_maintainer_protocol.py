@@ -119,7 +119,9 @@ class MaintainerProtocolTests(unittest.TestCase):
         for term in ("A release is a tag.", "it never runs the tests again",
                      "a push to `stable` or a tag starts no workflow",
                      "A release commit is never edited by hand",
-                     "two to three minutes from `ship` to the immutable Release"):
+                     "Merge the PR when green; the merge starts the release.",
+                     "Every other push to `main` starts nothing.",
+                     "about three minutes from the merge to the immutable Release"):
             with self.subTest(term=term):
                 self.assertIn(term, flat)
         # .release/stable.json stays; the release/stable branch is gone.

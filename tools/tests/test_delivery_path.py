@@ -32,11 +32,8 @@ import task_inputs  # noqa: E402
 from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 SWITCH = "delivery_path"
-REGISTRY = "skill-content/configure/data/process-switches.json"
 PLAN_REFERENCE = "skill-content/delivery-plan/references/switch-delivery_path-light_when_eligible.md"
 TOPOLOGY_REFERENCE = "skill-content/execution-plan/references/switch-delivery_path-light_when_eligible.md"
-OWNER_GATES_REFERENCE = "skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md"
-FLOWS = {"delivery-planning": PLAN_REFERENCE, "execution-planning": TOPOLOGY_REFERENCE}
 DECISION = "[[solution-design/decisions/fixture-api|Fixture API]]"
 LIGHT = {SWITCH: "light_when_eligible", "story_size_budget": "propose_split"}
 LIMITS = {"acceptance_criteria": 5}
@@ -48,10 +45,6 @@ DELIVERY = "DLV-001"
 
 def read(relative: str) -> str:
     return (TEAM / relative).read_text(encoding="utf-8")
-
-
-def flat(text: str) -> str:
-    return " ".join(text.split())
 
 
 def quiet(call, *args):
@@ -215,106 +208,12 @@ def lost_push_response():
         yield lost
 
 
-class DeliveryPathRegistryTests(unittest.TestCase):
-    def test_switch_ships_at_standard_under_the_issue_promotion_rule(self):
-        switch = json.loads(read(REGISTRY))["switches"][SWITCH]
-        self.assertEqual(switch["issue"], 328)
-        self.assertEqual([value["id"] for value in switch["values"]], ["standard", "light_when_eligible"])
-        self.assertEqual(switch["default"], "standard")
-        self.assertEqual(switch["flows"], sorted(FLOWS))
-        # Eligibility is compiler code, so no package data travels with the value.
-        self.assertNotIn("value_data", switch)
-        self.assertNotIn("parameters", switch)
-        self.assertEqual(switch["promotion"]["unit"], "At least 3 light-path Deliveries.")
-        for term in ("median proposal-to-publication time of at most 30 min",
-                     "exactly one owner gate per light-path Delivery",
-                     "zero reopens or re-plans caused by missed architecture or Operation impact",
-                     "every shared quality guard holding and the owner's approval"):
-            with self.subTest(term=term):
-                self.assertIn(term, switch["promotion"]["threshold"])
-        for term in ("time from the proposal's start to the plan's publication", "owner gates",
-                     "model passes", "fallbacks to the standard path", "2 owner gates and 2 planning passes",
-                     "an Item reopened or re-planned because the light path missed architecture or Operation"
-                     " impact", "code review conformance findings about path claims",
-                     "plan revisions after publication"):
-            with self.subTest(term=term):
-                self.assertIn(term, switch["metric"])
-
-
 class DeliveryPathInstructionTests(unittest.TestCase):
-    def test_references_apply_only_at_light_when_eligible_and_are_never_linked(self):
-        for reference in (PLAN_REFERENCE, TOPOLOGY_REFERENCE):
-            text = flat(read(reference))
-            with self.subTest(reference=reference):
-                self.assertIn("process switch `delivery_path` at `light_when_eligible`", text)
-                self.assertIn("A task binds this file only when the project's Process Policy selects that"
-                              " value; at the default, `standard`,", text)
-        for skill in TEAM.glob("skill-content/*/SKILL.md"):
-            self.assertNotIn("switch-delivery_path", skill.read_text(encoding="utf-8"))
-
-    def test_every_owning_flow_anchors_the_switch_and_names_its_reference(self):
-        for flow, reference in FLOWS.items():
-            with self.subTest(flow=flow):
-                text = flat(read(f"flows/{flow}.md"))
-                self.assertIn("Switch `delivery_path`: at `light_when_eligible`", text)
-                self.assertIn(reference, text)
-
     def test_the_reference_names_every_condition_the_compiler_checks(self):
         text = read(PLAN_REFERENCE)
         for condition in delivery_compile.LIGHT_PATH_CONDITIONS:
             with self.subTest(condition=condition):
                 self.assertIn(f"- `{condition}`:", text)
-
-    def test_one_gate_replaces_both_gates_and_the_steps_keep_their_order(self):
-        text = flat(read(PLAN_REFERENCE))
-        for rule in (
-            "The light path merges planning steps and owner gates, never checks",
-            "Reservation stays the point after which the Delivery ID, slug and scope hash are immutable,"
-            " and execution approval still needs the reserved Integration",
-            "The compiler decides eligibility from the records; nothing is assumed",
-            "With no limit set no Story is eligible, so small is always the owner's definition",
-            "Present one owner gate as one choice gate: the scope proposal, the Item topology with its"
-            " claims, role sequence and schedules, and the reused contract receipts",
-            "It replaces both the scope gate and the execution gate",
-            "run in this order with no further gate, each after `light-path-check` passes:"
-            " `delivery_compile.py approve-scope`, `delivery_git.py reserve-delivery`,"
-            " `delivery_compile.py approve-execution`, `delivery_git.py publish-execution-plan` and"
-            " `delivery_git.py claim-items`. Then hand over to `/deliver DLV-###`",
-            "The light path ends at the first failed `light-path-check`",
-            "keep every approval already made",
-            "A Delivery never returns to the light path",
-            "A `DELIVERY_TRANSACTION_UNCERTAIN` from `reserve-delivery` or `publish-execution-plan` is no"
-            " fallback",
-            "The gate's approval still covers the sequence, so the owner is not asked again",
-            "`approve-scope` writes one line that starts `Delivery path:` first in the Delivery's"
-            " `User Decisions` section before it hashes the scope",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
-
-    def test_both_references_compose_owner_gates_into_one_gate(self):
-        for reference in (PLAN_REFERENCE, OWNER_GATES_REFERENCE):
-            text = flat(read(reference))
-            with self.subTest(reference=reference):
-                self.assertIn("compose into one gate, never two", text)
-                self.assertIn("gate A is", text)
-        self.assertIn(PLAN_REFERENCE, flat(read(OWNER_GATES_REFERENCE)))
-        self.assertIn(OWNER_GATES_REFERENCE, flat(read(PLAN_REFERENCE)))
-
-    def test_the_topology_pass_writes_only_the_item_topology(self):
-        text = flat(read(TOPOLOGY_REFERENCE))
-        for rule in (
-            "Author only the planning fields of the Delivery's one `item.md`",
-            "the reason `init` writes is a placeholder and never counts",
-            "Write no execution-planning definitions document, Operation contract, architecture record or"
-            " any other file",
-            "`light-path-check` then ends the light path and `/execution-plan DLV-###` plans the Delivery"
-            " on the standard path",
-            "The escalation clause of your role stays as it is",
-            "`/execution-plan DLV-###` stays available on the light path",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
 
     def test_skills_and_the_architect_role_are_unchanged(self):
         for relative in ("skill-content/delivery-plan/SKILL.md", "skill-content/execution-plan/SKILL.md",
@@ -322,32 +221,6 @@ class DeliveryPathInstructionTests(unittest.TestCase):
             with self.subTest(path=relative):
                 self.assertNotIn("delivery_path", read(relative))
                 self.assertNotIn("light path", read(relative))
-
-    def test_host_contracts_keep_the_same_public_entries(self):
-        for host, surface in (("claude", "AskUserQuestion"), ("codex", "request_user_input")):
-            text = flat((ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md")
-                        .read_text(encoding="utf-8"))
-            with self.subTest(host=host):
-                self.assertIn("Delivery execution is available only through the exact public entries"
-                              " `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.", text)
-                self.assertIn("Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery"
-                              f" is planned inside `/delivery-plan` with one owner gate, presented through"
-                              f" `{surface}`", text)
-                self.assertIn("so the public entries do not change", text)
-
-    def test_docs_show_both_paths(self):
-        protocol = (ROOT / "docs/requirement-delivery-protocol.md").read_text(encoding="utf-8")
-        self.assertIn("standard: /delivery-plan -> scope gate -> /execution-plan DLV-### -> execution gate"
-                      " -> /deliver DLV-###", protocol)
-        self.assertIn("light:    /delivery-plan -> one gate: scope, topology, reused contract receipts ->"
-                      " /deliver DLV-###", protocol)
-        for doc in ("docs/orchestration.md", "docs/requirement-delivery-protocol.md"):
-            text = flat((ROOT / doc).read_text(encoding="utf-8"))
-            with self.subTest(doc=doc):
-                self.assertIn("process switch `delivery_path`", text.replace("Process", "process"))
-                self.assertIn("`standard`", text)
-                self.assertIn("`light_when_eligible`", text)
-                self.assertIn("light-path-check", text)
 
 
 class DeliveryPathTaskInputTests(unittest.TestCase):

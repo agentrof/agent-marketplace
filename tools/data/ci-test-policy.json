@@ -271,7 +271,8 @@
         "tools.tests.test_backlog_headless_handoff.*",
         "tools.tests.test_backlog_render_noop.*",
         "tools.tests.test_backlog_review_inputs.*",
-        "tools.tests.test_backlog_revision_atomicity.*"
+        "tools.tests.test_backlog_revision_atomicity.*",
+        "tools.tests.test_backlog_upstream_transition.*"
       ],
       "depends_on": [
         "delivery"
@@ -422,6 +423,7 @@
     "tools.tests.test_backlog_requirement_bindings",
     "tools.tests.test_backlog_review_inputs",
     "tools.tests.test_backlog_revision_atomicity",
+    "tools.tests.test_backlog_upstream_transition",
     "tools.tests.test_ci_evidence",
     "tools.tests.test_ci_host_policy",
     "tools.tests.test_ci_local",

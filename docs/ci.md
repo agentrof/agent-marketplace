@@ -75,11 +75,16 @@ impact analysis.
 Fresh reports contain per-test duration, outcome and actual Python, Git and
 operating-system identities. Successful runs publish bounded timing history
 for later plans. Plans report each history source run, attempt, age and
-artifact digest, restored weight counts and fallback reasons. Fixture startup
-estimates favor reusing a process-local seed without creating empty partitions.
-Reports distinguish test time, fixture build/validation/copy time, worker wall
-time and shard wall time. Timing data changes partition balance only; missing or
-invalid history uses policy weights without changing coverage. Weekly and
+artifact digest, restored weight counts and fallback reasons. History is bound
+to the exact policy, so the first plan after a policy change weighs each test
+by the policy's `test_seconds` for its runner system: the tests that took at
+least five seconds, refreshed from a run's `ci-durations` artifact with
+`python3 tools/ci_tests.py estimates --durations <file>`. Every other test
+weighs `default_seconds`. Fixture startup estimates favor reusing a
+process-local seed without creating empty partitions. Reports distinguish test
+time, fixture build/validation/copy time, worker wall time and shard wall time.
+Timing data changes partition balance only; missing or invalid history uses
+policy weights without changing coverage. Weekly and
 manually dispatched validation run full coverage. `make check` remains an
 exhaustive local gate; `make static-check` provides the cheap always-fresh
 contract, version, count and deterministic distribution checks.
@@ -96,7 +101,9 @@ make verify-local
 The direct interfaces are `python3 tools/ci_local.py check --staged --target
 origin/main` and `python3 tools/ci_local.py verify --staged --target origin/main`.
 `check --fresh` ignores saved test results. `--jobs` selects one to four separate
-processes, bounded by CPU count; policy defaults to two. Every worker receives
+processes, bounded by CPU count; policy defaults to two. The processes are
+balanced with the per-test estimates of the full-suite lane's system, refined
+by the local system's own. Every worker receives
 its own `TMPDIR`, `TMP` and `TEMP`, exact test IDs and an independent result file.
 Worker scratch directories live outside the candidate checkout and any Git
 worktree ancestry, so a non-Git fixture cannot discover an enclosing repository.

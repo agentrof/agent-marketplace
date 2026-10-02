@@ -29,6 +29,8 @@ POLICY_PATH = "tools/data/ci-test-policy.json"
 SUCCESS_OUTCOMES = {"success", "skipped", "expected_failure"}
 MAX_WORKERS = 16
 PROGRESS_SECONDS = 30
+RUNNERS = {"ubuntu-latest", "macos-latest", "windows-latest"}
+ESTIMATE_MINIMUM_SECONDS = 5.0
 
 
 class CIError(ValueError):
@@ -232,11 +234,18 @@ def policy_at(root):
             raise CIError(f"invalid shard count for {name}")
         if type(lane.get("workers", 1)) is not int or not 1 <= lane.get("workers", 1) <= MAX_WORKERS:
             raise CIError(f"invalid worker count for {name}")
-        if lane.get("os") not in {"ubuntu-latest", "macos-latest", "windows-latest"}:
+        if lane.get("os") not in RUNNERS:
             raise CIError(f"invalid operating system for {name}")
         if not isinstance(lane.get("python"), str) or len(lane["python"].split(".")) != 2 \
                 or not all(part.isdigit() for part in lane["python"].split(".")):
             raise CIError(f"Python lane must pin major.minor: {name}")
+    estimates = policy.get("test_seconds", {})
+    if not isinstance(estimates, dict) or not set(estimates) <= RUNNERS or any(
+            not isinstance(values, dict) or any(
+                not isinstance(test_id, str) or type(seconds) not in {int, float}
+                or not math.isfinite(seconds) or not 0 < seconds <= 600 for test_id, seconds in values.items())
+            for values in estimates.values()):
+        raise CIError("invalid per-test duration estimates")
     return policy
 
 
@@ -426,7 +435,10 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
         lane_ids = sorted(set(selected) & set(permitted))
         if not lane_ids:
             continue
-        durations = timings["durations"].get(name, {})
+        measured = timings["durations"].get(name, {})
+        # Measured history wins; the policy's per-test estimates cover a plan
+        # whose policy changed, since history is bound to the exact policy.
+        durations = {**policy.get("test_seconds", {}).get(lane["os"], {}), **measured}
         groups = worker_partition(lane_ids, lane["shards"], lane.get("workers", 1), durations, policy)
         shards, owners = assignments(groups)
         worker_seconds = [[estimated_seconds(tests, durations, policy) for tests in group] for group in groups]
@@ -435,7 +447,7 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
                        "must_run_ids": sorted(set(lane_ids) & set(lane.get("required_tests", []))),
                        "estimated_shard_seconds": [max(seconds) for seconds in worker_seconds],
                        "estimated_worker_seconds": worker_seconds,
-                       "measured_weights": len(set(lane_ids) & set(durations))}
+                       "measured_weights": len(set(lane_ids) & set(measured))}
     apple_lane = apple_launcher_lane(selected, policy)
     rows = matrix_rows(lanes, apple_lane)
     plan = {"schema_version": 1, "source_sha": source_sha,
@@ -1001,6 +1013,37 @@ def verify_reports(plan, reports):
     return {"schema_version": 1, "policy_hash": plan["policy_hash"], "durations": durations, "runtimes": runtimes, "measurements": measurements}
 
 
+def refresh_estimates(root, payload, minimum=ESTIMATE_MINIMUM_SECONDS):
+    """Rewrite the policy's per-test estimates from verified durations.
+
+    Only tests that took at least ``minimum`` seconds are kept, per runner
+    operating system and at the slowest of its lanes; every other test weighs
+    the policy default, which keeps the table short.
+    """
+    policy = read_json(root / POLICY_PATH)
+    validated = policy_at(root)
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1 \
+            or not isinstance(payload.get("durations"), dict):
+        raise CIError("invalid durations artifact")
+    if type(minimum) not in {int, float} or not math.isfinite(minimum) or minimum < 0.1:
+        raise CIError("the estimate threshold must be at least 0.1 seconds")
+    estimates = {}
+    for lane, values in payload["durations"].items():
+        if lane not in validated["lanes"] or not isinstance(values, dict):
+            continue
+        target = estimates.setdefault(validated["lanes"][lane]["os"], {})
+        for test_id, seconds in values.items():
+            if type(seconds) not in {int, float} or not math.isfinite(seconds) or not 0 <= seconds <= 600:
+                raise CIError(f"invalid duration for {test_id}")
+            if seconds >= minimum:
+                target[test_id] = max(target.get(test_id, 0.0), round(seconds, 1))
+    policy["test_seconds"] = {system: dict(sorted(values.items())) for system, values in sorted(estimates.items())}
+    path = root / POLICY_PATH
+    path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
+    policy_at(root)
+    return {system: len(values) for system, values in policy["test_seconds"].items()}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1026,6 +1069,9 @@ def main(argv=None):
     worker_parser.add_argument("--worker", type=int, required=True)
     worker_parser.add_argument("--workers", type=int, required=True)
     worker_parser.add_argument("--report", type=Path, required=True)
+    estimates_parser = sub.add_parser("estimates", help="refresh the policy's per-test estimates from durations")
+    estimates_parser.add_argument("--durations", type=Path, required=True)
+    estimates_parser.add_argument("--minimum", type=float, default=ESTIMATE_MINIMUM_SECONDS)
     for name in ("verify-reports", "verify"):
         verify_parser = sub.add_parser(name)
         verify_parser.add_argument("--plan", type=Path, required=True)
@@ -1039,6 +1085,9 @@ def main(argv=None):
             write_json(args.output, plan)
             print(json.dumps({"matrix": plan["matrix"], "has_tests": plan["has_tests"], "mode": plan["mode"],
                               "plan_hash": plan["plan_hash"], "selection_reason": plan["selection_reason"]}))
+            return 0
+        if args.command == "estimates":
+            print(json.dumps(refresh_estimates(ROOT, read_json(args.durations), args.minimum), sort_keys=True))
             return 0
         if args.command in {"run", "worker"}:
             signal.signal(signal.SIGTERM, lambda _signal, _frame: (_ for _ in ()).throw(KeyboardInterrupt()))

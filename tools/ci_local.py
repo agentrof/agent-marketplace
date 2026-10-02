@@ -194,12 +194,18 @@ def make_plan(root, target="origin/main", jobs=None):
     runner_os = {"Linux": "ubuntu-latest", "Darwin": "macos-latest", "Windows": "windows-latest"}.get(tests.platform.system())
     must_run = sorted(set(selected) & {test_id for lane in policy["lanes"].values()
                       if lane["os"] == runner_os for test_id in lane.get("required_tests", [])})
+    # The full-suite lane's measured estimates cover every module; this
+    # system's own estimates refine the tests its lanes measured.
+    estimates = policy.get("test_seconds", {})
+    weights = {test_id: seconds for lane in policy["lanes"].values() if lane["groups"] == ["all"]
+               for test_id, seconds in estimates.get(lane["os"], {}).items()}
+    weights.update(estimates.get(runner_os, {}))
     plan = {"schema_version": 1, "authority": "local_only", "candidate": source,
             "must_run_ids": must_run,
             "environment": environment_identity(root), "policy_hash": tests.digest(policy),
             "local_policy_hash": tests.digest(local_policy), "inventory_hash": inventory_hash,
             "selected_ids": selected, "mode": mode, "selection_reason": reason,
-            "shards": tests.balanced_shards(selected, jobs, {}, policy),
+            "shards": tests.balanced_shards(selected, jobs, weights, policy),
             "static_commands": local_policy["static_commands"]}
     plan["plan_hash"] = tests.digest(plan)
     return plan

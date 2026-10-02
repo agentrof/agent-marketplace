@@ -1,6 +1,0 @@
-{
-  "summary": "A private verification clone that differs from its commit now names the paths. Git can leave a tracked file out of a checkout that still exits 0, and the clone then differs from its commit before any command ran, yet `environment --verb up` refused with only \"runtime checkout changed; only teardown is allowed before a new verification session\" and a command run recorded only `candidate_intact` false, which read as a file the command had changed. The runtime refusal now reads \"runtime checkout changed (missing <path>); ...\", a QA command run, a pre-handoff regression run or a runtime event that is not intact records the paths as `checkout_difference`, and a freeze that such a pre-handoff run refuses names them as well. A path the checkout lacks is marked missing, any other is marked changed, and at most five are named before a count of the rest. What each refusal allows is unchanged.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

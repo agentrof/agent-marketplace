@@ -209,8 +209,10 @@ validation workflows never publish refs or releases.
    PR evidence, in about a minute, or executes full tests. A queued commit
    reuses PR evidence only when its tree equals the PR's tested merge. CodeQL
    continues to run on `main`.
-3. A release dispatches the `Release` workflow for one `main` commit. It
-   checks the commit's release state, waits for that commit's own `main`
+3. A release dispatches the `Release` workflow for one `main` commit. The
+   `Auto release` workflow does so on the push that merges a release commit,
+   when `versions.json` names a version no release tag holds yet; `ship`
+   does so by hand. The `Release` workflow checks the commit's release state, waits for that commit's own `main`
    validation and requires its success, and never runs the tests or the host
    lifecycles again. It then stages the version tag and `stable` with exact
    leases, installs both hosts from the real public `stable` channel and
@@ -218,7 +220,7 @@ validation workflows never publish refs or releases.
    and clean-main completion keep their contracts.
 
 Workflow or policy changes invalidate prior receipts deliberately. Measure a
-release from `ship` to the immutable Release, and the pull request that
+release from the merge to the immutable Release, and the pull request that
 carries the release commit by its slowest shard, runner queue time included.
 Timing targets are acceptance goals, not grounds to omit a failed or slow
 gate.

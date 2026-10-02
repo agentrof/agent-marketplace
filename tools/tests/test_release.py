@@ -1295,7 +1295,7 @@ class MainValidationTests(unittest.TestCase):
 
 
 class ReleaseCandidateTests(unittest.TestCase):
-    """verify-candidate reads main, the release tags, stable and main's validation."""
+    """verify-candidate and auto-release read main, release tags, stable and validation."""
 
     @classmethod
     def setUpClass(cls):
@@ -1452,6 +1452,53 @@ class ReleaseCandidateTests(unittest.TestCase):
         result = self.verify("0.0.1", bootstrap)
         self.assertEqual((result["prior_version"], result["prior_stable_sha"]), (None, None))
         self.assertEqual(result["notes"], f"- {release.BOOTSTRAP_NOTE}\n")
+
+    def test_a_push_that_moves_the_version_dispatches_its_release(self):
+        commands = FakeShipCommands()
+        result = release.auto_release(
+            self.root, self.feature, self.candidate, commands=commands,
+        )
+        self.assertEqual(commands.captured, [[
+            "gh", "workflow", "run", "release.yml", "--ref", "main",
+            "-f", "version=0.0.2", "-f", f"sha={self.candidate}",
+        ]])
+        self.assertEqual(commands.streamed, [])
+        self.assertEqual(
+            (result["release"], result["version"], result["run_id"]), (True, "0.0.2", "42"),
+        )
+
+    def test_a_push_that_keeps_the_version_or_finds_its_tag_starts_nothing(self):
+        self.git("commit", "-q", "--allow-empty", "-m", "docs: after the release")
+        later = self.git("rev-parse", "HEAD")
+        for before, after, version in (
+            (self.candidate, later, "0.0.2"),
+            (self.first, self.feature, "0.0.1"),
+        ):
+            with self.subTest(after=after):
+                commands = FakeShipCommands()
+                result = release.auto_release(self.root, before, after, commands=commands)
+                self.assertEqual(result, {
+                    "release": False, "version": version,
+                    "reason": f"this push keeps v{version}; nothing to release",
+                })
+                self.assertEqual(commands.captured, [])
+        self.git("tag", "-a", "v0.0.2", "-m", "v0.0.2", self.candidate)
+        self.push("v0.0.2")
+        commands = FakeShipCommands()
+        result = release.auto_release(
+            self.root, self.feature, self.candidate, commands=commands,
+        )
+        self.assertEqual(result["reason"], f"v0.0.2 already tags {self.candidate}")
+        self.assertEqual(commands.captured, [])
+
+    def test_an_absent_previous_head_falls_back_to_the_first_parent(self):
+        # A new branch reports 40 zeros; a rewritten one names a commit the checkout lacks.
+        for before in ("0" * 40, "", "f" * 40):
+            with self.subTest(before=before):
+                intent = release.release_intent(self.root, before, self.candidate)
+                self.assertEqual((intent["release"], intent["version"]), (True, "0.0.2"))
+        with self.assertRaisesRegex(release.ReleaseError, "exact lowercase 40-hex"):
+            release.release_intent(self.root, "", "HEAD")
 
 
 class ReleaseNotesTests(unittest.TestCase):

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Stable release and cross-host version tooling for Agent Marketplace.
 
-SemVer belongs only to stable releases. A release commit, the last commit of
-an ordinary pull request, consumes every pending changeset into the version
-surfaces; a release then tags that approved main commit and moves stable.
+A stable release is named YYYY.M.N: the UTC year and month its release commit
+was made in and its number within that month, a strict SemVer X.Y.Z. A
+release commit, the last commit of an ordinary pull request, consumes every
+pending changeset and sets every version surface to that one version; a
+release then tags that approved main commit and moves stable.
 """
 
 from __future__ import annotations
@@ -92,20 +94,35 @@ def require_sha(value: str, label: str) -> str:
     return value
 
 
-def bump(value: str, impact: str) -> str:
-    major, minor, patch = parse_semver(value)
-    if impact == "patch":
-        patch += 1
-    elif impact == "minor":
-        minor += 1
-        patch = 0
-    elif impact == "major":
-        major += 1
-        minor = 0
-        patch = 0
-    else:
-        raise ReleaseError(f"unknown release impact: {impact!r}")
-    return f"{major}.{minor}.{patch}"
+def utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def release_instant(when: datetime.datetime) -> datetime.datetime:
+    """``when`` in UTC and whole seconds, the precision of a commit date."""
+    if when.tzinfo is None or when.utcoffset() is None:
+        raise ReleaseError("a release date must carry its timezone")
+    return when.astimezone(datetime.timezone.utc).replace(microsecond=0)
+
+
+def next_version(latest: str, when: datetime.datetime) -> str:
+    """Name the release that follows ``latest`` when bump runs at ``when``.
+
+    The name is YYYY.M.N for the UTC year and month of ``when``. N counts on
+    from ``latest`` when it names that same month and starts at 1 otherwise,
+    a version of an earlier numbering such as 0.0.3 included. A ``latest``
+    of a later month can only come from a wrong clock.
+    """
+    year, month, number = parse_semver(latest, "latest release")
+    current = release_instant(when)
+    if (year, month) == (current.year, current.month):
+        return f"{year}.{month}.{number + 1}"
+    if (year, month) > (current.year, current.month):
+        raise ReleaseError(
+            f"the latest release {latest} is newer than {current:%Y-%m}, the UTC"
+            " month of the release clock; check the clock"
+        )
+    return f"{current.year}.{current.month}.1"
 
 
 def load_versions(root: Path) -> dict:
@@ -162,32 +179,38 @@ def load_changesets(root: Path, versions: dict | None = None) -> list[Changeset]
     return result
 
 
-def release_plan(versions: dict, changesets: list[Changeset]) -> dict:
+def release_plan(
+    versions: dict, changesets: list[Changeset], when: datetime.datetime,
+) -> dict:
+    """Plan the release commit bump makes at ``when``.
+
+    Impacts no longer choose the number: the marketplace and every plugin
+    take the one calendar version next_version names. A release still needs
+    a changeset that declares an impact; the highest impact of each
+    component is recorded, and every summary is kept.
+    """
     impacts: dict[str, str] = {}
     for changeset in changesets:
         for component, impact in changeset.components.items():
             current = impacts.get(component)
             if current is None or IMPACTS[impact] > IMPACTS[current]:
                 impacts[component] = impact
+    summaries = [item.summary for item in changesets]
     if not impacts:
         return {
             "has_release": False,
             "marketplace": versions["marketplace"],
             "plugins": dict(versions["plugins"]),
             "impacts": {},
-            "summaries": [item.summary for item in changesets],
+            "summaries": summaries,
         }
-    highest = max(impacts.values(), key=IMPACTS.__getitem__)
-    plugins = dict(versions["plugins"])
-    for plugin, version in list(plugins.items()):
-        if plugin in impacts:
-            plugins[plugin] = bump(version, impacts[plugin])
+    version = next_version(versions["marketplace"], when)
     return {
         "has_release": True,
-        "marketplace": bump(versions["marketplace"], highest),
-        "plugins": plugins,
+        "marketplace": version,
+        "plugins": {plugin: version for plugin in versions["plugins"]},
         "impacts": impacts,
-        "summaries": [item.summary for item in changesets],
+        "summaries": summaries,
     }
 
 
@@ -262,8 +285,7 @@ def validate_version_surfaces(
     problems: list[str] = []
     try:
         versions = load_versions(root)
-        changesets = load_changesets(root, versions)
-        release_plan(versions, changesets)
+        load_changesets(root, versions)
         adapters = adapters or build_distributions.load_adapters(root)
     except ReleaseError as exc:
         return [str(exc)]
@@ -897,11 +919,15 @@ def release_owned_changes(
     return problems
 
 
-def check_pr_changeset(root: Path, base: str, head: str = "HEAD") -> dict:
+def check_pr_changeset(
+    root: Path, base: str, head: str = "HEAD", *,
+    now: Callable[[], datetime.datetime] = utc_now,
+) -> dict:
     """Check the release-impact declaration of the pull request ``base...HEAD``.
 
     ``head`` names the pull request's last commit. It differs from HEAD where
-    CI checks out the merge of the pull request into ``base``.
+    CI checks out the merge of the pull request into ``base``. ``now`` is the
+    clock a release commit's date is checked against.
     """
     changed = changed_paths(root, base)
     fork = pull_request_fork(root, base)
@@ -911,7 +937,7 @@ def check_pr_changeset(root: Path, base: str, head: str = "HEAD") -> dict:
     problems = release_owned_changes(root, base, changed, versions)
     if problems:
         try:
-            version = verify_release_commit(root, base, head)
+            version = verify_release_commit(root, base, head, now=now)
         except ReleaseError as exc:
             raise ReleaseError(
                 "; ".join(problems) + ". Only a release commit may make these"
@@ -1084,16 +1110,18 @@ def append_changelog(root: Path, plan: dict) -> None:
     )
 
 
-def prepare_release(root: Path) -> dict:
+def prepare_release(root: Path, when: datetime.datetime) -> dict:
     """Consume every pending changeset into the release commit's tree.
 
-    It sets every version surface, appends the CHANGELOG.md section, records
+    It names the release for the UTC month of ``when``, sets every version
+    surface to that one version, appends the CHANGELOG.md section, records
     the release metadata and regenerates every host distribution. The result
-    depends on the tree alone, so check-pr can replay it byte for byte.
+    depends on the tree and that month alone, so check-pr can replay it byte
+    for byte at the release commit's own date.
     """
     versions = load_versions(root)
     changesets = load_changesets(root, versions)
-    plan = release_plan(versions, changesets)
+    plan = release_plan(versions, changesets, when)
     if not plan["has_release"]:
         raise ReleaseError("no pending stable release impact")
     next_versions = {
@@ -1121,16 +1149,30 @@ def prepare_release(root: Path) -> dict:
     return metadata
 
 
-def commit_release(root: Path) -> dict:
-    """Make the release commit on a clean checkout of the pull request."""
+def commit_release(
+    root: Path, now: Callable[[], datetime.datetime] = utc_now,
+) -> dict:
+    """Make the release commit on a clean checkout of the pull request.
+
+    The commit's author and committer date is the instant its version was
+    named, so check-pr replays it in the same month even when bump runs in a
+    month's last second.
+    """
     if git(root, "status", "--porcelain", "--untracked-files=all"):
         raise ReleaseError(
             "bump needs a clean worktree; commit or stash every change first"
         )
-    metadata = prepare_release(root)
+    when = release_instant(now())
+    metadata = prepare_release(root, when)
     message = f"chore: release v{metadata['version']}"
     git(root, "add", "--all")
-    git(root, "commit", "--quiet", "--message", message)
+    stamp = when.isoformat()
+    git(
+        root, "commit", "--quiet", "--message", message,
+        environment={
+            **os.environ, "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp,
+        },
+    )
     return {
         "version": metadata["version"],
         "commit": git(root, "rev-parse", "HEAD"),
@@ -1154,6 +1196,14 @@ def verify_release(root: Path, version: str | None = None) -> dict:
     if metadata.get("version") != expected or versions["marketplace"] != expected:
         raise ReleaseError("release metadata, requested tag, and marketplace version differ")
     parse_semver(expected, "release version")
+    others = sorted(
+        plugin for plugin, value in versions["plugins"].items() if value != expected
+    )
+    if others:
+        raise ReleaseError(
+            f"every plugin carries the release version {expected}; "
+            + ", ".join(others) + (" does" if len(others) == 1 else " do") + " not"
+        )
     if metadata.get("build_id") != build_distributions.marketplace_snapshot(root)["build_id"]:
         raise ReleaseError("release metadata build identity differs from the release sources")
     return metadata
@@ -1208,20 +1258,36 @@ def apply_package_index_modes(root: Path, environment: dict[str, str]) -> None:
         git(root, "update-index", "--chmod=-x", "--", *to_regular, environment=environment)
 
 
-def verify_release_commit(root: Path, base: str, head: str = "HEAD") -> str:
+def verify_release_commit(
+    root: Path, base: str, head: str = "HEAD", *,
+    now: Callable[[], datetime.datetime] = utc_now,
+) -> str:
     """Prove that ``head`` is the deterministic release commit of its parent.
 
     ``base`` must be an ancestor of the parent, and the commits between them
     keep the normal changeset rules. The parent is bumped again in a
     disposable clone that ignores ambient Git configuration, attributes,
     excludes, replacement refs and graph overlays; its complete tree must
-    equal the release commit's.
+    equal the release commit's. The replay runs at the release commit's own
+    committer date, so a release commit stays valid for the month it was
+    made in; a date in a month that has not begun comes from a wrong clock
+    and is refused.
     """
     environment = hermetic_git_environment()
     reject_graph_overlays(root, environment)
     head_sha = git(
         root, "rev-parse", "--verify", f"{head}^{{commit}}", environment=environment,
     )
+    made = datetime.datetime.fromtimestamp(int(git(
+        root, "log", "-1", "--no-show-signature", "--format=%ct", head_sha,
+        environment=environment,
+    )), datetime.timezone.utc)
+    today = release_instant(now())
+    if (made.year, made.month) > (today.year, today.month):
+        raise ReleaseError(
+            f"it is dated {made:%Y-%m-%d}, in a month that has not begun; fix"
+            " the clock, drop it and run bump again"
+        )
     base_sha = git(
         root, "rev-parse", "--verify", f"{base}^{{commit}}", environment=environment,
     )
@@ -1244,7 +1310,7 @@ def verify_release_commit(root: Path, base: str, head: str = "HEAD") -> str:
         replay_checkout(root, replay, parent, environment)
         if parent != base_sha:
             try:
-                earlier = check_pr_changeset(replay, base_sha)
+                earlier = check_pr_changeset(replay, base_sha, now=now)
             except ReleaseError as exc:
                 raise ReleaseError(
                     f"the commits before it break the changeset rules: {exc}"
@@ -1254,7 +1320,7 @@ def verify_release_commit(root: Path, base: str, head: str = "HEAD") -> str:
                     "the commits before it already make a release or a reset"
                 )
         try:
-            metadata = prepare_release(replay)
+            metadata = prepare_release(replay, made)
         except ReleaseError as exc:
             raise ReleaseError(f"its parent cannot be bumped: {exc}") from exc
         git(replay, "add", "--all", environment=environment)
@@ -1474,6 +1540,29 @@ def main_validation(
         sleep(poll_seconds)
 
 
+def untagged_stable_version(root: Path, stable: str, version: str) -> str:
+    """Return the version the commit stable points to names, older than ``version``.
+
+    When every release tag was deleted, stable still points at the last
+    released commit, so that commit is the release before ``version``.
+    """
+    if not git_ok(root, "cat-file", "-e", f"{stable}^{{commit}}"):
+        raise ReleaseError(
+            f"remote stable is at {stable}, which this checkout lacks; fetch origin"
+        )
+    named = (json_at_ref(root, stable, "versions.json") or {}).get("marketplace")
+    if not isinstance(named, str) or SEMVER_RE.fullmatch(named) is None:
+        raise ReleaseError(
+            f"versions.json at remote stable {stable} names no release version"
+        )
+    if parse_semver(named) >= parse_semver(version):
+        raise ReleaseError(
+            f"remote stable at {stable} names v{named}; a release never goes"
+            f" back to v{version}"
+        )
+    return named
+
+
 def verify_candidate(
     root: Path,
     version: str,
@@ -1494,7 +1583,10 @@ def verify_candidate(
     its release metadata matches its sources and CHANGELOG.md has its
     section. The version must be newer than every release tag, and its tag
     may exist only on this commit, which resumes an interrupted release.
-    Stable must sit on the previous release or on this commit. Last, main's
+    Stable must sit on the previous release or on this commit. The previous
+    release is the newest older tag; with no release tag at all it is the
+    commit stable points to, which must name an older version, and only a
+    repository without stable takes the first-release path. Last, main's
     push validation of this commit must have passed.
     """
     target = parse_semver(version, "release version")
@@ -1519,12 +1611,19 @@ def verify_candidate(
     earlier = [tag for tag in tags if parse_semver(tag) < target]
     prior = max(earlier, key=parse_semver) if earlier else None
     prior_sha = tags[prior] if prior else None
+    prior_name = f"v{prior}"
+    if not tags and refs["stable"] is not None:
+        prior_sha = refs["stable"]
+        if prior_sha == sha:
+            raise ReleaseError(f"{sha} is already the stable release")
+        prior = untagged_stable_version(root, prior_sha, version)
+        prior_name = f"the untagged stable release v{prior}"
     if prior_sha is not None:
         if prior_sha == sha:
             raise ReleaseError(f"{sha} is already released as v{prior}")
         if not git_ok(root, "merge-base", "--is-ancestor", prior_sha, sha):
             raise ReleaseError(
-                f"v{prior} at {prior_sha} is not an ancestor of {sha}; stable"
+                f"{prior_name} at {prior_sha} is not an ancestor of {sha}; stable"
                 " only moves forward"
             )
     if refs["stable"] not in (prior_sha, sha):
@@ -1532,6 +1631,14 @@ def verify_candidate(
         raise ReleaseError(
             f"remote stable is at {refs['stable'] or 'nothing'}; it must be"
             f" {expected} or the release commit"
+        )
+    if prior_sha is None and refs["stable"] == sha and version != BOOTSTRAP_VERSION:
+        raise ReleaseError(
+            f"v{version} and stable already sit on {sha}, and no older release"
+            " tag records the commit stable moved from, which a failed public"
+            " smoke must roll back to; re-run the failed jobs of the Release run"
+            " that staged them, `gh run rerun <run-id> --failed`, whose verify"
+            " output names that commit"
         )
     with tempfile.TemporaryDirectory(prefix="release-candidate.") as temporary:
         candidate = Path(temporary) / "candidate"
@@ -1553,7 +1660,7 @@ def verify_candidate(
                 + "; pass --sha with the main commit that merged the release"
                 " commit, or make a new release commit"
             )
-        if prior is None:
+        if prior_sha is None:
             verify_bootstrap(candidate)
         else:
             verify_release(candidate, version)
@@ -1621,10 +1728,6 @@ class Commands:
 
     def stream(self, argv: list[str]) -> int:
         return subprocess.run(argv, check=False).returncode
-
-
-def utc_now() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
 
 
 def dispatched_run(
@@ -1810,7 +1913,9 @@ def main() -> int:
             raise ReleaseError("\n".join(problems))
         print("release: version and changeset contracts valid")
     elif args.command == "plan":
-        print(json.dumps(release_plan(load_versions(root), load_changesets(root)), indent=2))
+        print(json.dumps(release_plan(
+            load_versions(root), load_changesets(root), utc_now(),
+        ), indent=2))
     elif args.command == "sync":
         sync_version_surfaces(root, load_versions(root))
     elif args.command == "check-pr":

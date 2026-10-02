@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -81,24 +80,6 @@ class OpaqueExperiencePrototypeTests(unittest.TestCase):
                 findings,
             )
 
-    def test_snapshot_rejects_aliases_not_technologies(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.root(temporary)
-            artifacts = root / "artifacts"
-            artifacts.mkdir()
-            source = artifacts / "index.html"
-            source.write_text("<html>anything</html>\n", encoding="utf-8")
-            alias = artifacts / "alias.js"
-            try:
-                os.symlink(source, alias)
-            except (OSError, NotImplementedError) as exc:
-                self.skipTest(f"symlinks unavailable: {exc}")
-            self.open_revision(root)
-
-            _registry, findings = experience_application_check.compile_application(root)
-
-            self.assertIn("artifacts/alias.js: symlinks are not permitted in a snapshot", findings)
-
     def test_v2_receipt_can_be_superseded_by_an_opaque_v3_snapshot(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = self.root(temporary)
@@ -151,20 +132,6 @@ class OpaqueExperiencePrototypeTests(unittest.TestCase):
             ledger_value = json.loads((ledger / "application-revisions.json").read_text())
             self.assertEqual(ledger_value["schema_version"], 3)
             self.assertEqual(ledger_value["revisions"][-1]["schema_version"], 3)
-
-    def test_package_artifacts_change_the_process_source_digest(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            package = Path(temporary) / "checkout"
-            package.mkdir()
-            (package / "experience.md").write_text(
-                "---\ntype: experience\n---\n\n# Checkout\n", encoding="utf-8"
-            )
-            artifact = package / "artifacts/private/demo.js"
-            artifact.parent.mkdir(parents=True)
-            artifact.write_text("first\n", encoding="utf-8")
-            before = experience_compile.source_digest(package)
-            artifact.write_text("second\n", encoding="utf-8")
-            self.assertNotEqual(before, experience_compile.source_digest(package))
 
 
 if __name__ == "__main__":

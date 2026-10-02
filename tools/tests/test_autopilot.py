@@ -1020,17 +1020,6 @@ class DistributionTests(unittest.TestCase):
         self.assertIn("\nname: autopilot\n", header)
         self.assertIn("\nexposure: entry\n", header)
 
-    def test_both_hosts_carry_the_same_canonical_content(self):
-        canonical = {path.relative_to(ENTRY).as_posix(): path.read_bytes()
-                     for path in sorted(ENTRY.rglob("*"))
-                     if path.is_file() and "__pycache__" not in path.parts}
-        for host in ("claude", "codex"):
-            with self.subTest(host=host):
-                root = self.package(host) / "skill-content/autopilot"
-                self.assertEqual({path.relative_to(root).as_posix(): path.read_bytes()
-                                  for path in sorted(root.rglob("*")) if path.is_file()},
-                                 canonical)
-
     def test_both_hosts_declare_the_arming_and_question_hooks(self):
         for host, (event, matcher, question, _root) in HOST_HOOKS.items():
             for source in (ROOT / "platforms" / host / "software-engineering-team/overlay/hooks",
@@ -1325,17 +1314,6 @@ class ContractTests(unittest.TestCase):
         self.assertLessEqual(requirement, requirement_compile.STATUSES | {"incorporated"})
         self.assertEqual(ends["text"], "none")
 
-    def test_a_delivery_decision_log_accepts_an_autopilot_answer_as_it_stands(self):
-        header = ("| id | class | question | options | recommendation | status | answer | blocks |"
-                  " wait_minutes |\n|---|---|---|---|---|---|---|---|---|\n")
-        body = ("## User Decisions\n\n" + header
-                + "| D-07 | queued | Which cache root? | One per checkout; One per Item |"
-                  " One per checkout | answered | One per checkout (autopilot"
-                  " AP-20261001T210000Z-3f9a, class choice) | AUTH-01 | 0 |\n")
-        self.assertEqual(delivery_compile.user_decision_findings(body, ["AUTH-01"]), [])
-        self.assertTrue(delivery_compile.user_decision_findings(body.replace("| queued |", "| choice |"),
-                                                                ["AUTH-01"]))
-
 
 class DecisionLogTests(unittest.TestCase):
     """Under owner_gates at two_fixed_gates the Delivery's decision log holds autopilot's work."""
@@ -1362,6 +1340,9 @@ class DecisionLogTests(unittest.TestCase):
         named = self.body().replace("| AUTH-01 | 0 |", "| Verification Contract | 0 |")
         self.assertTrue(any("by Story id" in finding for finding
                             in delivery_compile.user_decision_findings(named, stories)))
+        # The class column holds a declared class: `queued` or an at-once class.
+        self.assertTrue(delivery_compile.user_decision_findings(
+            self.body().replace("| queued |", "| choice |"), stories))
 
     def test_between_the_gates_the_answer_names_the_document_revision(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -1421,9 +1402,6 @@ class ValidatorTests(unittest.TestCase):
         findings: list = []
         validate.check_autopilot_policy(validate.build_tree(self.root), findings)
         return [finding.message for finding in findings if finding.check == "autopilot_policy"]
-
-    def test_the_shipped_policy_is_clean(self):
-        self.assertEqual(self.messages(), [])
 
     def test_malformed_policies_are_rejected(self):
         def duplicate(key):

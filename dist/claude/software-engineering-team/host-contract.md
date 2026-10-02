@@ -75,6 +75,15 @@
 - Under switch `execution_planning` at `single_source_bundle`, start every
   reader of an execution-plan bundle together: spawn them in one message, then
   wait for all of them before triage.
+- Claude Code's prompt cache keeps a role's context for five minutes from the
+  start of the model call that last used it, and a model call after a longer
+  pause writes the whole context into the cache again, at more than ten times
+  what a read costs. So a role that waits inside its turn never blocks one
+  tool call longer than the Delivery runner's 240-second `wait` bound: it runs
+  `delivery_verification.py wait` in the foreground with a Bash `timeout` of
+  300000, starts a verification command that can run longer with
+  `run_in_background`, and never waits through `sleep`, a polling loop or a
+  longer foreground timeout.
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots, local project memory and the role agents it

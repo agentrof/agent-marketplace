@@ -29,6 +29,130 @@ TODAY = "2026-10-01"
 # The Codex capture is the catalog bundled with the CLI that printed it.
 CODEX_CLI = ("--cli-version", "codex=codex-cli 0.159.1")
 
+# The pins every scenario starts from, as the shipped tables stood when the
+# scenarios were written. setUp writes them over the fixture, so a model bump
+# in the shipped catalogs and profiles changes no test here.
+FIXTURE_TABLES = {
+    "platforms/claude/model-catalog.json": """\
+{
+  "schema_version": 2,
+  "models": {
+    "claude-opus-5-5": {
+      "family": "opus",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "min_cli_version": "2.1.280",
+      "sources": [
+        "https://platform.claude.com/docs/en/models/opus-5-5/overview",
+        "https://code.claude.com/docs/en/model-config#adjust-effort-level"
+      ],
+      "verified": "2026-10-01"
+    },
+    "claude-sonnet-5-5": {
+      "family": "sonnet",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "min_cli_version": "2.1.284",
+      "sources": [
+        "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
+        "https://code.claude.com/docs/en/model-config#adjust-effort-level"
+      ],
+      "verified": "2026-10-01"
+    },
+    "claude-haiku-4-5-20251001": {
+      "family": "haiku",
+      "efforts": [],
+      "min_cli_version": "2.1.74",
+      "sources": [
+        "https://platform.claude.com/docs/en/models/haiku-4-5/overview",
+        "https://code.claude.com/docs/en/model-config#adjust-effort-level",
+        "https://code.claude.com/docs/en/changelog"
+      ],
+      "verified": "2026-10-01"
+    }
+  }
+}
+""",
+    "platforms/claude/execution-profiles.json": """\
+{
+  "schema_version": 3,
+  "profiles": {
+    "auto": {
+      "high": {"model": "claude-opus-5-5", "effort": "xhigh"},
+      "medium": {"model": "claude-opus-5-5", "effort": "medium"},
+      "low": {"model": "claude-sonnet-5-5", "effort": "high"},
+      "inherit": {}
+    }
+  }
+}
+""",
+    "platforms/codex/model-catalog.json": """\
+{
+  "schema_version": 2,
+  "models": {
+    "gpt-6.1-sol": {
+      "family": "sol",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "min_cli_version": "0.159.1",
+      "sources": [
+        "https://learn.chatgpt.com/docs/models",
+        "https://github.com/openai/codex/blob/rust-v0.159.1/codex-rs/models-manager/models.json",
+        "https://github.com/openai/codex/releases/tag/rust-v0.159.1"
+      ],
+      "verified": "2026-10-01"
+    },
+    "gpt-6-luna": {
+      "family": "luna",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "min_cli_version": "0.157.0",
+      "sources": [
+        "https://learn.chatgpt.com/docs/models",
+        "https://github.com/openai/codex/blob/rust-v0.159.1/codex-rs/models-manager/models.json",
+        "https://github.com/openai/codex/releases/tag/rust-v0.157.0"
+      ],
+      "verified": "2026-10-01"
+    }
+  }
+}
+""",
+    "platforms/codex/execution-profiles.json": """\
+{
+  "schema_version": 3,
+  "profiles": {
+    "auto": {
+      "high": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "medium": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "low": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "inherit": {}
+    }
+  }
+}
+""",
+}
+
 
 def codex_catalog(*models: tuple) -> dict:
     """The JSON `codex debug models` prints: (slug, efforts, visibility)."""
@@ -71,6 +195,8 @@ class ModelDriftTests(unittest.TestCase):
         self.base = Path(self.temporary.name)
         self.root = self.base / "marketplace"
         fixtures.make_valid_root(self.root, build=False)
+        for relative, text in FIXTURE_TABLES.items():
+            (self.root / relative).write_text(text, encoding="utf-8")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()

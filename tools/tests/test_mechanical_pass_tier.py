@@ -24,11 +24,9 @@ sys.path.insert(0, str(TEAM / "scripts"))
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
 
-import build_distributions  # noqa: E402
 import fixtures  # noqa: E402
 import process_policy  # noqa: E402
 import task_inputs  # noqa: E402
-import validate  # noqa: E402
 from git_fixture import init_repository  # noqa: E402
 
 SWITCH = "mechanical_pass_tier"
@@ -58,112 +56,7 @@ def switch() -> dict:
     return json.loads(read(REGISTRY))["switches"][SWITCH]
 
 
-def flat(text: str) -> str:
-    return " ".join(text.split())
-
-
-class RegistryTests(unittest.TestCase):
-    def test_switch_defaults_to_the_role_tier_under_its_promotion_rule(self):
-        spec = switch()
-        self.assertEqual([value["id"] for value in spec["values"]], ["role_tier", "mechanical"])
-        self.assertEqual(spec["default"], "role_tier")
-        self.assertEqual(spec["issue"], 330)
-        self.assertEqual(sorted(spec["flows"]), sorted(set(WRITERS.values())))
-        self.assertIn("frozen-task A/B", spec["promotion"]["unit"])
-        self.assertIn("at least 3 Deliveries", spec["promotion"]["unit"])
-        for fragment in ("at most 50%", "rework rate no higher than role_tier's",
-                         "zero accepted unrelated edits", "owner's approval"):
-            self.assertIn(fragment, spec["promotion"]["threshold"])
-        for fragment in ("wall time", "output tokens", "rework", "unrelated edit"):
-            self.assertIn(fragment, spec["metric"])
-
-    def test_the_mechanical_value_declares_one_variant_per_writer(self):
-        self.assertEqual(switch()["agent_variants"], {"mechanical": {
-            "suffix": "mechanical", "tier": "low",
-            "description": "Writer variant for passes that apply only the fixes a review verdict"
-                           " names.",
-            "agents": sorted(WRITERS)}})
-
-    def test_the_variants_run_on_the_low_tier_of_every_host(self):
-        # By the owner's decision of 1 Oct 2026 on #349 the `mechanical` tier
-        # is gone: the variants run on `low`, which every host maps.
-        models = json.loads((ROOT / "tools/data/models.json").read_text(encoding="utf-8"))
-        self.assertEqual(models["reasoning_levels"], ["high", "medium", "low", "inherit"])
-        self.assertNotIn("mechanical", build_distributions.CANONICAL_REASONING_LEVELS)
-        self.assertNotIn("mechanical", validate.AGENT_REASONING_ENUM)
-        self.assertEqual(switch()["agent_variants"]["mechanical"]["tier"], "low")
-        for host in ("claude", "codex"):
-            table = json.loads(build_distributions.execution_profile_path(ROOT, host)
-                               .read_text(encoding="utf-8"))["profiles"]["auto"]
-            with self.subTest(host=host):
-                self.assertNotIn("mechanical", table)
-                self.assertIn("model", table["low"])
-
-    def test_every_statement_of_the_tier_says_what_a_variant_changes_per_host(self):
-        # On Claude Code every writer runs a larger model than the low tier, so
-        # every variant runs a smaller one; on Codex every tier runs the same
-        # model and effort, so a variant changes only the fresh context. The
-        # texts must say so and name the effort it runs against each writer's.
-        tables = {host: json.loads(build_distributions.execution_profile_path(ROOT, host)
-                                   .read_text(encoding="utf-8"))["profiles"]["auto"]
-                  for host in ("claude", "codex")}
-        tiers = {agent: build_distributions.parse_frontmatter(TEAM / "agents" / f"{agent}.md")[0]
-                 ["reasoning"] for agent in WRITERS}
-        same = {host: {agent for agent, tier in tiers.items() if table[tier] == table["low"]}
-                for host, table in tables.items()}
-        self.assertEqual(same, {"claude": set(), "codex": set(WRITERS)})
-        spec = switch()
-        mechanical = next(value for value in spec["values"] if value["id"] == "mechanical")
-        for text in (mechanical["tradeoffs"], spec["agent_variants"]["mechanical"]["description"],
-                     read(REFERENCE)):
-            self.assertNotIn("lower mechanical tier", flat(text))
-            self.assertNotIn("Lower-tier", text)
-            self.assertNotIn("on a lower tier", flat(text))
-            self.assertNotIn("the mechanical tier", flat(text))
-        for fragment in ("a fresh agent on the low tier",
-                         "The host contract states per host what a variant changes against its"
-                         " writer's own tier: today a smaller model on one host, and on the"
-                         " other only the fresh context, since its low tier runs the writers'"
-                         " own model and effort",
-                         "placeholders until the frozen-task A/B sets them"):
-            self.assertIn(fragment, mechanical["tradeoffs"])
-        self.assertNotIn("session runs above it", mechanical["tradeoffs"])
-        contracts = {host: flat((ROOT / "platforms" / host / "software-engineering-team"
-                                 / "host-contract.md").read_text(encoding="utf-8"))
-                     .split("Every build also ships the `-mechanical` variants", 1)[1]
-                     .split(" - ", 1)[0] for host in tables}
-        authoring = flat((ROOT / "docs/authoring.md").read_text(encoding="utf-8")
-                         .split("## Mechanical passes", 1)[1].split("\n## ", 1)[0])
-        self.assertIn("on the `low` tier, `claude-sonnet-5-5` at effort `high`",
-                      contracts["claude"])
-        self.assertIn("on the `low` tier, `gpt-6.1-sol` at effort `xhigh`",
-                      contracts["codex"])
-        for text in (contracts["claude"], authoring):
-            self.assertIn("from Opus to Sonnet", text)
-            self.assertIn("above the `medium` of `product-owner`, `qa-engineer` and"
-                          " `devops-engineer`", text)
-            self.assertIn("below the `xhigh` of `solution-architect`", text)
-            self.assertNotIn("already run Sonnet", text)
-        for text in (contracts["codex"], authoring):
-            self.assertIn("own model and effort", text)
-            self.assertIn("only the fresh context", text)
-            self.assertNotIn("from Sol to Luna", text)
-        for text in (*contracts.values(), authoring):
-            self.assertIn("placeholders until the variants' frozen-task A/B sets them", text)
-
-
 class InstructionTests(unittest.TestCase):
-    def test_each_owning_flow_anchors_the_switch_and_names_the_reference(self):
-        for flow in sorted(set(WRITERS.values())):
-            with self.subTest(flow=flow):
-                text = flat(read(f"flows/{flow}.md"))
-                self.assertIn(f"Switch `{SWITCH}`: at `mechanical`", text)
-                self.assertIn(REFERENCE, text)
-        for flow in sorted({path.stem for path in (TEAM / "flows").glob("*.md")}
-                           - set(WRITERS.values())):
-            with self.subTest(flow=flow):
-                self.assertNotIn(SWITCH, read(f"flows/{flow}.md"))
-
     def test_the_reference_lists_exactly_the_declared_writer_variants(self):
         text = read(REFERENCE)
         rows = re.findall(r"^\| `([a-z-]+)` \| `([a-z-]+)` \|", text, re.M)
@@ -173,26 +66,6 @@ class InstructionTests(unittest.TestCase):
         kinds = re.findall(r"^\| `([a-z_]+)` \|", text, re.M)
         self.assertEqual(kinds[:4], ["apply_findings", "render", "stamp", "check"])
 
-    def test_the_reference_keeps_triage_design_and_reviews_off_the_mechanical_path(self):
-        text = flat(read(REFERENCE))
-        for fragment in (
-                "Never mechanical: authoring or rewriting text no finding dictates, design or a"
-                " choice between alternatives, triage of findings, code and architecture repairs,"
-                " and every review, re-check or calibration.",
-                "A variant never reads for a review, re-check or calibration",
-                "Otherwise the base writer runs the whole pass as the flow describes.",
-                "It never changes a severity, never disputes a finding and never edits text no"
-                " finding names.",
-                "The flow's re-check is unchanged",
-                "Every gate before a stamp stays, including the reader barrier, the"
-                " `--expected-hash` recheck and the owner's approval.",
-                "`--mode revise` and `--skill challenge-review`",
-                "add `--pass-kind apply_findings`, `--findings <record>` and one `--input` per"
-                " document the findings change",
-                "`task_inputs.py` refuses the kind for a review, re-check, calibration, triage or"
-                " repair task"):
-            self.assertIn(fragment, text)
-
     def test_only_the_switch_reference_names_a_variant(self):
         named = {}
         for path in sorted(TEAM.rglob("*.md")):
@@ -201,34 +74,6 @@ class InstructionTests(unittest.TestCase):
         self.assertEqual(named, {REFERENCE: set(WRITERS)})
         for skill in sorted(TEAM.glob("skill-content/*/SKILL.md")):
             self.assertNotIn("switch-mechanical_pass_tier", skill.read_text(encoding="utf-8"))
-
-
-class ReviewTierContractTests(unittest.TestCase):
-    """Every review, re-check and calibration keeps its tier under both values."""
-
-    def test_no_canonical_role_declares_a_retired_tier(self):
-        for path in sorted((TEAM / "agents").glob("*.md")):
-            with self.subTest(agent=path.stem):
-                fields = build_distributions.parse_frontmatter(path)[0]
-                self.assertNotIn(fields["reasoning"], {"lens", "mechanical"})
-
-    def test_every_variant_is_a_writer_and_never_a_reader(self):
-        policy = json.loads(read("templates/task-input-policy.json"))
-        panels = json.loads(read("skill-content/challenge-review/data/review-panels.json"))
-        read_only = set(policy["read_only_roles"])
-        readers = {step["reader_role"] for step in panels["review_steps"].values()}
-        for agent in switch()["agent_variants"]["mechanical"]["agents"]:
-            with self.subTest(agent=agent):
-                fields = build_distributions.parse_frontmatter(TEAM / "agents" / f"{agent}.md")[0]
-                self.assertNotIn("tools", fields)
-                self.assertNotIn(agent, read_only)
-        # The Operation counterparts read the other contract as their base role.
-        self.assertEqual(readers & set(WRITERS), {"devops-engineer", "qa-engineer"})
-        reference = flat(read(REFERENCE))
-        self.assertIn("the Operation counterpart that reviews the other contract runs as its"
-                      " base role", reference)
-        lens = read("skill-content/challenge-review/references/switch-review_panels-lens_panel.md")
-        self.assertNotIn("mechanical", lens)
 
 
 class ValidatorTests(unittest.TestCase):

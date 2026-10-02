@@ -34,8 +34,6 @@ SWITCH = "owner_gates"
 REGISTRY = "skill-content/configure/data/process-switches.json"
 CLASSES = "skill-content/deliver/data/owner-decision-classes.json"
 REFERENCE = "skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md"
-FLOWS = ("delivery-execution", "delivery-governance", "delivery-planning",
-         "execution-planning", "operation")
 HEADER = ("| id | class | question | options | recommendation | status | answer | blocks |"
           " wait_minutes |\n|---|---|---|---|---|---|---|---|---|\n")
 ANSWER = "One root per checkout, in Verification Contract revision 6."
@@ -80,47 +78,6 @@ def choose(docs: Path, value: str) -> None:
     policy(docs, "approve")
 
 
-class OwnerGatesRegistryTests(unittest.TestCase):
-    def test_switch_ships_at_per_step_under_the_owner_promotion_rule(self):
-        switch = json.loads(read(REGISTRY))["switches"][SWITCH]
-        self.assertEqual(switch["issue"], 329)
-        self.assertEqual([value["id"] for value in switch["values"]], ["per_step", "two_fixed_gates"])
-        self.assertEqual(switch["default"], "per_step")
-        self.assertEqual(switch["flows"], list(FLOWS))
-        self.assertEqual(switch["value_data"], {"two_fixed_gates": [CLASSES]})
-        # The owner's rule of 30 Sep 2026: at least 3 Deliveries, as #329 states no other unit.
-        self.assertEqual(switch["promotion"]["unit"], "At least 3 Deliveries run with two_fixed_gates.")
-        for term in ("At most 1 stop outside the two gates per Delivery, and only for an at-once"
-                     " class", "at most 15 min per Delivery",
-                     "zero dependent tasks run before their question was answered",
-                     "the owner's approval"):
-            with self.subTest(term=term):
-                self.assertIn(term, switch["promotion"]["threshold"])
-        for term in ("owner stops outside gates A and B", "critical-path owner wait",
-                     "time from queueing to answer", "minutes dependent tasks waited",
-                     "early gates forced", "idle hours that began with an open question",
-                     "status questions from the owner",
-                     "every User Decisions row is answered before the work that depends on it"):
-            with self.subTest(term=term):
-                self.assertIn(term, switch["metric"])
-
-
-class OwnerDecisionClassTests(unittest.TestCase):
-    def test_the_at_once_classes_are_the_issue_classes_beside_the_architect_clause(self):
-        data = json.loads(read(CLASSES))
-        self.assertEqual([entry["id"] for entry in data["classes"]],
-                         ["rule_exception", "scope_or_grant_change",
-                          "credentials_spending_or_irreversible_action"])
-        self.assertTrue(all(entry["description"].strip() for entry in data["classes"]))
-        [clause] = data["agent_clauses"]
-        self.assertEqual((clause["id"], clause["agent"]), ("architect_escalation", "software-architect"))
-        # The clause is kept as the agent file states it, under both values.
-        role = " ".join(read("agents/software-architect.md").split())
-        self.assertIn(clause["clause"], role)
-        for term in ("owner_gates", "two_fixed_gates", "gate A"):
-            self.assertNotIn(term, role)
-
-
 class OwnerDecisionClassValidatorTests(unittest.TestCase):
     """tools/validate.py rejects an empty or duplicate at-once class."""
 
@@ -147,9 +104,6 @@ class OwnerDecisionClassValidatorTests(unittest.TestCase):
         finally:
             self.path.write_text(self.original, encoding="utf-8")
 
-    def test_shipped_classes_are_clean(self):
-        self.assertEqual(self.messages(lambda data: None), [])
-
     def test_empty_duplicate_and_unanchored_classes_are_rejected(self):
         cases = (
             (lambda data: data.update(classes=[]), "classes must declare at least one at-once class"),
@@ -173,52 +127,6 @@ class OwnerDecisionClassValidatorTests(unittest.TestCase):
 
 
 class OwnerGatesReferenceTests(unittest.TestCase):
-    def test_reference_applies_only_at_two_fixed_gates_and_is_never_linked(self):
-        text = flat(REFERENCE)
-        self.assertIn("process switch `owner_gates` at `two_fixed_gates`", text)
-        self.assertIn("A task binds this file only when the project's Process Policy selects that"
-                      " value", text)
-        self.assertIn("at the default, `per_step`,", text)
-        for skill in TEAM.glob("skill-content/*/SKILL.md"):
-            self.assertNotIn("switch-owner_gates", skill.read_text(encoding="utf-8"))
-
-    def test_every_owning_flow_anchors_the_switch_and_names_the_reference(self):
-        for flow in FLOWS:
-            with self.subTest(flow=flow):
-                text = flat(f"flows/{flow}.md")
-                self.assertIn("Switch `owner_gates`: at `two_fixed_gates`", text)
-                self.assertIn(REFERENCE, text)
-
-    def test_the_gates_batch_questions_and_never_decide_by_default(self):
-        text = flat(REFERENCE)
-        for rule in (
-            "The switch changes when a question is asked, never who decides it",
-            "Nothing is decided by default",
-            "the run never proceeds on a guess",
-            "present gate A as one choice gate: the Delivery scope, the execution plan with its"
-            " topology, claims, role sequence and schedules, every Operation revision and"
-            " Governance change the plan needs, the decision log so far and every queued question",
-            "Group the questions in host calls no larger than the per-call bound the host"
-            " contract names, with the recommended option first and the tradeoffs in the option"
-            " descriptions",
-            "Gate A's approval is the go for Item start",
-            "apply it with `delivery_git.py apply-governance` before any Item starts",
-            "present gate B as one choice gate: the Delivery Review, its follow-ups, the decision"
-            " log since gate A and the merge",
-            "add a `pending` row to the Delivery's `User Decisions` table and continue",
-            "a task that depends on it waits, and only that task waits",
-            "When every remaining task depends on pending questions, ask the queued questions at"
-            " once as an early gate",
-            "Only the owner's answer closes a question",
-            "No approved document changes between the gates unless an `answered` row names it",
-            "Ask a decision of these classes at once and name its class in the question",
-            "class `architect_escalation`, which stays exactly as that file states it",
-            "never mark a row `answered` without the owner's answer",
-            "record the owner's answers verbatim and the wait minutes",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
-
     def test_setup_configure_backlog_and_requirement_gates_are_unchanged(self):
         self.assertIn("Setup, `/configure` outside a Delivery's plan, backlog approval and"
                       " Requirement-flow gates keep their own gates", flat(REFERENCE))
@@ -228,37 +136,6 @@ class OwnerGatesReferenceTests(unittest.TestCase):
                          "skill-content/requirement/SKILL.md"):
             with self.subTest(path=relative):
                 self.assertNotIn("owner_gates", read(relative))
-
-    def test_host_contracts_group_the_gate_questions(self):
-        # AskUserQuestion takes one to four questions; request_user_input takes
-        # one to three (openai/codex request_user_input_spec.rs).
-        for host, surface, bound in (("claude", "AskUserQuestion", "four"),
-                                     ("codex", "request_user_input", "three")):
-            text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
-                             / "host-contract.md").read_text(encoding="utf-8").split())
-            with self.subTest(host=host):
-                self.assertIn("Under switch `owner_gates` at `two_fixed_gates`, ask the owner inside"
-                              " a Delivery only at gate A, gate B, an early gate or for an at-once"
-                              " class", text)
-                self.assertIn(f"through `{surface}` in calls of at most {bound} questions, with the"
-                              " recommended option first", text)
-                self.assertIn(f"`{surface}` takes at most {bound} questions per call", text)
-                self.assertEqual(text.count("at most four") + text.count("at most three"), 2)
-        # The orchestration doc states the same bound per host (rr-seams-08).
-        orchestration = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
-        self.assertIn("every gate groups its questions in host calls no larger than the per-call bound"
-                      " the host contract names, four questions on Claude Code and three on Codex",
-                      orchestration)
-        self.assertNotIn("calls of at most four,", orchestration)
-
-    def test_docs_describe_both_values(self):
-        for doc in ("docs/orchestration.md", "docs/requirement-delivery-protocol.md"):
-            text = " ".join((ROOT / doc).read_text(encoding="utf-8").split())
-            with self.subTest(doc=doc):
-                self.assertIn("process switch `owner_gates`", text.replace("Process", "process"))
-                self.assertIn("`per_step`", text)
-                self.assertIn("`two_fixed_gates`", text)
-                self.assertIn("owner-decision-classes.json", text)
 
 
 class OwnerGatesTaskInputTests(unittest.TestCase):

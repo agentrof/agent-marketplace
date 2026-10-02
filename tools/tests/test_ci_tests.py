@@ -662,6 +662,43 @@ class CITestPlannerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ci_tests.CIError, "worker count"):
                     ci_tests.policy_at(self.root)
 
+    def test_measured_history_outweighs_policy_estimates_which_outweigh_defaults(self):
+        runner = self.policy["lanes"]["local"]["os"]
+        self.policy["test_seconds"] = {runner: {self.ids[0]: 40.0}}
+        self.policy["lanes"]["local"]["workers"] = 1
+        self.save_policy()
+        estimated = self.plan()["lanes"]["local"]
+        self.assertEqual(sorted(estimated["estimated_shard_seconds"]), [2.0, 40.0])
+        self.assertEqual(estimated["measured_weights"], 0)
+        history = {"schema_version": 1, "durations": {"local": {self.ids[0]: 0.5, self.ids[1]: 3.0}}}
+        measured = self.plan(timings=history)["lanes"]["local"]
+        self.assertEqual(sorted(measured["estimated_shard_seconds"]), [1.5, 3.0])
+        self.assertEqual(measured["measured_weights"], 2)
+        for invalid in ({"self-hosted": {}}, {runner: {self.ids[0]: 0}}, {runner: {self.ids[0]: float("inf")}},
+                        {runner: []}):
+            with self.subTest(invalid=invalid):
+                self.policy["test_seconds"] = invalid
+                self.save_policy()
+                with self.assertRaisesRegex(ci_tests.CIError, "estimates"):
+                    ci_tests.policy_at(self.root)
+
+    def test_estimates_keep_the_slowest_lane_per_system_above_the_threshold(self):
+        runner = self.policy["lanes"]["local"]["os"]
+        self.policy["lanes"]["other"] = dict(self.policy["lanes"]["local"])
+        self.save_policy()
+        payload = {"schema_version": 1, "durations": {
+            "local": {self.ids[0]: 6.04, self.ids[1]: 4.9, self.ids[2]: 7.0},
+            "other": {self.ids[0]: 8.26, self.ids[2]: 2.0},
+            "retired": {self.ids[1]: 50.0}}}
+        self.assertEqual(ci_tests.refresh_estimates(self.root, payload), {runner: 2})
+        policy = ci_tests.policy_at(self.root)
+        self.assertEqual(policy["test_seconds"], {runner: {self.ids[0]: 8.3, self.ids[2]: 7.0}})
+        self.assertEqual({key: value for key, value in policy.items() if key != "test_seconds"}, self.policy)
+        for payload, threshold in ((dict(payload, schema_version=2), 5.0), (payload, 0.0),
+                                   ({"schema_version": 1, "durations": {"local": {self.ids[0]: -1}}}, 5.0)):
+            with self.subTest(payload=payload, threshold=threshold), self.assertRaises(ci_tests.CIError):
+                ci_tests.refresh_estimates(self.root, payload, threshold)
+
     def test_fixture_weights_keep_every_test_and_expose_estimates(self):
         ids = ["tools.tests.a.Tests.test_one", "tools.tests.a.Tests.test_two",
                "tools.tests.b.Tests.test_one", "tools.tests.b.Tests.test_two"]

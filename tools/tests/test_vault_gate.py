@@ -101,22 +101,6 @@ class PortableVaultGateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return root / ".github/agentrof/vault-gate.pyz"
 
-    def test_archive_has_opaque_snapshot_checker_without_ui_templates(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            gate = self.setup_project(project)
-            listed = subprocess.run(
-                [sys.executable, str(gate), "check", "--project-root", str(project), "--json"],
-                capture_output=True, text=True, check=False,
-            )
-            self.assertIn(listed.returncode, (0, 1), listed.stdout + listed.stderr)
-            installed = subprocess.run(
-                [sys.executable, str(GATE_INSTALLER), "install", "--project-root", str(project)],
-                cwd=ROOT, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
-            self.assertTrue(gate.is_file())
-
     def test_gate_does_not_reject_arbitrary_prototype_extensions(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

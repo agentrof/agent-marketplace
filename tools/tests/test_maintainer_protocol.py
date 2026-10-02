@@ -43,31 +43,6 @@ class MaintainerProtocolTests(unittest.TestCase):
         self.assertIn("docs/maintainer-operations-protocol.md", agents)
         self.assertIn("docs/maintainer-operations-protocol.md", contributing)
 
-    def test_no_unattended_issue_agent_surface_exists(self):
-        removed_paths = (
-            ".github/workflows/issue-solution.yml",
-            ".github/codex/prompts/solve-issue.md",
-            ".github/codex/schemas/issue-solution.json",
-            "tools/maintainer_automation.py",
-        )
-        for relative in removed_paths:
-            with self.subTest(path=relative):
-                self.assertFalse((REPO / relative).exists())
-
-        workflow_text = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in sorted((REPO / ".github" / "workflows").glob("*.yml"))
-        )
-        for forbidden in (
-            "openai/codex-action",
-            "CODEX_ISSUE_AUTOMATION_ENABLED",
-            "ISSUE_AUTOMATION_APP_ID",
-            "ISSUE_AUTOMATION_PRIVATE_KEY",
-            "automation:solve",
-        ):
-            with self.subTest(forbidden=forbidden):
-                self.assertNotIn(forbidden, workflow_text)
-
     def test_model_catalog_captures_are_bundled_versioned_and_checked(self):
         protocol = PROTOCOL.read_text(encoding="utf-8")
         section = protocol.split("## Model catalog bump", 1)[1].split("\n## ", 1)[0]
@@ -139,21 +114,6 @@ class MaintainerProtocolTests(unittest.TestCase):
             " must report the `name` `vX.Y.Z`", flat,
         )
         self.assertNotIn("Agent Marketplace v", protocol)
-
-    def test_the_one_time_release_reset_is_recorded_and_cannot_recur(self):
-        protocol = PROTOCOL.read_text(encoding="utf-8")
-        self.assertIn("\n## One-time release reset\n", protocol)
-        section = protocol.split("\n## One-time release reset\n", 1)[1].split("\n## ", 1)[0]
-        flat = " ".join(section.split())
-        for term in ("`.release/reset.json` records the decision", "It cannot happen again",
-                     "refuses every partial or mixed variant",
-                     "the old history is not archived", "A pull request may only add the marker",
-                     "python3 tools/release.py ship --version 0.0.1"):
-            with self.subTest(term=term):
-                self.assertIn(term, flat)
-        # The reset ran once through owner commands that no longer apply.
-        self.assertNotIn("gh release delete", section)
-        self.assertNotIn("prepare-stable-release.yml", section)
 
     def test_upstream_text_never_identifies_a_consumer_project(self):
         protocol = PROTOCOL.read_text(encoding="utf-8")

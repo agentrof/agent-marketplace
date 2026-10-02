@@ -414,6 +414,28 @@ class ValidatorContractTests(unittest.TestCase):
                     self.assertIn("DELIVERY_PRE_HANDOFF_ABSENT", findings[0].message)
                     self.assertNotIn("DELIVERY_PRE_HANDOFF_MISSING", findings[0].message)
 
+    def test_a_host_that_drops_the_shared_user_context_is_a_finding_not_a_crash(self):
+        """Each host fragment renders the one shared user context list on one line."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            for relative, entry, named in (
+                    ("platforms/codex/_team/overlay/templates/project-instructions/host.md",
+                     "- `{{user_context}}`\n", "{{user_context}}"),
+                    ("platforms/shared/_team/overlay/templates/project-instructions/"
+                     "user-context.json", '"{{user_companion}}",', "{{user_companion}}")):
+                with self.subTest(source=relative):
+                    path = root / relative
+                    original = path.read_text(encoding="utf-8")
+                    self.assertIn(entry, original)
+                    path.write_text(original.replace(entry, ""), encoding="utf-8")
+                    try:
+                        findings = [finding for finding in validate.run(root)
+                                    if finding.check == "project_instruction_contract"]
+                    finally:
+                        path.write_text(original, encoding="utf-8")
+                    self.assertEqual(len(findings), 1)
+                    self.assertIn(named, findings[0].message)
+
 
 PLUGIN_ROOT = "plugins/software-engineering-team"
 PANELS = f"{PLUGIN_ROOT}/skill-content/challenge-review/data/review-panels.json"

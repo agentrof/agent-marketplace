@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import re
 import sys
 import tempfile
 import unittest
@@ -16,6 +18,19 @@ CODEX_PACKAGE = ROOT / "dist/codex/software-engineering-team"
 SCRIPTS = ROOT / "plugins/software-engineering-team/scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(ROOT / "tools"))
+
+import build_distributions  # noqa: E402
+
+COMPANION = "{{user_companion}}"
+# A user context entry as Claude Code imports it or Codex lists it.
+USER_CONTEXT_ENTRY = re.compile(r"^(?:@|- `)([^\s`]+)`?$", re.MULTILINE)
+
+
+def user_context(text: str) -> list[str]:
+    """Return the files a generated instruction file loads as user context."""
+    _, found, rest = text.partition("\n# Load user context\n")
+    return USER_CONTEXT_ENTRY.findall(rest.split("\n#", 1)[0]) if found else []
 
 
 def load_module():
@@ -136,6 +151,103 @@ class ProjectInstructionTests(unittest.TestCase):
                 "for codex;",
                 (project / "AGENTS.override.md").read_text(encoding="utf-8"),
             )
+
+
+class UserContextTests(unittest.TestCase):
+    """Every host loads the one declared user context, in its declared order."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.contract = load_module()
+        cls.surfaces = {
+            surface["host_id"]: surface
+            for surface in cls.contract.instruction_surfaces(CODEX_PACKAGE)
+        }
+
+    def setup_project(self, project: Path) -> dict[str, str]:
+        """Write every host's instructions as setup does; return them by host."""
+        plan = self.contract.plan_portable_project_files(
+            project, CODEX_PACKAGE, "workspace", seed_user_files=True
+        )
+        self.assertEqual(plan["choice_requests"], [])
+        self.contract.apply_changes(plan["changes"])
+        return {
+            host: (project / surface["filename"]).read_text(encoding="utf-8")
+            for host, surface in self.surfaces.items()
+        }
+
+    def test_every_host_loads_the_same_declared_files_in_order(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            loaded = {
+                host: [
+                    COMPANION if path == self.surfaces[host]["user_companion"] else path
+                    for path in user_context(text)
+                ]
+                for host, text in self.setup_project(project).items()
+            }
+            self.assertEqual(len({tuple(files) for files in loaded.values()}), 1, loaded)
+            declared = json.loads(
+                (ROOT / build_distributions.USER_CONTEXT_RELPATH).read_text(encoding="utf-8")
+            )["files"]
+            expected = [path.replace("{{workspace}}", "workspace") for path in declared]
+            for host, files in loaded.items():
+                with self.subTest(host=host):
+                    self.assertEqual(files, expected)
+                    companion = self.surfaces[host]["user_companion"]
+                    for path in files:
+                        target = companion if path == COMPANION else path
+                        self.assertTrue((project / target).is_file(), target)
+
+    def test_codex_instructions_tell_the_agent_to_read_them_before_any_work(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            text = self.setup_project(Path(temporary))["codex"]
+        _, found, rest = text.partition("\n# Load user context\n")
+        self.assertTrue(found, "AGENTS.override.md loads no user context")
+        section = " ".join(rest.split("\n#", 1)[0].split())
+        self.assertIn(
+            "Before any work, read these files in this order and follow them."
+            " Skip a file that does not exist.",
+            section,
+        )
+        self.assertNotIn("{{", text)
+
+    def test_build_refuses_a_host_fragment_without_one_user_context_line(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            common, team, delta = (root / name for name in ("common.md", "team.md", "host.md"))
+            common.write_text("# Common\n", encoding="utf-8")
+            team.write_text("# Team\n", encoding="utf-8")
+
+            def render() -> str:
+                return build_distributions.project_instruction_text(
+                    "team", "host", "HOST.user.md", (common, team, delta),
+                    [COMPANION, "{{workspace}}/memory/me.md"],
+                )
+
+            for text in ("## Host\n", "@{{user_context}}\n@{{user_context}}\n",
+                         "{{user_context}} {{user_context}}\n"):
+                with self.subTest(text=text):
+                    delta.write_text(text, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "on exactly one line"):
+                        render()
+            delta.write_text("# Load user context\n\n- `{{user_context}}`\n", encoding="utf-8")
+            self.assertTrue(render().endswith(
+                "# Load user context\n\n- `HOST.user.md`\n- `{{workspace}}/memory/me.md`\n"
+            ))
+
+    def test_user_context_list_names_distinct_files_and_the_companion_once(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / build_distributions.USER_CONTEXT_RELPATH
+            path.parent.mkdir(parents=True)
+            for files in ([], ["me.md"], [COMPANION, COMPANION], [COMPANION, "me.md", "me.md"],
+                          [COMPANION, "my notes.md"], [COMPANION, "`me.md`"]):
+                with self.subTest(files=files):
+                    path.write_text(json.dumps({"schema_version": 1, "files": files}),
+                                    encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, re.escape("name {{user_companion}} once")):
+                        build_distributions.user_context_files(root)
 
 
 if __name__ == "__main__":

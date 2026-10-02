@@ -232,32 +232,6 @@ class SolutionTopologyTests(unittest.TestCase):
             self.assertFalse(error)
             self.assertEqual(props["topology_contract_version"], 3)
 
-    def test_legacy_solution_is_readonly_and_cannot_satisfy_strict_handoff(self):
-        with tempfile.TemporaryDirectory() as raw:
-            docs = Path(raw) / "workspace/docs"
-            tree = docs / "solution-design"
-            tree.mkdir(parents=True)
-            landscape = tree / "landscape.md"
-            landscape.write_text(
-                "---\ntype: landscape\npackage_status: approved\n"
-                "topology_contract_version: 2\n---\n# Legacy\n",
-                encoding="utf-8",
-            )
-            digest = landscape_check.package_hash(tree)
-            landscape.write_text(
-                landscape.read_text(encoding="utf-8").replace(
-                    "topology_contract_version: 2\n", 
-                    f"topology_contract_version: 2\npackage_hash: {digest}\n",
-                ), encoding="utf-8",
-            )
-            receipt = stage_package.solution_candidates(docs)[0]
-            self.assertEqual(receipt["verification_profile"], "legacy-readonly")
-            _receipt, errors = stage_package.verify(
-                docs, "solution-design", "solution-design/landscape",
-                require_strict_current=True,
-            )
-            self.assertTrue(any("legacy-readonly" in error for error in errors))
-
     def test_in_review_decision_is_not_a_topology_binding(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"

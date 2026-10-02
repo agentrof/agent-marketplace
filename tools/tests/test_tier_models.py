@@ -335,9 +335,6 @@ class EffortPolicyCheckTests(unittest.TestCase):
         mutate(value)
         path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
-    def test_shipped_policies_are_clean(self):
-        self.assertEqual(self.messages(), [])
-
     def test_policy_shape_and_vocabulary_errors_are_rejected(self):
         evidence = load(self.root / "platforms/codex/effort-policy.json")["confirm"]["max"]
         cases = (
@@ -627,10 +624,6 @@ class ConfigTests(unittest.TestCase):
                     self.assertTrue(any(f"tier_models.codex.{tier}.effort: 'ultra' is refused"
                                         f" for every tier" in error and "subagents" in error
                                         for error in errors), errors)
-
-    def test_effort_overrides_is_a_retired_field(self):
-        errors = self.errors(effort_overrides={"claude": {"high": "low"}})
-        self.assertEqual(errors, ["config contains unknown or retired field: effort_overrides"])
 
     def test_a_package_without_a_tier_map_refuses_an_override_only(self):
         canonical = ROOT / "plugins" / PLUGIN

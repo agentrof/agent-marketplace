@@ -55,7 +55,6 @@ under test, including concurrent ref and lease observations, remain real.
 | --- | --- |
 | `full` | All tests on the primary Linux and macOS lanes, plus the complete native compatibility policy on macOS minimum Python and both Windows interpreters |
 | `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff of a PR or merge queue group |
-| `release` | Release, packaging, setup, upgrade and CI contracts after trusted source evidence, deterministic replay and runtime-equivalence proof |
 | `reuse` | Prior successful validation of identical input, with fresh static and transition checks |
 
 Unknown paths, new test modules, shared fixtures, workflow/selection changes
@@ -176,8 +175,8 @@ The merge path additionally verifies that the receipt tested the selected
 same-repository PR's merge tree and that GitHub identifies the resulting
 commit as that PR's merge. Before recording inherited evidence, the aggregate
 rechecks its source so a retry or expiry during execution cannot pass. Inherited
-run IDs and artifact digests remain in the receipt for audit. A caller cannot
-replace publication evidence with a preparation result.
+run IDs and artifact digests remain in the receipt for audit. Only `main`'s
+push validation inherits evidence.
 
 Within a single run, plan and per-partition report artifacts use stable logical
 names so GitHub's failed-job retry can retain successful producers. Rerunning a
@@ -186,58 +185,40 @@ requires every report to match the exact plan hash and source tree; mixed
 plans fail. Final evidence remains immutable and names the current run attempt,
 so a prior attempt's receipt never authorizes a retry.
 
-Unit-test evidence covers repository test execution. It does not grant host
-installation coverage. A separate checkout-lifecycle receipt binds successful
-real Claude Code and Codex installs to the tested tree, smoke harness, pinned
-CLI versions and host runtime policy in `tools/data/ci-host-policy.json`.
-The host reader verifies the trusted source workflow, merged PR, latest run and
-attempt, age, artifact provenance and digest. Only the explicitly supplied
-prepare/publish candidate may reuse it. PR, merge queue, standalone manual and
-scheduled host checks remain fresh; fork, merge queue and scheduled runs do not
-emit reusable proof.
-The required host aggregate rechecks the exact source before accepting reuse,
-and rejects changed or expired proof. Missing proof at planning runs fresh
-host installs. Failed-job retries retain the logical planning artifact while
-final receipts remain attempt-specific.
+Unit-test evidence covers repository test execution and never grants host
+installation coverage. Every PR, merge queue group, manual and scheduled run
+installs both real hosts fresh, on the runner, Python and Node versions
+`tools/data/ci-host-policy.json` pins and the CLI versions
+`tools/data/host-cli-versions.json` pins; no host result is reused.
 
-Neither evidence type replaces current Git topology, release policy,
-ref-transaction checks, CodeQL or newly published public-channel installs.
-The read-only validation workflows never publish refs or releases.
+Evidence never replaces current Git topology, release policy, ref-transaction
+checks, CodeQL or newly published public-channel installs. The read-only
+validation workflows never publish refs or releases.
 
 ## Release transitions
 
-1. A feature PR runs its selected tests and both real host lifecycles. When
-   `main` requires the merge queue, each queued group repeats the required
-   checks on the exact commit `main` moves to, selecting impact coverage over
-   the group's complete diff, and the queue release gate keeps a release PR on
-   its attested `main_source`.
-2. After merge, main runs fresh static gates and either verifies equivalent
-   PR evidence or executes full tests. A queued commit reuses PR evidence only
-   when its tree equals the PR's tested merge. CodeQL continues to run on main.
-3. Explicit release preparation consumes exact-main validation (or runs full
-   validation), verifies matching checkout-host evidence or exercises both
-   hosts, builds the release on Linux and checks all static contracts before
-   publishing the candidate branch.
-4. The release PR always proves its one-commit deterministic replay from
-   trusted main. A separate classifier compares complete Git bytes and modes,
-   allowing only closed version/provenance/catalog/changelog/changeset
-   transformations. Unchanged runtime payload plus valid main evidence permits
-   the release profile. Any unrecognized transformation or missing evidence
-   selects full tests. Both real host lifecycles still exercise the candidate.
-5. Publication verifies the exact two-parent merge and its tree, consumes the
-   successful release PR validation or executes full tests, and verifies
-   matching checkout-host evidence or exercises both hosts. Only then may the
-   existing trusted transaction stage stable/tag refs.
-6. Fresh public-channel installs verify the newly staged exact SHA on both
-   hosts. The public smoke CI target does not repeat unit tests; its required
-   predecessors already verified candidate coverage. Rollback, immutable
-   Release reconciliation, exact-lease cleanup and clean-main completion keep
-   their existing contracts.
+1. A pull request runs its selected tests and both real host lifecycles. A
+   release commit, the last commit of a pull request, changes only version
+   surfaces, the changelog, release metadata, consumed changesets and
+   `dist/`, so the same run tests the final release tree, and `check-pr`
+   proves the commit is the deterministic bump of its parent. When `main`
+   requires the merge queue, each queued group repeats the required checks on
+   the exact commit `main` moves to, selecting impact coverage over the
+   group's complete diff.
+2. After merge, `main` runs fresh static gates and either verifies equivalent
+   PR evidence, in about a minute, or executes full tests. A queued commit
+   reuses PR evidence only when its tree equals the PR's tested merge. CodeQL
+   continues to run on `main`.
+3. A release dispatches the `Release` workflow for one `main` commit. It
+   checks the commit's release state, waits for that commit's own `main`
+   validation and requires its success, and never runs the tests or the host
+   lifecycles again. It then stages the version tag and `stable` with exact
+   leases, installs both hosts from the real public `stable` channel and
+   creates the immutable Release. Rollback, immutable Release reconciliation
+   and clean-main completion keep their contracts.
 
-The first optimization PR cannot inherit evidence from older workflows and
-therefore runs full validation. Workflow or policy changes invalidate prior
-receipts deliberately. Measure the first full PR by the slowest shard,
-including runner queue time; measure a release separately from preparation
-dispatch to publication and to final main validation. Parallel publication
-and main validation must not be added together. Timing targets are acceptance
-goals, not grounds to omit a failed or slow gate.
+Workflow or policy changes invalidate prior receipts deliberately. Measure a
+release from `ship` to the immutable Release, and the pull request that
+carries the release commit by its slowest shard, runner queue time included.
+Timing targets are acceptance goals, not grounds to omit a failed or slow
+gate.

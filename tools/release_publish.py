@@ -117,7 +117,6 @@ class ReleaseSpec:
 class RemoteRefs:
     main: str
     stable: Optional[str]
-    release_branch: Optional[str]
     tag_object: Optional[str]
     tag_target: Optional[str]
 
@@ -125,7 +124,6 @@ class RemoteRefs:
         return {
             "main": self.main,
             "stable": self.stable,
-            "release_stable": self.release_branch,
             "tag_object": self.tag_object,
             "tag_target": self.tag_target,
         }
@@ -165,17 +163,16 @@ class Publisher:
     ) -> RemoteRefs:
         main_ref = "refs/heads/main"
         stable_ref = "refs/heads/stable"
-        release_ref = "refs/heads/release/stable"
         tag_ref = f"refs/tags/{spec.tag}"
         peeled_ref = f"{tag_ref}^{{}}"
         output = self._checked(
             [
                 "git", "ls-remote", spec.remote, main_ref, stable_ref,
-                release_ref, tag_ref, peeled_ref,
+                tag_ref, peeled_ref,
             ],
             "remote ref observation",
         )
-        expected = {main_ref, stable_ref, release_ref, tag_ref, peeled_ref}
+        expected = {main_ref, stable_ref, tag_ref, peeled_ref}
         values: dict[str, str] = {}
         for raw_line in output.splitlines():
             if not raw_line.strip():
@@ -219,7 +216,6 @@ class Publisher:
         return RemoteRefs(
             main=main,
             stable=values.get(stable_ref),
-            release_branch=values.get(release_ref),
             tag_object=tag_object,
             tag_target=tag_target,
         )
@@ -522,45 +518,6 @@ class Publisher:
             "rollback", "rolled-back", observed_phase, spec, observed, release
         )
 
-    def _delete_release_branch(
-        self, spec: ReleaseSpec, expected_sha: Optional[str]
-    ) -> tuple[str, RemoteRefs]:
-        refs = self.read_remote_refs(spec, require_candidate_main=False)
-        if self.classify_refs(spec, refs) != "staged":
-            raise PublishError(
-                "candidate refs changed before release/stable cleanup"
-            )
-        if expected_sha is None:
-            return "not-requested", refs
-        strict_sha(expected_sha, "release/stable SHA")
-        if refs.release_branch is None:
-            return "already-absent", refs
-        if refs.release_branch != expected_sha:
-            raise PublishError(
-                "release/stable moved before cleanup: expected "
-                f"{expected_sha}, got {refs.release_branch}"
-            )
-        release_ref = "refs/heads/release/stable"
-        deleted = self._run([
-            "git", "push",
-            f"--force-with-lease={release_ref}:{expected_sha}",
-            spec.remote, f":{release_ref}",
-        ])
-        observed = self.read_remote_refs(
-            spec, require_candidate_main=False
-        )
-        if self.classify_refs(spec, observed) != "staged":
-            raise PublishError(
-                "candidate refs changed during release/stable cleanup"
-            )
-        if observed.release_branch is not None:
-            detail = _stderr(deleted).strip() or _stdout(deleted).strip()
-            suffix = f": {detail}" if detail else ""
-            raise PublishError(
-                f"exact-lease release/stable cleanup failed{suffix}"
-            )
-        return "deleted", observed
-
     @staticmethod
     def _require_immutable(spec: ReleaseSpec, release: ReleaseObservation) -> None:
         if release.immutable is not True:
@@ -569,19 +526,16 @@ class Publisher:
                 "immutable, and the setting never locks a Release published "
                 "before it: enable release immutability for the repository, "
                 f"delete this mutable Release (never its tag {spec.tag}) and "
-                "re-run finalize to create an immutable one. Candidate refs and "
-                "release/stable were preserved"
+                "re-run finalize to create an immutable one. Candidate refs were "
+                "preserved"
             )
 
     def finalize(
         self,
         spec: ReleaseSpec,
         notes_file: str,
-        release_branch_sha: Optional[str] = None,
         require_immutable: bool = False,
     ) -> dict:
-        if release_branch_sha is not None:
-            strict_sha(release_branch_sha, "release/stable SHA")
         refs = self.read_remote_refs(spec, require_candidate_main=False)
         phase = self.classify_refs(spec, refs)
         if phase != "staged":
@@ -618,23 +572,9 @@ class Publisher:
             action = "reconciled-after-create-failure" if created.returncode else "created"
         if require_immutable:
             self._require_immutable(spec, release)
-
-        cleanup, refs = self._delete_release_branch(
-            spec, release_branch_sha
+        return self._result(
+            "finalize", action, "published", spec, refs, release,
         )
-        release = self.observe_release(spec)
-        if release.state != "exists" or (
-            require_immutable and release.immutable is not True
-        ):
-            raise PublishError(
-                "GitHub Release changed during final verification"
-            )
-        result = self._result(
-            "finalize", action, "published", spec, refs,
-            release,
-        )
-        result["release_branch_cleanup"] = cleanup
-        return result
 
     @staticmethod
     def _result(
@@ -685,7 +625,6 @@ def build_parser() -> argparse.ArgumentParser:
     finalize = subparsers.add_parser("finalize")
     _add_spec_arguments(finalize)
     finalize.add_argument("--notes-file", required=True)
-    finalize.add_argument("--release-branch-sha")
     finalize.add_argument("--require-immutable", action="store_true")
     return parser
 
@@ -715,8 +654,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if not notes.is_file():
                 raise PublishError(f"release notes file is missing: {notes}")
             result = publisher.finalize(
-                spec, str(notes), args.release_branch_sha,
-                args.require_immutable,
+                spec, str(notes), args.require_immutable,
             )
     except PublishError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))

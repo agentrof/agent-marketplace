@@ -2444,9 +2444,11 @@ class ExperienceCompilerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw)
             init_repository(project)
+            # Native Windows setup waits for this answer; other hosts ignore it.
             setup = subprocess.run(
                 [sys.executable, str(SETUP), "apply", "--project-root",
-                 str(project), "--json"],
+                 str(project), "--json",
+                 "--choice", "git.core_longpaths=leave"],
                 cwd=ROOT, text=True, capture_output=True, check=False,
             )
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)

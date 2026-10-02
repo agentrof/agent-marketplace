@@ -39,9 +39,13 @@ validation remain required; no Git hooks are installed. See
 Before running the gate, add `.changes/<short-kebab-summary>.json`. It must contain
 a non-empty `summary` and a `components` object. Use `patch`, `minor`, or
 `major` for every affected plugin or `agent-marketplace`; use an empty object
-for documentation, test, and CI changes with no stable release effect. Do not
-edit `versions.json` in a normal pull request. A local pass establishes the
-local candidate result; CI independently verifies its platform and host coverage.
+for documentation, test, and CI changes with no stable release effect. Never
+edit `versions.json`, `CHANGELOG.md` or `.release/stable.json` by hand: only
+the release commit changes them, the last commit of a pull request, made by
+`python3 tools/release.py bump`, as the
+[maintainer protocol](docs/maintainer-operations-protocol.md#flow-b-explicit-release-to-clean-main)
+describes. A local pass establishes the local candidate result; CI
+independently verifies its platform and host coverage.
 
 Security findings do not belong in public issues, pull requests or commit
 messages. Use the repository's [private vulnerability reporting form](https://github.com/agentrof/agent-marketplace/security/advisories/new)
@@ -94,7 +98,10 @@ The scaffolder creates one host-neutral
 `templates/project-instructions/team.md`, creates platform source for every
 registered adapter, updates native marketplace registries, and rebuilds all
 distributions. Host-specific project instruction behavior belongs only in the
-relevant platform adapter fragments.
+relevant platform adapter fragments. The files every host loads as user context
+are listed once in
+`platforms/shared/_team/overlay/templates/project-instructions/user-context.json`,
+and each host fragment renders that list on its one `{{user_context}}` line.
 After a manual canonical edit, run
 `python3 tools/build_distributions.py` before staging and `make check-local`.
 

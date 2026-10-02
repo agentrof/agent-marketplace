@@ -138,12 +138,12 @@ class FakeGitHub:
 
 
 class EvidenceReuseTests(unittest.TestCase):
-    def find(self, api, mode="main", expected=MERGED):
+    def find(self, api, expected=MERGED):
         with mock.patch.object(evidence, "tree", return_value=TREE), \
              mock.patch.object(evidence, "git", return_value=MERGED), \
              mock.patch.object(evidence, "contract_hash", return_value=CONTRACT), \
              mock.patch.object(evidence, "verify_plan_contract"):
-            return evidence.find_evidence(Path("."), api, expected, mode, NOW)
+            return evidence.find_evidence(Path("."), api, expected, NOW)
 
     def test_successful_pr_merge_tree_can_cover_resulting_main_commit(self):
         result = self.find(FakeGitHub())
@@ -247,26 +247,14 @@ class EvidenceReuseTests(unittest.TestCase):
             api.receipt["runtimes"] = runtimes
             self.assertFalse(self.find(api)["reused"])
 
-    def test_prepare_requires_exact_push_main_not_just_equal_tree(self):
+    def test_main_lookup_reads_only_the_merged_pr_validation(self):
         api = FakeGitHub()
+        result = self.find(api)
+        self.assertTrue(result["reused"], result)
+        self.assertEqual(result["lookup_mode"], "main")
         api.run.update(event="push", head_sha=MERGED, head_branch="main")
-        api.receipt.update(event="push", head_sha=MERGED, tested_sha=MERGED,
-                           ref="refs/heads/main", pull_request=None)
-        api.receipt["plan"]["source_sha"] = MERGED
-        api.receipt["plan"]["plan_hash"] = evidence.digest({
-            key: value for key, value in api.receipt["plan"].items() if key != "plan_hash"
-        })
-        api.receipt["plan_hash"] = api.receipt["plan"]["plan_hash"]
-        self.assertTrue(self.find(api, "prepare")["reused"])
-        api.receipt["tested_sha"] = TESTED
-        self.assertFalse(self.find(api, "prepare")["reused"])
-
-    def test_publish_requires_the_selected_release_pr(self):
-        api = FakeGitHub()
-        self.assertFalse(self.find(api, "publish")["reused"])
-        api.pull["head"]["ref"] = "release/stable"
-        api.run["head_branch"] = "release/stable"
-        self.assertTrue(self.find(api, "publish")["reused"])
+        api.runs = [api.run]
+        self.assertFalse(self.find(api)["reused"])
 
     def test_impact_profile_is_preserved_and_cannot_claim_full(self):
         api = FakeGitHub(receipt("impact"))
@@ -384,26 +372,62 @@ class ReceiptCreationTests(unittest.TestCase):
             self.assertEqual(result["inherited"], inherited)
             self.assertEqual(lookup.call_count, 2)
 
-    def test_source_plan_is_verified_in_its_own_tree_when_release_tree_differs(self):
+    def test_source_plan_is_verified_in_its_own_tree_when_the_checkout_differs(self):
         fake_tools = mock.Mock()
         checkout = mock.MagicMock()
         checkout.__enter__.return_value = Path("trusted-source")
         with mock.patch.object(evidence, "test_tools", return_value=fake_tools), \
              mock.patch.object(evidence, "git", return_value="9" * 40), \
              mock.patch.object(evidence, "trusted_checkout", return_value=checkout) as clone:
-            evidence.verify_plan_contract(Path("release-candidate"), plan(), BASE)
-        clone.assert_called_once_with(Path("release-candidate"), BASE)
+            evidence.verify_plan_contract(Path("checkout"), plan(), BASE)
+        clone.assert_called_once_with(Path("checkout"), BASE)
         self.assertEqual(fake_tools.validate_plan.call_args.args[1], Path("trusted-source"))
 
-    def test_release_profile_cannot_omit_inherited_main_evidence(self):
+    def test_a_retired_release_profile_never_supplies_evidence(self):
         api = FakeGitHub(receipt("release"))
         with mock.patch.object(evidence, "tree", return_value=TREE), \
              mock.patch.object(evidence, "git", return_value=MERGED), \
              mock.patch.object(evidence, "contract_hash", return_value=CONTRACT), \
              mock.patch.object(evidence, "verify_plan_contract"):
-            result = evidence.find_evidence(Path("."), api, MERGED, "main", NOW)
+            result = evidence.find_evidence(Path("."), api, MERGED, NOW)
         self.assertFalse(result["reused"])
-        self.assertIn("no validated main source", result["reason"])
+        self.assertIn("profile is invalid", result["reason"])
+
+    def test_only_main_push_validation_inherits_and_no_release_event_records(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data = plan("reuse")
+            (root / "plan.json").write_text(json.dumps(data), encoding="utf-8")
+            inherited = {
+                "reused": True, "lookup_mode": "main", "expected_sha": TESTED,
+                "expected_tree": TREE, "contract_hash": CONTRACT, "source_run_id": 122,
+                "source_run_attempt": 1, "artifact_id": 455, "receipt_digest": "4" * 64,
+            }
+            fake_tools = mock.Mock()
+            fake_tools.verify_reports.return_value = {"runtimes": {}}
+            base_environment = {
+                "GITHUB_REPOSITORY": REPO, "GITHUB_RUN_ID": "123",
+                "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": TESTED,
+                "GITHUB_REF": "refs/heads/main",
+            }
+            cases = (
+                ("workflow_dispatch", inherited, "does not match this workflow transition"),
+                ("push", dict(inherited, lookup_mode="prepare"),
+                 "does not match this workflow transition"),
+                ("pull_request_target", inherited, "unsupported receipt event"),
+            )
+            for event, proof, message in cases:
+                with self.subTest(event=event, mode=proof["lookup_mode"]):
+                    (root / "inherited.json").write_text(json.dumps(proof), encoding="utf-8")
+                    with mock.patch.object(evidence, "git", side_effect=lambda root, *args: "" if args[0] == "diff" else TESTED), \
+                         mock.patch.object(evidence, "tree", return_value=TREE), \
+                         mock.patch.object(evidence, "contract_hash", return_value=CONTRACT), \
+                         mock.patch.object(evidence, "test_tools", return_value=fake_tools), \
+                         mock.patch.object(evidence, "find_evidence", return_value=inherited), \
+                         mock.patch.dict(os.environ, dict(base_environment, GITHUB_EVENT_NAME=event), clear=True):
+                        with self.assertRaisesRegex(evidence.EvidenceError, message):
+                            evidence.create_receipt(root, root / "plan.json", root / "reports",
+                                                    root / "inherited.json")
 
 
 class TimingHistoryTests(unittest.TestCase):

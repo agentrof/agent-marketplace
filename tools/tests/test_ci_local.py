@@ -41,7 +41,7 @@ class LocalValidationTests(unittest.TestCase):
         self.source.write_text('value = 1\n')
         (self.root / 'static.py').write_text('')
         self.policy = {'schema_version': 1, 'groups': {'all': {'tests': ['tools.tests.test_example.*']}},
-            'always_groups': ['all'], 'release_groups': ['all'], 'lanes': {},
+            'always_groups': ['all'], 'lanes': {},
             'full_paths': ['tools/*'], 'rules': [{'paths': ['source.py', '*.md'], 'groups': ['all']}],
             'module_seconds': {}, 'default_seconds': 1,
             'known_test_modules': ['tools.tests.test_example']}

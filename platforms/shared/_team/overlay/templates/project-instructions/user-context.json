@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "files": [
+    "{{user_companion}}",
+    "{{workspace}}/memory/agent-marketplace.md",
+    "{{workspace}}/memory/me.md",
+    "{{workspace}}/memory/profile.md"
+  ]
+}

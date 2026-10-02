@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "version": "0.0.2",
+  "stable_base": "243278ab35314a3b619525cf803c02da8bfd8b2d",
+  "main_source": "31894fb74712c4a45f746510fa5e2b33d6b12f77",
+  "build_id": "snapshot.64069e5472080b04ce859cb59d225d9615d9f53a8fbdee7afc3aec2e47458597",
+  "impacts": {
+    "software-engineering-team": "patch"
+  },
+  "summaries": [
+    "The repository-portable vault gate that setup installs at `.github/agentrof/vault-gate.pyz` now gives the package's own verdict on two kinds of project where it failed. Its `check` failed `backlog:approved`, or `backlog:draft`, on every project with a backlog with `process switch registry cannot be read`, while the package's own `backlog_compile.py check` passed on the same project: the archive held the backlog compiler and the Process Policy module it imports, but not the process switch registry that module reads. The task input policy, the story size measures, the Delivery document contract, verification policy and owner decision classes, the code review panel data and the CI workflow template were missing the same way. The installer now closes the archive over each path under `skill-content/` or `templates/` that a bundled script names, as one string literal or as literals joined with `/`, and copies a named file as well as a named directory; a named path the package does not hold is skipped. The gate also failed `solution-design` when an accepted Solution decision named an installed method skill such as `python-fastapi`, because `landscape_check.py` resolves the installed skills from the folders under `skill-content/` and the archive held only the folders whose data it bundles. The archive now lists every folder under `skill-content/` and `templates/`. It stays byte-for-byte reproducible, and setup replaces an installed gate whose bytes differ, so running setup after the update installs the fixed gate.",
+    "A private verification clone that differs from its commit now names the paths. Git can leave a tracked file out of a checkout that still exits 0, and the clone then differs from its commit before any command ran, yet `environment --verb up` refused with only \"runtime checkout changed; only teardown is allowed before a new verification session\" and a command run recorded only `candidate_intact` false, which read as a file the command had changed. The runtime refusal now reads \"runtime checkout changed (missing <path>); ...\", a QA command run, a pre-handoff regression run or a runtime event that is not intact records the paths as `checkout_difference`, and a freeze that such a pre-handoff run refuses names them as well. A path the checkout lacks is marked missing, any other is marked changed, and at most five are named before a count of the rest. What each refusal allows is unchanged."
+  ]
+}

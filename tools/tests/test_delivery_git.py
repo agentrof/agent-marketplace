@@ -32,12 +32,13 @@ import file_lock  # noqa: E402
 import operation_compile  # noqa: E402
 import process_policy  # noqa: E402
 import architecture_compile  # noqa: E402
+import delivery_verification  # noqa: E402
 import setup_check  # noqa: E402
 import stage_package  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 from git_fixture import disable_automatic_maintenance, init_repository, remove_temporary, temporary_directory  # noqa: E402
-from fixture_cache import RepositorySeedCache  # noqa: E402
+from fixture_cache import RUNTIME, RepositorySeedCache  # noqa: E402
 
 
 def write_pull_request_workflow(project: Path) -> None:
@@ -174,7 +175,24 @@ class PreStartFixtureCache(RepositorySeedCache):
     """Delivery fixtures share the same pre-runtime isolation boundary."""
 
 
+class PullRequestIntentCache(PreStartFixtureCache):
+    """The state prepare_pr_creation leaves for the default Item: integrated and reviewed, its
+    worktree removed and its writer receipt released. The Item's verification sessions stay,
+    named by the removed worktree's absolute path, so no copy reads them."""
+
+    def require_seed(self, root: Path) -> None:
+        self.require_isolated(root)
+        runtime = root / RUNTIME
+        if any(path.is_file() for path in (runtime / "worktrees").rglob("*")):
+            raise AssertionError("a PR intent seed cannot hold an Item worktree")
+        if any(path.suffix != ".lock" or path.stat().st_size
+               for path in (runtime / "receipts").rglob("*") if path.is_file()):
+            raise AssertionError("a PR intent seed cannot hold a writer receipt")
+
+
 _PR_FIXTURE_CACHE = PreStartFixtureCache()
+_PR_INTENT_CACHE = PullRequestIntentCache()
+_PR_INTENT_RESULTS = {}
 _EXECUTION_FIXTURE_CACHES = {}
 _EXECUTION_FIXTURE_RECEIPTS = {}
 
@@ -183,6 +201,8 @@ class DeliveryGitTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         _PR_FIXTURE_CACHE.close()
+        _PR_INTENT_CACHE.close()
+        _PR_INTENT_RESULTS.clear()
         for cache in _EXECUTION_FIXTURE_CACHES.values():
             cache.close()
         _EXECUTION_FIXTURE_CACHES.clear()
@@ -197,6 +217,14 @@ class DeliveryGitTests(unittest.TestCase):
                 return False
         return all(getattr(getattr(self, name), "__func__", None) is original
                    for name, original in _PR_FIXTURE_METHODS.items())
+
+    def pr_intent_cache_context_unchanged(self):
+        """The pre-start context, the verification and provider code the intent steps run and
+        the steps themselves are as they were at import."""
+        return self.fixture_cache_context_unchanged() and all(
+            getattr(owner, name, None) is original for owner, name, original in _PR_INTENT_BINDINGS
+        ) and all(getattr(getattr(self, name), "__func__", None) is original
+                  for name, original in _PR_INTENT_METHODS.items())
 
     def symlink_or_skip(self, link: Path, target) -> None:
         """Create a symlink, or skip the current test or subtest on a host that cannot."""
@@ -384,6 +412,47 @@ class DeliveryGitTests(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, message):
                     PreStartFixtureCache.require_pre_start(project)
 
+    def test_pr_intent_fixture_copies_hold_the_same_state_and_stay_isolated(self):
+        first_temporary, first, _docs, first_tip, first_intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, first_temporary)
+        second_temporary, second, _docs, second_tip, second_intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, second_temporary)
+        self.assertEqual((first_tip, first_intent), (second_tip, second_intent))
+        refs = {project: delivery_git.run_git(project / "remote.git", "for-each-ref")
+                for project in (first, second)}
+        self.assertEqual(refs[first], refs[second])
+        for project in (first, second):
+            self.assertEqual(delivery_git.run_git(project, "remote", "get-url", "origin"),
+                             str(project / "remote.git"))
+            self.assertFalse((project / ".git" / "FETCH_HEAD").exists())
+            _PR_INTENT_CACHE.require_seed(project)
+        (first / "README.md").write_text("Only the first test changes this file.\n", encoding="utf-8")
+        delivery_git.run_git(first, "commit", "-qam", "Advance isolated fixture")
+        delivery_git.run_git(first, "push", "-q", "origin", "main")
+        self.assertNotEqual(delivery_git.run_git(first / "remote.git", "for-each-ref"), refs[first])
+        self.assertEqual(delivery_git.run_git(second / "remote.git", "for-each-ref"), refs[second])
+        self.assertEqual((second / "README.md").read_text(encoding="utf-8"), "fixture\n")
+        self.assertEqual(_PR_INTENT_CACHE.snapshot(_PR_INTENT_CACHE.root), _PR_INTENT_CACHE.fingerprint)
+
+    def test_pr_intent_fixture_rejects_item_worktrees_writer_receipts_and_linked_worktrees(self):
+        runtime = Path(".agentrof/agent-marketplace/.runtime")
+        for relative, message in (
+            (runtime / "worktrees/dlv-001/items/auth-01/README.md", "Item worktree"),
+            (runtime / "receipts/item-dlv-001-auth-01.json", "writer receipt"),
+            (".git/worktrees/active/gitdir", "linked worktrees"),
+        ):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as raw:
+                project = Path(raw)
+                lock = project / runtime / "receipts/item-dlv-001-auth-01.json.lock"
+                lock.parent.mkdir(parents=True)
+                lock.write_bytes(b"")
+                _PR_INTENT_CACHE.require_seed(project)
+                path = project / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("unexpected state\n", encoding="utf-8")
+                with self.assertRaisesRegex(AssertionError, message):
+                    _PR_INTENT_CACHE.require_seed(project)
+
     def test_pre_start_fixture_bypasses_changed_environment_and_setup_callables(self):
         self.assertTrue(self.fixture_cache_context_unchanged())
         with mock.patch.dict(os.environ, {"AGENTROF_FIXTURE_CONTEXT": "changed"}):
@@ -460,6 +529,19 @@ class DeliveryGitTests(unittest.TestCase):
 
     def prepare_pr_intent(self, author_review=None, *, use_cache=True):
         """Keep each mutable repository isolated; altered setup contexts use the real builder."""
+        if use_cache and author_review is None and self.pr_intent_cache_context_unchanged():
+            def builder():
+                temporary, project, docs, product_tip, intent = self.build_pr_intent()
+                _PR_INTENT_RESULTS["default"] = json.dumps([product_tip, intent])
+                return temporary, project, docs
+
+            temporary, project, docs = _PR_INTENT_CACHE.copy(builder)
+            product_tip, intent = json.loads(_PR_INTENT_RESULTS["default"])
+            return temporary, project, docs, product_tip, intent
+        return self.build_pr_intent(author_review, use_cache=use_cache)
+
+    def build_pr_intent(self, author_review=None, *, use_cache=True):
+        """Integrate and review the default Item, then prepare its PR intent."""
         if use_cache and self.fixture_cache_context_unchanged():
             temporary, project, docs = _PR_FIXTURE_CACHE.copy(self.build_pre_start_fixture)
         else:
@@ -6298,6 +6380,17 @@ _PR_FIXTURE_METHODS = {name: getattr(DeliveryGitTests, name) for name in (
     "build_pre_start_fixture", "make_project", "reserve_scope", "author_execution_topology",
     "approve_verification_contract", "approve_governance",
     "build_execution_fixture", "prepare_execution_with_draft_reserved_contracts",
+)}
+# The PR intent seed also runs the Item's evidence, push, integration and Review steps.
+_PR_INTENT_BINDINGS = [
+    (module, name, value)
+    for module in (delivery_verification, delivery_provider, delivery_result, file_lock)
+    for name, value in vars(module).items() if callable(value)
+]
+_PR_INTENT_BINDINGS.append(
+    (sys.modules[__name__], "approved_fixture_shell_commands", approved_fixture_shell_commands))
+_PR_INTENT_METHODS = {name: getattr(DeliveryGitTests, name) for name in (
+    "build_pr_intent", "commit_item_product_change", "approve_item_evidence", "record_item_evidence",
 )}
 
 

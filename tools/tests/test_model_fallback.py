@@ -31,7 +31,6 @@ sys.path.insert(0, str(TESTS_DIR.parent))
 import build_distributions  # noqa: E402
 import fixtures  # noqa: E402
 import git_fixture  # noqa: E402
-import validate  # noqa: E402
 
 PREFIX = f"{fixtures.PLUGIN}:"
 HOOK = "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/model_fallback.py"
@@ -210,7 +209,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         self.assertNotIn("`git status` over that scope reads as it did before", authoring)
 
     def test_the_validator_requires_the_hook(self):
-        self.assertEqual(validate.run(self.root), [])
+        self.assertEqual(fixtures.validator_findings(self.root, "single_team_contract"), [])
         hooks = self.root / "platforms/claude" / fixtures.PLUGIN / "overlay/hooks/hooks.json"
         original = hooks.read_bytes()
         data = json.loads(original)
@@ -219,7 +218,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                                     if group.get("matcher") != "Agent"]
         hooks.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         try:
-            findings = validate.run(self.root)
+            findings = fixtures.validator_findings(self.root, "single_team_contract")
         finally:
             hooks.write_bytes(original)
         self.assertTrue(any(finding.check == "single_team_contract"

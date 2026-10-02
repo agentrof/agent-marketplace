@@ -238,6 +238,9 @@ SHIPPED_ADDITIONS = {
         72, "#349: the one resolution of each role's tier, model and effort, which"
             " project_config.py and the host project generators import, so every task"
             " binds it with the other package scripts."),
+    "skill-content/setup/references/windows-long-paths.md": (
+        2, "#358: the native Windows core.longpaths choice procedure, a step of the setup"
+           " entry, which every setup task binds with the rest of its skill."),
 }
 
 # Every default-path output that differs from e47dbe0, by harness and by the

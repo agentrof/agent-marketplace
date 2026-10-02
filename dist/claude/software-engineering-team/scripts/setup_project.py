@@ -50,6 +50,13 @@ JSON_PAYLOAD_FILES = (
     "app.json", "appearance.json", "core-plugins.json", "graph.json",
     "types.json", "community-plugins.json",
 )
+LONG_PATHS_CHOICE = "git.core_longpaths"
+# Each declared choice lists its options with the recommended one first.
+CHOICES = {LONG_PATHS_CHOICE: ("set", "leave")}
+# Git for Windows creates no file whose absolute path reaches MAX_PATH, and no
+# directory whose path reaches MAX_PATH less room for an 8.3 file name, unless
+# core.longpaths is set, and its checkout still exits 0.
+WINDOWS_PATH_LIMITS = {"directory": 248, "file_path": 260}
 
 
 class SetupError(RuntimeError):
@@ -554,6 +561,174 @@ def bytes_hash(content: bytes) -> str:
     return "sha256:" + hashlib.sha256(content).hexdigest()
 
 
+def native_windows() -> bool:
+    return os.name == "nt"
+
+
+def parse_choices(values: list[str] | None) -> dict[str, str]:
+    """Read repeated ``--choice <id>=<option>`` answers to declared choices."""
+    result: dict[str, str] = {}
+    for value in values or []:
+        request_id, separator, selected = value.partition("=")
+        if not separator or selected not in CHOICES.get(request_id, ()):
+            expected = "; ".join(
+                f"{key}={'|'.join(options)}" for key, options in CHOICES.items()
+            )
+            raise SetupError(f"invalid --choice {value!r}; expected {expected}")
+        if result.setdefault(request_id, selected) != selected:
+            raise SetupError(f"conflicting choices for {request_id}")
+    return result
+
+
+def local_long_paths(root: Path) -> tuple[bool, str | None]:
+    """Return whether the repository's local config turns core.longpaths on,
+    and the raw value it holds, None when unset."""
+    raw = subprocess.run(
+        ["git", "-C", str(root), "config", "--local", "--get",
+         "core.longpaths"],
+        capture_output=True, text=True, check=False,
+    )
+    if raw.returncode == 1:
+        return False, None
+    if raw.returncode:
+        raise SetupError("core.longpaths read failed: " + raw.stderr.strip())
+    value = raw.stdout.rstrip("\n")
+    # Git's own boolean reading; a value it cannot read is not true.
+    enabled = subprocess.run(
+        ["git", "-C", str(root), "config", "--local", "--bool", "--get",
+         "core.longpaths"],
+        capture_output=True, text=True, check=False,
+    )
+    return enabled.returncode == 0 and enabled.stdout.strip() == "true", value
+
+
+def windows_length(path: str) -> int:
+    """Count UTF-16 code units, the unit of the Windows path limit."""
+    return len(path.encode("utf-16-le")) // 2
+
+
+def deepest_delivery_worktree(root: Path, workspace: str) -> Path:
+    """Return the deepest Item or Integration worktree root Delivery would use.
+
+    The next Delivery always has an Integration worktree, and each Story of
+    the backlog gets an Item worktree below it, at the paths the Delivery code
+    itself builds.
+    """
+    import backlog_compile
+    import delivery_compile
+    import delivery_git
+
+    docs = root / workspace / "docs"
+    try:
+        main_worktree = delivery_git.main_worktree(root)
+    except RuntimeError as exc:
+        raise SetupError(f"main worktree cannot be resolved: {exc}") from exc
+    delivery_id = delivery_compile.next_delivery_id(docs)
+    roots = [delivery_git.worktree_paths(main_worktree, delivery_id)["integration"]]
+    try:
+        record, _findings = backlog_compile.collect(docs)
+    except (OSError, RuntimeError, ValueError):
+        record = {}
+    for story in record.get("stories", []):
+        try:
+            roots.append(delivery_git.worktree_paths(
+                main_worktree, delivery_id, str(story["id"]))["item"])
+        except ValueError:
+            continue
+    return max(roots, key=lambda path: windows_length(str(path)))
+
+
+def long_tracked_paths(root: Path, worktree: Path) -> list[dict]:
+    """List each tracked file Git for Windows leaves out of *worktree*, and why.
+
+    A file whose directory reaches the directory limit is named for that,
+    since creating the directory fails first; any other for its own path.
+    """
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z"],
+        capture_output=True, check=False,
+    )
+    if listed.returncode:
+        raise SetupError("tracked file listing failed: "
+                         + listed.stderr.decode("utf-8", "replace").strip())
+    found = []
+    for entry in listed.stdout.split(b"\0"):
+        if not entry:
+            continue
+        name = entry.decode("utf-8")
+        path = worktree / name
+        for reason, target in (("directory", path.parent), ("file_path", path)):
+            length = windows_length(str(target))
+            if target != worktree and length >= WINDOWS_PATH_LIMITS[reason]:
+                found.append({"path": name, "reason": reason, "length": length})
+                break
+    return found
+
+
+def long_paths_plan(root: Path, workspace: str,
+                    choices: dict[str, str]) -> dict:
+    """Plan the native Windows core.longpaths choice.
+
+    Item and Integration worktrees share the project repository's local
+    config, and the owner's own Git commands in them must see the files
+    Delivery sees, so the setting belongs there and only with consent. Git on
+    other hosts has no path limit to lift.
+    """
+    plan = {"choice_requests": [], "operations": [], "warnings": [],
+            "before": None}
+    if not native_windows():
+        return plan
+    enabled, plan["before"] = local_long_paths(root)
+    if enabled:
+        return plan
+    selected = choices.get(LONG_PATHS_CHOICE)
+    if selected == "set":
+        plan["operations"].append({
+            "action": "update", "surface": "git_config",
+            "path": "core.longpaths", "ownership": "repository_local_config",
+            "changes": [{"key": "core.longpaths", "before": plan["before"],
+                         "after": "true"}],
+        })
+        return plan
+    worktree = deepest_delivery_worktree(root, workspace)
+    paths = long_tracked_paths(root, worktree)
+    if selected == "leave":
+        if paths:
+            plan["warnings"].append(
+                "core.longpaths stays off, so Git for Windows leaves these"
+                " tracked paths out of Item and Integration worktrees under"
+                f" {worktree}: " + ", ".join(
+                    f"{item['path']} ({item['reason'].replace('_', ' ')}"
+                    f" {item['length']} >= {WINDOWS_PATH_LIMITS[item['reason']]})"
+                    for item in paths
+                )
+            )
+        return plan
+    options = CHOICES[LONG_PATHS_CHOICE]
+    plan["choice_requests"].append({
+        "id": LONG_PATHS_CHOICE,
+        "surface": "core.longpaths",
+        "reason": "windows_path_limit",
+        "options": list(options),
+        "recommended": options[0],
+        "preview": {
+            "current_value": plan["before"],
+            "set_command": "git config --local core.longpaths true",
+            "worktree_root": str(worktree),
+            "long_paths": paths,
+        },
+    })
+    return plan
+
+
+def restore_long_paths(root: Path, before: str | None) -> bool:
+    """Put core.longpaths back as the local config held it before setup."""
+    argv = ["git", "-C", str(root), "config", "--local"]
+    argv += ["--unset", "core.longpaths"] if before is None \
+        else ["core.longpaths", before]
+    return subprocess.run(argv, capture_output=True, check=False).returncode == 0
+
+
 def build_plan(args) -> dict:
     root = git_root(Path(args.project_root).resolve())
     workspace = args.workspace
@@ -818,6 +993,11 @@ def build_plan(args) -> dict:
             "mode_before": "0600", "mode_after": f"{mode:04o}",
         })
 
+    long_paths = long_paths_plan(
+        root, workspace, parse_choices(getattr(args, "choice", None))
+    )
+    operations.extend(long_paths["operations"])
+
     operations.sort(key=lambda item: (item["path"], item["surface"]))
     return {
         "ok": not blockers,
@@ -827,6 +1007,9 @@ def build_plan(args) -> dict:
         "changes_required": bool(operations),
         "operations": operations,
         "blockers": blockers,
+        "choice_requests": long_paths["choice_requests"],
+        "warnings": long_paths["warnings"],
+        "_long_paths_before": long_paths["before"],
         "_config": config,
         "_policy": policy,
         "_policy_path": policy_path,
@@ -1082,7 +1265,16 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
     copied = 0
     reconciled = 0
     ignore_changed = False
+    long_paths_set = False
     rollback_conflicts: list[str] = []
+
+    def rollback() -> list[str]:
+        conflicts = snapshot.restore()
+        if long_paths_set and not restore_long_paths(
+                root, plan["_long_paths_before"]):
+            conflicts.append("core.longpaths")
+        return conflicts
+
     try:
         config_path = workspace_root / "config.json"
         desired = json.dumps(plan["_config"], ensure_ascii=False, indent=2) + "\n"
@@ -1147,6 +1339,14 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
             plan["_mode_repairs"].items(), key=lambda item: str(item[0])
         ):
             snapshot.chmod(target, mode)
+        if any(item["surface"] == "git_config"
+               for item in plan["operations"]):
+            run_checked(
+                ["git", "-C", str(root), "config", "--local",
+                 "core.longpaths", "true"],
+                "core.longpaths update",
+            )
+            long_paths_set = True
 
         findings = setup_check.closing(root, args.workspace)
         converged = build_plan(args)
@@ -1161,7 +1361,7 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
                 + ", ".join(item["path"] for item in converged["operations"])
             )
         if findings:
-            rollback_conflicts = snapshot.restore()
+            rollback_conflicts = rollback()
             snapshot.close()
             return 1, {
                 "ok": False,
@@ -1186,11 +1386,12 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
             "gitignore_changed": ignore_changed,
             "runtime_root": str(runtime),
             "next_entry": next_entry(root),
+            "warnings": plan["warnings"],
             "rolled_back": False,
         }
     except Exception as exc:
         try:
-            rollback_conflicts = snapshot.restore()
+            rollback_conflicts = rollback()
         finally:
             snapshot.close()
         return 1, {
@@ -1210,7 +1411,7 @@ def apply_plan(args, _inspected_plan: dict | None = None) -> tuple[int, dict]:
     root = git_root(Path(args.project_root).resolve())
     with refresh_guard(root):
         plan = build_plan(args)
-        if plan["blockers"]:
+        if plan["blockers"] or plan["choice_requests"]:
             return 1, {
                 "ok": False,
                 "command": "apply",
@@ -1220,6 +1421,10 @@ def apply_plan(args, _inspected_plan: dict | None = None) -> tuple[int, dict]:
                 "findings": [
                     "refresh plan blocker: " + value
                     for value in plan["blockers"]
+                ] + [
+                    f"choice required: pass --choice {request['id']}="
+                    f"<{'|'.join(request['options'])}>"
+                    for request in plan["choice_requests"]
                 ],
                 "rolled_back": False,
                 "rollback_conflicts": [],
@@ -1243,10 +1448,18 @@ def emit(result: dict, as_json: bool) -> None:
                     f"{item['action'].upper():9} {item['path']}"
                     f" [{item['ownership']}]"
                 )
+            for request in result["choice_requests"]:
+                print(
+                    f"CHOICE    {request['id']}="
+                    f"{'|'.join(request['options'])}"
+                    f" [recommended {request['recommended']}]"
+                )
         elif command == "check":
             print("setup-project: project refresh contract is current")
         else:
             print(f"setup-project: ready ({result['next_entry']})")
+        for value in result.get("warnings", []):
+            print(f"WARNING {result['project_root']}:1 [setup_contract] {value}")
         return
     for value in result.get("blockers", []) + result.get("findings", []):
         print(f"ERROR {result.get('project_root', '.')}:1 [setup_contract] {value}")
@@ -1264,6 +1477,7 @@ def main(argv=None) -> int:
     parser.set_defaults(workspace=WORKSPACE)
     parser.add_argument("--output-language", default="English")
     parser.add_argument("--terminology-language", default="English")
+    parser.add_argument("--choice", action="append", default=[])
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:

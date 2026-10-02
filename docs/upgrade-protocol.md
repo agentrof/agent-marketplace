@@ -10,7 +10,10 @@ configuration remain the source of truth.
    Obsidian keys, package-local Obsidian plugin projection, managed ignore and
    checkout-attribute blocks and portable gate. JSON changes expose exact
    key-level before/after values; byte-owned assets expose hashes. Resolve
-   every blocker before applying.
+   every blocker before applying. On native Windows, inspect also returns the
+   `git.core_longpaths` choice request while the repository's local Git
+   config does not turn `core.longpaths` on, and apply refuses until
+   `--choice git.core_longpaths=set|leave` answers it.
 3. Run `setup_project.py apply --project-root <root> --json`, then
    `setup_project.py check --project-root <root> --json`. All three commands use
    the same convergence planner; apply rebuilds its authoritative plan after

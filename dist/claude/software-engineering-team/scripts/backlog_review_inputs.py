@@ -320,7 +320,7 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     bounded = epic is not None and not writer and read_scope(docs) == "bounded"
     panels = read_panels(docs)
     with stage_package.candidate_session(), backlog.experience_validation_session():
-        record, errors = backlog.collect(docs, review_inputs=True)
+        record, errors = backlog.collect(docs, review_inputs=True, revision_inputs=writer)
         errors = sorted(set(errors))
         stubs = set(record["scaffold_findings"])
         notes = finding_notes(record)
@@ -563,6 +563,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                                        for story in item["stories"]})
         if carried:
             check["scaffold_findings"] = carried
+        if writer and record.get("transition_findings"):
+            check["transition_findings"] = record["transition_findings"]
 
     after = snapshot(docs)
     if before != after or contract != contract_hash() or any(

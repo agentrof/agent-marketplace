@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 COMPILER_SCRIPTS = (
@@ -31,17 +31,43 @@ DATA_PATHS = (
     "skill-content/design-system/data",
     "templates/vault",
 )
+DATA_ROOTS = ("skill-content", "templates")
 
 
 def package_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def packaged_scripts(root: Path) -> tuple[str, ...]:
-    """Close the portable archive over every shipped sibling import."""
+def joined_literals(division: ast.BinOp) -> list[str]:
+    """Return each run of string literals one ``/`` chain joins, as a path."""
+    operands = []
+    node = division
+    while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        operands.append(node.right)
+        node = node.left
+    operands.append(node)
+    joined, run = [], []
+    for operand in [*reversed(operands), None]:
+        if isinstance(operand, ast.Constant) and isinstance(operand.value, str):
+            run.append(operand.value)
+        elif run:
+            joined.append("/".join(run))
+            run = []
+    return joined
+
+
+def packaged_closure(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Close the portable archive over every shipped sibling import and over
+    every package data path a shipped script names.
+
+    A data path is named by a string literal, or by string literals joined
+    with ``/``, under a DATA_ROOTS directory. DATA_PATHS adds whole data
+    directories. A named path the package does not hold is skipped.
+    """
     scripts = root / "scripts"
     pending = list(COMPILER_SCRIPTS)
     included: set[str] = set()
+    names = set(DATA_PATHS)
     while pending:
         name = pending.pop()
         if name in included:
@@ -50,16 +76,47 @@ def packaged_scripts(root: Path) -> tuple[str, ...]:
         tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
         included.add(name)
         modules = set()
+        divisions = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 modules.update(alias.name.split(".", 1)[0] for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 modules.add(node.module.split(".", 1)[0])
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                names.add(node.value)
+            elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+                divisions.append(node)
+        inner = {id(node.left) for node in divisions}
+        for node in divisions:
+            if id(node) not in inner:
+                names.update(joined_literals(node))
         for module in sorted(modules):
             dependency = f"{module}.py"
             if (scripts / dependency).is_file() and dependency not in included:
                 pending.append(dependency)
-    return tuple(sorted(included))
+    data: list[str] = []
+    for parts in sorted({PurePosixPath(name).parts for name in names
+                         if name.startswith(DATA_ROOTS)}):
+        relative = "/".join(parts)
+        if (len(parts) > 1 and parts[0] in DATA_ROOTS and ".." not in parts
+                and (root / relative).exists()
+                and not any(relative.startswith(f"{kept}/") for kept in data)):
+            data.append(relative)
+    return tuple(sorted(included)), tuple(data)
+
+
+def root_folders(root: Path) -> tuple[str, ...]:
+    """Return every folder directly under a DATA_ROOTS directory.
+
+    The archive lists each one, so a script that lists a data root sees the
+    package's folders, as landscape_check does to resolve the installed
+    method skills. A listed folder holds only the files the closure bundles.
+    """
+    return tuple(sorted(
+        f"{name}/{child.name}"
+        for name in DATA_ROOTS if (root / name).is_dir()
+        for child in (root / name).iterdir() if child.is_dir()
+    ))
 
 
 def run(command: list[str], name: str) -> dict:
@@ -292,12 +349,16 @@ def cmd_install(args) -> int:
         staging = Path(temporary)
         shutil.copyfile(__file__, staging / "__main__.py")
         (staging / "scripts").mkdir()
-        for name in packaged_scripts(root):
+        scripts, data = packaged_closure(root)
+        for name in scripts:
             shutil.copyfile(root / "scripts" / name, staging / "scripts" / name)
-        for relative in DATA_PATHS:
-            source = root / relative
+        for relative in data:
+            source, target = root / relative, staging / relative
             if source.is_dir():
-                shutil.copytree(source, staging / relative)
+                shutil.copytree(source, target)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
         descriptor, raw_temporary = tempfile.mkstemp(
             prefix=".vault-gate.", suffix=".tmp", dir=destination.parent
         )
@@ -307,6 +368,12 @@ def cmd_install(args) -> int:
             with zipfile.ZipFile(
                 temporary_zip, "w", zipfile.ZIP_DEFLATED
             ) as archive:
+                for folder in root_folders(root):
+                    info = zipfile.ZipInfo(f"{folder}/")
+                    info.date_time = (1980, 1, 1, 0, 0, 0)
+                    # 0x10 is the MS-DOS directory attribute.
+                    info.external_attr = (0o40755 << 16) | 0x10
+                    archive.writestr(info, b"")
                 for path in sorted(staging.rglob("*")):
                     if path.is_file():
                         info = zipfile.ZipInfo(path.relative_to(staging).as_posix())

@@ -747,6 +747,27 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual((run["exit_code"], run["candidate_intact"], run["selection_intact"]), (0, True, True))
         self.assertIn("pre_handoff", self.freeze())
 
+    def test_a_run_whose_checkout_leaves_a_tracked_path_out_names_it_and_never_passes_the_gate(self):
+        """A private clone that leaves a tracked file out differs from its commit before the command
+        runs. The run is not intact, and it and the freeze refusal name the missing path (#358)."""
+        self.build()
+        self.write("src/api/limit.txt", "10\n")
+        self.commit("Repair the earlier story's regression")
+        original = verification.clone_private_checkout
+
+        def short(root, execution_root, commit):
+            original(root, execution_root, commit)
+            (execution_root / "src/web/page.txt").unlink()
+
+        with mock.patch.object(verification, "clone_private_checkout", side_effect=short):
+            run = self.run_regression()
+        self.assertEqual((run["exit_code"], run["candidate_intact"], run["checkout_difference"]),
+                         (0, False, "missing src/web/page.txt"))
+        with self.assertRaisesRegex(RuntimeError, rf"^{CODE}: the latest pre-handoff regression run on candidate"
+                                                  r" tree [0-9a-f]{40} exited 0 and changed its checkout"
+                                                  r" \(missing src/web/page\.txt\);"):
+            self.freeze()
+
     def test_a_selection_derived_differently_for_the_same_tree_needs_a_new_run(self):
         self.build()
         self.write("src/api/limit.txt", "10\n")

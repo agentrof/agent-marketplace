@@ -162,14 +162,13 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     aggregate and two-host lifecycle contexts. Test partitions must account
     for every selected case; shared or unknown impact selects full coverage.
     Reused validation binds successful trusted workflow evidence to the exact
-    tested tree and current coverage contract. Checkout-host reuse requires
-    separate successful host evidence with matching runtime and install
-    contracts. Missing evidence runs fresh tests or host installs, while
-    topology, release replay and public installs remain fresh.
-    Release branches are accepted
-    only when their sole commit tree is the deterministic replay of the
-    attested main source. Replay ignores ambient Git attributes, excludes,
-    replacement refs and graph overlays. Snapshot records are prefix-free;
+    tested tree and current coverage contract; missing evidence runs fresh
+    tests, and both host lifecycles always run fresh. Release-owned files
+    change only in a release commit, the last commit of a pull request, whose
+    tree is the deterministic bump of its parent; the replay ignores ambient
+    Git attributes, excludes, replacement refs and graph overlays. A release
+    tags an approved `main` commit whose own push validation succeeded and
+    never runs the tests again. Snapshot records are prefix-free;
     generated text uses LF, unknown/binary payloads remain byte-exact, and the
     tracked `package-modes.json` contract supplies platform-neutral executable
     modes. Schema-v4 package provenance binds the closed file inventory, hashes

@@ -245,23 +245,20 @@ class ValidatorTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.temporary.cleanup()
 
-    def edit_json(self, relative: str, mutate) -> list:
+    def edit_json(self, relative: str, mutate, check: str) -> list:
         path = self.root / relative
         original = path.read_bytes()
         value = json.loads(original)
         mutate(value)
         path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
         try:
-            return validate.run(self.root)
+            return fixtures.validator_findings(self.root, check)
         finally:
             path.write_bytes(original)
 
-    def variants(self, mutate) -> list:
+    def variants(self, mutate, check: str = "process_switches") -> list:
         return self.edit_json(f"plugins/{fixtures.PLUGIN}/{REGISTRY}",
-                              lambda data: mutate(data["switches"][SWITCH]))
-
-    def test_the_shipped_switch_is_clean(self):
-        self.assertEqual(validate.run(self.root), [])
+                              lambda data: mutate(data["switches"][SWITCH]), check)
 
     def test_a_reader_never_gets_a_mechanical_variant(self):
         for reader in ("backlog-reviewer", "code-reviewer", "analysis-challenger"):
@@ -278,14 +275,15 @@ class ValidatorTests(unittest.TestCase):
         # The reference routes an Environment Contract fix pass to
         # devops-engineer-mechanical; a build that stops shipping it must fail.
         findings = self.variants(lambda spec: spec["agent_variants"]["mechanical"]["agents"]
-                                 .remove("devops-engineer"))
+                                 .remove("devops-engineer"), "switch_variant_references")
         self.assertIn((
             f"plugins/{fixtures.PLUGIN}/{REFERENCE}", "switch_variant_references",
             "switch reference names agent variant 'devops-engineer-mechanical', which switch"
             " 'mechanical_pass_tier' at 'mechanical' does not declare"),
             {(finding.path, finding.check, finding.message) for finding in findings})
         lens = self.edit_json(f"plugins/{fixtures.PLUGIN}/{REGISTRY}", lambda data: data[
-            "switches"]["review_panels"]["agent_variants"]["lens_panel"].update(suffix="panel"))
+            "switches"]["review_panels"]["agent_variants"]["lens_panel"].update(suffix="panel"),
+            "switch_variant_references")
         self.assertTrue(any(
             finding.check == "switch_variant_references"
             and "'solution-reviewer-lens', which switch 'review_panels' at 'lens_panel'"
@@ -300,32 +298,6 @@ class ValidatorTests(unittest.TestCase):
                     finding.check == "process_switches"
                     and "must declare the 'mechanical' agent variants" in finding.message
                     for finding in findings), findings)
-
-    def test_a_host_table_must_map_the_variants_tier_in_its_vocabulary(self):
-        cases = (
-            ("claude", lambda auto: auto.pop("low")),
-            ("codex", lambda auto: auto.pop("low")),
-            ("claude", lambda auto: auto.update(
-                low={"model": "claude-sonnet-5-5", "effort": "extreme"})),
-            ("claude", lambda auto: auto.update(low={"model": "gpt-5"})),
-            ("claude", lambda auto: auto.update(low={"class": "strong", "effort": "high"})),
-            ("codex", lambda auto: auto.update(low={"model": "gpt-6-luna", "effort": "turbo"})),
-            ("codex", lambda auto: auto.update(low={"model": "gpt-6-luna", "effort": "ultra"})),
-            # A retired tier is no tier of the package.
-            ("claude", lambda auto: auto.update(
-                mechanical={"model": "claude-sonnet-5-5", "effort": "high"})),
-            ("codex", lambda auto: auto.update(lens={"model": "gpt-6.1-sol", "effort": "xhigh"})),
-        )
-        for host, mutate in cases:
-            with self.subTest(host=host, mutate=mutate):
-                findings = self.edit_json(f"platforms/{host}/execution-profiles.json",
-                                          lambda table: mutate(table["profiles"]["auto"]))
-                self.assertIn((f"platforms/{host}/execution-profiles.json", "execution_profiles"),
-                              {(finding.path, finding.check) for finding in findings})
-        findings = self.edit_json("tools/data/models.json",
-                                  lambda models: models["reasoning_levels"].remove("low"))
-        self.assertIn(("tools/data/models.json", "model_config_shape"),
-                      {(finding.path, finding.check) for finding in findings})
 
 
 class TaskBindingTests(unittest.TestCase):

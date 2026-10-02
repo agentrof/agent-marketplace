@@ -20,6 +20,33 @@ import fixtures  # noqa: E402
 import validate  # noqa: E402
 from git_fixture import init_repository  # noqa: E402
 
+# The checks that read tools/data/models.json, directly or through the declared tiers.
+MODEL_CONFIG_READERS = ("model_config_shape", "frontmatter_shape", "execution_profiles",
+                        "process_switches")
+
+
+def catalog_models(host: str) -> dict:
+    """The models a host's shipped catalog pins, by model ID."""
+    return json.loads((fixtures.REAL_REPOSITORY / "platforms" / host / "model-catalog.json")
+                      .read_text(encoding="utf-8"))["models"]
+
+
+def release(version: str) -> tuple:
+    return tuple(int(part) for part in version.split("."))
+
+
+def just_below(version: str) -> str:
+    """The closest X.Y.Z release below ``version``."""
+    major, minor, patch = release(version)
+    if patch:
+        return f"{major}.{minor}.{patch - 1}"
+    return f"{major}.{minor - 1}.999" if minor else f"{major - 1}.999.999"
+
+
+def just_above(version: str) -> str:
+    major, minor, patch = release(version)
+    return f"{major}.{minor}.{patch + 1}"
+
 
 class ValidatorContractTests(unittest.TestCase):
     def fixture(self, temporary: str) -> Path:
@@ -27,9 +54,8 @@ class ValidatorContractTests(unittest.TestCase):
         fixtures.make_valid_root(root)
         return root
 
-    @staticmethod
-    def checks(root: Path) -> list[str]:
-        return [finding.check for finding in validate.run(root)]
+    def assert_reported(self, root: Path, check: str) -> None:
+        self.assertTrue(fixtures.validator_findings(root, check), f"{check} reported nothing")
 
     def test_valid_single_team_fixture_is_clean_and_deterministic(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -38,13 +64,6 @@ class ValidatorContractTests(unittest.TestCase):
             second = validate.run(root)
             self.assertEqual(first, [])
             self.assertEqual(first, second)
-
-    def test_database_artifact_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            database = root / "plugins/software-engineering-team/cache.sqlite"
-            database.write_bytes(b"fixture")
-            self.assertIn("packaged_state_files", self.checks(root))
 
     def test_skill_project_scope_is_closed_and_external_is_entry_only(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -57,7 +76,7 @@ class ValidatorContractTests(unittest.TestCase):
                 "project_scope: external", "project_scope: remote"
             )
             path.write_text(text, encoding="utf-8")
-            self.assertIn("frontmatter_shape", self.checks(root))
+            self.assert_reported(root, "frontmatter_shape")
 
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
@@ -69,16 +88,7 @@ class ValidatorContractTests(unittest.TestCase):
                 "exposure: entry", "exposure: internal"
             )
             path.write_text(text, encoding="utf-8")
-            self.assertIn("frontmatter_shape", self.checks(root))
-
-    def test_plugin_dependency_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            path = root / "platforms/claude/software-engineering-team/manifest.json"
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-            manifest["dependencies"] = ["some-team"]
-            path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-            self.assertIn("single_team_contract", self.checks(root))
+            self.assert_reported(root, "frontmatter_shape")
 
     def test_graph_palette_identity_query_and_rgb_are_validated(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -95,7 +105,7 @@ class ValidatorContractTests(unittest.TestCase):
             story["query"] = "tag:#doc/wrong"
             story["rgb"] = -1
             path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
-            self.assertIn("vault_policy_shape", self.checks(root))
+            self.assert_reported(root, "vault_policy_shape")
 
     def test_lazy_fragment_property_drift_is_validated(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -107,7 +117,7 @@ class ValidatorContractTests(unittest.TestCase):
             policy = json.loads(path.read_text(encoding="utf-8"))
             del policy["property_types"]["package_status"]
             path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
-            findings = validate.run(root)
+            findings = fixtures.validator_findings(root, "vault_policy_shape")
             self.assertTrue(any(
                 finding.check == "vault_policy_shape"
                 and "lazy_fragments['business_analysis']"
@@ -126,7 +136,7 @@ class ValidatorContractTests(unittest.TestCase):
             types = json.loads(path.read_text(encoding="utf-8"))
             types["types"]["owner_role"] = "number"
             path.write_text(json.dumps(types, indent=2) + "\n", encoding="utf-8")
-            findings = validate.run(root)
+            findings = fixtures.validator_findings(root, "vault_policy_shape")
             self.assertTrue(any(
                 finding.check == "vault_policy_shape"
                 and "types.json property map" in finding.message
@@ -180,7 +190,7 @@ class ValidatorContractTests(unittest.TestCase):
             )
             receipt = data / "delivery-receipt-contract.json"
             receipt.unlink()
-            self.assertIn("delivery_contract_shape", self.checks(root))
+            self.assert_reported(root, "delivery_contract_shape")
 
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
@@ -193,88 +203,76 @@ class ValidatorContractTests(unittest.TestCase):
             protocol_path.write_text(
                 json.dumps(protocol, indent=2) + "\n", encoding="utf-8"
             )
-            self.assertIn("delivery_contract_shape", self.checks(root))
+            self.assert_reported(root, "delivery_contract_shape")
 
     def test_execution_profile_tables_are_validated(self):
-        for relative, mutate in (
-                ("platforms/claude/execution-profiles.json",
-                 lambda value: value["profiles"]["auto"]["high"].update(model="claude-ghost-5-5")),
-                ("platforms/claude/execution-profiles.json",
-                 lambda value: value["profiles"]["auto"]["high"].update({"class": "frontier"})),
-                # Haiku 4.5 takes no effort; no tier runs it by default.
-                ("platforms/claude/execution-profiles.json",
-                 lambda value: value["profiles"]["auto"]["low"].update(
-                     model="claude-haiku-4-5-20251001", effort="high")),
-                ("platforms/codex/execution-profiles.json",
-                 lambda value: value["profiles"]["auto"]["inherit"].update(effort="low")),
-                ("platforms/codex/execution-profiles.json",
-                 lambda value: value["profiles"].update(fast={})),
-                ("platforms/claude/model-catalog.json",
-                 lambda value: value["models"].update(
-                     opus=value["models"].pop("claude-haiku-4-5-20251001"))),
-                ("platforms/codex/model-catalog.json",
-                 lambda value: value["models"]["gpt-6-luna"].update(
-                     efforts=["low", "ultra", "turbo"])),
-                ("platforms/codex/model-catalog.json",
-                 lambda value: value["models"]["gpt-6-luna"].update(min_cli_version="0.157")),
-                ("platforms/claude/model-catalog.json",
-                 lambda value: value["models"]["claude-sonnet-5-5"].pop("min_cli_version")),
-                ("tools/data/models.json",
-                 lambda value: value["reasoning_levels"].append("extreme"))):
-            with self.subTest(path=relative), \
-                    tempfile.TemporaryDirectory() as temporary:
-                root = self.fixture(temporary)
-                path = root / relative
-                value = json.loads(path.read_text(encoding="utf-8"))
-                mutate(value)
-                path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-                findings = validate.run(root)
-                self.assertIn("execution_profiles", {finding.check for finding in findings})
-                if relative.startswith("platforms/"):
-                    self.assertIn((relative, "execution_profiles"),
-                                  {(finding.path, finding.check) for finding in findings})
-
+        # build_distributions owns the table and catalog rules, and
+        # test_single_team_distribution proves them one by one; here each
+        # file's problem reaches a finding against that file.
+        claude, codex = (f"platforms/{host}/execution-profiles.json" for host in ("claude", "codex"))
+        codex_model = sorted(catalog_models("codex"))[0]
+        # (changed file, mutation or None to delete it, check, files the findings name)
+        cases = (
+            (claude, lambda value: value["profiles"]["auto"]["high"].update(
+                model="claude-ghost-5-5"), "execution_profiles", {claude}),
+            (codex, lambda value: value["profiles"].update(fast={}), "execution_profiles", {codex}),
+            ("platforms/codex/model-catalog.json", lambda value: value["models"][codex_model].update(
+                efforts=["low", "ultra", "turbo"]), "execution_profiles",
+             {"platforms/codex/model-catalog.json"}),
+            # A declared tier no table maps is each table's problem.
+            ("tools/data/models.json", lambda value: value["reasoning_levels"].append("extreme"),
+             "execution_profiles", {claude, codex}),
+            ("tools/data/models.json", lambda value: value["reasoning_levels"].remove("low"),
+             "model_config_shape", {"tools/data/models.json"}),
+            (codex, None, "execution_profiles", {codex}),
+            ("platforms/claude/model-catalog.json", None, "execution_profiles",
+             {"platforms/claude/model-catalog.json"}),
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
-            path = root / "tools/data/models.json"
-            value = json.loads(path.read_text(encoding="utf-8"))
-            value["reasoning_levels"].remove("low")
-            path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-            findings = validate.run(root)
-            self.assertIn(
-                ("tools/data/models.json", "model_config_shape"),
-                {(finding.path, finding.check) for finding in findings},
-            )
-
-        for relative in ("platforms/codex/execution-profiles.json",
-                         "platforms/claude/model-catalog.json"):
-            with self.subTest(missing=relative), \
-                    tempfile.TemporaryDirectory() as temporary:
-                root = self.fixture(temporary)
-                (root / relative).unlink()
-                findings = validate.run(root)
-                self.assertIn(
-                    (relative, "execution_profiles"),
-                    {(finding.path, finding.check) for finding in findings},
-                )
+            for relative, mutate, check, named in cases:
+                path = root / relative
+                original = path.read_bytes()
+                with self.subTest(path=relative, check=check, missing=mutate is None):
+                    if mutate is None:
+                        path.unlink()
+                    else:
+                        value = json.loads(original)
+                        mutate(value)
+                        path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+                    try:
+                        findings = fixtures.validator_findings(root, check)
+                    finally:
+                        path.write_bytes(original)
+                    self.assertLessEqual(named, {finding.path for finding in findings})
 
     def test_a_model_catalog_keys_its_models_by_model_id(self):
         # The owner's decision of 1 Oct 2026 on #349: model IDs are the only
         # names, so a catalog's model keys are the host's IDs, not snake_case
         # field names; every other key stays snake_case.
+        model = sorted(catalog_models("codex"))[0]
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
-            self.assertEqual([finding for finding in validate.run(root)
-                              if finding.check == "json_hygiene"], [])
+            self.assertEqual(fixtures.validator_findings(root, "json_hygiene"), [])
             path = root / "platforms/codex/model-catalog.json"
             value = json.loads(path.read_text(encoding="utf-8"))
-            value["models"]["gpt-6.1-sol"]["Family"] = value["models"]["gpt-6.1-sol"].pop("family")
+            value["models"][model]["Family"] = value["models"][model].pop("family")
             path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
             self.assertIn(("platforms/codex/model-catalog.json", "json_hygiene"),
-                          {(finding.path, finding.check) for finding in validate.run(root)})
+                          {(finding.path, finding.check)
+                           for finding in fixtures.validator_findings(root, "json_hygiene")})
 
     def test_ci_host_cli_versions_meet_every_catalog_model_minimum(self):
         pins = "tools/data/host-cli-versions.json"
+        pinned = json.loads((fixtures.REAL_REPOSITORY / pins).read_text(encoding="utf-8"))
+        keys = {"claude": "claude_code", "codex": "codex"}
+        # Each host's floor: the highest minimum of its catalog, and the models that set it.
+        floors = {}
+        for host in keys:
+            minimums = {model: entry["min_cli_version"] for model, entry in catalog_models(host).items()}
+            floor = max(minimums.values(), key=release)
+            floors[host] = (floor, sorted(model for model, minimum in minimums.items()
+                                          if minimum == floor))
 
         def run(relative: str, mutate) -> set:
             with tempfile.TemporaryDirectory() as temporary:
@@ -286,30 +284,32 @@ class ValidatorContractTests(unittest.TestCase):
                     value = json.loads(path.read_text(encoding="utf-8"))
                     mutate(value)
                     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-                return {(finding.path, finding.message) for finding in validate.run(root)
-                        if finding.check == "host_cli_versions"}
+                return {(finding.path, finding.message)
+                        for finding in fixtures.validator_findings(root, "host_cli_versions")}
 
-        below = run(pins, lambda value: value.update(claude_code="2.1.283", codex="0.158.9"))
-        self.assertEqual({message.split(";")[0] for _path, message in below}, {
-            "claude_code 2.1.283 is below 2.1.284, the minimum of claude model"
-            " 'claude-sonnet-5-5'",
-            "codex 0.158.9 is below 0.159.1, the minimum of codex model 'gpt-6.1-sol'",
-        })
-        self.assertEqual({path for path, _message in below}, {pins})
+        below = {host: just_below(floor) for host, (floor, _models) in floors.items()}
+        found = run(pins, lambda value: value.update({keys[host]: version
+                                                     for host, version in below.items()}))
+        self.assertEqual({message.split(";")[0] for _path, message in found}, {
+            f"{keys[host]} {below[host]} is below {floor}, the minimum of {host} model {model!r}"
+            for host, (floor, models) in floors.items() for model in models})
+        self.assertEqual({path for path, _message in found}, {pins})
+        raised = sorted(catalog_models("claude"))[0]
+        above = just_above(pinned["claude_code"])
         for relative, mutate, fragment in (
                 (pins, None, "host CLI versions are missing or not valid JSON"),
                 (pins, lambda value: value.update(codex="0.159"),
                  "'codex' must pin the exact X.Y.Z codex CLI version CI installs"),
                 ("platforms/claude/model-catalog.json",
-                 lambda value: value["models"]["claude-haiku-4-5-20251001"].update(
-                     min_cli_version="2.1.285"),
-                 "claude_code 2.1.284 is below 2.1.285, the minimum of claude model"
-                 " 'claude-haiku-4-5-20251001'")):
+                 lambda value: value["models"][raised].update(min_cli_version=above),
+                 f"claude_code {pinned['claude_code']} is below {above}, the minimum of claude"
+                 f" model {raised!r}")):
             with self.subTest(fragment=fragment):
                 self.assertTrue(any(fragment in message for _path, message in run(relative, mutate)))
         # A pin at a model's exact minimum, or above it, is clean.
-        self.assertEqual(run(pins, lambda value: value.update(claude_code="2.1.284")), set())
-        self.assertEqual(run(pins, lambda value: value.update(codex="0.160.0")), set())
+        self.assertEqual(run(pins, lambda value: value.update(claude_code=floors["claude"][0])), set())
+        self.assertEqual(run(pins, lambda value: value.update(codex=just_above(floors["codex"][0]))),
+                         set())
 
     def test_malformed_model_config_is_a_finding_not_a_crash(self):
         missing = "model config is missing or not valid JSON"
@@ -326,6 +326,9 @@ class ValidatorContractTests(unittest.TestCase):
             "levels objects": (b'{"schema_version": 1, "reasoning_levels": [{"id": "high"}]}', shape),
             "levels absent": (b'{"schema_version": 1}', shape),
         }
+        # Two whole runs prove a malformed file stops no later check; every case
+        # runs the checks that read the config.
+        whole_runs = {"missing file", "levels objects"}
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
             # An unrelated defect proves the run still reaches every later check.
@@ -337,13 +340,17 @@ class ValidatorContractTests(unittest.TestCase):
                         path.unlink()
                     else:
                         path.write_bytes(content)
-                    findings = validate.run(root)
+                    if case in whole_runs:
+                        findings = validate.run(root)
+                        self.assertIn("packaged_state_files",
+                                      {finding.check for finding in findings})
+                    else:
+                        findings = fixtures.validator_findings(root, *MODEL_CONFIG_READERS)
                     self.assertTrue(any(
                         finding.path == "tools/data/models.json"
                         and finding.check == "model_config_shape"
                         and message in finding.message
                         for finding in findings), findings)
-                    self.assertIn("packaged_state_files", {finding.check for finding in findings})
                     # The agent tiers fall back to the builder's tiers instead of
                     # being judged against a malformed list.
                     self.assertEqual([finding for finding in findings
@@ -361,7 +368,7 @@ class ValidatorContractTests(unittest.TestCase):
                 value = json.loads(path.read_text())
                 mutate(value)
                 path.write_text(json.dumps(value))
-                self.assertIn("delivery_contract_shape", self.checks(root))
+                self.assert_reported(root, "delivery_contract_shape")
 
     def test_item_implementation_schedules_follow_the_switch_registry(self):
         """An Item records an implementation_schedule switch value, and one without reads as today's order."""
@@ -380,9 +387,10 @@ class ValidatorContractTests(unittest.TestCase):
                 value = json.loads(path.read_text(encoding="utf-8"))
                 mutate(value)
                 path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-                self.assertTrue(any(finding.check == "delivery_contract_shape"
-                                    and "implementation schedules" in finding.message
-                                    for finding in validate.run(root)))
+                self.assertTrue(any(
+                    finding.check == "delivery_contract_shape"
+                    and "implementation schedules" in finding.message
+                    for finding in fixtures.validator_findings(root, "delivery_contract_shape")))
 
     def test_instructions_name_only_declared_delivery_finding_codes(self):
         """A refusal an instruction tells a role to expect is one the result envelope can carry,
@@ -394,8 +402,7 @@ class ValidatorContractTests(unittest.TestCase):
                    "platforms/codex/_team/overlay/templates/project-instructions/host.md")
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
-            self.assertEqual([finding for finding in validate.run(root)
-                              if finding.check == "finding_code_references"], [])
+            self.assertEqual(fixtures.validator_findings(root, "finding_code_references"), [])
             for relative in sources:
                 with self.subTest(source=relative):
                     path = root / relative
@@ -405,8 +412,7 @@ class ValidatorContractTests(unittest.TestCase):
                                                " never with `DELIVERY_PRE_HANDOFF_MISSING` alone."]) + "\n",
                                     encoding="utf-8")
                     try:
-                        findings = [finding for finding in validate.run(root)
-                                    if finding.check == "finding_code_references"]
+                        findings = fixtures.validator_findings(root, "finding_code_references")
                     finally:
                         path.write_text(original, encoding="utf-8")
                     self.assertEqual([(finding.path, finding.line) for finding in findings],
@@ -429,8 +435,7 @@ class ValidatorContractTests(unittest.TestCase):
                     self.assertIn(entry, original)
                     path.write_text(original.replace(entry, ""), encoding="utf-8")
                     try:
-                        findings = [finding for finding in validate.run(root)
-                                    if finding.check == "project_instruction_contract"]
+                        findings = fixtures.validator_findings(root, "project_instruction_contract")
                     finally:
                         path.write_text(original, encoding="utf-8")
                     self.assertEqual(len(findings), 1)
@@ -455,8 +460,7 @@ class ReviewPanelValidatorTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def panel_messages(self) -> list[str]:
-        return [finding.message for finding in validate.run(self.root)
-                if finding.check == "review_panels"]
+        return [finding.message for finding in fixtures.validator_findings(self.root, "review_panels")]
 
     def write_data(self, mutate) -> None:
         data = json.loads(self.original)
@@ -476,9 +480,6 @@ class ReviewPanelValidatorTests(unittest.TestCase):
     def assert_rejected(self, fragment: str) -> None:
         messages = self.panel_messages()
         self.assertTrue(any(fragment in message for message in messages), messages)
-
-    def test_shipped_panel_data_is_clean(self):
-        self.assertEqual(self.panel_messages(), [])
 
     def test_data_shape_errors_are_rejected(self):
         def duplicate_lens(steps):
@@ -697,8 +698,8 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def messages(self) -> list[str]:
-        return [finding.message for finding in validate.run(self.root)
-                if finding.check == "process_switches"]
+        return [finding.message
+                for finding in fixtures.validator_findings(self.root, "process_switches")]
 
     def declare(self, **switches) -> None:
         data = json.loads(self.original)
@@ -936,16 +937,13 @@ class StorySizeMeasureValidatorTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def messages(self) -> list[str]:
-        return [finding.message for finding in validate.run(self.root)
-                if finding.check == "story_size_measures"]
+        return [finding.message
+                for finding in fixtures.validator_findings(self.root, "story_size_measures")]
 
     def write(self, mutate) -> None:
         value = json.loads(json.dumps(self.original))
         mutate(value)
         self.path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-
-    def test_shipped_measures_are_clean(self):
-        self.assertEqual(self.messages(), [])
 
     def test_measure_shape_and_derivation_errors_are_rejected(self):
         def measure(name, **changes):

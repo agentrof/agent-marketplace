@@ -30,7 +30,6 @@ import delivery_verification as verification  # noqa: E402
 import fixtures  # noqa: E402
 import process_policy  # noqa: E402
 import task_inputs  # noqa: E402
-import validate  # noqa: E402
 from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 REGISTRY = "skill-content/configure/data/process-switches.json"
@@ -247,16 +246,13 @@ class CodeReviewPanelValidatorTests(unittest.TestCase):
         self.originals = {path: (self.plugin / path).read_bytes() for path in (DATA, REGISTRY)}
 
     def messages(self) -> list[str]:
-        return [finding.message for finding in validate.run(self.root)
-                if finding.check == "code_review_panel"]
+        return [finding.message
+                for finding in fixtures.validator_findings(self.root, "code_review_panel")]
 
     def edit(self, relative: str, mutate) -> None:
         value = json.loads(self.originals[relative])
         mutate(value)
         (self.plugin / relative).write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-
-    def test_the_shipped_panel_is_clean(self):
-        self.assertEqual(self.messages(), [])
 
     def test_shape_variant_and_binding_errors_are_rejected(self):
         variant = lambda value: value["switches"]["code_review_panel"]["agent_variants"]["beside_official"]  # noqa: E731

@@ -7,4 +7,4 @@ description: Interactive, file-first solution landscape and decision workflow af
 
 # Solution Design
 
-Read `../../host-contract.md` and `../../skill-content/solution-design/SKILL.md` completely, resolving both paths relative to this file. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, confirm the project-local workspace config and docs contract.
+Read `../../host-contract.md` and `../../skill-content/solution-design/SKILL.md` completely, resolving both paths relative to this file. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, confirm the project-local workspace config and docs contract. When the session context reports `AGENT_MARKETPLACE_PYTHON: unsupported`, stop and tell the user the reason and the fix it gives.

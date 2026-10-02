@@ -22,6 +22,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "plugins/software-engineering-team/scripts"
 HOOK = ROOT / "platforms/shared/software-engineering-team/overlay/scripts/vault_hook.py"
+# Hooks run as their hooks.json commands run them: through the runtime floor launcher.
+LAUNCHER = ROOT / "platforms/shared/_team/overlay/scripts/hook_launcher.py"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
@@ -756,7 +758,7 @@ class VaultHookShellContractTests(unittest.TestCase):
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(SCRIPTS)
         return subprocess.run(
-            [sys.executable, str(HOOK), mode],
+            [sys.executable, str(LAUNCHER), str(HOOK), mode],
             input=json.dumps(payload), capture_output=True, text=True,
             check=False, env=environment, timeout=10,
         )
@@ -766,7 +768,8 @@ class VaultHookShellContractTests(unittest.TestCase):
         hook: Path, mode: str, payload: dict,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(hook), mode],
+            [sys.executable, str(hook.with_name("hook_launcher.py")),
+             f"scripts/{hook.name}", mode],
             input=json.dumps(payload), capture_output=True, text=True,
             check=False,
         )

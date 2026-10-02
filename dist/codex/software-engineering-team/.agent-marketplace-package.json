@@ -845,7 +845,7 @@
       "4b42a50fb8966874cbd89a37253240fba87533496e8d0462c69a7745b874cfe9"
     ,
     "templates/AGENTS.override.md":
-      "743b8976bcd7736450f24486bff2552f0592f61f621a2b03662af86b904a29ef"
+      "d84ca774c7fed4e518e3221355ba7aca179b0458b1810bd4bc40d0565d0df364"
     ,
     "templates/CLAUDE.md":
       "db8d959e9778cf374734e59a86ebb77ab3164a2e4981e025b04e452a9ccab4c8"
@@ -872,10 +872,13 @@
       "0f57bcb1fdc0fc36dce76767f9ff91e44fca7897e7fc024752ec227acc04ca7e"
     ,
     "templates/project-instructions/host.md":
-      "a3a7a5e62acc8feee66022cc43d9d4f1e201eb45a9954948e57d8686fbbe4afa"
+      "0ceaf50730dcd8ed779a9deb32dda64b3b24f2ec808985ce1286c473dd1c631d"
     ,
     "templates/project-instructions/team.md":
       "f2514f8c3b16405e1fb87671ebc12ddeaf4649af090ad3e7dbb121d562143d53"
+    ,
+    "templates/project-instructions/user-context.json":
+      "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
     ,
     "templates/task-input-contract.md":
       "61f528981276bf3fa4fee92584dd9912be8465a9af02ca6ab0971b16b52e3b26"

@@ -94,7 +94,10 @@ The scaffolder creates one host-neutral
 `templates/project-instructions/team.md`, creates platform source for every
 registered adapter, updates native marketplace registries, and rebuilds all
 distributions. Host-specific project instruction behavior belongs only in the
-relevant platform adapter fragments.
+relevant platform adapter fragments. The files every host loads as user context
+are listed once in
+`platforms/shared/_team/overlay/templates/project-instructions/user-context.json`,
+and each host fragment renders that list on its one `{{user_context}}` line.
 After a manual canonical edit, run
 `python3 tools/build_distributions.py` before staging and `make check-local`.
 

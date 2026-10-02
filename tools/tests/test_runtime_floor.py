@@ -194,7 +194,8 @@ class RuntimeFloorTests(unittest.TestCase):
             ".agentrof/agent-marketplace/.runtime/autopilot/grant.json": 2,
             "README.md": 0, "apps/api/main.py": 0, "workspace/notes.md": 0,
             str(outside / "workspace/docs/maps/home.md"): 0, str(outside / "notes.md"): 0,
-            "workspace/docs/bad\x00name.md": 0,
+            # A path no system can resolve is judged as written, alike everywhere.
+            "workspace/docs/bad\x00name.md": 2, str(outside / "bad\x00name.md"): 0,
         }
         tools = {"claude": ("Write", "Edit", "MultiEdit"), "codex": ("apply_patch",)}
         for host, names in tools.items():

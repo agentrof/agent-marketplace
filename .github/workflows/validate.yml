@@ -159,6 +159,10 @@ jobs:
           CI_LANE: ${{ matrix.lane }}
           CI_SHARD: ${{ matrix.shard }}
           PYTHONDONTWRITEBYTECODE: "1"
+          # Worker scratch on the runner's work disk; Windows TEMP is on the slower system disk.
+          TMPDIR: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
         run: >-
           python tools/ci_tests.py run
           --plan "$RUNNER_TEMP/ci-plan/ci-plan.json"

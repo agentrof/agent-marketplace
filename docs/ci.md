@@ -36,8 +36,10 @@ servers or its account's model cache. A tripwire records the call and fails;
 the worker fails the test during which it ran, or the shard when a class or
 module fixture ran it after the last test. A test pins fakes of its own with
 `fixtures.isolated_hosts`. `make check` runs unittest without the tripwires.
-Every CI worker process also gets its own `TMPDIR`, `TMP` and `TEMP` outside any
-Git checkout.
+Every CI worker process also gets its own `TMPDIR`, `TMP` and `TEMP` under the
+runner's work directory, outside any Git checkout; on Windows that directory is
+on the work disk, which creates small files several times faster than the
+system disk that holds the default `TEMP`.
 
 The small macOS minimum-version suite runs as one job. That job first
 executes the seven Apple system-Python launcher cases with the original system

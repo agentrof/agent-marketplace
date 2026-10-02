@@ -1,6 +1,0 @@
-{
-  "summary": "Codex now loads the same user context as Claude Code. The generated `CLAUDE.md` imports `CLAUDE.user.md` and `workspace/memory/agent-marketplace.md`, `me.md` and `profile.md`, but the generated `AGENTS.override.md` named only `AGENTS.user.md`, and Codex has no import syntax, so a Codex session never read the memory files, and the working preferences and profile they hold applied on Claude Code only. Both files now take their list from one shared declaration: Claude Code keeps its `@` imports, and `AGENTS.override.md` gains a `Load user context` section that tells Codex to read and follow `AGENTS.user.md` and the same memory files, in the same order, before any work, skipping a file that does not exist. The generated `CLAUDE.md` is unchanged. Running setup after the update rewrites `AGENTS.override.md`.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

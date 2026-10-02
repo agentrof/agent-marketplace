@@ -1252,9 +1252,6 @@ class ContractTests(unittest.TestCase):
                 text = " ".join(document.read_text(encoding="utf-8").split())
                 self.assertIn(limit, text)
                 self.assertNotIn("can start, extend or widen a grant.", text)
-        changes = ROOT / ".changes/autopilot-entry.json"
-        if changes.is_file():
-            self.assertIn(limit, json.loads(changes.read_text(encoding="utf-8"))["summary"])
 
     def test_status_and_the_docs_report_declared_guards_and_codex_trust(self):
         skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())

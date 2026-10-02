@@ -1,18 +1,20 @@
 # CI and release validation
 
-The required `check` aggregate proves the selected test inventory completed.
-The aggregate depends directly on the shard results, so it does not wait for
-compatibility summary runners. Those unchanged required contexts independently
-check the same shard outcomes. Every PR and every merge queue group also emits
-compatibility, CodeQL and two-host lifecycle contexts. Branch protection names
-remain stable. The compatibility context label `Python 3.x` represents the
-current interpreter pinned in the CI policy.
+The required `check` aggregate proves the selected test inventory completed;
+it depends directly on the shard results. Every PR and every merge queue group
+also emits the CodeQL and two-host lifecycle contexts. Branch protection
+requires `check`, `analyze-python` and `Claude Code and Codex lifecycle`.
 
 ## Test scope and execution
 
-`tools/data/ci-test-policy.json` owns operating systems, Python minor versions,
-shard jobs and worker processes per job, impact groups, dependency closures and
-initial duration weights. `tools/ci_tests.py` inventories individual unittest
+`tools/data/ci-test-policy.json` owns the one supported Python version,
+operating systems, shard jobs and worker processes per job, impact groups,
+dependency closures and initial duration weights. CI tests that Python once per
+operating system: Linux runs every test, macOS the platform group and Windows
+the Windows group. The plan job sets up the version itself and every other
+validation job takes it from the plan's output; a test pins that literal, the
+release workflows' versions, the host lifecycle policy and the plugin's runtime
+floor to the policy. `tools/ci_tests.py` inventories individual unittest
 cases without running them, selects their scope and balances them by duration
 over every worker process of a lane; each shard job then takes whole
 processes. A job starts its planned processes, folded onto fewer when the
@@ -41,20 +43,6 @@ runner's work directory, outside any Git checkout; on Windows that directory is
 on the work disk, which creates small files several times faster than the
 system disk that holds the default `TEMP`.
 
-The small macOS minimum-version suite runs as one job. That job first
-executes the seven Apple system-Python launcher cases with the original system
-environment, before installing the policy-selected Python. The validated plan
-structure assigns exactly one Apple owner whenever vault-hook tests are
-selected; missing, duplicate or disabled ownership fails plan validation.
-This avoids a separate macOS job competing with the full-suite workers.
-
-The Windows minimum-version lane installs the python.org NuGet build of its
-pinned Python, which the Python documentation names for CI systems, instead of
-running `actions/setup-python`, whose Windows installer cost about 50 seconds
-in every job. The policy pins the package, exact version and SHA-512; the job
-verifies both, adds the `python3` link setup-python adds and precompiles the
-standard library once, because the tests run with bytecode writes disabled.
-
 Delivery compiler, execution and PR-intent fixtures may copy an immutable,
 process-local starting repository prepared before the first Item starts.
 Every test gets independent
@@ -70,7 +58,7 @@ under test, including concurrent ref and lease observations, remain real.
 
 | Profile | Selection |
 | --- | --- |
-| `full` | All tests on the primary Linux and macOS lanes, plus the complete native compatibility policy on macOS minimum Python and both Windows interpreters |
+| `full` | Every test on Linux, the platform group on macOS and the Windows group, with its mandatory native regressions, on Windows |
 | `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff of a PR or merge queue group |
 | `reuse` | Prior successful validation of identical input, with fresh static and transition checks |
 

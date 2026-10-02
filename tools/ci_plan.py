@@ -54,11 +54,10 @@ def main() -> int:
         command += ["--base", base]
     subprocess.run(command, cwd=ROOT, check=True)
     plan = json.loads((directory / "ci-plan.json").read_text(encoding="utf-8"))
-    apple = plan["apple_launcher"]
     with args.github_output.open("a", encoding="utf-8") as output:
         output.write("matrix=" + json.dumps(plan["matrix"], separators=(",", ":")) + "\n")
         output.write("has_tests=" + str(plan["has_tests"]).lower() + "\n")
-        output.write("apple_launcher=" + str(apple).lower() + "\n")
+        output.write("python=" + plan["python"] + "\n")
         output.write("mode=" + plan["mode"] + "\n")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:

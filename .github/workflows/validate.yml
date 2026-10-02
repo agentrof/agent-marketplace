@@ -26,6 +26,7 @@ defaults:
 jobs:
   changeset:
     if: github.event_name == 'pull_request'
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -34,7 +35,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.9"
+          python-version: ${{ needs.plan.outputs.python }}
       - name: Require a release-impact declaration or an exact release commit
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -47,7 +48,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       has_tests: ${{ steps.plan.outputs.has_tests }}
-      apple_launcher: ${{ steps.plan.outputs.apple_launcher }}
+      python: ${{ steps.plan.outputs.python }}
       mode: ${{ steps.plan.outputs.mode }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -55,6 +56,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      # The CI policy's Python, which a test pins; later jobs take it from this job's output.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
@@ -75,6 +77,7 @@ jobs:
           retention-days: 7
 
   deterministic-check:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -85,7 +88,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
+          python-version: ${{ needs.plan.outputs.python }}
       - name: Validate contracts, release metadata, counts and generated distributions
         run: make static-check
 
@@ -104,50 +107,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Exercise the Apple system Python launcher
-        if: matrix.apple_launcher == true
-        env:
-          AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3: "1"
-          DEVELOPER_DIR: ""
-          PATH: /usr/bin:/bin:/usr/sbin:/sbin
-          SDKROOT: ""
-          TOOLCHAINS: ""
-        run: >-
-          /usr/bin/python3 -m unittest
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_system_macos_python3_launcher_is_accepted
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_python_cmd_preserves_attested_codex_result
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_python_candidate_with_invalid_result_is_restored
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_render_cannot_publish_a_different_valid_transition
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_render_with_forged_registry_is_restored
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_has_an_exact_attested_delta
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_preserves_real_codex_draft
-      - name: Install the pinned Python package
-        if: matrix.interpreter_version != ''
-        shell: pwsh
-        env:
-          PACKAGE: ${{ matrix.interpreter_package }}
-          VERSION: ${{ matrix.interpreter_version }}
-          SHA512: ${{ matrix.interpreter_sha512 }}
-        run: |
-          $ProgressPreference = "SilentlyContinue"
-          $archive = Join-Path $env:RUNNER_TEMP "interpreter.nupkg"
-          $root = Join-Path $env:RUNNER_TEMP "interpreter"
-          Invoke-WebRequest -MaximumRetryCount 3 -OutFile $archive `
-            -Uri "https://api.nuget.org/v3-flatcontainer/$env:PACKAGE/$env:VERSION/$env:PACKAGE.$env:VERSION.nupkg"
-          if ((Get-FileHash -Algorithm SHA512 -LiteralPath $archive).Hash.ToLowerInvariant() -ne $env:SHA512) {
-            throw "the interpreter package digest differs from the policy"
-          }
-          Add-Type -AssemblyName System.IO.Compression.ZipFile
-          [System.IO.Compression.ZipFile]::ExtractToDirectory($archive, $root)
-          $tools = Join-Path $root "tools"
-          New-Item -ItemType SymbolicLink -Path (Join-Path $tools "python3.exe") -Target (Join-Path $tools "python.exe") | Out-Null
-          # Tests run with bytecode writes off; a module left uncompiled only starts slower.
-          & (Join-Path $tools "python.exe") -m compileall -qq -j 0 -x site-packages (Join-Path $tools "Lib")
-          $found = & (Join-Path $tools "python.exe") -c "import platform; print(platform.python_version())"
-          if ($found -ne $env:VERSION) { throw "found Python $found instead of $env:VERSION" }
-          Add-Content -LiteralPath $env:GITHUB_PATH -Value $tools
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: matrix.interpreter_version == ''
         with:
           python-version: ${{ matrix.python }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -176,35 +136,6 @@ jobs:
           overwrite: true
           if-no-files-found: error
           retention-days: 7
-
-  compatibility:
-    name: compatibility (${{ matrix.os }}, Python ${{ matrix.python }})
-    if: always()
-    needs: [plan, test-shards]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python: "3.9"
-          - os: macos-latest
-            python: "3.x"
-    steps:
-      - name: Require the selected platform test jobs
-        env:
-          PLAN_RESULT: ${{ needs.plan.result }}
-          HAS_TESTS: ${{ needs.plan.outputs.has_tests }}
-          TEST_RESULT: ${{ needs.test-shards.result }}
-        run: |
-          set -euo pipefail
-          test "$PLAN_RESULT" = success
-          if [ "$HAS_TESTS" = true ]; then
-            test "$TEST_RESULT" = success
-          else
-            test "$HAS_TESTS" = false
-            test "$TEST_RESULT" = skipped
-          fi
 
   check:
     name: check
@@ -247,7 +178,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"
+          python-version: ${{ needs.plan.outputs.python }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ci-plan-${{ github.run_id }}

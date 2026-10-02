@@ -473,9 +473,9 @@ class CITestPlannerTests(unittest.TestCase):
         ids, _hash = ci_tests.inventory(ci_tests.ROOT)
         required = {"tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected",
                     "tools.tests.test_delivery_git.DeliveryGitTests.test_receipt_lock_is_released_when_its_holder_dies"}
-        for name in ("windows-current", "windows-minimum"):
+        for name, shards in (("windows-current", 11), ("windows-minimum", 13)):
             lane = policy["lanes"][name]
-            self.assertEqual(lane["shards"], 8)
+            self.assertEqual((lane["shards"], lane["workers"]), (shards, 3))
             self.assertTrue(required <= set(ci_tests.group_ids(lane["groups"], policy, ids)))
 
     def parallel_fixture(self, bodies=None, workers=3):

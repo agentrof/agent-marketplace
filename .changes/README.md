@@ -15,5 +15,7 @@ impact without editing `versions.json`.
 
 Allowed impacts are `patch`, `minor`, and `major`. Documentation, test, CI, and
 other changes with no stable release impact use an empty `components` object.
-The release tool combines pending changesets and applies the highest requested
-impact for each component.
+The release commit, the last commit of a pull request, made by
+`python3 tools/release.py bump`, consumes every pending changeset: it applies
+the highest requested impact to each component, writes the summaries into the
+release's `CHANGELOG.md` section and deletes the files.

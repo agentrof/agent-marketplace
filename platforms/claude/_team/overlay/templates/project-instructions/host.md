@@ -1,9 +1,6 @@
 # Load user context
 
-@CLAUDE.user.md
-@{{workspace}}/memory/agent-marketplace.md
-@{{workspace}}/memory/me.md
-@{{workspace}}/memory/profile.md
+@{{user_context}}
 
 ## Claude host
 

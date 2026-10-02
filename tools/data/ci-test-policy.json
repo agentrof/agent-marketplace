@@ -13,9 +13,6 @@
   "always_groups": [
     "contracts"
   ],
-  "release_groups": [
-    "release"
-  ],
   "generated_paths": [
     "dist/*"
   ],
@@ -426,11 +423,10 @@
     "tools.tests.test_backlog_review_inputs",
     "tools.tests.test_backlog_revision_atomicity",
     "tools.tests.test_ci_evidence",
-    "tools.tests.test_ci_host_evidence",
+    "tools.tests.test_ci_host_policy",
     "tools.tests.test_ci_local",
     "tools.tests.test_ci_performance",
     "tools.tests.test_ci_plan",
-    "tools.tests.test_ci_release",
     "tools.tests.test_ci_tests",
     "tools.tests.test_code_review_panel",
     "tools.tests.test_counts",

@@ -59,11 +59,19 @@ current process receipts together. Every approved package-set or
 application-only delta advances that application receipt; older Requirement and
 backlog bindings must revise and rebind before further handoff.
 
+# Load user context
+
+Before any work, read these files in this order and follow them. Skip a file
+that does not exist. Their loading is best-effort; mechanically required rules
+stay in this generated file or in hooks and validators.
+
+- `AGENTS.user.md`
+- `{{workspace}}/memory/agent-marketplace.md`
+- `{{workspace}}/memory/me.md`
+- `{{workspace}}/memory/profile.md`
+
 ## Codex host
 
-- Read `AGENTS.user.md` when it exists. It is user-owned and its loading is
-  best-effort; mechanically required rules stay in this generated file or in
-  hooks and validators.
 - Run mutating Agent Marketplace workflows in Code or Default mode, never Plan
   mode.
 - Use the matching project-scoped custom agent by its bare canonical role id.

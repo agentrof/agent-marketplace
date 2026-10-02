@@ -1,13 +1,6 @@
 name: release-hosts
 
 on:
-  workflow_call:
-    inputs:
-      candidate_sha:
-        description: Exact trusted candidate commit to exercise
-        required: false
-        type: string
-        default: ""
   workflow_dispatch:
   pull_request:
   merge_group:
@@ -17,8 +10,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
-  pull-requests: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -29,49 +20,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      reused: ${{ steps.proof.outputs.reused }}
-      runner_os: ${{ steps.proof.outputs.runner_os }}
-      python: ${{ steps.proof.outputs.python }}
-      node: ${{ steps.proof.outputs.node }}
+      runner_os: ${{ steps.policy.outputs.runner_os }}
+      python: ${{ steps.policy.outputs.python }}
+      node: ${{ steps.policy.outputs.node }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - name: Verify reusable checkout lifecycle evidence
-        id: proof
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CI_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
-          EXPECTED_SHA: ${{ inputs.candidate_sha || github.sha }}
-        run: >-
-          python3 tools/ci_host_evidence.py find
-          --expected-sha "$EXPECTED_SHA"
-          --output "$RUNNER_TEMP/ci-host-reuse.json"
-          --github-output "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ci-host-plan-${{ github.run_id }}
-          path: ${{ runner.temp }}/ci-host-reuse.json
-          overwrite: true
-          if-no-files-found: error
-          retention-days: 7
+      - name: Read the host runtime policy
+        id: policy
+        run: python3 tools/ci_host_policy.py --github-output "$GITHUB_OUTPUT"
 
   fresh-host-lifecycle:
     name: Fresh checkout lifecycle
     needs: host-plan
-    if: needs.host-plan.outputs.reused == 'false'
     runs-on: ${{ needs.host-plan.outputs.runner_os }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -94,33 +64,6 @@ jobs:
           codex --version
       - name: Exercise both hosts against the exact checkout
         run: python3 tools/smoke_plugin_installs.py --channel checkout
-      - name: Record successful checkout lifecycle evidence
-        if: >-
-          (github.event_name == 'pull_request' &&
-           github.event.pull_request.base.ref == 'main' &&
-           github.event.pull_request.head.repo.full_name == github.repository) ||
-          (github.event_name == 'workflow_dispatch' &&
-           github.ref == 'refs/heads/main' && inputs.candidate_sha == '')
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CANDIDATE_SHA: ${{ inputs.candidate_sha || github.sha }}
-          CI_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
-        run: >-
-          python3 tools/ci_host_evidence.py create
-          --candidate-sha "$CANDIDATE_SHA"
-          --output "$RUNNER_TEMP/ci-host-evidence.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: >-
-          (github.event_name == 'pull_request' &&
-           github.event.pull_request.base.ref == 'main' &&
-           github.event.pull_request.head.repo.full_name == github.repository) ||
-          (github.event_name == 'workflow_dispatch' &&
-           github.ref == 'refs/heads/main' && inputs.candidate_sha == '')
-        with:
-          name: ci-host-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ci-host-evidence.json
-          if-no-files-found: error
-          retention-days: 7
 
   native-host-lifecycle:
     name: Claude Code and Codex lifecycle
@@ -129,41 +72,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Require fresh success or the selected reuse path
+      - name: Require the plan and a fresh lifecycle success
         env:
           PLAN_RESULT: ${{ needs.host-plan.result }}
-          REUSED: ${{ needs.host-plan.outputs.reused }}
           FRESH_RESULT: ${{ needs.fresh-host-lifecycle.result }}
         run: |
           set -euo pipefail
           test "$PLAN_RESULT" = success
-          if [ "$REUSED" = true ]; then
-            test "$FRESH_RESULT" = skipped
-          else
-            test "$REUSED" = false
-            test "$FRESH_RESULT" = success
-          fi
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        if: needs.host-plan.outputs.reused == 'true'
-        with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: needs.host-plan.outputs.reused == 'true'
-        with:
-          python-version: "3.14"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        if: needs.host-plan.outputs.reused == 'true'
-        with:
-          name: ci-host-plan-${{ github.run_id }}
-          path: ${{ runner.temp }}/ci-host-plan
-      - name: Recheck the exact source run before accepting reused evidence
-        if: needs.host-plan.outputs.reused == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CI_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
-        run: >-
-          python3 tools/ci_host_evidence.py recheck
-          --proof "$RUNNER_TEMP/ci-host-plan/ci-host-reuse.json"
-          --output "$RUNNER_TEMP/ci-host-rechecked.json"
+          test "$FRESH_RESULT" = success

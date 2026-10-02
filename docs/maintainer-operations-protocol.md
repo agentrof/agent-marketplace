@@ -6,8 +6,8 @@ creating a background bot. It defines two manually invoked state machines:
 - an explicitly selected issue can advance to a tested, reviewable pull
   request and then must stop for merge approval;
 - an explicit release instruction can merge the already-selected eligible
-  changes, prepare and publish the stable release, and restore clean local and
-  remote Git state.
+  changes with their release commit, tag and publish the stable release, and
+  restore clean local and remote Git state.
 
 The protocol is repository maintenance infrastructure. It is separate from the
 Requirement and Delivery flows shipped to consuming projects.
@@ -210,12 +210,10 @@ a release, delete branches, or switch away merely because the PR is ready.
 ```text
 RELEASE_REQUESTED
   -> SELECTED_PR_SET
-  -> FEATURE_PR_GATES
-  -> FEATURE_MERGE
+  -> RELEASE_COMMIT
+  -> PR_GATES
+  -> MERGE
   -> MAIN_EXACT_SHA_GREEN
-  -> PREPARE_STABLE_RELEASE
-  -> RELEASE_PR_GATES
-  -> RELEASE_MERGE
   -> PUBLISH_STABLE_RELEASE
   -> ISSUE_AND_REF_AUDIT
   -> BOUNDED_BRANCH_CLEANUP
@@ -228,6 +226,10 @@ unambiguously selected in the active task. It does not authorize unrelated
 PRs, failed gates, force pushes, tag replacement, arbitrary issue closure, or
 arbitrary branch deletion.
 
+A release is a tag. The pull request that carries the release commit is the
+only place the tests run; the release then tags the `main` commit that pull
+request merged, moves `stable` to it and publishes the GitHub Release.
+
 The maintainer agent performs these steps without asking for a duplicate
 approval unless scope becomes ambiguous or a gate fails:
 
@@ -237,68 +239,51 @@ approval unless scope becomes ambiguous or a gate fails:
    `gh api 'repos/{owner}/{repo}/immutable-releases' --jq .enabled` to print
    `true` (see [Release immutability](#release-immutability)); otherwise stop
    before any merge, because publication would refuse to finish.
-2. Merge each selected feature PR using the repository's allowed merge method
-   and request remote branch deletion. When `main` requires the merge queue
-   (see [Repository settings](#repository-settings)), add every selected PR
-   with `gh pr merge <number>` instead, never with `--admin`, which bypasses the
-   queue; the queue merges each one after its group passes the required
-   checks, and step 8 deletes the merged branches. Record the resulting `main`
-   SHA and wait for its required validation. Confirm only the linked issues
-   expected to close actually closed.
-3. Dispatch `Prepare stable release` on that verified `main`. Wait for its
-   source validation, exact-SHA host gates and preparation job. Source
-   validation verifies trusted exact-main evidence or runs fresh full tests.
-   Host gates independently verify successful checkout-lifecycle evidence for
-   the exact tree and pinned host runtime, or run fresh real installs. Unit
-   evidence never grants host coverage. A reused host result is rechecked
-   before the gate completes.
-   Preparation consumes pending changesets, generates distributions, runs
-   `make static-check`, and publishes
-   `release/stable`. Branch publication re-observes `main` after the
-   exact-absence push and exact-lease removes only the just-created branch if
-   `main` raced. For the first stable baseline, it instead stages the bootstrap
-   stable/tag refs with exact leases, exercises both real public host channels
-   through the current trusted smoke harness, and creates or reconciles the
-   immutable GitHub Release. A resumed unpublished bootstrap candidate is
-   rebuilt with current trusted adapters without executing candidate code; an
-   invalid staged candidate is exact-lease rolled back and current `main` is
-   restaged. A matching immutable Release is reconciled instead of rolled back.
-4. Open the release PR from `release/stable` to `main` with the maintainer's
-   GitHub identity so ordinary pull-request validation runs.
-5. Wait for all checks on the exact release PR head. The release-policy gate
-   must prove that the head is exactly one commit on its attested `main_source`
-   and that its complete tree equals a deterministic replay of release
-   preparation. That replay disables ambient Git attributes, excludes and
-   replacement refs, fixes checkout text/mode policy, and compares the complete
-   byte-and-mode tree without following links. The narrower release test
-   profile additionally requires successful main evidence and a closed proof
-   that runtime bytes and modes are unchanged; otherwise full tests run.
-   Merge it with a merge commit only when green; the explicit release
-   instruction authorizes this release PR merge. Through the merge queue, add
-   it with `gh pr merge <number>` only while no other PR is queued; the queue
-   release gate removes it unless it is the first entry of its group, merged
-   by a two-parent merge commit of the `release/stable` head onto its
-   attested `main_source`. A removal because `main` advanced is a failed gate:
-   stop and report that the release must be prepared again.
-6. Wait for `Publish stable release`. It verifies the exact two-parent merge
-   topology and release tree, verifies successful candidate test evidence or
-   runs fresh full tests, and independently verifies matching checkout-host
-   evidence or exercises both real host lifecycles. It then
-   uses only the transaction helper from the
-   attested main parent while write credentials are present. The workflow
-   stages `stable` and the annotated version tag atomically with exact leases,
-   exercises fresh Claude Code and Codex installs from the real public
-   `stable` channel, creates or reconciles the immutable GitHub Release, and
-   removes remote `release/stable` with an exact lease. Finalization requires
-   GitHub to report that Release immutable; otherwise it fails and keeps
-   `release/stable`, and the owner decides the repair. A pre-Release smoke
-   failure rolls refs back atomically; an uncertain Release response is
-   observed and left in a safely resumable state rather than repaired blindly.
-   The candidate must be the attested merge or dispatch commit and an exact
-   ancestor of the observed `main` at initial staging. A later `main` advance
-   does not invalidate that already-verified release; the release commit
-   remains an ancestor of `main`.
-7. Verify the GitHub Release is published, not a draft or prerelease,
+2. Merge every selected PR except the one that lands last. Rebase that one
+   onto the current `main` and make the release commit its last commit:
+
+   ```console
+   python3 tools/release.py bump
+   python3 tools/release.py check-pr --base origin/main
+   ```
+
+   `bump` needs a clean worktree. It consumes every pending changeset,
+   applies the highest impact of each component to `versions.json` and every
+   version surface, appends the `CHANGELOG.md` section, writes
+   `.release/stable.json`, regenerates `dist/` and commits
+   `chore: release vX.Y.Z`. When every selected PR already merged, the
+   release commit goes alone on a branch from `main`. Push it.
+3. Wait for every check on that PR's exact head; its run tests the final
+   release tree. `check-pr` accepts release-owned changes only as the release
+   commit: the PR's last commit, with one parent that contains the base, whose
+   complete tree equals `bump` replayed on that parent in a disposable clone
+   that ignores ambient Git configuration, attributes, excludes, replacement
+   refs and graph overlays. The commits before it keep the normal changeset
+   rules. Merge the PR when green.
+4. Release the merge commit with one command:
+
+   ```console
+   python3 tools/release.py ship --version X.Y.Z
+   ```
+
+   It dispatches the `Release` workflow on `main` and follows it to the
+   immutable Release; `--sha <commit>` selects a `main` commit other than the
+   dispatched head. The read-only verify job requires that the commit is on
+   `main`, that every version surface names X.Y.Z, that no changeset is
+   pending, that the release metadata matches the sources, that
+   `CHANGELOG.md` has the X.Y.Z section, that X.Y.Z is newer than every
+   release tag and that `stable` holds the previous release or this commit.
+   It then waits, at most 20 minutes, for `main`'s own `validate` push run of
+   that exact commit and requires its success; it never runs the tests
+   again. The stage job pushes the annotated `vX.Y.Z` tag and moves `stable`
+   in one atomic push with exact leases. The public smoke installs both hosts
+   from the real public `stable` channel. The finalize job creates the GitHub
+   Release with the `CHANGELOG.md` section as its notes and requires GitHub
+   to report it immutable. A smoke failure rolls both refs back atomically
+   before any Release exists, and running `ship` again resumes a failed or
+   interrupted run. Only code of the dispatched `main` head runs with write
+   credentials, and a push to `stable` or a tag starts no workflow.
+5. Verify the GitHub Release is published, not a draft or prerelease,
    immutable and titled with its tag alone:
    `gh release view vX.Y.Z --json name,isDraft,isPrerelease,isImmutable`
    must report the `name` `vX.Y.Z`, `isDraft` and `isPrerelease` false and
@@ -306,162 +291,68 @@ approval unless scope becomes ambiguous or a gate fails:
    title. Require the tag and `origin/stable` to resolve to the same commit,
    and require that commit to be an ancestor of `origin/main`. Audit issue
    states and remote refs before cleanup.
-8. Delete only explicitly selected feature branches that are proven ancestors
+6. Delete only explicitly selected feature branches that are proven ancestors
    of `origin/main`. Align local `main` with `origin/main` and local `stable`
    with `origin/stable`, prune tracking refs, switch to `main`, and require an
    empty worktree. Use the fail-closed finalizer with each selected branch
-   named explicitly. Besides `release/stable`, it accepts a bounded
-   `<prefix><kebab-name>` branch for each `feature_branch_prefix` a registered
-   host declares in `platforms/<host>/adapter.json`, currently `claude/` for
-   Claude Code and `codex/` for Codex:
+   named explicitly. It accepts a bounded `<prefix><kebab-name>` branch for
+   each `feature_branch_prefix` a registered host declares in
+   `platforms/<host>/adapter.json`, currently `claude/` for Claude Code and
+   `codex/` for Codex:
 
    ```console
    python3 tools/release.py finalize-local --version X.Y.Z \
-     --branch claude/issue-123-summary --branch codex/issue-124-summary \
-     --branch release/stable --apply
+     --branch claude/issue-123-summary --branch codex/issue-124-summary --apply
    ```
 
 The finalizer refuses dirty state, mismatched stable/tag refs, a stable release
-that is not an ancestor of main, an incomplete remote release branch,
-unbounded or duplicate branch names, names outside `release/stable` and the
-declared host prefixes, branches checked out in another worktree, divergent
-local protected branches, and any selected branch not proven merged into
-`origin/main`.
+that is not an ancestor of main or whose `versions.json` names another
+version, unbounded or duplicate branch names, names outside the declared host
+prefixes, branches checked out in another worktree, divergent local protected
+branches, and any selected branch not proven merged into `origin/main`.
+
+With the validation of `main` already green, a release takes two to three
+minutes from `ship` to the immutable Release: verify about 20 seconds, stage
+about 15, the public smoke about 70 on a macOS runner and finalize about 15.
+The validation wait adds time only while `main`'s own run of that commit is
+still running.
 
 If an invariant fails, stop at the current recoverable state and report the
 exact gate. Never repair a release by moving an existing tag, force-pushing
-`main` or `stable`, deleting an unmerged branch other than an abandoned
-`release/stable`, or bypassing CI.
+`main` or `stable`, or bypassing CI.
 
-A release PR whose checks fail is abandoned, never patched: its head must stay
-one deterministic preparation commit. With the maintainer's decision to fix
-first, close the release PR, land the fix through an ordinary PR, then remove
-remote `release/stable` with an exact lease on the prepared commit, the
-closed release PR's head, and dispatch `Prepare stable release` again on the
-new `main`:
-
-```console
-git push --force-with-lease=refs/heads/release/stable:<prepared-sha> \
-  origin :refs/heads/release/stable
-```
-
-Removing it loses no work, because preparation replays it deterministically;
-preparation itself removes the branch the same way when `main` races.
+A release commit is never edited by hand. When its checks fail or `main`
+moves under it, drop it with `git reset --hard HEAD~1`, fix or rebase, and run
+`bump` again. When the verify job finds pending changesets, `main` merged
+other work after the release commit: release that merge commit with `--sha`,
+or make a new release commit. When `main`'s validation of the commit failed
+or was cancelled, rerun it with `gh run rerun <run-id>` and run `ship` again.
 
 ## One-time release reset
 
-The owner decided once to restart stable numbering: every published Release,
-its version tag and the `stable` branch are deleted, and the next release is
-`v0.0.1` again, published through the first-stable-baseline (bootstrap) path
-of `Prepare stable release`. It is not a recurring flow, and only the owner
-starts it. It can happen only once: the new `v0.0.1` is immutable, and GitHub
-never lets the tag name of a deleted immutable Release be used again.
+On 2026-10-01 the owner restarted stable numbering once: every earlier
+Release, its version tag and the `stable` branch were deleted, and the next
+release was `v0.0.1` again. `.release/reset.json` records the decision, its
+date and the retired versions. It cannot happen again: the new `v0.0.1` is an
+immutable Release, and GitHub never frees the tag name of a deleted immutable
+Release.
 
-### The reset pull request
+The marker selects the reset mode of `tools/release.py check-pr`, which
+accepted the reset pull request. That mode accepts only the complete reset:
+the marker added with `schema_version` 1, the `reason`, the `date`
+(`YYYY-MM-DD`) and `retired_versions`, every release of the base
+`CHANGELOG.md` in order; the marketplace and every plugin at `0.0.1` on every
+version surface; `.release/stable.json` and every `.changes/*.json` deleted;
+and `CHANGELOG.md` holding only the first release's note. It refuses every
+partial or mixed variant, and a line in any other file that repeats a retired
+`CHANGELOG.md` entry, because the old history is not archived. A pull request
+may only add the marker. Editing, renaming or deleting it is refused, and
+every pull request that leaves it unchanged follows the normal rules.
 
-One commit on an ordinary pull request makes the whole reset:
-
-- it adds `.release/reset.json` with `schema_version` 1, the `reason`, the
-  `date` (`YYYY-MM-DD`) and `retired_versions`, every release of the base
-  `CHANGELOG.md` in order;
-- it sets the marketplace and every plugin in `versions.json` to `0.0.1` and
-  updates every version surface with `python3 tools/release.py sync --write`
-  and `python3 tools/build_distributions.py`;
-- it deletes `.release/stable.json` and every `.changes/*.json`;
-- it replaces `CHANGELOG.md` with the bootstrap note alone, the same note the
-  `v0.0.1` Release carries.
-
-The marker selects the reset mode of `tools/release.py check-pr`. That mode
-accepts only the complete state above, which is the state the bootstrap path
-accepts, and refuses every partial or mixed variant: a version or version
-surface left behind, a kept or added changeset, kept or rewritten stable
-metadata, any other `CHANGELOG.md`, a plugin registry change, a marker whose
-list differs from the base `CHANGELOG.md`, and a base without a published
-stable release. The old history is not archived: a line in any other file
-that repeats a retired `CHANGELOG.md` entry is refused. A pull request may
-only add the marker. Editing, renaming or deleting it later is refused, and
-every pull request that leaves it unchanged follows the normal changeset
-rules.
-
-`check-pr` runs the pull request's own tools from its merge commit, so the
-reset needs no earlier pull request to install the mode. The merge queue's
-release gate runs the base's tools and refuses any change of the attested
-release other than a `release/stable` merge, so merge the reset pull request
-while `main` does not require the merge queue.
-
-### Owner commands, in order
-
-The owner runs these with their own credentials from a clean, up-to-date
-`main` checkout, after the reset pull request merged and the validation of
-the new `main` passed. Each step starts only after the previous one
-succeeded.
-
-1. Confirm that no retired Release is immutable. GitHub keeps the tag name of
-   a deleted immutable Release unusable, which would block `v0.0.1`:
-
-   ```console
-   gh api --paginate 'repos/{owner}/{repo}/releases' --jq '.[] | "\(.tag_name) \(.immutable)"'
-   ```
-
-   Every line must end in `false`.
-2. Read the retired versions from the marker and record the remote refs:
-
-   ```console
-   retired="$(python3 -c 'import json; print(" ".join(json.load(open(".release/reset.json"))["retired_versions"]))')"
-   git ls-remote origin refs/heads/stable refs/heads/release/stable 'refs/tags/v*'
-   ```
-
-   `stable` must resolve to the commit of the last retired tag, its `^{}`
-   line.
-3. Delete the GitHub Releases. Their tags stay for the next step:
-
-   ```console
-   for version in $retired; do gh release delete "v$version" --yes; done
-   ```
-
-4. Delete every retired tag with an exact lease on the tag object it names:
-
-   ```console
-   for version in $retired; do
-     ref="refs/tags/v$version"
-     object="$(git ls-remote origin "$ref" | awk -v ref="$ref" '$2 == ref {print $1}')"
-     git push --force-with-lease="refs/tags/v$version:$object" origin ":$ref"
-   done
-   ```
-
-5. If step 2 listed `release/stable`, an abandoned release candidate, delete
-   it with an exact lease on the head step 2 printed:
-
-   ```console
-   git push --force-with-lease=refs/heads/release/stable:<release-stable-sha> \
-     origin :refs/heads/release/stable
-   ```
-
-6. Delete `stable` with an exact lease on the head step 2 printed. The public
-   `stable` channel then does not exist until the bootstrap of step 7 stages
-   the new one, after its source validation and host gates pass, so run
-   steps 6 and 7 back to back:
-
-   ```console
-   git push --force-with-lease=refs/heads/stable:<stable-sha> \
-     origin :refs/heads/stable
-   ```
-
-7. Confirm that no retired ref is left, drop every local tag the remote no
-   longer has, the old local `v0.0.1` included, and start the bootstrap:
-
-   ```console
-   git ls-remote origin refs/heads/stable refs/heads/release/stable 'refs/tags/v*'
-   git fetch origin --prune --prune-tags
-   gh workflow run prepare-stable-release.yml --ref main
-   ```
-
-   The first command must print nothing: the bootstrap refuses to run while
-   any version tag exists without `stable`.
-8. When `Prepare stable release` finishes, verify the Release and clean up as
-   Flow B steps 7 and 8 describe, with
-   `python3 tools/release.py finalize-local --version 0.0.1 --apply` and a
-   `--branch` for each merged branch to delete.
+A first release, with no release tag and no `stable` branch, runs the same
+`Release` workflow: its commit must hold exactly that reset state, and
+`python3 tools/release.py ship --version 0.0.1` stages it against the absent
+`stable`.
 
 ## Model catalog bump
 
@@ -535,15 +426,12 @@ commit.
 Every workflow that reports a required context (`check`, both
 `compatibility` contexts, `analyze-python` and `Claude Code and Codex
 lifecycle`) also runs on `merge_group`. A queue run selects impact coverage
-over the group's complete diff from its base. The `check` aggregate there also
-requires the queue release gate, `tools/release.py verify-merge-group`, which
-runs with the group base's trusted code. It refuses a group in which any entry
-merges the `release/stable` head or changes the attested release in
-`.release/stable.json` unless that entry is the group's first, a two-parent
-merge commit of the head onto its attested `main_source` with the head's
-exact tree, and the release still passes its deterministic replay. The merge
-`Publish stable release` verifies is therefore the only one the queue can
-land.
+over the group's complete diff from its base. No release gate runs there:
+`check-pr` proved the release commit when its pull request ran, and the
+release refuses a commit that holds a changeset the release commit did not
+consume. Queue the pull request that carries a release commit alone and last,
+so no other entry of its group merges ahead of it; otherwise make the release
+commit again.
 
 Enable the queue only once these triggers are on `main`; a group built on an
 older `main` never reports its required checks. The owner then:
@@ -553,7 +441,7 @@ older `main` never reports its required checks. The owner then:
 
    | Setting | Value | Reason |
    | --- | --- | --- |
-   | Merge method | Merge commit | Release publication requires the two-parent merge |
+   | Merge method | Merge commit | Keeps each PR's commits on `main`, the release commit included |
    | Build concurrency | 5 | Queued PRs start their checks in parallel |
    | Minimum group size | 1 | A single ready PR never waits for others |
    | Maximum group size | 5 | Bounds one merge to five PRs |
@@ -597,10 +485,8 @@ editable.
 
 The publication tooling never edits, deletes or re-tags a Release that exists
 and rolls refs back only before one exists, so it runs unchanged with the
-setting enabled. Both finalize steps (`Publish stable release` and the
-bootstrap in `Prepare stable release`) pass `--require-immutable`: they read
-`isImmutable` from GitHub and, when it is not true, fail before removing
-`release/stable`.
+setting enabled. The finalize job of `Release` passes `--require-immutable`:
+it reads `isImmutable` from GitHub and fails when it is not true.
 
 The owner enables it once: Settings, General, Releases, **Enable release
 immutability**, or with admin credentials:
@@ -617,20 +503,18 @@ whether to keep it or to enable the setting, delete that Release (never its
 tag) and re-run the failed finalize job so it creates an immutable one.
 
 To keep it, the maintainer completes the publication with the finalize the
-failed job ran, without `--require-immutable`, since both workflows pass it.
-It reconciles the existing Release unchanged and deletes `release/stable`
-with an exact lease on the release head, using the values in the failed
-job's environment:
+failed job ran, without `--require-immutable`, which the workflow always
+passes. It reconciles the existing Release unchanged, using the values in the
+failed job's environment:
 
 ```console
 python3 tools/release_publish.py finalize --version "$VERSION" \
-  --candidate-sha "$EXPECTED_MERGE_SHA" --prior-stable-sha "$STABLE_BASE" \
-  --notes-file release-notes.md --release-branch-sha "$RELEASE_HEAD_SHA"
+  --candidate-sha "$CANDIDATE_SHA" --prior-stable-sha "$PRIOR_STABLE_SHA" \
+  --notes-file release-notes.md
 ```
 
-The notes file must exist but is unused for an existing Release. A kept
-bootstrap Release takes `--bootstrap` in place of `--prior-stable-sha` and
-`--release-branch-sha`.
+The notes file must exist but is unused for an existing Release. A kept first
+Release takes `--bootstrap` in place of `--prior-stable-sha`.
 
 ## Impact and residual risk
 
@@ -638,9 +522,9 @@ bootstrap Release takes `--bootstrap` in place of `--prior-stable-sha` and
 | --- | --- | --- |
 | Issue intake | No background consumption or model/API invocation | Maintainer must explicitly select each issue; live issue evidence prevents stale assumptions |
 | Agent behavior | One short instruction expands to a repository-defined procedure | Scope and irreversible transitions remain bound to explicit user authority |
-| CI | One stable-name aggregate requires changeset/release policy or, for a merge queue group, the queue release gate, plus fresh static gates and complete selected test coverage or verified equivalent evidence | Every expected report and test ID is checked; missing, failed, cancelled or unjustified skipped work fails closed |
+| CI | One stable-name aggregate requires the changeset or release-commit check on every PR, plus fresh static gates and complete selected test coverage or verified equivalent evidence | Every expected report and test ID is checked; missing, failed, cancelled or unjustified skipped work fails closed |
 | Hosts and operating systems | Every PR runs the required Claude Code and Codex lifecycle; policy selects complete Linux, macOS and native Windows partitions | Unknown/shared changes run full coverage; native Windows regressions cannot be replaced by emulation or unexpected skips |
-| Releases | One explicit command can perform several related mutations | Selected-set rule, deterministic release replay, public-host smoke, exact leases, resumable reconciliation and no force repair |
+| Releases | One command tags a validated `main` commit and publishes it | Selected-set rule, deterministic release-commit replay, the commit's own `main` validation, public-host smoke, exact leases, resumable reconciliation and no force repair |
 | Branch cleanup | Deletes merged refs after a published release | Only named, bounded branches proven merged are eligible; ambiguity or drift stops cleanup |
 
 Manual invocation is deliberate. It removes unattended API cost and public

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Stable release and cross-host version tooling for Agent Marketplace.
 
-SemVer belongs only to stable releases.
+SemVer belongs only to stable releases. A release commit, the last commit of
+an ordinary pull request, consumes every pending changeset into the version
+surfaces; a release then tags that approved main commit and moves stable.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -33,6 +36,19 @@ RESET_MARKER = ".release/reset.json"
 RESET_MARKER_KEYS = ("date", "reason", "retired_versions", "schema_version")
 CHANGELOG_RELEASE_RE = re.compile(r"^## (\S+)[ \t\r]*$", re.MULTILINE)
 ISO_DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+STABLE_METADATA = ".release/stable.json"
+METADATA_SCHEMA = 2
+METADATA_KEYS = ("build_id", "impacts", "schema_version", "summaries", "version")
+RELEASE_OWNED = ("CHANGELOG.md", STABLE_METADATA, "versions.json")
+RELEASE_WORKFLOW = "release.yml"
+VALIDATION_WORKFLOW = ".github/workflows/validate.yml"
+# Main's push validation reuses its pull request's evidence in about a minute
+# and runs the full suite in about fifteen. A release waits for it instead of
+# testing the same tree again.
+VALIDATION_WAIT_SECONDS = 1200
+VALIDATION_APPEAR_SECONDS = 120
+VALIDATION_POLL_SECONDS = 15
+RUN_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/actions/runs/([0-9]+)")
 
 
 class ReleaseError(RuntimeError):
@@ -239,7 +255,6 @@ def sync_version_surfaces(root: Path, versions: dict) -> None:
             write_json(manifest_path, manifest)
 
 
-
 def validate_version_surfaces(
     root: Path,
     adapters: dict[str, build_distributions.HostAdapter] | None = None,
@@ -373,7 +388,7 @@ def reject_graph_overlays(root: Path, environment: dict[str, str]) -> None:
         root, "rev-parse", "--is-shallow-repository", environment=environment,
     )
     if shallow != "false":
-        raise ReleaseError("release PR verification requires complete Git history")
+        raise ReleaseError("release verification requires complete Git history")
     graft_value = git(
         root, "rev-parse", "--git-path", "info/grafts", environment=environment,
     )
@@ -385,9 +400,9 @@ def reject_graph_overlays(root: Path, environment: dict[str, str]) -> None:
     except FileNotFoundError:
         return
     except OSError as exc:
-        raise ReleaseError("release PR verification cannot inspect Git grafts") from exc
+        raise ReleaseError("release verification cannot inspect Git grafts") from exc
     if grafts.strip():
-        raise ReleaseError("release PR verification rejects Git graft overlays")
+        raise ReleaseError("release verification rejects Git graft overlays")
 
 
 FINALIZE_BRANCH_NAME_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -405,8 +420,6 @@ def finalize_branch_prefixes() -> tuple[str, ...]:
 
 
 def validate_finalize_branch(branch: str) -> None:
-    if branch == "release/stable":
-        return
     prefixes = finalize_branch_prefixes()
     bounded = len(branch) <= MAX_FINALIZE_BRANCH_CHARS and any(
         branch.startswith(prefix)
@@ -416,8 +429,8 @@ def validate_finalize_branch(branch: str) -> None:
     if not bounded:
         forms = " or ".join(f"{prefix}<kebab-name>" for prefix in prefixes)
         raise ReleaseError(
-            "release cleanup branch must be release/stable or a bounded "
-            f"{forms} branch, got {branch!r}"
+            f"release cleanup branch must be a bounded {forms} branch, "
+            f"got {branch!r}"
         )
 
 
@@ -431,118 +444,6 @@ def worktree_branch_locations(root: Path) -> dict[str, Path]:
             branch = line.removeprefix("branch refs/heads/")
             locations[branch] = worktree
     return locations
-
-
-def remote_release_branch_refs(root: Path) -> dict[str, str | None]:
-    refs = {
-        "refs/heads/main": None,
-        "refs/heads/release/stable": None,
-    }
-    completed = subprocess.run(
-        ["git", "ls-remote", "--heads", "origin", *refs],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise ReleaseError(
-            completed.stderr.strip() or "remote release branch observation failed"
-        )
-    for line in completed.stdout.splitlines():
-        fields = line.split()
-        if len(fields) != 2 or fields[1] not in refs:
-            raise ReleaseError("remote release branch observation was invalid")
-        require_sha(fields[0], f"remote object ID for {fields[1]}")
-        if refs[fields[1]] is not None:
-            raise ReleaseError("remote release branch observation was ambiguous")
-        refs[fields[1]] = fields[0]
-    if refs["refs/heads/main"] is None:
-        raise ReleaseError("remote main is missing")
-    return {
-        "main": refs["refs/heads/main"],
-        "release_stable": refs["refs/heads/release/stable"],
-    }
-
-
-def publish_release_branch(
-    root: Path,
-    main_sha: str,
-    release_sha: str,
-    *,
-    after_push: Callable[[], None] | None = None,
-) -> dict:
-    """Create release/stable only for an exact observed main candidate.
-
-    Git omits a no-op main refspec from the receive-pack transaction, so a
-    lease on that ref is not a server-side compare-and-swap. The operation
-    therefore re-observes both refs after the exact-absence branch push and
-    exact-lease deletes only the branch it just created if main raced.
-    """
-    main_sha = require_sha(main_sha, "release branch main SHA")
-    release_sha = require_sha(release_sha, "release branch commit SHA")
-    parents = git(root, "rev-list", "--parents", "-n", "1", release_sha).split()
-    if parents != [release_sha, main_sha]:
-        raise ReleaseError(
-            "release branch commit must be exactly one commit on the main candidate"
-        )
-    before = remote_release_branch_refs(root)
-    if before["main"] != main_sha:
-        raise ReleaseError(
-            "remote main advanced before release branch publication"
-        )
-    if before["release_stable"] is not None:
-        raise ReleaseError("remote release/stable already exists")
-
-    pushed = subprocess.run(
-        [
-            "git", "push",
-            "--force-with-lease=refs/heads/release/stable:",
-            "origin", f"{release_sha}:refs/heads/release/stable",
-        ],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if after_push is not None:
-        after_push()
-    observed = remote_release_branch_refs(root)
-    if observed["release_stable"] != release_sha:
-        detail = pushed.stderr.strip() or pushed.stdout.strip()
-        suffix = f": {detail}" if detail else ""
-        raise ReleaseError(
-            "release/stable was not created at the exact release commit" + suffix
-        )
-    if observed["main"] != main_sha:
-        deleted = subprocess.run(
-            [
-                "git", "push",
-                f"--force-with-lease=refs/heads/release/stable:{release_sha}",
-                "origin", ":refs/heads/release/stable",
-            ],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        final = remote_release_branch_refs(root)
-        if final["release_stable"] is not None:
-            detail = deleted.stderr.strip() or deleted.stdout.strip()
-            suffix = f": {detail}" if detail else ""
-            raise ReleaseError(
-                "main advanced and exact release branch rollback failed" + suffix
-            )
-        raise ReleaseError(
-            "remote main advanced during release branch publication; "
-            "the exact stale release branch was rolled back"
-        )
-    return {
-        "schema_version": 1,
-        "action": "reconciled" if pushed.returncode else "created",
-        "main": main_sha,
-        "release_stable": release_sha,
-    }
 
 
 def release_ref_audit(root: Path, version: str) -> dict:
@@ -564,42 +465,10 @@ def release_ref_audit(root: Path, version: str) -> dict:
         raise ReleaseError(
             "published stable release is not an ancestor of origin/main"
         )
-    metadata = json_at_ref(root, stable_sha, ".release/stable.json")
-    metadata_present = git_ok(
-        root, "cat-file", "-e", f"{stable_sha}:.release/stable.json"
-    )
-    if version == BOOTSTRAP_VERSION:
-        if metadata_present:
-            raise ReleaseError(
-                "published bootstrap must not carry release metadata"
-            )
-        bootstrap_versions = json_at_ref(root, stable_sha, "versions.json")
-        plugins = (
-            bootstrap_versions.get("plugins")
-            if isinstance(bootstrap_versions, dict) else None
-        )
-        if (
-            not isinstance(bootstrap_versions, dict)
-            or set(bootstrap_versions) != {
-                "schema_version", "marketplace", "plugins"
-            }
-            or bootstrap_versions.get("schema_version") != 1
-            or bootstrap_versions.get("marketplace") != BOOTSTRAP_VERSION
-            or not isinstance(plugins, dict)
-            or not plugins
-            or any(value != BOOTSTRAP_VERSION for value in plugins.values())
-        ):
-            raise ReleaseError(
-                "published bootstrap versions do not attest v0.0.1"
-            )
-    elif not metadata_present or not isinstance(metadata, dict) \
-            or metadata.get("version") != version:
+    versions = json_at_ref(root, stable_sha, "versions.json")
+    if not isinstance(versions, dict) or versions.get("marketplace") != version:
         raise ReleaseError(
-            f"published stable release metadata does not attest v{version}"
-        )
-    if git_ok(root, "show-ref", "--verify", "--quiet", "refs/remotes/origin/release/stable"):
-        raise ReleaseError(
-            "origin/release/stable still exists; the publish workflow is incomplete"
+            f"published stable release versions.json does not name v{version}"
         )
     return {
         "version": version,
@@ -672,10 +541,6 @@ def finalize_local_release(
                 raise ReleaseError(
                     f"refusing to delete unmerged {label} branch {branch!r}"
                 )
-        if branch == "release/stable" and remote_exists:
-            raise ReleaseError(
-                "origin/release/stable still exists; publish must delete it"
-            )
         selected.append({
             "branch": branch,
             "local": local_exists,
@@ -920,7 +785,7 @@ def check_release_reset(root: Path, base: str, fork: str) -> dict:
         )
     marker = read_reset_marker(root)
     retired = marker["retired_versions"]
-    base_stable = json_at_ref(root, base, ".release/stable.json")
+    base_stable = json_at_ref(root, base, STABLE_METADATA)
     if base_stable is None:
         raise ReleaseError(
             "a release reset retires a published stable line, but the base has "
@@ -955,8 +820,8 @@ def check_release_reset(root: Path, base: str, fork: str) -> dict:
     if not isinstance(base_plugins, dict) \
             or set(base_plugins) != set(versions["plugins"]):
         raise ReleaseError("a release reset cannot change the plugin registry")
-    if (root / ".release" / "stable.json").exists():
-        raise ReleaseError("a release reset deletes .release/stable.json")
+    if (root / STABLE_METADATA).exists():
+        raise ReleaseError(f"a release reset deletes {STABLE_METADATA}")
     pending = sorted(path.name for path in (root / ".changes").glob("*.json"))
     if pending:
         raise ReleaseError(
@@ -988,13 +853,73 @@ def check_release_reset(root: Path, base: str, fork: str) -> dict:
     }
 
 
-def check_pr_changeset(root: Path, base: str) -> dict:
+def release_owned_changes(
+    root: Path, base: str, changed: list[tuple[str, str]], versions: dict,
+) -> list[str]:
+    """Name the changes only a release commit may make; none for a normal PR."""
+    retired: set[str] = set()
+    registry_retirement = False
+    stable_retirement = False
+    if any(path == "versions.json" for _status, path in changed):
+        retired = retirement_registry_delta(
+            json_at_ref(root, base, "versions.json"), versions
+        )
+        registry_retirement = bool(retired)
+        if any(path == STABLE_METADATA for _status, path in changed):
+            stable_retirement = stable_retirement_cleanup(
+                json_at_ref(root, base, STABLE_METADATA),
+                read_json(root / STABLE_METADATA)
+                if (root / STABLE_METADATA).is_file() else None,
+                retired,
+            )
+    protected = {
+        path for _status, path in changed
+        if path in RELEASE_OWNED
+        and not (path == "versions.json" and registry_retirement)
+        and not (path == STABLE_METADATA and stable_retirement)
+    }
+    changed_existing_changesets = {
+        path for status, path in changed
+        if path.startswith(".changes/") and path.endswith(".json")
+        and status != "A"
+    }
+    problems: list[str] = []
+    if protected:
+        problems.append(
+            "normal pull requests cannot edit release-owned files: "
+            + ", ".join(sorted(protected))
+        )
+    if changed_existing_changesets:
+        problems.append(
+            "normal pull requests cannot modify or delete existing changesets: "
+            + ", ".join(sorted(changed_existing_changesets))
+        )
+    return problems
+
+
+def check_pr_changeset(root: Path, base: str, head: str = "HEAD") -> dict:
+    """Check the release-impact declaration of the pull request ``base...HEAD``.
+
+    ``head`` names the pull request's last commit. It differs from HEAD where
+    CI checks out the merge of the pull request into ``base``.
+    """
     changed = changed_paths(root, base)
     fork = pull_request_fork(root, base)
     if reset_marker_changed(root, fork):
         return check_release_reset(root, base, fork)
-    added = [path for status, path in changed if status == "A" and path.startswith(".changes/") and path.endswith(".json")]
     versions = load_versions(root)
+    problems = release_owned_changes(root, base, changed, versions)
+    if problems:
+        try:
+            version = verify_release_commit(root, base, head)
+        except ReleaseError as exc:
+            raise ReleaseError(
+                "; ".join(problems) + ". Only a release commit may make these"
+                " changes: the last commit of a pull request, made by"
+                f" `python3 tools/release.py bump`. This one is not: {exc}"
+            ) from exc
+        return {"mode": "release", "version": version}
+    added = [path for status, path in changed if status == "A" and path.startswith(".changes/") and path.endswith(".json")]
     selected = [item for item in load_changesets(root, versions) if item.path.relative_to(root).as_posix() in added]
     declared = {component for item in selected for component in item.components}
     required: set[str] = set()
@@ -1011,42 +936,6 @@ def check_pr_changeset(root: Path, base: str) -> dict:
             required.add(MARKETPLACE_COMPONENT)
     if not added:
         raise ReleaseError("every normal pull request must add a .changes/*.json file")
-    retired: set[str] = set()
-    registry_retirement = False
-    stable_retirement = False
-    if any(path == "versions.json" for _status, path in changed):
-        retired = retirement_registry_delta(
-            json_at_ref(root, base, "versions.json"), versions
-        )
-        registry_retirement = bool(retired)
-        if any(path == ".release/stable.json" for _status, path in changed):
-            stable_retirement = stable_retirement_cleanup(
-                json_at_ref(root, base, ".release/stable.json"),
-                read_json(root / ".release" / "stable.json")
-                if (root / ".release" / "stable.json").is_file() else None,
-                retired,
-            )
-    protected = {
-        path for status, path in changed
-        if path in {"versions.json", "CHANGELOG.md", ".release/stable.json"}
-        and not (path == "versions.json" and registry_retirement)
-        and not (path == ".release/stable.json" and stable_retirement)
-    }
-    changed_existing_changesets = {
-        path for status, path in changed
-        if path.startswith(".changes/") and path.endswith(".json")
-        and status != "A"
-    }
-    if protected:
-        raise ReleaseError(
-            "normal pull requests cannot edit release-owned files: "
-            + ", ".join(sorted(protected))
-        )
-    if changed_existing_changesets:
-        raise ReleaseError(
-            "normal pull requests cannot modify or delete existing changesets: "
-            + ", ".join(sorted(changed_existing_changesets))
-        )
     missing = required - declared
     if missing:
         raise ReleaseError(
@@ -1195,28 +1084,16 @@ def append_changelog(root: Path, plan: dict) -> None:
     )
 
 
-def changeset_paths_at_ref(
-    root: Path, ref: str, *, environment: dict[str, str] | None = None,
-) -> set[str]:
-    output = git(
-        root, "ls-tree", "-r", "--name-only", ref, "--", ".changes",
-        environment=environment,
-    )
-    return {line for line in output.splitlines() if line.endswith(".json")}
+def prepare_release(root: Path) -> dict:
+    """Consume every pending changeset into the release commit's tree.
 
-
-def prepare(
-    root: Path, stable_sha: str, main_sha: str,
-    released_paths: set[str] | None = None,
-) -> dict:
+    It sets every version surface, appends the CHANGELOG.md section, records
+    the release metadata and regenerates every host distribution. The result
+    depends on the tree alone, so check-pr can replay it byte for byte.
+    """
     versions = load_versions(root)
     changesets = load_changesets(root, versions)
-    released_paths = released_paths or set()
-    pending = [
-        item for item in changesets
-        if item.path.relative_to(root).as_posix() not in released_paths
-    ]
-    plan = release_plan(versions, pending)
+    plan = release_plan(versions, changesets)
     if not plan["has_release"]:
         raise ReleaseError("no pending stable release impact")
     next_versions = {
@@ -1230,23 +1107,48 @@ def prepare(
     for changeset in changesets:
         changeset.path.unlink()
     metadata = {
-        "schema_version": 1,
+        "schema_version": METADATA_SCHEMA,
         "version": plan["marketplace"],
-        "stable_base": stable_sha,
-        "main_source": main_sha,
         "build_id": build_distributions.marketplace_snapshot(root)["build_id"],
         "impacts": plan["impacts"],
         "summaries": plan["summaries"],
     }
-    write_json(root / ".release" / "stable.json", metadata)
+    write_json(root / STABLE_METADATA, metadata)
+    try:
+        build_distributions.replace_generated(root, root / "dist")
+    except ValueError as exc:
+        raise ReleaseError(f"distribution build failed: {exc}") from exc
     return metadata
+
+
+def commit_release(root: Path) -> dict:
+    """Make the release commit on a clean checkout of the pull request."""
+    if git(root, "status", "--porcelain", "--untracked-files=all"):
+        raise ReleaseError(
+            "bump needs a clean worktree; commit or stash every change first"
+        )
+    metadata = prepare_release(root)
+    message = f"chore: release v{metadata['version']}"
+    git(root, "add", "--all")
+    git(root, "commit", "--quiet", "--message", message)
+    return {
+        "version": metadata["version"],
+        "commit": git(root, "rev-parse", "HEAD"),
+        "message": message,
+    }
 
 
 def verify_release(root: Path, version: str | None = None) -> dict:
     problems = validate_version_surfaces(root)
     if problems:
         raise ReleaseError("; ".join(problems))
-    metadata = read_json(root / ".release" / "stable.json")
+    metadata = read_json(root / STABLE_METADATA)
+    if set(metadata) != set(METADATA_KEYS) \
+            or metadata.get("schema_version") != METADATA_SCHEMA:
+        raise ReleaseError(
+            f"{STABLE_METADATA} must hold schema_version {METADATA_SCHEMA} and only "
+            + ", ".join(METADATA_KEYS)
+        )
     versions = load_versions(root)
     expected = version or versions["marketplace"]
     if metadata.get("version") != expected or versions["marketplace"] != expected:
@@ -1257,266 +1159,116 @@ def verify_release(root: Path, version: str | None = None) -> dict:
     return metadata
 
 
-def verify_release_pr(
-    root: Path, *, base_sha: str, head_sha: str, stable_sha: str,
-) -> dict:
-    """Prove that a release PR is the deterministic output of trusted main.
-
-    The repository must be checked out at ``base_sha``. Candidate Git data is
-    inspected by object ID but never checked out or executed. Release tooling
-    is replayed from the trusted base in a disposable clone and the resulting
-    tree is compared byte-for-byte with the candidate commit.
-    """
-    git_environment = hermetic_git_environment()
-    base_sha = require_sha(base_sha, "release PR base")
-    head_sha = require_sha(head_sha, "release PR head")
-    stable_sha = require_sha(stable_sha, "stable base")
-    reject_graph_overlays(root, git_environment)
-    if git(root, "rev-parse", "HEAD", environment=git_environment) != base_sha:
-        raise ReleaseError("release PR verification must run from the exact base SHA")
-    if git(root, "status", "--porcelain", environment=git_environment):
-        raise ReleaseError("release PR verification requires a clean base worktree")
-    parents = git(
-        root, "rev-list", "--parents", "-n", "1", head_sha,
-        environment=git_environment,
-    ).split()
-    if parents != [head_sha, base_sha]:
-        raise ReleaseError(
-            "release PR head must be exactly one non-merge commit on the current base"
-        )
-    if not git_ok(
-        root, "merge-base", "--is-ancestor", stable_sha, base_sha,
-        environment=git_environment,
-    ):
-        raise ReleaseError("stable base must be an ancestor of the release PR base")
-
-    raw_metadata = git(
-        root, "show", f"{head_sha}:.release/stable.json",
-        environment=git_environment,
+def replay_checkout(
+    root: Path, target: Path, revision: str, environment: dict[str, str],
+) -> None:
+    """Check ``revision`` out in a disposable clone with a fixed text policy."""
+    completed = subprocess.run(
+        [
+            "git", "clone", "--quiet", "--shared", "--no-checkout",
+            str(root), str(target),
+        ],
+        capture_output=True, text=True, check=False, env=environment,
     )
-    try:
-        metadata = json.loads(raw_metadata)
-    except json.JSONDecodeError as exc:
-        raise ReleaseError("release PR metadata is invalid JSON") from exc
-    expected_keys = {
-        "schema_version", "version", "stable_base", "main_source",
-        "build_id", "impacts", "summaries",
-    }
-    if not isinstance(metadata, dict) or set(metadata) != expected_keys:
-        raise ReleaseError("release PR metadata has unknown or missing keys")
-    if metadata.get("schema_version") != 1:
-        raise ReleaseError("release PR metadata schema_version must be 1")
-    version = metadata.get("version")
-    if not isinstance(version, str):
-        raise ReleaseError("release PR metadata version must be a string")
-    parse_semver(version, "release PR version")
-    if metadata.get("main_source") != base_sha:
-        raise ReleaseError("release PR main_source differs from the current base")
-    if metadata.get("stable_base") != stable_sha:
-        raise ReleaseError("release PR stable_base differs from the stable ref")
-    impacts = metadata.get("impacts")
-    summaries = metadata.get("summaries")
-    if not isinstance(impacts, dict) or any(
-        not isinstance(component, str) or impact not in IMPACTS
-        for component, impact in impacts.items()
+    if completed.returncode != 0:
+        raise ReleaseError(completed.stderr.strip() or "release replay clone failed")
+    for key, value in (
+        ("core.autocrlf", "false"), ("core.eol", "lf"), ("core.filemode", "false"),
+        ("gc.auto", "0"), ("maintenance.auto", "false"),
     ):
-        raise ReleaseError("release PR impacts are invalid")
-    if not isinstance(summaries, list) or any(
-        not isinstance(summary, str) or not summary.strip()
-        for summary in summaries
+        git(target, "config", key, value, environment=environment)
+    git(target, "checkout", "--quiet", "--detach", revision, environment=environment)
+
+
+def apply_package_index_modes(root: Path, environment: dict[str, str]) -> None:
+    """Stage each generated package file with the mode its provenance declares.
+
+    The replay ignores filesystem execute bits, so a package file it adds
+    would otherwise be staged without the mode the release commit carries.
+    """
+    _marker, provenance_name = build_distributions.packaging_names(root)
+    declared: set[str] = set()
+    for provenance in sorted((root / "dist").glob(f"*/*/{provenance_name}")):
+        package = provenance.parent.relative_to(root).as_posix()
+        executables = read_json(provenance).get("executables", [])
+        declared.update(f"{package}/{path}" for path in executables)
+    to_executable: list[str] = []
+    to_regular: list[str] = []
+    staged = git_text(root, "ls-files", "-s", "-z", "--", "dist", environment=environment)
+    for record in filter(None, staged.split("\0")):
+        metadata, path = record.split("\t", 1)
+        mode = metadata.split()[0]
+        if path in declared and mode != "100755":
+            to_executable.append(path)
+        elif path not in declared and mode == "100755":
+            to_regular.append(path)
+    if to_executable:
+        git(root, "update-index", "--chmod=+x", "--", *to_executable, environment=environment)
+    if to_regular:
+        git(root, "update-index", "--chmod=-x", "--", *to_regular, environment=environment)
+
+
+def verify_release_commit(root: Path, base: str, head: str = "HEAD") -> str:
+    """Prove that ``head`` is the deterministic release commit of its parent.
+
+    ``base`` must be an ancestor of the parent, and the commits between them
+    keep the normal changeset rules. The parent is bumped again in a
+    disposable clone that ignores ambient Git configuration, attributes,
+    excludes, replacement refs and graph overlays; its complete tree must
+    equal the release commit's.
+    """
+    environment = hermetic_git_environment()
+    reject_graph_overlays(root, environment)
+    head_sha = git(
+        root, "rev-parse", "--verify", f"{head}^{{commit}}", environment=environment,
+    )
+    base_sha = git(
+        root, "rev-parse", "--verify", f"{base}^{{commit}}", environment=environment,
+    )
+    parents = git(
+        root, "rev-list", "--parents", "-n", "1", head_sha, environment=environment,
+    ).split()[1:]
+    if len(parents) != 1:
+        raise ReleaseError(f"its last commit has {len(parents)} parents, not one")
+    parent = parents[0]
+    if not git_ok(
+        root, "merge-base", "--is-ancestor", base_sha, parent,
+        environment=environment,
     ):
-        raise ReleaseError("release PR summaries are invalid")
-
-    expected_message = f"chore: prepare stable v{version}"
-    if git(
-        root, "show", "-s", "--format=%B", head_sha,
-        environment=git_environment,
-    ) != expected_message:
-        raise ReleaseError("release PR commit message differs from the release contract")
-
-    with tempfile.TemporaryDirectory(prefix="release-pr-verify.") as temporary:
-        expected_root = Path(temporary) / "expected"
-        completed = subprocess.run(
-            ["git", "clone", "--shared", "--no-checkout", str(root), str(expected_root)],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=git_environment,
+        raise ReleaseError(
+            "the base advanced after the release commit was made; rebase the"
+            " pull request onto the base and run bump again"
         )
-        if completed.returncode != 0:
-            raise ReleaseError(completed.stderr.strip() or "release replay clone failed")
-        git(
-            expected_root, "config", "core.autocrlf", "false",
-            environment=git_environment,
-        )
-        git(
-            expected_root, "config", "core.eol", "lf",
-            environment=git_environment,
-        )
-        git(
-            expected_root, "config", "core.filemode", "false",
-            environment=git_environment,
-        )
-        git(
-            expected_root, "checkout", "--detach", base_sha,
-            environment=git_environment,
-        )
-        released_paths = changeset_paths_at_ref(
-            root, stable_sha, environment=git_environment,
-        )
-        replay = prepare(
-            expected_root,
-            stable_sha,
-            base_sha,
-            released_paths=released_paths,
-        )
-        build_distributions.replace_generated(expected_root, expected_root / "dist")
-        verify_release(expected_root, replay["version"])
-        if replay != metadata:
-            raise ReleaseError("release PR metadata differs from deterministic replay")
-        git(expected_root, "add", "--all", environment=git_environment)
-        expected_tree = git(
-            expected_root, "write-tree", environment=git_environment,
-        )
+    with tempfile.TemporaryDirectory(prefix="release-commit.") as temporary:
+        replay = Path(temporary) / "replay"
+        replay_checkout(root, replay, parent, environment)
+        if parent != base_sha:
+            try:
+                earlier = check_pr_changeset(replay, base_sha)
+            except ReleaseError as exc:
+                raise ReleaseError(
+                    f"the commits before it break the changeset rules: {exc}"
+                ) from exc
+            if earlier["mode"] != "changeset":
+                raise ReleaseError(
+                    "the commits before it already make a release or a reset"
+                )
+        try:
+            metadata = prepare_release(replay)
+        except ReleaseError as exc:
+            raise ReleaseError(f"its parent cannot be bumped: {exc}") from exc
+        git(replay, "add", "--all", environment=environment)
+        apply_package_index_modes(replay, environment)
+        expected_tree = git(replay, "write-tree", environment=environment)
     head_tree = git(
-        root, "rev-parse", f"{head_sha}^{{tree}}",
-        environment=git_environment,
+        root, "rev-parse", f"{head_sha}^{{tree}}", environment=environment,
     )
     if head_tree != expected_tree:
-        raise ReleaseError("release PR tree differs from deterministic replay")
-    return {
-        "schema_version": 1,
-        "base": base_sha,
-        "head": head_sha,
-        "stable": stable_sha,
-        "version": version,
-        "expected_tree": expected_tree,
-        "head_tree": head_tree,
-    }
-
-
-def release_identity(
-    root: Path, revision: str, environment: dict[str, str],
-) -> object:
-    """Return the release a commit attests, or None before the first one."""
-    path = f"{revision}:.release/stable.json"
-    if not git_ok(root, "cat-file", "-e", path, environment=environment):
-        return None
-    raw = git(root, "show", path, environment=environment)
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        return raw
-    if not isinstance(value, dict):
-        return raw
-    # Plugin retirement may prune impacts; only a release changes these.
-    return tuple(
-        value.get(key)
-        for key in ("version", "stable_base", "main_source", "build_id")
-    )
-
-
-def verify_merge_group(
-    root: Path, *, base_sha: str, head_sha: str, stable_sha: str,
-    release_sha: str | None = None,
-) -> dict:
-    """Keep a queued release PR on the exact merge publication verifies.
-
-    The repository must be checked out at ``base_sha``, the merge group's
-    parent commit. Queue commits are inspected by object ID and never
-    executed. ``release_sha`` is the observed ``release/stable`` head. The
-    only entry that may merge it or change the attested release is the
-    group's first entry: a two-parent merge of that head onto its
-    ``main_source`` with the head's exact tree.
-    """
-    git_environment = hermetic_git_environment()
-    base_sha = require_sha(base_sha, "merge group base")
-    head_sha = require_sha(head_sha, "merge group head")
-    stable_sha = require_sha(stable_sha, "stable base")
-    if release_sha is not None:
-        release_sha = require_sha(release_sha, "release/stable head")
-    reject_graph_overlays(root, git_environment)
-    if git(root, "rev-parse", "HEAD", environment=git_environment) != base_sha:
         raise ReleaseError(
-            "merge group verification must run from the exact base SHA"
+            "its tree differs from the deterministic bump of its parent; drop"
+            " it and run bump again"
         )
-    if git(root, "status", "--porcelain", environment=git_environment):
-        raise ReleaseError("merge group verification requires a clean base worktree")
-    entries = git(
-        root, "rev-list", "--first-parent", "--reverse",
-        f"{base_sha}..{head_sha}", environment=git_environment,
-    ).split()
-    previous = base_sha
-    release_entries: list[tuple[str, list[str]]] = []
-    for entry in entries:
-        parents = git(
-            root, "rev-list", "--parents", "-n", "1", entry,
-            environment=git_environment,
-        ).split()[1:]
-        if not parents or parents[0] != previous:
-            raise ReleaseError(
-                "merge group entries must form one first-parent chain on its base"
-            )
-        previous = entry
-        merges_release = release_sha is not None and release_sha in (
-            entry, *parents[1:]
-        )
-        if merges_release or release_identity(
-            root, parents[0], git_environment,
-        ) != release_identity(root, entry, git_environment):
-            release_entries.append((entry, parents))
-    if not entries or previous != head_sha:
-        raise ReleaseError(
-            "merge group head must add first-parent commits to its base"
-        )
-    result: dict = {
-        "schema_version": 1,
-        "base": base_sha,
-        "head": head_sha,
-        "entries": len(entries),
-        "release_entry": None,
-    }
-    if not release_entries:
-        return result
-    if len(release_entries) != 1:
-        raise ReleaseError(
-            "merge group changes the attested release in more than one entry"
-        )
-    entry, parents = release_entries[0]
-    if release_sha is None:
-        raise ReleaseError(
-            "merge group changes the attested release without a release/stable PR"
-        )
-    if entry == release_sha or parents[1:] != [release_sha]:
-        raise ReleaseError(
-            "only the release/stable PR may change the attested release, as a "
-            "two-parent merge commit of its head; set the queue merge method "
-            "to MERGE"
-        )
-    if parents[0] != base_sha:
-        raise ReleaseError(
-            "a queued release PR must be the first entry of its merge group"
-        )
-    release_parents = git(
-        root, "rev-list", "--parents", "-n", "1", release_sha,
-        environment=git_environment,
-    ).split()[1:]
-    if release_parents != [base_sha]:
-        raise ReleaseError(
-            "the release head is not one commit on the merge group base; main "
-            "advanced after preparation, so prepare the release again"
-        )
-    if git(
-        root, "rev-parse", f"{entry}^{{tree}}", environment=git_environment,
-    ) != git(
-        root, "rev-parse", f"{release_sha}^{{tree}}", environment=git_environment,
-    ):
-        raise ReleaseError("queued release merge tree differs from the release head")
-    result["release_entry"] = entry
-    result["release"] = verify_release_pr(
-        root, base_sha=base_sha, head_sha=release_sha, stable_sha=stable_sha,
-    )
-    return result
+    return metadata["version"]
 
 
 def verify_bootstrap(
@@ -1534,7 +1286,7 @@ def verify_bootstrap(
         raise ReleaseError(
             f"the first stable release must use {BOOTSTRAP_VERSION} everywhere"
         )
-    if (root / ".release" / "stable.json").exists():
+    if (root / STABLE_METADATA).exists():
         raise ReleaseError(
             "the first stable release cannot carry prior stable provenance"
         )
@@ -1550,100 +1302,392 @@ def verify_bootstrap(
     return versions
 
 
-def verify_bootstrap_candidate(
-    root: Path, candidate_sha: str, main_sha: str,
-) -> dict:
-    """Validate a staged bootstrap ancestor using only trusted current code."""
-    environment = hermetic_git_environment()
-    candidate_sha = require_sha(candidate_sha, "bootstrap candidate")
-    main_sha = require_sha(main_sha, "bootstrap main")
-    reject_graph_overlays(root, environment)
-    if git(root, "rev-parse", "HEAD", environment=environment) != main_sha:
+def changelog_section(text: str, version: str) -> str:
+    """Return the body of the one ``## version`` section of CHANGELOG.md."""
+    lines = text.splitlines()
+    heading = f"## {version}"
+    starts = [index for index, line in enumerate(lines) if line.rstrip() == heading]
+    if len(starts) != 1:
         raise ReleaseError(
-            "bootstrap candidate verification must run from the exact main SHA"
+            f"CHANGELOG.md must hold exactly one {heading} section, found {len(starts)}"
         )
-    if git(root, "status", "--porcelain", environment=environment):
-        raise ReleaseError("bootstrap candidate verification requires a clean worktree")
-    if not git_ok(
-        root, "merge-base", "--is-ancestor", candidate_sha, main_sha,
-        environment=environment,
-    ):
-        raise ReleaseError("bootstrap candidate must be an ancestor of current main")
-    trusted_adapters = build_distributions.load_adapters(root)
-    with tempfile.TemporaryDirectory(prefix="bootstrap-candidate-verify.") as temporary:
-        temporary_root = Path(temporary)
-        candidate_root = temporary_root / "candidate"
-        expected_dist = temporary_root / "expected-dist"
-        completed = subprocess.run(
-            [
-                "git", "clone", "--no-checkout", "--no-local",
-                str(root), str(candidate_root),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=environment,
-        )
-        if completed.returncode != 0:
-            raise ReleaseError(
-                completed.stderr.strip() or "bootstrap candidate clone failed"
-            )
-        git(
-            candidate_root, "config", "core.autocrlf", "false",
-            environment=environment,
-        )
-        git(
-            candidate_root, "config", "core.eol", "lf",
-            environment=environment,
-        )
-        git(
-            candidate_root, "config", "core.filemode", "false",
-            environment=environment,
-        )
-        git(
-            candidate_root, "checkout", "--detach", candidate_sha,
-            environment=environment,
-        )
-        if git(
-            candidate_root, "status", "--porcelain", environment=environment,
-        ):
-            raise ReleaseError("bootstrap candidate checkout is not canonical")
+    body: list[str] = []
+    for line in lines[starts[0] + 1:]:
+        if line.startswith("## "):
+            break
+        body.append(line)
+    notes = "\n".join(body).strip()
+    if not notes:
+        raise ReleaseError(f"CHANGELOG.md section {version} is empty")
+    return notes + "\n"
+
+
+def release_notes(root: Path, version: str, ref: str | None = None) -> str:
+    """The CHANGELOG.md section of a release, from the worktree or a commit."""
+    parse_semver(version, "release version")
+    if ref is None:
+        path = root / "CHANGELOG.md"
         try:
-            candidate_versions = verify_bootstrap(
-                candidate_root, adapters=trusted_adapters,
-            )
-            build_distributions.build(
-                candidate_root, expected_dist, adapters=trusted_adapters,
-            )
-        except (OSError, ValueError) as exc:
-            raise ReleaseError(f"bootstrap candidate is invalid: {exc}") from exc
-        problems = build_distributions.compare_dirs(
-            expected_dist, candidate_root / "dist",
+            raw = path.read_bytes()
+        except OSError as exc:
+            raise ReleaseError(f"missing release file: {path}") from exc
+    else:
+        raw = blob_at_ref(root, ref, "CHANGELOG.md")
+        if raw is None:
+            raise ReleaseError(f"CHANGELOG.md is missing at {ref}")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ReleaseError("CHANGELOG.md is not UTF-8") from exc
+    return changelog_section(text, version)
+
+
+def observe_release_refs(root: Path) -> dict:
+    """Read remote main, stable and every SemVer release tag in one call."""
+    output = git(
+        root, "ls-remote", "origin", "refs/heads/main", "refs/heads/stable",
+        "refs/tags/v*",
+    )
+    heads: dict[str, str] = {}
+    objects: dict[str, str] = {}
+    peeled: dict[str, str] = {}
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            raise ReleaseError(f"remote ref observation returned {line!r}")
+        oid, ref = fields
+        require_sha(oid, f"remote object ID for {ref}")
+        if ref in ("refs/heads/main", "refs/heads/stable"):
+            heads[ref.rsplit("/", 1)[1]] = oid
+            continue
+        if not ref.startswith("refs/tags/v"):
+            continue
+        name = ref[len("refs/tags/v"):]
+        target = peeled if name.endswith("^{}") else objects
+        version = name[:-3] if name.endswith("^{}") else name
+        if SEMVER_RE.fullmatch(version):
+            target[version] = oid
+    if "main" not in heads:
+        raise ReleaseError("remote main is missing")
+    lightweight = sorted(set(objects) - set(peeled), key=parse_semver)
+    if lightweight:
+        raise ReleaseError(
+            "release tags must be annotated: "
+            + ", ".join(f"v{version}" for version in lightweight)
         )
-        if problems:
-            raise ReleaseError(
-                "bootstrap candidate distribution differs from trusted replay: "
-                + "; ".join(problems)
-            )
-        snapshot = build_distributions.marketplace_snapshot(candidate_root)
     return {
-        "schema_version": 1,
-        "candidate": candidate_sha,
-        "main": main_sha,
-        "version": candidate_versions["marketplace"],
-        "build_id": snapshot["build_id"],
+        "main": heads["main"],
+        "stable": heads.get("stable"),
+        "tags": {version: peeled[version] for version in objects},
     }
 
 
-def release_notes(root: Path, version: str) -> str:
-    metadata_path = root / ".release" / "stable.json"
-    if metadata_path.is_file():
-        metadata = read_json(metadata_path)
-        if metadata.get("version") == version:
-            return "\n".join(f"- {item}" for item in metadata.get("summaries", [])) + "\n"
-    if version == BOOTSTRAP_VERSION:
-        return f"- {BOOTSTRAP_NOTE}\n"
-    raise ReleaseError(f"release notes unavailable for {version}")
+def github_api(endpoint: str) -> object:
+    """One read-only GitHub REST call through the gh CLI."""
+    try:
+        completed = subprocess.run(
+            ["gh", "api", endpoint], capture_output=True, text=True,
+            check=False, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ReleaseError(f"GitHub API request failed: {exc}") from exc
+    if completed.returncode != 0:
+        raise ReleaseError(
+            "GitHub API request failed: "
+            + (completed.stderr.strip() or completed.stdout.strip() or "no detail")
+        )
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise ReleaseError("GitHub API returned invalid JSON") from exc
+
+
+def main_validation(
+    api: Callable[[str], object],
+    repository: str,
+    sha: str,
+    *,
+    wait_seconds: float = VALIDATION_WAIT_SECONDS,
+    appear_seconds: float = VALIDATION_APPEAR_SECONDS,
+    poll_seconds: float = VALIDATION_POLL_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict:
+    """Wait, bounded, for main's push validation of ``sha`` and require success.
+
+    The release never runs the tests again: the validate run that main's push
+    started for this exact commit decides. A running one is awaited; a failed
+    or cancelled one, or none at all, refuses the release.
+    """
+    endpoint = (
+        f"repos/{repository}/actions/workflows/validate.yml/runs"
+        f"?event=push&branch=main&head_sha={sha}&per_page=100"
+    )
+    started = clock()
+    failures = 0
+    while True:
+        try:
+            listing = api(endpoint)
+            failures = 0
+        except ReleaseError as exc:
+            failures += 1
+            if failures >= 3:
+                raise ReleaseError(f"cannot read main's validation runs: {exc}") from exc
+            listing = None
+        elapsed = clock() - started
+        runs = [
+            run for run in (
+                listing.get("workflow_runs", []) if isinstance(listing, dict) else []
+            )
+            if isinstance(run, dict)
+            and run.get("path") == VALIDATION_WORKFLOW
+            and run.get("event") == "push"
+            and run.get("head_branch") == "main"
+            and run.get("head_sha") == sha
+            and (run.get("repository") or {}).get("full_name") == repository
+            and (run.get("head_repository") or {}).get("full_name") == repository
+        ]
+        if runs:
+            latest = max(runs, key=lambda run: (str(run.get("created_at", "")), run.get("id", 0)))
+            status = latest.get("status")
+            location = latest.get("html_url", f"run {latest.get('id')}")
+            if status == "completed":
+                if latest.get("conclusion") == "success":
+                    return latest
+                raise ReleaseError(
+                    f"main's validation of {sha} concluded {latest.get('conclusion')}:"
+                    f" {location}; rerun it and release again"
+                )
+            if elapsed >= wait_seconds:
+                raise ReleaseError(
+                    f"main's validation of {sha} is still {status} after"
+                    f" {int(wait_seconds)} seconds: {location}; release again"
+                    " when it finishes"
+                )
+        elif listing is not None and elapsed >= min(appear_seconds, wait_seconds):
+            raise ReleaseError(
+                f"main has no push validation run for {sha}; release a commit"
+                " main moved to, whose validation passed"
+            )
+        elif listing is None and elapsed >= wait_seconds:
+            raise ReleaseError(f"cannot read main's validation runs for {sha}")
+        sleep(poll_seconds)
+
+
+def verify_candidate(
+    root: Path,
+    version: str,
+    sha: str,
+    *,
+    repository: str,
+    api: Callable[[str], object] = github_api,
+    wait_seconds: float = VALIDATION_WAIT_SECONDS,
+    appear_seconds: float = VALIDATION_APPEAR_SECONDS,
+    poll_seconds: float = VALIDATION_POLL_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict:
+    """Decide whether the main commit ``sha`` may be released as ``version``.
+
+    Read-only. The commit must be on main and be a release commit for exactly
+    this version: every version surface names it, no changeset is pending,
+    its release metadata matches its sources and CHANGELOG.md has its
+    section. The version must be newer than every release tag, and its tag
+    may exist only on this commit, which resumes an interrupted release.
+    Stable must sit on the previous release or on this commit. Last, main's
+    push validation of this commit must have passed.
+    """
+    target = parse_semver(version, "release version")
+    sha = require_sha(sha, "release commit")
+    environment = hermetic_git_environment()
+    reject_graph_overlays(root, environment)
+    if not git_ok(root, "cat-file", "-e", f"{sha}^{{commit}}") or not git_ok(
+        root, "merge-base", "--is-ancestor", sha, "refs/remotes/origin/main",
+    ):
+        raise ReleaseError(f"{sha} is not a commit on main")
+    refs = observe_release_refs(root)
+    tags = refs["tags"]
+    newer = sorted(
+        (tag for tag in tags if parse_semver(tag) > target), key=parse_semver,
+    )
+    if newer:
+        raise ReleaseError(
+            f"v{newer[-1]} is already released; a release never goes back to v{version}"
+        )
+    if tags.get(version, sha) != sha:
+        raise ReleaseError(f"v{version} already tags {tags[version]}, not {sha}")
+    earlier = [tag for tag in tags if parse_semver(tag) < target]
+    prior = max(earlier, key=parse_semver) if earlier else None
+    prior_sha = tags[prior] if prior else None
+    if prior_sha is not None:
+        if prior_sha == sha:
+            raise ReleaseError(f"{sha} is already released as v{prior}")
+        if not git_ok(root, "merge-base", "--is-ancestor", prior_sha, sha):
+            raise ReleaseError(
+                f"v{prior} at {prior_sha} is not an ancestor of {sha}; stable"
+                " only moves forward"
+            )
+    if refs["stable"] not in (prior_sha, sha):
+        expected = f"v{prior} at {prior_sha}" if prior else "absent"
+        raise ReleaseError(
+            f"remote stable is at {refs['stable'] or 'nothing'}; it must be"
+            f" {expected} or the release commit"
+        )
+    with tempfile.TemporaryDirectory(prefix="release-candidate.") as temporary:
+        candidate = Path(temporary) / "candidate"
+        replay_checkout(root, candidate, sha, environment)
+        versions = load_versions(candidate)
+        if versions["marketplace"] != version:
+            raise ReleaseError(
+                f"versions.json at {sha} names {versions['marketplace']}, not"
+                f" {version}; merge the release commit that"
+                " `python3 tools/release.py bump` makes first"
+            )
+        changes = candidate / ".changes"
+        pending = sorted(path.name for path in changes.glob("*.json")) \
+            if changes.is_dir() else []
+        if pending:
+            raise ReleaseError(
+                f"{sha} holds changesets no release commit consumed: "
+                + ", ".join(pending)
+                + "; pass --sha with the main commit that merged the release"
+                " commit, or make a new release commit"
+            )
+        if prior is None:
+            verify_bootstrap(candidate)
+        else:
+            verify_release(candidate, version)
+        notes = release_notes(candidate, version)
+    run = main_validation(
+        api, repository, sha, wait_seconds=wait_seconds,
+        appear_seconds=appear_seconds, poll_seconds=poll_seconds,
+        clock=clock, sleep=sleep,
+    )
+    return {
+        "schema_version": 1,
+        "version": version,
+        "candidate_sha": sha,
+        "prior_version": prior,
+        "prior_stable_sha": prior_sha,
+        "validation_run": run.get("html_url", run.get("id")),
+        "notes": notes,
+    }
+
+
+class Commands:
+    """The gh calls ship makes; tests replace them."""
+
+    def capture(self, argv: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(argv, capture_output=True, text=True, check=False)
+
+    def stream(self, argv: list[str]) -> int:
+        return subprocess.run(argv, check=False).returncode
+
+
+def utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def dispatched_run(
+    commands: Commands, since: datetime.datetime, *,
+    attempts: int = 12, sleep: Callable[[float], None] = time.sleep,
+) -> str:
+    """Find the Release run a dispatch started when gh did not print it."""
+    for attempt in range(attempts):
+        listed = commands.capture([
+            "gh", "run", "list", "--workflow", RELEASE_WORKFLOW,
+            "--event", "workflow_dispatch", "--branch", "main",
+            "--limit", "10", "--json", "databaseId,createdAt",
+        ])
+        try:
+            runs = json.loads(listed.stdout) if listed.returncode == 0 else []
+        except json.JSONDecodeError:
+            runs = []
+        fresh = []
+        for run in runs if isinstance(runs, list) else []:
+            try:
+                created = datetime.datetime.fromisoformat(
+                    str(run["createdAt"]).replace("Z", "+00:00")
+                )
+                identity = int(run["databaseId"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if created >= since:
+                fresh.append((created, identity))
+        if fresh:
+            return str(max(fresh)[1])
+        if attempt + 1 < attempts:
+            sleep(5)
+    raise ReleaseError(
+        "the dispatched Release run did not appear; find it with"
+        f" `gh run list --workflow {RELEASE_WORKFLOW}`"
+    )
+
+
+def ship(
+    root: Path,
+    version: str,
+    sha: str | None = None,
+    *,
+    commands: Commands | None = None,
+    watch: bool = True,
+    now: Callable[[], datetime.datetime] = utc_now,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict:
+    """Dispatch the Release workflow on main and follow it to the Release."""
+    parse_semver(version, "release version")
+    commands = commands or Commands()
+    inputs = ["-f", f"version={version}"]
+    resolved = None
+    if sha:
+        try:
+            resolved = git(root, "rev-parse", "--verify", f"{sha}^{{commit}}")
+        except ReleaseError as exc:
+            raise ReleaseError(f"unknown commit {sha}; fetch origin first") from exc
+        inputs += ["-f", f"sha={require_sha(resolved, 'release commit')}"]
+    since = now() - datetime.timedelta(seconds=30)
+    dispatched = commands.capture([
+        "gh", "workflow", "run", RELEASE_WORKFLOW, "--ref", "main", *inputs,
+    ])
+    if dispatched.returncode != 0:
+        raise ReleaseError(
+            "release dispatch failed: "
+            + ((dispatched.stderr or "").strip() or (dispatched.stdout or "").strip()
+               or "no detail")
+        )
+    match = RUN_URL_RE.search(dispatched.stdout or "") \
+        or RUN_URL_RE.search(dispatched.stderr or "")
+    run_id = match.group(1) if match else dispatched_run(commands, since, sleep=sleep)
+    result: dict = {"version": version, "sha": resolved, "run_id": run_id}
+    if not watch:
+        return result
+    if commands.stream([
+        "gh", "run", "watch", run_id, "--exit-status", "--compact",
+    ]) != 0:
+        raise ReleaseError(
+            f"Release run {run_id} failed; read `gh run view {run_id}"
+            " --log-failed`, then ship again, which resumes from the state the"
+            " run left"
+        )
+    viewed = commands.capture([
+        "gh", "release", "view", f"v{version}", "--json", "url,isImmutable",
+    ])
+    try:
+        release = json.loads(viewed.stdout) if viewed.returncode == 0 else None
+    except json.JSONDecodeError:
+        release = None
+    if not isinstance(release, dict) or release.get("isImmutable") is not True:
+        raise ReleaseError(
+            f"Release run {run_id} passed, yet v{version} is not an immutable Release"
+        )
+    result.update(release_url=release.get("url"), immutable=True)
+    return result
+
+
+def write_github_output(path: Path, values: dict[str, str]) -> None:
+    with path.open("a", encoding="utf-8") as output:
+        for key, value in values.items():
+            output.write(f"{key}={value}\n")
 
 
 def main() -> int:
@@ -1657,33 +1701,38 @@ def main() -> int:
     pr_parser = sub.add_parser("check-pr")
     pr_parser.add_argument("--base", required=True)
     pr_parser.add_argument(
+        "--head", default="HEAD",
+        help="the pull request's last commit, when HEAD is CI's merge commit",
+    )
+    pr_parser.add_argument(
         "--pr-text", type=Path,
         help="a file with the pull request title and body to scan as well",
     )
-    prepare_parser = sub.add_parser("prepare")
-    prepare_parser.add_argument("--stable-sha", required=True)
-    prepare_parser.add_argument("--main-sha", required=True)
+    sub.add_parser(
+        "bump", help="make the release commit: the pull request's last commit",
+    )
     verify_parser = sub.add_parser("verify-release")
     verify_parser.add_argument("--version")
-    release_pr_parser = sub.add_parser("verify-release-pr")
-    release_pr_parser.add_argument("--base-sha", required=True)
-    release_pr_parser.add_argument("--head-sha", required=True)
-    release_pr_parser.add_argument("--stable-sha", required=True)
-    merge_group_parser = sub.add_parser("verify-merge-group")
-    merge_group_parser.add_argument("--base-sha", required=True)
-    merge_group_parser.add_argument("--head-sha", required=True)
-    merge_group_parser.add_argument("--stable-sha", required=True)
-    merge_group_parser.add_argument("--release-sha")
-    branch_parser = sub.add_parser("publish-release-branch")
-    branch_parser.add_argument("--main-sha", required=True)
-    branch_parser.add_argument("--release-sha", required=True)
-    sub.add_parser("verify-bootstrap")
-    bootstrap_candidate_parser = sub.add_parser("verify-bootstrap-candidate")
-    bootstrap_candidate_parser.add_argument("--candidate-sha", required=True)
-    bootstrap_candidate_parser.add_argument("--main-sha", required=True)
+    candidate_parser = sub.add_parser("verify-candidate")
+    candidate_parser.add_argument("--version", required=True)
+    candidate_parser.add_argument("--sha", required=True)
+    candidate_parser.add_argument(
+        "--repository", default=os.environ.get("GITHUB_REPOSITORY", ""),
+    )
+    candidate_parser.add_argument("--github-output", type=Path)
+    candidate_parser.add_argument(
+        "--wait-seconds", type=float, default=VALIDATION_WAIT_SECONDS,
+    )
     notes_parser = sub.add_parser("release-notes")
     notes_parser.add_argument("--version", required=True)
+    notes_parser.add_argument("--ref")
     notes_parser.add_argument("--output", type=Path)
+    ship_parser = sub.add_parser(
+        "ship", help="release a main commit: dispatch the Release workflow and follow it",
+    )
+    ship_parser.add_argument("--version", required=True)
+    ship_parser.add_argument("--sha")
+    ship_parser.add_argument("--no-watch", action="store_true")
     finalize_parser = sub.add_parser("finalize-local")
     finalize_parser.add_argument("--version", required=True)
     finalize_parser.add_argument("--branch", action="append", default=[])
@@ -1700,7 +1749,7 @@ def main() -> int:
     elif args.command == "sync":
         sync_version_surfaces(root, load_versions(root))
     elif args.command == "check-pr":
-        result = check_pr_changeset(root, args.base)
+        result = check_pr_changeset(root, args.base, args.head)
         if result["mode"] == "reset":
             retired = result["retired_versions"]
             plural = "" if len(retired) == 1 else "s"
@@ -1709,49 +1758,43 @@ def main() -> int:
                 f"release{plural}, {retired[0]} to {retired[-1]}, and restarts "
                 f"stable numbering at {result['version']}"
             )
+        elif result["mode"] == "release":
+            print(
+                "release: release commit valid; it is the deterministic bump"
+                f" of its parent to v{result['version']}"
+            )
         else:
             print("release: pull request changeset valid")
         scanned = check_pr_publishable(root, args.base, args.pr_text)
         print(publishable_summary(scanned, args.pr_text is not None))
-    elif args.command == "prepare":
-        released_paths = changeset_paths_at_ref(root, args.stable_sha)
-        result = prepare(
-            root, args.stable_sha, args.main_sha, released_paths=released_paths
-        )
-        print(json.dumps(result, indent=2))
+    elif args.command == "bump":
+        print(json.dumps(commit_release(root), indent=2))
     elif args.command == "verify-release":
         print(json.dumps(verify_release(root, args.version), indent=2))
-    elif args.command == "verify-release-pr":
-        print(json.dumps(verify_release_pr(
-            root,
-            base_sha=args.base_sha,
-            head_sha=args.head_sha,
-            stable_sha=args.stable_sha,
-        ), indent=2))
-    elif args.command == "verify-merge-group":
-        print(json.dumps(verify_merge_group(
-            root,
-            base_sha=args.base_sha,
-            head_sha=args.head_sha,
-            stable_sha=args.stable_sha,
-            release_sha=args.release_sha,
-        ), indent=2))
-    elif args.command == "publish-release-branch":
-        print(json.dumps(publish_release_branch(
-            root, args.main_sha, args.release_sha
-        ), indent=2))
-    elif args.command == "verify-bootstrap":
-        print(json.dumps(verify_bootstrap(root), indent=2))
-    elif args.command == "verify-bootstrap-candidate":
-        print(json.dumps(verify_bootstrap_candidate(
-            root, args.candidate_sha, args.main_sha,
-        ), indent=2))
+    elif args.command == "verify-candidate":
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository):
+            raise ReleaseError("--repository must name owner/repository")
+        result = verify_candidate(
+            root, args.version, args.sha, repository=args.repository,
+            wait_seconds=args.wait_seconds,
+        )
+        if args.github_output:
+            write_github_output(args.github_output, {
+                "candidate_sha": result["candidate_sha"],
+                "prior_stable_sha": result["prior_stable_sha"] or "",
+                "version": result["version"],
+            })
+        print(json.dumps(result, indent=2))
     elif args.command == "release-notes":
-        notes = release_notes(root, args.version)
+        notes = release_notes(root, args.version, args.ref)
         if args.output:
             args.output.write_bytes(notes.encode("utf-8"))
         else:
             print(notes, end="")
+    elif args.command == "ship":
+        print(json.dumps(ship(
+            root, args.version, args.sha, watch=not args.no_watch,
+        ), indent=2))
     elif args.command == "finalize-local":
         print(json.dumps(finalize_local_release(
             root, args.version, args.branch, apply=args.apply

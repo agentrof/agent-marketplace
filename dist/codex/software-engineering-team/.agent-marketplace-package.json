@@ -17,7 +17,7 @@
       "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474"
     ,
     ".codex-plugin/plugin.json":
-      "f4715b9643233dbe5629c1b4bf8e1eab6ad3e5ca5a253e84f2493b79e55ccdb4"
+      "703e5eb98e0aab619988dd00fdf4cb7829dc4987d7da6d48252995703513571e"
     ,
     "agents/analysis-challenger.md":
       "03aaef2a63c2f15b12c4d3dd7143920086f44122ec1ffa76c3661f2238d01913"
@@ -236,7 +236,7 @@
       "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
     ,
     "scripts/setup_project.py":
-      "bbf6a61f7bcfc013f08feff2cbe489b4e2fa3273bc37c7879f87281a2c04defd"
+      "2fa2476cdca3a8e6c6d016ff33437e7610089e358a0a7f9207430266d8e3f77d"
     ,
     "scripts/stage_package.py":
       "e0d667a6012af3cc67afa787ebaa6d12a9b9bf87adc422cc70dcd4b61456427b"
@@ -602,10 +602,13 @@
       "cc8eab275082721a22c16d4d0d545e62faefdab626e7cdfefffc899f8abb28c8"
     ,
     "skill-content/setup/SKILL.md":
-      "72b3b867ab2fcf02f7e69b0532913fdc060e069c536dcf9126737f75566e1ef4"
+      "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "315956adbe1f396a7886d4fa2125a9fffc03259a3d3897bf4db435caa73bdb1e"
+    ,
+    "skill-content/setup/references/windows-long-paths.md":
+      "f6ce03aee49421cf7fd313388af3a9c9e2eb74f3e20a8019be0d4703cfca5705"
     ,
     "skill-content/sketch/SKILL.md":
       "9a2a84b499d3f2632bde2e6ccb6c1e0f46887cdc4d644bb77181a11ebe7bd586"
@@ -845,7 +848,7 @@
       "4b42a50fb8966874cbd89a37253240fba87533496e8d0462c69a7745b874cfe9"
     ,
     "templates/AGENTS.override.md":
-      "743b8976bcd7736450f24486bff2552f0592f61f621a2b03662af86b904a29ef"
+      "d84ca774c7fed4e518e3221355ba7aca179b0458b1810bd4bc40d0565d0df364"
     ,
     "templates/CLAUDE.md":
       "db8d959e9778cf374734e59a86ebb77ab3164a2e4981e025b04e452a9ccab4c8"
@@ -872,10 +875,13 @@
       "0f57bcb1fdc0fc36dce76767f9ff91e44fca7897e7fc024752ec227acc04ca7e"
     ,
     "templates/project-instructions/host.md":
-      "a3a7a5e62acc8feee66022cc43d9d4f1e201eb45a9954948e57d8686fbbe4afa"
+      "0ceaf50730dcd8ed779a9deb32dda64b3b24f2ec808985ce1286c473dd1c631d"
     ,
     "templates/project-instructions/team.md":
       "f2514f8c3b16405e1fb87671ebc12ddeaf4649af090ad3e7dbb121d562143d53"
+    ,
+    "templates/project-instructions/user-context.json":
+      "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
     ,
     "templates/task-input-contract.md":
       "61f528981276bf3fa4fee92584dd9912be8465a9af02ca6ab0971b16b52e3b26"
@@ -950,8 +956,8 @@
       "6608e750755077fc1828b1fe40456f9828ca1fc1da82234c5864f5e996e41d77"
   },
   "host": "codex",
-  "marketplace_release": "0.0.2",
+  "marketplace_release": "0.0.3",
   "runtime_contracts": [],
   "schema_version": 4,
-  "version": "0.0.2"
+  "version": "0.0.3"
 }

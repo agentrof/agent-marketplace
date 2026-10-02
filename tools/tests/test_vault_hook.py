@@ -1504,11 +1504,13 @@ class VaultHookShellContractTests(unittest.TestCase):
     ) -> tuple[Path, Path]:
         docs, _config = self.project(root)
         init_repository(root)
+        # Native Windows setup waits for this answer; other hosts ignore it.
         setup = subprocess.run(
             [
                 sys.executable,
                 str(package / "scripts" / "setup_project.py"),
                 "apply", "--project-root", str(root), "--json",
+                "--choice", "git.core_longpaths=leave",
             ],
             capture_output=True, text=True, check=False,
         )
@@ -3760,11 +3762,13 @@ class VaultHookShellContractTests(unittest.TestCase):
                 docs, _config = self.project(root)
                 init_repository(root)
                 package = ROOT / "dist" / host / "software-engineering-team"
+                # Native Windows setup waits for this answer; other hosts ignore it.
                 setup = subprocess.run(
                     [
                         sys.executable,
                         str(package / "scripts" / "setup_project.py"),
                         "apply", "--project-root", str(root), "--json",
+                        "--choice", "git.core_longpaths=leave",
                     ],
                     capture_output=True, text=True, check=False,
                 )

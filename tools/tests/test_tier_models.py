@@ -1208,6 +1208,43 @@ class VaultHookTests(unittest.TestCase):
                 self.assert_restored(host, "set-role-tier", "--ro", MOVED, "--tier", "medium")
 
 
+# A hand-written CLAUDE.md beside its user-owned companion: apply replaces the
+# root only after the owner chooses to preserve or discard that text.
+HAND_WRITTEN = "# Team notes\n\nHand-written before setup.\n"
+COMPANION = "# Project Instructions\n\nThe owner's own rules.\n"
+
+
+def tree(root: Path) -> dict[str, bytes | None]:
+    """Every path under ``root``: a file with its bytes, a directory with None."""
+    return {path.relative_to(root).as_posix(): path.read_bytes() if path.is_file() else None
+            for path in sorted(root.rglob("*"))}
+
+
+def assert_inspect_previews(test: unittest.TestCase, root: Path, generate) -> None:
+    """A project generator's `inspect` plans what its `check` plans: the change to a
+    hand-written CLAUDE.md and the owner's open choice, reading no model list and
+    writing nothing."""
+    (root / "CLAUDE.md").write_text(HAND_WRITTEN, encoding="utf-8")
+    (root / "CLAUDE.user.md").write_text(COMPANION, encoding="utf-8")
+    before = tree(root)
+    inspected = generate("inspect")
+    test.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
+    test.assertEqual(tree(root), before)
+    plan = json.loads(inspected.stdout)
+    test.assertEqual(plan["status"], "choice_required")
+    test.assertIn("CLAUDE.md", plan["changes"])
+    [request] = plan["choice_requests"]
+    test.assertEqual((request["id"], request["surface"], request["reason"]),
+                     ("claude.root.claude", "CLAUDE.md", "unmanaged_content"))
+    test.assertEqual(request["preview"]["companion_before_sha256"],
+                     hashlib.sha256(COMPANION.encode("utf-8")).hexdigest())
+    test.assertNotEqual(plan["target_surfaces"], plan["current_surfaces"])
+    test.assertEqual(plan["model_check"], {"status": "not_run"})
+    checked = generate("check")
+    test.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+    test.assertEqual(json.loads(checked.stdout), plan)
+
+
 class ClaudeProjectAgentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -1445,6 +1482,9 @@ class ClaudeProjectAgentTests(unittest.TestCase):
         self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
         self.assertEqual(json.loads(inspected.stdout)["current_surfaces"],
                          report["target_surfaces"])
+
+    def test_inspect_previews_the_plan_and_the_open_choice_without_writing(self):
+        assert_inspect_previews(self, self.project.root, self.project.generator)
 
 
     def test_the_host_contract_spawns_the_rendered_role_first(self):
@@ -1926,6 +1966,9 @@ class CodexProjectAgentTests(unittest.TestCase):
         self.assertTrue(report["restart_required"])
         self.assertIn("new Codex session", report["notice"])
         self.assertEqual(report["tier_map"]["high"]["model_source"], "package")
+
+    def test_inspect_previews_the_plan_and_the_open_choice_without_writing(self):
+        assert_inspect_previews(self, self.project.root, self.generate)
 
 
 class DocumentationTests(unittest.TestCase):

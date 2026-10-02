@@ -46,6 +46,13 @@ structure assigns exactly one Apple owner whenever vault-hook tests are
 selected; missing, duplicate or disabled ownership fails plan validation.
 This avoids a separate macOS job competing with the full-suite workers.
 
+The Windows minimum-version lane installs the python.org NuGet build of its
+pinned Python, which the Python documentation names for CI systems, instead of
+running `actions/setup-python`, whose Windows installer cost about 50 seconds
+in every job. The policy pins the package, exact version and SHA-512; the job
+verifies both, adds the `python3` link setup-python adds and precompiles the
+standard library once, because the tests run with bytecode writes disabled.
+
 Delivery compiler, execution and PR-intent fixtures may copy an immutable,
 process-local starting repository prepared before the first Item starts.
 Every test gets independent

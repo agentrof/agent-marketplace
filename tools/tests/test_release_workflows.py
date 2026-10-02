@@ -435,6 +435,25 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("tools.tests.test_delivery_compile.*", policy["groups"]["windows"]["tests"])
         self.assertIn("tools.tests.test_delivery_git.*", policy["groups"]["windows"]["tests"])
 
+    def test_a_pinned_interpreter_package_replaces_setup_python_only_where_declared(self):
+        text = self.text("validate.yml")
+        policy = json.loads((REPO / "tools/data/ci-test-policy.json").read_text(encoding="utf-8"))
+        pinned = {name: lane["interpreter"] for name, lane in policy["lanes"].items() if "interpreter" in lane}
+        self.assertEqual(set(pinned), {"windows-minimum"})
+        self.assertEqual({(pin["source"], pin["package"], pin["version"]) for pin in pinned.values()},
+                         {("nuget", "python", "3.9.13")})
+        shard_job = text.split("\n  test-shards:\n", 1)[1].split("\n  compatibility:\n", 1)[0]
+        install = shard_job.split("- name: Install the pinned Python package\n", 1)[1].split("\n      - ", 1)[0]
+        setup = shard_job.split("uses: actions/setup-python@", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("if: matrix.interpreter_version != ''", install)
+        self.assertIn("if: matrix.interpreter_version == ''", setup)
+        self.assertLess(shard_job.index("Install the pinned Python package"),
+                        shard_job.index("uses: actions/setup-python@"))
+        for step in ("Get-FileHash -Algorithm SHA512", "-ne $env:SHA512", "https://api.nuget.org/v3-flatcontainer/",
+                     'New-Item -ItemType SymbolicLink -Path (Join-Path $tools "python3.exe")',
+                     "-m compileall -qq -j 0 -x site-packages", "$found -ne $env:VERSION", "$env:GITHUB_PATH"):
+            self.assertIn(step, install)
+
     def test_dependabot_is_not_asked_for_action_bumps_the_gates_refuse(self):
         # PINNED_ACTIONS and the changeset gate refuse every bump Dependabot can raise.
         self.assertFalse((REPO / ".github/dependabot.yml").exists())

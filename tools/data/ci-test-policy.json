@@ -401,7 +401,13 @@
       "required_tests": [
         "tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected",
         "tools.tests.test_delivery_git.DeliveryGitTests.test_receipt_lock_is_released_when_its_holder_dies"
-      ]
+      ],
+      "interpreter": {
+        "source": "nuget",
+        "package": "python",
+        "version": "3.9.13",
+        "sha512": "bf5dfc15afb807fc2d8915fce75e5a20050eea7b592b4430d537df4a1ecc79a06d90381fb9dc7810b7bd1dfde55cd94c6a3e9e36c1e3e63715237800642355c0"
+      }
     }
   },
   "known_test_modules": [

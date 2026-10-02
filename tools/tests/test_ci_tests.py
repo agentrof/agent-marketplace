@@ -662,6 +662,29 @@ class CITestPlannerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ci_tests.CIError, "worker count"):
                     ci_tests.policy_at(self.root)
 
+    def test_a_pinned_interpreter_is_windows_only_exact_and_planned(self):
+        pin = {"source": "nuget", "package": "python", "version": "3.9.13", "sha512": "a" * 128}
+        lane = {"os": "windows-latest", "python": "3.9"}
+        self.assertTrue(ci_tests.valid_interpreter(pin, lane))
+        for change in ({"os": "ubuntu-latest"}, {"python": "3.14"}):
+            self.assertFalse(ci_tests.valid_interpreter(pin, dict(lane, **change)))
+        for change in ({"source": "url"}, {"version": "3.9"}, {"sha512": "A" * 128}, {"package": "../python"},
+                       {"extra": True}):
+            self.assertFalse(ci_tests.valid_interpreter(dict(pin, **change), lane))
+        self.policy["lanes"]["local"]["interpreter"] = pin
+        self.save_policy()
+        if platform.system() != "Windows":
+            with self.assertRaisesRegex(ci_tests.CIError, "pinned interpreter"):
+                ci_tests.policy_at(self.root)
+            del self.policy["lanes"]["local"]["interpreter"]
+            expected = ""
+        else:
+            self.policy["lanes"]["local"]["interpreter"] = dict(pin, version=platform.python_version())
+            expected = platform.python_version()
+        self.save_policy()
+        rows = self.plan()["matrix"]["include"]
+        self.assertEqual({row["interpreter_version"] for row in rows}, {expected})
+
     def test_measured_history_outweighs_policy_estimates_which_outweigh_defaults(self):
         runner = self.policy["lanes"]["local"]["os"]
         self.policy["test_seconds"] = {runner: {self.ids[0]: 40.0}}

@@ -454,6 +454,12 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                      "-m compileall -qq -j 0 -x site-packages", "$found -ne $env:VERSION", "$env:GITHUB_PATH"):
             self.assertIn(step, install)
 
+    def test_test_scratch_lives_on_the_runner_work_directory(self):
+        shard_job = self.text("validate.yml").split("\n  test-shards:\n", 1)[1].split("\n  compatibility:\n", 1)[0]
+        run = shard_job.split("- name: Run the exact selected test partition\n", 1)[1]
+        for name in ("TMPDIR", "TMP", "TEMP"):
+            self.assertIn(f"{name}: ${{{{ runner.temp }}}}\n", run)
+
     def test_dependabot_is_not_asked_for_action_bumps_the_gates_refuse(self):
         # PINNED_ACTIONS and the changeset gate refuse every bump Dependabot can raise.
         self.assertFalse((REPO / ".github/dependabot.yml").exists())

@@ -78,7 +78,12 @@ def governed(path):
     never denied.
     """
     size = len(AUTOPILOT_RUNTIME)
-    for candidate in (os.path.abspath(path), os.path.realpath(path)):
+    candidates = [os.path.abspath(path)]
+    try:
+        candidates.append(os.path.realpath(path))
+    except (OSError, ValueError):
+        pass  # a path the system cannot resolve is judged as written
+    for candidate in candidates:
         names = parts(candidate)
         if any(names[index:index + size] == AUTOPILOT_RUNTIME
                for index in range(len(names) - size + 1)):

@@ -219,7 +219,7 @@ def policy_at(root):
     policy = read_json(root / POLICY_PATH)
     if policy.get("schema_version") != 1:
         raise CIError("unsupported CI test policy")
-    required = {"groups", "lanes", "always_groups", "release_groups", "full_paths", "rules", "module_seconds"}
+    required = {"groups", "lanes", "always_groups", "full_paths", "rules", "module_seconds"}
     if not required <= set(policy):
         raise CIError("CI test policy is incomplete")
     for name, lane in policy["lanes"].items():
@@ -282,10 +282,10 @@ def dependency_tests(root, paths, all_ids):
 
 
 def select_ids(mode, paths, policy, all_ids, root=None):
+    if mode not in {"full", "impact", "reuse"}:
+        raise CIError(f"unknown plan mode: {mode}")
     if mode == "reuse":
         return [], "reuse", "caller must verify complete prior evidence for this source"
-    if mode == "release":
-        return group_ids(policy["release_groups"], policy, all_ids), "release", "caller must prove trusted deterministic release replay"
     if mode == "full":
         return list(all_ids), "full", "full coverage requested"
     if "known_test_modules" in policy:
@@ -451,7 +451,7 @@ def validate_plan(plan, root=None):
             raise CIError("policy or inventory changed after planning")
         if git(root, "rev-parse", "HEAD^{tree}").decode().strip() != plan["source_tree"]:
             raise CIError("plan belongs to another source tree")
-        if plan["requested_mode"] not in {"full", "impact", "release", "reuse"}:
+        if plan["requested_mode"] not in {"full", "impact", "reuse"}:
             raise CIError("unknown plan mode")
         paths = changed_paths(root, plan["base_sha"], plan["source_sha"]) if plan["requested_mode"] == "impact" else []
         expected, mode, reason = select_ids(plan["requested_mode"], paths, policy, ids, root)
@@ -709,7 +709,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     plan_parser = sub.add_parser("plan")
-    plan_parser.add_argument("--mode", choices=("full", "impact", "release", "reuse"), default="full")
+    plan_parser.add_argument("--mode", choices=("full", "impact", "reuse"), default="full")
     plan_parser.add_argument("--base")
     plan_parser.add_argument("--head", default="HEAD")
     plan_parser.add_argument("--timings", type=Path)

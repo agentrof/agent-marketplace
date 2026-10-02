@@ -36,7 +36,7 @@ class CITestPlannerTests(unittest.TestCase):
         self.ids = [self.module + ".Tests.test_" + name for name in ("alpha", "beta", "skip")]
         runner = {"Linux": "ubuntu-latest", "Darwin": "macos-latest", "Windows": "windows-latest"}[platform.system()]
         self.policy = {"schema_version": 1, "groups": {"fixture": {"tests": [self.module + ".*"]}},
-                       "always_groups": ["fixture"], "release_groups": ["fixture"],
+                       "always_groups": ["fixture"],
                        "full_paths": ["tools/*", "plugins/*/*.md"],
                        "generated_paths": ["dist/*"], "generated_sources": ["plugins/*"],
                        "rules": [{"paths": ["README.md"], "groups": ["fixture"]},
@@ -228,6 +228,12 @@ class CITestPlannerTests(unittest.TestCase):
         self.assertEqual(plan["lanes"], {})
         self.assertEqual(plan["selected_ids"], [])
         self.assertEqual(ci_tests.verify_reports(plan, [])["durations"], {})
+
+    def test_an_unknown_or_retired_mode_is_refused_not_narrowed(self):
+        # A release is a tag of a validated commit; no release test profile exists.
+        for mode in ("release", "prepare", ""):
+            with self.subTest(mode=mode), self.assertRaisesRegex(ci_tests.CIError, "unknown plan mode"):
+                ci_tests.select_ids(mode, [], self.policy, self.ids)
 
     def test_reports_require_each_shard_once_with_exact_source_and_test_ids(self):
         plan = self.plan()

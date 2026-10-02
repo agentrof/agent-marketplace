@@ -25,7 +25,7 @@ RECEIPT_NAME = "ci-evidence.json"
 MAX_BYTES = 4 * 1024 * 1024
 MAX_AGE_HOURS = 24
 SHA = re.compile(r"[0-9a-f]{40}\Z")
-PROFILES = {"full", "impact", "release", "reuse"}
+PROFILES = {"full", "impact", "reuse"}
 FRESH_REQUIRED = ["repository-policy", "git-history", "release-proof", "public-channel"]
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -367,9 +367,8 @@ def restore_timings(root: Path, api: GitHub, now: dt.datetime | None = None) -> 
     return result
 
 
-def validate_receipt(receipt: dict, run: dict, expected_sha: str, expected_tree: str,
-                     contract: str, mode: str, pull: dict | None,
-                     api: GitHub) -> dict:
+def validate_receipt(receipt: dict, run: dict, expected_tree: str,
+                     contract: str, pull: dict, api: GitHub) -> dict:
     require(receipt.get("schema_version") == 1, "unsupported receipt schema")
     require(receipt.get("repository") == api.repository, "receipt repository differs")
     require(receipt.get("run_id") == run["id"] and
@@ -384,22 +383,16 @@ def validate_receipt(receipt: dict, run: dict, expected_sha: str, expected_tree:
     require(isinstance(commit, dict) and commit.get("sha") == tested_sha and
             commit.get("tree", {}).get("sha") == expected_tree,
             "tested commit does not contain the expected tree")
-    if mode == "prepare":
-        require(tested_sha == expected_sha and receipt.get("ref") == "refs/heads/main"
-                and run.get("head_branch") == "main",
-                "prepare requires exact main evidence")
-    else:
-        require(pull is not None, "PR identity is required")
-        require(run.get("head_branch") == pull["head"]["ref"], "source PR branch differs")
-        require(receipt.get("pull_request") == {
-            "number": pull["number"], "head_sha": pull["head"]["sha"],
-            "head_repository": api.repository, "base_ref": "main",
-        }, "receipt PR identity differs")
-        parents = [parent.get("sha") for parent in commit.get("parents", [])]
-        require(len(parents) == 2 and parents[1] == run["head_sha"],
-                "receipt did not test the PR merge commit")
-        require(receipt.get("ref") == f"refs/pull/{pull['number']}/merge",
-                "receipt did not test the PR merge ref")
+    require(run.get("head_branch") == pull["head"]["ref"], "source PR branch differs")
+    require(receipt.get("pull_request") == {
+        "number": pull["number"], "head_sha": pull["head"]["sha"],
+        "head_repository": api.repository, "base_ref": "main",
+    }, "receipt PR identity differs")
+    parents = [parent.get("sha") for parent in commit.get("parents", [])]
+    require(len(parents) == 2 and parents[1] == run["head_sha"],
+            "receipt did not test the PR merge commit")
+    require(receipt.get("ref") == f"refs/pull/{pull['number']}/merge",
+            "receipt did not test the PR merge ref")
     plan = validate_plan(receipt.get("plan"), expected_tree)
     require(plan["source_sha"] == tested_sha, "plan did not test the attested commit")
     require(receipt.get("plan_hash") == plan.get("plan_hash") and
@@ -424,22 +417,15 @@ def validate_receipt(receipt: dict, run: dict, expected_sha: str, expected_tree:
                 and positive(inherited.get("source_run_id"))
                 and inherited.get("source_run_id") != run["id"],
                 "reuse profile has no valid inherited proof")
-    if plan["mode"] == "release":
-        inherited = receipt.get("inherited")
-        require(isinstance(inherited, dict) and inherited.get("reused") is True
-                and sha(inherited.get("expected_sha"))
-                and inherited.get("contract_hash") == contract
-                and positive(inherited.get("source_run_id"))
-                and inherited.get("source_run_id") != run["id"],
-                "release profile has no validated main source")
     return plan
 
 
-def find_evidence(root: Path, api: GitHub, expected_sha: str, mode: str,
+def find_evidence(root: Path, api: GitHub, expected_sha: str,
                   now: dt.datetime | None = None, current_run: int = 0) -> dict:
+    """Find the merged PR's successful validation of main commit ``expected_sha``."""
     result = {
         "schema_version": 1, "reused": False, "expected_sha": expected_sha,
-        "lookup_mode": mode,
+        "lookup_mode": "main",
         "fresh_required": FRESH_REQUIRED, "reason": "no matching successful validation",
     }
     try:
@@ -449,24 +435,19 @@ def find_evidence(root: Path, api: GitHub, expected_sha: str, mode: str,
                 "current trusted workflow contract differs from the source")
         result.update(expected_tree=expected_tree, contract_hash=contract)
         now = now or dt.datetime.now(dt.timezone.utc)
-        pull = None
-        if mode == "prepare":
-            event, head_sha = "push", expected_sha
-        else:
-            pulls = api.get(f"commits/{expected_sha}/pulls?per_page=100")
-            require(isinstance(pulls, list) and len(pulls) < 100, "PR association is incomplete")
-            candidates = [item for item in pulls if (
-                item.get("merge_commit_sha") == expected_sha and item.get("merged_at")
-                and item.get("base", {}).get("ref") == "main"
-                and item.get("base", {}).get("repo", {}).get("full_name") == api.repository
-                and item.get("head", {}).get("repo", {}).get("full_name") == api.repository
-                and (mode != "publish" or item.get("head", {}).get("ref") == "release/stable")
-            )]
-            require(len(candidates) == 1, "exact merged PR is missing or ambiguous")
-            pull = candidates[0]
-            require(positive(pull.get("number")) and sha(pull.get("head", {}).get("sha")),
-                    "merged PR identity is invalid")
-            event, head_sha = "pull_request", pull["head"]["sha"]
+        pulls = api.get(f"commits/{expected_sha}/pulls?per_page=100")
+        require(isinstance(pulls, list) and len(pulls) < 100, "PR association is incomplete")
+        candidates = [item for item in pulls if (
+            item.get("merge_commit_sha") == expected_sha and item.get("merged_at")
+            and item.get("base", {}).get("ref") == "main"
+            and item.get("base", {}).get("repo", {}).get("full_name") == api.repository
+            and item.get("head", {}).get("repo", {}).get("full_name") == api.repository
+        )]
+        require(len(candidates) == 1, "exact merged PR is missing or ambiguous")
+        pull = candidates[0]
+        require(positive(pull.get("number")) and sha(pull.get("head", {}).get("sha")),
+                "merged PR identity is invalid")
+        event, head_sha = "pull_request", pull["head"]["sha"]
         listing = api.get(f"actions/workflows/validate.yml/runs?event={event}&head_sha={head_sha}&per_page=100")
         require(isinstance(listing, dict) and listing.get("total_count", 101) <= 100,
                 "workflow run list is incomplete")
@@ -480,7 +461,7 @@ def find_evidence(root: Path, api: GitHub, expected_sha: str, mode: str,
         require(isinstance(run, dict), "source run response is invalid")
         validate_run(run, api.repository, event, head_sha, now, current_run)
         receipt, artifact = read_run_receipt(api, run)
-        plan = validate_receipt(receipt, run, expected_sha, expected_tree, contract, mode, pull, api)
+        plan = validate_receipt(receipt, run, expected_tree, contract, pull, api)
         verify_plan_contract(root, plan, expected_sha)
         # Re-read after downloading so a concurrent rerun cannot bless its old attempt.
         observed = api.get(f"actions/runs/{run['id']}")
@@ -499,37 +480,8 @@ def find_evidence(root: Path, api: GitHub, expected_sha: str, mode: str,
     return result
 
 
-def verify_release_inheritance(root: Path, current_sha: str, inherited: dict,
-                               contract: str, release_head: str) -> None:
-    import release
-    metadata = parse_json(git(root, "show", f"{current_sha}:.release/stable.json").encode())
-    base = metadata.get("main_source")
-    require(sha(base) and inherited.get("expected_sha") == base
-            and inherited.get("expected_tree") == tree(root, base)
-            and inherited.get("contract_hash") == contract_hash(root, base) == contract,
-            "release source evidence differs from the attested main")
-    require(tree(root, release_head) == tree(root, current_sha),
-            "release merge tree differs from its head")
-    require(sha(metadata.get("stable_base")), "release stable base is invalid")
-    with trusted_checkout(root, base) as trusted:
-        classification_path = trusted.parent / "delta.json"
-        commands = [
-            [sys.executable, str(trusted / "tools/release.py"), "verify-release-pr",
-             "--base-sha", base, "--head-sha", release_head, "--stable-sha", metadata["stable_base"]],
-            [sys.executable, str(trusted / "tools/ci_release.py"), "classify",
-             "--base", base, "--head", release_head, "--output", str(classification_path)],
-        ]
-        for command in commands:
-            completed = subprocess.run(command, capture_output=True, check=False, timeout=120,
-                                       env=release.hermetic_git_environment())
-            require(completed.returncode == 0, "trusted release inheritance verification failed")
-        classified = parse_json(classification_path.read_bytes())
-        require(isinstance(classified, dict) and classified.get("release_only") is True,
-                "release changes runtime bytes or modes")
-
-
 def create_receipt(root: Path, plan_path: Path, reports: Path,
-                   inherited_path: Path | None = None, candidate_sha: str | None = None) -> dict:
+                   inherited_path: Path | None = None) -> dict:
     ci_tests = test_tools()
     current_sha = git(root, "rev-parse", "HEAD")
     require(not git(root, "diff", "--name-only", "HEAD", "--"),
@@ -540,15 +492,15 @@ def create_receipt(root: Path, plan_path: Path, reports: Path,
     ci_tests.validate_plan(plan, root)
     verified = ci_tests.verify_reports(plan, reports)
     event = os.environ.get("GITHUB_EVENT_NAME", "")
-    require(event in {"push", "pull_request", "workflow_dispatch", "pull_request_target"},
+    require(event in {"push", "pull_request", "workflow_dispatch"},
             "unsupported receipt event")
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     GitHub(repository)
     run_id = int(os.environ.get("GITHUB_RUN_ID", "0"))
     attempt = int(os.environ.get("GITHUB_RUN_ATTEMPT", "0"))
     require(positive(run_id) and positive(attempt), "GitHub run identity is missing")
-    require((candidate_sha or os.environ.get("GITHUB_SHA")) == current_sha,
-            "checkout differs from the triggering or explicitly selected commit")
+    require(os.environ.get("GITHUB_SHA") == current_sha,
+            "checkout differs from the triggering commit")
     receipt = {
         "schema_version": 1, "repository": repository, "run_id": run_id,
         "run_attempt": attempt, "event": event, "ref": os.environ.get("GITHUB_REF", ""),
@@ -570,32 +522,23 @@ def create_receipt(root: Path, plan_path: Path, reports: Path,
         inherited = parse_json(inherited_path.read_bytes())
         require(isinstance(inherited, dict) and inherited.get("reused") is True,
                 "inherited validation was not verified")
-        require(inherited.get("lookup_mode") in {"main", "prepare", "publish"},
-                "inherited validation has no verified lookup mode")
-        expected_mode = "prepare" if plan["mode"] == "release" else {
-            "push": "main", "workflow_dispatch": "prepare", "pull_request_target": "publish",
-        }.get(event)
-        require(expected_mode is not None and inherited["lookup_mode"] == expected_mode,
+        require(event == "push" and inherited.get("lookup_mode") == "main",
                 "inherited lookup does not match this workflow transition")
         confirmed = find_evidence(root, GitHub(repository), inherited.get("expected_sha"),
-                                  inherited["lookup_mode"], current_run=run_id)
+                                  current_run=run_id)
         require(confirmed.get("reused") is True and all(
             confirmed.get(key) == inherited.get(key) for key in (
                 "expected_sha", "expected_tree", "contract_hash", "source_run_id",
                 "source_run_attempt", "artifact_id", "receipt_digest",
             )
         ), "inherited validation changed before receipt creation")
-        if plan["mode"] == "release":
-            require(receipt["pull_request"] is not None, "release profile requires its exact PR")
-            verify_release_inheritance(root, current_sha, inherited, receipt["contract_hash"], receipt["head_sha"])
-        else:
-            require(inherited.get("expected_sha") == current_sha
-                    and inherited.get("expected_tree") == current_tree
-                    and inherited.get("contract_hash") == receipt["contract_hash"],
-                    "inherited validation does not cover this exact checkout")
+        require(inherited.get("expected_sha") == current_sha
+                and inherited.get("expected_tree") == current_tree
+                and inherited.get("contract_hash") == receipt["contract_hash"],
+                "inherited validation does not cover this exact checkout")
         receipt["inherited"] = inherited
-    require(plan["mode"] not in {"reuse", "release"} or receipt["inherited"] is not None,
-            "reuse and release profiles require inherited evidence")
+    require(plan["mode"] != "reuse" or receipt["inherited"] is not None,
+            "the reuse profile requires inherited evidence")
     return receipt
 
 
@@ -605,7 +548,6 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     find = commands.add_parser("find")
     find.add_argument("--expected-sha", required=True)
-    find.add_argument("--mode", choices=("main", "prepare", "publish"), required=True)
     find.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
     find.add_argument("--output", type=Path, required=True)
     find.add_argument("--github-output", type=Path)
@@ -614,14 +556,13 @@ def main() -> int:
     create.add_argument("--reports", type=Path, required=True)
     create.add_argument("--output", type=Path, required=True)
     create.add_argument("--inherited", type=Path)
-    create.add_argument("--candidate-sha")
     timings = commands.add_parser("timings")
     timings.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
     timings.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == "create":
-            value = create_receipt(args.root, args.plan, args.reports, args.inherited, args.candidate_sha)
+            value = create_receipt(args.root, args.plan, args.reports, args.inherited)
         elif args.command == "timings":
             try:
                 value = restore_timings(args.root, GitHub(args.repository))
@@ -630,11 +571,11 @@ def main() -> int:
                          "fallback_reasons": ["timing service unavailable; policy estimates used"]}
         else:
             try:
-                value = find_evidence(args.root, GitHub(args.repository), args.expected_sha, args.mode,
+                value = find_evidence(args.root, GitHub(args.repository), args.expected_sha,
                                       current_run=int(os.environ.get("GITHUB_RUN_ID", "0")))
             except (EvidenceError, ValueError) as exc:
                 value = {"schema_version": 1, "reused": False, "expected_sha": args.expected_sha,
-                         "lookup_mode": args.mode, "fresh_required": FRESH_REQUIRED,
+                         "lookup_mode": "main", "fresh_required": FRESH_REQUIRED,
                          "reason": f"full validation required: {exc}"}
         args.output.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         if args.command == "find" and args.github_output:

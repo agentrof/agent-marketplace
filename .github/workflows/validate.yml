@@ -1,12 +1,6 @@
 name: validate
 
 on:
-  workflow_call:
-    inputs:
-      candidate_sha:
-        description: Exact trusted candidate to validate or match to prior evidence
-        type: string
-        required: true
   workflow_dispatch:
   push:
     branches: [main]
@@ -31,13 +25,7 @@ defaults:
 
 jobs:
   changeset:
-    if: >-
-      github.event_name == 'pull_request' &&
-      !(
-        github.event.pull_request.base.ref == 'main' &&
-        github.event.pull_request.head.ref == 'release/stable' &&
-        github.event.pull_request.head.repo.full_name == github.repository
-      )
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -47,74 +35,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.9"
-      - name: Require a release-impact declaration
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python3 tools/release.py check-pr --base "$BASE_SHA"
-
-  release-pr-policy:
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.ref == 'release/stable' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.9"
-      - name: Verify the deterministic release branch
+      - name: Require a release-impact declaration or an exact release commit
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin \
-            "+refs/heads/stable:refs/remotes/origin/stable" \
-            "+refs/heads/release/stable:refs/remotes/origin/release/stable"
-          test "$(git rev-parse refs/remotes/origin/release/stable)" = "$HEAD_SHA"
-          python3 tools/release.py verify-release-pr \
-            --base-sha "$BASE_SHA" \
-            --head-sha "$HEAD_SHA" \
-            --stable-sha "$(git rev-parse refs/remotes/origin/stable)"
-
-  release-queue-policy:
-    if: github.event_name == 'merge_group'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ github.event.merge_group.base_sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.9"
-      - name: Keep a queued release PR on the merge publication verifies
-        env:
-          BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-          HEAD_REF: ${{ github.event.merge_group.head_ref }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin \
-            "+${HEAD_REF}:refs/remotes/origin/merge-group" \
-            "+refs/heads/stable:refs/remotes/origin/stable"
-          test "$(git rev-parse refs/remotes/origin/merge-group)" = "$HEAD_SHA"
-          release_sha="$(git ls-remote --heads origin refs/heads/release/stable | awk '{print $1}')"
-          args=(--base-sha "$BASE_SHA" --head-sha "$HEAD_SHA")
-          args+=(--stable-sha "$(git rev-parse refs/remotes/origin/stable)")
-          if [ -n "$release_sha" ]; then
-            args+=(--release-sha "$release_sha")
-          fi
-          python3 tools/release.py verify-merge-group "${args[@]}"
+        run: python3 tools/release.py check-pr --base "$BASE_SHA" --head "$HEAD_SHA"
 
   plan:
     runs-on: ubuntu-latest
@@ -127,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -137,7 +62,6 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          CI_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: >-
           python3 tools/ci_plan.py
           --output-directory "$RUNNER_TEMP/ci-plan"
@@ -156,7 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -177,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Exercise the Apple system Python launcher
@@ -257,8 +181,6 @@ jobs:
     if: always()
     needs:
       - changeset
-      - release-pr-policy
-      - release-queue-policy
       - plan
       - test-shards
       - deterministic-check
@@ -268,13 +190,7 @@ jobs:
       - name: Require every validation result
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REF: ${{ github.head_ref }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          REPOSITORY: ${{ github.repository }}
           CHANGESET_RESULT: ${{ needs.changeset.result }}
-          RELEASE_POLICY_RESULT: ${{ needs.release-pr-policy.result }}
-          RELEASE_QUEUE_RESULT: ${{ needs.release-queue-policy.result }}
           PLAN_RESULT: ${{ needs.plan.result }}
           HAS_TESTS: ${{ needs.plan.outputs.has_tests }}
           TEST_RESULT: ${{ needs.test-shards.result }}
@@ -290,25 +206,13 @@ jobs:
             test "$TEST_RESULT" = skipped
           fi
           expected_changeset=skipped
-          expected_release_policy=skipped
-          expected_release_queue=skipped
           if [ "$EVENT_NAME" = pull_request ]; then
-            if [ "$BASE_REF" = main ] &&
-               [ "$HEAD_REF" = release/stable ] &&
-               [ "$HEAD_REPOSITORY" = "$REPOSITORY" ]; then
-              expected_release_policy=success
-            else
-              expected_changeset=success
-            fi
-          elif [ "$EVENT_NAME" = merge_group ]; then
-            expected_release_queue=success
+            expected_changeset=success
           fi
           test "$CHANGESET_RESULT" = "$expected_changeset"
-          test "$RELEASE_POLICY_RESULT" = "$expected_release_policy"
-          test "$RELEASE_QUEUE_RESULT" = "$expected_release_queue"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -367,11 +271,10 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/ci-reports"
           args=()
-          if [ "$CI_MODE" = reuse ] || [ "$CI_MODE" = release ]; then
+          if [ "$CI_MODE" = reuse ]; then
             args+=(--inherited "$RUNNER_TEMP/ci-plan/ci-reuse.json")
           fi
           python3 tools/ci_evidence.py create \
-            --candidate-sha "$(git rev-parse HEAD)" \
             --plan "$RUNNER_TEMP/ci-plan/ci-plan.json" \
             --reports "$RUNNER_TEMP/ci-reports" \
             --output "$RUNNER_TEMP/ci-evidence.json" "${args[@]}"

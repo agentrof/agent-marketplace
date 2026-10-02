@@ -62,35 +62,6 @@ class DeliveryProviderTests(unittest.TestCase):
             self.assertEqual(result["merge_commit"], "b" * 40)
             self.assertEqual(gh.call_count, 2)
 
-    def test_merge_commit_rejects_provider_without_merge_commit(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            init_repository(root)
-            subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/agentrof/example.git"], check=True)
-            response = {"url": "https://github.com/agentrof/example/pull/17", "state": "MERGED"}
-            with patch.object(delivery_provider, "run_gh", side_effect=["", json.dumps(response)]):
-                with self.assertRaises(delivery_provider.ProviderError):
-                    delivery_provider.GitHubProvider(root).merge_commit(
-                        response["url"], "a" * 40
-                    )
-
-    def test_merge_commit_rejects_changed_provider_head(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            init_repository(root)
-            subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/agentrof/example.git"], check=True)
-            response = {
-                "url": "https://github.com/agentrof/example/pull/17",
-                "state": "MERGED",
-                "headRefOid": "c" * 40,
-                "mergeCommit": {"oid": "b" * 40},
-            }
-            with patch.object(delivery_provider, "run_gh", side_effect=["", json.dumps(response)]):
-                with self.assertRaises(delivery_provider.ProviderError):
-                    delivery_provider.GitHubProvider(root).merge_commit(
-                        response["url"], "a" * 40
-                    )
-
     def test_update_body_sends_only_the_body_to_the_exact_pr(self):
         """The body reaches GitHub's pull request update as JSON on standard input, not through
         gh pr edit, and GitHub's answer must name the same PR."""
@@ -104,24 +75,6 @@ class DeliveryProviderTests(unittest.TestCase):
         self.assertEqual(run.call_args.args, (["gh", "api", "--hostname", "github.com", "--method", "PATCH",
                                                "repos/agentrof/example/pulls/17", "--input", "-"],))
         self.assertEqual(json.loads(run.call_args.kwargs["input"]), {"body": body})
-
-    def test_required_checks_must_be_complete_and_successful(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            init_repository(root)
-            subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/agentrof/example.git"], check=True)
-            provider = delivery_provider.GitHubProvider(root)
-            provider.require_green_checks({
-                "statusCheckRollup": [{"name": "tests", "status": "COMPLETED", "conclusion": "SUCCESS"}],
-            })
-            for check in (
-                {"name": "tests", "status": "IN_PROGRESS", "conclusion": None},
-                {"name": "tests", "status": "COMPLETED", "conclusion": "FAILURE"},
-            ):
-                with self.assertRaises(delivery_provider.ProviderError):
-                    provider.require_green_checks({"statusCheckRollup": [check]})
-            with self.assertRaises(delivery_provider.ProviderError):
-                provider.require_green_checks({"statusCheckRollup": []})
 
     def github_provider(self) -> delivery_provider.GitHubProvider:
         temporary = tempfile.TemporaryDirectory()

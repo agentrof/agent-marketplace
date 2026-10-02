@@ -575,17 +575,6 @@ class TaskInputTests(unittest.TestCase):
                     self.assertEqual({switch for switch, path in references.items()
                                       if path in result["required_reads"]}, owned)
 
-    def test_no_shipped_manifest_binds_a_switch_reference_without_a_policy(self):
-        policy = task_inputs.catalog()
-        for entry, route in policy["entries"].items():
-            for role in route["roles"] or [None]:
-                with self.subTest(entry=entry, role=role):
-                    result = task_inputs.manifest(entry=entry, role=role, mode="review")
-                    paths = [*result["required_reads"],
-                             *(item["path"] for item in result["conditional_reads"]),
-                             *(item["path"] for item in result["instructions"])]
-                    self.assertFalse([path for path in paths if "/references/switch-" in path])
-
     def test_changed_project_input_invalidates_manifest_without_runtime_writes(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

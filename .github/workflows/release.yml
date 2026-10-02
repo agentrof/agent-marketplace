@@ -1,0 +1,203 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version X.Y.Z that versions.json names at the released commit
+        required: true
+        type: string
+      sha:
+        description: Main commit to release; empty releases the dispatched main head
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      candidate_sha: ${{ steps.verify.outputs.candidate_sha }}
+      prior_stable_sha: ${{ steps.verify.outputs.prior_stable_sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Verify the release commit and its main validation
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          CANDIDATE_SHA: ${{ inputs.sha || github.sha }}
+        run: >-
+          python3 tools/release.py verify-candidate
+          --version "$VERSION"
+          --sha "$CANDIDATE_SHA"
+          --github-output "$GITHUB_OUTPUT"
+
+  stage:
+    needs: verify
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      phase: ${{ steps.stage.outputs.phase }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Configure release author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Stage the annotated tag and stable with exact leases
+        id: stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          CANDIDATE_SHA: ${{ needs.verify.outputs.candidate_sha }}
+          PRIOR_STABLE_SHA: ${{ needs.verify.outputs.prior_stable_sha }}
+        run: |
+          set -euo pipefail
+          prior=(--bootstrap)
+          if [ -n "$PRIOR_STABLE_SHA" ]; then
+            prior=(--prior-stable-sha "$PRIOR_STABLE_SHA")
+          fi
+          if ! stage_json="$(
+            python3 tools/release_publish.py stage \
+              --version "$VERSION" \
+              --candidate-sha "$CANDIDATE_SHA" \
+              "${prior[@]}"
+          )"; then
+            echo "$stage_json"
+            exit 1
+          fi
+          echo "$stage_json"
+          phase="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["phase"])' "$stage_json")"
+          echo "phase=$phase" >> "$GITHUB_OUTPUT"
+
+  public-smoke:
+    if: needs.stage.outputs.phase == 'staged'
+    needs: [verify, stage]
+    permissions:
+      contents: read
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.verify.outputs.candidate_sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install pinned host CLIs
+        run: |
+          set -euo pipefail
+          claude_version="$(python3 -c 'import json; print(json.load(open("trusted/tools/data/host-cli-versions.json"))["claude_code"])')"
+          codex_version="$(python3 -c 'import json; print(json.load(open("trusted/tools/data/host-cli-versions.json"))["codex"])')"
+          npm install --global "@anthropic-ai/claude-code@${claude_version}" "@openai/codex@${codex_version}"
+          claude --version | grep -F "${claude_version}"
+          codex --version | grep -F "${codex_version}"
+      - name: Install from the real public stable channel
+        env:
+          EXPECTED_RELEASE_SHA: ${{ needs.verify.outputs.candidate_sha }}
+        run: >-
+          python3 trusted/tools/smoke_plugin_installs.py
+          --root candidate
+          --channel public
+          --expected-sha "$EXPECTED_RELEASE_SHA"
+
+  rollback:
+    if: >-
+      always() &&
+      needs.stage.result == 'success' &&
+      needs.stage.outputs.phase == 'staged' &&
+      needs.public-smoke.result != 'success'
+    needs: [verify, stage, public-smoke]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Roll back only the exact unpublished refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          CANDIDATE_SHA: ${{ needs.verify.outputs.candidate_sha }}
+          PRIOR_STABLE_SHA: ${{ needs.verify.outputs.prior_stable_sha }}
+        run: |
+          set -euo pipefail
+          prior=(--bootstrap)
+          if [ -n "$PRIOR_STABLE_SHA" ]; then
+            prior=(--prior-stable-sha "$PRIOR_STABLE_SHA")
+          fi
+          python3 tools/release_publish.py rollback \
+            --version "$VERSION" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            "${prior[@]}"
+
+  finalize:
+    if: >-
+      always() &&
+      needs.stage.result == 'success' &&
+      (
+        needs.stage.outputs.phase == 'published' ||
+        needs.public-smoke.result == 'success'
+      )
+    needs: [verify, stage, public-smoke]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Create or reconcile the immutable Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          CANDIDATE_SHA: ${{ needs.verify.outputs.candidate_sha }}
+          PRIOR_STABLE_SHA: ${{ needs.verify.outputs.prior_stable_sha }}
+        run: |
+          set -euo pipefail
+          prior=(--bootstrap)
+          if [ -n "$PRIOR_STABLE_SHA" ]; then
+            prior=(--prior-stable-sha "$PRIOR_STABLE_SHA")
+          fi
+          python3 tools/release.py release-notes \
+            --version "$VERSION" \
+            --ref "$CANDIDATE_SHA" \
+            --output "$RUNNER_TEMP/release-notes.md"
+          python3 tools/release_publish.py finalize \
+            --version "$VERSION" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            "${prior[@]}" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --require-immutable

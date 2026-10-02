@@ -32,7 +32,7 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
 
    Present its pre-mutation operation list. Requirement Flow determines which
    stages apply for each request; setup does not infer request routing.
-2. Resolve any reported blocker, then run:
+2. Resolve any reported blocker and the Windows-only `git.core_longpaths` choice that `references/windows-long-paths.md` defines, then run:
 
    ```text
    <absolute-python> <absolute-package-scripts>/setup_project.py apply --project-root <root> --json

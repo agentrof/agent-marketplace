@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -21,8 +23,10 @@ SCRIPTS = SETUP.parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 import vault_check as vault_payload
+import delivery_git
 import setup_project as setup_module
 import stage_package
+from tools.tests import backlog_fixture
 from tools.tests.git_fixture import init_repository, temporary_directory
 from unittest import mock
 
@@ -1271,6 +1275,199 @@ class SetupProjectTests(unittest.TestCase):
                         self.assertEqual(setup_module.owner_only_repairs(project, "workspace"), repairs)
         finally:
             os.umask(previous)
+
+
+class WindowsLongPathsChoiceTests(unittest.TestCase):
+    """Item and Integration worktrees share the project repository's local Git config, and Git
+    for Windows leaves out of a checkout that still exits 0 every tracked file whose path reaches
+    260 characters, or whose directory reaches 248, unless core.longpaths is on. Native Windows
+    setup asks before it turns that on; any other host asks nothing (#358). The platform is
+    mocked, so every host runs these."""
+
+    def run_setup(self, project: Path, command: str, *options: str,
+              windows: bool = True) -> tuple[int, dict]:
+        output = io.StringIO()
+        with mock.patch.object(setup_module, "native_windows", return_value=windows), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            code = setup_module.main([command, "--project-root", str(project), "--json", *options])
+        return code, json.loads(output.getvalue())
+
+    def local_long_paths(self, project: Path) -> str | None:
+        value = subprocess.run(["git", "-C", str(project), "config", "--local", "--get", "core.longpaths"],
+                               capture_output=True, text=True, check=False)
+        return value.stdout.strip() if value.returncode == 0 else None
+
+    def stage(self, project: Path, relative: str) -> str:
+        (project / relative).parent.mkdir(parents=True, exist_ok=True)
+        (project / relative).write_text("x\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(project), "add", "--", relative], check=True)
+        return relative
+
+    def track(self, project: Path, worktree: Path, length: int, folder: str) -> str:
+        """Stage a file whose path is exactly *length* characters long inside *worktree*."""
+        relative = f"{folder}/" + "x" * (length - len(str(worktree)) - len(folder) - 6) + ".txt"
+        self.assertEqual(len(str(worktree / relative)), length)
+        return self.stage(project, relative)
+
+    def directory(self, worktree: Path, length: int, folder: str) -> str:
+        """Name a directory whose path is exactly *length* characters long inside *worktree*."""
+        relative = f"{folder}/" + "d" * (length - len(str(worktree)) - len(folder) - 2)
+        self.assertEqual(len(str(worktree / relative)), length)
+        return relative
+
+    def test_native_windows_asks_before_turning_long_paths_on(self):
+        with temporary_directory() as temporary:
+            project = Path(temporary).resolve()
+            init_repository(project)
+            code, plan = self.run_setup(project, "inspect")
+            self.assertEqual(code, 0, plan)
+            self.assertEqual(plan["choice_requests"], [{
+                "id": "git.core_longpaths", "surface": "core.longpaths",
+                "reason": "windows_path_limit", "options": ["set", "leave"],
+                "recommended": "set",
+                "preview": {
+                    "current_value": None,
+                    "set_command": "git config --local core.longpaths true",
+                    "worktree_root": str(delivery_git.worktree_paths(project, "DLV-001")["integration"]),
+                    "long_paths": [],
+                },
+            }])
+            code, refused = self.run_setup(project, "apply")
+            self.assertEqual(code, 1, refused)
+            self.assertEqual(refused["findings"],
+                             ["choice required: pass --choice git.core_longpaths=<set|leave>"])
+            self.assertFalse((project / "workspace").exists())
+            self.assertIsNone(self.local_long_paths(project))
+            code, failed = self.run_setup(project, "apply", "--choice", "git.core_longpaths=maybe")
+            self.assertEqual(code, 1, failed)
+            self.assertIn("invalid --choice 'git.core_longpaths=maybe'", failed["error"])
+            self.assertFalse((project / "workspace").exists())
+
+    def test_answering_set_writes_the_local_config(self):
+        with temporary_directory() as temporary:
+            project = Path(temporary).resolve()
+            init_repository(project)
+            code, applied = self.run_setup(project, "apply", "--choice", "git.core_longpaths=set")
+            self.assertEqual(code, 0, applied)
+            self.assertEqual(self.local_long_paths(project), "true")
+            self.assertIn({
+                "action": "update", "surface": "git_config", "path": "core.longpaths",
+                "ownership": "repository_local_config",
+                "changes": [{"key": "core.longpaths", "before": None, "after": "true"}],
+            }, applied["applied_operations"])
+            code, plan = self.run_setup(project, "inspect")
+            self.assertEqual((code, plan["choice_requests"], plan["operations"]), (0, [], []))
+            code, checked = self.run_setup(project, "check")
+            self.assertEqual(code, 0, checked)
+
+    def test_answering_leave_writes_nothing_and_names_each_long_tracked_path(self):
+        with temporary_directory() as temporary:
+            project = Path(temporary).resolve()
+            init_repository(project)
+            integration = delivery_git.worktree_paths(project, "DLV-001")["integration"]
+            reaching = self.track(project, integration, 260, "deep")
+            short = self.track(project, integration, 259, "near")
+            config = (project / ".git" / "config").read_bytes()
+            code, plan = self.run_setup(project, "inspect")
+            self.assertEqual(code, 0, plan)
+            self.assertEqual(plan["choice_requests"][0]["preview"]["long_paths"],
+                             [{"path": reaching, "reason": "file_path", "length": 260}])
+            code, applied = self.run_setup(project, "apply", "--choice", "git.core_longpaths=leave")
+            self.assertEqual(code, 0, applied)
+            self.assertEqual((project / ".git" / "config").read_bytes(), config)
+            self.assertNotIn("git_config", [item["surface"] for item in applied["applied_operations"]])
+            self.assertEqual(applied["warnings"], [
+                "core.longpaths stays off, so Git for Windows leaves these tracked paths out of"
+                f" Item and Integration worktrees under {integration}: {reaching} (file path 260 >= 260)"
+            ])
+            self.assertNotIn(short, applied["warnings"][0])
+            code, checked = self.run_setup(project, "check")
+            self.assertEqual((code, checked["findings"]), (0, []))
+
+    def test_a_directory_reaching_248_characters_leaves_its_short_files_out(self):
+        """CreateDirectoryW keeps room for an 8.3 file name, so Git for Windows creates no
+        directory whose path reaches 248 characters and leaves out every file in it, even one
+        whose own path is under 260. The directory is the reason named, since it fails first."""
+        with temporary_directory() as temporary:
+            project = Path(temporary).resolve()
+            init_repository(project)
+            integration = delivery_git.worktree_paths(project, "DLV-001")["integration"]
+            deep = self.directory(integration, 248, "deep")
+            inside = self.stage(project, f"{deep}/a.txt")
+            crossing = self.stage(project, f"{deep}/" + "y" * 20 + ".txt")
+            beside = self.stage(project, self.directory(integration, 247, "near") + "/a.txt")
+            self.assertLess(len(str(integration / inside)), 260)
+            self.assertGreaterEqual(len(str(integration / crossing)), 260)
+            code, plan = self.run_setup(project, "inspect")
+            self.assertEqual(code, 0, plan)
+            self.assertEqual(plan["choice_requests"][0]["preview"]["long_paths"], [
+                {"path": inside, "reason": "directory", "length": 248},
+                {"path": crossing, "reason": "directory", "length": 248},
+            ])
+            code, applied = self.run_setup(project, "apply", "--choice", "git.core_longpaths=leave")
+            self.assertEqual(code, 0, applied)
+            self.assertEqual(applied["warnings"], [
+                "core.longpaths stays off, so Git for Windows leaves these tracked paths out of"
+                f" Item and Integration worktrees under {integration}: {inside} (directory 248 >= 248),"
+                f" {crossing} (directory 248 >= 248)"
+            ])
+            self.assertNotIn(beside, applied["warnings"][0])
+
+    def test_the_deepest_story_item_worktree_sets_the_limit(self):
+        with temporary_directory() as temporary:
+            project = Path(temporary).resolve()
+            init_repository(project)
+            backlog_fixture.make_approved_backlog(project / "workspace" / "docs", "CHECKOUTFLOW-01")
+            item = delivery_git.worktree_paths(project, "DLV-001", "CHECKOUTFLOW-01")["item"]
+            integration = delivery_git.worktree_paths(project, "DLV-001")["integration"]
+            self.assertGreater(len(str(item)), len(str(integration)))
+            reaching = self.track(project, item, 260, "deep")
+            self.assertLess(len(str(integration / reaching)), 260)
+            code, plan = self.run_setup(project, "inspect")
+            self.assertEqual(code, 0, plan)
+            preview = plan["choice_requests"][0]["preview"]
+            self.assertEqual((preview["worktree_root"], preview["long_paths"]),
+                             (str(item), [{"path": reaching, "reason": "file_path", "length": 260}]))
+
+    def test_a_value_git_reads_as_true_asks_nothing(self):
+        for value in ("true", "yes"):
+            with self.subTest(value=value), temporary_directory() as temporary:
+                project = Path(temporary).resolve()
+                init_repository(project)
+                subprocess.run(["git", "-C", str(project), "config", "--local", "core.longpaths", value],
+                               check=True)
+                code, plan = self.run_setup(project, "inspect")
+                self.assertEqual((code, plan["choice_requests"]), (0, []))
+                code, applied = self.run_setup(project, "apply")
+                self.assertEqual(code, 0, applied)
+                self.assertEqual(self.local_long_paths(project), value)
+
+    def test_other_hosts_ask_nothing(self):
+        with temporary_directory() as temporary:
+            project = Path(temporary).resolve()
+            init_repository(project)
+            code, plan = self.run_setup(project, "inspect", windows=False)
+            self.assertEqual((code, plan["choice_requests"], plan["warnings"]), (0, [], []))
+            code, applied = self.run_setup(project, "apply", windows=False)
+            self.assertEqual(code, 0, applied)
+            code, applied = self.run_setup(project, "apply", "--choice", "git.core_longpaths=set",
+                                       windows=False)
+            self.assertEqual((code, applied["applied_operations"]), (0, []))
+            self.assertIsNone(self.local_long_paths(project))
+
+    def test_a_failed_apply_puts_the_value_back(self):
+        for before in (None, "false"):
+            with self.subTest(before=before), temporary_directory() as temporary:
+                project = Path(temporary).resolve()
+                init_repository(project)
+                if before is not None:
+                    subprocess.run(["git", "-C", str(project), "config", "--local", "core.longpaths", before],
+                                   check=True)
+                with mock.patch.object(setup_module.setup_check, "closing",
+                                       return_value=["forced closing failure"]):
+                    code, failed = self.run_setup(project, "apply", "--choice", "git.core_longpaths=set")
+                self.assertEqual((code, failed["rolled_back"], failed["rollback_conflicts"]), (1, True, []))
+                self.assertEqual(self.local_long_paths(project), before)
 
 
 if __name__ == "__main__":

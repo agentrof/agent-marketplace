@@ -239,7 +239,7 @@
       "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
     ,
     "scripts/setup_project.py":
-      "bbf6a61f7bcfc013f08feff2cbe489b4e2fa3273bc37c7879f87281a2c04defd"
+      "2fa2476cdca3a8e6c6d016ff33437e7610089e358a0a7f9207430266d8e3f77d"
     ,
     "scripts/stage_package.py":
       "e0d667a6012af3cc67afa787ebaa6d12a9b9bf87adc422cc70dcd4b61456427b"
@@ -605,10 +605,13 @@
       "cc8eab275082721a22c16d4d0d545e62faefdab626e7cdfefffc899f8abb28c8"
     ,
     "skill-content/setup/SKILL.md":
-      "72b3b867ab2fcf02f7e69b0532913fdc060e069c536dcf9126737f75566e1ef4"
+      "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "315956adbe1f396a7886d4fa2125a9fffc03259a3d3897bf4db435caa73bdb1e"
+    ,
+    "skill-content/setup/references/windows-long-paths.md":
+      "f6ce03aee49421cf7fd313388af3a9c9e2eb74f3e20a8019be0d4703cfca5705"
     ,
     "skill-content/sketch/SKILL.md":
       "9a2a84b499d3f2632bde2e6ccb6c1e0f46887cdc4d644bb77181a11ebe7bd586"

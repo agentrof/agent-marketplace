@@ -1,0 +1,6 @@
+{
+  "summary": "On native Windows, setup now asks before it turns on Git long paths for the project. Item and Integration worktrees share the project repository's local Git config, and Git for Windows leaves out of them, while its checkout still exits 0, every tracked file whose path reaches 260 characters or whose directory reaches 248 unless `core.longpaths` is set. While that local config does not turn `core.longpaths` on, `setup_project.py inspect` returns the `git.core_longpaths` choice request, and `apply` refuses until `--choice git.core_longpaths=set` or `--choice git.core_longpaths=leave` answers it, so a script that runs setup on Windows passes one of them. `set`, the recommended option, runs `git config --local core.longpaths true`; `leave` writes nothing, and apply warns, without failing, with every tracked file Git for Windows would leave out of the deepest Item or Integration worktree the Delivery code would create for the next Delivery and the backlog's Stories, each with its reason: its directory reaches 248 characters, or else its own path reaches 260. macOS and Linux never ask, and neither does a value Git already reads as true.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -946,11 +946,12 @@ print(sys.argv[2])
         self.assertFalse(verification.read_session(self.root)["runtime"]["active"])
 
     @contextlib.contextmanager
-    def git_for_windows_checkouts(self):
+    def git_for_windows_checkouts(self, *, honors_longpaths=True):
         """Check private clones out as Git for Windows does by default.
 
-        Without core.longpaths it creates no file whose absolute path reaches
-        260 characters, and the checkout still exits 0. Yields the root of each
+        Without core.longpaths, or with *honors_longpaths* false whatever the
+        config says, it creates no file whose absolute path reaches 260
+        characters, and the checkout still exits 0. Yields the root of each
         clone checked out.
         """
         original = verification.git
@@ -962,7 +963,7 @@ print(sys.argv[2])
                 roots.append(Path(root))
                 configured = subprocess.run(["git", "-C", str(root), "config", "--bool", "core.longpaths"],
                                             capture_output=True, text=True, check=False).stdout.strip()
-                if configured != "true":
+                if configured != "true" or not honors_longpaths:
                     for relative in original(root, "ls-files", "-z").split("\0"):
                         if relative and len(str(Path(root) / relative)) >= 260:
                             (Path(root) / relative).unlink(missing_ok=True)
@@ -971,10 +972,9 @@ print(sys.argv[2])
         with mock.patch.object(verification, "git", side_effect=git):
             yield roots
 
-    def test_private_checkouts_hold_a_tracked_path_past_the_windows_path_limit(self):
-        """The private clones sit deep in the verification scratch, so a tracked path that fits
-        the project reaches 260 characters there. Git for Windows must still check it out, or
-        neither checkout counts as intact and the runtime one refuses up."""
+    def freeze_runtime_candidate_with_a_deep_path(self) -> str:
+        """Freeze a runtime candidate that tracks a path deep enough to reach 260 characters in
+        either private clone, and return that path."""
         deep = "src/" + "/".join(["nested-package-level"] * 7) + "/module.py"
         self.write(deep, "value = 3\n")
         item, body = delivery.split_note(self.root / self.item_path)
@@ -983,6 +983,13 @@ print(sys.argv[2])
         self.note("workspace/docs/operation/environment-contract.md", {"status": "approved", "env_command": self.command, "env_workdir": ".", "scenarios": ["baseline"], "service_catalog": []})
         self.commit()
         self.freeze()
+        return deep
+
+    def test_private_checkouts_hold_a_tracked_path_past_the_windows_path_limit(self):
+        """The private clones sit deep in the verification scratch, so a tracked path that fits
+        the project reaches 260 characters there. Git for Windows must still check it out, or
+        neither checkout counts as intact and the runtime one refuses up."""
+        deep = self.freeze_runtime_candidate_with_a_deep_path()
         with self.git_for_windows_checkouts() as clones:
             with self.subTest(checkout="runtime"):
                 events = [verification.run_environment(self.root, verb) for verb in ("down", "up")]
@@ -992,6 +999,40 @@ print(sys.argv[2])
         self.assertEqual(len(clones), 2)
         for clone in clones:
             self.assertGreaterEqual(len(str(clone / deep)), 260)
+
+    def test_a_private_checkout_that_leaves_a_tracked_path_out_names_it(self):
+        """A checkout that leaves a tracked file out differs from its commit before any command
+        ran. The runtime refusal and each record that is not intact name the missing path, so a
+        short checkout no longer reads as a changed one (#358); what each checkout allows stays."""
+        deep = self.freeze_runtime_candidate_with_a_deep_path()
+        with self.git_for_windows_checkouts(honors_longpaths=False) as clones:
+            down = verification.run_environment(self.root, "down")
+            with self.assertRaises(RuntimeError) as refusal:
+                verification.run_environment(self.root, "up")
+            raw = verification.run_check(self.root, "test")
+        self.assertEqual(len(clones), 2)
+        # Git lists src/ first; how many workspace notes also reach the limit depends on the host's scratch.
+        message = str(refusal.exception)
+        self.assertTrue(message.startswith(f"runtime checkout changed (missing {deep}"), message)
+        self.assertTrue(message.endswith("); only teardown is allowed before a new verification session"), message)
+        for record in (down, raw):
+            self.assertEqual((record["exit_code"], record["candidate_intact"]), (0, False))
+            self.assertTrue(record["checkout_difference"].startswith("missing " + deep), record["checkout_difference"])
+
+    def test_a_checkout_difference_names_five_paths_then_counts_the_rest(self):
+        for index in range(6):
+            self.write(f"src/part{index}.py", "value = 0\n")
+        self.commit()
+        self.assertEqual(verification.checkout_difference(self.root), "")
+        for index in range(6):
+            (self.root / f"src/part{index}.py").unlink()
+        self.write("src/product.py", "value = 9\n")
+        self.assertEqual(verification.checkout_difference(self.root),
+                         ", ".join(f"missing src/part{index}.py" for index in range(5)) + " and 2 more")
+        for index in range(1, 6):
+            self.write(f"src/part{index}.py", "value = 0\n")
+        self.assertEqual(verification.checkout_difference(self.root),
+                         "missing src/part0.py, changed src/product.py")
 
     def test_failed_or_interrupted_runtime_start_requires_cleanup_before_cancellation(self):
         item, body = delivery.split_note(self.root / self.item_path)

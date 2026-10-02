@@ -745,16 +745,35 @@ def clone_private_checkout(root: Path, execution_root: Path, commit: str) -> Non
     git(execution_root, "checkout", "--detach", commit)
 
 
+# How many paths a checkout difference names before it counts the rest.
+CHECKOUT_DIFFERENCE_LIMIT = 5
+
+
+def checkout_difference(execution_root: Path) -> str:
+    """Name the tracked paths where a private checkout differs from its HEAD, or return "" if none does.
+
+    A path the checkout lacks is named missing, any other changed: Git can
+    leave a tracked file out of a checkout that exits 0, and the clone then
+    differs from its commit before any command ran. At most
+    CHECKOUT_DIFFERENCE_LIMIT paths are named, then how many more differ.
+    """
+    fields = git(execution_root, "diff", "--name-status", "--no-renames", "-z", "HEAD").split("\0")
+    named = [("missing " if status == "D" else "changed ") + path for status, path in zip(fields[::2], fields[1::2])]
+    more = len(named) - CHECKOUT_DIFFERENCE_LIMIT
+    return ", ".join(named[:CHECKOUT_DIFFERENCE_LIMIT]) + (f" and {more} more" if more > 0 else "")
+
+
 def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, command: str, environment: dict,
                          *, isolate_search_paths: bool = False,
-                         cloned=None) -> tuple[subprocess.CompletedProcess, bool, dict, dict]:
+                         cloned=None) -> tuple[subprocess.CompletedProcess, bool, str, dict, dict]:
     """Run an approved command verbatim in a private clone of one exact commit.
 
     Returns the completed command, whether the clone still holds that commit
-    unchanged, with *isolate_search_paths* the interpreter search path entries
-    dropped because they resolve outside the clone, and the environment the
-    command ran in. *cloned*, when given, is called once the clone holds the
-    commit, before the command runs.
+    unchanged, the checkout difference that names where it does not, with
+    *isolate_search_paths* the interpreter search path entries dropped because
+    they resolve outside the clone, and the environment the command ran in.
+    *cloned*, when given, is called once the clone holds the commit, before
+    the command runs.
     """
     with tempfile.TemporaryDirectory(prefix="candidate-", dir=scratch) as temporary:
         execution_root = Path(temporary) / "checkout"
@@ -772,13 +791,15 @@ def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, c
         completed = subprocess.run(command, cwd=execution_directory, env=environment, shell=True,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         from delivery_git import require_visible_item_index
+        difference = ""
         try:
             require_visible_item_index(execution_root)
             intact = (git(execution_root, "rev-parse", "HEAD") == commit
                       and not git(execution_root, "diff", "--name-only", "HEAD"))
+            difference = "" if intact else checkout_difference(execution_root)
         except RuntimeError:
             intact = False
-    return completed, intact, dropped, environment
+    return completed, intact, difference, dropped, environment
 
 
 def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None) -> dict:
@@ -857,8 +878,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         write_session(root, session)
         session_id = session["session_id"]
     started = time.monotonic()
-    completed, intact, _dropped, _ran = private_checkout_run(root, scratch, current["product_commit"], workdir,
-                                                             command, environment)
+    completed, intact, difference, _dropped, _ran = private_checkout_run(root, scratch, current["product_commit"],
+                                                                         workdir, command, environment)
     selection_intact = None
     if selection is not None:
         try:
@@ -889,6 +910,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         record = {"identity": identity, "exit_code": completed.returncode, "candidate_intact": intact,
                   "output_file": output_name, "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
                   "duration_seconds": time.monotonic() - started, "completed_at": time.time()}
+        if difference:
+            record["checkout_difference"] = difference
         if selection is not None:
             record["diagnostic_selection"] = selection
         if selection_intact is not None:
@@ -1828,13 +1851,16 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             if workdir != execution_root.resolve() and execution_root.resolve() not in workdir.parents:
                 raise RuntimeError("environment workdir escapes its isolated candidate")
             from delivery_git import require_visible_item_index
+            difference = ""
             try:
                 require_visible_item_index(execution_root)
                 before_intact = not git(execution_root, "diff", "--name-only", "HEAD")
+                difference = "" if before_intact else checkout_difference(execution_root)
             except RuntimeError:
                 before_intact = False
             if not before_intact and verb != "down":
-                raise RuntimeError("runtime checkout changed; only teardown is allowed before a new verification session")
+                raise RuntimeError("runtime checkout changed" + (f" ({difference})" if difference else "")
+                                   + "; only teardown is allowed before a new verification session")
             bound_session = session["session_id"]
             environment_identity = runtime_environment_identity(root)
             # Persist before launching: a failed/interrupted up may still leave
@@ -1861,10 +1887,12 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             state = session["runtime"]
             output_name = "scratch/runtime-" + state.get("attempt_id", session["session_id"]) + "-" + str(len(state["events"])) + ".log"
             atomic_file.replace_bytes(raw_output_path(root, output_name), completed.stdout)
+            difference = ""
             try:
                 require_visible_item_index(execution_root)
                 intact = (before_intact and git(execution_root, "rev-parse", "HEAD") == current["product_commit"]
                           and not git(execution_root, "diff", "--name-only", "HEAD"))
+                difference = "" if intact else checkout_difference(execution_root)
             except RuntimeError:
                 intact = False
             event = {"candidate_intact": intact, "verb": verb, "value": value, "command": command, "exit_code": completed.returncode,
@@ -1872,6 +1900,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                      "duration_seconds": time.monotonic() - started, "candidate_hash": current["candidate_hash"],
                      "environment_identity": environment_identity, "completed_at": time.time(),
                      "attempt_id": state.get("attempt_id")}
+            if difference:
+                event["checkout_difference"] = difference
             event["evidence_hash"] = digest(event)
             state["events"].append(event)
             state.pop("pending", None)
@@ -2287,7 +2317,7 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
         scratch = safe_runtime_path(root, Path(environment["AGENTROF_VERIFICATION_SCRATCH"]))
         scratch.mkdir(parents=True, exist_ok=True)
         started = time.monotonic()
-        completed, intact, dropped, ran = private_checkout_run(
+        completed, intact, difference, dropped, ran = private_checkout_run(
             root, scratch, current["product_commit"], derived["workdir"], derived["command"], environment,
             isolate_search_paths=True, cloned=reading.close)
         duration = time.monotonic() - started
@@ -2311,6 +2341,8 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
                       "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
                       "duration_seconds": duration, "completed_at": time.time(), "dropped_search_paths": dropped,
                       **environment_identity(root, ran, contract)}
+            if difference:
+                record["checkout_difference"] = difference
             if selection_intact is not None:
                 record["selection_intact"] = selection_intact
             record["evidence_hash"] = digest(record)
@@ -2340,6 +2372,7 @@ def accepted_pre_handoff(root: Path, delivery_id: str, story: str, current: dict
     if latest.get("exit_code") != 0 or latest.get("candidate_intact") is not True:
         changed = ("" if latest.get("candidate_intact") is True
                    else " and changed the selection it ran" if latest.get("selection_intact") is False
+                   else f" and changed its checkout ({latest['checkout_difference']})" if latest.get("checkout_difference")
                    else " and changed its checkout")
         raise RuntimeError(f"DELIVERY_PRE_HANDOFF_MISSING: the latest pre-handoff regression run on candidate tree"
                            f" {tree} exited {latest.get('exit_code')}{changed}; repair what it found and commit,"

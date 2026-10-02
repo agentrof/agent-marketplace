@@ -1288,6 +1288,67 @@ class HomePathCheckTests(unittest.TestCase):
                 self.assertEqual(used, set(users))
 
 
+class StdlibOnlyCheckTests(unittest.TestCase):
+    """A runtime script imports only the standard library and its package's
+    scripts. The check reads the imports Python runs, so prose that starts
+    with "from " or "import " is none (#362)."""
+
+    SCRIPT = "plugins/team/scripts/probe.py"
+
+    def findings(self, text: str) -> list:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / self.SCRIPT
+            path.parent.mkdir(parents=True)
+            path.write_text(text, encoding="utf-8")
+            (path.parent / "sibling.py").write_text("VALUE = 1\n", encoding="utf-8")
+            found: list = []
+            validate.check_stdlib_only(validate.build_tree(root), found)
+            return [(finding.path, finding.line, finding.check, finding.message) for finding in found]
+
+    def test_prose_that_starts_with_from_or_import_is_no_import(self):
+        self.assertEqual(self.findings(
+            '"""Return the skill ids the package installs,\n'
+            "from the folders under skill-content/.\n"
+            "import them where a gate needs them.\n"
+            '"""\n'
+            "# from here on, only the standard library\n"
+            "#   import nothing else\n"
+            "import json\n"
+            "from . import sibling\n"
+            "\n"
+            "\n"
+            "def describe():\n"
+            '    """List what the package ships,\n'
+            "    from each skill folder.\n"
+            '    """\n'
+            "    return '''\n"
+            "import every skill\n"
+            "from the package\n"
+            "'''\n"), [])
+
+    def test_a_real_import_outside_the_standard_library_is_found_anywhere(self):
+        self.assertEqual(self.findings(
+            "import json, requests\n"
+            "import sibling\n"
+            "\n"
+            "\n"
+            "def load():\n"
+            "    from yaml import safe_load\n"
+            "    import numpy.linalg\n"
+            "    return safe_load, numpy\n"), [
+                (self.SCRIPT, 1, "stdlib_only", "non-stdlib import 'requests'"),
+                (self.SCRIPT, 6, "stdlib_only", "non-stdlib import 'yaml'"),
+                (self.SCRIPT, 7, "stdlib_only", "non-stdlib import 'numpy'")])
+
+    def test_a_script_that_does_not_parse_is_a_finding(self):
+        for text, line in (("import json\n\ndef broken(:\n    pass\n", 3), ("VALUE = 1\0\n", 1)):
+            with self.subTest(text=text):
+                findings = self.findings(text)
+                self.assertEqual([finding[:3] for finding in findings], [(self.SCRIPT, line, "stdlib_only")])
+                self.assertIn("script does not parse, so its imports cannot be read", findings[0][3])
+
+
 class ValidatorBuilderTests(unittest.TestCase):
     """Every validator check fires on its broken fixture and stays silent on
     the valid one; CHECKS and VALIDATOR_BUILDERS name the same checks."""

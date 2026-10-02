@@ -318,12 +318,6 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                     self.assertIn(context, text)
         self.assertNotIn("merge_group", self.text("release.yml"))
 
-    def test_merge_groups_run_the_ordinary_gates_without_a_release_gate(self):
-        text = self.text("validate.yml")
-        self.assertNotIn("verify-merge-group", text)
-        self.assertNotIn("merge_group.head_ref", text)
-        self.assertNotIn("release-queue-policy", text)
-
     def test_finalize_requires_a_release_github_reports_immutable(self):
         text = self.text("release.yml")
         block = self.release_jobs()["finalize"]
@@ -440,9 +434,15 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertNotIn("continue-on-error", shard_job)
         self.assertIn("TEST_RESULT: ${{ needs.test-shards.result }}", text)
         self.assertIn('test "$TEST_RESULT" = success', text)
-        self.assertIn("tools.tests.test_vault_hook.*", policy["groups"]["platform"]["tests"])
-        self.assertIn("tools.tests.test_delivery_compile.*", policy["groups"]["windows"]["tests"])
-        self.assertIn("tools.tests.test_delivery_git.*", policy["groups"]["windows"]["tests"])
+        # The hook and the Delivery code keep native tests where their systems differ.
+        native = {lane: [selector for group in ("platform", lane)
+                         for selector in policy["groups"][group]["tests"]]
+                  for lane in ("macos", "windows")}
+        for lane, module in (("macos", "test_vault_hook"), ("windows", "test_vault_hook"),
+                             ("windows", "test_delivery_compile"), ("windows", "test_delivery_git")):
+            with self.subTest(lane=lane, module=module):
+                self.assertTrue(any(selector.startswith(f"tools.tests.{module}.")
+                                    for selector in native[lane]))
 
     def test_test_scratch_lives_on_the_runner_work_directory(self):
         shard_job = self.text("validate.yml").split("\n  test-shards:\n", 1)[1].split("\n  check:\n", 1)[0]

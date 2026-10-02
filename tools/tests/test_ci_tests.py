@@ -460,13 +460,20 @@ class CITestPlannerTests(unittest.TestCase):
         ids, _hash = ci_tests.inventory(ci_tests.ROOT)
         required = {"tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected",
                     "tools.tests.test_delivery_git.DeliveryGitTests.test_receipt_lock_is_released_when_its_holder_dies"}
-        self.assertEqual({name: (lane["os"], lane["python"], lane["shards"], lane["workers"], lane["groups"])
+        # Shard counts follow the measured weights, so only the lane shape is pinned.
+        self.assertEqual({name: (lane["os"], lane["python"], lane["workers"], lane["groups"])
                           for name, lane in policy["lanes"].items()},
-                         {"linux": ("ubuntu-latest", policy["python"], 10, 3, ["all"]),
-                          "macos": ("macos-latest", policy["python"], 1, 3, ["platform"]),
-                          "windows": ("windows-latest", policy["python"], 14, 3, ["windows"])})
+                         {"linux": ("ubuntu-latest", policy["python"], 3, ["all"]),
+                          "macos": ("macos-latest", policy["python"], 3, ["macos"]),
+                          "windows": ("windows-latest", policy["python"], 3, ["windows"])})
         self.assertEqual(set(policy["lanes"]["windows"]["required_tests"]), required)
         self.assertTrue(required <= set(ci_tests.group_ids(["windows"], policy, ids)))
+        # Linux runs every test; macOS and Windows name each test that proves behavior of
+        # their own system, never a whole module.
+        for group in ("platform", "macos", "windows"):
+            with self.subTest(group=group):
+                self.assertEqual([selector for selector in policy["groups"][group]["tests"]
+                                  if selector not in ids], [])
 
     def parallel_fixture(self, bodies=None, workers=3):
         """Six tests that each record the process, scratch and tripwire they ran under."""
@@ -718,7 +725,8 @@ class CITestPlannerTests(unittest.TestCase):
         modules = {"tools.tests.test_delivery_verification", "tools.tests.test_performance_contracts",
                    "tools.tests.test_task_inputs", "tools.tests.test_ci_local"}
         native = ci_tests.group_ids(["windows"], policy, ids)
-        self.assertTrue({test_id for test_id in ids if ci_tests.module_of(test_id) in modules}.issubset(native))
+        # Each keeps its Windows-specific tests on Windows; Linux runs all of them.
+        self.assertEqual({ci_tests.module_of(test_id) for test_id in native} & modules, modules)
         selected, _mode, _reason = ci_tests.select_ids("impact",
             ["plugins/software-engineering-team/scripts/delivery_git.py"], policy, ids, root=ci_tests.ROOT)
         self.assertTrue({test_id for test_id in ids if ci_tests.module_of(test_id) in modules}.issubset(selected))

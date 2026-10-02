@@ -10,13 +10,18 @@ requires `check`, `analyze-python` and `Claude Code and Codex lifecycle`.
 `tools/data/ci-test-policy.json` owns the one supported Python version,
 operating systems, shard jobs and worker processes per job, impact groups,
 dependency closures and initial duration weights. CI tests that Python once per
-operating system: Linux runs every test, macOS the platform group and Windows
-the Windows group. The plan job sets up the version itself and every other
-validation job takes it from the plan's output; a test pins that literal, the
-release workflows' versions, the host lifecycle policy and the plugin's runtime
-floor to the policy. `tools/ci_tests.py` inventories individual unittest
-cases without running them, selects their scope and balances them by duration
-over every worker process of a lane; each shard job then takes whole
+operating system. Linux runs every test. macOS and Windows run only the tests
+that prove behavior of their own system, each named by its exact ID: the
+platform group both run (worker processes, the hook launcher, case-insensitive
+file systems), the macOS group (file flags, the bare system interpreter) and
+the Windows group (path separators, junctions, long paths, CRLF checkouts,
+locks, text pipes and Git for Windows). A test that repeats platform-neutral
+logic runs on Linux only. The plan job sets up the version itself and every
+other validation job takes it from the plan's output; a test pins that literal,
+the release workflows' versions, the host lifecycle policy and the plugin's
+runtime floor to the policy. `tools/ci_tests.py` inventories individual
+unittest cases without running them, selects their scope and balances them by
+duration over every worker process of a lane; each shard job then takes whole
 processes. A job starts its planned processes, folded onto fewer when the
 runner reports fewer CPUs, and each process runs its IDs in ID order, so a
 module's fixtures start once per process. Each worker verifies the plan and
@@ -43,22 +48,27 @@ runner's work directory, outside any Git checkout; on Windows that directory is
 on the work disk, which creates small files several times faster than the
 system disk that holds the default `TEMP`.
 
-Delivery compiler, execution and PR-intent fixtures may copy an immutable,
-process-local starting repository prepared before the first Item starts.
-Every test gets independent
-files, Git objects and a bare remote; the origin is rebound to that copy and
-transient fetch metadata is removed. The seed contains no linked Item worktree
-or active writer receipt. Construction and isolation have dedicated coverage;
-changed setup functions or environment use fresh preparation. The named Windows
-text-pipe emulator may build a separate seed under its exact wrapper and reuse
-it only within that wrapper's lifetime. Its underlying runner must be the native
-runner and every other setup binding and environment value must remain unchanged;
-seeds are discarded on context exit. Arbitrary mocks never qualify. Git operations
-under test, including concurrent ref and lease observations, remain real.
+Delivery compiler and execution fixtures may copy an immutable, process-local
+starting repository prepared before the first Item starts. PR-intent fixtures
+may copy the state `prepare_pr_creation` leaves for the default Item:
+integrated and reviewed, its worktree removed and its writer receipt released;
+its verification sessions stay, named by the removed worktree's path, so no
+copy reads them. Setup and project vault tests may copy a project one
+`setup_project.py apply` left, which holds no absolute path. Every test gets
+independent files, Git objects and a bare remote; the origin is rebound to that
+copy and transient fetch metadata is removed. No seed contains a linked Item
+worktree or an active writer receipt. Construction and isolation have dedicated
+coverage; changed setup functions or environment use fresh preparation. The
+named Windows text-pipe emulator may build a separate seed under its exact
+wrapper and reuse it only within that wrapper's lifetime. Its underlying runner
+must be the native runner and every other setup binding and environment value
+must remain unchanged; seeds are discarded on context exit. Arbitrary mocks
+never qualify. Git operations under test, including concurrent ref and lease
+observations, remain real.
 
 | Profile | Selection |
 | --- | --- |
-| `full` | Every test on Linux, the platform group on macOS and the Windows group, with its mandatory native regressions, on Windows |
+| `full` | Every test on Linux; on macOS the platform and macOS groups; on Windows the platform and Windows groups, with the mandatory native regressions |
 | `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff of a PR or merge queue group |
 | `reuse` | Prior successful validation of identical input, with fresh static and transition checks |
 

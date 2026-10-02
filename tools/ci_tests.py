@@ -12,11 +12,15 @@ import json
 import math
 import os
 import platform
+import re
 import shlex
+import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -24,6 +28,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = "tools/data/ci-test-policy.json"
 SUCCESS_OUTCOMES = {"success", "skipped", "expected_failure"}
+MAX_WORKERS = 16
+PROGRESS_SECONDS = 30
+RUNNERS = {"ubuntu-latest", "macos-latest", "windows-latest"}
+ESTIMATE_MINIMUM_SECONDS = 5.0
+INTERPRETER_KEYS = {"source", "package", "version", "sha512"}
+NO_INTERPRETER = {"interpreter_package": "", "interpreter_version": "", "interpreter_sha512": ""}
 
 
 class CIError(ValueError):
@@ -215,6 +225,16 @@ def matches(value, patterns):
     return any(fnmatch.fnmatchcase(value, pattern) for pattern in patterns)
 
 
+def valid_interpreter(value, lane):
+    """A python.org NuGet build for Windows: exact version of the lane, SHA-512 bound."""
+    return (isinstance(value, dict) and set(value) == INTERPRETER_KEYS and value["source"] == "nuget"
+            and lane.get("os") == "windows-latest"
+            and isinstance(value["package"], str) and re.fullmatch(r"[a-z0-9][a-z0-9.-]*", value["package"]) is not None
+            and isinstance(value["version"], str) and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", value["version"]) is not None
+            and value["version"].rsplit(".", 1)[0] == lane.get("python")
+            and isinstance(value["sha512"], str) and re.fullmatch(r"[0-9a-f]{128}", value["sha512"]) is not None)
+
+
 def policy_at(root):
     policy = read_json(root / POLICY_PATH)
     if policy.get("schema_version") != 1:
@@ -225,11 +245,22 @@ def policy_at(root):
     for name, lane in policy["lanes"].items():
         if not isinstance(lane.get("shards"), int) or not 1 <= lane["shards"] <= 16:
             raise CIError(f"invalid shard count for {name}")
-        if lane.get("os") not in {"ubuntu-latest", "macos-latest", "windows-latest"}:
+        if type(lane.get("workers", 1)) is not int or not 1 <= lane.get("workers", 1) <= MAX_WORKERS:
+            raise CIError(f"invalid worker count for {name}")
+        if lane.get("os") not in RUNNERS:
             raise CIError(f"invalid operating system for {name}")
         if not isinstance(lane.get("python"), str) or len(lane["python"].split(".")) != 2 \
                 or not all(part.isdigit() for part in lane["python"].split(".")):
             raise CIError(f"Python lane must pin major.minor: {name}")
+        if "interpreter" in lane and not valid_interpreter(lane["interpreter"], lane):
+            raise CIError(f"invalid pinned interpreter for {name}")
+    estimates = policy.get("test_seconds", {})
+    if not isinstance(estimates, dict) or not set(estimates) <= RUNNERS or any(
+            not isinstance(values, dict) or any(
+                not isinstance(test_id, str) or type(seconds) not in {int, float}
+                or not math.isfinite(seconds) or not 0 < seconds <= 600 for test_id, seconds in values.items())
+            for values in estimates.values()):
+        raise CIError("invalid per-test duration estimates")
     return policy
 
 
@@ -357,6 +388,40 @@ def balanced_shards(ids, count, durations, policy):
     return [sorted(shard) for shard in shards]
 
 
+def worker_partition(ids, shard_count, workers, durations, policy):
+    """Balance one lane over its shard jobs and their worker processes.
+
+    A process pays each module's fixture startup once, so the balance runs over
+    every process. Shards then take whole processes round robin, which never
+    leaves a shard or a process empty.
+    """
+    processes = balanced_shards(ids, shard_count * workers, durations, policy)
+    groups = [[] for _ in range(min(shard_count, len(ids)))]
+    for index, tests in enumerate(processes):
+        groups[index % len(groups)].append(tests)
+    return groups
+
+
+def assignments(groups):
+    """Each shard's sorted IDs and the worker that runs each of them."""
+    shards, owners = [], []
+    for group in groups:
+        worker_of = {test_id: index for index, tests in enumerate(group) for test_id in tests}
+        shard = sorted(worker_of)
+        shards.append(shard)
+        owners.append([worker_of[test_id] for test_id in shard])
+    return shards, owners
+
+
+def interpreter_fields(lane):
+    """Matrix fields naming a pinned interpreter package; empty selects setup-python."""
+    value = lane.get("interpreter")
+    if value is None:
+        return dict(NO_INTERPRETER)
+    return {"interpreter_package": value["package"], "interpreter_version": value["version"],
+            "interpreter_sha512": value["sha512"]}
+
+
 def apple_launcher_lane(selected_ids, policy):
     if not any(test_id.startswith("tools.tests.test_vault_hook.") for test_id in selected_ids):
         return None
@@ -369,7 +434,8 @@ def apple_launcher_lane(selected_ids, policy):
 
 def matrix_rows(lanes, apple_lane):
     rows = [{"lane": name, "os": lane["os"], "python": lane["python"], "shard": index,
-             "shards": len(lane["shards"]), "apple_launcher": name == apple_lane and index == 0}
+             "shards": len(lane["shards"]), "apple_launcher": name == apple_lane and index == 0,
+             **interpreter_fields(lane)}
             for name, lane in lanes.items() for index in range(len(lane["shards"]))]
     if apple_lane is not None and sum(row["apple_launcher"] for row in rows) != 1:
         raise CIError("Apple launcher check must belong to exactly one selected shard")
@@ -394,12 +460,21 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
         lane_ids = sorted(set(selected) & set(permitted))
         if not lane_ids:
             continue
-        shards = balanced_shards(lane_ids, lane["shards"], timings["durations"].get(name, {}), policy)
+        measured = timings["durations"].get(name, {})
+        # Measured history wins; the policy's per-test estimates cover a plan
+        # whose policy changed, since history is bound to the exact policy.
+        durations = {**policy.get("test_seconds", {}).get(lane["os"], {}), **measured}
+        groups = worker_partition(lane_ids, lane["shards"], lane.get("workers", 1), durations, policy)
+        shards, owners = assignments(groups)
+        worker_seconds = [[estimated_seconds(tests, durations, policy) for tests in group] for group in groups]
         lanes[name] = {"os": lane["os"], "python": lane["python"], "selected_ids": lane_ids, "shards": shards,
+                       "workers": lane.get("workers", 1), "worker_assignments": owners,
                        "must_run_ids": sorted(set(lane_ids) & set(lane.get("required_tests", []))),
-                       "estimated_shard_seconds": [estimated_seconds(shard, timings["durations"].get(name, {}), policy)
-                                                   for shard in shards],
-                       "measured_weights": len(set(lane_ids) & set(timings["durations"].get(name, {})))}
+                       "estimated_shard_seconds": [max(seconds) for seconds in worker_seconds],
+                       "estimated_worker_seconds": worker_seconds,
+                       "measured_weights": len(set(lane_ids) & set(measured))}
+        if "interpreter" in lane:
+            lanes[name]["interpreter"] = lane["interpreter"]
     apple_lane = apple_launcher_lane(selected, policy)
     rows = matrix_rows(lanes, apple_lane)
     plan = {"schema_version": 1, "source_sha": source_sha,
@@ -412,7 +487,7 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
             "has_tests": bool(rows), "apple_launcher": apple_lane is not None,
             "apple_launcher_lane": apple_lane,
             "matrix": {"include": rows or [{"lane": "noop", "os": "ubuntu-latest",
-            "python": "3.14", "shard": 0, "shards": 0, "apple_launcher": False}]}}
+            "python": "3.14", "shard": 0, "shards": 0, "apple_launcher": False, **NO_INTERPRETER}]}}
     plan["plan_hash"] = digest(plan)
     validate_plan(plan, root)
     return plan
@@ -439,6 +514,7 @@ def validate_plan(plan, root=None):
             raise CIError(f"shards are not a complete disjoint partition: {name}")
         if not set(expected) <= set(all_selected):
             raise CIError(f"lane contains an unselected test: {name}")
+        validate_execution(name, lane)
     rows = matrix_rows(plan["lanes"], apple_lane)
     if any(not isinstance(row.get("apple_launcher"), bool) for row in plan["matrix"]["include"]):
         raise CIError("matrix Apple launcher flags must be boolean")
@@ -471,8 +547,81 @@ def validate_plan(plan, root=None):
                     or lane["python"] != config["python"] or len(lane["shards"]) != min(config["shards"], len(expected)) \
                     or lane.get("must_run_ids", []) != sorted(set(expected) & set(config.get("required_tests", []))):
                 raise CIError(f"lane coverage differs from policy: {name}")
+            if lane["workers"] != config.get("workers", 1) or lane.get("interpreter") != config.get("interpreter"):
+                raise CIError(f"lane execution differs from policy: {name}")
         if set(plan["lanes"]) - set(policy["lanes"]):
             raise CIError("plan contains unknown lanes")
+
+
+def validate_execution(name, lane):
+    """Every shard splits into contiguous, non-empty worker processes."""
+    workers, owners = lane.get("workers"), lane.get("worker_assignments")
+    seconds = lane.get("estimated_worker_seconds")
+    if type(workers) is not int or not 1 <= workers <= MAX_WORKERS or not isinstance(owners, list) \
+            or not isinstance(seconds, list) or len(owners) != len(lane["shards"]) or len(seconds) != len(owners):
+        raise CIError(f"worker partition is invalid: {name}")
+    for shard, owner, estimates in zip(lane["shards"], owners, seconds):
+        used = set(owner) if isinstance(owner, list) else set()
+        if not isinstance(owner, list) or len(owner) != len(shard) or any(type(index) is not int for index in owner) \
+                or sorted(used) != list(range(len(used))) or len(used) > workers \
+                or not isinstance(estimates, list) or len(estimates) != len(used) \
+                or any(type(value) not in {int, float} or not math.isfinite(value) or value < 0 for value in estimates):
+            raise CIError(f"worker partition is invalid: {name}")
+    if "interpreter" in lane and not valid_interpreter(lane["interpreter"], lane):
+        raise CIError(f"pinned interpreter is invalid: {name}")
+
+
+def available_cpus():
+    """CPUs this process may use; affinity or a container quota can lower the count."""
+    counter = getattr(os, "process_cpu_count", None)
+    if counter is not None:
+        return max(1, counter() or 1)
+    if hasattr(os, "sched_getaffinity"):
+        return max(1, len(os.sched_getaffinity(0)))
+    return max(1, os.cpu_count() or 1)
+
+
+def worker_groups(lane, shard, limit=None):
+    """Each process's tests; fewer CPUs than planned workers fold workers together.
+
+    A group lists its tests in ID order, so every module and class stays
+    contiguous and its fixtures start once per process.
+    """
+    if limit is not None and (type(limit) is not int or limit < 1):
+        raise CIError("worker count must be positive")
+    tests, owners = lane["shards"][shard], lane["worker_assignments"][shard]
+    count = min(max(owners) + 1, available_cpus() if limit is None else limit)
+    groups = [[] for _ in range(count)]
+    for test_id, owner in zip(tests, owners):
+        groups[owner % count].append(test_id)
+    return groups
+
+
+def path_alias(path, metadata=None):
+    try:
+        metadata = metadata if metadata is not None else path.lstat()
+    except FileNotFoundError:
+        return False
+    return (stat.S_ISLNK(metadata.st_mode)
+            or bool(getattr(metadata, "st_file_attributes", 0)
+                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)))
+
+
+def worker_temp_parent(root):
+    parent = Path(tempfile.gettempdir()).resolve()
+    candidate_root = root.resolve()
+    if parent == candidate_root or candidate_root in parent.parents:
+        raise CIError("worker temporary directory must be outside the candidate checkout; set TMPDIR/TMP/TEMP to an external directory")
+    # Non-Git fixtures must remain non-Git when Git searches their ancestors.
+    # Another checkout or linked worktree is just as unsafe as this candidate.
+    if any((directory / ".git").exists() or path_alias(directory / ".git")
+           for directory in (parent, *parent.parents)):
+        raise CIError("worker temporary directory has a Git checkout ancestor")
+    probe = subprocess.run(["git", "--no-replace-objects", "-C", str(parent), "rev-parse", "--git-dir"],
+                           capture_output=True, check=False)
+    if probe.returncode == 0:
+        raise CIError("worker temporary directory belongs to a Git repository")
+    return parent
 
 
 def runtime_identity():
@@ -602,11 +751,18 @@ class TimedResult(unittest.TextTestResult):
         super().addSubTest(test, subtest, err)
 
 
-def run_shard(root, plan, lane_name, shard, report_path):
-    validate_plan(plan, root)
+def planned_lane(plan, lane_name, shard):
     lane = plan["lanes"].get(lane_name)
-    if lane is None or not isinstance(shard, int) or not 0 <= shard < len(lane["shards"]):
+    if lane is None or type(shard) is not int or not 0 <= shard < len(lane["shards"]):
         raise CIError("unknown lane or shard")
+    return lane
+
+
+def run_shard(root, plan, lane_name, shard, report_path, workers=None):
+    """Run one shard in-process, or across worker processes when CPUs allow."""
+    validate_plan(plan, root)
+    lane = planned_lane(plan, lane_name, shard)
+    groups = worker_groups(lane, shard, workers)
     runtime = runtime_identity()
     validate_runtime(runtime, lane)
     expected = lane["shards"][shard]
@@ -615,18 +771,187 @@ def run_shard(root, plan, lane_name, shard, report_path):
     write_json(report_path, report)
     started = time.monotonic()
     try:
-        ids, _hash = inventory(root)
-        result, unattributed = run_guarded(lambda: load_selected(root, expected, ids),
-                                           report, report_path)
+        if len(groups) == 1:
+            ids, _hash = inventory(root)
+            result, unattributed = run_guarded(lambda: load_selected(root, expected, ids),
+                                               report, report_path)
+            passed = result.wasSuccessful()
+            problems = ["a class or module fixture " + host_calls_text(unattributed)] if unattributed else []
+            report["workers"] = [{"worker": 0, "tests": len(report["tests"]),
+                                  "status": "complete" if passed and not problems else "failed",
+                                  "wall_seconds": round(time.monotonic() - started, 6)}]
+        else:
+            passed, problems = run_workers(root, plan, lane_name, shard, groups, report, runtime)
         complete = sorted(test["id"] for test in report["tests"]) == sorted(expected)
         required_ran = all(test["outcome"] == "success" for test in report["tests"]
                            if test["id"] in lane.get("must_run_ids", []))
-        report["status"] = "complete" if result.wasSuccessful() and complete and required_ran \
-            and not unattributed else "failed"
-        if unattributed:
-            report["error"] = "a class or module fixture " + host_calls_text(unattributed)
+        report["status"] = "complete" if passed and complete and required_ran and not problems else "failed"
+        if problems:
+            report["error"] = "; ".join(problems)
         if not required_ran:
             report["error"] = "mandatory native regression was skipped or did not pass"
+        if not complete:
+            report["error"] = "one or more planned tests did not finish"
+    except (KeyboardInterrupt, SystemExit):
+        report["status"] = "cancelled"
+        write_json(report_path, report)
+        raise
+    except BaseException as error:
+        report["status"] = "failed"
+        report["error"] = str(error)
+        write_json(report_path, report)
+        raise
+    report["wall_seconds"] = round(time.monotonic() - started, 6)
+    write_json(report_path, report)
+    return 0 if report["status"] == "complete" else 1
+
+
+def relay(stream, prefix, lock):
+    """Copy a worker's output line by line, tagged, without decoding it."""
+    for line in iter(stream.readline, b""):
+        with lock:
+            sys.stdout.flush()
+            target = getattr(sys.stdout, "buffer", None)
+            if target is None:
+                sys.stdout.write(prefix + line.decode("utf-8", "replace"))
+            else:
+                target.write(prefix.encode() + line)
+                target.flush()
+    stream.close()
+
+
+def say(lock, text):
+    with lock:
+        print(text, flush=True)
+
+
+def stop(process):
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+def run_workers(root, plan, lane_name, shard, groups, report, runtime):
+    """Run each group in its own interpreter, then merge the exact accounting.
+
+    Every worker gets its own TMPDIR, TMP and TEMP outside any Git checkout and
+    applies its own host tripwire; its report stays outside the shard report.
+    """
+    lock = threading.Lock()
+    # A short prefix keeps each worker's scratch path shorter than the default
+    # Windows TEMP, so no fixture path gains characters toward the 260 limit.
+    directory = Path(tempfile.mkdtemp(prefix="ciw-", dir=worker_temp_parent(root)))
+    plan_path = directory / "plan.json"
+    write_json(plan_path, plan)
+    workers = []
+    started = time.monotonic()
+    try:
+        for index in range(len(groups)):
+            scratch = directory / str(index)
+            scratch.mkdir()
+            environment = {**os.environ, "TMPDIR": str(scratch), "TMP": str(scratch), "TEMP": str(scratch),
+                           "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUNBUFFERED": "1"}
+            process = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "worker", "--root", str(root),
+                 "--plan", str(plan_path), "--plan-hash", plan["plan_hash"], "--lane", lane_name,
+                 "--shard", str(shard), "--worker", str(index), "--workers", str(len(groups)),
+                 "--report", str(scratch / "report.json")],
+                cwd=root, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            thread = threading.Thread(target=relay, args=(process.stdout, f"[worker {index}] ", lock), daemon=True)
+            thread.start()
+            workers.append((process, thread, scratch))
+        say(lock, f"ci-tests: {lane_name} shard {shard}: {sum(map(len, groups))} tests in {len(groups)} workers")
+        next_update = started + PROGRESS_SECONDS
+        while any(process.poll() is None for process, _thread, _scratch in workers):
+            if time.monotonic() >= next_update:
+                finished = sum(process.poll() is not None for process, _thread, _scratch in workers)
+                say(lock, f"ci-tests: {finished}/{len(workers)} workers finished after "
+                          f"{time.monotonic() - started:.0f}s")
+                next_update += PROGRESS_SECONDS
+            time.sleep(0.1)
+        for _process, thread, _scratch in workers:
+            thread.join()
+        return merge_workers(plan, lane_name, shard, groups, report, runtime,
+                             [process.returncode for process, _thread, _scratch in workers],
+                             [scratch / "report.json" for _process, _thread, scratch in workers])
+    except BaseException:
+        for process, _thread, scratch in workers:
+            stop(process)
+        merge_workers(plan, lane_name, shard, groups, report, runtime,
+                      [process.returncode for process, _thread, _scratch in workers],
+                      [scratch / "report.json" for _process, _thread, scratch in workers])
+        raise
+    finally:
+        for process, thread, _scratch in workers:
+            stop(process)
+            thread.join(timeout=10)
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def merge_workers(plan, lane_name, shard, groups, report, runtime, codes, paths):
+    """Fold worker reports into the shard report; any doubt fails the shard."""
+    rows, errors, problems, summary = [], [], [], []
+    passed = True
+    for index, (tests, code, path) in enumerate(zip(groups, codes, paths)):
+        try:
+            value = read_json(path)
+        except CIError:
+            value = None
+        allowed = set(tests)
+        if not isinstance(value, dict) or value.get("plan_hash") != plan["plan_hash"] \
+                or value.get("lane") != lane_name or value.get("shard") != shard or value.get("worker") != index \
+                or value.get("runtime") != runtime or not isinstance(value.get("tests"), list) \
+                or not isinstance(value.get("errors", []), list) \
+                or any(not isinstance(row, dict) or row.get("id") not in allowed for row in value["tests"]):
+            passed = False
+            problems.append(f"worker {index} left no valid report (exit {code})")
+            summary.append({"worker": index, "tests": 0, "status": "missing", "wall_seconds": None})
+            continue
+        rows.extend(value["tests"])
+        errors.extend(value.get("errors", []))
+        if code != 0 or value.get("status") != "complete":
+            passed = False
+            problems.append(f"worker {index} {value.get('status')} (exit {code})"
+                            + (f": {value['error']}" if value.get("error") else ""))
+        summary.append({"worker": index, "tests": len(value["tests"]), "status": value.get("status"),
+                        "wall_seconds": value.get("wall_seconds")})
+    if errors:
+        report["errors"] = errors
+    report["tests"] = sorted(rows, key=lambda row: row["id"])
+    report["workers"] = summary
+    return passed, problems
+
+
+def run_worker(root, plan, plan_hash, lane_name, shard, worker, workers, report_path):
+    """One worker process of a shard: exactly its planned group, under its own tripwire."""
+    validate_plan(plan)
+    if plan["plan_hash"] != plan_hash:
+        raise CIError("worker plan differs from its shard's plan")
+    lane = planned_lane(plan, lane_name, shard)
+    runtime = runtime_identity()
+    validate_runtime(runtime, lane)
+    groups = worker_groups(lane, shard, workers)
+    if len(groups) != workers or type(worker) is not int or not 0 <= worker < workers:
+        raise CIError("unknown worker")
+    expected = groups[worker]
+    report = {"schema_version": 1, "plan_hash": plan["plan_hash"], "source_tree": plan["source_tree"],
+              "lane": lane_name, "shard": shard, "worker": worker, "status": "running", "runtime": runtime,
+              "tests": []}
+    write_json(report_path, report)
+    started = time.monotonic()
+    try:
+        ids, identity = inventory(root)
+        if identity != plan["inventory_hash"]:
+            raise CIError("test inventory changed after planning")
+        result, unattributed = run_guarded(lambda: load_selected(root, expected, ids), report, report_path)
+        complete = sorted(test["id"] for test in report["tests"]) == sorted(expected)
+        report["status"] = "complete" if result.wasSuccessful() and complete and not unattributed else "failed"
+        if unattributed:
+            report["error"] = "a class or module fixture " + host_calls_text(unattributed)
         if not complete:
             report["error"] = "one or more planned tests did not finish"
     except (KeyboardInterrupt, SystemExit):
@@ -653,6 +978,15 @@ def validate_measurements(report):
                 not isinstance(name, str) or type(value) not in {int, float}
                 or not math.isfinite(value) or value < 0 for name, value in phases.items()):
             raise CIError("invalid fixture phase duration")
+    workers = report.get("workers", [])
+    if not isinstance(workers, list) or any(
+            not isinstance(row, dict) or type(row.get("worker")) is not int or type(row.get("tests")) is not int
+            or row["tests"] < 0 or not isinstance(row.get("status"), str)
+            or (row.get("wall_seconds") is not None and (type(row["wall_seconds"]) not in {int, float}
+                                                       or not math.isfinite(row["wall_seconds"])
+                                                       or row["wall_seconds"] < 0))
+            for row in workers):
+        raise CIError("invalid worker measurement")
 
 
 def verify_reports(plan, reports):
@@ -695,7 +1029,10 @@ def verify_reports(plan, reports):
             "test_seconds": round(sum(test["seconds"] for test in tests), 6),
             "fixture_seconds": {phase: round(sum(test.get("fixture_seconds", {}).get(phase, 0.0) for test in tests), 6)
                 for phase in {phase for test in tests for phase in test.get("fixture_seconds", {})}},
-            "estimated_seconds": plan["lanes"][key[0]].get("estimated_shard_seconds", [None] * len(expected))[key[1]]})
+            "estimated_seconds": plan["lanes"][key[0]].get("estimated_shard_seconds", [None] * len(expected))[key[1]],
+            "worker_wall_seconds": [row.get("wall_seconds") for row in report.get("workers", [])],
+            "estimated_worker_seconds": plan["lanes"][key[0]].get("estimated_worker_seconds",
+                                                                  [None] * len(expected))[key[1]]})
         identity = report["runtime"]
         if key[0] in runtimes and runtimes[key[0]] != identity:
             raise CIError(f"runtime changed between shards: {key[0]}")
@@ -703,6 +1040,37 @@ def verify_reports(plan, reports):
     if seen != set(expected):
         raise CIError("missing shard reports: " + str(sorted(set(expected) - seen)))
     return {"schema_version": 1, "policy_hash": plan["policy_hash"], "durations": durations, "runtimes": runtimes, "measurements": measurements}
+
+
+def refresh_estimates(root, payload, minimum=ESTIMATE_MINIMUM_SECONDS):
+    """Rewrite the policy's per-test estimates from verified durations.
+
+    Only tests that took at least ``minimum`` seconds are kept, per runner
+    operating system and at the slowest of its lanes; every other test weighs
+    the policy default, which keeps the table short.
+    """
+    policy = read_json(root / POLICY_PATH)
+    validated = policy_at(root)
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1 \
+            or not isinstance(payload.get("durations"), dict):
+        raise CIError("invalid durations artifact")
+    if type(minimum) not in {int, float} or not math.isfinite(minimum) or minimum < 0.1:
+        raise CIError("the estimate threshold must be at least 0.1 seconds")
+    estimates = {}
+    for lane, values in payload["durations"].items():
+        if lane not in validated["lanes"] or not isinstance(values, dict):
+            continue
+        target = estimates.setdefault(validated["lanes"][lane]["os"], {})
+        for test_id, seconds in values.items():
+            if type(seconds) not in {int, float} or not math.isfinite(seconds) or not 0 <= seconds <= 600:
+                raise CIError(f"invalid duration for {test_id}")
+            if seconds >= minimum:
+                target[test_id] = max(target.get(test_id, 0.0), round(seconds, 1))
+    policy["test_seconds"] = {system: dict(sorted(values.items())) for system, values in sorted(estimates.items())}
+    path = root / POLICY_PATH
+    path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
+    policy_at(root)
+    return {system: len(values) for system, values in policy["test_seconds"].items()}
 
 
 def main(argv=None):
@@ -719,6 +1087,20 @@ def main(argv=None):
     run_parser.add_argument("--lane", required=True)
     run_parser.add_argument("--shard", type=int, required=True)
     run_parser.add_argument("--report", type=Path, required=True)
+    run_parser.add_argument("--workers", type=int,
+                            help="at most this many worker processes; default: the planned count, bounded by CPUs")
+    worker_parser = sub.add_parser("worker", help=argparse.SUPPRESS)
+    worker_parser.add_argument("--root", type=Path, default=ROOT)
+    worker_parser.add_argument("--plan", type=Path, required=True)
+    worker_parser.add_argument("--plan-hash", required=True)
+    worker_parser.add_argument("--lane", required=True)
+    worker_parser.add_argument("--shard", type=int, required=True)
+    worker_parser.add_argument("--worker", type=int, required=True)
+    worker_parser.add_argument("--workers", type=int, required=True)
+    worker_parser.add_argument("--report", type=Path, required=True)
+    estimates_parser = sub.add_parser("estimates", help="refresh the policy's per-test estimates from durations")
+    estimates_parser.add_argument("--durations", type=Path, required=True)
+    estimates_parser.add_argument("--minimum", type=float, default=ESTIMATE_MINIMUM_SECONDS)
     for name in ("verify-reports", "verify"):
         verify_parser = sub.add_parser(name)
         verify_parser.add_argument("--plan", type=Path, required=True)
@@ -733,9 +1115,16 @@ def main(argv=None):
             print(json.dumps({"matrix": plan["matrix"], "has_tests": plan["has_tests"], "mode": plan["mode"],
                               "plan_hash": plan["plan_hash"], "selection_reason": plan["selection_reason"]}))
             return 0
-        if args.command == "run":
+        if args.command == "estimates":
+            print(json.dumps(refresh_estimates(ROOT, read_json(args.durations), args.minimum), sort_keys=True))
+            return 0
+        if args.command in {"run", "worker"}:
             signal.signal(signal.SIGTERM, lambda _signal, _frame: (_ for _ in ()).throw(KeyboardInterrupt()))
-            return run_shard(ROOT, read_json(args.plan), args.lane, args.shard, args.report)
+        if args.command == "run":
+            return run_shard(ROOT, read_json(args.plan), args.lane, args.shard, args.report, args.workers)
+        if args.command == "worker":
+            return run_worker(args.root.resolve(), read_json(args.plan), args.plan_hash, args.lane, args.shard,
+                              args.worker, args.workers, args.report)
         plan = read_json(args.plan)
         validate_plan(plan, ROOT)
         result = verify_reports(plan, [read_json(path) for path in sorted(args.reports.rglob("*.json"))])

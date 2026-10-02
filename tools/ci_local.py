@@ -19,6 +19,8 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools import ci_tests as tests
 
+path_alias = tests.path_alias
+worker_temp_parent = tests.worker_temp_parent
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = "tools/data/ci-local-policy.json"
 CACHE_PATH = ".agentrof/agent-marketplace/.runtime/ci-local"
@@ -29,16 +31,6 @@ STDLIB_PREWARM = (
     "re, shutil, signal, site, socket, stat, subprocess, tempfile, threading, time, "
     "traceback, typing, unittest, urllib.request, uuid, xml.etree.ElementTree, zipfile"
 )
-
-
-def path_alias(path, metadata=None):
-    try:
-        metadata = metadata if metadata is not None else path.lstat()
-    except FileNotFoundError:
-        return False
-    return (stat.S_ISLNK(metadata.st_mode)
-            or bool(getattr(metadata, "st_file_attributes", 0)
-                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)))
 
 
 def policy_at(root):
@@ -202,12 +194,18 @@ def make_plan(root, target="origin/main", jobs=None):
     runner_os = {"Linux": "ubuntu-latest", "Darwin": "macos-latest", "Windows": "windows-latest"}.get(tests.platform.system())
     must_run = sorted(set(selected) & {test_id for lane in policy["lanes"].values()
                       if lane["os"] == runner_os for test_id in lane.get("required_tests", [])})
+    # The full-suite lane's measured estimates cover every module; this
+    # system's own estimates refine the tests its lanes measured.
+    estimates = policy.get("test_seconds", {})
+    weights = {test_id: seconds for lane in policy["lanes"].values() if lane["groups"] == ["all"]
+               for test_id, seconds in estimates.get(lane["os"], {}).items()}
+    weights.update(estimates.get(runner_os, {}))
     plan = {"schema_version": 1, "authority": "local_only", "candidate": source,
             "must_run_ids": must_run,
             "environment": environment_identity(root), "policy_hash": tests.digest(policy),
             "local_policy_hash": tests.digest(local_policy), "inventory_hash": inventory_hash,
             "selected_ids": selected, "mode": mode, "selection_reason": reason,
-            "shards": tests.balanced_shards(selected, jobs, {}, policy),
+            "shards": tests.balanced_shards(selected, jobs, weights, policy),
             "static_commands": local_policy["static_commands"]}
     plan["plan_hash"] = tests.digest(plan)
     return plan
@@ -357,23 +355,6 @@ def read_receipt(path):
         return tests.read_json(path)
     except tests.CIError:
         return {}
-
-
-def worker_temp_parent(root):
-    parent = Path(tempfile.gettempdir()).resolve()
-    candidate_root = root.resolve()
-    if parent == candidate_root or candidate_root in parent.parents:
-        raise tests.CIError("worker temporary directory must be outside the candidate checkout; set TMPDIR/TMP/TEMP to an external directory")
-    # Non-Git fixtures must remain non-Git when Git searches their ancestors.
-    # Another checkout or linked worktree is just as unsafe as this candidate.
-    if any((directory / ".git").exists() or path_alias(directory / ".git")
-           for directory in (parent, *parent.parents)):
-        raise tests.CIError("worker temporary directory has a Git checkout ancestor")
-    probe = subprocess.run(["git", "--no-replace-objects", "-C", str(parent), "rev-parse", "--git-dir"],
-                           capture_output=True, check=False)
-    if probe.returncode == 0:
-        raise tests.CIError("worker temporary directory belongs to a Git repository")
-    return parent
 
 
 def cache_identity(cache):

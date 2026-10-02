@@ -11,14 +11,20 @@ current interpreter pinned in the CI policy.
 ## Test scope and execution
 
 `tools/data/ci-test-policy.json` owns operating systems, Python minor versions,
-shard counts, impact groups, dependency closures and initial duration weights.
-`tools/ci_tests.py` inventories individual unittest cases without running them,
-selects their scope and balances independent partitions by duration. Each
-worker verifies the plan and runtime discovery before executing its assigned
-IDs. The aggregate checks the exact report set and test IDs: missing,
-duplicate, failed, cancelled or mismatched results fail validation. Explicit
-platform skips remain visible; mandatory native Windows regressions cannot
-skip.
+shard jobs and worker processes per job, impact groups, dependency closures and
+initial duration weights. `tools/ci_tests.py` inventories individual unittest
+cases without running them, selects their scope and balances them by duration
+over every worker process of a lane; each shard job then takes whole
+processes. A job starts its planned processes, folded onto fewer when the
+runner reports fewer CPUs, and each process runs its IDs in ID order, so a
+module's fixtures start once per process. Each worker verifies the plan and
+runtime discovery before executing its assigned IDs. The shard report merges
+the workers' results, one row per planned test, and records each worker's test
+count and wall time; a worker that fails, exits early or reports a test outside
+its set fails the shard. The aggregate checks the exact report set and test
+IDs: missing, duplicate, failed, cancelled or mismatched results fail
+validation. Explicit platform skips remain visible; mandatory native Windows
+regressions cannot skip.
 
 A worker, in CI or local validation, runs its tests with tripwire `claude`
 and `codex` binaries in place of the host binaries a session names:
@@ -30,13 +36,24 @@ servers or its account's model cache. A tripwire records the call and fails;
 the worker fails the test during which it ran, or the shard when a class or
 module fixture ran it after the last test. A test pins fakes of its own with
 `fixtures.isolated_hosts`. `make check` runs unittest without the tripwires.
+Every CI worker process also gets its own `TMPDIR`, `TMP` and `TEMP` under the
+runner's work directory, outside any Git checkout; on Windows that directory is
+on the work disk, which creates small files several times faster than the
+system disk that holds the default `TEMP`.
 
-The small macOS minimum-version suite uses one worker. That worker first
+The small macOS minimum-version suite runs as one job. That job first
 executes the seven Apple system-Python launcher cases with the original system
 environment, before installing the policy-selected Python. The validated plan
 structure assigns exactly one Apple owner whenever vault-hook tests are
 selected; missing, duplicate or disabled ownership fails plan validation.
 This avoids a separate macOS job competing with the full-suite workers.
+
+The Windows minimum-version lane installs the python.org NuGet build of its
+pinned Python, which the Python documentation names for CI systems, instead of
+running `actions/setup-python`, whose Windows installer cost about 50 seconds
+in every job. The policy pins the package, exact version and SHA-512; the job
+verifies both, adds the `python3` link setup-python adds and precompiles the
+standard library once, because the tests run with bytecode writes disabled.
 
 Delivery compiler, execution and PR-intent fixtures may copy an immutable,
 process-local starting repository prepared before the first Item starts.
@@ -67,11 +84,16 @@ impact analysis.
 Fresh reports contain per-test duration, outcome and actual Python, Git and
 operating-system identities. Successful runs publish bounded timing history
 for later plans. Plans report each history source run, attempt, age and
-artifact digest, restored weight counts and fallback reasons. Fixture startup
-estimates favor reusing a process-local seed without creating empty partitions.
-Reports distinguish test time, fixture build/validation/copy time and shard wall
-time. Timing data changes partition balance only; missing or invalid history
-uses policy weights without changing coverage. Weekly and
+artifact digest, restored weight counts and fallback reasons. History is bound
+to the exact policy, so the first plan after a policy change weighs each test
+by the policy's `test_seconds` for its runner system: the tests that took at
+least five seconds, refreshed from a run's `ci-durations` artifact with
+`python3 tools/ci_tests.py estimates --durations <file>`. Every other test
+weighs `default_seconds`. Fixture startup estimates favor reusing a
+process-local seed without creating empty partitions. Reports distinguish test
+time, fixture build/validation/copy time, worker wall time and shard wall time.
+Timing data changes partition balance only; missing or invalid history uses
+policy weights without changing coverage. Weekly and
 manually dispatched validation run full coverage. `make check` remains an
 exhaustive local gate; `make static-check` provides the cheap always-fresh
 contract, version, count and deterministic distribution checks.
@@ -88,7 +110,9 @@ make verify-local
 The direct interfaces are `python3 tools/ci_local.py check --staged --target
 origin/main` and `python3 tools/ci_local.py verify --staged --target origin/main`.
 `check --fresh` ignores saved test results. `--jobs` selects one to four separate
-processes, bounded by CPU count; policy defaults to two. Every worker receives
+processes, bounded by CPU count; policy defaults to two. The processes are
+balanced with the per-test estimates of the full-suite lane's system, refined
+by the local system's own. Every worker receives
 its own `TMPDIR`, `TMP` and `TEMP`, exact test IDs and an independent result file.
 Worker scratch directories live outside the candidate checkout and any Git
 worktree ancestry, so a non-Git fixture cannot discover an enclosing repository.

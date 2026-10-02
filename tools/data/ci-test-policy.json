@@ -350,7 +350,7 @@
     "linux-current": {
       "os": "ubuntu-latest",
       "python": "3.14",
-      "shards": 2,
+      "shards": 6,
       "groups": [
         "all"
       ]
@@ -358,7 +358,7 @@
     "linux-minimum": {
       "os": "ubuntu-latest",
       "python": "3.9",
-      "shards": 3,
+      "shards": 5,
       "groups": [
         "all"
       ]
@@ -366,9 +366,9 @@
     "macos-current": {
       "os": "macos-latest",
       "python": "3.14",
-      "shards": 4,
+      "shards": 1,
       "groups": [
-        "all"
+        "platform"
       ]
     },
     "macos-minimum": {

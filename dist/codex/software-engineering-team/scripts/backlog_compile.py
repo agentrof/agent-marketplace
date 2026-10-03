@@ -488,7 +488,7 @@ def validate_upstream_ref(docs: Path, value: str, label: str,
         errors.append(f"{label} targets the wrong vault subtree: {target}")
         return parsed
     status, type_name = planning_source_status_and_type(docs, target, label, errors)
-    if status != "approved":
+    if status != "approved" and not historical_source_approval(docs, target, label, status):
         errors.append(f"{label} target is not approved: {target}")
     if allowed_types and type_name not in allowed_types:
         errors.append(f"{label} targets unsupported type {type_name}: {target}")
@@ -1981,7 +1981,7 @@ def validate_evidence_ref(docs: Path, value: str, label: str,
         )
         return parsed
     allowed_statuses = {"approved", "accepted"}
-    if status not in allowed_statuses:
+    if status not in allowed_statuses and not historical_source_approval(docs, target, label, status):
         errors.append(f"{label} target is not approved/accepted: {target}")
     return parsed
 
@@ -2029,7 +2029,7 @@ def round_number(path: Path, props: dict, suffix: str, errors: list[str]) -> int
 @stage_package.candidate_session()
 @experience_validation_session()
 def collect(docs: Path, *, historical_inputs: bool = False,
-            review_inputs: bool = False) -> tuple[dict, list[str]]:
+            review_inputs: bool = False, revision_inputs: bool = False) -> tuple[dict, list[str]]:
     """Validate sources; input discovery may precede authored review findings.
 
     ``record["scaffold_findings"]`` names the returned errors that exist only
@@ -2083,15 +2083,13 @@ def collect(docs: Path, *, historical_inputs: bool = False,
         if review_round in rounds:
             errors.append(f"backlog review round {review_round} is duplicated")
         rounds.add(review_round)
-        if not review_inputs:
-            errors.extend(review_section_findings(
-                body, contract["required_backlog_review_sections"], rel, docs))
-            errors.extend(accepted_minor_findings(docs, body, rel, contract))
-            errors.extend(review_loop_record(docs, body, rel, review_props))
         record["backlog_reviews"].append({"path": rel, "props": review_props,
                                           "body": body,
                                           "id": note_id(review_props, path.stem),
                                           "round": review_round})
+    if not review_inputs:
+        errors.extend(review_completion_findings(
+            docs, record["backlog_reviews"], contract["required_backlog_review_sections"], contract))
 
     epics_root = root / "epics"
     for epic_dir in sorted(epics_root.iterdir() if epics_root.is_dir() else []):
@@ -2140,20 +2138,15 @@ def collect(docs: Path, *, historical_inputs: bool = False,
             if review_round in epic_rounds:
                 errors.append(f"{epic_id} review round {review_round} is duplicated")
             epic_rounds.add(review_round)
-            if not review_inputs:
-                errors.extend(review_section_findings(
-                    review_body_text, contract["required_epic_review_sections"],
-                    review_rel, docs))
-                errors.extend(accepted_minor_findings(
-                    docs, review_body_text, review_rel, contract))
-                errors.extend(review_loop_record(docs, review_body_text, review_rel,
-                                                 review_props))
             item = {"path": review_rel, "props": review_props,
                     "body": review_body_text,
                     "id": note_id(review_props, review.stem),
                     "round": review_round}
             epic["reviews"].append(item)
             record["epic_reviews"].append(item | {"epic_id": epic_id})
+        if not review_inputs:
+            errors.extend(review_completion_findings(
+                docs, epic["reviews"], contract["required_epic_review_sections"], contract))
 
         stories_root = epic_dir / "stories"
         for story_dir in sorted(stories_root.iterdir() if stories_root.is_dir() else []):
@@ -2413,7 +2406,8 @@ def collect(docs: Path, *, historical_inputs: bool = False,
 
     if not review_inputs:
         errors.extend(review_coverage_findings(record, docs))
-    errors.extend(global_criterion_coverage_findings(record, docs))
+    errors.extend(global_criterion_coverage_findings(
+        record, docs, historical_inputs=historical_inputs, revision_inputs=revision_inputs))
     if historical_inputs and {"input_contract", "absent_input_stages"}.intersection(record["backlog"]["props"]):
         errors.extend(backlog_input_policy.historical_absence_findings(docs, record))
     record["scaffold_findings"] = sorted(set(scaffolds))
@@ -2516,7 +2510,9 @@ def review_coverage_findings(record: dict, docs: Path) -> list[str]:
     return errors
 
 
-def global_criterion_coverage_findings(record: dict, docs: Path) -> list[str]:
+def global_criterion_coverage_findings(record: dict, docs: Path, *,
+                                     historical_inputs: bool = False,
+                                     revision_inputs: bool = False) -> list[str]:
     errors: list[str] = []
     covered = {
         key for story in record["stories"]
@@ -2544,6 +2540,9 @@ def global_criterion_coverage_findings(record: dict, docs: Path) -> list[str]:
         universe = approved_ba_universe(docs, errors) if has_feature_story else {}
         if not universe:
             universe = {key: {} for key in covered}
+    prior = prior_approved_universe(docs) if historical_inputs or revision_inputs else None
+    if historical_inputs and prior is not None:
+        universe = {key: entry for key, entry in universe.items() if key in prior}
     unknown_covered = sorted(covered - set(universe))
     if unknown_covered:
         errors.append("story criterion_refs contain values outside the approved BA universe: "
@@ -2557,10 +2556,38 @@ def global_criterion_coverage_findings(record: dict, docs: Path) -> list[str]:
         errors.append("criteria cannot be both story-covered and deferred: "
                       + ", ".join(overlap))
     uncovered = sorted(set(universe) - covered - set(deferred))
+    if revision_inputs and prior is not None and record["backlog"]["props"].get("status") == "draft":
+        additions = sorted(set(uncovered) - prior)
+        if additions:
+            record["transition_findings"] = [
+                "new approved BA criteria/rules require story coverage or explicit deferral: "
+                + ", ".join(additions)]
+            uncovered = sorted(set(uncovered) - set(additions))
     if uncovered:
         errors.append("approved BA criteria/rules are neither story-covered nor deferred: "
                       + ", ".join(uncovered))
     return errors
+
+
+def review_completion_findings(docs: Path, reviews: list[dict], sections: list[str],
+                               contract: dict) -> list[str]:
+    errors = []
+    current = latest(reviews)
+    for review in reviews:
+        if review is not current and review["props"].get("status") != "approved" and not (
+                review["props"].get("source_hash") or review["props"].get("approved_at_utc")):
+            continue
+        errors.extend(review_section_findings(review["body"], sections, review["path"], docs))
+        errors.extend(accepted_minor_findings(docs, review["body"], review["path"], contract))
+        errors.extend(review_loop_record(docs, review["body"], review["path"], review["props"]))
+    return errors
+
+
+def historical_unapproved_review_paths(record: dict, docs: Path) -> set[Path]:
+    groups = [record["backlog_reviews"], *(epic["reviews"] for epic in record["epics"])]
+    return {docs / review["path"] for reviews in groups for review in reviews
+            if review is not latest(reviews) and review["props"].get("status") != "approved"
+            and not (review["props"].get("source_hash") or review["props"].get("approved_at_utc"))}
 
 
 def package_paths(record: dict, docs: Path) -> list[Path]:
@@ -2613,10 +2640,10 @@ def approval_stamp_findings(path: Path, docs: Path) -> list[str]:
     return errors
 
 
-def committed_approval_sources(project: Path, docs: Path) -> dict[Path, bytes]:
+def committed_approval_sources(project: Path, docs: Path, commit: str = "HEAD") -> dict[Path, bytes]:
     """Read the backlog at one pinned HEAD, with object IDs as batch input."""
     head = subprocess.run(
-        ["git", "--no-replace-objects", "rev-parse", "--verify", "HEAD"],
+        ["git", "--no-replace-objects", "rev-parse", "--verify", commit],
         cwd=project, capture_output=True, check=False,
     )
     if head.returncode:
@@ -2634,7 +2661,9 @@ def committed_approval_sources(project: Path, docs: Path) -> dict[Path, bytes]:
         if not row:
             continue
         fields, raw = row.split(b"\t", 1)
-        _mode, kind, oid = fields.split(b" ")
+        mode, kind, oid = fields.split(b" ")
+        if mode not in {b"100644", b"100755"}:
+            raise ValueError("committed backlog approval contains a non-regular file")
         if kind == b"blob":
             selected[project / raw.decode("utf-8", errors="surrogateescape")] = oid
     if not selected:
@@ -2662,6 +2691,160 @@ def committed_approval_sources(project: Path, docs: Path) -> dict[Path, bytes]:
     return sources
 
 
+def history_project(docs: Path) -> Path | None:
+    return next((parent for parent in (docs, *docs.parents)
+                 if (parent / ".git").exists()), None)
+
+
+def history_blob(project: Path, commit: str, relative: str) -> bytes | None:
+    listing = subprocess.run(
+        ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-z",
+         commit, "--", relative], cwd=project, capture_output=True, check=False)
+    rows = [row for row in listing.stdout.split(b"\0") if row]
+    if listing.returncode or len(rows) != 1:
+        return None
+    fields, name = rows[0].split(b"\t", 1)
+    mode, kind, oid = fields.split(b" ")
+    if mode not in {b"100644", b"100755"} or kind != b"blob" or name != relative.encode("utf-8"):
+        return None
+    shown = subprocess.run(["git", "--no-replace-objects", "cat-file", "blob", oid.decode("ascii")],
+                           cwd=project, capture_output=True, check=False)
+    return shown.stdout if not shown.returncode else None
+
+
+def approved_history_sources(project: Path, docs: Path, commit: str) -> dict[Path, bytes] | None:
+    """Prove the complete committed approval boundary before using its sources."""
+    def read():
+        sources = committed_approval_sources(project, docs, commit)
+        root = sources.get(docs / "backlog/backlog.md")
+        if root is None:
+            return None
+        props, _body = parse_front_matter_text(root.decode("utf-8"))
+        if props.get("status") != "approved" or props.get("source_hash") != digest_text(root.decode("utf-8")):
+            return None
+        canonical_paths = re.compile(
+            r"backlog/(?:backlog\.md|reviews/round-[0-9]+-backlog-review\.md|"
+            r"epics/[^/]+/(?:epic\.md|reviews/round-[0-9]+-epic-review\.md|"
+            r"stories/[^/]+/(?:story|test-plan)\.md))")
+        notes = {}
+        for path, content in sources.items():
+            relative = path.relative_to(docs).as_posix()
+            if not canonical_paths.fullmatch(relative):
+                continue
+            text = content.decode("utf-8")
+            note_props, _body = parse_front_matter_text(text)
+            notes[path] = (text, note_props)
+        groups = {}
+        for path, (_text, note_props) in notes.items():
+            if note_props.get("type") in {"backlog-review", "epic-review"}:
+                errors = []
+                number = round_number(path, note_props, note_props["type"], errors)
+                if errors:
+                    return None
+                groups.setdefault(path.parent, []).append({"path": path.relative_to(docs).as_posix(),
+                                                            "props": note_props, "round": number})
+        group_record = {"backlog_reviews": [], "epics": [{"reviews": reviews} for reviews in groups.values()]}
+        historical = historical_unapproved_review_paths(group_record, docs)
+        manifest = {}
+        for path, (text, note_props) in notes.items():
+            relative = path.relative_to(docs).as_posix()
+            expected_status = "planned" if path.name == "story.md" else "approved"
+            if path in historical:
+                errors = status_findings(note_props, note_props["type"], relative, backlog_contract())
+                if errors:
+                    return None
+            else:
+                if note_props.get("status") != expected_status:
+                    return None
+                if note_props.get("source_hash") != digest_text(text) or not note_props.get("approved_at_utc"):
+                    return None
+            manifest[relative] = digest_text(text)
+        payload = json.dumps(manifest, sort_keys=True, ensure_ascii=False,
+                             separators=(",", ":")).encode("utf-8")
+        if props.get("package_hash") != "sha256:" + hashlib.sha256(payload).hexdigest():
+            return None
+        return sources
+    try:
+        return session_read(("approved-history", project, docs, commit), read)
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
+def history_commits(project: Path, path: Path, needle: str = "") -> list[str]:
+    command = ["git", "--no-replace-objects", "--literal-pathspecs", "log", "--format=%H"]
+    if needle:
+        command.extend(["-S", needle])
+    command.extend(["--", path.relative_to(project).as_posix()])
+    result = subprocess.run(command, cwd=project, capture_output=True, text=True, check=False)
+    return result.stdout.split() if not result.returncode else []
+
+
+def historical_source_approval(docs: Path, target: str, label: str, status: str) -> bool:
+    """An unchanged committed Story/Test Plan keeps its approved evidence history."""
+    if status != "superseded" or not target.startswith("solution-design/"):
+        return False
+    owner = docs / label.split(" ", 1)[0]
+    if not owner.is_file() or owner.name not in {"story.md", "test-plan.md"}:
+        return False
+    props, _body = parse_front_matter(owner)
+    if props.get("status") not in {"planned", "approved"} or approval_stamp_findings(owner, docs):
+        return False
+    project = history_project(docs)
+    if project is None:
+        return False
+    def read():
+        head = session_read(("head-approvals", project, docs),
+                            lambda: committed_approval_sources(project, docs)).get(owner)
+        if head is None or canonical_text(head.decode("utf-8")) != canonical(owner):
+            return False
+        for commit in history_commits(project, owner, str(props["source_hash"])):
+            sources = approved_history_sources(project, docs, commit)
+            original = sources.get(owner) if sources else None
+            if original is None or digest_text(original.decode("utf-8")) != props["source_hash"]:
+                continue
+            source = history_blob(project, commit, (docs / f"{target}.md").relative_to(project).as_posix())
+            if source is None:
+                continue
+            historical_props, _body = parse_front_matter_text(source.decode("utf-8"))
+            if historical_props.get("status") in {"approved", "accepted"}:
+                return True
+        return False
+    try:
+        return session_read(("historical-source", docs, owner, target), read)
+    except (OSError, ValueError, UnicodeError):
+        return False
+
+
+def prior_approved_universe(docs: Path) -> set[str] | None:
+    """Read the BA universe at the last hash-verified committed backlog approval."""
+    project = history_project(docs)
+    if project is None:
+        return None
+    def read():
+        for commit in history_commits(project, docs / "backlog/backlog.md"):
+            sources = approved_history_sources(project, docs, commit)
+            if sources is None:
+                continue
+            prior = set()
+            for path in sorted((docs / "business-analysis").glob("*/_generated/registry.json")):
+                content = history_blob(project, commit, path.relative_to(project).as_posix())
+                if content is None:
+                    return None
+                registry = json.loads(content.decode("utf-8"))
+                ids = registry.get("ids", {})
+                if not isinstance(ids, dict):
+                    return None
+                for identifier, entry in ids.items():
+                    if isinstance(entry, dict) and entry.get("doc_status") == "approved" and entry.get("row_status", "active") == "active":
+                        prior.add(f"{path.parent.parent.name}:{identifier}")
+            return prior
+        return None
+    try:
+        return session_read(("prior-universe", docs), read)
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
 def preserved_approval_sources(
     record: dict, docs: Path, *, allow_new_approvals: bool = False,
 ) -> tuple[dict[Path, bytes], list[str]]:
@@ -2671,6 +2854,7 @@ def preserved_approval_sources(
     project = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), None)
     preserved, errors = {}, []
     committed = {}
+    historical = historical_unapproved_review_paths(record, docs)
     if project is not None:
         try:
             committed = committed_approval_sources(project, docs)
@@ -2704,6 +2888,9 @@ def preserved_approval_sources(
             if not head_stamped or head != path.read_bytes():
                 errors.append(f"{path.relative_to(docs).as_posix()} prior review approval must remain byte-exact in HEAD; create a new review round")
             errors.extend(approval_stamp_findings(path, docs))
+        if path in historical:
+            preserved[path] = path.read_bytes()
+            continue
         unchanged = (
             props.get("source_hash") == head_props.get("source_hash")
             and props.get("approved_at_utc") == head_props.get("approved_at_utc")
@@ -2734,8 +2921,10 @@ def approval_findings(record: dict, docs: Path) -> list[str]:
             if story["test_props"].get("status") != "approved":
                 errors.append(f"{story['id']} test plan is not approved")
     paths = package_paths(record, docs)
+    historical = historical_unapproved_review_paths(record, docs)
     for path in paths:
-        errors.extend(approval_stamp_findings(path, docs))
+        if path not in historical:
+            errors.extend(approval_stamp_findings(path, docs))
     expected_package = package_digest(docs, paths)
     if record["backlog"]["props"].get("package_hash") != expected_package:
         errors.append("backlog approved package_hash is stale")
@@ -2800,7 +2989,7 @@ def render_backlog_navigation(record: dict, docs: Path, *, preserved: set[Path] 
         preserved = {
             path for path in package_paths(record, docs)
             if not approval_stamp_findings(path, docs)
-        }
+        } | historical_unapproved_review_paths(record, docs)
 
     def append_current_nav(path: Path, links: list[str]) -> None:
         if path not in preserved:
@@ -3015,6 +3204,29 @@ def review_body(title: str, sections: list[str]) -> str:
             ])
         lines.append("")
     return "\n".join(lines)
+
+
+def revision_review_body(previous: dict, title: str, backlog_title: str, revision: int,
+                         sections: list[str] | None = None) -> str:
+    """Keep criterion dispositions and history without copying a prior verdict."""
+    root_link = wikilink("backlog/backlog.md", backlog_title)
+    previous_link = wikilink(previous["path"], str(previous["props"].get("title", previous["id"])))
+    body = review_body(title, sections or backlog_contract()["required_backlog_review_sections"])
+    deferred = "## Deferred Criteria\n\n" + raw_section(previous["body"], "Deferred Criteria").strip() + "\n\n"
+    body = re.sub(r"^## Deferred Criteria\n.*?(?=^## |\Z)", lambda _match: deferred,
+                  body, flags=re.MULTILINE | re.DOTALL)
+    context = (f"{root_link} is draft revision {revision}; this round has not evaluated its current inputs. "
+               f"{previous_link} retains the preceding approval's evidence.\n\n")
+    body = body.replace(f"# {title}\n\n", f"# {title}\n\n" + context, 1)
+    if set(REVIEW_RECORD_SECTIONS) & set(headings(previous["body"])):
+        body += "\n".join([
+            "## Prior Review Follow-ups", "",
+            f"{previous_link} retains the prior review's finding records and accepted minor follow-ups. "
+            "The Product Owner must triage those follow-ups against the current sources. "
+            "This review records only findings its own readers actually return and calibrate; "
+            "no prior finding is declared closed or accepted by opening this draft.", "",
+        ])
+    return body
 
 
 def coverage_class_table() -> str:
@@ -3729,24 +3941,7 @@ def begin_revision(args) -> int:
     ] + ["status/draft"]
     # The new round records the Process Policy in force as it is written.
     review_props.update(round_pin(docs))
-    review_body_text, headings_replaced = re.subn(
-        r"^# [^\n]*$", lambda _match: f"# {review_title}",
-        latest_review["body"], count=1, flags=re.MULTILINE,
-    )
-    if not headings_replaced:
-        review_body_text = f"# {review_title}\n\n" + review_body_text.lstrip("\n")
-    pending_verdict = (
-        "## Verdict\n\n"
-        f"Evidence [Verdict]: [[backlog/backlog|{backlog_title}]] is now draft "
-        f"revision {revision}; review round {next_round} has not evaluated its current inputs.\n"
-        "Conclusion [Verdict]: Approval remains pending a fresh review of this "
-        "revision's scope, receipt bindings and coverage.\n\n"
-    )
-    review_body_text = re.sub(
-        r"^##[ \t]+Verdict[ \t]*\n.*?(?=^##[ \t]+|\Z)",
-        lambda _match: pending_verdict, review_body_text,
-        flags=re.MULTILINE | re.DOTALL,
-    )
+    review_body_text = revision_review_body(latest_review, review_title, backlog_title, revision)
     review_path = docs / "backlog" / "reviews" / f"round-{next_round}-backlog-review.md"
     # Navigation may touch every package note, home and the map. Snapshot only
     # those owned paths so rollback cannot erase unrelated concurrent work.
@@ -3765,7 +3960,8 @@ def begin_revision(args) -> int:
     try:
         backlog_path.write_bytes(front_matter(root_props, root_body).encode("utf-8"))
         review_path.write_bytes(front_matter(review_props, review_body_text).encode("utf-8"))
-        refreshed, render_errors = collect(docs)
+        refreshed, render_errors = collect(docs, review_inputs=True, revision_inputs=True)
+        render_errors.extend(review_coverage_findings(refreshed, docs))
         if render_errors:
             raise RuntimeError("; ".join(sorted(set(render_errors))))
         render_backlog_navigation(refreshed, docs)
@@ -3790,13 +3986,16 @@ def begin_revision(args) -> int:
         print(json.dumps({"ok": False, "errors": [f"{label}: {exc}", *restore_errors]}, indent=2,
                          ensure_ascii=False, sort_keys=True))
         return 1
-    print(json.dumps({
+    result = {
         "ok": True, "revision": revision, "review_round": next_round,
         "frozen_story_ids": sorted(set(snapshot.get("active_story_ids", []))
                                     | set(snapshot.get("delivered_story_ids", []))),
         "cancelled_story_ids": sorted(set(snapshot.get("cancelled_story_ids", []))),
         "backlog": str(backlog_path), "review": str(review_path),
-    }, indent=2, ensure_ascii=False, sort_keys=True))
+    }
+    if refreshed.get("transition_findings"):
+        result["transition_findings"] = refreshed["transition_findings"]
+    print(json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True))
     return 0
 
 
@@ -3823,11 +4022,124 @@ def revision_status(args) -> int:
     return 0
 
 
+def pending_review_policy_matches(docs: Path, props: dict, pin: dict) -> bool:
+    """Compare the values that govern review work, preserving the recorded pin."""
+    recorded = recorded_pin(props)
+    if not recorded or recorded == pin:
+        return True
+    import process_policy
+
+    registry = process_policy.load_registry()
+    ran = process_policy.pinned_values(
+        docs, {} if recorded == no_policy_pin() else recorded, registry)[0]
+    current = process_policy.effective_values(docs)[0]
+    return all((ran[switch]["value"], ran[switch].get("parameters"))
+               == (current[switch]["value"], current[switch].get("parameters"))
+               for switch, entry in registry.items()
+               if BACKLOG_FLOW in (entry["spec"].get("flows") or []))
+
+
+def stub_review(docs: Path, slug: str | None = None) -> int:
+    created = False
+    review_path = None
+    try:
+        record, errors = collect(docs, review_inputs=True, revision_inputs=True)
+        errors = [error for error in errors if error not in set(record["scaffold_findings"])]
+        epic = next((item for item in record["epics"] if item["folder"] == slug), None) if slug else None
+        if (record.get("backlog") or {}).get("props", {}).get("status") != "draft":
+            errors.append(f"a new {'epic' if slug else 'backlog'} review requires a draft backlog revision")
+        if slug and epic is None:
+            errors.append(f"unknown epic slug: {slug}")
+        pin, policy_errors = policy_pin(docs)
+        errors.extend(policy_errors)
+        if errors:
+            raise ValueError("; ".join(sorted(set(errors))))
+        _preserved, preservation_errors = preserved_approval_sources(record, docs)
+        if preservation_errors:
+            raise ValueError("; ".join(preservation_errors))
+        previous = latest(epic["reviews"] if epic else record["backlog_reviews"])
+        result = {"ok": True}
+        if epic:
+            result["epic_id"] = epic["id"]
+        if previous["props"].get("status") != "approved" and pending_review_policy_matches(
+                docs, previous["props"], pin):
+            result.update(created=False, review_round=previous["round"], review=str(docs / previous["path"]))
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        number = previous["round"] + 1
+        root_props = record["backlog"]["props"]
+        title = (f"Review round {number} for {epic['props']['title']}" if epic else
+                 f"Backlog review round {number} for {root_props['title']}")
+        parent = epic if epic else record["backlog"]
+        parent_link = wikilink(parent["path"], parent["props"]["title"])
+        kind = "epic-review" if epic else "backlog-review"
+        props = {
+            "type": kind, "title": title, "status": "draft",
+            "round": number, "owner_role": "product_owner",
+            "derives_from": [parent_link],
+        }
+        if epic:
+            props.update(
+                verifies=[wikilink(path, str(properties["title"]))
+                          for story in epic["stories"]
+                          for path, properties in ((story["path"], story["props"]),
+                                                   (story["test_plan"], story["test_props"]))],
+                scenario_refs=sorted({scenario for story in epic["stories"] for scenario in story["scenario_ids"]}),
+                dependency_refs=sorted(dependency_edges(epic["stories"], True, record)))
+        else:
+            props.update(related_to=[wikilink(item["path"], item["props"]["title"]) for item in record["epics"]],
+                         dependency_refs=sorted(dependency_edges(record["stories"], False, record)))
+        props.update(tags=[f"doc/{kind}", "status/draft"],
+                     aliases=[f"{epic['id']}-REVIEW-{number:03d}" if epic else f"BACKLOG-REVIEW-{number:03d}"],
+                     **pin)
+        body = revision_review_body(previous, title, str(root_props["title"]),
+                                    int(root_props["revision"]),
+                                    backlog_contract()[f"required_{'epic' if epic else 'backlog'}_review_sections"])
+        body = body.rstrip() + "\n\n" + NAV_MARKER + "\n- [[maps/backlog|Backlog map]]\n- " + parent_link + "\n"
+        review_path = docs / Path(parent["path"]).parent / "reviews" / f"round-{number}-{kind}.md"
+        with review_path.open("xb") as stream:
+            created = True
+            stream.write(front_matter(props, body).encode("utf-8"))
+        refreshed, errors = collect(docs, review_inputs=True, revision_inputs=True)
+        errors = [error for error in errors if error not in set(refreshed["scaffold_findings"])]
+        if errors:
+            raise ValueError("; ".join(sorted(set(errors))))
+        if epic:
+            selected = next(item for item in refreshed["epics"] if item["folder"] == slug)
+            scope = dict(refreshed, backlog_reviews=[], epics=[selected])
+        else:
+            scope = dict(refreshed, epics=[dict(item, reviews=[]) for item in refreshed["epics"]])
+        errors.extend(review_coverage_findings(scope, docs))
+        if errors:
+            raise ValueError("; ".join(sorted(set(errors))))
+    except (OSError, ValueError, RuntimeError) as exc:
+        if created:
+            try:
+                review_path.unlink()
+            except OSError as restore_exc:
+                exc = RuntimeError(f"{exc}; could not remove new review: {restore_exc}")
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2, sort_keys=True))
+        return 1
+    result.update(created=True, review_round=number, review=str(review_path))
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def stub_epic_review(docs: Path, slug: str) -> int:
+    return stub_review(docs, slug)
+
+
+def stub_backlog_review(args) -> int:
+    return stub_review(docs_root(args.docs))
+
+
 def stub_epic(args) -> int:
     docs = docs_root(args.docs)
     if not SLUG_RE.fullmatch(args.slug):
         print("invalid epic slug", file=sys.stderr)
         return 2
+    if getattr(args, "new_review", False):
+        return stub_epic_review(docs, args.slug)
     root = docs / "backlog" / "epics" / args.slug
     (root / "stories").mkdir(parents=True, exist_ok=True)
     (root / "reviews").mkdir(parents=True, exist_ok=True)
@@ -3998,7 +4310,12 @@ def main(argv=None) -> int:
     command.add_argument("--id")
     command.add_argument("--title")
     command.add_argument("--goal")
+    command.add_argument("--new-review", action="store_true",
+                         help="Open the next pending review of an existing epic in a draft backlog")
     command.set_defaults(func=stub_epic)
+    command = sub.add_parser("stub-backlog-review")
+    command.add_argument("--docs", default=None)
+    command.set_defaults(func=stub_backlog_review)
     command = sub.add_parser("stub-story")
     command.add_argument("epic")
     command.add_argument("slug")

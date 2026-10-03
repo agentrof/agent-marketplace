@@ -1740,13 +1740,6 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(errors, [])
         return delivery_compile.execution_plan_findings(item.parents[2], sources, self.docs)
 
-    def test_switch_is_declared_off_by_default_with_the_issue_promotion_unit(self):
-        switch = process_policy.load_registry()["implementation_schedule"]
-        self.assertEqual((switch["values"], switch["default"]),
-                         (["sequential_v1", "parallel_lanes_v1"], "sequential_v1"))
-        self.assertIn("At least 3 Items", switch["spec"]["promotion"]["unit"])
-        self.assertIn("70%", switch["spec"]["promotion"]["threshold"])
-
     def test_parallel_lane_policy_declares_the_schedule_on_every_new_item(self):
         """#327: init writes the schedule on every new Item, a one-lane Item included (rv-accept-ideas-27)."""
         self.approve_verification_contract()
@@ -1913,59 +1906,6 @@ class DeliveryCompilerTests(unittest.TestCase):
             self.assertTrue(delivery_compile.execution_plan_findings(
                 item.parents[2], sources, self.docs, reopen=[props["story_id"]]))
 
-    def test_host_contracts_start_a_consumer_lane_when_its_own_producers_finish(self):
-        """A consumer lane waits only for the producers its seams name, never for a whole phase
-        (rv-accept-ideas-26)."""
-        for host, start in (("claude", "Spawn every lane that waits for no producer in one message"),
-                            ("codex", "Start every lane that waits for no producer before waiting on any")):
-            text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
-                             / "host-contract.md").read_text(encoding="utf-8").split())
-            bullet = text[text.index("Under switch `implementation_schedule` at `parallel_lanes_v1`"):]
-            bullet = bullet[:bullet.index(" - ")]
-            with self.subTest(host=host):
-                self.assertIn(start, bullet)
-                self.assertIn("each consumer lane as soon as every producer it waits for has finished", bullet)
-                self.assertNotIn("next phase", bullet)
-                # Approval refuses intersecting lane scopes, so lanes overlap only when disjoint (rr-seams-09).
-                self.assertIn("writers run at the same time only when their approved lane scopes are disjoint",
-                              bullet)
-                self.assertNotIn("intersect", bullet)
-        reference = " ".join((SCRIPTS.parent / "skill-content/deliver/references"
-                              / "switch-implementation_schedule-parallel_lanes_v1.md")
-                             .read_text(encoding="utf-8").split())
-        self.assertIn("start it as soon as every producer it names has finished, without waiting for"
-                      " any other lane", reference)
-
-    def test_only_the_coordinator_writes_the_shared_git_index(self):
-        """Lanes share one Git index, so a lane never runs git add -N; it reports each new file and
-        the coordinator adds it, one Git command at a time (rv-accept-ideas-28)."""
-        reference = " ".join((SCRIPTS.parent / "skill-content/deliver/references"
-                              / "switch-implementation_schedule-parallel_lanes_v1.md")
-                             .read_text(encoding="utf-8").split())
-        self.assertIn("A lane makes no Git writes: no add, commit,", reference)
-        self.assertIn("That includes `git add -N`", reference)
-        self.assertIn("A lane reports each file it creates, and the coordinator runs `git add -N <path>`"
-                      " for it, one Git command at a time", reference)
-        self.assertNotIn("The one exception is `git add -N", reference)
-        for doc in ("docs/orchestration.md", "docs/requirement-delivery-protocol.md"):
-            text = " ".join((ROOT / doc).read_text(encoding="utf-8").split())
-            with self.subTest(doc=doc):
-                self.assertIn("the coordinator runs intent-to-add for the new files they report", text)
-                self.assertNotIn("no Git writes except intent-to-add", text)
-
-    def test_orchestration_names_both_writer_exceptions_and_the_operation_calibrator(self):
-        """orchestration.md keeps its general rules true to the switch references (rv-seams-13)."""
-        text = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
-        self.assertIn("Writers are serialized, except in the two process-switch cases below: the parallel"
-                      " lanes of `implementation_schedule` and the parallel contract drafts of"
-                      " `execution_planning`.", text)
-        self.assertIn("`parallel_lanes_v1` is one of the two exceptions to serialized writers, beside the"
-                      " parallel contract drafts of `single_source_bundle`", text)
-        self.assertNotIn("the one exception", text)
-        self.assertIn("A claim on an Operation contract is calibrated by the counterpart of the contract the"
-                      " claim concerns, the DevOps Engineer for the Verification Contract and the QA Engineer"
-                      " for the Environment Contract, never by that contract's writer.", text)
-
     def test_items_without_a_schedule_keep_their_phases(self):
         roles = ["software_architect", "backend_developer", "devops_engineer", "code_reviewer", "qa_engineer"]
         self.assertEqual(delivery_compile.execution_phases({"role_sequence": roles}),
@@ -1979,23 +1919,6 @@ class DeliveryCompilerTests(unittest.TestCase):
              ["code_reviewer"], ["qa_engineer"]])
         with self.assertRaisesRegex(ValueError, "unsupported implementation_schedule"):
             delivery_compile.execution_phases({"role_sequence": roles, "implementation_schedule": "fast"})
-
-
-class PlanGateInstructionTests(unittest.TestCase):
-    def test_every_plan_gate_checks_the_plan_before_the_owner_sees_it(self):
-        """#345: the standard plan gate and gate A both run check-plan first."""
-        team = ROOT / "plugins" / "software-engineering-team"
-        for relative, rule in (
-            ("flows/execution-planning.md", "Show the plan to the user only once it passes"),
-            ("skill-content/execution-plan/SKILL.md", "the plan is shown only once it passes"),
-            ("skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md",
-             "(`delivery_compile.py check` and `check-plan`, `operation_compile.py check`,"
-             " `delivery_governance.py check`), present gate A"),
-        ):
-            with self.subTest(path=relative):
-                text = " ".join((team / relative).read_text(encoding="utf-8").split())
-                self.assertIn("check-plan", text)
-                self.assertIn(rule, text)
 
 
 class ScopeHandoffBindingTests(unittest.TestCase):

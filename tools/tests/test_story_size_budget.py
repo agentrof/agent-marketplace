@@ -43,7 +43,6 @@ SWITCH = "story_size_budget"
 REGISTRY = "skill-content/configure/data/process-switches.json"
 MEASURES = "skill-content/product-planning/data/story-size-measures.json"
 REFERENCE = "skill-content/product-planning/references/switch-story_size_budget-propose_split.md"
-OWNING_FLOWS = ("backlog-planning", "delivery-planning")
 EPIC = "backlog/epics/delivery-fixture"
 SECOND = ("[[business-analysis/delivery/domains/identity/acceptance/"
           "delivery-acceptance|delivery:AC-DEL-002]]")
@@ -53,10 +52,6 @@ GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com
 
 def read(relative: str) -> str:
     return (TEAM / relative).read_text(encoding="utf-8")
-
-
-def flat(text: str) -> str:
-    return " ".join(text.split())
 
 
 def quiet(call, *args):
@@ -72,29 +67,6 @@ def measured(story: dict) -> dict:
 
 
 class RegistryAndInstructionTests(unittest.TestCase):
-    def test_switch_is_off_by_default_with_owner_set_limits_and_its_promotion_rule(self):
-        spec = json.loads(read(REGISTRY))["switches"][SWITCH]
-        self.assertEqual(spec["issue"], 325)
-        self.assertEqual([value["id"] for value in spec["values"]], ["off", "propose_split"])
-        self.assertEqual(spec["default"], "off")
-        self.assertEqual(sorted(spec["flows"]), sorted(OWNING_FLOWS))
-        # The package sets no limit: the declaration names ids and a type, never a value.
-        self.assertEqual(spec["parameters"], {
-            "summary": spec["parameters"]["summary"], "values": ["propose_split"],
-            "declared_by": {"path": MEASURES, "key": "measures"},
-            "type": "positive_integer", "min_count": 1})
-        # Only the propose_split instructions and the compiler read the measures.
-        self.assertEqual(spec["value_data"], {"propose_split": [MEASURES]})
-        self.assertIn("never over budget", spec["parameters"]["summary"])
-        self.assertEqual(spec["promotion"]["unit"], "At least 3 backlog revisions run with"
-                         " propose_split and 3 Deliveries that contain stories planned under it.")
-        for fragment in ("accepts at least half of the split proposals",
-                         "median cycle time at most half", "loses, merges or rewords a criterion",
-                         "dependency cycle", "verifiable only after a sibling lands"):
-            self.assertIn(fragment, spec["promotion"]["threshold"])
-        self.assertIn("never fails a check, blocks an approval or rewrites a criterion",
-                      spec["values"][1]["tradeoffs"])
-
     def test_a_promotion_in_the_documented_form_loads_and_validates(self):
         # A promotion keeps off as the default and ships package limits (#325).
         with tempfile.TemporaryDirectory() as raw:
@@ -123,17 +95,6 @@ class RegistryAndInstructionTests(unittest.TestCase):
         self.assertEqual(derivations, set(backlog_compile.STORY_SIZE_DERIVATIONS))
         self.assertEqual({spec["derivation"] for spec in measures.values()}, derivations)
 
-    def test_each_owning_flow_anchors_the_switch_and_names_the_reference(self):
-        for flow in OWNING_FLOWS:
-            with self.subTest(flow=flow):
-                text = flat(read(f"flows/{flow}.md"))
-                self.assertIn(f"Switch `{SWITCH}`: at `propose_split`", text)
-                self.assertIn(REFERENCE, text)
-        for path in sorted((TEAM / "flows").glob("*.md")):
-            if path.stem not in OWNING_FLOWS:
-                with self.subTest(flow=path.stem):
-                    self.assertNotIn(SWITCH, path.read_text(encoding="utf-8"))
-
     def test_the_default_path_keeps_its_instructions(self):
         # The size rule, the no-estimate rule and the role files keep their text.
         for relative in ("skill-content/product-planning/SKILL.md",
@@ -150,64 +111,6 @@ class RegistryAndInstructionTests(unittest.TestCase):
                 self.assertNotIn("Size Exceptions", text)
         self.assertIn("DON'T add an estimate field, points, or sizing numbers to any artifact",
                       read("skill-content/product-planning/references/flow-metrics.md"))
-
-    def test_the_reference_defines_an_advisory_verbatim_split(self):
-        text = flat(read(REFERENCE))
-        for rule in (
-                "These are the instructions of process switch `story_size_budget` at"
-                " `propose_split`",
-                "A task binds this file only when the project's Process Policy selects that"
-                " value; at the default, `off`, nothing is measured or shown",
-                "without adding a field to any story or capping anything",
-                "The package sets none, and a measure without a limit is reported but never"
-                " over budget",
-                "it never fails `backlog_compile.py check`, never blocks a review or an approval"
-                " and never rewrites a criterion",
-                "The one-review-unit rule and the no-estimate rule of"
-                " `references/flow-metrics.md` stand as written",
-                "A limit bounds a review unit, never time or effort",
-                "never recount them by hand",
-                "The budget skips a story that a merged Delivery records as integrated",
-                "When a Delivery's merge state cannot be read, for example in a shallow clone,"
-                " the budget measures only the stories this revision changes instead",
-                "`advisories` names each over-budget measure that no Size Exceptions row keeps",
-                "a split moves a criterion to one story, so a shared one stays only when each"
-                " story delivers a distinct slice",
-                "A row keeps its story in every later review round of the epic too",
-                "before any epic review manifest is derived",
-                "`references/slicing-patterns.md`",
-                "Too-Big and Too-Small tests",
-                "Never merge, reword, drop or compress a criterion or a scenario to fit a limit",
-                "Ask the owner one choice-gate question per over-budget story",
-                "Create each new story with `backlog_compile.py stub-story`",
-                "byte for byte",
-                "only its heading changes to the new story's `<story-id>-TS-###`",
-                "every moved criterion is covered by exactly one of the two stories",
-                "No part may be verifiable only after a sibling lands",
-                "`Size Exceptions` table of its epic's current review note",
-                "The compiler validates every row and rejects a repeated story and measure",
-                "The review manifest's `check.story_size` block carries the measures",
-                "never raises a finding for a count alone",
-                "Slicing evidence names the limits its review ran under; the note records the"
-                " Process Policy's path, revision and source hash of the round",
-                "the budget never changes the selection or the scope decision"):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
-        for skill in sorted(TEAM.glob("skill-content/*/SKILL.md")):
-            self.assertNotIn("switch-story_size_budget", skill.read_text(encoding="utf-8"))
-
-    def test_the_reference_defines_the_optional_operation_impact_classification(self):
-        text = flat(read(REFERENCE))
-        for rule in (
-                "`contract_deltas` counts 1 for `software_architect` among the story's roles, an"
-                " expected architecture delta, and 1 for `operation_impact: required`, an expected"
-                " revision of the Environment Contract or the Verification Contract",
-                "like a Requirement impact matrix row it classifies impact and carries no estimate",
-                "`backlog_compile.py check` refuses another value or a missing reason",
-                "a story without the classification counts no Operation delta, as before",
-                "Never classify a story to fit a limit"):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
 
 
 def story(body: str = "", scenarios: int = 0, owner: str = "backend_developer",

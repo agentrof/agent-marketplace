@@ -32,8 +32,6 @@ MAX_WORKERS = 16
 PROGRESS_SECONDS = 30
 RUNNERS = {"ubuntu-latest", "macos-latest", "windows-latest"}
 ESTIMATE_MINIMUM_SECONDS = 5.0
-INTERPRETER_KEYS = {"source", "package", "version", "sha512"}
-NO_INTERPRETER = {"interpreter_package": "", "interpreter_version": "", "interpreter_sha512": ""}
 
 
 class CIError(ValueError):
@@ -225,23 +223,16 @@ def matches(value, patterns):
     return any(fnmatch.fnmatchcase(value, pattern) for pattern in patterns)
 
 
-def valid_interpreter(value, lane):
-    """A python.org NuGet build for Windows: exact version of the lane, SHA-512 bound."""
-    return (isinstance(value, dict) and set(value) == INTERPRETER_KEYS and value["source"] == "nuget"
-            and lane.get("os") == "windows-latest"
-            and isinstance(value["package"], str) and re.fullmatch(r"[a-z0-9][a-z0-9.-]*", value["package"]) is not None
-            and isinstance(value["version"], str) and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", value["version"]) is not None
-            and value["version"].rsplit(".", 1)[0] == lane.get("python")
-            and isinstance(value["sha512"], str) and re.fullmatch(r"[0-9a-f]{128}", value["sha512"]) is not None)
-
-
 def policy_at(root):
+    """The validated policy; every lane runs the policy's one Python version."""
     policy = read_json(root / POLICY_PATH)
     if policy.get("schema_version") != 1:
         raise CIError("unsupported CI test policy")
-    required = {"groups", "lanes", "always_groups", "full_paths", "rules", "module_seconds"}
+    required = {"groups", "lanes", "always_groups", "full_paths", "rules", "module_seconds", "python"}
     if not required <= set(policy):
         raise CIError("CI test policy is incomplete")
+    if not isinstance(policy["python"], str) or re.fullmatch(r"[0-9]+\.[0-9]+", policy["python"]) is None:
+        raise CIError("the policy Python version must pin major.minor")
     for name, lane in policy["lanes"].items():
         if not isinstance(lane.get("shards"), int) or not 1 <= lane["shards"] <= 16:
             raise CIError(f"invalid shard count for {name}")
@@ -249,11 +240,9 @@ def policy_at(root):
             raise CIError(f"invalid worker count for {name}")
         if lane.get("os") not in RUNNERS:
             raise CIError(f"invalid operating system for {name}")
-        if not isinstance(lane.get("python"), str) or len(lane["python"].split(".")) != 2 \
-                or not all(part.isdigit() for part in lane["python"].split(".")):
-            raise CIError(f"Python lane must pin major.minor: {name}")
-        if "interpreter" in lane and not valid_interpreter(lane["interpreter"], lane):
-            raise CIError(f"invalid pinned interpreter for {name}")
+        if "python" in lane:
+            raise CIError(f"a lane inherits the policy Python version: {name}")
+        lane["python"] = policy["python"]
     estimates = policy.get("test_seconds", {})
     if not isinstance(estimates, dict) or not set(estimates) <= RUNNERS or any(
             not isinstance(values, dict) or any(
@@ -413,33 +402,10 @@ def assignments(groups):
     return shards, owners
 
 
-def interpreter_fields(lane):
-    """Matrix fields naming a pinned interpreter package; empty selects setup-python."""
-    value = lane.get("interpreter")
-    if value is None:
-        return dict(NO_INTERPRETER)
-    return {"interpreter_package": value["package"], "interpreter_version": value["version"],
-            "interpreter_sha512": value["sha512"]}
-
-
-def apple_launcher_lane(selected_ids, policy):
-    if not any(test_id.startswith("tools.tests.test_vault_hook.") for test_id in selected_ids):
-        return None
-    name = policy.get("apple_launcher_lane")
-    lane = policy["lanes"].get(name)
-    if lane is None or lane["os"] != "macos-latest":
-        raise CIError("selected vault-hook tests require an Apple launcher lane")
-    return name
-
-
-def matrix_rows(lanes, apple_lane):
-    rows = [{"lane": name, "os": lane["os"], "python": lane["python"], "shard": index,
-             "shards": len(lane["shards"]), "apple_launcher": name == apple_lane and index == 0,
-             **interpreter_fields(lane)}
+def matrix_rows(lanes):
+    return [{"lane": name, "os": lane["os"], "python": lane["python"], "shard": index,
+             "shards": len(lane["shards"])}
             for name, lane in lanes.items() for index in range(len(lane["shards"]))]
-    if apple_lane is not None and sum(row["apple_launcher"] for row in rows) != 1:
-        raise CIError("Apple launcher check must belong to exactly one selected shard")
-    return rows
 
 
 def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
@@ -473,10 +439,7 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
                        "estimated_shard_seconds": [max(seconds) for seconds in worker_seconds],
                        "estimated_worker_seconds": worker_seconds,
                        "measured_weights": len(set(lane_ids) & set(measured))}
-        if "interpreter" in lane:
-            lanes[name]["interpreter"] = lane["interpreter"]
-    apple_lane = apple_launcher_lane(selected, policy)
-    rows = matrix_rows(lanes, apple_lane)
+    rows = matrix_rows(lanes)
     plan = {"schema_version": 1, "source_sha": source_sha,
             "source_tree": git(root, "rev-parse", source_sha + "^{tree}").decode().strip(),
             "policy_hash": digest(policy), "inventory_hash": inventory_hash,
@@ -484,10 +447,9 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
             "changed_paths": paths, "selection_reason": reason, "selected_ids": selected, "lanes": lanes,
             "timing_provenance": {"sources": timings.get("sources", []),
                                   "fallback_reasons": timings.get("fallback_reasons", ["no history supplied"])},
-            "has_tests": bool(rows), "apple_launcher": apple_lane is not None,
-            "apple_launcher_lane": apple_lane,
+            "has_tests": bool(rows), "python": policy["python"],
             "matrix": {"include": rows or [{"lane": "noop", "os": "ubuntu-latest",
-            "python": "3.14", "shard": 0, "shards": 0, "apple_launcher": False, **NO_INTERPRETER}]}}
+            "python": policy["python"], "shard": 0, "shards": 0}]}}
     plan["plan_hash"] = digest(plan)
     validate_plan(plan, root)
     return plan
@@ -501,9 +463,8 @@ def validate_plan(plan, root=None):
         raise CIError("plan selection contains duplicate or unsorted IDs")
     if bool(plan.get("lanes")) != plan.get("has_tests"):
         raise CIError("plan matrix disagrees with selected lanes")
-    apple_lane = plan.get("apple_launcher_lane")
-    if plan.get("apple_launcher") is not (apple_lane is not None):
-        raise CIError("Apple launcher selection differs from its lane")
+    if any(lane.get("python") != plan.get("python") for lane in plan["lanes"].values()):
+        raise CIError("every lane runs the plan's Python version")
     for name, lane in plan["lanes"].items():
         expected = lane["selected_ids"]
         flattened = [test_id for shard in lane["shards"] for test_id in shard]
@@ -515,15 +476,14 @@ def validate_plan(plan, root=None):
         if not set(expected) <= set(all_selected):
             raise CIError(f"lane contains an unselected test: {name}")
         validate_execution(name, lane)
-    rows = matrix_rows(plan["lanes"], apple_lane)
-    if any(not isinstance(row.get("apple_launcher"), bool) for row in plan["matrix"]["include"]):
-        raise CIError("matrix Apple launcher flags must be boolean")
+    rows = matrix_rows(plan["lanes"])
     if rows and sorted(rows, key=lambda row: (row["lane"], row["shard"])) != sorted(plan["matrix"]["include"], key=lambda row: (row["lane"], row["shard"])):
         raise CIError("matrix does not match the lane partitions")
     if root is not None:
         policy = policy_at(root)
         ids, inventory_hash = inventory(root)
-        if digest(policy) != plan["policy_hash"] or inventory_hash != plan["inventory_hash"]:
+        if digest(policy) != plan["policy_hash"] or inventory_hash != plan["inventory_hash"] \
+                or plan["python"] != policy["python"]:
             raise CIError("policy or inventory changed after planning")
         if git(root, "rev-parse", "HEAD^{tree}").decode().strip() != plan["source_tree"]:
             raise CIError("plan belongs to another source tree")
@@ -533,8 +493,6 @@ def validate_plan(plan, root=None):
         expected, mode, reason = select_ids(plan["requested_mode"], paths, policy, ids, root)
         if expected != all_selected or mode != plan["mode"] or paths != plan["changed_paths"] or reason != plan["selection_reason"]:
             raise CIError("plan selection does not match the declared inputs")
-        if apple_lane != apple_launcher_lane(all_selected, policy):
-            raise CIError("Apple launcher lane differs from policy")
         for name, config in policy["lanes"].items():
             permitted = ids if config["groups"] == ["all"] else group_ids(config["groups"], policy, ids)
             expected = sorted(set(all_selected) & set(permitted))
@@ -547,7 +505,7 @@ def validate_plan(plan, root=None):
                     or lane["python"] != config["python"] or len(lane["shards"]) != min(config["shards"], len(expected)) \
                     or lane.get("must_run_ids", []) != sorted(set(expected) & set(config.get("required_tests", []))):
                 raise CIError(f"lane coverage differs from policy: {name}")
-            if lane["workers"] != config.get("workers", 1) or lane.get("interpreter") != config.get("interpreter"):
+            if lane["workers"] != config.get("workers", 1):
                 raise CIError(f"lane execution differs from policy: {name}")
         if set(plan["lanes"]) - set(policy["lanes"]):
             raise CIError("plan contains unknown lanes")
@@ -567,8 +525,6 @@ def validate_execution(name, lane):
                 or not isinstance(estimates, list) or len(estimates) != len(used) \
                 or any(type(value) not in {int, float} or not math.isfinite(value) or value < 0 for value in estimates):
             raise CIError(f"worker partition is invalid: {name}")
-    if "interpreter" in lane and not valid_interpreter(lane["interpreter"], lane):
-        raise CIError(f"pinned interpreter is invalid: {name}")
 
 
 def available_cpus():

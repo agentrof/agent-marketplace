@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -505,113 +506,281 @@ class ProcessPolicyParameterTests(unittest.TestCase):
                           if finding.path == "delivery/process-policy.md"], [])
 
 
-def flat(relative: str) -> str:
-    return " ".join((TEAM / relative).read_text(encoding="utf-8").split())
+SKILLS = "plugins/software-engineering-team/skill-content"
+FLOWS = "plugins/software-engineering-team/flows"
+HOSTS = {host: f"platforms/{host}/software-engineering-team/host-contract.md"
+         for host in ("claude", "codex")}
+SWITCH_REFERENCE = re.compile(r"switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md")
+# The value each switch ships at: a flip changes every project that chose nothing.
+RELEASED_DEFAULTS = {
+    "code_review_panel": "single_reader",
+    "delivery_path": "standard",
+    "execution_planning": "per_document",
+    "implementation_schedule": "sequential_v1",
+    "mechanical_pass_tier": "role_tier",
+    "owner_gates": "per_step",
+    "pre_handoff_regression": "off",
+    "review_loop": "current",
+    "review_manifest_scope": "transitive",
+    "review_panels": "single_reader",
+    "story_size_budget": "off",
+}
+# The rules that keep a switch value safe, in the files agents read them from:
+# who decides, who reads independently, which severity holds, which gate stays
+# and which writes never run at once. Any other sentence may be reworded.
+SAFETY_RULES = {
+    "code_review_panel": {
+        f"{SKILLS}/code-review/references/switch-code_review_panel-beside_official.md": (
+            "The panel never replaces the official code reviewer",
+            "No reader of the step gets another reader's reply, QA's output or evidence that"
+            " appears after dispatch",
+            "The implementation writer stays idle until `merge-panel` settles the code review",
+            "Spawn a fresh `code-reviewer` on its own tier, never a `code-reviewer-lens`",
+            "A duplicate never gates on its own",
+        ),
+        HOSTS["claude"]: ("only the code review panel under switch `code_review_panel` at"
+                          " `beside_official` spawns it",),
+        HOSTS["codex"]: ("only the code review panel under switch `code_review_panel` at"
+                         " `beside_official` starts it",),
+    },
+    "delivery_path": {
+        f"{SKILLS}/delivery-plan/references/switch-delivery_path-light_when_eligible.md": (
+            "The light path merges planning steps and owner gates, never checks",
+            "The compiler decides eligibility from the records; nothing is assumed",
+            "With no limit set no Story is eligible, so small is always the owner's definition",
+            "The light path ends at the first failed `light-path-check`",
+            "A Delivery never returns to the light path",
+            "compose into one gate, never two",
+        ),
+        f"{SKILLS}/execution-plan/references/switch-delivery_path-light_when_eligible.md": (
+            "Write no execution-planning definitions document, Operation contract, architecture"
+            " record or any other file",
+            "The escalation clause of your role stays as it is",
+        ),
+        **{path: ("Delivery execution is available only through the exact public entries"
+                  " `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.",)
+           for path in HOSTS.values()},
+    },
+    "execution_planning": {
+        f"{SKILLS}/execution-plan/references/switch-execution_planning-single_source_bundle.md": (
+            "the QA Engineer writes the Verification Contract and the DevOps Engineer the"
+            " Environment Contract",
+            "An architecture record exists only inside an active Item",
+            "Publication carries only the contracts an Item pins",
+            "A non-runtime Item never binds the Environment Contract",
+            "one that contradicts the owner is critical",
+        ),
+        f"{SKILLS}/software-architecture/references/switch-execution_planning-single_source_bundle.md": (
+            "this file changes where a definition is written, never what the architect decides"
+            " or when it escalates",
+        ),
+        f"{SKILLS}/challenge-review/references/switch-review_panels-lens_panel.md": (
+            "run once for each contract the bundle revises, as that contract's counterpart",
+        ),
+        "plugins/software-engineering-team/agents/software-architect.md": (
+            "Escalates and halts, never guesses",),
+        "docs/orchestration.md": (
+            "A claim on an Operation contract is calibrated by the counterpart of the contract"
+            " the claim concerns, the DevOps Engineer for the Verification Contract and the QA"
+            " Engineer for the Environment Contract, never by that contract's writer.",
+        ),
+    },
+    "implementation_schedule": {
+        f"{SKILLS}/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md": (
+            "A lane makes no Git writes: no add, commit,",
+            "A lane reports each file it creates, and the coordinator runs `git add -N <path>`"
+            " for it, one Git command at a time",
+        ),
+        **{path: ("writers run at the same time only when their approved lane scopes are"
+                  " disjoint",) for path in HOSTS.values()},
+        "docs/orchestration.md": (
+            "Writers are serialized, except in the two process-switch cases below: the parallel"
+            " lanes of `implementation_schedule` and the parallel contract drafts of"
+            " `execution_planning`.",
+        ),
+    },
+    "mechanical_pass_tier": {
+        f"{SKILLS}/challenge-review/references/switch-mechanical_pass_tier-mechanical.md": (
+            "Never mechanical: authoring or rewriting text no finding dictates, design or a"
+            " choice between alternatives, triage of findings, code and architecture repairs,"
+            " and every review, re-check or calibration.",
+            "A variant never reads for a review, re-check or calibration",
+            "It never changes a severity, never disputes a finding and never edits text no"
+            " finding names.",
+            "Every gate before a stamp stays, including the reader barrier, the"
+            " `--expected-hash` recheck and the owner's approval.",
+            "the Operation counterpart that reviews the other contract runs as its base role",
+        ),
+    },
+    "owner_gates": {
+        f"{SKILLS}/deliver/references/switch-owner_gates-two_fixed_gates.md": (
+            "Nothing is decided by default",
+            "the run never proceeds on a guess",
+            "Only the owner's answer closes a question",
+            "No approved document changes between the gates unless an `answered` row names it",
+            "Ask a decision of these classes at once and name its class in the question",
+            "(`delivery_compile.py check` and `check-plan`, `operation_compile.py check`,"
+            " `delivery_governance.py check`), present gate A",
+        ),
+        f"{FLOWS}/execution-planning.md": ("Show the plan to the user only once it passes",),
+        f"{SKILLS}/execution-plan/SKILL.md": ("the plan is shown only once it passes",),
+        # Decisions of these classes are asked at once, never queued for a gate.
+        f"{SKILLS}/deliver/data/owner-decision-classes.json": (
+            '"rule_exception"', '"scope_or_grant_change"',
+            '"credentials_spending_or_irreversible_action"'),
+        HOSTS["claude"]: ("`AskUserQuestion` takes at most four questions per call",),
+        HOSTS["codex"]: ("`request_user_input` takes at most three questions per call",),
+    },
+    "pre_handoff_regression": {
+        f"{SKILLS}/deliver/references/switch-pre_handoff_regression-touched_suites.md": (
+            "A failing run is repaired before the freeze",
+            "leaves the run with `selection_intact` false, so it does not pass",
+            "`freeze` refuses with `DELIVERY_ENVIRONMENT_BUSY` and names the holder, so a run"
+            " still going is never passed over",
+            "`run --fresh` reuses no run and runs every suite",
+            "No other command receives the variable, an inherited one included",
+            "which QA always runs itself",
+            "Evidence approval checks the reuse as recorded",
+        ),
+    },
+    "review_loop": {
+        f"{SKILLS}/challenge-review/references/switch-review_loop-blocking_delta.md": (
+            "Only a critical or major finding blocks",
+            "The writer never lowers a returned severity",
+            "A finding that stays critical or major after calibration never enters an"
+            " `Accepted Minor Findings` section",
+            "The calibration reader is neither the writer nor a reader that returned a finding"
+            " of the review",
+            "Never pass the writer's triage or interpretation, another reply or the conversation",
+            "A row that lowers or invalidates a claim without citing the text is refused: that"
+            " claim keeps its claimed severity",
+            "Never spawn a `-lens` or `-mechanical` variant for calibration",
+        ),
+        f"{SKILLS}/code-review/references/switch-review_loop-blocking_delta.md": (
+            "Spawn a fresh `code-reviewer` on its own tier, neither an implementation writer nor"
+            " the reviewer that returned the claims",
+            "Credentials or secrets that reach a client artifact or a log stay critical",
+            "Neither the claiming reviewer nor the writer changes a severity",
+            "QA keeps its own blocking severities",
+        ),
+    },
+    "review_manifest_scope": {
+        f"{SKILLS}/backlog-plan/references/switch-review_manifest_scope-bounded.md": (
+            "The root manifest and a writer's manifest keep the transitive read set, and backlog"
+            " approval still checks the whole backlog",
+            "Add each reported note to that reader's task with `--input`, rerun that reader",
+            "a review taken under the other value is stale",
+        ),
+    },
+    "review_panels": {
+        f"{SKILLS}/challenge-review/references/switch-review_panels-lens_panel.md": (
+            "one fresh, read-only reader per lens assignment, in parallel, over the same inputs",
+            "Never pass another reader's reply, conversation history or the writer's"
+            " interpretation",
+            "Wait for every reader before any writer action",
+            "keeps every reader's evidence and the highest returned severity",
+            "the writer never lowers a returned severity",
+            "approved only when every assignment has returned, no lens has an open critical or"
+            " major finding and the owning compiler checks named by the flow are green",
+            "so a manifest derived under another value is stale",
+        ),
+        # At the default every panel step keeps its one independent reviewer.
+        f"{FLOWS}/backlog-planning.md": (
+            "Give one fresh `backlog-reviewer` the returned manifest and every named path",),
+        f"{FLOWS}/solution-design.md": (
+            "Spawn one independent primary `solution-reviewer` for all four required lenses",),
+        f"{FLOWS}/design-system.md": (
+            "Spawn `design-system-reviewer` read-only with MASTER, catalog, page overrides and"
+            " the semantic token, accessibility and contradiction lens",),
+        f"{FLOWS}/operation.md": ("Spawn the non-writing counterpart as a read-only reviewer",),
+        **{path: ("the reviewers themselves keep their own tier",) for path in HOSTS.values()},
+    },
+    "story_size_budget": {
+        f"{SKILLS}/product-planning/references/switch-story_size_budget-propose_split.md": (
+            "it never fails `backlog_compile.py check`, never blocks a review or an approval and"
+            " never rewrites a criterion",
+            "Never merge, reword, drop or compress a criterion or a scenario to fit a limit",
+            "Ask the owner one choice-gate question per over-budget story",
+            "every moved criterion is covered by exactly one of the two stories",
+            "Never classify a story to fit a limit",
+            "the budget never changes the selection or the scope decision",
+        ),
+    },
+}
+# Choices reach a project only through the Process Policy lifecycle.
+POLICY_RULES = {
+    f"{SKILLS}/configure/references/process-policy.md": (
+        "Never choose for the user and never skip a switch",
+        "The package default is the recommended option and comes first",
+        "Ask the approval choice gate. On rejection write nothing",
+        "`workspace/config.json` never holds a process choice",
+        "never hand-edit the Switches table or the lifecycle fields",
+        "inside a Delivery with `--delivery DLV-###`, which refuses a drifted pin",
+        "A Delivery in review or later keeps its pin",
+    ),
+    f"{SKILLS}/configure/SKILL.md": (
+        "for `process`, use `process_policy.py`. Never hand-edit their lifecycle fields",),
+    f"{SKILLS}/configure/references/config-contract.md": (
+        "the config stays closed, and the Process Policy is the one place for process choices",),
+}
+# Steps whose order is the rule: the pre-handoff run sits between the freeze and the readers.
+ORDERED_STEPS = {
+    f"{FLOWS}/delivery-execution.md": (
+        "freeze --delivery DLV-### --story <story>",
+        "Switch `pre_handoff_regression`",
+        "Invoke Code Review and QA independently",
+    ),
+}
 
 
-class ConfigureProcessContractTests(unittest.TestCase):
-    """/configure process changes switch values only through the policy lifecycle."""
-
-    def test_configure_routes_process_to_its_reference_and_compiler(self):
-        skill = flat("skill-content/configure/SKILL.md")
-        for rule in ("or a process switch (`process`)",
-                     "`references/process-policy.md` for `process` before durable changes",
-                     "for `process`, use `process_policy.py`. Never hand-edit their lifecycle fields"):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, skill)
-
-    def test_one_choice_gate_per_switch_with_the_default_recommended_first(self):
-        reference = flat("skill-content/configure/references/process-policy.md")
-        for rule in (
-                "Ask one choice-gate question per switch, in host calls no larger than the"
-                " per-call bound the host contract names",
-                "The package default is the recommended option and comes first",
-                "Each option's description carries that value's registry tradeoffs",
-                "the question names the switch's metric and promotion unit",
-                "Never choose for the user and never skip a switch",
-                "When no answer changes a value in force and `undeclared` lists no row, write"
-                " nothing and stop",
-                "Under `undeclared` it lists each policy row for a switch or parameter this"
-                " package no longer declares",
-                "each undeclared row the revision removes",
-                "`set --switch <id> --default` for each undeclared switch row and"
-                " `set --switch <id> --parameter <id> --default` for each undeclared parameter"
-                " row",
-                "Ask the approval choice gate. On rejection write nothing",
-                "Choosing the default removes the switch's row",
-                "`workspace/config.json` never holds a process choice",
-                "never hand-edit the Switches table or the lifecycle fields",
-                "a project row is never a promotion",
-                "name every Delivery whose pinned value of a switch it still reads the delta changes",
-                "an execution-approved one reads only those its `delivery-execution` flow owns",
-                "A switch no Delivery flow owns is read from the current policy",
-                "its checks refuse it until its execution plan is revised and approved again",
-                "A Delivery in review or later keeps its pin",
-                "inside a Delivery with `--delivery DLV-###`, which refuses a drifted pin",
-                "reads the pinned revision's value from then on",
-                "`begin-plan-revision`, the execution-plan tasks, which bind the new revision"
-                " while that barrier is held, and the Item revisions they make,"
-                " `approve-execution`, `publish-execution-plan` and `finish-plan-revision`"):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, reference)
-        order = [reference.index(verb) for verb in (
-            "`process_policy.py switches", "`init`", "`begin-revision`", "`set --switch",
-            "`check`", "`approve`")]
-        self.assertEqual(order, sorted(order))
-
-    def test_config_stays_closed_and_names_the_process_policy(self):
-        contract = flat("skill-content/configure/references/config-contract.md")
-        self.assertIn("| Process switch values | `workspace/docs/delivery/process-policy.md` over"
-                      " the package registry `data/process-switches.json` | Process Policy"
-                      " lifecycle, `/configure process` |", contract)
-        self.assertIn("No `scale`, `limits`, stack, source-directory, command or process switch"
-                      " field is accepted in config: the config stays closed, and the Process"
-                      " Policy is the one place for process choices", contract)
+def flat_text(relative: str) -> str:
+    return " ".join((ROOT / relative).read_text(encoding="utf-8").split())
 
 
-class PromotionRuleTests(unittest.TestCase):
-    """The promotion rule says which choices survive a flip, how a value that
-    takes parameters is promoted and who sets a unit other than 3 Deliveries."""
+class ProcessSwitchContractTests(unittest.TestCase):
+    """One registry-driven check of every switch, beside the validator's anchor,
+    reference and shape rules, and the safety rules each value keeps."""
 
-    def test_only_a_non_default_choice_survives_a_flip(self):
-        authoring = " ".join((ROOT / "docs/authoring.md").read_text(encoding="utf-8").split())
-        self.assertIn("Only a non-default choice survives a flip. The Process Policy keeps a row"
-                      " only for a value other than the default", authoring)
-        self.assertIn("also one whose owner answered the previous default at the choice gate",
-                      authoring)
-        self.assertNotIn("a project that chose either value explicitly keeps it", authoring)
-        reference = flat("skill-content/configure/references/process-policy.md")
-        self.assertIn("The default option's description says that it records no row, so a"
-                      " later promoted default reaches the project", reference)
-
-    def test_a_value_that_takes_parameters_is_promoted_with_package_limits(self):
-        authoring = " ".join((ROOT / "docs/authoring.md").read_text(encoding="utf-8").split())
-        self.assertIn("A value that takes owner-set parameters stays non-default", authoring)
-        self.assertIn("the switch's `parameters` gain `package_limits`", authoring)
-        switch = json.loads((TEAM / process_policy.REGISTRY).read_text(
-            encoding="utf-8"))["switches"]["story_size_budget"]
-        self.assertIn("A promotion keeps off as the default, since only a value the owner"
-                      " chooses takes parameters, and ships package_limits for propose_split",
-                      switch["promotion"]["threshold"])
-
-    def test_a_unit_other_than_three_deliveries_needs_its_issue_or_an_owner_decision(self):
-        authoring = " ".join((ROOT / "docs/authoring.md").read_text(encoding="utf-8").split())
-        self.assertIn("The unit is at least 3 Deliveries. Another unit needs the switch's idea"
-                      " issue or an owner decision to declare it", authoring)
-        self.assertIn("the owner confirmed that unit on 1 Oct 2026", authoring)
-        self.assertNotIn("unless the switch declares another unit", authoring)
-        switches = json.loads((TEAM / process_policy.REGISTRY).read_text(encoding="utf-8"))
-        units = {name: spec["promotion"]["unit"] for name, spec in switches["switches"].items()}
-        # Every other switch keeps a unit of Deliveries, or Items from Deliveries.
-        self.assertIn("5 epic review passes", units.pop("review_manifest_scope"))
-        self.assertIn("5 panel review passes", units.pop("review_panels"))
-        self.assertIn("5 reviewed documents", units.pop("review_loop"))
-        # #347 states the code review panel's unit as its measurement criterion.
-        self.assertIn("5 code-review passes", units.pop("code_review_panel"))
-        for name, unit in units.items():
+    def test_every_switch_ships_at_its_released_default_with_scoped_instructions(self):
+        switches = json.loads((TEAM / process_policy.REGISTRY).read_text(encoding="utf-8"))["switches"]
+        self.assertEqual(sorted(switches), sorted(RELEASED_DEFAULTS))
+        self.assertEqual(sorted(SAFETY_RULES), sorted(RELEASED_DEFAULTS))
+        references: dict = {}
+        for path in sorted(TEAM.glob("skill-content/*/references/switch-*.md")):
+            name, value = SWITCH_REFERENCE.fullmatch(path.name).groups()
+            references.setdefault((name, value), []).append(path.relative_to(ROOT).as_posix())
+        orchestration = flat_text("docs/orchestration.md")
+        for name, spec in sorted(switches.items()):
+            values = [value["id"] for value in spec["values"]]
             with self.subTest(switch=name):
-                self.assertIn("3", unit)
-                self.assertRegex(unit, "Deliveries")
+                self.assertEqual(spec["default"], RELEASED_DEFAULTS[name])
+                self.assertIn("with every shared quality guard holding and the owner's approval",
+                              spec["promotion"]["threshold"])
+                self.assertIn(f"switch `{name}`", orchestration.replace("Switch", "switch"))
+                for value in values:
+                    self.assertIn(f"`{value}`", orchestration)
+                for value in values:
+                    if value == spec["default"]:
+                        continue
+                    self.assertTrue(references.get((name, value)), value)
+                    for relative in references[(name, value)]:
+                        text = flat_text(relative)
+                        for term in (f"`{name}`", f"`{value}`", "Process Policy"):
+                            self.assertIn(term, text, relative)
+
+    def test_the_safety_rules_stay_where_agents_read_them(self):
+        rules = [(name, relative, rule) for name, files in sorted(SAFETY_RULES.items())
+                 for relative, texts in files.items() for rule in texts]
+        rules += [("process_policy", relative, rule) for relative, texts in POLICY_RULES.items()
+                  for rule in texts]
+        for name, relative, rule in rules:
+            with self.subTest(switch=name, path=relative, rule=rule[:60]):
+                self.assertIn(rule, flat_text(relative))
+        for relative, steps in ORDERED_STEPS.items():
+            text = flat_text(relative)
+            with self.subTest(path=relative):
+                positions = [text.index(step) for step in steps]
+                self.assertEqual(positions, sorted(positions))
 
 
 class MeasuredBaselineTests(unittest.TestCase):

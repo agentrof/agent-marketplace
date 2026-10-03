@@ -297,14 +297,14 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         ])
         self.assertNotIn("release-pr-policy", jobs)
         self.assertNotIn("release-queue-policy", jobs)
-        self.assertEqual(jobs["compatibility"]["needs"], ["plan", "test-shards"])
-        self.assertNotIn("compatibility", jobs["check"]["needs"])
-        self.assertIn("name: compatibility (${{ matrix.os }}, Python ${{ matrix.python }})", validate)
+        self.assertNotIn("compatibility", jobs)
+        self.assertEqual(jobs["changeset"]["needs"], ["plan"])
+        self.assertEqual(jobs["deterministic-check"]["needs"], ["plan"])
 
     def test_required_contexts_also_report_on_merge_queue_groups(self):
         trigger = "  merge_group:\n    types: [checks_requested]\n"
         for workflow, contexts in (
-            ("validate.yml", ("name: check\n", "name: compatibility (")),
+            ("validate.yml", ("name: check\n",)),
             ("codeql.yml", ("  analyze-python:\n",)),
             ("release-hosts.yml", ("name: Claude Code and Codex lifecycle\n",)),
         ):
@@ -317,12 +317,6 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                 for context in contexts:
                     self.assertIn(context, text)
         self.assertNotIn("merge_group", self.text("release.yml"))
-
-    def test_merge_groups_run_the_ordinary_gates_without_a_release_gate(self):
-        text = self.text("validate.yml")
-        self.assertNotIn("verify-merge-group", text)
-        self.assertNotIn("merge_group.head_ref", text)
-        self.assertNotIn("release-queue-policy", text)
 
     def test_finalize_requires_a_release_github_reports_immutable(self):
         text = self.text("release.yml")
@@ -341,9 +335,29 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         text = self.text("validate.yml")
         self.assertIn("permissions:\n  contents: read\n  actions: read\n  pull-requests: read", text)
         self.assertNotIn("contents: write", text)
-        self.assertIn('python-version: "3.14"', text)
         self.assertIn('python-version: ${{ matrix.python }}', text)
         self.assertIn('persist-credentials: false', text)
+
+    def test_every_python_a_workflow_sets_up_is_the_policy_version(self):
+        policy = json.loads((REPO / "tools/data/ci-test-policy.json").read_text(encoding="utf-8"))
+        hosts = json.loads((REPO / "tools/data/ci-host-policy.json").read_text(encoding="utf-8"))
+        self.assertEqual(hosts["python"], policy["python"])
+        literals, expressions = {}, {}
+        for workflow in sorted((REPO / ".github" / "workflows").glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            for job, block in re.findall(r"(?ms)^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)",
+                                         text.split("\njobs:\n", 1)[1]):
+                for value in re.findall(r"(?m)^ +python-version: (.+)$", block):
+                    target = expressions if value.startswith("${{") else literals
+                    target.setdefault(value, []).append(f"{workflow.name}:{job}")
+        # A job that runs before any plan sets up the policy's version itself.
+        self.assertEqual(literals, {f'"{policy["python"]}"': [
+            "release-hosts.yml:host-plan", "release.yml:public-smoke", "validate.yml:plan"]})
+        self.assertEqual(expressions, {
+            "${{ needs.host-plan.outputs.python }}": ["release-hosts.yml:fresh-host-lifecycle"],
+            "${{ needs.plan.outputs.python }}": [
+                "validate.yml:changeset", "validate.yml:deterministic-check", "validate.yml:check"],
+            "${{ matrix.python }}": ["validate.yml:test-shards"]})
 
     def test_no_job_inherits_a_skip_its_need_tolerates(self):
         validate = workflow_jobs(self.text("validate.yml"))
@@ -400,62 +414,38 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         ))
         self.assertEqual([], workflow_skip_inheritance_findings("gated", gated))
 
-    def test_vault_hook_matrix_gates_platforms_and_apple_launcher(self):
+    def test_each_system_tests_the_policy_python_in_one_lane(self):
         text = self.text("validate.yml")
-        policy = json.loads((REPO / "tools/data/ci-test-policy.json").read_text())
-        environments = {(item["os"], item["python"]) for item in policy["lanes"].values()}
-        self.assertEqual(environments, {
-            (runner, version) for runner in ("ubuntu-latest", "macos-latest", "windows-latest")
-            for version in ("3.9", "3.14")
-        })
+        policy = json.loads((REPO / "tools/data/ci-test-policy.json").read_text(encoding="utf-8"))
+        self.assertEqual({lane["os"] for lane in policy["lanes"].values()},
+                         {"ubuntu-latest", "macos-latest", "windows-latest"})
+        self.assertEqual(len(policy["lanes"]), 3)
+        self.assertTrue(all("python" not in lane and "interpreter" not in lane
+                            for lane in policy["lanes"].values()))
+        self.assertNotIn("apple_launcher_lane", policy)
         self.assertNotIn("vault-hook-platforms:", text)
-        self.assertEqual(policy["apple_launcher_lane"], "macos-minimum")
-        self.assertEqual(policy["lanes"]["macos-minimum"]["shards"], 1)
-        shard_job = text.split("\n  test-shards:\n", 1)[1].split("\n  compatibility:\n", 1)[0]
-        self.assertIn("if: matrix.apple_launcher == true", shard_job)
-        self.assertLess(shard_job.index("Exercise the Apple system Python launcher"),
-                        shard_job.index("uses: actions/setup-python@"))
+        shard_job = text.split("\n  test-shards:\n", 1)[1].split("\n  check:\n", 1)[0]
+        setup = shard_job.split("uses: actions/setup-python@", 1)[1].split("\n      - ", 1)[0]
+        self.assertEqual([line.strip() for line in setup.splitlines()[1:]],
+                         ["with:", "python-version: ${{ matrix.python }}"])
+        for retired in ("apple_launcher", "Apple system Python", "/usr/bin/python3",
+                        "AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3", "interpreter_", "nuget", "pwsh"):
+            self.assertNotIn(retired, text)
         self.assertNotIn("continue-on-error", shard_job)
         self.assertIn("TEST_RESULT: ${{ needs.test-shards.result }}", text)
         self.assertIn('test "$TEST_RESULT" = success', text)
-        for setting in ('AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3: "1"', 'DEVELOPER_DIR: ""',
-                        'PATH: /usr/bin:/bin:/usr/sbin:/sbin', 'SDKROOT: ""', 'TOOLCHAINS: ""'):
-            self.assertIn(setting, shard_job)
-        self.assertEqual(text.count("AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3"), 1)
-        for name in (
-            "test_system_macos_python3_launcher_is_accepted",
-            "test_issue_77_bare_python_cmd_preserves_attested_codex_result",
-            "test_bare_python_candidate_with_invalid_result_is_restored",
-            "test_bare_render_cannot_publish_a_different_valid_transition",
-            "test_bare_render_with_forged_registry_is_restored",
-            "test_issue_77_bare_init_has_an_exact_attested_delta",
-            "test_issue_77_bare_init_preserves_real_codex_draft",
-        ):
-            self.assertIn(name, text)
-        self.assertIn("tools.tests.test_delivery_compile.*", policy["groups"]["windows"]["tests"])
-        self.assertIn("tools.tests.test_delivery_git.*", policy["groups"]["windows"]["tests"])
-
-    def test_a_pinned_interpreter_package_replaces_setup_python_only_where_declared(self):
-        text = self.text("validate.yml")
-        policy = json.loads((REPO / "tools/data/ci-test-policy.json").read_text(encoding="utf-8"))
-        pinned = {name: lane["interpreter"] for name, lane in policy["lanes"].items() if "interpreter" in lane}
-        self.assertEqual(set(pinned), {"windows-minimum"})
-        self.assertEqual({(pin["source"], pin["package"], pin["version"]) for pin in pinned.values()},
-                         {("nuget", "python", "3.9.13")})
-        shard_job = text.split("\n  test-shards:\n", 1)[1].split("\n  compatibility:\n", 1)[0]
-        install = shard_job.split("- name: Install the pinned Python package\n", 1)[1].split("\n      - ", 1)[0]
-        setup = shard_job.split("uses: actions/setup-python@", 1)[1].split("\n      - ", 1)[0]
-        self.assertIn("if: matrix.interpreter_version != ''", install)
-        self.assertIn("if: matrix.interpreter_version == ''", setup)
-        self.assertLess(shard_job.index("Install the pinned Python package"),
-                        shard_job.index("uses: actions/setup-python@"))
-        for step in ("Get-FileHash -Algorithm SHA512", "-ne $env:SHA512", "https://api.nuget.org/v3-flatcontainer/",
-                     'New-Item -ItemType SymbolicLink -Path (Join-Path $tools "python3.exe")',
-                     "-m compileall -qq -j 0 -x site-packages", "$found -ne $env:VERSION", "$env:GITHUB_PATH"):
-            self.assertIn(step, install)
+        # The hook and the Delivery code keep native tests where their systems differ.
+        native = {lane: [selector for group in ("platform", lane)
+                         for selector in policy["groups"][group]["tests"]]
+                  for lane in ("macos", "windows")}
+        for lane, module in (("macos", "test_vault_hook"), ("windows", "test_vault_hook"),
+                             ("windows", "test_delivery_compile"), ("windows", "test_delivery_git")):
+            with self.subTest(lane=lane, module=module):
+                self.assertTrue(any(selector.startswith(f"tools.tests.{module}.")
+                                    for selector in native[lane]))
 
     def test_test_scratch_lives_on_the_runner_work_directory(self):
-        shard_job = self.text("validate.yml").split("\n  test-shards:\n", 1)[1].split("\n  compatibility:\n", 1)[0]
+        shard_job = self.text("validate.yml").split("\n  test-shards:\n", 1)[1].split("\n  check:\n", 1)[0]
         run = shard_job.split("- name: Run the exact selected test partition\n", 1)[1]
         for name in ("TMPDIR", "TMP", "TEMP"):
             self.assertIn(f"{name}: ${{{{ runner.temp }}}}\n", run)

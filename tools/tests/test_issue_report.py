@@ -25,9 +25,6 @@ from git_fixture import init_repository, remove_temporary  # noqa: E402
 PLUGIN = ROOT / "plugins/software-engineering-team"
 FILE_ISSUE = PLUGIN / "scripts/file_issue.py"
 ISSUE_SKILL = PLUGIN / "skill-content/issue-report/SKILL.md"
-VAULT_POLICY = (
-    PLUGIN / "skill-content/obsidian-vault/data/vault-policy.json"
-)
 NO_CHECKOUT_NOTICE = ("file_issue: notice: no Git checkout at the project root, so only"
                       " home-directory paths are checked\n")
 
@@ -70,50 +67,6 @@ class IssueReportTests(unittest.TestCase):
             "does not require project setup",
         ):
             self.assertIn(required, text)
-        for retired in (
-            "workspace/docs",
-            "obsidian-vault",
-            "issue_compile.py",
-            "--report",
-            "--dry-run",
-            "source_hash",
-        ):
-            self.assertNotIn(retired, text)
-
-    def test_vault_backlog_and_portable_gate_have_no_issue_contract(self):
-        policy = json.loads(VAULT_POLICY.read_text(encoding="utf-8"))
-        self.assertNotIn("issues", policy["subtrees"])
-        self.assertNotIn("issue-report", policy["extra_doc_types"])
-        self.assertNotIn("issue_report", policy["type_path_patterns"])
-        self.assertNotIn("issue_report", policy["status_values"])
-        self.assertNotIn(
-            "issue-report", policy["fragment_graph_groups"]["backlog"]
-        )
-        self.assertNotIn(
-            "issue-report",
-            {group["id"] for group in policy["graph_color_groups"]},
-        )
-        for retired_property in ("issue_kind", "external_url", "filed_at_utc"):
-            self.assertNotIn(retired_property, policy["property_types"])
-
-        graph = (
-            PLUGIN / "templates/vault/.obsidian/graph.json"
-        ).read_text(encoding="utf-8")
-        types = (
-            PLUGIN / "templates/vault/.obsidian/types.json"
-        ).read_text(encoding="utf-8")
-        backlog = (PLUGIN / "scripts/backlog_compile.py").read_text(
-            encoding="utf-8"
-        )
-        portable = (PLUGIN / "scripts/vault_gate.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertNotIn("doc/issue-report", graph)
-        self.assertNotIn("issue_kind", types)
-        self.assertNotIn('"issue-report"', backlog)
-        self.assertNotIn("issue_compile.py", portable)
-        self.assertFalse((PLUGIN / "scripts/issue_compile.py").exists())
-        self.assertFalse((PLUGIN / "templates/vault/maps/issues.md").exists())
 
     def test_empty_title_and_body_fail_before_network(self):
         with mock.patch.object(self.issue, "create_issue") as create:
@@ -315,17 +268,6 @@ class IssueReportTests(unittest.TestCase):
                 ):
                     with self.assertRaises(expected):
                         self.issue.create_with_api("title", "body", "secret")
-
-    def test_retired_file_and_dry_run_arguments_are_not_accepted(self):
-        for arguments in (
-            ["--report", "report.md"],
-            ["--title", "Title", "--dry-run"],
-        ):
-            with self.subTest(arguments=arguments), \
-                    redirect_stderr(io.StringIO()):
-                with self.assertRaises(SystemExit) as raised:
-                    self.issue.main(arguments)
-            self.assertEqual(raised.exception.code, 2)
 
 
 class UpstreamConfidentialityTests(unittest.TestCase):

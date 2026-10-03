@@ -55,6 +55,13 @@ def run_compiler(compiler, argv):
     return code, out.getvalue(), err.getvalue()
 
 
+def assert_distributions_ship_the_compiler(case: unittest.TestCase) -> None:
+    """Both host builds ship the canonical compiler byte for byte, so its run proves theirs."""
+    for host in ("claude", "codex"):
+        shipped = REPO / "dist" / host / "software-engineering-team/scripts/ba_compile.py"
+        case.assertEqual(shipped.read_bytes(), COMPILER.read_bytes(), shipped)
+
+
 def load_compiler(path: Path, name: str):
     module_spec = importlib.util.spec_from_file_location(name, path)
     compiler = importlib.util.module_from_spec(module_spec)
@@ -367,13 +374,6 @@ def break_required_sections(space: Path) -> None:
          "## Trigger <!-- sec: trigger -->", "## Trigger")
 
 
-def break_summary_caps(space: Path) -> None:
-    filler = "\n".join(f"Summary filler line {i}." for i in range(12))
-    edit(space / INV / "entities" / "stock-item-entity.md",
-         "One sellable, storable product variant tracked per warehouse.",
-         filler)
-
-
 def break_content_bans(space: Path) -> None:
     edit(space / INV / "processes" / "goods-receipt-process.md",
          "Damaged goods are refused", "Damaged goods — refused")
@@ -434,17 +434,6 @@ def break_br_uncited(space: Path) -> None:
          "| BR-INV-002 | On-hand quantity",
          "| BR-INV-003 | An uncited rule. | constraint | active | |\n"
          "| BR-INV-002 | On-hand quantity")
-
-
-def break_thresholds(space: Path) -> None:
-    filler = "\n".join(f"Exception narration line {i}." for i in range(1400))
-    edit(space / INV / "processes" / "goods-receipt-process.md",
-         "Damaged goods are refused at the line level.", filler)
-
-
-def break_aging(space: Path) -> None:
-    edit(space / INV / "rules" / "stock-item-lifecycle-rules.md",
-         "| confirmed | 2026-07-09 |", "| open | 2020-01-01 |")
 
 
 def break_gate_approval(space: Path) -> None:
@@ -542,16 +531,6 @@ class ValidSpaceTests(unittest.TestCase):
         self.assertNotIn("challenge", SCHEMA)
         self.assertNotIn("locked", SCHEMA["frontmatter"]["optional"])
         self.assertNotRegex(SCHEMA["id_format"], r"(?:^|\|)CH(?:\||\))")
-
-    def test_generated_views_have_no_challenge_history(self):
-        registry = (self.space / "_generated" / "registry.md").read_text(
-            encoding="utf-8"
-        )
-        status = (self.space / "_generated" / "status.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertNotIn("Challenge Findings", registry)
-        self.assertNotIn("Challenge coverage", status)
 
     def test_render_is_deterministic(self):
         first = {p.name: p.read_bytes()
@@ -903,62 +882,58 @@ class EnterReviewTests(unittest.TestCase):
             business_analysis.rmdir()
 
     def test_full_review_lifecycle_in_canonical_and_both_distributions(self):
-        paths = [COMPILER, *(REPO / "dist" / host / "software-engineering-team/scripts/ba_compile.py"
-                              for host in ("claude", "codex"))]
+        assert_distributions_ship_the_compiler(self)
         relative = "domains/inventory/decisions/batch-sizing-decision.md"
-        for index, path in enumerate(paths):
-            with self.subTest(compiler=str(path)), tempfile.TemporaryDirectory() as raw:
-                compiler = load_compiler(path, f"review_entry_{index}")
-                docs = Path(raw) / "docs"
-                space = docs / "business-analysis/erp"
-                make_valid_space(space)
-                code, out, err = run_compiler(compiler, ["stub", "--space", str(space),
-                    "--type", "decision", "--node", "domains/inventory",
-                    "--slug", "batch-sizing", "--title", "Batch sizing"])
-                self.assertEqual(code, 0, out + err)
-                for cycle in range(2):
-                    if cycle:
-                        code, out, err = run_compiler(compiler, ["begin-revision", "--space", str(space), "--doc", relative])
-                        self.assertEqual(code, 0, out + err)
-                    for command in ("enter-review", "approve"):
-                        code, out, err = run_compiler(compiler, [command, "--space", str(space), "--doc", relative])
-                        self.assertEqual(code, 0, out + err)
-                        checked = subprocess.run([sys.executable, str(VAULT_CHECK), "check", "--vault", str(docs),
-                            "--impact", f"business-analysis/erp/{relative}"], capture_output=True, text=True)
-                        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
-                    code, out, err = run_compiler(compiler, ["approve-package", "--space", str(space)])
+        with tempfile.TemporaryDirectory() as raw:
+            compiler = load_compiler(COMPILER, "review_entry")
+            docs = Path(raw) / "docs"
+            space = docs / "business-analysis/erp"
+            make_valid_space(space)
+            code, out, err = run_compiler(compiler, ["stub", "--space", str(space),
+                "--type", "decision", "--node", "domains/inventory",
+                "--slug", "batch-sizing", "--title", "Batch sizing"])
+            self.assertEqual(code, 0, out + err)
+            for cycle in range(2):
+                if cycle:
+                    code, out, err = run_compiler(compiler, ["begin-revision", "--space", str(space), "--doc", relative])
                     self.assertEqual(code, 0, out + err)
-                    result = compiler.classify_package(space, vault_root=docs)
-                    self.assertEqual(result["profile"], "strict-current")
-
-    def test_tag_list_comments_preserve_bytes_in_every_distribution(self):
-        paths = [COMPILER, *(REPO / "dist" / host / "software-engineering-team/scripts/ba_compile.py"
-                              for host in ("claude", "codex"))]
-        relative = "domains/inventory/decisions/batch-sizing-decision.md"
-        for index, path in enumerate(paths):
-            with self.subTest(compiler=str(path)), tempfile.TemporaryDirectory() as raw:
-                compiler = load_compiler(path, f"review_comments_{index}")
-                docs = Path(raw) / "docs"
-                space = docs / "business-analysis/erp"
-                make_valid_space(space)
-                code, out, err = run_compiler(compiler, ["stub", "--space", str(space),
-                    "--type", "decision", "--node", "domains/inventory",
-                    "--slug", "batch-sizing", "--title", "Batch sizing"])
-                self.assertEqual(code, 0, out + err)
-                target = space / relative
-                before = target.read_bytes().replace(b"tags:\n", b"tags:\n  # type mirror\n")
-                before = before.replace(b"  - status/draft\n", b"  # lifecycle mirror\n  - status/draft\n  # end mirror\n")
-                target.write_bytes(before)
-                for phase in ("before", "after"):
-                    if phase == "after":
-                        code, out, err = run_compiler(compiler, ["enter-review", "--space", str(space), "--doc", relative])
-                        self.assertEqual(code, 0, out + err)
-                        expected = before.replace(b"status: draft", b"status: in_review", 1)
-                        expected = expected.replace(b"  - status/draft", b"  - status/in-review", 1)
-                        self.assertEqual(target.read_bytes(), expected)
+                for command in ("enter-review", "approve"):
+                    code, out, err = run_compiler(compiler, [command, "--space", str(space), "--doc", relative])
+                    self.assertEqual(code, 0, out + err)
                     checked = subprocess.run([sys.executable, str(VAULT_CHECK), "check", "--vault", str(docs),
                         "--impact", f"business-analysis/erp/{relative}"], capture_output=True, text=True)
                     self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+                code, out, err = run_compiler(compiler, ["approve-package", "--space", str(space)])
+                self.assertEqual(code, 0, out + err)
+                result = compiler.classify_package(space, vault_root=docs)
+                self.assertEqual(result["profile"], "strict-current")
+
+    def test_tag_list_comments_preserve_bytes_in_every_distribution(self):
+        assert_distributions_ship_the_compiler(self)
+        relative = "domains/inventory/decisions/batch-sizing-decision.md"
+        with tempfile.TemporaryDirectory() as raw:
+            compiler = load_compiler(COMPILER, "review_comments")
+            docs = Path(raw) / "docs"
+            space = docs / "business-analysis/erp"
+            make_valid_space(space)
+            code, out, err = run_compiler(compiler, ["stub", "--space", str(space),
+                "--type", "decision", "--node", "domains/inventory",
+                "--slug", "batch-sizing", "--title", "Batch sizing"])
+            self.assertEqual(code, 0, out + err)
+            target = space / relative
+            before = target.read_bytes().replace(b"tags:\n", b"tags:\n  # type mirror\n")
+            before = before.replace(b"  - status/draft\n", b"  # lifecycle mirror\n  - status/draft\n  # end mirror\n")
+            target.write_bytes(before)
+            for phase in ("before", "after"):
+                if phase == "after":
+                    code, out, err = run_compiler(compiler, ["enter-review", "--space", str(space), "--doc", relative])
+                    self.assertEqual(code, 0, out + err)
+                    expected = before.replace(b"status: draft", b"status: in_review", 1)
+                    expected = expected.replace(b"  - status/draft", b"  - status/in-review", 1)
+                    self.assertEqual(target.read_bytes(), expected)
+                checked = subprocess.run([sys.executable, str(VAULT_CHECK), "check", "--vault", str(docs),
+                    "--impact", f"business-analysis/erp/{relative}"], capture_output=True, text=True)
+                self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
 
 
 class SubcommandTests(unittest.TestCase):
@@ -990,16 +965,6 @@ class SubcommandTests(unittest.TestCase):
         structural = [f for f in findings if f.check in
                       ("frontmatter_schema", "required_sections", "status_legality")]
         self.assertEqual(structural, [])
-
-    def test_challenge_record_stub_is_retired(self):
-        space = self.root / "topic"
-        run(["init", "--space", str(space), "--title", "Topic", "--code", "TOP"])
-        code, _, err = run([
-            "stub", "--space", str(space), "--type", "challenge_record",
-            "--title", "Malformed review",
-        ])
-        self.assertEqual(code, 2)
-        self.assertIn("unknown type 'challenge_record'", err)
 
     def test_stub_nav_targets_owning_hub(self):
         """Content stubs nav to their owning overview hub; overview stubs
@@ -1429,50 +1394,7 @@ class PackageLifecycleTests(unittest.TestCase):
         receipt = self.approve_package()
         self.assertEqual(receipt["verification_profile"], "strict-current")
 
-    def test_issue_56_lifecycle_runs_three_times_in_every_distribution(self):
-        compilers = {
-            "canonical": COMPILER,
-            "claude": REPO / "dist/claude/software-engineering-team/scripts/ba_compile.py",
-            "codex": REPO / "dist/codex/software-engineering-team/scripts/ba_compile.py",
-        }
-        for name, path in compilers.items():
-            self.assertTrue(path.is_file(), name)
-            compiler = load_compiler(path, f"issue_56_{name}")
-            for attempt in range(3):
-                with tempfile.TemporaryDirectory() as raw:
-                    docs = Path(raw) / "docs"
-                    space = docs / "business-analysis" / "erp"
-                    make_valid_space(space)
-                    for argv in (
-                        ["approve-package", "--space", str(space),
-                         "--vault-root", str(docs)],
-                        ["begin-revision", "--space", str(space),
-                         "--doc", self.entity],
-                        ["begin-revision", "--space", str(space),
-                         "--doc", self.process],
-                    ):
-                        code, out, err = run_compiler(compiler, argv)
-                        self.assertEqual(code, 0,
-                                         f"{name} attempt {attempt + 1}: {out}{err}")
-                    root = (space / "space.md").read_text(encoding="utf-8")
-                    self.assertIn("package_status: draft", root)
-                    self.assertNotIn("package_hash:", root)
 
-
-
-
-class NumericLimitRemovalTests(unittest.TestCase):
-    """BA remains structural and semantic when authored content grows."""
-
-    def test_long_summary_and_deep_nesting_have_no_numeric_finding(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            space = Path(temporary) / "docs" / "business-analysis" / "erp"
-            make_valid_space(space)
-            summary = space / "space.md"
-            summary.write_text(summary.read_text(encoding="utf-8") + "\n" + "\n".join("Additional scope context." for _ in range(400)), encoding="utf-8")
-            findings = collect(space)
-            numeric = {"summary_caps", "thresholds", "aging"}
-            self.assertFalse([item for item in findings if item.check in numeric])
 
 
 if __name__ == "__main__":

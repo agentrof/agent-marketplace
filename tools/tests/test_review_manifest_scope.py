@@ -26,18 +26,9 @@ import test_backlog_review_inputs as review_input_tests
 from backlog_fixture import make_approved_backlog
 from git_fixture import init_repository
 
-REGISTRY = "skill-content/configure/data/process-switches.json"
 REFERENCE = "skill-content/backlog-plan/references/switch-review_manifest_scope-bounded.md"
 FLOW = "flows/backlog-planning.md"
 BA = "business-analysis/delivery/domains/identity"
-
-
-def read(relative: str) -> str:
-    return (TEAM / relative).read_text(encoding="utf-8")
-
-
-def flat(text: str) -> str:
-    return " ".join(text.split())
 
 
 def policy(docs: Path, *argv: str) -> None:
@@ -60,63 +51,6 @@ def choose(docs: Path, value: str | None, *, switch: str = "review_manifest_scop
 
 
 class ReviewManifestScopeContractTests(unittest.TestCase):
-    def test_switch_ships_at_transitive_with_a_review_pass_unit(self):
-        switch = json.loads(read(REGISTRY))["switches"]["review_manifest_scope"]
-        self.assertEqual(switch["issue"], 303)
-        self.assertEqual([value["id"] for value in switch["values"]], ["transitive", "bounded"])
-        self.assertEqual(switch["default"], "transitive")
-        self.assertEqual(switch["flows"], ["backlog-planning"])
-        self.assertNotIn("agent_variants", switch)
-        for term in ("manifest path count, JSON bytes and build seconds", "reviewer wall time",
-                     "valid findings by severity against a transitive shadow review of the same"
-                     " epic and revision, as recall", "each request for evidence outside the"
-                     " manifest"):
-            with self.subTest(term=term):
-                self.assertIn(term, switch["metric"])
-        # Backlog planning runs outside every Delivery, so the unit is justified in place.
-        self.assertIn("At least 5 epic review passes run with bounded across at least 2 backlog"
-                      " revisions", switch["promotion"]["unit"])
-        self.assertIn("review passes replace the 3-Delivery default", switch["promotion"]["unit"])
-        for term in ("Valid critical and major recall at least equal to the transitive shadow"
-                     " review's", "evidence lay outside the bounded manifest",
-                     "median reviewer wall time at most 70%", "the owner's approval"):
-            with self.subTest(term=term):
-                self.assertIn(term, switch["promotion"]["threshold"])
-
-    def test_reference_binds_only_at_bounded_and_the_flow_anchors_it(self):
-        text = flat(read(REFERENCE))
-        self.assertIn("process switch `review_manifest_scope` at `bounded`", text)
-        self.assertIn("A task binds this file only when the project's Process Policy selects that"
-                      " value", text)
-        self.assertIn("at the default, `transitive`,", text)
-        self.assertNotIn("switch-review_manifest_scope", read("skill-content/backlog-plan/SKILL.md"))
-        flow = flat(read(FLOW))
-        self.assertIn("Switch `review_manifest_scope`: at `bounded`", flow)
-        self.assertIn(REFERENCE, flow)
-
-    def test_reference_states_the_read_set_and_what_stays_whole(self):
-        text = flat(read(REFERENCE))
-        for rule in (
-            "the scope: the root backlog, the epic, its stories and test plans",
-            "every story that dependency edges connect to the epic's stories, with its test plan"
-            " and epic",
-            "links to in its front matter or body, and every Experience record it cites as"
-            " `<experience>:<ID>@rN`",
-            "one hop further, the front-matter relations of each such note",
-            "A note two hops out is read without its links",
-            "a story reached through a link is read without its test plan or dependency closure",
-            "The root manifest and a writer's manifest keep the transitive read set, and backlog"
-            " approval still checks the whole backlog",
-            "is listed in `check.scaffold_findings` and does not fail it",
-            "Add each reported note to that reader's task with `--input`, rerun that reader",
-            "Its hash binds every note it reads and the story identities and dependency edges"
-            " that reach the dependency closure, so an edge that reaches a story read only"
-            " through a link leaves it fresh",
-            "a review taken under the other value is stale",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
-
     def test_default_path_instructions_never_name_the_switch(self):
         for path in TEAM.rglob("*.md"):
             relative = path.relative_to(TEAM).as_posix()
@@ -124,19 +58,6 @@ class ReviewManifestScopeContractTests(unittest.TestCase):
                 continue
             with self.subTest(path=relative):
                 self.assertNotIn("review_manifest_scope", path.read_text(encoding="utf-8"))
-
-    def test_docs_describe_both_values(self):
-        architecture = flat((ROOT / "docs/architecture.md").read_text(encoding="utf-8"))
-        invariant = architecture.split(" 11. ", 1)[1].split(" 12. ", 1)[0]
-        orchestration = flat((ROOT / "docs/orchestration.md").read_text(encoding="utf-8"))
-        for text in (invariant, orchestration):
-            with self.subTest(text=text[:40]):
-                self.assertIn("`review_manifest_scope`", text)
-                self.assertIn("`transitive`", text)
-                self.assertIn("`bounded`", text)
-                self.assertIn("front-matter relations one hop further", text)
-        self.assertIn("the manifest's hash binds only the story identities and dependency edges"
-                      " that reach that closure", invariant)
 
 
 class BoundedManifestTests(unittest.TestCase):

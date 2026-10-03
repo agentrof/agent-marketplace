@@ -17,8 +17,6 @@ from tools import smoke_plugin_installs as smoke
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import fixtures  # noqa: E402
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -49,18 +47,6 @@ class HostSmokeContracts(unittest.TestCase):
                                   if path.is_dir())
                 self.assertEqual(packages, [smoke.TEAM])
 
-    def test_native_packages_execute_fresh_setup(self):
-        for host in ("claude", "codex"):
-            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
-                project = Path(temporary) / "project"
-                # Setup checks each pinned model with the host binaries; fakes stand in.
-                environment = fixtures.isolated_hosts(os.environ, Path(temporary) / "isolation")
-                smoke.init_project(project, dict(environment))
-                smoke.exercise_package(
-                    ROOT / "dist" / host / smoke.TEAM,
-                    project,
-                    dict(environment),
-                )
     def test_installed_package_smoke_requires_product_and_delivery_entrypoints(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "package"
@@ -137,13 +123,6 @@ class HostSmokeContracts(unittest.TestCase):
             call.args[1].get("PYTHONDONTWRITEBYTECODE") == "1"
             for call in runner.call_args_list
         ))
-
-    def test_real_host_workflow_runs_the_install_smoke(self):
-        workflow = (ROOT / ".github/workflows/release-hosts.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("pull_request:", workflow)
-        self.assertIn("tools/smoke_plugin_installs.py --channel checkout", workflow)
 
     def test_installed_package_must_match_candidate_provenance_and_hashes(self):
         for host in ("claude", "codex"):

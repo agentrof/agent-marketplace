@@ -67,7 +67,9 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
         "Read `../../host-contract.md` and "
         f"`../../skill-content/{name}/SKILL.md` completely, resolving both paths "
         "relative to this file. Follow the canonical skill as the authoritative "
-        f"workflow and the host contract as its platform adapter.{gate}\n"
+        f"workflow and the host contract as its platform adapter.{gate}"
+        " When the session context reports `AGENT_MARKETPLACE_PYTHON: unsupported`,"
+        " stop and tell the user the reason and the fix it gives.\n"
     )
     visible = context["title_of"](name)
     short = f"Start the {visible} guided workflow"
@@ -212,7 +214,7 @@ def scaffold_overlay_files() -> dict[str, dict]:
             "hooks": {
                 "SessionStart": [{"hooks": [{
                     "type": "command",
-                    "command": "python3 \"${PLUGIN_ROOT}\"/scripts/team_guard.py register",
+                    "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/team_guard.py register",
                 }]}],
             },
         },

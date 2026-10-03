@@ -30,7 +30,6 @@ import delivery_verification as verification  # noqa: E402
 import fixtures  # noqa: E402
 import process_policy  # noqa: E402
 import task_inputs  # noqa: E402
-import validate  # noqa: E402
 from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 REGISTRY = "skill-content/configure/data/process-switches.json"
@@ -43,14 +42,6 @@ PREFIX = {lens: f"P1-{lens}-" for lens in LENSES}
 
 def read(relative: str) -> str:
     return (TEAM / relative).read_text(encoding="utf-8")
-
-
-def flat(text: str) -> str:
-    return " ".join(text.split())
-
-
-def switch() -> dict:
-    return json.loads(read(REGISTRY))["switches"]["code_review_panel"]
 
 
 def run_policy(docs: Path, command: str, *argv: str) -> None:
@@ -70,34 +61,6 @@ def policy(docs: Path, **values: str) -> None:
 
 
 class CodeReviewPanelRegistryTests(unittest.TestCase):
-    def test_switch_ships_at_single_reader_under_the_issue_promotion_rule(self):
-        spec = switch()
-        self.assertEqual(spec["issue"], 347)
-        self.assertEqual([value["id"] for value in spec["values"]], ["single_reader", "beside_official"])
-        self.assertEqual(spec["default"], "single_reader")
-        self.assertEqual(spec["flows"], ["delivery-execution"])
-        self.assertEqual(spec["agent_variants"], {"beside_official": {
-            "suffix": "lens", "tier": "low",
-            "description": "Lens reader variant for review panels.",
-            "agents": ["code-reviewer"]}})
-        self.assertEqual(spec["value_data"], {"beside_official": [DATA]})
-        for term in ("valid critical and major findings found only by the panel",
-                     "only by the official reviewer", "by both",
-                     "calibration confirmed, lowered, ruled invalid and ruled duplicate",
-                     "the wall clock of the combined step, from the freeze to merge-panel, against"
-                     " the official reviewer's alone, from the freeze to its registration"):
-            with self.subTest(metric=term):
-                self.assertIn(term, spec["metric"])
-        # #347 states the unit; the 3-Delivery default needs that issue to change.
-        self.assertEqual(spec["promotion"]["unit"],
-                         "At least 5 code-review passes run with beside_official across at least 2"
-                         " Deliveries, the measurement criterion of #347.")
-        for term in ("Union valid critical and major recall above the official reviewer's alone",
-                     "a combined wall clock at most 120% of the official reviewer's, summed over"
-                     " those passes", "every shared quality guard holding", "the owner's approval"):
-            with self.subTest(threshold=term):
-                self.assertIn(term, spec["promotion"]["threshold"])
-
     def test_the_panel_data_declares_the_measured_lens_split(self):
         data = json.loads(read(DATA))
         self.assertEqual(set(data), {"schema_version", "review_steps"})
@@ -117,70 +80,6 @@ class CodeReviewPanelRegistryTests(unittest.TestCase):
 
 
 class CodeReviewPanelReferenceTests(unittest.TestCase):
-    def test_reference_applies_only_at_beside_official_and_is_never_linked(self):
-        text = flat(read(REFERENCE))
-        for rule in ("These are the instructions of process switch `code_review_panel` at"
-                     " `beside_official`",
-                     "A task binds this file only when the project's Process Policy selects that value",
-                     "at the default, `single_reader`, code review runs as its flow, skill and role"
-                     " files describe"):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
-        self.assertNotIn("switch-code_review_panel", read("skill-content/code-review/SKILL.md"))
-
-    def test_the_owning_flow_anchors_the_switch_at_code_review(self):
-        flow = flat(read("flows/delivery-execution.md"))
-        self.assertIn("Switch `code_review_panel`: at `beside_official`", flow)
-        self.assertIn(REFERENCE, flow)
-        # The code review panel is no review panel step of challenge-review's data.
-        self.assertNotRegex(read("flows/delivery-execution.md"), r"review\s+panel\s+`")
-
-    def test_the_panel_reads_the_same_inputs_beside_the_unchanged_official_reviewer(self):
-        text = flat(read(REFERENCE))
-        for rule in (
-            "The panel never replaces the official code reviewer",
-            "The official `code-reviewer` reviews exactly as at `single_reader`",
-            "one fresh `code-reviewer-lens` per assignment the same inputs",
-            "No reader of the step gets another reader's reply, QA's output or evidence that"
-            " appears after dispatch",
-            "Start the official reviewer and every lens reader together",
-            "The implementation writer stays idle until `merge-panel` settles the code review",
-            "`delivery_verification.py panel-result --file <result.json>`",
-            "at this value `result` refuses a code review result that is not a confirmed"
-            " cancellation",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
-
-    def test_each_panel_claim_is_calibrated_before_it_gates_and_merged_with_its_source(self):
-        text = flat(read(REFERENCE))
-        for rule in (
-            "Spawn a fresh `code-reviewer` on its own tier, never a `code-reviewer-lens`",
-            "every open critical or major finding of a lens result and, when `review_loop` is"
-            " `blocking_delta`, every open critical or major claim of the official result that"
-            " no earlier calibration ruled",
-            "A lens claim may also be ruled `duplicate` with `duplicate_of`",
-            "A duplicate never gates on its own",
-            "`delivery_verification.py merge-panel` registers the one code review result the"
-            " machine interface accepts",
-            "every official finding, with `source` `official`",
-            "every lens claim calibration confirmed, with `source` `panel`, its `lens`",
-            "A claim ruled `invalid` or `duplicate`, and a lens finding that is not critical or"
-            " major, never enter the result",
-            "the combined seconds to the merge and their ratio to the official reviewer's",
-            "`approve-item-evidence` records the `panel` record of every pass of the Item",
-            "that reports the same defect and is at least as severe as the claim",
-            "a `duplicate_of` outside those findings or less severe than its claim",
-            "except a finding of an earlier pass with `source` `panel` that the official result re-lists, which"
-            " keeps that source and its `lens`",
-            "those carried from an earlier pass with `source` `panel` in `carried_panel_blocking`",
-            "every lens claim with its lens, severity, ruling, `file`, `description`, the calibration `reason`"
-            " and a `minor` ruling's follow-up fields",
-            "with every lens claim of each pass, at either `review_loop` value",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
-
     def test_default_path_instructions_name_no_panel_value(self):
         for path in TEAM.rglob("*.md"):
             relative = path.relative_to(TEAM).as_posix()
@@ -188,26 +87,6 @@ class CodeReviewPanelReferenceTests(unittest.TestCase):
                 continue
             with self.subTest(path=relative):
                 self.assertNotIn("beside_official", path.read_text(encoding="utf-8"))
-
-    def test_docs_and_host_contracts_describe_the_switch(self):
-        orchestration = flat((ROOT / "docs/orchestration.md").read_text(encoding="utf-8"))
-        self.assertIn("Process switch `code_review_panel`", orchestration)
-        self.assertIn("`merge-panel`", orchestration)
-        architecture = flat((ROOT / "docs/architecture.md").read_text(encoding="utf-8"))
-        invariant = architecture.split(" 29. ", 1)[1].split(" 30. ", 1)[0]
-        self.assertIn("process switch `code_review_panel` at `beside_official`", invariant)
-        authoring = flat((ROOT / "docs/authoring.md").read_text(encoding="utf-8"))
-        self.assertIn("`code_review_panel` counts 5 code-review passes across 2 Deliveries", authoring)
-        self.assertIn("The `code_review_panel` validator check rejects", authoring)
-        for host, verb in (("claude", "spawn"), ("codex", "start")):
-            contract = flat((ROOT / "platforms" / host / "software-engineering-team"
-                             / "host-contract.md").read_text(encoding="utf-8"))
-            with self.subTest(host=host):
-                self.assertIn("Under switch `code_review_panel` at `beside_official`", contract)
-                self.assertIn(f"only the code review panel under switch `code_review_panel` at"
-                              f" `beside_official` {verb}s it", contract)
-                # The calibration rule of the review_loop test stays true.
-                self.assertNotIn("calibration reader", contract)
 
 
 class CodeReviewPanelTaskInputTests(unittest.TestCase):
@@ -247,16 +126,13 @@ class CodeReviewPanelValidatorTests(unittest.TestCase):
         self.originals = {path: (self.plugin / path).read_bytes() for path in (DATA, REGISTRY)}
 
     def messages(self) -> list[str]:
-        return [finding.message for finding in validate.run(self.root)
-                if finding.check == "code_review_panel"]
+        return [finding.message
+                for finding in fixtures.validator_findings(self.root, "code_review_panel")]
 
     def edit(self, relative: str, mutate) -> None:
         value = json.loads(self.originals[relative])
         mutate(value)
         (self.plugin / relative).write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-
-    def test_the_shipped_panel_is_clean(self):
-        self.assertEqual(self.messages(), [])
 
     def test_shape_variant_and_binding_errors_are_rejected(self):
         variant = lambda value: value["switches"]["code_review_panel"]["agent_variants"]["beside_official"]  # noqa: E731

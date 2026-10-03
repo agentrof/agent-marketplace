@@ -30,13 +30,6 @@
       ]
     },
     {
-      "pattern": "compatibility (*)",
-      "depends_on": [
-        "plan",
-        "tests (*)"
-      ]
-    },
-    {
       "pattern": "check",
       "depends_on": [
         "plan",
@@ -48,8 +41,7 @@
     }
   ],
   "test_steps": [
-    "Run the exact selected test partition",
-    "Exercise the Apple system Python launcher"
+    "Run the exact selected test partition"
   ],
   "observed_metrics": [
     "work_to_acceptance_seconds",

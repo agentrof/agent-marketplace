@@ -42,8 +42,8 @@ class CITestPlannerTests(unittest.TestCase):
                        "rules": [{"paths": ["README.md"], "groups": ["fixture"]},
                                  {"paths": ["plugins/compiler.py", "dist/*"], "groups": ["fixture"]}],
                        "module_seconds": {}, "default_seconds": 1.0,
-                       "lanes": {"local": {"os": runner, "python": ".".join(platform.python_version().split(".")[:2]),
-                                           "shards": 2, "groups": ["all"]}}}
+                       "python": ".".join(platform.python_version().split(".")[:2]),
+                       "lanes": {"local": {"os": runner, "shards": 2, "groups": ["all"]}}}
         self.save_policy()
         git_fixture.init_repository(self.root)
         self.git("config", "user.email", "ci@example.invalid")
@@ -92,54 +92,41 @@ class CITestPlannerTests(unittest.TestCase):
         with self.assertRaises(ci_tests.CIError):
             ci_tests.balanced_shards(ids, 2, {"a": float("nan")}, self.policy)
 
-    def test_selected_vault_hook_requires_exactly_one_apple_worker(self):
-        (self.root / "tools/tests/test_vault_hook.py").write_text(
-            "import unittest\nclass Tests(unittest.TestCase):\n    def test_native(self): pass\n",
-            encoding="utf-8")
-        with self.assertRaisesRegex(ci_tests.CIError, "require an Apple launcher lane"):
-            self.plan()
-        self.policy["apple_launcher_lane"] = "local"
-        self.policy["lanes"]["local"]["os"] = "macos-latest"
+    def test_every_lane_and_matrix_row_runs_the_policy_python_version(self):
+        self.policy["lanes"]["other"] = {"os": self.policy["lanes"]["local"]["os"], "shards": 1,
+                                         "groups": ["fixture"]}
         self.save_policy()
         plan = self.plan()
-        owner = [row for row in plan["matrix"]["include"] if row["apple_launcher"]]
-        self.assertEqual([(row["lane"], row["shard"]) for row in owner], [("local", 0)])
-        self.assertTrue(plan["apple_launcher"])
-        for mutation in ("missing", "duplicate", "wrong-lane", "disabled", "nonboolean"):
-            with self.subTest(mutation=mutation):
+        version = self.policy["python"]
+        self.assertEqual(plan["python"], version)
+        self.assertEqual({lane["python"] for lane in plan["lanes"].values()}, {version})
+        self.assertEqual({row["python"] for row in plan["matrix"]["include"]}, {version})
+        self.assertEqual({tuple(sorted(row)) for row in plan["matrix"]["include"]},
+                         {("lane", "os", "python", "shard", "shards")})
+        for change in ("plan", "lane", "row"):
+            with self.subTest(change=change):
                 altered = copy.deepcopy(plan)
-                if mutation == "missing":
-                    altered["matrix"]["include"][0]["apple_launcher"] = False
-                elif mutation == "duplicate":
-                    altered["matrix"]["include"][1]["apple_launcher"] = True
-                elif mutation == "wrong-lane":
-                    altered["apple_launcher_lane"] = "unselected"
-                elif mutation == "nonboolean":
-                    altered["matrix"]["include"][0]["apple_launcher"] = 1
+                if change == "plan":
+                    altered["python"] = "3.9"
+                elif change == "lane":
+                    altered["lanes"]["other"]["python"] = "3.9"
                 else:
-                    altered["apple_launcher"] = False
-                    altered["apple_launcher_lane"] = None
-                    for row in altered["matrix"]["include"]:
-                        row["apple_launcher"] = False
+                    altered["matrix"]["include"][0]["python"] = "3.9"
                 self.rehash(altered)
                 with self.assertRaises(ci_tests.CIError):
                     ci_tests.validate_plan(altered, self.root)
-        self.policy["lanes"]["local"]["os"] = "ubuntu-latest"
+        for change, message in ((dict(self.policy, python="3"), "major.minor"),
+                                (dict(self.policy, python="3.14.1"), "major.minor"),
+                                ({key: value for key, value in self.policy.items() if key != "python"},
+                                 "incomplete")):
+            with self.subTest(policy=change.get("python")):
+                (self.root / ci_tests.POLICY_PATH).write_text(json.dumps(change), encoding="utf-8")
+                with self.assertRaisesRegex(ci_tests.CIError, message):
+                    ci_tests.policy_at(self.root)
+        self.policy["lanes"]["other"]["python"] = "3.9"
         self.save_policy()
-        with self.assertRaisesRegex(ci_tests.CIError, "require an Apple launcher lane"):
-            self.plan()
-
-    def test_unselected_apple_lane_cannot_drop_native_check(self):
-        (self.root / "tools/tests/test_vault_hook.py").write_text(
-            "import unittest\nclass Tests(unittest.TestCase):\n    def test_native(self): pass\n",
-            encoding="utf-8")
-        self.policy["apple_launcher_lane"] = "support"
-        self.policy["groups"]["empty"] = {"tests": []}
-        self.policy["lanes"]["support"] = {"os": "macos-latest", "python": "3.9", "shards": 1,
-                                               "groups": ["empty"]}
-        self.save_policy()
-        with self.assertRaisesRegex(ci_tests.CIError, "exactly one selected shard"):
-            self.plan()
+        with self.assertRaisesRegex(ci_tests.CIError, "inherits the policy Python version"):
+            ci_tests.policy_at(self.root)
 
     def test_partition_rejects_missing_duplicate_and_unknown_ids_even_after_rehash(self):
         original = self.plan()
@@ -468,15 +455,25 @@ class CITestPlannerTests(unittest.TestCase):
                 else:
                     self.assertEqual(ci_tests.verify_reports(plan, [report])["policy_hash"], plan["policy_hash"])
 
-    def test_repository_windows_policy_keeps_native_regressions_on_both_python_versions(self):
+    def test_repository_policy_runs_one_lane_per_system_and_keeps_native_windows_regressions(self):
         policy = ci_tests.policy_at(ci_tests.ROOT)
         ids, _hash = ci_tests.inventory(ci_tests.ROOT)
         required = {"tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected",
                     "tools.tests.test_delivery_git.DeliveryGitTests.test_receipt_lock_is_released_when_its_holder_dies"}
-        for name, shards in (("windows-current", 11), ("windows-minimum", 13)):
-            lane = policy["lanes"][name]
-            self.assertEqual((lane["shards"], lane["workers"]), (shards, 3))
-            self.assertTrue(required <= set(ci_tests.group_ids(lane["groups"], policy, ids)))
+        # Shard counts follow the measured weights, so only the lane shape is pinned.
+        self.assertEqual({name: (lane["os"], lane["python"], lane["workers"], lane["groups"])
+                          for name, lane in policy["lanes"].items()},
+                         {"linux": ("ubuntu-latest", policy["python"], 3, ["all"]),
+                          "macos": ("macos-latest", policy["python"], 3, ["macos"]),
+                          "windows": ("windows-latest", policy["python"], 3, ["windows"])})
+        self.assertEqual(set(policy["lanes"]["windows"]["required_tests"]), required)
+        self.assertTrue(required <= set(ci_tests.group_ids(["windows"], policy, ids)))
+        # Linux runs every test; macOS and Windows name each test that proves behavior of
+        # their own system, never a whole module.
+        for group in ("platform", "macos", "windows"):
+            with self.subTest(group=group):
+                self.assertEqual([selector for selector in policy["groups"][group]["tests"]
+                                  if selector not in ids], [])
 
     def parallel_fixture(self, bodies=None, workers=3):
         """Six tests that each record the process, scratch and tripwire they ran under."""
@@ -662,29 +659,6 @@ class CITestPlannerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ci_tests.CIError, "worker count"):
                     ci_tests.policy_at(self.root)
 
-    def test_a_pinned_interpreter_is_windows_only_exact_and_planned(self):
-        pin = {"source": "nuget", "package": "python", "version": "3.9.13", "sha512": "a" * 128}
-        lane = {"os": "windows-latest", "python": "3.9"}
-        self.assertTrue(ci_tests.valid_interpreter(pin, lane))
-        for change in ({"os": "ubuntu-latest"}, {"python": "3.14"}):
-            self.assertFalse(ci_tests.valid_interpreter(pin, dict(lane, **change)))
-        for change in ({"source": "url"}, {"version": "3.9"}, {"sha512": "A" * 128}, {"package": "../python"},
-                       {"extra": True}):
-            self.assertFalse(ci_tests.valid_interpreter(dict(pin, **change), lane))
-        self.policy["lanes"]["local"]["interpreter"] = pin
-        self.save_policy()
-        if platform.system() != "Windows":
-            with self.assertRaisesRegex(ci_tests.CIError, "pinned interpreter"):
-                ci_tests.policy_at(self.root)
-            del self.policy["lanes"]["local"]["interpreter"]
-            expected = ""
-        else:
-            self.policy["lanes"]["local"]["interpreter"] = dict(pin, version=platform.python_version())
-            expected = platform.python_version()
-        self.save_policy()
-        rows = self.plan()["matrix"]["include"]
-        self.assertEqual({row["interpreter_version"] for row in rows}, {expected})
-
     def test_measured_history_outweighs_policy_estimates_which_outweigh_defaults(self):
         runner = self.policy["lanes"]["local"]["os"]
         self.policy["test_seconds"] = {runner: {self.ids[0]: 40.0}}
@@ -714,9 +688,10 @@ class CITestPlannerTests(unittest.TestCase):
             "other": {self.ids[0]: 8.26, self.ids[2]: 2.0},
             "retired": {self.ids[1]: 50.0}}}
         self.assertEqual(ci_tests.refresh_estimates(self.root, payload), {runner: 2})
-        policy = ci_tests.policy_at(self.root)
-        self.assertEqual(policy["test_seconds"], {runner: {self.ids[0]: 8.3, self.ids[2]: 7.0}})
-        self.assertEqual({key: value for key, value in policy.items() if key != "test_seconds"}, self.policy)
+        written = ci_tests.read_json(self.root / ci_tests.POLICY_PATH)
+        self.assertEqual(written["test_seconds"], {runner: {self.ids[0]: 8.3, self.ids[2]: 7.0}})
+        self.assertEqual({key: value for key, value in written.items() if key != "test_seconds"}, self.policy)
+        ci_tests.policy_at(self.root)
         for payload, threshold in ((dict(payload, schema_version=2), 5.0), (payload, 0.0),
                                    ({"schema_version": 1, "durations": {"local": {self.ids[0]: -1}}}, 5.0)):
             with self.subTest(payload=payload, threshold=threshold), self.assertRaises(ci_tests.CIError):
@@ -750,7 +725,8 @@ class CITestPlannerTests(unittest.TestCase):
         modules = {"tools.tests.test_delivery_verification", "tools.tests.test_performance_contracts",
                    "tools.tests.test_task_inputs", "tools.tests.test_ci_local"}
         native = ci_tests.group_ids(["windows"], policy, ids)
-        self.assertTrue({test_id for test_id in ids if ci_tests.module_of(test_id) in modules}.issubset(native))
+        # Each keeps its Windows-specific tests on Windows; Linux runs all of them.
+        self.assertEqual({ci_tests.module_of(test_id) for test_id in native} & modules, modules)
         selected, _mode, _reason = ci_tests.select_ids("impact",
             ["plugins/software-engineering-team/scripts/delivery_git.py"], policy, ids, root=ci_tests.ROOT)
         self.assertTrue({test_id for test_id in ids if ci_tests.module_of(test_id) in modules}.issubset(selected))

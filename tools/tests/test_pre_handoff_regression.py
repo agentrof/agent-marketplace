@@ -33,9 +33,7 @@ import task_inputs  # noqa: E402
 from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 SWITCH = "pre_handoff_regression"
-REGISTRY = "skill-content/configure/data/process-switches.json"
 REFERENCE = "skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md"
-FLOW = "flows/delivery-execution.md"
 CODE = "DELIVERY_PRE_HANDOFF_MISSING"
 REUSED_MARKER = "Earlier-story targets QA's final test run reused, recorded by approve-item-evidence:"
 PYTHON = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
@@ -124,10 +122,6 @@ def read(relative: str) -> str:
     return (TEAM / relative).read_text(encoding="utf-8")
 
 
-def flat(relative: str) -> str:
-    return " ".join(read(relative).split())
-
-
 def policy(docs: Path, *argv: str) -> None:
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
@@ -145,114 +139,6 @@ def scenario(identifier: str, automation: str, target: str) -> str:
 
 
 class RegistryTests(unittest.TestCase):
-    def test_switch_ships_off_under_the_umbrella_promotion_unit(self):
-        switch = json.loads(read(REGISTRY))["switches"][SWITCH]
-        self.assertEqual(switch["issue"], 351)
-        self.assertEqual([value["id"] for value in switch["values"]], ["off", "touched_suites"])
-        self.assertEqual(switch["default"], "off")
-        self.assertEqual(switch["flows"], ["delivery-execution"])
-        for key in ("agent_variants", "parameters", "value_data", "reference_scope"):
-            self.assertNotIn(key, switch)
-        for term in ("the blocking findings Code Review and QA raise that are regressions in an"
-                     " earlier story's suite, per review round", "the wall clock of each pre-handoff run"):
-            with self.subTest(term=term):
-                self.assertIn(term, switch["metric"])
-        self.assertEqual(switch["promotion"]["unit"], "At least 3 Deliveries run with touched_suites.")
-        for term in ("Zero blocking findings that are regressions in an earlier story's suite after the"
-                     " first review round", "every shared quality guard holding", "the owner's approval"):
-            with self.subTest(term=term):
-                self.assertIn(term, switch["promotion"]["threshold"])
-        tradeoffs = {value["id"]: value["tradeoffs"] for value in switch["values"]}
-        self.assertIn("Today's behaviour and the baseline", tradeoffs["off"])
-        self.assertIn("in one measured project", tradeoffs["off"])
-
-    def test_the_flow_anchors_the_freeze_step_and_no_skill_links_the_reference(self):
-        text = flat(FLOW)
-        self.assertIn("Switch `pre_handoff_regression`: at `touched_suites`", text)
-        self.assertIn(REFERENCE, text)
-        anchor = text.index("Switch `pre_handoff_regression`")
-        self.assertLess(text.index("freeze --delivery DLV-### --story <story>"), anchor)
-        self.assertLess(anchor, text.index("Invoke Code Review and QA independently"))
-        self.assertNotIn("switch-pre_handoff_regression", read("skill-content/deliver/SKILL.md"))
-
-    def test_the_reference_states_the_selection_the_run_the_gate_and_qa_guidance(self):
-        text = flat(REFERENCE)
-        for rule in (
-            "process switch `pre_handoff_regression` at `touched_suites`",
-            "A task binds this file only when the project's Process Policy selects that value",
-            "at the default, `off`,",
-            "regression-selection --delivery DLV-### --story <story>",
-            "regression-run --delivery DLV-### --story <story>",
-            "an Item that is `integrated` in a Delivery the candidate holds as merged",
-            "`affected_test_ids`",
-            "the one whose digest the Item records as `test_plan_source_hash`",
-            "else that revision read from the candidate's Git history",
-            "the newest integrated revision counts",
-            "when a Delivery, Item or Delivery Review record cannot be read",
-            "leaves the run with `selection_intact` false, so it does not pass",
-            "the full approved `test_command`",
-            "takes the Item's environment lock while it derives and writes the selection",
-            "under the Item's environment lock",
-            "takes the Item's environment lock for the whole run",
-            "each of them and `freeze` refuse the same way and name the run",
-            "reads the Item worktree only while it derives the selection again and clones the candidate",
-            "reader barrier guards refuses with `DELIVERY_ENVIRONMENT_BUSY` and names the run",
-            "Once its command runs in the private clone, the worktree takes writes again",
-            "the run is recorded against the tree it cloned and `freeze` checks the current one, so the new"
-            " candidate needs a run of its own",
-            "a private checkout of the exact candidate commit",
-            "against the candidate's tree",
-            "A failing run is repaired before the freeze",
-            f"`freeze` refuses with `{CODE}`",
-            "`freeze` refuses with `DELIVERY_ENVIRONMENT_BUSY` and names the holder, so a run still going is"
-            " never passed over",
-            "every run of the Item so far, failed runs included, as `pre_handoff_history`",
-            "so a run record moved aside loses no run a freeze already carried",
-            "records that history with any later run in the Item's verification record",
-            "Until it does, the runs exist only in the Item's verification runtime, in its session and in"
-            " `pre-handoff.json`, so clearing that runtime before then loses them",
-            "which the Item's verification record lists run by run with its result",
-            "reports every failing group, not only the first",
-            "The command itself is the project's",
-            "## Measurement",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
-        # The session that carries the history lives in the same runtime as the run record.
-        self.assertNotIn("runtime cleanup", text)
-
-    def test_the_reference_states_how_qas_final_test_run_reuses_the_run(self):
-        text = flat(REFERENCE)
-        for rule in (
-            "## QA's final test run reuses the run",
-            "QA's `run --kind test` on the frozen candidate takes the earlier stories' targets from the run the"
-            " freeze accepted, instead of running them a second time on the same tree",
-            "only when it passed intact on the frozen tree, with that selection and the approved command derived"
-            " for it, in the declared environment of QA's run, and no longer ago than final evidence stays fresh,"
-            " the verification policy's `raw_evidence_max_age_seconds`",
-            "`run --fresh` reuses no run and runs every suite",
-            "still fresh at approval, as QA's own record must be",
-            "apart from the Item's own Test Plan targets and every earlier target that prefixes one or lies under"
-            " one as text, which QA always runs itself",
-            "also when it skips them by node id prefix, as pytest's `--deselect` does",
-            "none that is, prefixes or lies under one of the Item's own",
-            "names that file in `AGENTROF_REUSED_TESTS`",
-            "No other command receives the variable, an inherited one included",
-            "a command that changes that file leaves the run with `selection_intact` false, so it does not pass",
-            "making it skip them is a Verification Contract revision through the Operation flow",
-            "the result names the binding as `pre_handoff_reuse`",
-            "Evidence approval checks the reuse as recorded",
-            "`approve-item-evidence` records the reuse in the Item's verification record, below the pre-handoff runs:"
-            " each reused earlier story with its test ids, the reused run's number in that list and its evidence"
-            " hash, or `none.` when QA's final test run reused nothing",
-            "QA may spot-run one reused group per Delivery through `run --kind diagnostic_test`",
-            "a group the final test run reused needs no such run",
-            "the earlier stories it reused, which the Item's verification record lists, and whether a reused group"
-            " failed when QA ran it again",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, text)
-
     def test_the_refusal_code_is_declared_and_reaches_the_envelope(self):
         self.assertIn(CODE, delivery_result.FINDING_CODES)
         contract = json.loads(read("skill-content/deliver/data/delivery-result-contract.json"))

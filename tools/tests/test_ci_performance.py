@@ -13,7 +13,7 @@ class PerformanceTests(unittest.TestCase):
     def test_queue_time_starts_after_dependencies_and_incomplete_jobs_stay_unknown(self):
         jobs = [
             {'id': 1, 'name': 'plan', 'started_at': '2026-09-28T10:00:00Z', 'completed_at': '2026-09-28T10:01:00Z'},
-            {'id': 2, 'name': 'tests (windows-current, 0)', 'started_at': '2026-09-28T10:10:00Z',
+            {'id': 2, 'name': 'tests (windows, 0)', 'started_at': '2026-09-28T10:10:00Z',
              'completed_at': '2026-09-28T10:15:00Z', 'steps': [{'name': 'Run the exact selected test partition',
                  'started_at': '2026-09-28T10:11:00Z', 'completed_at': '2026-09-28T10:15:00Z'}]},
             {'id': 3, 'name': 'deterministic-check', 'completed_at': '2026-09-28T10:00:20Z'},

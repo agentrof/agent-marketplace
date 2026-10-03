@@ -27,6 +27,8 @@ codex plugin marketplace add agentrof/agent-marketplace@stable
 codex plugin add software-engineering-team@agent-marketplace
 ```
 
+The hooks run `python3` from PATH and need Python 3.14 (macOS: `brew install python3`).
+
 Start `software-engineering-team:setup` in the project. The setup entry uses
 `scripts/setup_project.py inspect|apply|check` to converge the workspace,
 tracked vault contract, ignored local Obsidian plugin projection, closed

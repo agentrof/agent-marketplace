@@ -3769,7 +3769,8 @@ def check_delivery_contract_shape(
         problems.append("control-record and subject registries differ")
     verification = contracts["delivery-verification-policy.json"]
     expected_keys = {"schema_version", "raw_evidence_max_age_seconds", "schedules", "legacy_schedule", "new_schedule",
-                     "blocking_severities", "nonblocking_severities", "review_checks", "qa_checks", "role_modes", "final_modes", "mutation_scope"}
+                     "blocking_severities", "nonblocking_severities", "review_checks", "qa_checks", "role_modes", "final_modes", "mutation_scope",
+                     "wait_bound_seconds"}
     if set(verification) != expected_keys or verification.get("schema_version") != 1:
         problems.append("verification policy has an unsupported schema or field set")
     if (verification.get("schedules") != ["sequential_v1", "parallel_snapshot_v1"]
@@ -3784,6 +3785,12 @@ def check_delivery_contract_shape(
     age = verification.get("raw_evidence_max_age_seconds")
     if not isinstance(age, int) or isinstance(age, bool) or not 0 < age <= 86400:
         problems.append("verification evidence age must be positive and at most 24 hours")
+    # One wait call plus the model turn that repeats it stays under the shortest
+    # prompt cache lifetime of a supported host, 300 seconds; under a minute,
+    # the cache reads of the repeated calls add up.
+    bound = verification.get("wait_bound_seconds")
+    if not isinstance(bound, int) or isinstance(bound, bool) or not 60 <= bound <= 270:
+        problems.append("verification wait bound must be a whole number of seconds from 60 to 270")
     scope = verification.get("mutation_scope", {})
     if (not isinstance(scope, dict) or set(scope) != {"excluded_prefixes", "non_code_suffixes", "test_path_segments", "test_name_patterns", "unknown_file_policy", "additional_include_property"}
             or scope.get("unknown_file_policy") != "include" or scope.get("additional_include_property") != "mutation_include_paths"

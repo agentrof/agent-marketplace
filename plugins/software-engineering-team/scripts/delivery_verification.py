@@ -30,6 +30,8 @@ import operation_compile
 
 POLICY_PATH = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/delivery-verification-policy.json"
 ROLES = ("code_reviewer", "qa_engineer")
+# How often one wait call checks the Item's locks; a local check costs no model call.
+WAIT_POLL_SECONDS = 0.5
 # At review_loop blocking_delta a fresh code reviewer registers its rulings on
 # the claims of a code review in this mode, apart from the claiming result.
 CALIBRATION_MODE = "calibration"
@@ -196,7 +198,7 @@ def command_lock(root: Path, role: str, command: str):
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
         if not file_lock.try_lock(fd):
-            raise RuntimeError("another verification command is still running")
+            raise RuntimeError("another verification command is still running; `wait` returns once it has exited")
         try:
             atomic_file.replace_text(owner, json.dumps(
                 {"role": role, "command": command, "pid": os.getpid(),
@@ -230,16 +232,68 @@ def wait_for_own_command(root: Path, role: str, action: str) -> None:
     cannot change after its verdict. Another role's command holds no other
     reader: the code reviewer runs none and registers while QA's runs. A
     command that has not recorded its owner yet holds every reader.
+    `wait --role` returns once the same check passes.
     """
-    holder = command_holder(root)
+    holder = wait_holder(root, role)
     if holder is None:
         return
     if not recorded_command_owner(holder):
         raise RuntimeError("wait for a verification command that has not recorded its owner yet to exit"
-                           f" before {action}")
-    if holder["role"] == role:
-        raise RuntimeError(f"wait for {holder['role']}'s verification command `{holder['command']}` in process"
-                           f" {holder['pid']} since {holder['started_at']} to exit before {action}")
+                           f" before {action}; `wait --role {role}` returns once it has")
+    raise RuntimeError(f"wait for {holder['role']}'s verification command `{holder['command']}` in process"
+                       f" {holder['pid']} since {holder['started_at']} to exit before {action};"
+                       f" `wait --role {role}` returns once it has")
+
+
+def wait_holder(root: Path, role: str | None) -> dict | None:
+    """What a wait by *role* still waits for, or None once nothing does.
+
+    For a reader role it is that reader's own running verification command, or
+    a command that has not recorded its owner yet, which holds every reader:
+    what wait_for_own_command refuses. Without a role it is any holder of the
+    Item's environment lock or verification command lock, which every command,
+    freeze and guarded write of the Item refuses.
+    """
+    if role is None:
+        environment = environment_holder(root)
+        if environment is not None:
+            return {"lock": "environment", **environment}
+    command = command_holder(root)
+    if command is None or (role is not None and recorded_command_owner(command) and command["role"] != role):
+        return None
+    return {"lock": "verification_command", **command}
+
+
+def wait_for_release(root: Path, role: str | None = None, seconds: float | None = None) -> dict:
+    """Block until nothing the caller waits for holds the Item, and at most the policy's wait bound.
+
+    The call returns as soon as the holder releases its lock, so a waiting role
+    acts on the command's exit rather than on an interval of its own. It never
+    blocks longer than wait_bound_seconds, which stays under the hosts' prompt
+    cache lifetime: a role that calls wait again at once makes each model call
+    of its wait while its cached context is warm, where one long sleep makes the
+    host write that whole context into its cache again.
+    """
+    root = root.resolve()
+    bound = policy()["wait_bound_seconds"]
+    limit = bound if seconds is None else seconds
+    if role is not None and role not in ROLES:
+        raise RuntimeError("wait takes no role or a reader role: " + ", ".join(ROLES))
+    if not 0 < limit <= bound:
+        raise RuntimeError(f"one wait blocks for more than 0 and at most {bound} seconds, so the next model call"
+                           " finds the prompt cache warm; call wait again to wait longer")
+    started = time.monotonic()
+    while True:
+        holder = wait_holder(root, role)
+        elapsed = time.monotonic() - started
+        if holder is None or elapsed >= limit:
+            break
+        time.sleep(min(WAIT_POLL_SECONDS, limit - elapsed))
+    value = {"role": role, "released": holder is None, "waited_seconds": round(elapsed, 3),
+             "bound_seconds": bound}
+    if holder is not None:
+        value.update(holder=holder, next="call wait again now, as a tool call of its own")
+    return value
 
 
 def environment_lock_paths(root: Path) -> tuple[Path, Path]:
@@ -1736,7 +1790,8 @@ def resume_qa(root: Path) -> dict:
     root = root.resolve()
     with locked(root):
         if command_active(root):
-            raise RuntimeError("wait for the verification command to exit before resuming QA")
+            raise RuntimeError("wait for the verification command to exit before resuming QA;"
+                               " `wait` returns once it has")
         value = read_session(root)
         require_current(root, value, allow_evidence=True)
         worker = value["workers"]["qa_engineer"]
@@ -2605,6 +2660,9 @@ def main(argv=None) -> int:
     diff.add_argument("--path", action="append", default=[])
     subs.add_parser("resume-qa")
     subs.add_parser("status")
+    wait = subs.add_parser("wait")
+    wait.add_argument("--role", choices=ROLES)
+    wait.add_argument("--seconds", type=float)
     args = parser.parse_args(argv)
     root = Path(args.worktree).resolve()
     try:
@@ -2634,6 +2692,8 @@ def main(argv=None) -> int:
             value = candidate_diff(root, args.path)
         elif args.command == "resume-qa":
             value = resume_qa(root)
+        elif args.command == "wait":
+            value = wait_for_release(root, args.role, args.seconds)
         elif args.command == "run":
             value = run_check(root, args.kind, fresh=args.fresh, selection_file=args.selection_file)
         elif args.command == "manifest":

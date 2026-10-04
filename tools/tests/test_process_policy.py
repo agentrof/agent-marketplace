@@ -680,6 +680,12 @@ SAFETY_RULES = {
         ),
     },
     "reader_waves": {
+        f"{SKILLS}/challenge-review/references/switch-reader_waves-all_at_once.md": (
+            "a role never starts or closes another agent",
+            "No writer runs while its readers run",
+            "Wait for every reader of the wave before triage or any writer action",
+            "never who reads, what each reader is given or how findings are triaged",
+        ),
         # A wave starts readers only; the writer waits for every reader.
         **{path: ("Under switch `reader_waves` at `all_at_once`",
                   "wait for all of them before triage")

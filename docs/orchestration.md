@@ -171,9 +171,10 @@ lets them. At `all_at_once`, the coordinator closes every finished worker,
 the writer between its passes included, and starts every reader of the wave
 before waiting on any of them, the largest inputs first when the host's
 thread cap is short, and each wave's progress message names its size and its
-readers running at once. Each host contract states how: Codex counts every
-open spawned thread against its cap, while a finished Claude Code subagent
-holds none.
+readers running at once, as
+`challenge-review/references/switch-reader_waves-all_at_once.md` defines.
+Each host contract states how: Codex counts every open spawned thread against
+its cap, while a finished Claude Code subagent holds none.
 
 A Delivery Item's implementation writers run as process switch
 `implementation_schedule` selects. `sequential_v1`, the default, runs them one

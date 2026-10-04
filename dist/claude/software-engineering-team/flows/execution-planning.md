@@ -83,8 +83,9 @@ the bundle's counterpart readers, as
 `skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
 defines.
 Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck
-wave starts at once, after every finished worker is closed, as the host
-contract defines.
+wave starts at once, after every finished worker is closed, as
+`skill-content/challenge-review/references/switch-reader_waves-all_at_once.md`
+and the host contract define.
 
 Approval, and every re-approval, also refuses until a committed workflow will
 run on the Delivery PR, because the final merge needs a green provider check.

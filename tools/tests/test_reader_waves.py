@@ -25,6 +25,7 @@ from git_fixture import init_repository, remove_temporary  # noqa: E402
 SWITCH = "reader_waves"
 OWNERS = ["backlog-planning", "business-analysis", "design-system", "execution-planning",
           "operation", "solution-design"]
+REFERENCE = "skill-content/challenge-review/references/switch-reader_waves-all_at_once.md"
 TASKS = (("backlog-plan", "backlog-reviewer"), ("business-analysis", "analysis-challenger"),
          ("design-system", "design-system-reviewer"), ("solution-design", "solution-reviewer"))
 
@@ -51,9 +52,10 @@ class ReaderWavesTests(unittest.TestCase):
     def test_every_owning_flow_anchors_the_switch(self):
         for flow in OWNERS:
             with self.subTest(flow=flow):
+                text = flat(TEAM / "flows" / f"{flow}.md")
                 self.assertIn("Switch `reader_waves`: at `all_at_once`, every reader of a"
-                              " review or recheck wave starts at once",
-                              flat(TEAM / "flows" / f"{flow}.md"))
+                              " review or recheck wave starts at once", text)
+                self.assertIn(REFERENCE, text)
 
     def test_codex_closes_finished_threads_and_starts_every_reader_before_waiting(self):
         text = flat(ROOT / "platforms/codex/software-engineering-team/host-contract.md")
@@ -72,9 +74,7 @@ class ReaderWavesTests(unittest.TestCase):
         self.assertIn("Under switch `reader_waves` at `all_at_once`, spawn every reader of a"
                       " review or recheck wave in one message", text)
 
-    def test_the_switch_binds_no_instruction_file_of_its_own(self):
-        # The host contract carries the whole rule, so a task binds the same
-        # instruction files at either value.
+    def test_only_all_at_once_binds_the_reference_to_every_owning_task(self):
         bound = {}
         for value in ("as_slots_free", "all_at_once"):
             temporary = tempfile.TemporaryDirectory()
@@ -90,10 +90,21 @@ class ReaderWavesTests(unittest.TestCase):
                                             "commit", "-q", "-m", "policy"]):
                 subprocess.run(["git", "-C", str(project), *argv], check=True, capture_output=True)
             bound[value] = {
-                f"{entry}:{role}": sorted(task_inputs.manifest(
+                f"{entry}:{role}": set(task_inputs.manifest(
                     entry=entry, role=role, mode="review", project=project)["required_reads"])
                 for entry, role in TASKS}
-        self.assertEqual(bound["as_slots_free"], bound["all_at_once"])
+        for task, reads in bound["all_at_once"].items():
+            with self.subTest(task=task):
+                self.assertEqual(reads - bound["as_slots_free"][task], {REFERENCE})
+                self.assertNotIn(REFERENCE, bound["as_slots_free"][task])
+
+    def test_the_reference_keeps_readers_apart_from_writers(self):
+        text = flat(TEAM / REFERENCE)
+        for phrase in ("No writer runs while its readers run",
+                       "never from its earlier transcript",
+                       "Wait for every reader of the wave before triage or any writer action",
+                       "a role never starts or closes another agent"):
+            self.assertIn(phrase, text)
 
 
 if __name__ == "__main__":

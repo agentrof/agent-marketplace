@@ -33,8 +33,9 @@ Requirement stage and it does not alter product-stage package hashes.
    Switch `review_loop`: at `blocking_delta`, this review loop follows
    `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
    Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck
-   wave starts at once, after every finished worker is closed, as the host
-   contract defines.
+   wave starts at once, after every finished worker is closed, as
+   `skill-content/challenge-review/references/switch-reader_waves-all_at_once.md`
+   and the host contract define.
    Switch `execution_planning`: at `single_source_bundle`, a contract that a
    Delivery's execution plan revises is written against the fact ownership of
    `skill-content/execution-plan/data/fact-ownership.json`, and that plan's

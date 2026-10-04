@@ -179,6 +179,11 @@ those bytes.
    informational and may be empty or non-empty. Any later change to those
    inputs requires re-entering review and a fresh attestation; even a cosmetic
    edit cannot reuse evidence for different bytes.
+   Switch `rebind_review_scope`: at `source_delta`, the final review of a
+   package whose revision only moved its source receipts reads the source
+   delta instead of the prototype tree, as
+   `skill-content/experience-modeling/references/switch-rebind_review_scope-source_delta.md`
+   defines.
 
 ## Approval and handoff
 

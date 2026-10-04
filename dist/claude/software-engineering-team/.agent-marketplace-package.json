@@ -122,7 +122,7 @@
       "05c6a5596efedce2ad7f700af4947442badfe4175379b55b954b45231e5dd160"
     ,
     "flows/experience-design.md":
-      "1e96a8be304200f0e9edef9ea008d4cb586f9bd436e9e2c89c8369b0c778b94c"
+      "cdd66de56d9c188ed3e92f4ac7e53a6e4577373c880a014cbe83ce638e683167"
     ,
     "flows/operation.md":
       "4cc9775649de3b6098fd4313d8a9c939a339b29613ebc3b62759d5ac24373d95"
@@ -365,7 +365,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "7fbbaa94d24db7c86bba4aa29393b796587d085544c7502f5e56f1f13c544b6e"
+      "257ec884f20daae41e130ee7996086670e4c19f34529d06d99b79a59d42f48c3"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
@@ -477,6 +477,9 @@
     ,
     "skill-content/experience-modeling/references/artifact-recovery.md":
       "6ac6c2f37d61267d9838e44f050af8673a5252866d7a6c451c30e1f4371faeb8"
+    ,
+    "skill-content/experience-modeling/references/switch-rebind_review_scope-source_delta.md":
+      "0372714a2c8ad14219fa871377b4f9080313a1a3887f59f66f3434d9a96a102c"
     ,
     "skill-content/issue-report/SKILL.md":
       "936be52cacf430dcf4d5c03881aae8d7355cdd109046efc18bcefc6210cd561b"

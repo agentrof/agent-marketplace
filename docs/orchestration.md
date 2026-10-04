@@ -199,6 +199,16 @@ own gate, as
 `business-analysis/references/switch-dependent_rebind_gate-with_source.md`
 defines.
 
+What the final snapshot review of a source-only Experience rebind reads is
+process switch `rebind_review_scope`. At `full`, the default, it reads the
+whole package and prototype tree. At `source_delta`, when `source-impact`
+reports `source_rebind_only` and no note citing a changed source row or
+document, the reviewer reads the source delta, the package notes and the
+attested hashes, not the prototype tree, and still writes the full
+attestation; any authored change or cited claim takes the full review, as
+`experience-modeling/references/switch-rebind_review_scope-source_delta.md`
+defines.
+
 How the readers of one review or recheck wave start is process switch
 `reader_waves`. At `as_slots_free`, the default, readers start as the host
 lets them. At `all_at_once`, the coordinator closes every finished worker,

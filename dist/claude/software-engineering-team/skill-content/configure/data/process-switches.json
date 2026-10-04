@@ -543,6 +543,27 @@
         "unit": "At least 3 source changes with at least one mechanical Experience dependent, run with with_source.",
         "threshold": "Zero owner gates opened after a source approval for a mechanical rebind and zero mechanical rebinds whose final review found a source-caused finding, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "rebind_review_scope": {
+      "summary": "What the final snapshot review of an Experience revision that only moved its source receipts reads: the whole package and prototype tree, or the source delta with the package notes once the compiler proves every record and artifact byte unchanged.",
+      "issue": 403,
+      "flows": ["experience-design"],
+      "values": [
+        {
+          "id": "full",
+          "tradeoffs": "Every final snapshot review reads the whole package and its prototype tree at the reviewer's own tier, even for a rebind that changed no record and no prototype byte. Today's behaviour and the baseline the scoped review is measured against: in one measured project, the review of such a rebind took about 28 min and 70.3 M input tokens to confirm the same zero changed bytes the compiler had proved in 2 min, about 72% of the time from the rebind gate's answer to the backlog rebind."
+        },
+        {
+          "id": "source_delta",
+          "tradeoffs": "When `experience_compile.py source-impact` reports `source_rebind_only` and no note citing a changed source row or document, the fresh reviewer reads the source diff, the package notes and the attested hashes instead of the prototype tree, reports any claim that depends on the changed source, which starts the full review, and writes the same attestation. A shorter rebind review, while a claim that depends on a changed rule without citing it relies on the reviewer reading the notes, and a prototype screen that shows a changed rule's outcome is not reread."
+        }
+      ],
+      "default": "full",
+      "metric": "Per source-only rebind review: its scope, wall time, input tokens and findings, and source-caused findings that a later full review of the same package raised.",
+      "promotion": {
+        "unit": "At least 3 source-only rebind reviews run with source_delta, each with a replay of the full review on the same frozen inputs.",
+        "threshold": "The same source-caused findings as the full replay, a median review wall time under 8 min and a seeded source change that contradicts a cited claim still producing a finding, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

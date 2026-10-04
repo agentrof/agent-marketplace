@@ -178,5 +178,27 @@ class DependentRebindGateTests(unittest.TestCase):
             self.assertIn(phrase, text)
 
 
+class RebindReviewScopeTests(unittest.TestCase):
+    REFERENCE = ("skill-content/experience-modeling/references/"
+                 "switch-rebind_review_scope-source_delta.md")
+
+    def test_registry_keeps_the_full_review_as_default(self):
+        import process_policy
+        spec = process_policy.load_registry()["rebind_review_scope"]
+        self.assertEqual((spec["default"], spec["values"]), ("full", ["full", "source_delta"]))
+        self.assertEqual(spec["spec"]["flows"], ["experience-design"])
+
+    def test_the_scoped_review_keeps_the_attestation_and_falls_back(self):
+        team = ROOT / "plugins/software-engineering-team"
+        flow = " ".join((team / "flows/experience-design.md").read_text(encoding="utf-8").split())
+        self.assertIn(self.REFERENCE, flow)
+        text = " ".join((team / self.REFERENCE).read_text(encoding="utf-8").split())
+        for phrase in ("`package_change` `source_rebind_only` and `review_scope` `source_delta`",
+                       "Do not give it the prototype tree",
+                       "writes the same schema-v4 attestation as a full review",
+                       "which ends the scoped review and starts the full one"):
+            self.assertIn(phrase, text)
+
+
 if __name__ == "__main__":
     unittest.main()

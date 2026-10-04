@@ -526,6 +526,7 @@ RELEASED_DEFAULTS = {
     "pre_handoff_regression": "off",
     "qa_gate_order": "plan_first",
     "reader_waves": "as_slots_free",
+    "rebind_review_scope": "full",
     "remediation_bookkeeping": "writer",
     "remediation_writers": "single_writer",
     "review_loop": "current",
@@ -701,6 +702,15 @@ SAFETY_RULES = {
         **{path: ("Under switch `reader_waves` at `all_at_once`",
                   "wait for all of them before triage")
            for path in HOSTS.values()},
+    },
+    "rebind_review_scope": {
+        f"{SKILLS}/experience-modeling/references/switch-rebind_review_scope-source_delta.md": (
+            "the final attestation binds the exact inputs after the last authored change",
+            "Any other row, a second source in the same revision, or a changed input after the review"
+            " takes the full review",
+            "which ends the scoped review and starts the full one",
+            "Never use the scoped review for a package with an authored change",
+        ),
     },
     "review_loop": {
         f"{SKILLS}/challenge-review/references/switch-review_loop-blocking_delta.md": (
@@ -928,8 +938,8 @@ class MeasuredBaselineTests(unittest.TestCase):
                                  "dependent_rebind_gate", "epic_review_cadence",
                                  "execution_planning", "own_target_reuse", "owner_gates",
                                  "pre_handoff_regression", "qa_gate_order", "reader_waves",
-                                 "remediation_bookkeeping", "remediation_writers",
-                                 "review_scope_record", "root_review_scope",
+                                 "rebind_review_scope", "remediation_bookkeeping",
+                                 "remediation_writers", "review_scope_record", "root_review_scope",
                                  "source_decision_gate"])
 
 

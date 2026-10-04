@@ -103,6 +103,11 @@ REBIND_GATE = "business-analysis/references/switch-dependent_rebind_gate-with_so
 EXPECTED = {key: sorted([*value, REBIND_GATE])
             if key.split(":")[0] in ("business-analysis", "experience-design") else value
             for key, value in EXPECTED.items()}
+# rebind_review_scope binds its reference to the tasks that select experience-modeling.
+SCOPED = "experience-modeling/references/switch-rebind_review_scope-source_delta.md"
+EXPECTED = {key: sorted([*value, SCOPED])
+            if key in ("experience-design:experience-reviewer", "experience-design:ux-designer")
+            else value for key, value in EXPECTED.items()}
 # reader_waves binds its reference to every task of the entries whose flows own it.
 WAVES = "challenge-review/references/switch-reader_waves-all_at_once.md"
 WAVE_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system",

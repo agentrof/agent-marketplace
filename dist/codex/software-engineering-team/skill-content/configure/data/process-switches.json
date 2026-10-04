@@ -471,6 +471,7 @@
         }
       ],
       "default": "as_slots_free",
+      "reference_scope": "owning_flows",
       "metric": "Per review or recheck wave: its wall time against its slowest reader's, its size, the most readers running at once and the minutes between the first and the last reader's start.",
       "promotion": {
         "unit": "At least 5 review or recheck waves of at least 3 readers each, across at least 2 flows, run with all_at_once.",

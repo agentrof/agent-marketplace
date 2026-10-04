@@ -15,8 +15,9 @@ mode. Manual mode never reads, creates or binds Requirement state.
    explicitly named domain. Each prompt includes exact paths, review lens,
    output contract and `SELF-CHECK`.
    Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck
-   wave starts at once, after every finished worker is closed, as the host
-   contract defines.
+   wave starts at once, after every finished worker is closed, as
+   `skill-content/challenge-review/references/switch-reader_waves-all_at_once.md`
+   and the host contract define.
 3. Render, move each ready draft through `ba_compile.py enter-review --space
    <space> --doc <relative-doc>`, close individual document gates with `approve`,
    then run `approve-package`. Review entry changes only document status and its

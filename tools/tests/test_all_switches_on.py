@@ -91,6 +91,12 @@ EXPECTED = {
                                           "software-architecture/references/switch-" + BUNDLE],
     "solution-design:solution-reviewer": list(REVIEW),
 }
+# reader_waves binds its reference to every task of the entries whose flows own it.
+WAVES = "challenge-review/references/switch-reader_waves-all_at_once.md"
+WAVE_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system",
+                "execution-plan", "solution-design")
+EXPECTED = {key: sorted([*value, WAVES]) if key.split(":")[0] in WAVE_ENTRIES else value
+            for key, value in EXPECTED.items()}
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")
 

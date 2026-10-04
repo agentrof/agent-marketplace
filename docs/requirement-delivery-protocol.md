@@ -531,10 +531,10 @@ reused.
 
 Process switch `qa_gate_order` decides when QA starts its first test command
 of a round. At `plan_first`, the default, QA plans and maps every check before
-it executes anything. At `gate_first`, QA starts the command through the
-host's background command mechanism, then plans, maps and drafts its result
-while it runs, and reads its output only once the plan and the coverage matrix
-are written.
+it executes anything. At `gate_first`, QA starts the command in the
+background, as the host runs a long command, then plans, maps and drafts its
+result while it runs, reads its output only once the plan and the coverage
+matrix are written, and waits for it only through `wait --role qa_engineer`.
 
 Process switch `test_group_report` decides whether a test run knows its
 groups. At `off`, the default, the runner records the command's exit code,

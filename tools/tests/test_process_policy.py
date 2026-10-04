@@ -692,6 +692,7 @@ SAFETY_RULES = {
             "start no other `run` or `environment` command until it ends",
             "Read the command's output only once the plan and the matrix are written",
             "no check is planned, or left out, because of what the run showed",
+            "Never wait through a sleep, a polling loop or a long timeout of your own",
         ),
     },
     "reader_waves": {

@@ -233,7 +233,7 @@ stops to check in before a long task is done
 ([Sonnet 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5));
 at `high` it scores 49.4% on FrontierCode against 36.5% at `medium`
 ([Sonnet 5.5 results](https://www.anthropic.com/claude-sonnet-5-5)). On
-Codex the high and medium tiers run GPT-6.1 Sol at `xhigh`: on the Artificial Analysis
+Codex every tier runs GPT-6.1 Sol at `xhigh`: on the Artificial Analysis
 Coding Agent Index v1.5
 ([coding agents](https://artificialanalysis.ai/agents/coding-agents), read 1
 Oct 2026) Codex with GPT-6.1 Sol at `xhigh` scores 63 at 15.5 minutes and
@@ -242,12 +242,13 @@ hours and $13.0 and Claude Code with Sonnet 5.5 at `max` scores 68 at 1.5
 hours and $14.2. Every generated variant, the four `-lens` readers and the
 four `-mechanical` writers, runs on the `low` tier and so keeps the values
 the owner chose for it. No canonical role runs the low tier, which on Codex
-runs Sol at `high` since #404: at `xhigh` a variant changed only the fresh
-context of a pass, so a `-mechanical` fix pass, such as one that rewrote a
+stays at Sol `xhigh`, so a `-mechanical` fix pass, such as one that rewrote a
 single numeric test in about 16 minutes in one measured project, still
-generated at the writers' effort. On OpenAI's own charts Sol scores 75.2% on
+generates at the writers' effort. On OpenAI's own charts Sol scores 75.2% on
 DeepSWE v1.1 at `high`, above its 71.9% at `max`
-([GPT-6.1 Sol](https://openai.com/index/introducing-gpt-6-1-sol/)). Every tier pins an effort, because a Claude Code
+([GPT-6.1 Sol](https://openai.com/index/introducing-gpt-6-1-sol/)), but
+lowering the Codex low tier waits for the frozen-task A/B of #404 on
+recorded fix passes. Every tier pins an effort, because a Claude Code
 subagent without `effort` follows the session's level, `max` included
 ([subagents](https://code.claude.com/docs/en/sub-agents)). No tier defaults
 to `max` or `ultra`: each host's effort policy asks the owner to confirm
@@ -611,11 +612,12 @@ What a variant changes depends on the host's tables. Every variant runs
 on the `low` tier. On Claude Code that is Sonnet at effort `high`, which
 moves every writer from Opus to Sonnet, above the `medium` of
 `product-owner`, `qa-engineer` and `devops-engineer` and below the `xhigh`
-of `solution-architect`. On Codex the writers run Sol at `xhigh` and a
-variant runs Sol at `high`, one effort step lower, in a fresh context; a pass
-that resumes the base writer instead keeps the writer's effort, so the
-coordinator starts the variant and the pass record says which ran. These
-values are starting values until the variants' frozen-task A/B sets them.
+of `solution-architect`. On Codex every tier runs Sol at `xhigh`, so a
+variant keeps its writer's own model and effort and changes only the fresh
+context of the pass; the coordinator still starts the variant for every
+fix pass, and the pass record says which ran with its model and effort.
+These values are placeholders until the variants' frozen-task A/B sets
+them; lowering the Codex low tier waits for that A/B (#404).
 
 ## Story size budget
 

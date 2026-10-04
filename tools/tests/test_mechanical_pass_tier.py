@@ -77,14 +77,13 @@ class InstructionTests(unittest.TestCase):
 
 
 class CodexTierTests(unittest.TestCase):
-    """On Codex a variant runs its writer's model one effort step lower, so a
-    fix pass gains more than a fresh context (#404), and a pass that resumes
-    the base writer is recorded as such."""
+    """On Codex a variant keeps its writer's model and effort until the
+    variants' frozen-task A/B sets a lower one (#404), and every fix pass
+    starts the variant and records the model and effort that ran it."""
 
-    def test_every_codex_variant_runs_below_the_writer_it_serves(self):
+    def test_every_codex_variant_runs_its_writers_model_and_effort(self):
         profile = json.loads((ROOT / "platforms/codex/execution-profiles.json").read_text(
             encoding="utf-8"))["profiles"]["auto"]
-        efforts = ["low", "medium", "high", "xhigh", "max"]
         agents = ROOT / "dist/codex/software-engineering-team/agents"
 
         def setting(name: str) -> tuple[str, str]:
@@ -92,14 +91,15 @@ class CodexTierTests(unittest.TestCase):
             return (re.search(r"^model: (.+)$", text, re.M)[1],
                     re.search(r"^model_reasoning_effort: (.+)$", text, re.M)[1])
 
+        self.assertEqual(profile["low"], {"model": "gpt-6.1-sol", "effort": "xhigh"})
         self.assertEqual(setting("product-owner-mechanical"),
                          (profile["low"]["model"], profile["low"]["effort"]))
         for writer in WRITERS:
             with self.subTest(writer=writer):
-                model, effort = setting(writer)
-                variant_model, variant_effort = setting(f"{writer}-mechanical")
-                self.assertEqual(variant_model, model)
-                self.assertLess(efforts.index(variant_effort), efforts.index(effort))
+                self.assertEqual(setting(f"{writer}-mechanical"), setting(writer))
+        contract = " ".join((ROOT / "platforms/codex/software-engineering-team/host-contract.md")
+                            .read_text(encoding="utf-8").split())
+        self.assertIn("a lower low-tier effort waits for that A/B (#404)", contract)
 
     def test_a_resumed_writer_pass_is_recorded_on_its_own_tier(self):
         text = " ".join(read(REFERENCE).split())

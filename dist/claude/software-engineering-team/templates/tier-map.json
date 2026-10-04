@@ -154,7 +154,7 @@
         },
         "inherit": {},
         "low": {
-          "effort": "high",
+          "effort": "xhigh",
           "efforts": [
             "low",
             "medium",

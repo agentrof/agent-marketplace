@@ -4,7 +4,7 @@
     "auto": {
       "high": {"model": "gpt-6.1-sol", "effort": "xhigh"},
       "medium": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "low": {"model": "gpt-6.1-sol", "effort": "high"},
+      "low": {"model": "gpt-6.1-sol", "effort": "xhigh"},
       "inherit": {}
     }
   }

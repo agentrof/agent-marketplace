@@ -2,7 +2,7 @@
 name: qa-engineer-mechanical
 description: QA engineer role that co-authors story test plans during Backlog Planning and independently verifies delivered behavior during Delivery; never auto-triggered. Writer variant for passes that apply only the fixes a review verdict names.
 model: gpt-6.1-sol
-model_reasoning_effort: high
+model_reasoning_effort: xhigh
 output_contract: prose
 ---
 

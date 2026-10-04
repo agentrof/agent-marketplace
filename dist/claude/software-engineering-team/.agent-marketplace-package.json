@@ -104,7 +104,7 @@
       "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3"
     ,
     "flows/delivery-execution.md":
-      "2e3d6fe093324450baf7aaa574409b615e9b513291cc814f31340ad3ca95fc4d"
+      "ef1c83fcad8215d4daa106fafebb47b483fa260b448c593be2fe78f563f1727d"
     ,
     "flows/delivery-governance.md":
       "ef2fa67262e0f500ba49b80d2865af6038638327745b989303acfaf1b1446fb7"
@@ -179,7 +179,7 @@
       "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
     ,
     "scripts/delivery_verification.py":
-      "9870c769c50df568ab38bcee5c2be70e5ec04388081553deac50e7ad420855a5"
+      "bc259e1b6bc1be31b9795bbba15eeb97d6e1dacb6bf2a0907faffa82ce451835"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -329,7 +329,7 @@
       "be3be367917f0e6e42272262cc89899774976272325de244e229a4b9db2f99fa"
     ,
     "skill-content/code-review/references/switch-review_loop-blocking_delta.md":
-      "21b36d1267253a8157f60046b6a66932b6db2ee7414788fa7179e464fb32ca36"
+      "46d14cd4fd6f991b766a5562161651dad84b8b9afd133e8c8a5e508408b925fe"
     ,
     "skill-content/configure/SKILL.md":
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
@@ -386,7 +386,7 @@
       "9b18128e9329d69c9ecda42be3df30bb2f7861561c6c4293748c7e3b33c2b9c2"
     ,
     "skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md":
-      "38d22ac17e18d89edfa3cf2485467629eeef7c38b477b488d7cdf750eec7edd5"
+      "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
     ,
     "skill-content/delivery-plan/SKILL.md":
       "bd1020b0afede9f2e7f28c47e49f9d28548ecc51d2ec84158c98a5dc360702fa"
@@ -557,7 +557,7 @@
       "7ddf13911059f2676d23cb1ae8a0e33e69f0f3cd7e2f2a9c3a7f4149761194d3"
     ,
     "skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md":
-      "bd1d5a658fb6901c4236202f92a9e5b6383973e08e4e1081ed5b482709ad30ff"
+      "ff67910ad82a3211b4ed3058e0437c0314246950bb9a2a017cad8b0844fcfb91"
     ,
     "skill-content/qa-verification/references/test-design.md":
       "c8ef52eb9cbb30c14fcb905b49b92a9e88489ba9a842b75834da615d7fb330cd"

@@ -75,7 +75,7 @@ in an earlier cycle and keeps that ruling.
 3. The calibration reader registers its rows as its own result with
    `delivery_verification.py calibrate --file <calibration.json>`: `role`
    `code_reviewer`, `mode` `calibration`, the session's `candidate_hash` and
-   `session_id` from `status`, its `report`, the `claims` it ruled exactly as
+   `session_id` from `status --summary`, its `report`, the `claims` it ruled exactly as
    returned and its rows as `calibration`. `calibrate` refuses a missing,
    extra or duplicate row, a changed claimed severity, a raised severity, a
    reason without a `path:line` citation of a line the candidate holds, a

@@ -89,7 +89,9 @@ the bound with the holder it still waits for; then call `wait` again at once,
 each time as a tool call of its own. Start a command that can outlast one
 `wait`, such as QA's full suite, in the background as the host runs a long
 command, wait for it with `wait --role qa_engineer`, then read the record the
-command printed.
+command printed. Read a recorded run again with `status --run <kind>`, or
+every run with the session identity through `status --summary`; plain
+`status` prints the whole session, bindings included.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
 Switch `qa_gate_order`: at `gate_first`, QA starts its first test command of a

@@ -187,6 +187,18 @@ back to two gates, as
 `business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md`
 defines.
 
+Which owner gate approves the Experience rebinds a source approval makes
+necessary is process switch `dependent_rebind_gate`. At `separate`, the
+default, binding refresh finds the stale Experience package after the source
+approval and opens its own scope gate. At `with_source`,
+`experience_compile.py source-impact` lists the stale packages before the
+source gate and classes each as a `mechanical` rebind, when none of its notes
+cites a changed source row or document, or a `semantic` one; the source gate
+approves the mechanical rebinds with the source, and a semantic one keeps its
+own gate, as
+`business-analysis/references/switch-dependent_rebind_gate-with_source.md`
+defines.
+
 How the readers of one review or recheck wave start is process switch
 `reader_waves`. At `as_slots_free`, the default, readers start as the host
 lets them. At `all_at_once`, the coordinator closes every finished worker,

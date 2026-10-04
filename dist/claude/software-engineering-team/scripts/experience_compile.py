@@ -895,7 +895,11 @@ def commit_transaction(root: Path, transaction_id: str) -> None:
 
 
 def fm(path: Path) -> tuple[dict, str]:
-    lines = path.read_text(encoding="utf-8").splitlines()
+    return fm_text(path.read_text(encoding="utf-8"))
+
+
+def fm_text(text: str) -> tuple[dict, str]:
+    lines = text.splitlines()
     if not lines or lines[0] != "---":
         raise ValueError("missing frontmatter")
     data, current, end = {}, "", -1
@@ -5460,6 +5464,189 @@ def render_experience_navigation(root: Path) -> None:
             )
 
 
+# Root keys a source-only rebind may change: lifecycle stamps, the revision
+# counter and the receipts the package binds.
+REBIND_KEYS = frozenset({
+    "status", "approval_revision", "registry_hash", "package_hash", "source_hash",
+    "approved_at_utc", "tags", "revision", "input_bindings", "upstream_stage_receipts_hash",
+})
+SOURCE_ROW_ID = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$")
+SOURCE_HASH_LINE = re.compile(r"(?m)^package_hash:\s*[\"']?(sha256:[0-9a-f]{64})[\"']?\s*$")
+
+
+def _git(cwd: Path, *argv: str, check: bool = True) -> subprocess.CompletedProcess:
+    result = subprocess.run(["git", "-C", str(cwd), *argv], capture_output=True, check=False)
+    if check and result.returncode:
+        raise ValueError(f"git {' '.join(argv[:2])} failed: "
+                         + result.stderr.decode("utf-8", "replace").strip())
+    return result
+
+
+def _git_text(top: Path, commit: str, relative: str) -> str | None:
+    result = _git(top, "show", f"{commit}:{relative}", check=False)
+    return result.stdout.decode("utf-8") if result.returncode == 0 else None
+
+
+def _rebind_form(text: str, *, root_note: bool) -> str:
+    """A note without what a source-only rebind may change."""
+    data, body = fm_text(text)
+    ignored = REBIND_KEYS if root_note else {"tags"}
+    stable = {key: value for key, value in data.items() if key not in ignored}
+    return render_fm(stable, without_generated_relations(body), digest=True)
+
+
+def _source_rows(text: str) -> dict[str, str]:
+    """Every table row a source document mints, keyed by its id."""
+    rows = {}
+    for line in text.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")] \
+            if line.lstrip().startswith("|") else []
+        if cells and SOURCE_ROW_ID.match(cells[0]):
+            rows[cells[0]] = " ".join(" | ".join(cells).split())
+    return rows
+
+
+def _source_documents(text_by_path: dict[str, str]) -> dict[str, str]:
+    """Source documents in a comparable form: lifecycle and generated parts left out."""
+    import ba_compile
+    result = {}
+    for relative, text in text_by_path.items():
+        if relative.split("/", 1)[0] == GENERATED or not relative.endswith(".md"):
+            continue
+        lines = text.splitlines()
+        if lines and lines[0] == "---" and "---" in lines[1:]:
+            end = lines.index("---", 1)
+            lines = ["---", *(line for line in lines[1:end]
+                              if line.partition(":")[0].strip() not in ba_compile.LIFECYCLE_KEYS
+                              and not ba_compile.STATUS_TAG_RE.match(line)), *lines[end:]]
+        result[relative] = without_generated_relations("\n".join(lines).rstrip() + "\n")
+    return result
+
+
+def _source_commit(top: Path, space_rel: str, digest: str) -> str | None:
+    """The newest commit whose source package receipt is ``digest``."""
+    log = _git(top, "log", "--format=%H", "--", f"{space_rel}/space.md", check=False)
+    for commit in log.stdout.decode().split():
+        text = _git_text(top, commit, f"{space_rel}/space.md") or ""
+        match = SOURCE_HASH_LINE.search(text)
+        if match and match.group(1) == digest:
+            return commit
+    return None
+
+
+def _tree_at(top: Path, commit: str, relative: str) -> dict[str, str]:
+    listing = _git(top, "ls-tree", "-r", "--name-only", commit, "--", relative, check=False)
+    paths = [line for line in listing.stdout.decode().splitlines() if line]
+    return {path[len(relative) + 1:]: _git_text(top, commit, path) or "" for path in paths}
+
+
+def _changed_paths(top: Path, relative: str) -> list[str]:
+    """Paths under ``relative`` whose bytes differ from HEAD, untracked ones included."""
+    changed = set(_git(top, "diff", "--name-only", "HEAD", "--", relative,
+                       check=False).stdout.decode().split("\n"))
+    changed |= set(_git(top, "ls-files", "--others", "--exclude-standard", "--", relative,
+                        check=False).stdout.decode().split("\n"))
+    return sorted(path for path in changed if path)
+
+
+def source_impact(root: Path, source_ref: str) -> dict:
+    """Which approved Experience packages a source change makes stale, and how.
+
+    The source's previous content is the commit whose receipt each package
+    binds at HEAD; its new content is the working tree. A package is a
+    mechanical rebind when none of its notes cites a changed source row or
+    document, and its open revision is ``source_rebind_only`` when only the
+    root's lifecycle, revision and bindings differ from HEAD.
+    """
+    stage, _, space = source_ref.partition("/")
+    space, _, tail = space.partition("/")
+    if stage != "business-analysis" or tail != "space" or not space:
+        raise ValueError("source-impact takes a business-analysis/<space>/space reference")
+    root = root.resolve()
+    top = Path(_git(root, "rev-parse", "--show-toplevel").stdout.decode().strip()).resolve()
+    docs = root.parent
+    space_dir = docs / "business-analysis" / space
+    space_rel = space_dir.relative_to(top).as_posix()
+    current_source = _source_documents({
+        path.relative_to(space_dir).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(space_dir.rglob("*.md"))} if space_dir.is_dir() else {})
+    application = (root / "artifacts").relative_to(top).as_posix()
+    application_changed = _changed_paths(top, application)
+    results = []
+    for package in packages(root):
+        package_rel = package.relative_to(top).as_posix()
+        approved_root = _git_text(top, "HEAD", f"{package_rel}/experience.md")
+        if approved_root is None:
+            continue
+        approved_rows = input_rows_from_bindings(fm_text(approved_root)[0].get("input_bindings", []))
+        bound = [digest for row_stage, reference, digest in approved_rows
+                 if row_stage == stage and reference == source_ref]
+        if not bound:
+            continue
+        current_rows = input_rows_from_bindings(fm(package / "experience.md")[0].get("input_bindings", []))
+        base = _source_commit(top, space_rel, bound[0])
+        if base is None:
+            raise ValueError(f"{package.name}: no commit holds {source_ref} at {bound[0]}")
+        previous = _source_documents(_tree_at(top, base, space_rel))
+        changed_documents = sorted(path for path in set(previous) | set(current_source)
+                                   if previous.get(path) != current_source.get(path))
+        changed_ids = set()
+        for path in changed_documents:
+            old_rows = _source_rows(previous.get(path, ""))
+            new_rows = _source_rows(current_source.get(path, ""))
+            changed_ids |= {key for key in set(old_rows) | set(new_rows)
+                            if old_rows.get(key) != new_rows.get(key)}
+        links = [f"business-analysis/{space}/{path[:-3]}" for path in changed_documents]
+        cited = []
+        for note in authored(package):
+            text = note.read_text(encoding="utf-8")
+            hits = sorted({key for key in changed_ids if re.search(rf"(?<![A-Z0-9-]){re.escape(key)}(?![A-Z0-9-])", text)}
+                          | {link for link in links if link in text})
+            if hits:
+                cited.append({"note": note.relative_to(package).as_posix(), "cites": hits})
+        changed_notes = []
+        for note in authored(package):
+            relative = note.relative_to(package).as_posix()
+            before = _git_text(top, "HEAD", f"{package_rel}/{relative}")
+            root_note = relative == "experience.md"
+            if before is None or _rebind_form(before, root_note=root_note) != _rebind_form(
+                    note.read_text(encoding="utf-8"), root_note=root_note):
+                changed_notes.append(relative)
+        for relative in _tree_at(top, "HEAD", package_rel):
+            if (relative.endswith(".md") and GENERATED not in relative.split("/")
+                    and LEDGER not in relative.split("/") and not (package / relative).exists()):
+                changed_notes.append(relative)
+        artifacts = [path[len(package_rel) + 1:] for path in _changed_paths(top, f"{package_rel}/artifacts")]
+        bindings_changed = set(current_rows) != set(approved_rows)
+        if changed_notes or artifacts or application_changed:
+            package_change = "authored_change"
+        elif bindings_changed:
+            package_change = "source_rebind_only"
+        else:
+            package_change = "none"
+        results.append({
+            "experience": package.name,
+            "bound_package_hash": bound[0],
+            "source_base_commit": base,
+            "changed_source_documents": changed_documents,
+            "changed_source_ids": sorted(changed_ids),
+            "cited_by": cited,
+            "rebind": "semantic" if cited else "mechanical",
+            "package_change": package_change,
+            "changed_notes": sorted(set(changed_notes)),
+            "changed_artifacts": artifacts,
+            "review_scope": "source_delta"
+            if package_change == "source_rebind_only" and not cited else "full",
+        })
+    return {"source_ref": source_ref, "application_artifacts_changed": application_changed,
+            "dependents": results}
+
+
+def source_impact_command(args) -> int:
+    print(json.dumps(source_impact(Path(args.root), args.source_ref), indent=2, sort_keys=True))
+    return 0
+
+
 def reconcile_vault_navigation(root: Path) -> None:
     render_experience_navigation(root)
 
@@ -5494,6 +5681,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("abort-open-scope"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--confirm", required=True); p.set_defaults(func=abort_open_scope)
     p = sub.add_parser("return-to-draft"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.set_defaults(func=return_to_draft)
     p = sub.add_parser("resolve"); p.add_argument("--root", required=True); p.add_argument("--ref", required=True); p.set_defaults(func=resolve)
+    p = sub.add_parser("source-impact"); p.add_argument("--root", required=True); p.add_argument("--source-ref", required=True); p.set_defaults(func=source_impact_command)
     args = parser.parse_args(argv)
     try:
         transaction_root = command_experience_root(args)

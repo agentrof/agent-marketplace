@@ -516,6 +516,7 @@ RELEASED_DEFAULTS = {
     "calculation_examples": "off",
     "code_review_panel": "single_reader",
     "delivery_path": "standard",
+    "dependent_rebind_gate": "separate",
     "epic_review_cadence": "wait_per_panel",
     "execution_planning": "per_document",
     "implementation_schedule": "sequential_v1",
@@ -796,6 +797,14 @@ SAFETY_RULES = {
             "so any change to the backlog stales it",
         ),
     },
+    "dependent_rebind_gate": {
+        f"{SKILLS}/business-analysis/references/switch-dependent_rebind_gate-with_source.md": (
+            "the owner approves the complete action set before any lifecycle mutation",
+            "never approved here",
+            "Never widen the approved set, and never let an authored record or artifact change ride on"
+            " this approval",
+        ),
+    },
     "source_decision_gate": {
         f"{SKILLS}/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md": (
             "A choice pick sets a direction only and never approves a write",
@@ -916,9 +925,10 @@ class MeasuredBaselineTests(unittest.TestCase):
                 with self.subTest(switch=name):
                     self.assertTrue(evidence.startswith(" in one measured project"), evidence)
         self.assertEqual(cited, ["calculation_examples", "code_review_panel", "delivery_path",
-                                 "epic_review_cadence", "execution_planning", "own_target_reuse",
-                                 "owner_gates", "pre_handoff_regression", "qa_gate_order",
-                                 "reader_waves", "remediation_bookkeeping", "remediation_writers",
+                                 "dependent_rebind_gate", "epic_review_cadence",
+                                 "execution_planning", "own_target_reuse", "owner_gates",
+                                 "pre_handoff_regression", "qa_gate_order", "reader_waves",
+                                 "remediation_bookkeeping", "remediation_writers",
                                  "review_scope_record", "root_review_scope",
                                  "source_decision_gate"])
 

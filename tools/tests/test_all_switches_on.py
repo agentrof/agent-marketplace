@@ -98,6 +98,11 @@ ONE_GATE = "business-analysis/references/switch-source_decision_gate-one_gate_wh
 EXPECTED = {key: sorted([*value, CALCULATION, ONE_GATE])
             if key.split(":")[0] in ("backlog-plan", "business-analysis") else value
             for key, value in EXPECTED.items()}
+# dependent_rebind_gate binds its reference to every task of its owning flows' entries.
+REBIND_GATE = "business-analysis/references/switch-dependent_rebind_gate-with_source.md"
+EXPECTED = {key: sorted([*value, REBIND_GATE])
+            if key.split(":")[0] in ("business-analysis", "experience-design") else value
+            for key, value in EXPECTED.items()}
 # reader_waves binds its reference to every task of the entries whose flows own it.
 WAVES = "challenge-review/references/switch-reader_waves-all_at_once.md"
 WAVE_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system",

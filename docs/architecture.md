@@ -47,7 +47,9 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     manifest fresh; the root manifest's binds every backlog note.
     Process switch `review_scope_record` at `both_scopes` adds to an epic
     reader's manifest the sizes of both read sets, which its hash binds, and
-    never changes what the reader reads.
+    never changes what the reader reads. At process switch
+    `remediation_writers` `per_epic`, an epic writer's manifest reads that
+    epic's review scope at the `review_manifest_scope` value in force.
 12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
     scenarios; automation-required scenarios name an executable-test target.
 13. Every story has exactly one accountable implementation owner and may name

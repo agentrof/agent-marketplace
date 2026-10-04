@@ -118,6 +118,17 @@ coordinator appends both to a tracked JSON Lines record.
 `backlog-plan/references/switch-review_scope_record-both_scopes.md` defines
 the record.
 
+Who applies the epic reviews' findings is process switch
+`remediation_writers`. At `single_writer`, the default, one Product Owner
+writer reads the union of every epic's review scope and applies them all. At
+`per_epic`, each epic with findings gets its own Product Owner writer, in
+parallel, whose `--epic` task reads that epic's review scope at the
+`review_manifest_scope` value in force and writes only that epic's notes;
+afterwards one cross-epic writer, derived without `--epic`, reads and writes
+only the notes the cross-epic findings name.
+`backlog-plan/references/switch-remediation_writers-per_epic.md` defines the
+writers.
+
 When epic reviews queue behind the host's agent limit, process switch
 `epic_review_cadence` sets when the next one starts. At `wait_per_panel`, the
 default, the coordinator waits for the previous review's calibration and its

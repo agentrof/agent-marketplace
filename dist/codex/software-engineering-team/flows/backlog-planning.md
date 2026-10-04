@@ -288,6 +288,11 @@ declarations and stale completed evidence offered for the current candidate
 remain findings. The final compiler requires the exact written relation sets
 and complete review prose before approval.
 
+Switch `remediation_writers`: at `per_epic`, one writer per epic with
+findings and then one cross-epic writer apply the epic reviews' findings, as
+`skill-content/backlog-plan/references/switch-remediation_writers-per_epic.md`
+defines.
+
 The Product Owner is the single writer: it triages the returned findings,
 repairs source documents, and writes each designated epic review note. An epic
 review uses `derives_from` for its owning epic and `verifies` for the exact

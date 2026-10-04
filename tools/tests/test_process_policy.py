@@ -523,6 +523,7 @@ RELEASED_DEFAULTS = {
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
     "qa_gate_order": "plan_first",
+    "remediation_writers": "single_writer",
     "review_loop": "current",
     "review_manifest_scope": "transitive",
     "review_panels": "single_reader",
@@ -705,6 +706,15 @@ SAFETY_RULES = {
             " has returned",
         ),
     },
+    "remediation_writers": {
+        f"{SKILLS}/backlog-plan/references/switch-remediation_writers-per_epic.md": (
+            "The Product Owner stays the only backlog writer role",
+            "before any writer starts, as the flow requires",
+            "No two writers ever write the same note",
+            "the cross-epic writer starts only after every epic writer has returned",
+            "Each fix's re-review runs exactly as the step's review loop says",
+        ),
+    },
     "review_manifest_scope": {
         f"{SKILLS}/backlog-plan/references/switch-review_manifest_scope-bounded.md": (
             "The root manifest and a writer's manifest keep the transitive read set, and backlog"
@@ -858,7 +868,8 @@ class MeasuredBaselineTests(unittest.TestCase):
         self.assertEqual(cited, ["code_review_panel", "delivery_path", "epic_review_cadence",
                                  "execution_planning",
                                  "own_target_reuse", "owner_gates", "pre_handoff_regression",
-                                 "qa_gate_order", "review_scope_record"])
+                                 "qa_gate_order", "remediation_writers",
+                                 "review_scope_record"])
 
 
 if __name__ == "__main__":

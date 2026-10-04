@@ -379,6 +379,27 @@
         "unit": "At least 5 epic reviews recorded across at least 2 backlog revisions. The switch changes only backlog planning, which runs outside any Delivery, so epic reviews replace the 3-Delivery default.",
         "threshold": "A record for every epic review of those revisions and zero discarded panels after an over-budget flag, with every shared quality guard holding and the owner's approval. The records then decide review_manifest_scope's default, a separate owner decision."
       }
+    },
+    "remediation_writers": {
+      "summary": "Who applies the accepted findings of a backlog revision's epic reviews: one Product Owner writer over the union of every epic's review scope, or one writer per epic with findings over that epic's review scope, in parallel, followed by one cross-epic writer that reads only the notes the cross-epic findings name.",
+      "issue": 394,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "single_writer",
+          "tradeoffs": "One Product Owner writer reads the union of every epic's review scope before its first edit and applies every accepted finding. Today's behaviour and the baseline per-epic writers are measured against: in one measured project, a writer bound to 1,063 inputs, 21.5 MB of sources, read for about 88 min, compacted its context 7 times and had changed no canonical file after 96 min."
+        },
+        {
+          "id": "per_epic",
+          "tradeoffs": "After every epic review returns, each epic with accepted findings gets its own Product Owner writer, in parallel within the host's agent limit, whose manifest is that epic's review scope at the review_manifest_scope value in force and whose write scope is that epic's own notes; findings that cross epics go to one cross-epic writer afterwards, whose task binds only the notes those findings name. A writer that only applies named fixes may run as the mechanical variant under mechanical_pass_tier. A shorter read before the first edit and parallel writers, while a fix that a per-epic writer's scope cannot hold must be routed to the cross-epic writer, the parallel writers' edits meet only at the cross-epic pass and the root review, and more agents run at once."
+        }
+      ],
+      "default": "single_writer",
+      "metric": "Per backlog revision: wall clock from the last epic review's return to the last remediation writer's return, input tokens and context compactions per writer, and findings each writer returned for another writer's scope, against a single_writer revision; guard: the root review after remediation finds every accepted finding resolved and no new cross-epic defect.",
+      "promotion": {
+        "unit": "At least 2 backlog revisions run with per_epic, each with at least 3 epics with accepted findings. The switch changes only backlog planning, which runs outside any Delivery, so revisions replace the 3-Delivery default.",
+        "threshold": "Remediation wall clock at most 40% of the single_writer baseline, at most 1 context compaction per writer and zero cross-epic defects the root review traces to a per-epic writer, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

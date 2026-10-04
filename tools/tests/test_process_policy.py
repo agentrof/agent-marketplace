@@ -523,6 +523,7 @@ RELEASED_DEFAULTS = {
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
     "qa_gate_order": "plan_first",
+    "reader_waves": "as_slots_free",
     "remediation_bookkeeping": "writer",
     "remediation_writers": "single_writer",
     "review_loop": "current",
@@ -677,6 +678,12 @@ SAFETY_RULES = {
             "Read the command's output only once the plan and the matrix are written",
             "no check is planned, or left out, because of what the run showed",
         ),
+    },
+    "reader_waves": {
+        # A wave starts readers only; the writer waits for every reader.
+        **{path: ("Under switch `reader_waves` at `all_at_once`",
+                  "wait for all of them before triage")
+           for path in HOSTS.values()},
     },
     "review_loop": {
         f"{SKILLS}/challenge-review/references/switch-review_loop-blocking_delta.md": (
@@ -887,8 +894,8 @@ class MeasuredBaselineTests(unittest.TestCase):
         self.assertEqual(cited, ["code_review_panel", "delivery_path", "epic_review_cadence",
                                  "execution_planning",
                                  "own_target_reuse", "owner_gates", "pre_handoff_regression",
-                                 "qa_gate_order", "remediation_bookkeeping", "remediation_writers",
-                                 "review_scope_record", "root_review_scope"])
+                                 "qa_gate_order", "reader_waves", "remediation_bookkeeping",
+                                 "remediation_writers", "review_scope_record", "root_review_scope"])
 
 
 if __name__ == "__main__":

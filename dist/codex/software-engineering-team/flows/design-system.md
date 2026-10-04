@@ -29,6 +29,9 @@ the catalog artifact path and relative-artifact link law.
    `skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
    defines. Switch `review_loop`: at `blocking_delta`, this review loop follows
    `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+   Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck
+   wave starts at once, after every finished worker is closed, as the host
+   contract defines.
 5. Run compiler checks, then `approve`; changes to an approved MASTER begin a
    revision first. Compiler approval and a committed package are handoff.
 4. Requirement mode binds its receipt. Manual mode returns it and suggests

@@ -165,6 +165,16 @@ until every review and every calibration has returned.
 `backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md`
 defines the cadence.
 
+How the readers of one review or recheck wave start is process switch
+`reader_waves`. At `as_slots_free`, the default, readers start as the host
+lets them. At `all_at_once`, the coordinator closes every finished worker,
+the writer between its passes included, and starts every reader of the wave
+before waiting on any of them, the largest inputs first when the host's
+thread cap is short, and each wave's progress message names its size and its
+readers running at once. Each host contract states how: Codex counts every
+open spawned thread against its cap, while a finished Claude Code subagent
+holds none.
+
 A Delivery Item's implementation writers run as process switch
 `implementation_schedule` selects. `sequential_v1`, the default, runs them one
 after another in their approved order. For an Item whose approved plan

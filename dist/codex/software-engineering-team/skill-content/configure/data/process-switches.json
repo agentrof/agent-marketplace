@@ -455,6 +455,27 @@
         "unit": "At least 2 backlog revisions run with compiler, at least 3 remediation writer passes in all. The switch changes only backlog planning, which runs outside any Delivery, so writer passes replace the 3-Delivery default.",
         "threshold": "A median bookkeeping tail of at most 5 min per pass and zero closure rows that differ from the readers' tables, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "reader_waves": {
+      "summary": "How a coordinator starts the independent readers of one review or recheck wave on a host that caps its open agent threads: each as a thread frees up, or all at once after closing every finished worker.",
+      "issue": 399,
+      "flows": ["backlog-planning", "business-analysis", "design-system", "execution-planning", "operation", "solution-design"],
+      "values": [
+        {
+          "id": "as_slots_free",
+          "tradeoffs": "Readers start as the host lets them, and a finished worker or a writer between its passes may keep its thread open. Today's behaviour and the baseline the wave start is measured against: in one measured project, a recheck wave of 12 independent readers ran in batches of at most three for 51 min, where its slowest reader took 20.7 min, and one panel's third reader started about 28 min late behind a finished worker's open thread."
+        },
+        {
+          "id": "all_at_once",
+          "tradeoffs": "Before a wave starts the coordinator closes every finished worker, the writer between its passes included, counts the free threads and starts every reader of the wave before waiting on any of them; when threads are short it starts the readers with the largest inputs first and says so, and each wave's progress message names its size and its readers running at once. A wave takes about as long as its slowest reader, while a closed writer starts its next pass fresh from its manifest and the findings, without its earlier read history, and a host thread cap below the wave size still batches the rest."
+        }
+      ],
+      "default": "as_slots_free",
+      "metric": "Per review or recheck wave: its wall time against its slowest reader's, its size, the most readers running at once and the minutes between the first and the last reader's start.",
+      "promotion": {
+        "unit": "At least 5 review or recheck waves of at least 3 readers each, across at least 2 flows, run with all_at_once.",
+        "threshold": "A median ratio of wave wall time to slowest reader of at most 1.2 and readers running at once equal to the wave size wherever the host's thread cap allows it and no rise in writer fix-pass rework, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

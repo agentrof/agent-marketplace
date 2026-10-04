@@ -92,6 +92,30 @@ application-only revision changes no process revision but creates a new current
 `experience-design/_ledger/application-revisions.json`; the current projection
 is `experience-design/_generated/application-registry.json`.
 
+After an approved source handoff, synchronize the local checkout in a separate
+direct shell call using the resolved absolute Git executable from the checkout
+root. The Experience guard attests only `merge --no-edit <committed-source>` or
+`restore --source=<committed-source> --worktree -- workspace/docs/experience-design`.
+Fetch required target and Fence objects separately before synchronization. The immutable source
+must contain the current remote target and its exact Experience tree, and the
+remote protocol-2 Fence must be open and target that same commit. A local commit
+alone does not establish this authority. Wrapped scripts, mixed shell commands,
+bare executable names, PowerShell and unknown shell identities receive no Git
+writer exemption. Native cmd commands retain canonical quoting requirements.
+
+Synchronization verifies exact committed protected bytes and the owning
+application gate, preserves existing local history and the restore's index,
+and publishes the accepted postimage through the same serialized authority as
+compiler writers. A shell reader that began earlier then recognizes that
+postimage instead of restoring its older snapshot. Authoring new approval
+receipts continues through the owning compiler lifecycle.
+
+Protected writers acquire their lock before reading the recovery preimage.
+Every snapshot captures and rechecks the authority generation around its tree;
+a concurrent transition rejects capture before any capsule is published.
+Every accepted publication advances that transient generation even when its
+content is unchanged. Durable approval receipts and revisions are unaffected.
+
 Reviewers, not the snapshot compiler, judge prototype fidelity, usability,
 accessibility, visual quality, behavior and design coherence. Approval requires
 a fresh transient schema-v4 attestation bound to proposal, artifact-tree,

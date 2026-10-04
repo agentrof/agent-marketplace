@@ -1,0 +1,6 @@
+{
+  "summary": "Attest approved Experience Git synchronization through the remote coordination target, preserve local history and staged content, and publish its verified postimage so concurrent readers cannot restore older receipts.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

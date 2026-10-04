@@ -242,6 +242,7 @@
         "tools.tests.test_operation_governance.*",
         "tools.tests.test_architecture_compile.*",
         "tools.tests.test_vault_hook.*",
+        "tools.tests.test_vault_hook_git_sync.*",
         "tools.tests.test_frontmatter_round_trip.*",
         "tools.tests.test_writer_line_endings.*",
         "tools.tests.test_delivery_verification.*",
@@ -346,7 +347,11 @@
         "tools.tests.test_runtime_floor.RuntimeFloorTests.test_each_packaged_hook_answers_through_the_launcher_as_it_did_directly",
         "tools.tests.test_runtime_floor.RuntimeFloorTests.test_every_hook_command_and_scaffolded_hook_runs_through_the_launcher",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_noncanonical_artifact_case_is_rejected_without_overwrite",
-        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_restore_never_descends_into_case_changed_artifacts"
+        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_restore_never_descends_into_case_changed_artifacts",
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_git_capture_locks_before_reading_the_tree_or_authority",
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_metadata_symlink_never_receives_a_safety_exemption",
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_restore_replays_the_approved_target_and_publishes_its_postimage",
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_shell_composition_and_untrusted_executables_receive_no_grant"
       ]
     },
     "macos": {
@@ -364,7 +369,8 @@
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_has_an_exact_attested_delta",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_preserves_real_codex_draft",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_python_cmd_preserves_attested_codex_result",
-        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_system_macos_python3_launcher_is_accepted"
+        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_system_macos_python3_launcher_is_accepted",
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_safe_os_metadata_is_preserved_without_entering_the_committed_postimage"
       ],
       "depends_on": [
         "platform"
@@ -603,6 +609,7 @@
     "tools.tests.test_vault_check",
     "tools.tests.test_vault_gate",
     "tools.tests.test_vault_hook",
+    "tools.tests.test_vault_hook_git_sync",
     "tools.tests.test_writer_line_endings"
   ],
   "impact_groups": [

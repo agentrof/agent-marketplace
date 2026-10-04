@@ -50,7 +50,7 @@ class LocalValidationTests(unittest.TestCase):
         ci_tests.write_json(self.root / ci_local.POLICY_PATH, {'schema_version': 1, 'max_age_seconds': 86400,
             'default_workers': 2, 'max_workers': 4, 'static_commands': [['static.py']],
             'environment_names': ['PATH', 'LANG'], 'environment_prefixes': ['PYTHON', 'GIT_'],
-            'environment_ignored': ['GIT_EDITOR'],
+            'environment_ignored': ['GIT_EDITOR'], 'git_configuration_ignored': ['branch.*', 'remote.*.fetch'],
             'ignored_cache_paths': ['.agentrof/*', '**/__pycache__/*']})
         git_fixture.init_repository(self.root)
         self.git('config', 'core.autocrlf', 'false')
@@ -441,6 +441,28 @@ class LocalValidationTests(unittest.TestCase):
             self.assertEqual(os.environ['MAKELEVEL'], '7')
         with mock.patch.dict(os.environ, {'MAKELEVEL': '2', 'MAKEFLAGS': 'other', 'LOCAL_SECRET': 'do-not-record'}):
             self.assertEqual(ci_local.environment_identity(self.root), identity)
+
+    def test_another_worktree_creating_and_deleting_branches_during_check_keeps_the_receipt(self):
+        self.git('branch', 'packed')
+        self.git('pack-refs', '--all')
+        other = Path(self.temporary.name).parent / (Path(self.temporary.name).name + '-other')
+        self.addCleanup(shutil.rmtree, other, True)
+        original = subprocess.run
+        def parallel_branch(command, **kwargs):
+            if command[-1] == 'static.py':
+                ci_tests.git(self.root, 'worktree', 'add', '-q', '-b', 'parallel', str(other), 'HEAD')
+                ci_tests.git(self.root, 'config', 'branch.parallel.remote', 'origin')
+                ci_tests.git(self.root, 'config', '--add', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*')
+                ci_tests.git(self.root, 'branch', '-D', 'packed')
+            return original(command, **kwargs)
+        with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)), \
+                mock.patch.object(ci_local.subprocess, 'run', side_effect=parallel_branch):
+            receipt = self.run_check()
+        self.assertEqual(receipt['status'], 'complete')
+        self.assertEqual(self.run_check(verify_only=True), receipt)
+        self.git('config', 'core.autocrlf', 'true')
+        with self.assertRaisesRegex(ci_tests.CIError, 'Git configuration'):
+            self.run_check(verify_only=True)
 
     def test_verify_without_jobs_takes_the_worker_count_check_used(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):

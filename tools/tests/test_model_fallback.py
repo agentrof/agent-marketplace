@@ -23,6 +23,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR))
@@ -633,6 +634,8 @@ class CodexModelCheckTests(unittest.TestCase):
 
     def environment(self, codex: bool) -> dict:
         env = fixtures.isolated_hosts(os.environ, self.isolation)
+        # The fake catalog declares its own account context.
+        env = {key: value for key, value in env.items() if not key.startswith("CODEX_SANDBOX")}
         env.update({"PYTHONDONTWRITEBYTECODE": "1", "CODEX_HOME": str(self.home),
                     "PATH": str(self.codex.path.parent if codex else self.empty)})
         if codex:
@@ -746,6 +749,16 @@ class CodexModelCheckTests(unittest.TestCase):
         # A catalog listing only: no command starts a model.
         self.assertEqual(self.commands(), [["--version"], ["debug", "models"],
                                            ["debug", "models", "--bundled"]])
+
+    def test_fake_catalog_ignores_ambient_sandbox_markers(self):
+        self.listing(self.sol, self.luna, bundled=True)
+        markers = {"CODEX_SANDBOX": "seatbelt", "CODEX_SANDBOX_NETWORK_DISABLED": "1"}
+        ambient = {**os.environ, **markers}
+        with mock.patch.object(os, "environ", ambient):
+            result, note = self.generated("apply", "--scope", "local")
+            self.assertEqual(result["model_check"]["view"], "generic")
+            self.assertIn("printed the catalog bundled with the binary", note)
+            self.assertEqual({key: os.environ[key] for key in markers}, markers)
 
     def test_without_a_codex_list_every_pin_stays_and_it_says_so(self):
         self.cache(self.luna)

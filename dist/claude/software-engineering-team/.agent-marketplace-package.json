@@ -614,7 +614,7 @@
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
-      "315956adbe1f396a7886d4fa2125a9fffc03259a3d3897bf4db435caa73bdb1e"
+      "afceebbbe2c0cd68d41f17109e2185023a728542c6bf205166b5e6bb1e4d2df8"
     ,
     "skill-content/setup/references/windows-long-paths.md":
       "f6ce03aee49421cf7fd313388af3a9c9e2eb74f3e20a8019be0d4703cfca5705"
@@ -860,7 +860,7 @@
       "db8d959e9778cf374734e59a86ebb77ab3164a2e4981e025b04e452a9ccab4c8"
     ,
     "templates/ci-tests.yml":
-      "1ba0c7a800f23c244710f538073f122d10d356be1ba652cfbef6c2844b49f588"
+      "0d05078ab3c81a50c20b8a08ce2f1bef6c8fe7b01d7c6230e122e1b140a49cc7"
     ,
     "templates/gitignore":
       "fa6da40c9313474f7d39f430d2311c2a6d646dfbceb5df566b454af6052d6a8e"

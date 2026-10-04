@@ -6,6 +6,7 @@ import contextlib
 import io
 import json
 import hashlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -107,6 +108,11 @@ class OperationGovernanceTests(unittest.TestCase):
             ci = output.read_text(encoding="utf-8")
             self.assertIn("run: make test", ci)
             self.assertIn("run: make audit", ci)
+            for job in ("vault_gate", "tests"):
+                with self.subTest(job=job):
+                    block = re.search(rf"(?ms)^  {job}:\n(.*?)(?=^  \w+:|\Z)", ci).group(1)
+                    self.assertIn("      - uses: actions/checkout@v4\n"
+                                  "        with:\n          fetch-depth: 0\n", block)
             self.assertNotIn("{{", ci)
 
     def test_pull_request_check_source_is_validated(self):

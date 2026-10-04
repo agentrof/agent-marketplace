@@ -40,6 +40,10 @@
     "GIT_PAGER",
     "GIT_SEQUENCE_EDITOR"
   ],
+  "git_configuration_ignored": [
+    "branch.*",
+    "remote.*.fetch"
+  ],
   "static_commands": [
     [
       "tools/validate.py"

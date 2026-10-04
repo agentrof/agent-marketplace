@@ -152,7 +152,12 @@ nor listed as unbound with its reason. When the receipt differs from the plan on
 environment, `verify` names the changed variables, never their values. Make's
 orchestration variables are removed before checks so direct and Make entry
 points use the same effective environment. `verify` without `--jobs` uses the
-worker count of the receipt's `check`.
+worker count of the receipt's `check`. The Git configuration digest leaves out
+the entries `git_configuration_ignored` names, `branch.*` and `remote.*.fetch`,
+which other worktrees of the same repository rewrite when they create, track,
+fetch or delete branches. For the same reason the run does not watch the shared
+`config` and `packed-refs` files for writes; the candidate's HEAD, base and
+bytes and the filtered configuration are compared instead.
 Results expire after at most 24 hours; reuse does not extend that deadline.
 The latest failed, interrupted, changed or corrupt attempt invalidates prior
 success. The source is rechecked after statics and workers. Missing, duplicate,

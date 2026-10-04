@@ -42,7 +42,7 @@ def policy_at(root):
     if any(type(value.get(key)) is not int for key in ("default_workers", "max_workers")) or \
             not 1 <= value.get("default_workers", 0) <= value.get("max_workers", 0) <= 4:
         raise tests.CIError("invalid local worker policy")
-    for key in ("environment_names", "environment_prefixes", "environment_ignored"):
+    for key in ("environment_names", "environment_prefixes", "environment_ignored", "git_configuration_ignored"):
         names = value.get(key)
         if not isinstance(names, list) or any(not isinstance(name, str) or not name for name in names):
             raise tests.CIError("invalid local environment binding: " + key)
@@ -161,10 +161,22 @@ def environment_identity(root):
     environment = {name: hmac.new(key, (name + "\0" + value).encode("utf-8", "surrogateescape"),
                                   hashlib.sha256).hexdigest()
                    for name, value in bound_environment(policy_at(root)).items()}
-    configuration = tests.git(root, "config", "--null", "--list", "--show-origin")
     return {"runtime": tests.runtime_identity(), "python_executable": str(Path(sys.executable).resolve()),
             "environment": environment,
-            "git_configuration_hash": hashlib.sha256(configuration).hexdigest()}
+            "git_configuration_hash": hashlib.sha256(git_configuration(root)).hexdigest()}
+
+
+def git_configuration(root):
+    """The configuration that can change test behaviour, without the entries other worktrees rewrite."""
+    ignored = policy_at(root)["git_configuration_ignored"]
+    raw = tests.git(root, "config", "--null", "--list", "--show-origin").split(b"\0")
+    kept = []
+    # Each entry is its origin, then its key and value split by the first newline.
+    for origin, entry in zip(raw[0::2], raw[1::2]):
+        key = entry.split(b"\n", 1)[0].decode("utf-8", "surrogateescape")
+        if not tests.matches(key, ignored):
+            kept.append(origin + b"\0" + entry + b"\0")
+    return b"".join(kept)
 
 
 def environment_difference(receipt, plan):
@@ -216,7 +228,9 @@ def file_generation(path):
 
 def generation_token(root):
     paths = {root / name for name, _mode, _oid in index_entries(root)}
-    git_files = ["index", "HEAD", "logs/HEAD", "config", "packed-refs"]
+    # The shared config and packed-refs change when another worktree creates, deletes or fetches a
+    # branch; their test-relevant content is compared through the environment and candidate instead.
+    git_files = ["index", "HEAD", "logs/HEAD"]
     branch = subprocess.run(["git", "--no-replace-objects", "-C", str(root), "symbolic-ref", "--quiet", "HEAD"],
                             capture_output=True, check=False)
     if branch.returncode == 0:

@@ -5,6 +5,9 @@ non-default value.
 - review_scope_record both_scopes: an epic reader's manifest measures both
   review_manifest_scope read sets, and a command reports the blocking findings
   that cite a note outside the bounded read set (#395).
+- remediation_writers per_epic: an epic writer reads its epic's review scope
+  and writes only its epic's notes, and a cross-epic writer writes only the
+  notes it is given (#394).
 """
 
 from __future__ import annotations
@@ -12,9 +15,12 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 TEAM = ROOT / "plugins" / "software-engineering-team"
@@ -22,7 +28,11 @@ sys.path.insert(0, str(TEAM / "scripts"))
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
 import backlog_compile as backlog  # noqa: E402
 import backlog_review_inputs as inputs  # noqa: E402
+import task_inputs  # noqa: E402
 import test_review_manifest_scope as scope_tests  # noqa: E402
+from backlog_fixture import (CONSTRAINT, CRITERION, DESIGN, EXPERIENCE,  # noqa: E402
+                             _author_story, make_approved_backlog)
+from git_fixture import init_repository, remove_temporary  # noqa: E402
 from test_review_manifest_scope import choose, policy  # noqa: E402
 
 REVIEW = "backlog/epics/delivery-fixture/reviews/round-1-epic-review.md"
@@ -151,6 +161,132 @@ class ReviewScopeRecordTests(unittest.TestCase):
                             "\n\n## Verdict", 1)
         path.write_text(backlog.front_matter(props, body), encoding="utf-8")
         self.assertEqual(inputs.scope_findings(self.docs, "EP-001")["blocking"], 0)
+
+
+def commit_all(root: Path) -> None:
+    for args in (("add", "-A"), ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                                 "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture")):
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+
+class GitBacklogFixture:
+    """EP-001 holds ST-001 and EP-002 holds ST-002, both finished, committed."""
+
+    @staticmethod
+    def build(case: unittest.TestCase) -> tuple[Path, Path]:
+        temporary = tempfile.TemporaryDirectory()
+        case.addCleanup(remove_temporary, temporary)
+        root = Path(temporary.name).resolve()
+        docs = root / "workspace/docs"
+        (docs / "maps").mkdir(parents=True)
+        (root / "workspace/config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            make_approved_backlog(docs, "ST-001")
+            backlog.stub_epic(SimpleNamespace(docs=str(docs), slug="second", id="EP-002",
+                                              title="Second", goal="Deliver a separate customer outcome."))
+            backlog.stub_story(SimpleNamespace(
+                docs=str(docs), epic="second", slug="st-002", id="ST-002", title=None, scope=None,
+                work_kind="feature", criterion_ref=[CRITERION], experience_ref=[EXPERIENCE],
+                evidence_ref=[], uses_design=[DESIGN], constrained_by=[CONSTRAINT]))
+        folder = docs / "backlog/epics/second/stories/st-002"
+        _author_story(folder / "story.md", folder / "test-plan.md", "ST-002")
+        init_repository(root)
+        subprocess.run(["git", "-C", str(root), "config", "core.autocrlf", "false"],
+                       check=True, capture_output=True)
+        commit_all(root)
+        return root, docs
+
+
+class RemediationWritersTests(unittest.TestCase):
+    FIRST = "workspace/docs/backlog/epics/delivery-fixture/stories/st-001/story.md"
+    SECOND = "workspace/docs/backlog/epics/second/stories/st-002/story.md"
+
+    def setUp(self):
+        self.root, self.docs = GitBacklogFixture.build(self)
+        self.findings = ".agentrof/agent-marketplace/.runtime/cross-epic.json"
+        path = self.root / self.findings
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"findings": [
+            {"id": "F-1", "severity": "major", "anchor": self.FIRST,
+             "text": "ST-001 and ST-002 both claim the account export."}]}), encoding="utf-8")
+
+    def choose(self, *pairs: tuple[str, str]) -> None:
+        exists = process_policy_path(self.docs).exists()
+        policy(self.docs, "begin-revision" if exists else "init")
+        for switch, value in pairs:
+            policy(self.docs, "set", "--switch", switch, "--value", value)
+        policy(self.docs, "approve")
+        commit_all(self.root)
+
+    def writer(self, **extra) -> dict:
+        return task_inputs.manifest(entry="backlog-plan", role="product-owner", mode="revise",
+                                    project=self.root, **extra)
+
+    def allowed(self, task: dict) -> set[str]:
+        return {row["path"] for row in task["write_scope"]["allowed_write_area"]}
+
+    def link_far_note(self) -> None:
+        """ST-001 links a rule set whose body links a note two hops out."""
+        base = self.docs / "business-analysis/delivery/domains/identity"
+        far = base / "entities/audit-entity.md"
+        far.parent.mkdir(parents=True, exist_ok=True)
+        far.write_text(backlog.front_matter({"type": "entity", "title": "Audit"}, "# Audit\n"),
+                       encoding="utf-8")
+        rules = base / "rules/account-rules.md"
+        rules.parent.mkdir(parents=True, exist_ok=True)
+        rules.write_text(backlog.front_matter(
+            {"type": "rule_set", "title": "Account rules", "status": "approved"},
+            "# Account rules\n\nAudit follows [[business-analysis/delivery/domains/identity/"
+            "entities/audit-entity|Audit]].\n"), encoding="utf-8")
+        story = self.root / self.FIRST
+        props, body = backlog.parse_front_matter(story)
+        body = body.replace("\n## Non-Goals", "\nIt applies [[business-analysis/delivery/domains/"
+                            "identity/rules/account-rules|Account rules]].\n\n## Non-Goals", 1)
+        story.write_text(backlog.front_matter(props, body), encoding="utf-8")
+        commit_all(self.root)
+
+    def test_an_epic_writer_reads_its_review_scope_only_at_per_epic(self):
+        self.link_far_note()
+        self.choose(("review_manifest_scope", "bounded"))
+        reader = inputs.manifest(self.docs, epic="EP-001")
+        single = inputs.manifest(self.docs, epic="EP-001", writer=True)
+        self.assertNotIn("remediation_writers", single)
+        self.assertNotIn("review_manifest_scope", single)
+        self.assertLess(set(reader["paths"]), set(single["paths"]))
+        self.choose(("remediation_writers", "per_epic"))
+        writer = inputs.manifest(self.docs, epic="EP-001", writer=True)
+        self.assertEqual((writer["remediation_writers"], writer["review_manifest_scope"]),
+                         ("per_epic", "bounded"))
+        self.assertEqual(writer["paths"], reader["paths"])
+        self.assertEqual(inputs.manifest(self.docs, epic="EP-001", writer=True,
+                                         expected_hash=writer["source_hash"]), writer)
+        task = self.writer(epic="EP-001")
+        self.assertIn("skill-content/backlog-plan/references/switch-remediation_writers-per_epic.md",
+                      task["required_reads"])
+        allowed = self.allowed(task)
+        self.assertIn(self.FIRST, allowed)
+        self.assertFalse({path for path in allowed if "/second/" in path})
+        self.assertNotIn("workspace/docs/backlog/backlog.md", allowed)
+
+    def test_a_cross_epic_writer_writes_only_its_inputs_at_per_epic(self):
+        task = dict(findings=self.findings, inputs=[self.FIRST, self.SECOND])
+        self.assertEqual(self.writer(**task)["write_scope"]["status"], "unresolved")
+        self.choose(("remediation_writers", "per_epic"))
+        cross = self.writer(**task)
+        self.assertEqual(cross["write_scope"]["status"], "resolved")
+        self.assertEqual(self.allowed(cross), {self.FIRST, self.SECOND})
+        # Without findings it is no remediation writer, and a reader never writes.
+        self.assertEqual(self.writer(inputs=[self.FIRST])["write_scope"]["status"], "unresolved")
+        reader = task_inputs.manifest(entry="backlog-plan", role="backlog-reviewer", mode="review",
+                                      project=self.root, **task)
+        self.assertEqual(reader["write_scope"]["status"], "read_only")
+
+
+def process_policy_path(docs: Path) -> Path:
+    import process_policy
+    return process_policy.path_for(docs)
 
 
 if __name__ == "__main__":

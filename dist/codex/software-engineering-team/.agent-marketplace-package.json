@@ -98,7 +98,7 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "2ded31a9a1eb1bfe04a5039099a854aa8301aedfd78f4b35352c3365b2b3eb82"
+      "6674555cb547e7485840a0c4405c5ef62a2a88d9287348d422aa89a93ca8fcd4"
     ,
     "flows/business-analysis.md":
       "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3"
@@ -161,7 +161,7 @@
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
     ,
     "scripts/backlog_review_inputs.py":
-      "ac4c4df0849f7838ebc81b6e112c8e004aa3b573b1fadded1dce043a77591fd7"
+      "36e5ad715fb29438021ca3d5d45b3c63e09f68d1e13bf57f09441960b5eac349"
     ,
     "scripts/delivery_compile.py":
       "296875bd6c03f5ad73eb80a93a6f7575af9a88a4c3f563ea912c088dda200437"
@@ -248,7 +248,7 @@
       "e0d667a6012af3cc67afa787ebaa6d12a9b9bf87adc422cc70dcd4b61456427b"
     ,
     "scripts/task_inputs.py":
-      "f5e6ea74c63c0be44259129484c45e0e5f6f07455f930c3a697d54bf87e97911"
+      "6d5a90854717f2bd212f5757a1a66ca486a87ed264803c45e5580e0e23f63910"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -279,6 +279,9 @@
     ,
     "skill-content/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md":
       "4126c93245f53e049273a3fdb3394c6bc74158d1ba6c8f6a6c991dabd089bca5"
+    ,
+    "skill-content/backlog-plan/references/switch-remediation_writers-per_epic.md":
+      "7f304f26209ab6de320846e32235ebc3162fc3e6b4e64d55cb19980ab10ef602"
     ,
     "skill-content/backlog-plan/references/switch-review_manifest_scope-bounded.md":
       "dc84f3e14ceda303a735f0394dfa7fb4c3f8a2ba5d94cca203bfec69495cec3c"
@@ -341,7 +344,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "7a2e5a1770544ee7b901f5d88bbbfa6e630a49bdfc5966ab9d413b85329082b3"
+      "55a1e34d9c610b4fd8e70e410a170bf39bfc978f4351d42ead36420451ba27ba"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"

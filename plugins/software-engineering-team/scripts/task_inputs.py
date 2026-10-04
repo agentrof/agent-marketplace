@@ -26,6 +26,8 @@ OWNING_FLOWS_SCOPE = "owning_flows"
 # How a declared pass kind runs: as the owning writer's generated variant, or
 # as a command of the entry itself with no role pass.
 PASS_KIND_RUNS = {"writer_variant", "entry_command"}
+# The switch value whose cross-epic backlog writer writes only its given inputs.
+WRITERS_SWITCH, WRITERS_VALUE = "remediation_writers", "per_epic"
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
 SWITCH_REFERENCE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 DELIVERY_PACKAGE = re.compile(r"^workspace/docs/delivery/deliveries/([^/]+)/")
@@ -481,11 +483,14 @@ def working_inventory(root: Path, command: list[str], *, unborn: bool = False,
 
 
 def write_scope(project: Path | None, paths: set[str], role: str | None, route: dict,
-                read_only: bool, closure: dict | None, package: Path) -> dict:
+                read_only: bool, closure: dict | None, package: Path,
+                cross_epic: bool = False) -> dict:
     """Describe selected authoring bounds without minting writer authority.
 
     Read dependencies are not write targets. Unknown compiler selections and
     new documents stay unresolved rather than granting a whole stage directory.
+    A cross-epic remediation writer, at remediation_writers per_epic, writes
+    only the backlog documents it was given as inputs.
     """
     result = {"status": "read_only" if read_only else "unresolved", "allowed_write_area": [],
               "source_records": [], "writer_authority": False,
@@ -520,12 +525,16 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
                 targets.append({"path": path, "coverage": "exact_file", "source": path})
                 sources.append(path)
     elif spec["resolver"] == "backlog_documents":
-        if closure is None:
+        if closure is None and not cross_epic:
             result["reason"] = "backlog write scope needs the existing --epic closure to separate primary sources from dependencies"
             return result
-        bounded = set(closure["primary_paths"]) | {closure["review"]["path"]}
-        if closure["scope"] != "backlog":
-            bounded.discard("backlog/backlog.md")
+        if closure is None:
+            # The notes that cross-epic findings name, given one --input each.
+            bounded = {path.removeprefix("workspace/docs/") for path in selected}
+        else:
+            bounded = set(closure["primary_paths"]) | {closure["review"]["path"]}
+            if closure["scope"] != "backlog":
+                bounded.discard("backlog/backlog.md")
         selected &= {"workspace/docs/" + path for path in bounded}
         patterns = {
             "backlog": r"backlog/backlog\.md",
@@ -735,9 +744,13 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
                         method_bindings.setdefault(skill, []).append(relative)
         if technology - set(method_bindings):
             raise ValueError("technology methods require selected committed accepted Solution decision inputs")
+    # At remediation_writers per_epic, a writer without --epic that applies
+    # findings is the cross-epic writer.
+    cross_epic = (epic is None and findings is not None and not read_only
+                  and (WRITERS_SWITCH, WRITERS_VALUE) in chosen)
     scope = write_scope(project, set(inputs or []) | ({"workspace/docs/" + path for path in closure["paths"]}
                                                     if closure else set()),
-                        role, route, read_only, closure, package)
+                        role, route, read_only, closure, package, cross_epic)
     if documents:
         scope.update(status="resolved", source_records=documents,
                      allowed_write_area=[{"path": path, "coverage": "exact_file", "source": path}

@@ -331,9 +331,12 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     before = snapshot(docs)
     contract = contract_hash()
     # Only an epic reader follows the switch; a writer and the root reader
-    # keep the transitive closure.
+    # keep the transitive closure, except a per-epic remediation writer,
+    # which reads its epic's review scope.
     reader = epic is not None and not writer
-    bounded = reader and (scope or read_scope(docs)) == "bounded"
+    per_epic = (epic is not None and writer
+                and read_switch(docs, WRITERS_SWITCH)["value"] == WRITERS_VALUE)
+    bounded = (reader or per_epic) and (scope or read_scope(docs)) == "bounded"
     measure = (reader and scope is None
                and read_switch(docs, RECORD_SWITCH)["value"] == RECORD_VALUE)
     panels = read_panels(docs)
@@ -608,6 +611,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         result["check"] = check
     if bounded:
         result[SCOPE_SWITCH] = "bounded"
+    if per_epic:
+        result[WRITERS_SWITCH] = WRITERS_VALUE
     # Naming the value makes a switch change stale every manifest it derived.
     if panels:
         result[PANEL_SWITCH] = PANEL_VALUE
@@ -624,6 +629,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     return result
 
 
+WRITERS_SWITCH = "remediation_writers"
+WRITERS_VALUE = "per_epic"
 RECORD_SWITCH = "review_scope_record"
 RECORD_VALUE = "both_scopes"
 SCOPE_BUDGET = "transitive_source_bytes"

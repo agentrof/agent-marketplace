@@ -29,6 +29,15 @@
 - Native Windows lifecycle writer preservation is not claimed until Codex
   supplies an attested shell-family contract. Shared hook logic is portable to
   Windows and fails closed there; real lifecycle parity remains a host gate.
+- Bring an approved source handoff into the local checkout with Git itself,
+  never a pull or a wrapped script: fetch it first, then run one direct shell
+  command from the checkout root with Git's absolute path, `<git> merge
+  --no-edit <source>`, or, when `HEAD` already holds that source, `<git>
+  restore --source=<source> --worktree -- workspace/docs/experience-design`.
+  `<source>` is a committed source holding the current remote target. The
+  vault hook attests only these two forms, against the open project Fence and
+  its target; another merge, pull or checkout that changes compiler-owned
+  Experience state is restored, and the hook's message names the form to run.
 - Vault hooks are workflow-integrity controls for host-dispatched tool effects,
   not a same-user operating-system sandbox. A process deliberately targeting
   hook scratch or recovery files has the user's filesystem authority; host

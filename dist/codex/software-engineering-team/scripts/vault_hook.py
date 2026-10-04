@@ -1931,13 +1931,53 @@ def sync_git(project: Path, executable: str, *args: str) -> bytes:
     return result.stdout
 
 
+# The handoff check reads the remote inside a hook, so it never waits longer.
+GIT_SYNC_REMOTE_TIMEOUT_SECONDS = 20
+
+
+class GitSyncRemoteUnavailable(ValueError):
+    """The remote did not answer the handoff check, or answered with an error."""
+
+
+def git_sync_remote_oid(project: Path, executable: str, ref: str) -> str:
+    """Read one ref of origin with a network call bounded by the hook's own timeout."""
+    try:
+        result = subprocess.run(
+            [executable, "ls-remote", "origin", ref], cwd=project,
+            capture_output=True, check=False, timeout=GIT_SYNC_REMOTE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        raise GitSyncRemoteUnavailable(
+            f"the remote did not answer `git ls-remote origin {ref}` within "
+            f"{GIT_SYNC_REMOTE_TIMEOUT_SECONDS} seconds") from None
+    if result.returncode:
+        raise GitSyncRemoteUnavailable(f"`git ls-remote origin {ref}` failed")
+    for line in result.stdout.decode("utf-8", "replace").splitlines():
+        oid, _tab, name = line.partition("\t")
+        if name == ref:
+            return oid
+    raise ValueError(f"remote ref is absent: {ref}")
+
+
+def git_sync_commands(project: Path) -> str:
+    """Name the two Git synchronization commands the guard attests, with this host's Git."""
+    selected = shutil.which("git")
+    git = str(Path(selected).absolute()) if selected else "<absolute path of git>"
+    if selected:
+        git = subprocess.list2cmdline([git]) if os.name == "nt" else shlex.quote(git)
+    return (f"run Git by its absolute path, as a call of its own from {project}: "
+            f"`{git} restore --source=HEAD --worktree -- workspace/docs/experience-design` "
+            "materializes the Experience tree HEAD already holds, and "
+            f"`{git} merge --no-edit <source>` brings a later approved handoff in")
+
+
 def approved_git_sync_authority(project: Path) -> tuple[str, str]:
     """Use the existing remote coordination authority, never a local commit alone."""
     import delivery_git
     executable = shutil.which("git")
     if executable is None:
         raise ValueError("approved Git executable is unavailable")
-    fence_oid = delivery_git.remote_oid(project, "origin", "refs/heads/agentrof/fence")
+    fence_oid = git_sync_remote_oid(project, executable, "refs/heads/agentrof/fence")
     message = sync_git(project, executable, "show", "-s", "--format=%B", fence_oid).decode("utf-8")
     delivery_git.require_fence_record(message)
     if delivery_git.trailer(message, "Protocol") != "2":
@@ -1948,7 +1988,7 @@ def approved_git_sync_authority(project: Path) -> tuple[str, str]:
     values["Barrier-Epoch"] = delivery_git.trailer(message, "Barrier-Epoch") or "none"
     delivery_git._validate_fence_values(values)
     branch = delivery_git.resolve_target_branch(project, "origin")
-    target = delivery_git.remote_oid(project, "origin", "refs/heads/" + branch)
+    target = git_sync_remote_oid(project, executable, "refs/heads/" + branch)
     if values["Mode"] != "open" or values["Target"] != target:
         raise ValueError("approved Git target has not completed its handoff")
     return fence_oid, target
@@ -1985,8 +2025,12 @@ def attest_git_experience_sync(payload: dict, project: Path) -> dict | None:
 
 
 def valid_git_experience_sync_result(payload: dict, project: Path,
-                                    vault: Path, attestation: dict) -> bool:
-    """Attest exact committed bytes and owning checks before publishing authority."""
+                                    vault: Path, attestation: dict,
+                                    problems: list[str] | None = None) -> bool:
+    """Attest exact committed bytes and owning checks before publishing authority.
+
+    ``problems`` receives the reason when the remote handoff check could not run.
+    """
     try:
         spec = git_experience_sync_spec(payload, project)
         if spec is None or any(spec[key] != attestation.get(key) for key in spec):
@@ -2042,6 +2086,10 @@ def valid_git_experience_sync_result(payload: dict, project: Path,
             vault / EXPERIENCE_ROOT_RELATIVE, True,
         )
         return not findings
+    except GitSyncRemoteUnavailable as exc:
+        if problems is not None:
+            problems.append(str(exc))
+        return False
     except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired):
         return False
 
@@ -3906,6 +3954,11 @@ def capture_shell_snapshot(payload: dict, *, writer_lock_held: bool = False) -> 
     )
     try:
         git_sync = attest_git_experience_sync(payload, project) if root else None
+    except GitSyncRemoteUnavailable as exc:
+        return deny(
+            f"approved Git Experience synchronization did not run: {exc}, so the open Fence "
+            "and its target could not be verified and nothing changed; once the remote "
+            "answers, " + git_sync_commands(project))
     except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
         return deny("approved Git Experience synchronization could not be attested; no writer authority was granted")
     protected_writer_candidate = application_writer_candidate or git_sync is not None
@@ -4295,8 +4348,13 @@ def shell_verify(payload: dict) -> int:
                     "protected shell effects were restored or verified"
                 ))
             if git_sync_before is not None:
-                if not valid_git_experience_sync_result(payload, project, root, git_sync_before):
-                    return deny("approved Git Experience synchronization left no attested postimage")
+                problems: list[str] = []
+                if not valid_git_experience_sync_result(payload, project, root, git_sync_before,
+                                                        problems):
+                    return deny("approved Git Experience synchronization left no attested postimage"
+                                + "".join(f"; {problem}" for problem in problems)
+                                + ("; once the remote answers, " + git_sync_commands(project)
+                                   if problems else ""))
                 publish_authorized_experience_state(project, root)
             return 0
         machine_changes = [
@@ -4360,9 +4418,10 @@ def shell_verify(payload: dict) -> int:
                     "its protected state was left unchanged"
                 ))
         candidate_is_valid = bool(recovery_candidate_is_valid)
+        git_sync_problems: list[str] = []
         if machine_changes and git_sync_before is not None and not integrity_error and not config_violation:
             candidate_is_valid = valid_git_experience_sync_result(
-                payload, project, root, git_sync_before,
+                payload, project, root, git_sync_before, git_sync_problems,
             )
         if (
             machine_changes
@@ -4401,6 +4460,9 @@ def shell_verify(payload: dict) -> int:
                 "official lifecycle or left compiler validation red; the "
                 "original Experience tree was "
                 f"restored ({detail})"
+                + "".join(f"; {problem}" for problem in git_sync_problems)
+                + "; if a Git merge or pull of an approved handoff made this "
+                "change, " + git_sync_commands(project)
             ))
         writer_postimage_is_valid = bool(machine_changes) and (
             application_writer_allowed or candidate_is_valid

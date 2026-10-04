@@ -407,6 +407,34 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertEqual(failed["exit_code"], 1)
         self.assertEqual(verification.read_session(self.root)["raw_evidence"]["test"]["exit_code"], 1)
 
+    def status(self, *arguments):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = verification.main(["--worktree", str(self.root), "status", *arguments])
+        return code, json.loads(output.getvalue())
+
+    def test_status_summary_prints_run_outcomes_without_the_session_bindings(self):
+        frozen = self.freeze()
+        raw = verification.run_check(self.root, "test")
+        code, summary = self.status("--summary")
+        self.assertEqual(code, 0)
+        self.assertEqual(summary["session_id"], frozen["session_id"])
+        self.assertEqual(summary["candidate_hash"], frozen["candidate"]["candidate_hash"])
+        self.assertEqual(summary["workers"], {"code_reviewer": "running", "qa_engineer": "running"})
+        run = summary["runs"]["test"]
+        self.assertEqual({key: run[key] for key in ("exit_code", "candidate_intact", "evidence_hash")},
+                         {"exit_code": 0, "candidate_intact": True, "evidence_hash": raw["evidence_hash"]})
+        self.assertEqual(run["environment_hash"], raw["identity"]["environment_hash"])
+        self.assertEqual(Path(run["output_path"]).read_text().strip(), "123")
+        self.assertNotIn("source_observations", json.dumps(summary))
+        _code, whole = self.status()
+        self.assertLess(len(json.dumps(summary)), len(json.dumps(whole)))
+        code, narrowed = self.status("--run", "test")
+        self.assertEqual((code, narrowed["runs"]), (0, {"test": run}))
+        code, missing = self.status("--run", "mutation")
+        self.assertEqual(code, 2)
+        self.assertIn("no mutation run is recorded", missing["errors"][0])
+
     def test_forged_session_and_missing_runtime_do_not_grant_approval(self):
         self.freeze()
         path = verification.session_path(self.root)

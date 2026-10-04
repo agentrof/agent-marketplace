@@ -121,9 +121,9 @@ environment lock, a pre-handoff run included, `freeze` refuses with
 `DELIVERY_ENVIRONMENT_BUSY` and names the holder, so a run still going is
 never passed over. The session the freeze writes keeps the
 accepted run under `pre_handoff`, with the earlier stories it covered, and its
-wall clock as `metrics.pre_handoff_seconds`; `status` shows both to the
-readers. It also carries every run of the Item so far, failed runs included,
-as `pre_handoff_history`, each run once however often a tree is frozen, so a
+wall clock as `metrics.pre_handoff_seconds`; `status --run pre_handoff`
+shows both to the readers. It also carries every run of the Item so far,
+failed runs included, as `pre_handoff_history`, each run once however often a tree is frozen, so a
 run record moved aside loses no run a freeze already carried.
 `approve-item-evidence` records that history with any later run in the Item's
 verification record, each run with its candidate tree, kind, result, exit

@@ -18,8 +18,8 @@ overlaps the command instead of coming before and after it.
    selection another switch value asks for.
 2. Start that command, `run --kind test` in a final round or `run --kind
    diagnostic_test` in a diagnostic one, through the host's background command
-   mechanism, so that it runs while you work. Once it ends, its record is in the
-   session that `status` prints, with the evidence hash and environment hash
+   mechanism, so that it runs while you work. Once it ends, `status --run
+   <kind>` prints its record, with the evidence hash and environment hash
    the result copies.
 3. While it runs, do the work that needs none of its results: derive the
    risk-ordered partitions from the Test Plan, the criteria and the rules; map

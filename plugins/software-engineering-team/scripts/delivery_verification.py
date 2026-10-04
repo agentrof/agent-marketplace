@@ -2744,6 +2744,40 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str) -> 
     return result
 
 
+RUN_SUMMARY_FIELDS = ("exit_code", "candidate_intact", "selection_intact", "reused_pre_handoff", "duration_seconds",
+                      "completed_at", "evidence_hash", "environment_hash", "checkout_difference", "earlier_stories",
+                      "output_file")
+
+
+def run_summary(root: Path, record: dict) -> dict:
+    """One run's outcome without the identity and bindings that make the whole session large."""
+    fields = {**record.get("identity", {}), **record}
+    value = {key: fields[key] for key in RUN_SUMMARY_FIELDS if key in fields}
+    if "reused_pre_handoff" in value:
+        value["reused_pre_handoff"] = value["reused_pre_handoff"].get("evidence_hash")
+    if "output_file" in value:
+        value["output_path"] = str(raw_output_path(root, value["output_file"]))
+    return value
+
+
+def status_summary(root: Path, run: str | None = None) -> dict:
+    """The session's identity, readers and run outcomes; `run` narrows the runs to one kind."""
+    session = read_session(root)
+    runs = dict(session["raw_evidence"])
+    if "pre_handoff" in session:
+        runs["pre_handoff"] = session["pre_handoff"]
+    if run is not None:
+        if run not in runs:
+            raise RuntimeError(f"no {run} run is recorded in verification session {session['session_id']}")
+        runs = {run: runs[run]}
+    current = session["candidate"]
+    return {"session_id": session["session_id"], "delivery": current["delivery"], "story": current["story"],
+            "candidate_hash": current["candidate_hash"], "product_commit": current["product_commit"],
+            "workers": {role: worker["state"] for role, worker in session["workers"].items()},
+            "unresolved_findings": len(session.get("unresolved_findings", [])),
+            "metrics": session["metrics"], "runs": {kind: run_summary(root, record) for kind, record in runs.items()}}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", required=True)
@@ -2786,7 +2820,9 @@ def main(argv=None) -> int:
     diff = subs.add_parser("diff")
     diff.add_argument("--path", action="append", default=[])
     subs.add_parser("resume-qa")
-    subs.add_parser("status")
+    status = subs.add_parser("status")
+    status.add_argument("--summary", action="store_true")
+    status.add_argument("--run", choices=("test", "mutation", "dependency_audit", "diagnostic_test", "pre_handoff"))
     wait = subs.add_parser("wait")
     wait.add_argument("--role", choices=ROLES)
     wait.add_argument("--seconds", type=float)
@@ -2826,6 +2862,8 @@ def main(argv=None) -> int:
                               spot_file=args.spot_run_file)
         elif args.command == "manifest":
             value = manifest(root, args.delivery, args.story, args.role, args.mode)
+        elif args.summary or args.run:
+            value = status_summary(root, args.run)
         else:
             value = read_session(root)
         print(json.dumps({"ok": True, **value}, indent=2))

@@ -600,6 +600,27 @@
         "threshold": "The same source-caused findings as the full replay, a median review wall time under 8 min and a seeded source change that contradicts a cited claim still producing a finding, with every shared quality guard holding and the owner's approval."
       }
     },
+    "test_engines": {
+      "summary": "Whether QA's final test run runs the whole suite as one serial command on the Item's one test environment, or runs the partitions the Verification Contract declares in parallel, each in its own private clone on an isolated test engine, and merges them into one piece of evidence.",
+      "issue": 386,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "single",
+          "tradeoffs": "QA's final test run is one approved command under the Item's environment lock, so the suite runs as one serial job. Today's behaviour and the baseline the partitions are measured against: in one measured project, a local test engine was busy for at least 64% of a Delivery's wall clock, and QA's final gate alone ran 227 minutes for 166 cases."
+        },
+        {
+          "id": "partitioned",
+          "tradeoffs": "Where the Verification Contract declares test_partition_command, test_engines and a Test Partitions table and the Environment Contract provisions the engines, run --kind test runs each partition in its own private clone with AGENTROF_TEST_PARTITION and AGENTROF_TEST_ENGINE, longest first, at most one exclusive partition per engine and never more partitions than engines at once, holds the Item's environment lock until the last one ends and merges their results into one record whose exit code is 0 only when every partition passed intact; evidence approval refuses a record that lacks a partition, holds one twice, holds a failed one or runs another command. The gate is bounded by its longest partition instead of the sum, while engines on one host contend for its CPU, memory and disk, a leak between engines gives flaky failures that look like product defects, hidden order dependence between groups surfaces as new failures, and implementation lanes wait for every engine during the gate."
+        }
+      ],
+      "default": "single",
+      "metric": "Per Delivery: the wall clock of QA's final test run against the sum of its partitions' durations, the host's CPU and memory pressure during the run, and the failures later traced to an isolation leak between engines or to order dependence between groups.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with partitioned.",
+        "threshold": "A median wall clock of QA's final test run at most half of the single runs of a similar suite, and no failure traced to an isolation leak between engines that reached a review round, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "test_group_report": {
       "summary": "Whether a test run counts only its command's exit code and output, or also reads a group report the approved command writes, so that a group that never ran or failed to collect never passes for a green one.",
       "issue": 384,

@@ -267,6 +267,16 @@ evidence approval refuses a final test run with a group that did not pass, as
 `deliver/references/switch-test_group_report-refuse_missing_groups.md`
 defines.
 
+How QA's final test run uses the test environment is process switch
+`test_engines`. At `single`, the default, it runs the approved test command
+once under the Item's environment lock. At `partitioned`, where the
+Verification Contract declares a partition command, its engines and a `Test
+Partitions` table and the Environment Contract provisions the engines,
+`run --kind test` runs every partition in its own private clone, in parallel
+over the engines, longest first, and merges them into one record whose exit
+code is 0 only when every partition passed intact, as
+`deliver/references/switch-test_engines-partitioned.md` defines.
+
 Backlog planning measures story size as process switch `story_size_budget`
 selects. At `off`, the default, nothing is measured or shown. At
 `propose_split`, `backlog_compile.py check --json` reports each story's

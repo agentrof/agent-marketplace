@@ -235,8 +235,8 @@ owns. An `execution_approved` one runs only its `delivery-execution` flow
 until a plan revision, whose approval pins the policy anew, so it reads only
 the switches that flow owns: `code_review_panel`, `execution_planning`,
 `implementation_schedule`, `own_target_reuse`, `owner_gates`,
-`pre_handoff_regression`, `qa_gate_order`, `review_loop` and
-`test_group_report`. A switch no
+`pre_handoff_regression`, `qa_gate_order`, `review_loop`, `test_engines`
+and `test_group_report`. A switch no
 Delivery flow owns, such as
 `mechanical_pass_tier`, is no part of the pin: inside a Delivery it is read
 from the current policy. While a new execution approval can still re-pin the
@@ -548,6 +548,23 @@ neither. With them, `run --kind test`, `run --kind diagnostic_test` and
 lacks a group not intact, and bind the declaration in the run's identity;
 evidence approval refuses a final test run with a group that is missing, not
 collected or failed.
+
+Process switch `test_engines` decides whether QA's final test run is one
+command. At `single`, the default, it is. At `partitioned`, a Verification
+Contract may declare `test_partition_command`, `test_engines`, a `Test
+Partitions` table that places every declared test group in exactly one
+partition with the runtime profile it needs, and `shared_profiles`, the
+profiles whose partitions may share an engine; the Environment Contract
+declares the same `test_engines`. `run --kind test` then runs each partition in
+its own private clone with `AGENTROF_TEST_PARTITION` and
+`AGENTROF_TEST_ENGINE`, longest first by its last recorded duration, at most
+one exclusive partition per engine and never more partitions than engines at
+once, under the Item's environment lock until the last one ends. A failing or
+unstarted partition never stops another, and one record merges them; its
+identity binds the plan, the partition command and the declared environment,
+not the schedule. Evidence approval refuses a record that lacks a declared
+partition, holds one twice, holds a failed or not intact one or ran another
+command.
 
 Process switch `execution_planning` decides how the facts a plan needs are
 written and reviewed. At `per_document`, the default, each Operation contract

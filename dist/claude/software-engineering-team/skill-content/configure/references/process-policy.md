@@ -43,8 +43,8 @@ parameter the table leaves unset.
    switch a Delivery flow owns; an execution-approved one reads only those its
    `delivery-execution` flow owns: `code_review_panel`, `execution_planning`,
    `implementation_schedule`, `own_target_reuse`, `owner_gates`,
-   `pre_handoff_regression`, `qa_gate_order`, `review_loop` and
-   `test_group_report`. A switch no
+   `pre_handoff_regression`, `qa_gate_order`, `review_loop`, `test_engines`
+   and `test_group_report`. A switch no
    Delivery flow owns is read from the current
    policy and stops no Delivery.
    Such a Delivery runs under the values it pinned, so after the new

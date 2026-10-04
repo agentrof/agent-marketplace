@@ -537,6 +537,7 @@ RELEASED_DEFAULTS = {
     "source_decision_gate": "two_gates",
     "story_size_budget": "off",
     "test_cost_budget": "off",
+    "test_engines": "single",
     "test_group_report": "off",
 }
 # The rules that keep a switch value safe, in the files agents read them from:
@@ -845,6 +846,17 @@ SAFETY_RULES = {
             "record the owner's decision and its reason in the epic review note",
         ),
     },
+    "test_engines": {
+        f"{SKILLS}/deliver/references/switch-test_engines-partitioned.md": (
+            "never two partitions of an exclusive profile on one engine at once, and never more partitions at"
+            " once than there are engines",
+            "Holds the Item's environment and verification command locks from the first partition's start until"
+            " the last one ends, and releases them on every exit path",
+            "an exit code of 0 only when every partition passed intact",
+            "never a reason to rerun until green",
+            "Both contracts change only through the Operation flow, never in a task",
+        ),
+    },
     "test_group_report": {
         f"{SKILLS}/deliver/references/switch-test_group_report-refuse_missing_groups.md": (
             "a group that fails to collect is `not_collected`, never left out",
@@ -882,6 +894,7 @@ ORDERED_STEPS = {
         "QA uses `run --kind test|mutation|dependency_audit`",
         "Switch `qa_gate_order`: at `gate_first`",
         "Switch `test_group_report`: at `refuse_missing_groups`",
+        "Switch `test_engines`: at `partitioned`",
     ),
 }
 
@@ -961,7 +974,8 @@ class MeasuredBaselineTests(unittest.TestCase):
                                  "pre_handoff_regression", "qa_gate_order", "reader_waves",
                                  "rebind_review_scope", "remediation_bookkeeping",
                                  "remediation_writers", "review_scope_record", "root_review_scope",
-                                 "source_decision_gate", "test_cost_budget", "test_group_report"])
+                                 "source_decision_gate", "test_cost_budget", "test_engines",
+                                 "test_group_report"])
 
 
 if __name__ == "__main__":

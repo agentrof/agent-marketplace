@@ -104,7 +104,7 @@
       "aaebfe00ee5e062d23a881e0d0c989563426b2c026dcb07c78d74b0929477e5c"
     ,
     "flows/delivery-execution.md":
-      "6e611b1044cd2ed0db3ff5396cebd900fc45b20cec72f04d80f896f996a7daa9"
+      "18602ae7323024ac27bfb946f90f142aff5c4840df01e4dd3520fe45a3dc10f7"
     ,
     "flows/delivery-governance.md":
       "ef2fa67262e0f500ba49b80d2865af6038638327745b989303acfaf1b1446fb7"
@@ -179,7 +179,7 @@
       "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
     ,
     "scripts/delivery_verification.py":
-      "f7c25bfc1c41bba88fd483768836c4ff8de52c19573c7d41cc9fe81a6b75f7ff"
+      "88c8ab11b6d7bcd7ec471e9247252bcd4941ed90c6d0f889d7b50cc871c6247b"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -215,7 +215,7 @@
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/operation_compile.py":
-      "a3d5f4a5ee6c5ef6a7f50f97262f0d06384ef597171ae0398d07cadce991c93b"
+      "c0eabacc6a0b7a614b98e0048652f0ff3f46b579c5b934d094f74905d7cb9094"
     ,
     "scripts/process_policy.py":
       "673e45268b8b1f8161ecb4f1d26a9d5c970049015022e804a70c84b7da87828a"
@@ -362,13 +362,13 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "df5d7725a63843f80f0b163e65030a9a476c012cd4abe26f491ec888956e5ff8"
+      "930482c6bacf42e28c6a504db0bd1f134597e0af957e8158cb16f354579c54cb"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "82786a6d499f86951db9a7e03f0292d4db2889f607b17c73b15dfa443b8195cb"
+      "ca318646f6f2575d8f2f443ecf3d0f95ccf58c20153aa790f1ae2db1f6baaed1"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -414,6 +414,9 @@
     ,
     "skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md":
       "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
+    ,
+    "skill-content/deliver/references/switch-test_engines-partitioned.md":
+      "718714d0b07687b4d670499555397d5bac780a749b3dcd50736a6f3e5b0fafa7"
     ,
     "skill-content/deliver/references/switch-test_group_report-refuse_missing_groups.md":
       "8bc78970e33ae960d0f02dcf92c512396897e8f62d7ef7de2beae7cda2f04044"
@@ -518,7 +521,7 @@
       "931c87622196a746700885aa5a78081954df37d0b6dc571ff54e70a93dcf9a05"
     ,
     "skill-content/obsidian-vault/data/vault-policy.json":
-      "112f10d523f3e8d122ae624d204db35ac6ddf12f4b33196d7bec4ab6fa94801a"
+      "3c26f2af14bbbae8395bede6ba8497eb3768eb1cba13d03a12e28c26776f8c50"
     ,
     "skill-content/obsidian-vault/references/graph.md":
       "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e"
@@ -980,7 +983,7 @@
       "46b840eaddc2c50abf29b4b0b145e1e0774c4760e89b4d09a7a9ce122b33bbbe"
     ,
     "templates/vault/.obsidian/types.json":
-      "2a1c8cf8b3e0d82d3d0524cffee898c6248cb8398793bd134e74e53016642f58"
+      "7b25b81d92ece8fc165eb9986a27f40f4c99a908101e3aa09df83693ffa98aff"
     ,
     "templates/vault/home.md":
       "b62efb50cb11a9e14ea667a2e12cbff4789ec458c705cd226440c9d5d25b3397"

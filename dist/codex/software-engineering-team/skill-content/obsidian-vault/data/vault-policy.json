@@ -432,6 +432,9 @@
     "service_catalog": "multitext",
     "test_groups": "multitext",
     "test_group_report": "text",
+    "test_partition_command": "text",
+    "test_engines": "multitext",
+    "shared_profiles": "multitext",
     "max_parallel": "number",
     "governance_hash": "text",
     "decision_kind": "text",
@@ -537,7 +540,7 @@
     "code_review": ["item_plan_hash", "reviewed_commit", "verification_candidate_hash", "verification_mode", "verification_result_hash", "source_hash"],
     "verification": ["item_plan_hash", "verified_commit", "test_plan_source_hash", "verification_candidate_hash", "verification_mode", "verification_result_hash", "source_hash"],
     "delivery_review": ["plan_hash", "reviewed_commit", "reviewed_integration_commit", "approved_at_utc", "approval_hash", "source_hash"],
-    "operation": ["revision", "constrained_by", "source_hash", "approved_at_utc", "test_command", "test_workdir", "diagnostic_test_command", "diagnostic_test_workdir", "command_variables", "mutation_include_paths", "mutation_disposition", "mutation_command", "mutation_workdir", "mutation_rationale", "dependency_audit_disposition", "dependency_audit_command", "dependency_audit_workdir", "dependency_audit_rationale", "pull_request_check_source", "pull_request_check_provider", "env_command", "env_workdir", "scenarios", "tolerated_warnings", "service_catalog", "test_groups", "test_group_report"],
+    "operation": ["revision", "constrained_by", "source_hash", "approved_at_utc", "test_command", "test_workdir", "diagnostic_test_command", "diagnostic_test_workdir", "command_variables", "mutation_include_paths", "mutation_disposition", "mutation_command", "mutation_workdir", "mutation_rationale", "dependency_audit_disposition", "dependency_audit_command", "dependency_audit_workdir", "dependency_audit_rationale", "pull_request_check_source", "pull_request_check_provider", "env_command", "env_workdir", "scenarios", "tolerated_warnings", "service_catalog", "test_groups", "test_group_report", "test_partition_command", "test_engines", "shared_profiles"],
     "delivery_governance": ["revision", "max_parallel", "governance_hash", "source_hash", "approved_at_utc"],
     "process_policy": ["revision", "approved_at_utc", "source_hash"]
   },

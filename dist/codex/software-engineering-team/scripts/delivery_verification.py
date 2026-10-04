@@ -59,6 +59,12 @@ REFUSE_MISSING_GROUPS = "refuse_missing_groups"
 GROUP_STATUSES = ("passed", "failed", "not_collected")
 GROUP_COUNTS = ("passed", "failed", "skipped")
 MISSING_GROUP = "missing"
+# At test_engines partitioned QA's final test run runs the partitions the
+# Verification Contract declares in parallel, one private clone each, over its
+# isolated test engines, longest first by the durations the Item's runtime keeps.
+ENGINE_SWITCH = "test_engines"
+PARTITIONED = "partitioned"
+PARTITION_DURATIONS = "partition-durations.json"
 # At process switch code_review_panel beside_official a lens panel reads the
 # frozen candidate beside the official code reviewer, and merge-panel
 # registers the one code review result from both.
@@ -85,8 +91,10 @@ COMMAND_VARIABLE_PREFIXES = ("AGENTROF_", "LC_")
 # The runner sets these for every command it runs.
 RUNNER_VARIABLES = ("AGENTROF_MUTATION_FILES", "AGENTROF_VERIFICATION_SCRATCH")
 # The runner's per-run inputs: an identity binds the data each carries, so it
-# names neither the variable nor its path.
-SELECTION_VARIABLES = ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS")
+# names neither the variable nor its path. A partitioned test run hands each
+# partition its own file and engine, which its record names, never the identity.
+PARTITION_VARIABLES = ("AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE")
+SELECTION_VARIABLES = ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
 # At touched_suites QA's final test run names here the earlier-story targets the
 # accepted pre-handoff run covered, for the approved test command to skip (#354).
 REUSED_TESTS = "reused-tests.json"
@@ -905,10 +913,14 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                 raise RuntimeError(f"run --spot-run-file serves only process switch {OWN_TARGET_SWITCH} {SPOT_RUN};"
                                    f" {current['delivery']} runs it at {value}")
             spot = spot_run_selection(root, Path(spot_file), current)
-        contract, _ = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+        contract, contract_body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
         command = contract.get(kind + "_command")
         if not isinstance(command, str) or not command.strip() or "{{" in command or "}}" in command:
             raise RuntimeError("approved verification command is missing or contains unresolved parameters")
+        partitions = (partition_declaration(root, current["delivery"], contract, contract_body)
+                      if kind == "test" else None)
+        if partitions is not None:
+            command = partitions["command"]
         workdir = str(contract.get(kind + "_workdir", "."))
         directory = (root / workdir).resolve()
         if directory != root and root not in directory.parents:
@@ -946,6 +958,9 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                   if kind in {"test", "diagnostic_test"} else None)
         if groups is not None:
             identity["test_group_report"] = groups
+        if partitions is not None:
+            identity["test_partitions"] = {key: partitions[key] for key in
+                                           ("partitions", "test_engines", "shared_profiles")}
         key = digest(identity)
         old = session["raw_evidence"].get(kind)
         if (not fresh and old and old.get("identity") == identity and old.get("exit_code") == 0 and old.get("candidate_intact") is True
@@ -967,12 +982,27 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         session["raw_evidence"].pop(kind, None)
         write_session(root, session)
         session_id = session["session_id"]
-        if groups is not None:
+        if groups is not None and partitions is None:
             clear_group_report(scratch, groups)
     started = time.monotonic()
-    completed, intact, difference, _dropped, _ran = private_checkout_run(root, scratch, current["product_commit"],
-                                                                         workdir, command, environment)
-    group_report = read_group_report(scratch, groups) if groups is not None else None
+    partition_records = None
+    if partitions is not None:
+        partition_records = run_partitions(root, scratch, current, workdir, partitions, environment,
+                                           reuse["test_ids"] if reuse is not None else [], groups)
+        intact, difference = all(record["candidate_intact"] is True for record in partition_records), ""
+        completed = subprocess.CompletedProcess(command, 0 if all(record["passed"] for record in partition_records)
+                                                else 1, b"".join(
+            f"== partition {record['partition']} on engine {record['engine']}: exit {record['exit_code']}"
+            f" ==\n".encode("utf-8") + record["output"] for record in partition_records))
+        group_report = None if groups is None else {
+            "test_groups": {group: entry for record in partition_records
+                            for group, entry in record.get("test_groups", {}).items()},
+            "missing_test_groups": sorted(group for record in partition_records
+                                          for group in record.get("missing_test_groups", []))}
+    else:
+        completed, intact, difference, _dropped, _ran = private_checkout_run(
+            root, scratch, current["product_commit"], workdir, command, environment)
+        group_report = read_group_report(scratch, groups) if groups is not None else None
     if group_report is not None and group_report["missing_test_groups"]:
         intact = False
     selection_intact = None
@@ -1013,6 +1043,15 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             record["selection_intact"] = selection_intact
         if group_report is not None:
             record.update(group_report)
+        if partition_records is not None:
+            record["partitions"] = []
+            for index, entry in enumerate(partition_records):
+                name = f"scratch/{kind}-{key.removeprefix('sha256:')}-partition-{index}.log"
+                atomic_file.replace_bytes(raw_output_path(root, name), entry["output"])
+                record["partitions"].append({**{field: value for field, value in entry.items()
+                                                if field not in {"output", "test_groups", "missing_test_groups"}},
+                                             "output_file": name,
+                                             "output_sha256": hashlib.sha256(entry["output"]).hexdigest()})
         record["evidence_hash"] = digest(record)
         session["raw_evidence"][kind] = record
         session["metrics"]["command_seconds"] += record["duration_seconds"]
@@ -1110,6 +1149,187 @@ def group_report_problem(raw: dict, declaration: dict) -> str | None:
     if unpassed:
         return "records test groups that did not pass: " + ", ".join(
             f"{group} {status}" for group, status in unpassed.items())
+    return None
+
+
+def partition_declaration(root: Path, delivery_id: str, contract: dict, body: str) -> dict | None:
+    """The partition plan, command and engines QA's final test run runs under, or None.
+
+    Only a Verification Contract that declares test_partition_command under a
+    Delivery that runs test_engines at partitioned yields them; a contract
+    without it never reads the Process Policy. The plan must place every
+    declared group in exactly one partition, and the Environment Contract must
+    provision every engine.
+    """
+    if "test_partition_command" not in contract:
+        return None
+    docs = delivery.docs_root(root)
+    if delivery.delivery_switch_value(docs, delivery_id, ENGINE_SWITCH) != PARTITIONED:
+        return None
+    plan, problems = operation_compile.test_partition_plan(contract, body)
+    if problems or plan is None:
+        raise RuntimeError("; ".join(problems) or "the Verification Contract declares no test partition plan")
+    path = docs / "operation/environment-contract.md"
+    provisioned = delivery.split_note(path)[0].get("test_engines") if path.is_file() else None
+    missing = [engine for engine in contract["test_engines"]
+               if not isinstance(provisioned, list) or engine not in provisioned]
+    if missing:
+        raise RuntimeError("the Environment Contract provisions no test engine " + ", ".join(missing))
+    command = contract["test_partition_command"]
+    if "{{" in command or "}}" in command:
+        raise RuntimeError("approved test partition command contains unresolved parameters")
+    return {"command": command, "partitions": plan, "test_engines": list(contract["test_engines"]),
+            "shared_profiles": sorted(contract.get("shared_profiles", []))}
+
+
+def partition_durations_path(root: Path) -> Path:
+    return safe_runtime_path(root, session_path(root).parent / PARTITION_DURATIONS, file_only=True)
+
+
+def partition_durations(root: Path) -> dict:
+    try:
+        value = json.loads(partition_durations_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {name: seconds for name, seconds in value.items()
+            if isinstance(seconds, (int, float)) and not isinstance(seconds, bool)} if isinstance(value, dict) else {}
+
+
+def partition_order(root: Path, plan: list[dict]) -> list[dict]:
+    """The partitions longest first by their last recorded duration; one never recorded comes first."""
+    durations = partition_durations(root)
+    return sorted(plan, key=lambda entry: -durations.get(entry["partition"], float("inf")))
+
+
+def run_partitions(root: Path, scratch: Path, current: dict, workdir: str, partitions: dict, environment: dict,
+                   reused: list[str], groups: dict | None) -> list[dict]:
+    """Run every partition in its own private clone, in parallel over the declared test engines.
+
+    A partition of an exclusive profile takes an engine alone; partitions of a
+    shared profile may share one with each other. Never more partitions run at
+    once than there are engines. A partition that fails, cannot start or
+    misses a group never stops another. Each record names its partition,
+    engine, exit code, intactness, duration and output, in plan order.
+    """
+    import threading
+
+    engines, shared = partitions["test_engines"], set(partitions["shared_profiles"])
+    load = {engine: {"exclusive": False, "count": 0} for engine in engines}
+    pending, results, condition = partition_order(root, partitions["partitions"]), {}, threading.Condition()
+    directory = safe_runtime_path(root, session_path(root).parent / "partitions")
+    directory.mkdir(exist_ok=True)
+
+    def engine_for(entry: dict) -> str | None:
+        if sum(state["count"] for state in load.values()) >= len(engines):
+            return None
+        if entry["profile"] in shared:
+            free = [engine for engine in engines if not load[engine]["exclusive"]]
+            return min(free, key=lambda engine: load[engine]["count"]) if free else None
+        return next((engine for engine in engines if load[engine]["count"] == 0), None)
+
+    def run(entry: dict, engine: str, index: int) -> None:
+        record = {"partition": entry["partition"], "engine": engine, "groups": entry["groups"],
+                  "profile": entry["profile"]}
+        started = time.monotonic()
+        try:
+            own = safe_runtime_path(root, scratch / "partitions" / entry["partition"])
+            own.mkdir(parents=True, exist_ok=True)
+            selection = safe_runtime_path(root, directory / f"{index}.json", file_only=True)
+            data = (json.dumps({"schema_version": 1, "candidate_hash": current["candidate_hash"],
+                                "partition": entry["partition"], "groups": entry["groups"], "engine": engine,
+                                "reused_test_ids": reused}, indent=2, sort_keys=True) + "\n").encode("utf-8")
+            atomic_file.replace_bytes(selection, data)
+            generation = source_file_generation(selection)
+            own_groups = (None if groups is None else
+                          {**groups, "test_groups": [group for group in groups["test_groups"]
+                                                     if group in entry["groups"]]})
+            if own_groups is not None:
+                clear_group_report(own, own_groups)
+            completed, intact, difference, _dropped, _ran = private_checkout_run(
+                root, own, current["product_commit"], workdir, partitions["command"],
+                {**environment, "AGENTROF_TEST_PARTITION": str(selection), "AGENTROF_TEST_ENGINE": engine,
+                 "AGENTROF_VERIFICATION_SCRATCH": str(own)})
+            try:
+                intact = intact and selection.read_bytes() == data and source_file_generation(selection) == generation
+            except OSError:
+                intact = False
+            record.update(exit_code=completed.returncode, output=completed.stdout)
+            if difference:
+                record["checkout_difference"] = difference
+            if own_groups is not None:
+                report = read_group_report(own, own_groups)
+                record.update(report)
+                intact = intact and not report["missing_test_groups"]
+            record["candidate_intact"] = intact
+        except Exception as exc:  # noqa: BLE001 - any failure is this partition's result, never another's
+            record.update(exit_code=None, candidate_intact=False, output=f"{exc}\n".encode("utf-8"),
+                          error=f"the partition did not start or finish: {exc}")
+        record["duration_seconds"] = time.monotonic() - started
+        record["passed"] = (record["exit_code"] == 0 and record["candidate_intact"] is True
+                            and all(group.get("status") == "passed"
+                                    for group in record.get("test_groups", {}).values()))
+        with condition:
+            results[entry["partition"]] = record
+            load[engine]["count"] -= 1
+            load[engine]["exclusive"] = False
+            condition.notify_all()
+
+    threads = []
+    with condition:
+        while pending:
+            chosen = next(((entry, engine) for entry in pending
+                           for engine in [engine_for(entry)] if engine is not None), None)
+            if chosen is None:
+                condition.wait()
+                continue
+            entry, engine = chosen
+            pending.remove(entry)
+            load[engine]["count"] += 1
+            load[engine]["exclusive"] = entry["profile"] not in shared
+            thread = threading.Thread(target=run, args=(entry, engine, partitions["partitions"].index(entry)),
+                                      daemon=True)
+            threads.append(thread)
+            thread.start()
+    for thread in threads:
+        thread.join()
+    durations = partition_durations(root)
+    durations.update({partition: record["duration_seconds"] for partition, record in results.items()})
+    atomic_file.replace_text(partition_durations_path(root), json.dumps(durations, indent=2, sort_keys=True) + "\n")
+    return [results[entry["partition"]] for entry in partitions["partitions"]]
+
+
+def partition_problem(root: Path, raw: dict, partitions: dict) -> str | None:
+    """Why a final test run's record is no complete, passing run of the declared partition plan, or None."""
+    if raw.get("identity", {}).get("test_partitions") != {key: partitions[key] for key in (
+            "partitions", "test_engines", "shared_profiles")}:
+        return "does not run the test partition plan the approved Verification Contract declares"
+    records = raw.get("partitions")
+    if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
+        return "records no partition results"
+    names = [record.get("partition") for record in records]
+    twice = sorted({str(name) for name in names if names.count(name) > 1})
+    if twice:
+        return "holds partition " + ", ".join(twice) + " more than once"
+    declared = [entry["partition"] for entry in partitions["partitions"]]
+    missing = [name for name in declared if name not in names]
+    if missing:
+        return "lacks partition " + ", ".join(missing)
+    stray = sorted(str(name) for name in names if name not in declared)
+    if stray:
+        return "holds partition " + ", ".join(stray) + ", which the plan does not declare"
+    failed = [record["partition"] for record in records
+              if record.get("passed") is not True or record.get("exit_code") != 0
+              or record.get("candidate_intact") is not True]
+    if failed:
+        return "holds failed or not intact partition " + ", ".join(failed)
+    for record in records:
+        try:
+            output = raw_output_path(root, str(record.get("output_file")))
+        except RuntimeError:
+            return f"names no raw output of partition {record['partition']}"
+        if (not output.is_file() or output.is_symlink()
+                or hashlib.sha256(output.read_bytes()).hexdigest() != record.get("output_sha256")):
+            return f"partition {record['partition']} raw command output is missing or changed"
     return None
 
 
@@ -1320,7 +1540,7 @@ def require_raw_evidence(root: Path, session: dict, checks: dict) -> dict | None
     in a reader's shell is approved from any other.
     """
     kinds = {"full_test_suite": "test", "mutation_whole_changed_files": "mutation", "dependency_audit": "dependency_audit"}
-    contract = verification_contract(root)
+    contract, contract_body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
     shared: tuple[str, dict] | None = None
     for check in required_checks(root, session["candidate"], "qa_engineer"):
         if check not in kinds:
@@ -1334,7 +1554,10 @@ def require_raw_evidence(root: Path, session: dict, checks: dict) -> dict | None
         problem = environment_problem(identity, contract)
         if problem:
             raise RuntimeError(f"{check} evidence {problem}")
-        if (identity.get("kind") != kinds[check] or identity.get("command") != contract.get(kinds[check] + "_command")
+        partitions = (partition_declaration(root, session["candidate"]["delivery"], contract, contract_body)
+                      if check == "full_test_suite" else None)
+        approved = partitions["command"] if partitions is not None else contract.get(kinds[check] + "_command")
+        if (identity.get("kind") != kinds[check] or identity.get("command") != approved
                 or identity.get("workdir") != contract.get(kinds[check] + "_workdir", ".")
                 or identity.get("execution_isolation") != "private_clone_v1"):
             raise RuntimeError(f"{check} evidence does not run the approved command in its approved workdir")
@@ -1344,6 +1567,10 @@ def require_raw_evidence(root: Path, session: dict, checks: dict) -> dict | None
                   if check == "full_test_suite" else None)
         if groups is not None:
             problem = group_report_problem(raw, groups)
+            if problem:
+                raise RuntimeError(f"{check} evidence {problem}")
+        if partitions is not None:
+            problem = partition_problem(root, raw, partitions)
             if problem:
                 raise RuntimeError(f"{check} evidence {problem}")
         if "reused_pre_handoff" in identity:
@@ -1746,8 +1973,10 @@ def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dic
                 raise RuntimeError("mutation evidence must cover every compiler-selected changed file")
         if role == "qa_engineer":
             test = checks["full_test_suite"]
-            contract, _ = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
-            if test.get("command") != contract.get("test_command") or test.get("exit_code") != 0:
+            contract, contract_body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+            partitions = partition_declaration(root, current["delivery"], contract, contract_body)
+            approved = partitions["command"] if partitions is not None else contract.get("test_command")
+            if test.get("command") != approved or test.get("exit_code") != 0:
                 raise RuntimeError("full suite evidence must identify the approved test command and successful exit")
             if not isinstance(test.get("environment"), str) or not test["environment"].strip():
                 raise RuntimeError("full suite evidence requires the verification environment identity")

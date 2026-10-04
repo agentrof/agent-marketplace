@@ -103,6 +103,11 @@ the group report the approved command writes and records every declared group,
 as
 `skill-content/deliver/references/switch-test_group_report-refuse_missing_groups.md`
 defines.
+Switch `test_engines`: at `partitioned`, `run --kind test` runs the
+partitions the Verification Contract declares in parallel on isolated test
+engines and merges them into one record, as
+`skill-content/deliver/references/switch-test_engines-partitioned.md`
+defines.
 For failed or affected tests first, an optional approved
 `diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
 <scratch-selection.json>`. Copy the selector schema from the QA manifest,

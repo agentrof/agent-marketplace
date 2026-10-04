@@ -845,7 +845,7 @@ def scope_findings(docs: Path, epic: str, findings: Path | None = None) -> dict:
 def append_record(path: Path, entry: dict) -> None:
     """Append one measurement row as a JSON line, the record the owner keeps."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(entry, sort_keys=True, ensure_ascii=False) + "\n")
 
 

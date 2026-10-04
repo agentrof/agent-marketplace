@@ -1716,6 +1716,47 @@ def _apple_python_launcher_matches(candidate: Path, cwd: Path) -> bool:
         return False
 
 
+# Homebrew links python3 into <prefix>/bin, outside the keg directory that
+# sys.executable reports (<prefix>/opt/python@3.X/bin).
+HOMEBREW_PREFIXES = (
+    Path("/opt/homebrew"),
+    Path("/usr/local"),
+    Path("/home/linuxbrew/.linuxbrew"),
+)
+
+
+def _homebrew_python_launcher_matches(candidate: Path) -> bool:
+    """Bind Homebrew's prefix launcher to the Homebrew interpreter running this hook."""
+    minor = f"3.{sys.version_info[1]}"
+    running = {
+        Path(value)
+        for value in (sys.executable, getattr(sys, "_base_executable", ""))
+        if value and Path(value).is_absolute()
+    }
+    for prefix in HOMEBREW_PREFIXES:
+        if candidate not in (prefix / "bin" / "python3", prefix / "bin" / f"python{minor}"):
+            continue
+        keg = prefix / "opt" / f"python@{minor}"
+        if not any(_path_within(value, keg) for value in running):
+            return False
+        try:
+            link = candidate.lstat()
+            directory = candidate.parent.stat()
+        except OSError:
+            return False
+        owners = {0, os.getuid()} if hasattr(os, "getuid") else {0}
+        # Homebrew keeps its prefix group-writable for macOS's admin group
+        # (gid 80), whose members can administer the machine anyway; any
+        # other group or world write would let another account swap the link.
+        writable_groups = {0, 80} if sys.platform == "darwin" else {0}
+        if link.st_uid not in owners or directory.st_uid not in owners \
+                or directory.st_mode & 0o002 \
+                or (directory.st_mode & 0o020 and directory.st_gid not in writable_groups):
+            return False
+        return candidate.resolve() in _trusted_runtime_targets()
+    return False
+
+
 def trusted_python_command(
     value: str, cwd: Path, allow_bare: bool = False,
 ) -> bool:
@@ -1761,6 +1802,8 @@ def trusted_python_command(
                 # compatibility commands; direct absolute aliases retain the
                 # normal writer path.
                 return allow_bare or Path(value).is_absolute()
+        if _homebrew_python_launcher_matches(candidate):
+            return allow_bare or Path(value).is_absolute()
         return _apple_python_launcher_matches(candidate, cwd)
     except (OSError, RuntimeError):
         return False

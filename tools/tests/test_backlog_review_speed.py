@@ -11,6 +11,9 @@ non-default value.
 - root_review_scope revision_delta: a revision's root reader reads in full only
   the changed stories and their neighbours, with every other story as a
   hash-bound summary in the compiler's graph (#405).
+- remediation_bookkeeping compiler: one compiler command writes the rechecks'
+  closure rows, the expected manifest hashes and the preservation report
+  (#398).
 """
 
 from __future__ import annotations
@@ -440,6 +443,124 @@ class RootReviewScopeTests(unittest.TestCase):
         self.depends(4, 3)
         with self.assertRaisesRegex(inputs.InputError, "cycle"):
             inputs.manifest(self.docs)
+
+
+class RemediationBookkeepingTests(unittest.TestCase):
+    REVIEW = "backlog/epics/second/reviews/round-1-epic-review.md"
+    PLAN = "[[backlog/epics/second/stories/st-002/test-plan|ST-002-TP]]"
+
+    def setUp(self):
+        self.root, self.docs = GitBacklogFixture.build(self)
+        self.runtime = self.root / ".agentrof/agent-marketplace/.runtime"
+        self.runtime.mkdir(parents=True)
+        self.closures = self.runtime / "closures.json"
+        self.report = self.runtime / "remediation-report.json"
+
+    def choose(self, value: str) -> None:
+        exists = process_policy_path(self.docs).exists()
+        policy(self.docs, "begin-revision" if exists else "init")
+        policy(self.docs, "set", "--switch", "remediation_bookkeeping", "--value", value)
+        policy(self.docs, "approve")
+        commit_all(self.root)
+
+    def head(self) -> str:
+        return subprocess.run(["git", "-C", str(self.root), "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def write_closures(self, *rows: dict) -> None:
+        self.closures.write_text(json.dumps({"closures": [dict({
+            "review": self.REVIEW, "finding": "F-1", "reader": "criteria-coverage",
+            "result": "closed", "manifest_hash": "sha256:" + "a" * 64,
+            "evidence": f"{self.PLAN} The plan now asserts the lockout after five attempts."},
+            **row) for row in rows]}), encoding="utf-8")
+
+    def record(self, *extra: str) -> tuple[int, dict]:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = backlog.main(["record-rechecks", "--docs", str(self.docs), "--closures",
+                                 str(self.closures), "--candidate", self.candidate, "--report",
+                                 str(self.report), *extra])
+        return code, json.loads(output.getvalue())
+
+    def test_the_command_runs_only_at_compiler(self):
+        self.candidate = self.head()
+        self.write_closures({})
+        code, result = self.record()
+        self.assertEqual(code, 1)
+        self.assertIn("remediation_bookkeeping compiler", result["errors"][0])
+        self.assertFalse(self.report.exists())
+
+    def test_one_command_writes_closures_hashes_and_the_preservation_report(self):
+        self.choose("compiler")
+        self.candidate = self.head()
+        self.write_closures({}, {"finding": "F-2", "reader": "dependencies", "result": "open"})
+        code, result = self.record()
+        self.assertEqual(code, 0, result)
+        body = (self.docs / self.REVIEW).read_text(encoding="utf-8")
+        self.assertIn("## Recheck Closures\n\n| finding | reader | result | manifest_hash |"
+                      " evidence |\n|---|---|---|---|---|\n| F-1 | criteria-coverage | closed |", body)
+        self.assertIn("[[backlog/epics/second/stories/st-002/test-plan\\|ST-002-TP]]", body)
+        self.assertLess(body.index("## Recheck Closures"), body.index("## Verdict"))
+        report = json.loads(self.report.read_text(encoding="utf-8"))
+        self.assertEqual(report, result["report"])
+        self.assertEqual(report["candidate"], self.candidate)
+        self.assertEqual(report["expected_hashes"],
+                         {"EP-002": inputs.manifest(self.docs, epic="EP-002")["source_hash"]})
+        preservation = report["preservation"]
+        self.assertEqual((preservation["changed"], preservation["added"], preservation["removed"],
+                          preservation["violations"]), ([self.REVIEW], [], [], []))
+        self.assertGreater(preservation["preserved"], 0)
+        # The check validates the rows it wrote, and a rerun writes the same bytes.
+        props, review_body = backlog.parse_front_matter(self.docs / self.REVIEW)
+        self.assertEqual(backlog.recheck_closure_record(self.docs, review_body, self.REVIEW, props), [])
+        written = (self.docs / self.REVIEW).read_bytes()
+        self.assertEqual(self.record()[0], 0)
+        self.assertEqual((self.docs / self.REVIEW).read_bytes(), written)
+        self.assertEqual(self.record("--verify")[0], 0)
+
+    def test_verify_refuses_a_hand_edit_and_a_stale_report(self):
+        self.choose("compiler")
+        self.candidate = self.head()
+        self.write_closures({})
+        self.assertEqual(self.record()[0], 0)
+        path = self.docs / self.REVIEW
+        path.write_text(path.read_text(encoding="utf-8").replace("| closed |", "| open |"),
+                        encoding="utf-8")
+        code, result = self.record("--verify")
+        self.assertEqual(code, 1)
+        self.assertIn(f"{self.REVIEW} Recheck Closures differ from the closures", result["errors"])
+        self.assertTrue(any(error.startswith("report is stale") for error in result["errors"]))
+
+    def test_rows_are_validated_and_approved_reviews_stay_immutable(self):
+        self.choose("compiler")
+        self.candidate = self.head()
+        self.write_closures({"result": "maybe", "manifest_hash": "sha256:short"})
+        code, result = self.record()
+        self.assertEqual(code, 1)
+        self.assertTrue(any("result must be closed or open" in error for error in result["errors"]))
+        self.assertTrue(any("manifest_hash must be" in error for error in result["errors"]))
+        self.assertNotIn("Recheck Closures", (self.docs / self.REVIEW).read_text(encoding="utf-8"))
+        approved = "backlog/epics/delivery-fixture/reviews/round-1-epic-review.md"
+        self.write_closures({"review": approved})
+        self.assertIn("is approved; an approved review is immutable", self.record()[1]["errors"][0])
+        # A hand edit of an approved review since the candidate is a violation.
+        path = self.docs / approved
+        path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        self.write_closures({})
+        code, result = self.record()
+        self.assertEqual(code, 1)
+        self.assertEqual(result["report"]["preservation"]["violations"],
+                         [f"{approved} is an approved review the candidate holds; it is immutable"])
+
+    def test_at_writer_a_recheck_section_is_authored_text(self):
+        self.candidate = self.head()
+        path = self.docs / self.REVIEW
+        props, body = backlog.parse_front_matter(path)
+        body = body.replace("## Verdict", "## Recheck Closures\n\nThe readers closed F-1.\n\n"
+                            "## Verdict", 1)
+        self.assertEqual(backlog.recheck_closure_record(self.docs, body, self.REVIEW, props), [])
+        self.choose("compiler")
+        self.assertTrue(backlog.recheck_closure_record(self.docs, body, self.REVIEW, props))
 
 
 def process_policy_path(docs: Path) -> Path:

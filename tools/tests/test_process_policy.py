@@ -523,6 +523,7 @@ RELEASED_DEFAULTS = {
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
     "qa_gate_order": "plan_first",
+    "remediation_bookkeeping": "writer",
     "remediation_writers": "single_writer",
     "review_loop": "current",
     "review_manifest_scope": "transitive",
@@ -707,6 +708,15 @@ SAFETY_RULES = {
             " has returned",
         ),
     },
+    "remediation_bookkeeping": {
+        f"{SKILLS}/backlog-plan/references/switch-remediation_bookkeeping-compiler.md": (
+            "The command records; it decides nothing",
+            "A closure row only copies what a recheck reader returned",
+            "rerun it after any change instead of editing a row, a hash or the report by hand",
+            "Each `--expected-hash` recheck the flow requires before accepting a result is"
+            " unchanged",
+        ),
+    },
     "remediation_writers": {
         f"{SKILLS}/backlog-plan/references/switch-remediation_writers-per_epic.md": (
             "The Product Owner stays the only backlog writer role",
@@ -877,7 +887,7 @@ class MeasuredBaselineTests(unittest.TestCase):
         self.assertEqual(cited, ["code_review_panel", "delivery_path", "epic_review_cadence",
                                  "execution_planning",
                                  "own_target_reuse", "owner_gates", "pre_handoff_regression",
-                                 "qa_gate_order", "remediation_writers",
+                                 "qa_gate_order", "remediation_bookkeeping", "remediation_writers",
                                  "review_scope_record", "root_review_scope"])
 
 

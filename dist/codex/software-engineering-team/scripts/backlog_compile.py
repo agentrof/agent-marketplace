@@ -1427,6 +1427,254 @@ def review_loop_record(docs: Path, body: str, path: str, props: dict) -> list[st
     return review_record_findings(docs, body, path, approved=approved)
 
 
+# Switch remediation_bookkeeping at compiler lets one compiler command write
+# the rechecks' closure rows into each review note, compute the expected
+# manifest hashes and write the preservation report after a remediation pass.
+BOOKKEEPING, COMPILER_BOOKKEEPING = "remediation_bookkeeping", "compiler"
+RECHECK_CLOSURES = "Recheck Closures"
+RECHECK_COLUMNS = ("finding", "reader", "result", "manifest_hash", "evidence")
+RECHECK_RESULTS = ("closed", "open")
+RECHECK_READER_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+MANIFEST_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def bookkeeping_value(docs: Path) -> str:
+    """The remediation_bookkeeping value of the project's approved Process Policy."""
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    return values[BOOKKEEPING]["value"]
+
+
+def recheck_rows(docs: Path, body: str, path: str) -> tuple[list[dict[str, str]], list[str]]:
+    """Read and validate a review note's Recheck Closures table."""
+    rows, errors = structured_table(section(body, RECHECK_CLOSURES), RECHECK_COLUMNS, path,
+                                    RECHECK_CLOSURES)
+    returned = (returned_findings(docs, body, path)[0]
+                if RETURNED_FINDINGS in headings(body) else None)
+    seen: set[tuple[str, str]] = set()
+    for number, row in enumerate(rows, 1):
+        label = f"{path} recheck closure {number}"
+        identifier, reader = row["finding"], row["reader"]
+        if not FINDING_ID_RE.fullmatch(identifier):
+            errors.append(f"{label} finding must be an id such as F-3: {identifier or '(missing)'}")
+        elif returned is not None and identifier not in returned:
+            errors.append(f"{label} closes {identifier}, which Returned Findings does not list")
+        if not RECHECK_READER_RE.fullmatch(reader):
+            errors.append(f"{label} reader must be a lens or role id: {reader or '(missing)'}")
+        if (identifier, reader) in seen:
+            errors.append(f"{path} records the recheck of {identifier} by {reader} twice")
+        seen.add((identifier, reader))
+        if row["result"] not in RECHECK_RESULTS:
+            errors.append(f"{label} result must be closed or open")
+        if not MANIFEST_HASH_RE.fullmatch(row["manifest_hash"]):
+            errors.append(f"{label} manifest_hash must be the sha256 of the manifest the reader read")
+        cited_statement(docs, row["evidence"], label, "evidence", errors)
+    return rows, errors
+
+
+def recheck_closure_record(docs: Path, body: str, path: str, props: dict) -> list[str]:
+    """Validate a review note's Recheck Closures when the compiler writes them.
+
+    A note without the section never reads the Process Policy, and an approved
+    note keeps what it was approved with. At any value but compiler a section
+    of that name is authored text.
+    """
+    if RECHECK_CLOSURES not in headings(body) or props.get("status") == "approved":
+        return []
+    try:
+        value = session_read(("remediation_bookkeeping", docs.resolve()),
+                             lambda: bookkeeping_value(docs))
+    except ValueError as exc:
+        return [f"{path} needs the remediation_bookkeeping value of the Process Policy: {exc}"]
+    if value != COMPILER_BOOKKEEPING:
+        return []
+    return recheck_rows(docs, body, path)[1]
+
+
+def table_cell(value: str) -> str:
+    """Escape a wikilink alias for a table cell; any other pipe or a line break is refused."""
+    escaped = re.sub(r"\[\[([^\[\]\n]+?)\]\]",
+                     lambda match: "[[" + re.sub(r"(?<!\\)\|", r"\\|", match.group(1)) + "]]",
+                     value.strip())
+    outside = re.sub(r"\[\[[^\[\]\n]+?\]\]", "", escaped)
+    if "\n" in value or re.search(r"(?<!\\)\|", outside):
+        raise ValueError(f"a closure cell holds a line break or a table pipe: {value!r}")
+    return escaped
+
+
+def with_recheck_section(body: str, rows: list[dict[str, str]]) -> str:
+    """Return a review body whose Recheck Closures section holds exactly ``rows``.
+
+    An existing section is replaced in place; a new one goes before Accepted
+    Minor Findings, or else before Verdict.
+    """
+    table = ["| " + " | ".join(RECHECK_COLUMNS) + " |",
+             "|" + "---|" * len(RECHECK_COLUMNS),
+             *("| " + " | ".join(row[column] for column in RECHECK_COLUMNS) + " |"
+               for row in rows)]
+    block = f"## {RECHECK_CLOSURES}\n\n" + "\n".join(table) + "\n\n"
+    existing = re.search(rf"^##\s+{re.escape(RECHECK_CLOSURES)}\s*$", body, flags=re.MULTILINE)
+    if existing:
+        following = re.search(r"^##\s+", body[existing.end():], flags=re.MULTILINE)
+        end = existing.end() + following.start() if following else len(body)
+        return body[:existing.start()] + block + body[end:]
+    for title in (ACCEPTED_MINOR_FINDINGS, "Verdict"):
+        anchor = re.search(rf"^##\s+{re.escape(title)}\s*$", body, flags=re.MULTILINE)
+        if anchor:
+            return body[:anchor.start()] + block + body[anchor.start():]
+    raise ValueError("review note has no Verdict section to place Recheck Closures before")
+
+
+def backlog_preservation(project: Path, docs: Path, candidate: str) -> dict:
+    """Compare the backlog's working files with the pinned candidate commit.
+
+    Every backlog file is changed, added, removed or preserved byte for byte;
+    a changed or removed review note that the candidate holds approved is a
+    violation, since an approved review is immutable.
+    """
+    prefix = (docs / "backlog").relative_to(project).as_posix()
+    committed = committed_approval_sources(project, docs, candidate)
+    before = {path.relative_to(docs).as_posix(): content for path, content in committed.items()
+              if "_generated" not in path.relative_to(docs).parts}
+    after = {path.relative_to(docs).as_posix(): path.read_bytes()
+             for path in sorted((docs / "backlog").rglob("*"))
+             if path.is_file() and "_generated" not in path.relative_to(docs).parts}
+    changed = sorted(path for path in set(before) & set(after) if before[path] != after[path])
+    violations = []
+    for path in changed + sorted(set(before) - set(after)):
+        if not path.endswith(".md"):
+            continue
+        props, _body = parse_front_matter_text(before[path].decode("utf-8"))
+        if props.get("type") in {"epic-review", "backlog-review"} and props.get("status") == "approved":
+            violations.append(f"{path} is an approved review the candidate holds; it is immutable")
+    return {"prefix": prefix, "changed": changed, "added": sorted(set(after) - set(before)),
+            "removed": sorted(set(before) - set(after)),
+            "preserved": len([path for path in before if path in after and before[path] == after[path]]),
+            "violations": violations}
+
+
+def record_rechecks(args) -> int:
+    """Write the rechecks' closure rows, the expected hashes and the preservation report.
+
+    One deterministic step after a remediation pass, at remediation_bookkeeping
+    compiler. ``--verify`` writes nothing and checks that the review notes and
+    the report still equal what the command would write.
+    """
+    import atomic_file
+    import backlog_review_inputs
+
+    docs = docs_root(args.docs)
+
+    def fail(errors: list[str]) -> int:
+        print(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False,
+                         sort_keys=True))
+        return 1
+
+    try:
+        if bookkeeping_value(docs) != COMPILER_BOOKKEEPING:
+            return fail([f"record-rechecks runs at switch {BOOKKEEPING} {COMPILER_BOOKKEEPING}"])
+    except ValueError as exc:
+        return fail([f"process policy cannot set {BOOKKEEPING}: {exc}"])
+    project = history_project(docs)
+    report_path = Path(args.report).resolve()
+    if project is None:
+        return fail(["record-rechecks needs the project's Git checkout for the candidate"])
+    if docs.resolve() in report_path.parents:
+        return fail(["the report is runtime data; write it outside the docs vault"])
+    resolved = subprocess.run(["git", "--no-replace-objects", "rev-parse", "--verify",
+                               args.candidate + "^{commit}"], cwd=project, capture_output=True,
+                              text=True, check=False)
+    if args.candidate.startswith("-") or resolved.returncode:
+        return fail([f"candidate does not resolve to a commit: {args.candidate}"])
+    candidate = resolved.stdout.strip()
+    try:
+        raw = Path(args.closures).read_bytes()
+        listed = json.loads(raw.decode("utf-8")).get("closures")
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError) as exc:
+        return fail([f"closures cannot be read: {exc}"])
+    if not isinstance(listed, list) or not listed or not all(
+            isinstance(item, dict) and set(item) == {"review", *RECHECK_COLUMNS}
+            and all(isinstance(value, str) for value in item.values()) for item in listed):
+        return fail(["closures must list each row's review, " + ", ".join(RECHECK_COLUMNS)])
+    record, _errors = collect(docs, review_inputs=True)
+    scopes = {latest(item["reviews"])["path"]: item["id"] for item in record["epics"]
+              if item["reviews"]}
+    if record["backlog_reviews"]:
+        scopes[latest(record["backlog_reviews"])["path"]] = "root"
+    grouped: dict[str, list[dict[str, str]]] = {}
+    errors = []
+    for item in listed:
+        if item["review"] not in scopes:
+            errors.append(f"{item['review']} is not the current review note of an epic or the root")
+            continue
+        try:
+            row = {column: table_cell(item[column]) for column in RECHECK_COLUMNS}
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
+        grouped.setdefault(item["review"], []).append(row)
+    if errors:
+        return fail(errors)
+    written = {}
+    for path, rows in sorted(grouped.items()):
+        note = docs / path
+        original = note.read_bytes()
+        props, body = parse_front_matter_text(original.decode("utf-8"))
+        if props.get("status") == "approved":
+            errors.append(f"{path} is approved; an approved review is immutable")
+            continue
+        try:
+            text = front_matter(props, with_recheck_section(body, rows))
+        except ValueError as exc:
+            errors.append(f"{path}: {exc}")
+            continue
+        errors.extend(recheck_rows(docs, with_recheck_section(body, rows), path)[1])
+        written[path] = (note, original, text.encode("utf-8"))
+    if errors:
+        return fail(errors)
+    for path, (note, original, content) in sorted(written.items()):
+        if args.verify:
+            if original != content:
+                errors.append(f"{path} Recheck Closures differ from the closures")
+            continue
+        if original != content:
+            atomic_file.replace_bytes(note, content)
+    hashes = {}
+    for path in sorted(grouped):
+        scope = scopes[path]
+        try:
+            hashes[scope] = backlog_review_inputs.manifest(
+                docs, epic=None if scope == "root" else scope)["source_hash"]
+        except (backlog_review_inputs.InputError, OSError, ValueError, RuntimeError) as exc:
+            hashes[scope] = f"error: {exc}"
+            errors.append(f"{scope} manifest cannot be derived: {exc}")
+    report = {"schema_version": 1, "candidate": candidate,
+              "closures_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+              "reviews": {path: "sha256:" + hashlib.sha256((docs / path).read_bytes()).hexdigest()
+                          for path in sorted(grouped)},
+              "expected_hashes": dict(sorted(hashes.items())),
+              "preservation": backlog_preservation(project, docs, candidate)}
+    errors.extend(report["preservation"]["violations"])
+    if args.verify:
+        try:
+            stored = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            stored = None
+            errors.append(f"report cannot be read: {exc}")
+        if stored is not None and stored != report:
+            errors.append("report is stale: " + ", ".join(
+                sorted(key for key in set(report) | set(stored)
+                       if report.get(key) != stored.get(key))))
+    else:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_file.replace_bytes(report_path, (json.dumps(
+            report, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8"))
+    print(json.dumps({"ok": not errors, "errors": errors, "report": report}, indent=2,
+                     ensure_ascii=False, sort_keys=True))
+    return 0 if not errors else 1
+
+
 def acceptance_checklist_lines(story: dict) -> int:
     """Count the checklist criteria of the Acceptance section, outside code blocks.
 
@@ -2580,6 +2828,7 @@ def review_completion_findings(docs: Path, reviews: list[dict], sections: list[s
         errors.extend(review_section_findings(review["body"], sections, review["path"], docs))
         errors.extend(accepted_minor_findings(docs, review["body"], review["path"], contract))
         errors.extend(review_loop_record(docs, review["body"], review["path"], review["props"]))
+        errors.extend(recheck_closure_record(docs, review["body"], review["path"], review["props"]))
     return errors
 
 
@@ -4354,6 +4603,15 @@ def main(argv=None) -> int:
     command.add_argument("--absent-input", choices=("design-system", "experience-design"),
                          action="append", default=[], help="Revalidate an explicit headless Requirement input absence")
     command.set_defaults(func=begin_revision)
+    command = sub.add_parser("record-rechecks",
+                             help="write recheck closures, expected hashes and the preservation"
+                                  " report (remediation_bookkeeping compiler)")
+    command.add_argument("--docs", default=None)
+    command.add_argument("--closures", required=True)
+    command.add_argument("--candidate", required=True)
+    command.add_argument("--report", required=True)
+    command.add_argument("--verify", action="store_true")
+    command.set_defaults(func=record_rechecks)
     command = sub.add_parser("revision-status")
     command.add_argument("--docs", default=None)
     command.set_defaults(func=revision_status)

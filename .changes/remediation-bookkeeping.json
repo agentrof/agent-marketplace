@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch `remediation_bookkeeping` (`writer` | `compiler`), off by default, so every default output and every bound instruction is unchanged. At `compiler`, a backlog remediation writer does content fixes only and runs `backlog_compile.py record-rechecks --closures <file> --candidate <reviewed commit> --report <file>` once: from the recheck readers' closure tables, copied verbatim into one JSON file, it writes each current review note's `Recheck Closures` table (finding, reader, closed or open, the manifest hash the reader read, cited evidence), derives the expected review manifest hash of every touched epic and the root, and writes a preservation report of every backlog file changed, added, removed or kept byte for byte since the candidate, failing on an approved review the candidate holds. It refuses an approved note and a row whose finding `Returned Findings` does not list, is idempotent, and `--verify` writes nothing and fails on a hand-edited table or a stale report; `backlog_compile.py check` validates the rows of a draft review note at this value only. In one measured project, this bookkeeping took about 26 and 18 min of two writer passes of one backlog revision on the highest tier.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

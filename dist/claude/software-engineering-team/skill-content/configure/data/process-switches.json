@@ -434,6 +434,27 @@
         "unit": "At least 3 backlog revisions run with revision_delta, each replayed as a frozen full root review. The switch changes only backlog planning, which runs outside any Delivery, so revisions replace the 3-Delivery default.",
         "threshold": "The same verdict and every critical and major finding of the full replay, a median root review wall clock at most 40% of the full replay's, and every seeded cross-story defect reported, with every shared quality guard holding and the owner's approval. A promotion keeps full as the default, since only a value the owner chooses takes parameters, and ships package_limits for revision_delta."
       }
+    },
+    "remediation_bookkeeping": {
+      "summary": "Who writes the bookkeeping of a backlog remediation pass: the Product Owner writer copies each recheck's closure rows into the review notes, reruns the expected-hash checks and writes the preservation report itself, or the writer does content fixes only and one compiler command writes the closure rows, the expected manifest hashes and the preservation report from the readers' closure tables and the pinned candidate.",
+      "issue": 398,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "writer",
+          "tradeoffs": "The writer copies closure rows, reruns each expected-hash check and writes the preservation report on its own tier, and a wording change in one record repeats every check. Today's behaviour and the baseline the command is measured against: in one measured project, this tail took about 26 min and 18 min of two writer passes, about 44 min of one backlog revision on the highest tier."
+        },
+        {
+          "id": "compiler",
+          "tradeoffs": "The coordinator writes the readers' closure tables to one JSON file and the writer runs `backlog_compile.py record-rechecks` once after its content fixes: it writes each review note's `Recheck Closures` table, derives the expected manifest hash of every touched scope and writes a preservation report against the pinned candidate, and its `--verify` mode is the writer's check. A tail of minutes instead of a model pass, while the closure tables must already be structured, and the compiler validates the `Recheck Closures` rows of a draft review note only at this value."
+        }
+      ],
+      "default": "writer",
+      "metric": "Per remediation writer pass: the time from the coordinator's fixes-ready message to the writer's final answer, against writer passes of the same kind, and the review notes' closure rows against the readers' closure tables, which must match row for row.",
+      "promotion": {
+        "unit": "At least 2 backlog revisions run with compiler, at least 3 remediation writer passes in all. The switch changes only backlog planning, which runs outside any Delivery, so writer passes replace the 3-Delivery default.",
+        "threshold": "A median bookkeeping tail of at most 5 min per pass and zero closure rows that differ from the readers' tables, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

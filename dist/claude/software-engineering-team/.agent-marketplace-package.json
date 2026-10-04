@@ -98,7 +98,7 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "8087d9fb0023889997003bef87ec8a78e59dae3a1d2a469973fe398d3b7aea3c"
+      "d39633f87455578df4e7c47298422658d72a78416c61636e692a8cc1b773c495"
     ,
     "flows/business-analysis.md":
       "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3"
@@ -155,13 +155,13 @@
       "6097b5a504ee3c8e98a414cb7a81961069d7435f92ce15882803b7cbec6a9899"
     ,
     "scripts/backlog_compile.py":
-      "83f72bd2ccdda8bb4e50b949b88fc10a818ac65ce2b7b24a66612b7ad34e77b3"
+      "9f3eeba54f61e899f1e14c9b7de470a4b93ea89a2e423257c0c085ad3d0032cc"
     ,
     "scripts/backlog_input_policy.py":
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
     ,
     "scripts/backlog_review_inputs.py":
-      "d1962055909817a7732de80d5ab0aeeee39933b6b7fbf182c0db5c90c5b5b978"
+      "c9576011fe7e31407beb31ed793550bc63111c9313b64604f95b51fc9c78727d"
     ,
     "scripts/delivery_compile.py":
       "296875bd6c03f5ad73eb80a93a6f7575af9a88a4c3f563ea912c088dda200437"
@@ -286,6 +286,9 @@
     "skill-content/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md":
       "4126c93245f53e049273a3fdb3394c6bc74158d1ba6c8f6a6c991dabd089bca5"
     ,
+    "skill-content/backlog-plan/references/switch-remediation_bookkeeping-compiler.md":
+      "313ab796866f57e5e7af10e3deae11b4006ec940b62df080dffc6576f1247af6"
+    ,
     "skill-content/backlog-plan/references/switch-remediation_writers-per_epic.md":
       "7f304f26209ab6de320846e32235ebc3162fc3e6b4e64d55cb19980ab10ef602"
     ,
@@ -353,7 +356,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "5c30cb64427462eb9079bf35bdc9a5b0732f1c3e080f6ab42763ae586cb1bac5"
+      "4f111a1be9713cec4166946d92bb47b85bd26acd8b848929e7e41579700dcf51"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"

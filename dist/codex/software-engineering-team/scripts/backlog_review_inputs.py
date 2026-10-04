@@ -211,6 +211,7 @@ def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: di
     pending = backlog.review_section_findings(review["body"], sections, review["path"], docs)
     pending += backlog.accepted_minor_findings(docs, review["body"], review["path"], contract)
     pending += backlog.review_loop_record(docs, review["body"], review["path"], review["props"])
+    pending += backlog.recheck_closure_record(docs, review["body"], review["path"], review["props"])
     if budget is not None and not root:
         pending += backlog.size_exception_rows(docs, scope_epics[0], review)[1]
     # The coverage check reads every current review; hand it only this one.

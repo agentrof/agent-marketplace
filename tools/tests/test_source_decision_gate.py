@@ -14,10 +14,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TEAM = ROOT / "plugins" / "software-engineering-team"
-sys.path.insert(0, str(ROOT / "tools" / "tests"))
 sys.path.insert(0, str(TEAM / "scripts"))
 import process_policy  # noqa: E402
-from test_ba_compile import ba, make_valid_space, run  # noqa: E402
+# The package path, as every other suite imports it: a second import under
+# another name would replace the compiler module the other suites patch.
+from tools.tests.test_ba_compile import make_valid_space, run  # noqa: E402
 
 SWITCH = "source_decision_gate"
 REFERENCE = ("skill-content/business-analysis/references/"

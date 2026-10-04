@@ -69,8 +69,11 @@ class CalculationExamplesTests(unittest.TestCase):
             docs = project / "workspace/docs"
             init_repository(project, initial_branch="main")
             (docs / "maps").mkdir(parents=True)
-            for argv in (["init"], ["set", "--switch", SWITCH, "--value", value], ["approve"]):
-                code, output = quiet(process_policy.main, [argv[0], "--docs", str(docs), *argv[1:]])
+            for command, *rest in (("set", "--switch", SWITCH, "--value", value), ("approve",)):
+                if command == "set":
+                    code, output = quiet(process_policy.main, ["init", "--docs", str(docs)])
+                    self.assertEqual(code, 0, output)
+                code, output = quiet(process_policy.main, [command, "--docs", str(docs), *rest])
                 self.assertEqual(code, 0, output)
             for argv in (["add", "--all"], ["-c", "user.email=t@example.com", "-c", "user.name=T",
                                             "commit", "-q", "-m", "policy"]):

@@ -129,6 +129,18 @@ only the notes the cross-epic findings name.
 `backlog-plan/references/switch-remediation_writers-per_epic.md` defines the
 writers.
 
+What the root reviewer of a backlog revision reads in full is process switch
+`root_review_scope`. At `full`, the default, it reads the complete package. At
+`revision_delta`, its manifest names in full only the stories the revision
+changed or added, their neighbours one dependency edge away, their test
+plans, every epic and the review notes, and gives every other story as a
+hash-bound summary in the compiler's whole-backlog graph with every
+dependency edge and the root review's compiler facts. A first backlog, a delta
+over the owner's `max_delta_share_percent` and a reader's stated request read
+the whole package.
+`backlog-plan/references/switch-root_review_scope-revision_delta.md` defines
+the read set.
+
 When epic reviews queue behind the host's agent limit, process switch
 `epic_review_cadence` sets when the next one starts. At `wait_per_panel`, the
 default, the coordinator waits for the previous review's calibration and its

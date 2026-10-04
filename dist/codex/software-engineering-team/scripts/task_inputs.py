@@ -610,7 +610,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
              findings: str | None = None, base: str | None = None, epic: str | None = None,
              expected_hash: str | None = None, package: Path = PACKAGE,
              delivery: str | None = None, remote: str = "origin",
-             pass_kind: str | None = None) -> dict:
+             pass_kind: str | None = None, full_root_reason: str | None = None) -> dict:
     policy = catalog(package)
     package = package.resolve()
     project = project.resolve() if project is not None else None
@@ -715,8 +715,11 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
             raise ValueError("epic scope belongs to a project backlog task")
         import backlog_review_inputs
         closure = backlog_review_inputs.manifest(project / "workspace/docs", epic=epic or None,
-                                                 writer=not read_only)
+                                                 writer=not read_only,
+                                                 full_root_reason=full_root_reason)
         project_files.update("workspace/docs/" + path for path in closure["paths"])
+    elif full_root_reason is not None:
+        raise ValueError("a full root read request belongs to a root review task (--epic with no id)")
     if project is None and project_files:
         raise ValueError("project root is required for project inputs")
     # An exact epic's closure is derived again on every run, so a source that
@@ -852,6 +855,9 @@ def main(argv=None) -> int:
     parser.add_argument("--delivery")
     parser.add_argument("--remote", default="origin",
                         help="the Delivery remote whose Fence shows a held plan-revision barrier")
+    parser.add_argument("--full-root-reason",
+                        help="a root reader's reason to read the whole package (root_review_scope"
+                             " revision_delta)")
     parser.add_argument("--pass-kind",
                         help="a mechanical pass kind that templates/task-input-policy.json declares")
     args = parser.parse_args(argv)
@@ -861,7 +867,7 @@ def main(argv=None) -> int:
                            inputs=args.input, skills=args.skill, findings=args.findings, base=args.base,
                            epic=args.epic, expected_hash=args.expected_hash,
                            delivery=args.delivery, remote=args.remote,
-                           pass_kind=args.pass_kind))
+                           pass_kind=args.pass_kind, full_root_reason=args.full_root_reason))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError, KeyError, TypeError) as exc:

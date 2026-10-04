@@ -8,6 +8,9 @@ non-default value.
 - remediation_writers per_epic: an epic writer reads its epic's review scope
   and writes only its epic's notes, and a cross-epic writer writes only the
   notes it is given (#394).
+- root_review_scope revision_delta: a revision's root reader reads in full only
+  the changed stories and their neighbours, with every other story as a
+  hash-bound summary in the compiler's graph (#405).
 """
 
 from __future__ import annotations
@@ -282,6 +285,161 @@ class RemediationWritersTests(unittest.TestCase):
         reader = task_inputs.manifest(entry="backlog-plan", role="backlog-reviewer", mode="review",
                                       project=self.root, **task)
         self.assertEqual(reader["write_scope"]["status"], "read_only")
+
+
+class RootReviewScopeTests(unittest.TestCase):
+    """An approved four-story backlog reopened as revision 2."""
+
+    EPIC = "backlog/epics/delivery-fixture"
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.docs = Path(temporary.name) / "workspace/docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.docs.parent / "config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
+        make_approved_backlog(self.docs, "ST-001", "ST-002", "ST-003", "ST-004")
+        self.reopen(2)
+
+    def reopen(self, revision: int) -> None:
+        """Open a draft revision as begin-revision does, with a fresh root round."""
+        root = self.docs / "backlog/backlog.md"
+        props, body = backlog.parse_front_matter(root)
+        backlog.status_tag(props, "draft")
+        props["revision"] = revision
+        for key in ("approved_at_utc", "source_hash", "package_hash"):
+            props.pop(key, None)
+        root.write_text(backlog.front_matter(props, body), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            backlog.stub_backlog_review(SimpleNamespace(docs=str(self.docs)))
+
+    def path(self, number: int, name: str = "story") -> str:
+        return f"{self.EPIC}/stories/st-{number:03d}/{name}.md"
+
+    def depends(self, source: int, target: int) -> None:
+        path = self.docs / self.path(source)
+        props, body = backlog.parse_front_matter(path)
+        link = f"[[{self.path(target)[:-3]}|ST-{target:03d}]]"
+        props["depends_on"] = [*backlog.values(props, "depends_on"), link]
+        body = body.replace("## Dependencies\n\nNone.",
+                            "## Dependencies\n\n- " + link + ": Supplies the required input.")
+        path.write_text(backlog.front_matter(props, body), encoding="utf-8")
+
+    def choose(self, limit: int | None = 60) -> None:
+        exists = process_policy_path(self.docs).exists()
+        policy(self.docs, "begin-revision" if exists else "init")
+        policy(self.docs, "set", "--switch", "root_review_scope", "--value", "revision_delta")
+        if limit is not None:
+            policy(self.docs, "set", "--switch", "root_review_scope", "--parameter",
+                   "max_delta_share_percent", "--value", str(limit))
+        policy(self.docs, "approve")
+
+    def test_full_reads_every_story_and_names_no_delta(self):
+        self.depends(3, 4)
+        value = inputs.manifest(self.docs)
+        self.assertNotIn("root_review_scope", value)
+        self.assertNotIn("check", value)
+        for number in range(1, 5):
+            self.assertIn(self.path(number, "test-plan"), value["paths"])
+
+    def test_a_delta_read_names_changed_stories_and_neighbours_in_full(self):
+        self.depends(3, 4)
+        full = inputs.manifest(self.docs)
+        self.choose()
+        value = inputs.manifest(self.docs)
+        self.assertEqual(value["root_review_scope"], "revision_delta")
+        self.assertEqual(value["revision_delta"], {
+            "changed": ["ST-003"], "neighbours": ["ST-004"], "share_percent": 50,
+            "max_share_percent": 60, "read": "delta"})
+        for number in (3, 4):
+            for name in ("story", "test-plan"):
+                self.assertIn(self.path(number, name), value["primary_paths"])
+        for number in (1, 2):
+            for name in ("story", "test-plan"):
+                self.assertNotIn(self.path(number, name), value["paths"])
+        self.assertIn(f"{self.EPIC}/epic.md", value["primary_paths"])
+        self.assertLess(set(value["paths"]), set(full["paths"]))
+        graph = value["check"]["backlog_graph"]
+        self.assertEqual({identity: row["read"] for identity, row in graph["stories"].items()},
+                         {"ST-001": "summary", "ST-002": "summary", "ST-003": "full",
+                          "ST-004": "full"})
+        self.assertEqual(graph["stories"]["ST-001"]["story_sha256"],
+                         inputs.file_hash(self.docs / self.path(1)))
+        self.assertEqual(graph["stories"]["ST-003"]["depends_on"], ["ST-004"])
+        self.assertEqual(graph["dependency_edges"],
+                         sorted(backlog.dependency_edges(backlog.collect(self.docs)[0]["stories"],
+                                                         None, backlog.collect(self.docs)[0])))
+        # The root review's compiler facts come with the delta read.
+        self.assertEqual(value["check"]["counts"]["stories"], 4)
+        self.assertEqual(inputs.manifest(self.docs, expected_hash=value["source_hash"]), value)
+        # The hash binds every backlog byte, an unchanged story's included.
+        summary = self.docs / self.path(1)
+        summary.write_text(summary.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(inputs.InputError, "stale"):
+            inputs.manifest(self.docs, expected_hash=value["source_hash"])
+
+    def test_an_unchanged_story_a_delta_note_links_is_read_alone(self):
+        self.depends(3, 4)
+        path = self.docs / self.path(3)
+        props, body = backlog.parse_front_matter(path)
+        body = body.replace("\n## Non-Goals", f"\nIt hands over to [[{self.path(1)[:-3]}|ST-001]]."
+                            "\n\n## Non-Goals", 1)
+        path.write_text(backlog.front_matter(props, body), encoding="utf-8")
+        self.choose()
+        value = inputs.manifest(self.docs)
+        self.assertIn(self.path(1), value["context_paths"])
+        self.assertNotIn(self.path(1, "test-plan"), value["paths"])
+
+    def test_the_whole_package_is_read_when_the_delta_cannot_stand_alone(self):
+        self.depends(3, 4)
+        self.choose(limit=40)
+        value = inputs.manifest(self.docs)
+        self.assertEqual((value["revision_delta"]["read"], value["revision_delta"]["reason"]),
+                         ("full", "the delta holds more than 40% of the stories"))
+        self.assertIn(self.path(1, "test-plan"), value["paths"])
+        self.choose(limit=60)
+        code, result = run(["--docs", str(self.docs), "--root", "--full-root-reason",
+                            "ST-003 may overlap ST-001's export scope"])
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["revision_delta"]["reason"],
+                         "reader request: ST-003 may overlap ST-001's export scope")
+        self.assertIn(self.path(1, "test-plan"), result["paths"])
+        self.reopen(1)
+        self.assertEqual(inputs.manifest(self.docs)["revision_delta"]["reason"],
+                         "first backlog revision")
+
+    def test_a_root_reader_task_carries_the_delta_and_a_reader_request(self):
+        self.depends(3, 4)
+        self.choose()
+        root = self.docs.parent.parent
+        init_repository(root)
+        subprocess.run(["git", "-C", str(root), "config", "core.autocrlf", "false"],
+                       check=True, capture_output=True)
+        commit_all(root)
+        task = dict(entry="backlog-plan", role="backlog-reviewer", mode="review", project=root,
+                    epic="")
+        delta = task_inputs.manifest(**task)
+        self.assertIn("skill-content/backlog-plan/references/switch-root_review_scope-revision_delta.md",
+                      delta["required_reads"])
+        self.assertEqual(delta["backlog_scope"]["revision_delta"]["read"], "delta")
+        full = task_inputs.manifest(**task, full_root_reason="Overlap with an unchanged story.")
+        self.assertEqual(full["backlog_scope"]["revision_delta"]["reason"],
+                         "reader request: Overlap with an unchanged story.")
+        with self.assertRaisesRegex(ValueError, "full root read request"):
+            task_inputs.manifest(**dict(task, epic="EP-001"), full_root_reason="Read it all.")
+        with self.assertRaisesRegex(ValueError, "root review task"):
+            task_inputs.manifest(**dict(task, epic=None), full_root_reason="Read it all.")
+
+    def test_a_reader_request_needs_the_value_and_a_cycle_still_fails(self):
+        with self.assertRaisesRegex(inputs.InputError, "full root read request"):
+            inputs.manifest(self.docs, full_root_reason="Read everything.")
+        self.choose()
+        self.depends(3, 4)
+        self.depends(4, 3)
+        with self.assertRaisesRegex(inputs.InputError, "cycle"):
+            inputs.manifest(self.docs)
 
 
 def process_policy_path(docs: Path) -> Path:

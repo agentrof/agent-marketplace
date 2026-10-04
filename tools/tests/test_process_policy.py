@@ -528,6 +528,7 @@ RELEASED_DEFAULTS = {
     "review_manifest_scope": "transitive",
     "review_panels": "single_reader",
     "review_scope_record": "off",
+    "root_review_scope": "full",
     "story_size_budget": "off",
 }
 # The rules that keep a switch value safe, in the files agents read them from:
@@ -754,6 +755,14 @@ SAFETY_RULES = {
             "Never delete or rewrite a row without the owner's approval",
         ),
     },
+    "root_review_scope": {
+        f"{SKILLS}/backlog-plan/references/switch-root_review_scope-revision_delta.md": (
+            "The root review stays the backlog's cross-story gate",
+            "backlog approval still checks the whole backlog",
+            "never infer the story's content from its summary",
+            "so any change to the backlog stales it",
+        ),
+    },
     "story_size_budget": {
         f"{SKILLS}/product-planning/references/switch-story_size_budget-propose_split.md": (
             "it never fails `backlog_compile.py check`, never blocks a review or an approval and"
@@ -869,7 +878,7 @@ class MeasuredBaselineTests(unittest.TestCase):
                                  "execution_planning",
                                  "own_target_reuse", "owner_gates", "pre_handoff_regression",
                                  "qa_gate_order", "remediation_writers",
-                                 "review_scope_record"])
+                                 "review_scope_record", "root_review_scope"])
 
 
 if __name__ == "__main__":

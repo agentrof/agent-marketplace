@@ -2334,7 +2334,8 @@ def round_number(path: Path, props: dict, suffix: str, errors: list[str]) -> int
 @stage_package.candidate_session()
 @experience_validation_session()
 def collect(docs: Path, *, historical_inputs: bool = False,
-            review_inputs: bool = False, revision_inputs: bool = False) -> tuple[dict, list[str]]:
+            review_inputs: bool = False, revision_inputs: bool = False,
+            prior_universe: bool = False) -> tuple[dict, list[str]]:
     """Validate sources; input discovery may precede authored review findings.
 
     ``record["scaffold_findings"]`` names the returned errors that exist only
@@ -2342,6 +2343,11 @@ def collect(docs: Path, *, historical_inputs: bool = False,
     ``record["advisory_findings"]`` names what is reported but never returned
     as an error: the empty last section of a story approved before the
     compiler read that section above the navigation.
+    ``prior_universe`` judges criterion coverage against the BA universe of the
+    last committed backlog approval, as begin-revision's intake check does: a
+    criterion approved upstream since then is the revision's work, never a
+    reason to refuse opening it. Every other reader, Delivery's historical read
+    included, judges coverage against the current approved universe.
     """
     contract = backlog_contract()
     root = docs / "backlog"
@@ -2712,7 +2718,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
     if not review_inputs:
         errors.extend(review_coverage_findings(record, docs))
     errors.extend(global_criterion_coverage_findings(
-        record, docs, historical_inputs=historical_inputs, revision_inputs=revision_inputs))
+        record, docs, prior_universe=prior_universe, revision_inputs=revision_inputs))
     if historical_inputs and {"input_contract", "absent_input_stages"}.intersection(record["backlog"]["props"]):
         errors.extend(backlog_input_policy.historical_absence_findings(docs, record))
     record["scaffold_findings"] = sorted(set(scaffolds))
@@ -2816,7 +2822,7 @@ def review_coverage_findings(record: dict, docs: Path) -> list[str]:
 
 
 def global_criterion_coverage_findings(record: dict, docs: Path, *,
-                                     historical_inputs: bool = False,
+                                     prior_universe: bool = False,
                                      revision_inputs: bool = False) -> list[str]:
     errors: list[str] = []
     covered = {
@@ -2845,8 +2851,8 @@ def global_criterion_coverage_findings(record: dict, docs: Path, *,
         universe = approved_ba_universe(docs, errors) if has_feature_story else {}
         if not universe:
             universe = {key: {} for key in covered}
-    prior = prior_approved_universe(docs) if historical_inputs or revision_inputs else None
-    if historical_inputs and prior is not None:
+    prior = prior_approved_universe(docs) if prior_universe or revision_inputs else None
+    if prior_universe and prior is not None:
         universe = {key: entry for key, entry in universe.items() if key in prior}
     unknown_covered = sorted(covered - set(universe))
     if unknown_covered:
@@ -3002,12 +3008,19 @@ def history_project(docs: Path) -> Path | None:
                  if (parent / ".git").exists()), None)
 
 
-def history_blob(project: Path, commit: str, relative: str) -> bytes | None:
+def history_listing(project: Path, commit: str, relative: str) -> list[bytes] | None:
+    """Return the tree rows of one path at one commit, or None when Git cannot list it."""
     listing = subprocess.run(
         ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-z",
          commit, "--", relative], cwd=project, capture_output=True, check=False)
-    rows = [row for row in listing.stdout.split(b"\0") if row]
-    if listing.returncode or len(rows) != 1:
+    if listing.returncode:
+        return None
+    return [row for row in listing.stdout.split(b"\0") if row]
+
+
+def history_blob(project: Path, commit: str, relative: str) -> bytes | None:
+    rows = history_listing(project, commit, relative)
+    if rows is None or len(rows) != 1:
         return None
     fields, name = rows[0].split(b"\t", 1)
     mode, kind, oid = fields.split(b" ")
@@ -3086,8 +3099,14 @@ def history_commits(project: Path, path: Path, needle: str = "") -> list[str]:
 
 
 def historical_source_approval(docs: Path, target: str, label: str, status: str) -> bool:
-    """An unchanged committed Story/Test Plan keeps its approved evidence history."""
-    if status != "superseded" or not target.startswith("solution-design/"):
+    """An unchanged committed Story/Test Plan keeps its approved evidence history.
+
+    The target is a superseded Solution Design or System Architecture note; under
+    system-architecture/ only decisions carry that status. It counts when the
+    commit that approved the Story's or Test Plan's exact bytes held it approved
+    or accepted.
+    """
+    if status != "superseded" or not target.startswith(("solution-design/", "system-architecture/")):
         return False
     owner = docs / label.split(" ", 1)[0]
     if not owner.is_file() or owner.name not in {"story.md", "test-plan.md"}:
@@ -3133,7 +3152,11 @@ def prior_approved_universe(docs: Path) -> set[str] | None:
                 continue
             prior = set()
             for path in sorted((docs / "business-analysis").glob("*/_generated/registry.json")):
-                content = history_blob(project, commit, path.relative_to(project).as_posix())
+                relative = path.relative_to(project).as_posix()
+                if history_listing(project, commit, relative) == []:
+                    # A topic registry created after that approval approved nothing then.
+                    continue
+                content = history_blob(project, commit, relative)
                 if content is None:
                     return None
                 registry = json.loads(content.decode("utf-8"))
@@ -4144,7 +4167,7 @@ def begin_revision(args) -> int:
     records the new root/review revision; it never invents live Git state.
     """
     docs = docs_root(args.docs)
-    record, errors = collect(docs, historical_inputs=True)
+    record, errors = collect(docs, historical_inputs=True, prior_universe=True)
     errors.extend(approval_findings(record, docs))
     if errors:
         print(json.dumps({"ok": False, "errors": sorted(set(errors))}, indent=2,

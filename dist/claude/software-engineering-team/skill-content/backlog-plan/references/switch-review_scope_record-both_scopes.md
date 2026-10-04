@@ -41,20 +41,26 @@ earlier manifest.
 
 ## Record
 
-The coordinator keeps one tracked JSON Lines file, by default
-`.agentrof/agent-marketplace/measurements/review-scope.jsonl`, committed with
-the backlog revision and never placed under `.runtime/`, and appends to it:
+The coordinator keeps one tracked JSON Lines file,
+`<workspace>/measurements/review-scope.jsonl`, beside the docs vault, commits
+it with the backlog revision, and appends to it:
 
 1. When an epic reader's manifest is derived for dispatch: rerun the same
-   command with `--record <file>`, which appends the epic, the manifest's
+   command with `--record`, which appends the epic, the manifest's
    `source_hash` and its `scope_sizes`.
 2. After the review's findings are in the review note, or in the claim
    record that calibration reads: run
-   `backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID> --scope-findings --record <file>`,
+   `backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID> --scope-findings --record`,
    adding `--findings <claim record>` when the review note keeps no
    `Returned Findings` yet. It lists each blocking finding, after calibration
    where one ruled, with the notes it cites and those outside the bounded read
    set, and appends that list.
+
+`--record <file>` takes another file only inside the workspace and outside
+the docs vault, and the command refuses a file Git ignores: setup's managed
+`.gitignore` ignores `.agentrof/` and the host directories, so a record there
+would never reach the commit, and the vault gate refuses a non-markdown file
+inside the vault.
 
 A record row is measurement data, never review evidence: no reader gets it,
 and no review note cites it. Never delete or rewrite a row without the

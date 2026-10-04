@@ -114,7 +114,9 @@ both sizes, flags a transitive read set over the owner's
 `transitive_source_bytes` budget so the flow offers `bounded` before any
 reader starts, and `backlog_review_inputs.py --scope-findings` reports the
 review's blocking findings that cite a note outside the bounded read set; the
-coordinator appends both to a tracked JSON Lines record.
+coordinator appends both to the JSON Lines record
+`<workspace>/measurements/review-scope.jsonl`, which the backlog revision
+commits, and the command refuses a record inside the vault or one Git ignores.
 `backlog-plan/references/switch-review_scope_record-both_scopes.md` defines
 the record.
 

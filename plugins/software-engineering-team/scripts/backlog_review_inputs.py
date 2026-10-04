@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import unicodedata
 
 import backlog_compile as backlog
@@ -672,6 +673,7 @@ DELTA_LIMIT = "max_delta_share_percent"
 RECORD_SWITCH = "review_scope_record"
 RECORD_VALUE = "both_scopes"
 SCOPE_BUDGET = "transitive_source_bytes"
+RECORD_FILE = Path("measurements") / "review-scope.jsonl"
 
 
 def story_adjacency(record: dict) -> dict[str, set[str]]:
@@ -842,6 +844,29 @@ def scope_findings(docs: Path, epic: str, findings: Path | None = None) -> dict:
             "findings": result}
 
 
+def record_path(docs: Path, value: str | None) -> Path:
+    """Return the review scope record, a file Git keeps beside the docs vault.
+
+    The record outlives every revision, so the backlog revision commits it.
+    Setup's managed .gitignore ignores the runtime and host roots, and the vault
+    gate refuses a non-markdown file in a note subtree, so the record lies in
+    the workspace outside the vault, at ``measurements/review-scope.jsonl``
+    unless a path is given, and a path Git ignores is refused.
+    """
+    vault = docs.resolve()
+    workspace = vault.parent
+    path = Path(value).resolve() if value else workspace / RECORD_FILE
+    if not path.is_relative_to(workspace) or path.is_relative_to(vault):
+        raise InputError("the review scope record must lie in the workspace outside the docs"
+                         f" vault: {path}")
+    ignored = subprocess.run(["git", "check-ignore", "--quiet", "--", str(path)],
+                             cwd=workspace, capture_output=True, check=False)
+    if ignored.returncode == 0:
+        raise InputError(f"Git ignores the review scope record {path}; keep it where the"
+                         " backlog revision commits it")
+    return path
+
+
 def append_record(path: Path, entry: dict) -> None:
     """Append one measurement row as a JSON line, the record the owner keeps."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -888,17 +913,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--full-root-reason",
                         help="a root reader's reason to read the whole package"
                              " (root_review_scope revision_delta)")
-    parser.add_argument("--record", type=Path,
-                        help="append the scope measurement as one JSON line to this file"
-                             " (review_scope_record both_scopes)")
+    parser.add_argument("--record", nargs="?", const="", metavar="FILE",
+                        help="append the scope measurement as one JSON line to the tracked record,"
+                             f" <workspace>/{RECORD_FILE.as_posix()} unless FILE names another"
+                             " workspace file (review_scope_record both_scopes)")
     args = parser.parse_args(argv)
     try:
-        if (args.scope_findings or args.record or args.findings) and (
+        if (args.scope_findings or args.record is not None or args.findings) and (
                 args.epic is None or read_switch(args.docs, RECORD_SWITCH)["value"] != RECORD_VALUE):
             raise InputError("--scope-findings, --findings and --record measure an epic review"
                              f" under switch {RECORD_SWITCH} at {RECORD_VALUE}")
         if args.findings and not args.scope_findings:
             raise InputError("--findings belongs to --scope-findings")
+        record = None if args.record is None else record_path(args.docs, args.record or None)
         if args.scope_findings:
             result = scope_findings(args.docs, args.epic, args.findings)
             entry = {"kind": "findings", **{key: value for key, value in result.items()
@@ -911,8 +938,8 @@ def main(argv: list[str] | None = None) -> int:
             entry = {"kind": "manifest", "epic": args.epic, "scope": result["scope"],
                      "source_hash": result["source_hash"],
                      "scope_sizes": result.get("scope_sizes")}
-        if args.record is not None:
-            append_record(args.record, entry)
+        if record is not None:
+            append_record(record, entry)
     except (InputError, OSError, ValueError, RuntimeError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2, sort_keys=True))
         return 1

@@ -32,6 +32,7 @@ DATA_PATHS = (
     "templates/vault",
 )
 DATA_ROOTS = ("skill-content", "templates")
+SWITCH_REGISTRY = "skill-content/configure/data/process-switches.json"
 
 
 def package_root() -> Path:
@@ -94,6 +95,19 @@ def packaged_closure(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
             dependency = f"{module}.py"
             if (scripts / dependency).is_file() and dependency not in included:
                 pending.append(dependency)
+    # The process switch registry names the data files that declare its
+    # parameters, and loading the registry reads every one of them.
+    registry = root / SWITCH_REGISTRY
+    if SWITCH_REGISTRY in names and registry.is_file():
+        try:
+            switches = json.loads(registry.read_text(encoding="utf-8")).get("switches", {})
+        except (OSError, ValueError, AttributeError):
+            switches = {}
+        for spec in switches.values() if isinstance(switches, dict) else []:
+            declared = spec.get("parameters", {}).get("declared_by", {}) \
+                if isinstance(spec, dict) and isinstance(spec.get("parameters"), dict) else {}
+            if isinstance(declared, dict) and isinstance(declared.get("path"), str):
+                names.add(declared["path"])
     data: list[str] = []
     for parts in sorted({PurePosixPath(name).parts for name in names
                          if name.startswith(DATA_ROOTS)}):

@@ -71,7 +71,10 @@ class RegistryAndInstructionTests(unittest.TestCase):
         # A promotion keeps off as the default and ships package limits (#325).
         with tempfile.TemporaryDirectory() as raw:
             package = Path(raw)
-            for relative in (REGISTRY, MEASURES):
+            # Loading the registry reads every switch's parameter declaration.
+            declared = [spec["parameters"]["declared_by"]["path"] for spec in json.loads(
+                read(REGISTRY))["switches"].values() if "parameters" in spec]
+            for relative in sorted({REGISTRY, MEASURES, *declared}):
                 (package / relative).parent.mkdir(parents=True, exist_ok=True)
                 (package / relative).write_bytes((TEAM / relative).read_bytes())
             registry = json.loads(read(REGISTRY))

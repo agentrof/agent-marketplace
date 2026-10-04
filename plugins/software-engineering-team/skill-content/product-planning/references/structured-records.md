@@ -251,6 +251,13 @@ and imprecision that cannot mislead. Imprecision that could lead a careful
 reader to build or test different behavior is major, never minor. Findings
 that share one root cause are one finding at the severity of that cause.
 
+The review note's `verdict` field records the reader's returned verdict,
+`approved` or `changes_requested`, in the same write as its `Verdict` section;
+atomic approval reads only this field. `approved` never stands under status
+`changes_requested`: when the re-review approves, status returns to `draft`,
+and only approval sets `approved`. The compiler refuses a concluded `Verdict`
+section with an empty `verdict`, any other value, and that contradiction.
+
 Only an open critical or major finding keeps a review at `changes_requested`.
 The Product Owner closes each one with a fix or with cited evidence that
 disproves it, and the re-review confirms either. A minor finding never blocks

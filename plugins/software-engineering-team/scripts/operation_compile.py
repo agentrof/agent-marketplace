@@ -38,6 +38,7 @@ FILE_FOR = {
 COMMAND_FIELDS = {
     "verification": (
         "test_command", "mutation_command", "dependency_audit_command", "diagnostic_test_command",
+        "test_partition_command",
     ),
     "environment": ("env_command",),
 }
@@ -163,6 +164,122 @@ def command_variable_problem(names: object) -> str | None:
     return None
 
 
+def literal_id(value: object) -> bool:
+    """Whether a declared id passes as data: nonempty, unpadded, no option prefix or control character."""
+    return (isinstance(value, str) and bool(value) and value == value.strip() and not value.startswith("-")
+            and not any(ord(character) < 32 or ord(character) == 127 for character in value))
+
+
+def unique_literal_ids(values: object) -> bool:
+    return (isinstance(values, list) and bool(values) and all(literal_id(value) for value in values)
+            and len(set(values)) == len(values))
+
+
+def scratch_relative_path(value: object) -> bool:
+    """Whether a path is a normalized relative file path that stays inside the directory it is joined to."""
+    return (valid_workdir(value) and value != "." and ":" not in value
+            and all(part.rstrip(". ") == part for part in PurePosixPath(value).parts))
+
+
+def test_group_problems(props: dict) -> list[str]:
+    """Why a Verification Contract's optional test group report declaration is invalid.
+
+    test_groups names the groups the test command runs and test_group_report
+    the file it writes under AGENTROF_VERIFICATION_SCRATCH with one status per
+    group; a contract declares both or neither.
+    """
+    declared = [name for name in ("test_groups", "test_group_report") if name in props]
+    if not declared:
+        return []
+    errors = []
+    if len(declared) == 1:
+        errors.append("test_groups and test_group_report are declared together or not at all")
+    if "test_groups" in props and not unique_literal_ids(props["test_groups"]):
+        errors.append("test_groups must list unique literal group ids")
+    if "test_group_report" in props and not scratch_relative_path(props["test_group_report"]):
+        errors.append("test_group_report must be a normalized relative path under the verification scratch")
+    return errors
+
+
+# A Verification Contract may split its suite into partitions that run in
+# parallel on isolated test engines: a partition command, the engines and a
+# Test Partitions table, all or none, and the profiles whose partitions may
+# share an engine. Partition, engine and profile ids name files and engines.
+TEST_PARTITIONS = "Test Partitions"
+TEST_PARTITION_COLUMNS = ("partition", "groups", "profile")
+PARTITION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+
+
+def partition_ids(values: object) -> bool:
+    return (isinstance(values, list) and bool(values)
+            and all(isinstance(value, str) and PARTITION_ID_RE.fullmatch(value) for value in values)
+            and len(set(values)) == len(values))
+
+
+def test_partition_plan(props: dict, body: str) -> tuple[list[dict] | None, list[str]]:
+    """The Verification Contract's test partition plan, or None when it declares none, with its problems.
+
+    Each partition runs the groups of test_groups its row names, every group
+    in exactly one partition, on an engine its profile allows.
+    """
+    import backlog_compile
+
+    authored = without_generated_relations(body)
+    table = TEST_PARTITIONS in backlog_compile.headings(authored)
+    declared = {"test_partition_command": "test_partition_command" in props,
+                "test_engines": "test_engines" in props, TEST_PARTITIONS: table}
+    if not any(declared.values()):
+        return None, (["shared_profiles requires test_partition_command, test_engines and a Test Partitions"
+                       " table"] if "shared_profiles" in props else [])
+    if not all(declared.values()):
+        return None, [f"test_partition_command, test_engines and a {TEST_PARTITIONS} table are declared together"
+                      " or not at all"]
+    errors = []
+    command = props["test_partition_command"]
+    if not isinstance(command, str) or not command.strip():
+        errors.append("test_partition_command must be a non-empty approved command")
+    if not partition_ids(props["test_engines"]):
+        errors.append("test_engines must list unique engine ids of letters, digits, '.', '_' and '-'")
+    groups = props.get("test_groups")
+    if not unique_literal_ids(groups):
+        errors.append(f"a {TEST_PARTITIONS} table needs test_groups, the groups it partitions")
+        groups = []
+    rows, table_errors = backlog_compile.structured_table(
+        backlog_compile.section(authored, TEST_PARTITIONS), TEST_PARTITION_COLUMNS,
+        "verification contract", TEST_PARTITIONS)
+    errors.extend(table_errors)
+    plan, placed = [], {}
+    for number, row in enumerate(rows, 1):
+        partition = row["partition"].strip("`")
+        members = [group.strip().strip("`") for group in row["groups"].split(",")]
+        profile = row["profile"].strip("`")
+        label = f"{TEST_PARTITIONS} row {number}"
+        if not PARTITION_ID_RE.fullmatch(partition) or not PARTITION_ID_RE.fullmatch(profile):
+            errors.append(f"{label} needs a partition id and a profile id of letters, digits, '.', '_' and '-'")
+        if not all(members) or len(set(members)) != len(members):
+            errors.append(f"{label} must name each of its groups once")
+        for group in members:
+            if group and group not in groups:
+                errors.append(f"{label} names {group}, which test_groups does not declare")
+            if group in placed:
+                errors.append(f"group {group} is in partitions {placed[group]} and {partition}")
+            placed.setdefault(group, partition)
+        plan.append({"partition": partition, "groups": members, "profile": profile})
+    ids = [entry["partition"] for entry in plan]
+    if not plan:
+        errors.append(f"the {TEST_PARTITIONS} table must hold at least one partition")
+    if len(set(ids)) != len(ids):
+        errors.append(f"the {TEST_PARTITIONS} table names a partition more than once")
+    for group in groups:
+        if group not in placed:
+            errors.append(f"group {group} is in no partition")
+    shared = props.get("shared_profiles", [])
+    if "shared_profiles" in props and (not partition_ids(shared) or not set(shared) <= {
+            entry["profile"] for entry in plan}):
+        errors.append("shared_profiles must list unique profiles of the Test Partitions table")
+    return plan, errors
+
+
 def pull_request_checks(props: dict) -> tuple[object, object]:
     """The declared source of Delivery PR checks and the provider that reports them."""
     return (props.get("pull_request_check_source", PULL_REQUEST_CHECK_SOURCES[0]),
@@ -280,6 +397,8 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         problem = command_variable_problem(props.get("command_variables", []))
         if problem:
             errors.append(problem)
+        errors.extend(test_group_problems(props))
+        errors.extend(test_partition_plan(props, body)[1])
         source, provider = pull_request_checks(props)
         if source not in PULL_REQUEST_CHECK_SOURCES:
             errors.append("pull_request_check_source must be repository_workflow or external")
@@ -301,6 +420,8 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         for name in ("tolerated_warnings", "service_catalog"):
             if not isinstance(props.get(name), list):
                 errors.append(f"{name} must be a list")
+        if "test_engines" in props and not partition_ids(props["test_engines"]):
+            errors.append("test_engines must list unique engine ids of letters, digits, '.', '_' and '-'")
     errors.extend(review_record_findings(docs, kind, props, body))
     digest = receipt_hash(props, body)
     if props.get("status") == "approved":

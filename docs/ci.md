@@ -13,7 +13,7 @@ dependency closures and initial duration weights. CI tests that Python once per
 operating system. Linux runs every test. macOS and Windows run only the tests
 that prove behavior of their own system, each named by its exact ID: the
 platform group both run (worker processes, the hook launcher, case-insensitive
-file systems), the macOS group (file flags, the bare system interpreter) and
+file systems), the macOS group (file flags, bare `python3` commands) and
 the Windows group (path separators, junctions, long paths, CRLF checkouts,
 locks, text pipes and Git for Windows). A test that repeats platform-neutral
 logic runs on Linux only. The plan job sets up the version itself and every
@@ -140,9 +140,24 @@ select the full suite. The command never fetches refs.
 
 Every `check` executes static validation afresh. A successful local receipt
 binds HEAD/base/index bytes and modes, inventory, selected IDs, command and
-policy hashes, Python/Git/OS, Git configuration and environment digests. Secret
-environment values are never written. Make's orchestration variables are removed
-before checks so direct and Make entry points use the same effective environment.
+policy hashes, Python/Git/OS, Git configuration and environment digests. The
+environment digests cover only the variables `ci-local-policy.json` binds, the
+names and prefixes that can change what the tests do, such as `PATH`, `LANG`,
+`LC_*`, `TZ`, `PYTHON*`, `GIT_*` and the host variables the tools read. Host
+session ids, sandbox tokens and scratch roots are not bound, so a `verify` from
+another agent session of the same host accepts the receipt. Each bound value is
+written only as a digest keyed with a random key of the local cache, never as
+the value. A test fails when the tools read a variable that is neither bound
+nor listed as unbound with its reason. When the receipt differs from the plan only in its
+environment, `verify` names the changed variables, never their values. Make's
+orchestration variables are removed before checks so direct and Make entry
+points use the same effective environment. `verify` without `--jobs` uses the
+worker count of the receipt's `check`. The Git configuration digest leaves out
+the entries `git_configuration_ignored` names, `branch.*` and `remote.*.fetch`,
+which other worktrees of the same repository rewrite when they create, track,
+fetch or delete branches. For the same reason the run does not watch the shared
+`config` and `packed-refs` files for writes; the candidate's HEAD, base and
+bytes and the filtered configuration are compared instead.
 Results expire after at most 24 hours; reuse does not extend that deadline.
 The latest failed, interrupted, changed or corrupt attempt invalidates prior
 success. The source is rechecked after statics and workers. Missing, duplicate,
@@ -223,10 +238,11 @@ validation workflows never publish refs or releases.
    release commit, the last commit of a pull request, changes only version
    surfaces, the changelog, release metadata, consumed changesets and
    `dist/`, so the same run tests the final release tree, and `check-pr`
-   proves the commit is the deterministic bump of its parent. When `main`
-   requires the merge queue, each queued group repeats the required checks on
-   the exact commit `main` moves to, selecting impact coverage over the
-   group's complete diff.
+   proves the commit is the deterministic bump of its parent at the commit's
+   own committer date, which names the release `YYYY.M.N` for that month
+   however late the pull request merges. When `main` requires the merge
+   queue, each queued group repeats the required checks on the exact commit
+   `main` moves to, selecting impact coverage over the group's complete diff.
 2. After merge, `main` runs fresh static gates and either verifies equivalent
    PR evidence, in about a minute, or executes full tests. A queued commit
    reuses PR evidence only when its tree equals the PR's tested merge. CodeQL
@@ -234,9 +250,12 @@ validation workflows never publish refs or releases.
 3. A release dispatches the `Release` workflow for one `main` commit. The
    `Auto release` workflow does so on the push that merges a release commit,
    when `versions.json` names a version no release tag holds yet; `ship`
-   does so by hand. The `Release` workflow checks the commit's release state, waits for that commit's own `main`
-   validation and requires its success, and never runs the tests or the host
-   lifecycles again. It then stages the version tag and `stable` with exact
+   does so by hand. The `Release` workflow checks the commit's release state,
+   including a version newer than every release tag or, with no tag at all,
+   than the version of the commit `stable` points to, an ancestor of the
+   release commit. It waits for that commit's own `main` validation and
+   requires its success, and never runs the tests or the host lifecycles
+   again. It then stages the version tag and `stable` with exact
    leases, installs both hosts from the real public `stable` channel and
    creates the immutable Release. Rollback, immutable Release reconciliation
    and clean-main completion keep their contracts.

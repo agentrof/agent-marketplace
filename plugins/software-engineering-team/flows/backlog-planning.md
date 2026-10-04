@@ -84,6 +84,24 @@ The root contains `backlog.md` and `reviews/`. Each epic is a folder with an
 `epic.md`, `reviews/`, and `stories/`. Each story folder contains exactly
 `story.md` and `test-plan.md`. Membership is derived from the path.
 
+In a draft backlog revision, materialize planned story/test-plan scaffolds
+before opening an existing epic's next review with
+`backlog_compile.py stub-epic <epic-slug> --docs <workspace>/docs --new-review`.
+This creates a fresh TODO round with current policy and exact current
+membership, preserving prior evidence. An existing pending round is reused
+byte-exact only when its recorded backlog-owned switch values and parameters
+match the current approved policy; a changed value creates a fresh successor.
+Delivery-only changes and policy revisions with the same owned values do not
+require a new round. An unreadable recorded policy or an invalid current policy
+refuses creation. For the root review alone, run
+`backlog_compile.py stub-backlog-review --docs <workspace>/docs` with the same
+rules. These round-only writes preserve every prior review and all source,
+revision and input-binding bytes. Derive writer inputs after these writes.
+The final check requires completed current root and epic rounds and retains
+completion/integrity checks for historical approved evidence. Earlier
+unfinished rounds remain unapproved, byte-exact history included in the
+package digest; approval never stamps, retags or rewrites their pins.
+
 ## 2. Author stories
 
 The Product Owner authors each `story.md` with exactly these sections:
@@ -167,27 +185,42 @@ The Requirement trace ends at planned verification:
 criterion or rule -> scenario -> automation target
 ```
 
+Switch `calculation_examples`: at `required`, a scenario that exercises a calculation rule takes its
+expected value from the rule's formula or cited worked example and never invents one, as
+`skill-content/requirements-analysis/references/switch-calculation_examples-required.md` defines.
+
 Executable tests, execution results, story completion and release readiness
 belong to delivery.
 
 ## 4. Challenge and render
 
-Switch `review_panels`: at `lens_panel`, review panel `backlog_epic` and review
-panel `backlog_root` replace this section's epic and root reviewers, as
-`skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
-defines. Switch `mechanical_pass_tier`: at `mechanical`, a Product Owner pass
-that only applies the fixes returned findings name, and the compiler commands
-of this section and section 5, run as
-`skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md`
-defines.
-Switch `review_loop`: at `blocking_delta`, this section's review loops
-follow
+Switch `review_panels`: at `lens_panel`, review panel `backlog_epic` and review panel `backlog_root`
+replace this section's epic and root reviewers, as
+`skill-content/challenge-review/references/switch-review_panels-lens_panel.md` defines. Switch
+`mechanical_pass_tier`: at `mechanical`, a Product Owner pass that only applies the fixes returned
+findings name, and the compiler commands of this section and section 5, run as
+`skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md` defines.
+Switch `review_loop`: at `blocking_delta`, this section's review loops follow
 `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
-Switch `story_size_budget`: at `propose_split`, `check --json` also reports
-each story's size against the owner-set limits, and before the first epic
-review manifest the Product Owner proposes a split for each story over budget,
-which the owner accepts or keeps, as
-`skill-content/product-planning/references/switch-story_size_budget-propose_split.md`
+Switch `source_decision_gate`: at `one_gate_when_drafted`, a finding whose fix changes approved
+analysis documents reaches the owner as one gate on the reviewed exact change when its
+recommendation needs no owner input, as
+`skill-content/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md`
+defines.
+Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck wave starts at once,
+after every finished worker is closed, as
+`skill-content/challenge-review/references/switch-reader_waves-all_at_once.md` and the host contract
+define.
+Switch `story_size_budget`: at `propose_split`, `check --json` also reports each story's size
+against the owner-set limits, and before the first epic review manifest the Product Owner proposes a
+split for each story over budget, which the owner accepts or keeps, as
+`skill-content/product-planning/references/switch-story_size_budget-propose_split.md` defines.
+Switch `test_cost_budget`: at `flag_serial_rows`, `check --json` also lists each automation-required
+scenario that runs more rows serially than the owner-set limit, and before the first epic review
+manifest QA proposes a split for each, as
+`skill-content/product-planning/references/switch-test_cost_budget-flag_serial_rows.md` defines.
+Switch `epic_review_cadence`: at `overlap_calibration`, epic reviews that run one after another
+start as `skill-content/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md`
 defines.
 
 ### Recovery that removes only operating-system metadata
@@ -232,11 +265,12 @@ still need every source finished:
 backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID>
 ```
 
-Switch `review_manifest_scope`: at `bounded`, an epic reader's manifest reads
-the epic's dependency closure, the notes it links to or cites and their
-front-matter relations, as
-`skill-content/backlog-plan/references/switch-review_manifest_scope-bounded.md`
-defines.
+Switch `review_manifest_scope`: at `bounded`, an epic reader's manifest reads the epic's dependency
+closure, the notes it links to or cites and their front-matter relations, as
+`skill-content/backlog-plan/references/switch-review_manifest_scope-bounded.md` defines.
+Switch `review_scope_record`: at `both_scopes`, an epic reader's manifest also measures the other
+scope's read set, and each epic review is recorded as
+`skill-content/backlog-plan/references/switch-review_scope_record-both_scopes.md` defines.
 
 Give one fresh `backlog-reviewer` the returned manifest and every named path:
 the root backlog, that epic, its child stories and test plans, and the incoming
@@ -262,6 +296,10 @@ declarations and stale completed evidence offered for the current candidate
 remain findings. The final compiler requires the exact written relation sets
 and complete review prose before approval.
 
+Switch `remediation_writers`: at `per_epic`, one writer per epic with findings and then one
+cross-epic writer apply the epic reviews' findings, as
+`skill-content/backlog-plan/references/switch-remediation_writers-per_epic.md` defines.
+
 The Product Owner is the single writer: it triages the returned findings,
 repairs source documents, and writes each designated epic review note. An epic
 review uses `derives_from` for its owning epic and `verifies` for the exact
@@ -275,6 +313,10 @@ in `advisories` names an empty last section, or an untouched Delivery Notes
 stub, of a story approved before the compiler read that section above the
 navigation; it never fails the check, and the Product Owner fills the section
 whenever that story is revised.
+
+Switch `root_review_scope`: at `revision_delta`, the root reader of a backlog revision reads in full
+only the revision's delta, as
+`skill-content/backlog-plan/references/switch-root_review_scope-revision_delta.md` defines.
 
 Only after every epic package and review is green, run
 `backlog_review_inputs.py --docs <workspace>/docs --root`. Invoke one fresh
@@ -290,6 +332,10 @@ contracts, deferred criteria, global test coverage, findings and verdict. After
 the root review is authored, run the full
 `backlog_compile.py check --docs <workspace>/docs --render --json` and scoped
 vault gate. Both must pass before the package can be offered for approval.
+
+Switch `remediation_bookkeeping`: at `compiler`, a writer pass records its rechecks' closure rows,
+expected hashes and preservation report with one compiler command, as
+`skill-content/backlog-plan/references/switch-remediation_bookkeeping-compiler.md` defines.
 
 Use the current host's agent invocation and wait mechanism; no host-specific
 command is canonical. Reviewer responses are input, never durable state.

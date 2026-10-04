@@ -1,0 +1,6 @@
+{
+  "summary": "Attest approved Experience Git synchronization through the remote coordination target, preserve local history and staged content, and publish its verified postimage so concurrent readers cannot restore older receipts. Both host contracts and the Requirement flow's handoff name the two accepted forms, `merge --no-edit <source>` and `restore --source=<source> --worktree -- workspace/docs/experience-design`, run with Git's absolute path as a call of its own from the checkout root; when another merge or pull is restored, the guard's message names the restore to run. The remote handoff check bounds each `git ls-remote` to 20 seconds and refuses with the reason and those commands when the remote does not answer.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

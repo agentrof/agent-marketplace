@@ -106,6 +106,9 @@ PRE_HANDOFF_RUN_COLUMNS = ("run", "candidate_tree", "kind", "result", "exit_code
 # And what QA's final test run reused of the accepted run, which only the disposable runtime holds otherwise.
 ITEM_REUSED_TARGETS = "Earlier-story targets QA's final test run reused, recorded by approve-item-evidence:"
 REUSED_TARGET_COLUMNS = ("story", "test_ids", "pre_handoff_run", "evidence_hash")
+# At own_target_reuse spot_run, also the Item's own targets it reused and those QA's run spot-ran itself.
+ITEM_REUSED_OWN_TARGETS = "Own targets QA's final test run reused, recorded by approve-item-evidence:"
+REUSED_OWN_TARGET_COLUMNS = ("story", "test_ids", "spot_run_test_ids", "pre_handoff_run", "evidence_hash")
 USER_DECISION_STATUSES = ("pending", "answered")
 USER_DECISION_ID_RE = re.compile(r"^D-[0-9]{2,}$")
 QUEUED_DECISION_CLASS = "queued"
@@ -265,6 +268,7 @@ def approved_backlog_sources(
     *,
     historical_inputs: bool = False,
     story_size: dict | None = None,
+    test_cost: dict | None = None,
 ) -> tuple[dict[str, dict], dict, list[str]]:
     """Resolve the exact approved Story/Test Plan snapshots a Delivery may use.
 
@@ -272,7 +276,9 @@ def approved_backlog_sources(
     accept caller-provided hashes or treat a generated registry as a source of
     truth, so this resolver checks the authored package and its approval stamps
     before exposing one selected Story. With a story size budget, each selected
-    Story also carries its measures under ``story_size`` for display only. A
+    Story also carries its measures under ``story_size`` for display only, and
+    with a test cost budget its scenarios over the serial-row limit under
+    ``serial_row_scenarios``, for display only too. A
     Story that classifies its Operation impact carries it under
     ``operation_impact``; an unclassified one carries no such key.
     """
@@ -346,6 +352,10 @@ def approved_backlog_sources(
         entries = backlog_compile.story_size_entries(record, docs, story_size, set(selected))
         for story_id, entry in entries.items():
             selected[story_id]["story_size"] = entry
+    if test_cost is not None:
+        for story_id in selected:
+            selected[story_id]["serial_row_scenarios"] = backlog_compile.test_cost_block(
+                test_cost, [stories[story_id]])["serial_row_scenarios"]
     backlog_props = record["backlog"]["props"]
     snapshot = {
         "backlog_path": str(record["backlog"]["path"]),
@@ -792,13 +802,15 @@ def init_delivery(args) -> int:
     stories = list(args.story or [])
     # One read-only candidate snapshot serves the strict read and the handoff check.
     with stage_package.candidate_session():
-        # The proposal shows story sizes under story_size_budget; never a scope rule.
+        # The proposal shows story sizes under story_size_budget and the scenarios
+        # over the serial-row limit under test_cost_budget; neither is a scope rule.
         try:
             budget, budget_errors = backlog_compile.story_size_budget(docs), []
+            cost = backlog_compile.test_cost_budget(docs)
         except ValueError as exc:
-            budget, budget_errors = None, [str(exc)]
+            budget, cost, budget_errors = None, None, [str(exc)]
         sources, backlog_snapshot, source_errors = approved_backlog_sources(
-            docs, stories, story_size=budget)
+            docs, stories, story_size=budget, test_cost=cost)
         dod_snapshot, dod_errors = approved_dod_source(docs)
         # New Items declare the implementation schedule the Process Policy selects.
         schedule, policy_errors = policy_implementation_schedule(docs)
@@ -863,6 +875,11 @@ def init_delivery(args) -> int:
     if budget is not None:
         result["story_size"] = backlog_compile.story_size_block(
             budget, {story: sources[story]["story_size"] for story in stories})
+    if cost is not None:
+        result["test_cost"] = {"switch": backlog_compile.TEST_COST_SWITCH, "value": cost["value"],
+                               "limits": cost["limits"],
+                               "serial_row_scenarios": [entry for story in stories
+                                                        for entry in sources[story]["serial_row_scenarios"]]}
     if light is not None:
         result["delivery_path"] = {"value": LIGHT_WHEN_ELIGIBLE, "eligible": light["eligible"],
                                    "failed": light["failed"], "pending": light["pending"],
@@ -2868,6 +2885,8 @@ def pre_handoff_evidence(worktree: Path, delivery_id: str, story: str, session: 
     result, exit code, wall clock and the earlier stories it ran. Below them it
     records what QA's final test run reused: each earlier story with its test
     ids, the reused run's number in that list and its evidence hash, or none.
+    At own_target_reuse spot_run it adds the Item's own targets that run
+    reused, with the spot-run targets QA's run ran itself, or none.
     At the default the body is returned unchanged.
     """
     import delivery_verification
@@ -2884,16 +2903,23 @@ def pre_handoff_evidence(worktree: Path, delivery_id: str, story: str, session: 
             round(run["duration_seconds"], 1), stories or "none")) + " |")
     # The session validate checked, so QA's final test evidence and its reuse bind the frozen session.
     reuse = session["raw_evidence"]["test"]["identity"].get("reused_pre_handoff")
-    reused = []
+    reused, reused_own = [], []
     if reuse is not None:
         run = next((number for number, entry in enumerate(history, start=1)
                     if entry["evidence_hash"] == reuse["evidence_hash"]), "none")
         reused = ["| " + " | ".join(table_cell(cell) for cell in (
             f"{entry['story']} of {entry['delivery']}", ", ".join(entry["test_ids"]), run,
             reuse["evidence_hash"])) + " |" for entry in reuse["earlier_stories"]]
-    return with_compiler_block(body, "Implementation Evidence", ITEM_PRE_HANDOFF_RUNS,
-                               table_block(ITEM_PRE_HANDOFF_RUNS, PRE_HANDOFF_RUN_COLUMNS, rows) + "\n\n"
-                               + table_block(ITEM_REUSED_TARGETS, REUSED_TARGET_COLUMNS, reused))
+        own = reuse.get("own_targets")
+        if own is not None:
+            reused_own = ["| " + " | ".join(table_cell(cell) for cell in (
+                f"{story} of {delivery_id}", ", ".join(own["test_ids"]), ", ".join(own["spot_test_ids"]), run,
+                reuse["evidence_hash"])) + " |"]
+    block = (table_block(ITEM_PRE_HANDOFF_RUNS, PRE_HANDOFF_RUN_COLUMNS, rows) + "\n\n"
+             + table_block(ITEM_REUSED_TARGETS, REUSED_TARGET_COLUMNS, reused))
+    if delivery_verification.own_target_reuse(worktree, delivery_id) == delivery_verification.SPOT_RUN:
+        block += "\n\n" + table_block(ITEM_REUSED_OWN_TARGETS, REUSED_OWN_TARGET_COLUMNS, reused_own)
+    return with_compiler_block(body, "Implementation Evidence", ITEM_PRE_HANDOFF_RUNS, block)
 
 
 def table_cell(value: object) -> str:

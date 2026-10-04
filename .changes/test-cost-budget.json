@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch `test_cost_budget` (`off` | `flag_serial_rows`), off by default, so every default output and every bound instruction is unchanged. A Test Plan scenario may state `rows`, the table rows its automation target runs, and `row_split`, `serial`, `sharded` or `grouped`; `backlog_compile.py check` refuses a `rows` value that is no positive integer and any other split whenever a scenario states them, at every value. At `flag_serial_rows`, with the owner's `serial_rows` limit set through `/configure process` (the package recommends none), `backlog_compile.py check --json`, the epic and root review manifests and `delivery_compile.py init` list under `test_cost` each automation-required scenario whose rows exceed the limit while its split is `serial` or absent, with its story and automation target. The flag is advisory and never fails a check. Its switch reference, bound for every Backlog Planning and Delivery Planning task at that value only, has QA propose a sharded or grouped split before the epic review, or the owner keep the scenario serial with a reason recorded in the review note. In one measured project, one test ran 260 rows serially for 58 minutes, 25% of QA's final gate.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

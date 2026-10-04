@@ -1647,75 +1647,6 @@ def _trusted_runtime_origins() -> set[Path]:
     return origins
 
 
-def _apple_developer_root(executables: set[Path]) -> Path | None:
-    command_line_tools = Path("/Library/Developer/CommandLineTools")
-    if any(_path_within(value, command_line_tools) for value in executables):
-        return command_line_tools
-    for value in executables:
-        parts = value.parts
-        try:
-            index = parts.index("Contents")
-        except ValueError:
-            continue
-        if index > 0 and index + 1 < len(parts) \
-                and parts[index - 1].endswith(".app") \
-                and parts[index + 1] == "Developer":
-            return Path(*parts[:index + 2])
-    return None
-
-
-def _apple_python_launcher_matches(candidate: Path, cwd: Path) -> bool:
-    """Bind Apple's fixed launcher to the interpreter running this hook."""
-    launchers = {
-        Path("/usr/bin/python3"),
-        Path("/Library/Developer/CommandLineTools/usr/bin/python3"),
-    }
-    if sys.platform != "darwin" or candidate not in launchers:
-        return False
-    try:
-        mode = candidate.stat()
-    except OSError:
-        return False
-    if mode.st_uid != 0 or mode.st_mode & 0o022 or os.environ.get("TOOLCHAINS"):
-        return False
-    current = {
-        Path(value)
-        for value in (sys.executable, getattr(sys, "_base_executable", ""))
-        if value and Path(value).is_absolute()
-    }
-    developer_root = _apple_developer_root(current)
-    if developer_root is None:
-        return False
-    configured = os.environ.get("DEVELOPER_DIR")
-    if configured:
-        try:
-            if Path(configured).resolve() != developer_root.resolve():
-                return False
-        except (OSError, RuntimeError):
-            return False
-    sdk_root = os.environ.get("SDKROOT")
-    if sdk_root:
-        try:
-            if not _path_within(Path(sdk_root).resolve(), developer_root.resolve()):
-                return False
-        except (OSError, RuntimeError):
-            return False
-    try:
-        result = subprocess.run(
-            ["/usr/bin/xcrun", "--find", "python3"],
-            capture_output=True, text=True, check=False, timeout=2,
-        )
-        lines = result.stdout.splitlines()
-        selected = Path(lines[0]) if result.returncode == 0 and len(lines) == 1 else None
-        if selected is None \
-                or selected.resolve() not in _trusted_runtime_targets():
-            return False
-        project = shell_project({"cwd": str(cwd)}).resolve()
-        return not _path_within(selected.resolve(), project)
-    except (OSError, RuntimeError, subprocess.TimeoutExpired):
-        return False
-
-
 # Homebrew links python3 into <prefix>/bin, outside the keg directory that
 # sys.executable reports (<prefix>/opt/python@3.X/bin).
 HOMEBREW_PREFIXES = (
@@ -1804,7 +1735,7 @@ def trusted_python_command(
                 return allow_bare or Path(value).is_absolute()
         if _homebrew_python_launcher_matches(candidate):
             return allow_bare or Path(value).is_absolute()
-        return _apple_python_launcher_matches(candidate, cwd)
+        return False
     except (OSError, RuntimeError):
         return False
 
@@ -1958,6 +1889,209 @@ def parsed_options(
         result[option] = args[index + 1]
         index += 2
     return result
+
+
+def git_experience_sync_spec(payload: dict, project: Path) -> dict | None:
+    """Recognize only direct merge/restore commands in this exact checkout."""
+    parsed = direct_shell_tokens(payload)
+    if parsed is None:
+        return None
+    tokens, cwd = parsed
+    if len(tokens) < 3 or cwd != project.resolve():
+        return None
+    executable = _lexical_executable_path(tokens[0], cwd)
+    selected = shutil.which("git")
+    if not Path(tokens[0]).is_absolute() or executable is None or not selected:
+        return None
+    expected = _lexical_executable_path(selected, cwd)
+    if executable != expected or _path_within(executable.resolve(), project):
+        return None
+    args = tokens[1:]
+    if len(args) == 3 and args[:2] == ["merge", "--no-edit"]:
+        action, source = "merge", args[2]
+    elif len(args) == 5 and args[0] == "restore" \
+            and args[1].startswith("--source=") \
+            and args[2:] == ["--worktree", "--", "workspace/docs/experience-design"]:
+        action, source = "restore", args[1].removeprefix("--source=")
+    else:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*", source):
+        return None
+    return {"executable": str(executable), "action": action, "source": source}
+
+
+def sync_git(project: Path, executable: str, *args: str) -> bytes:
+    """Read Git objects without replacement refs or external diff helpers."""
+    result = subprocess.run(
+        [executable, "--no-replace-objects", *args], cwd=project,
+        capture_output=True, check=False, timeout=15,
+    )
+    if result.returncode:
+        raise ValueError("approved Git source could not be verified")
+    return result.stdout
+
+
+# The handoff check reads the remote inside a hook, so it never waits longer.
+GIT_SYNC_REMOTE_TIMEOUT_SECONDS = 20
+
+
+class GitSyncRemoteUnavailable(ValueError):
+    """The remote did not answer the handoff check, or answered with an error."""
+
+
+def git_sync_remote_oid(project: Path, executable: str, ref: str) -> str:
+    """Read one ref of origin with a network call bounded by the hook's own timeout."""
+    try:
+        result = subprocess.run(
+            [executable, "ls-remote", "origin", ref], cwd=project,
+            capture_output=True, check=False, timeout=GIT_SYNC_REMOTE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        raise GitSyncRemoteUnavailable(
+            f"the remote did not answer `git ls-remote origin {ref}` within "
+            f"{GIT_SYNC_REMOTE_TIMEOUT_SECONDS} seconds") from None
+    if result.returncode:
+        raise GitSyncRemoteUnavailable(f"`git ls-remote origin {ref}` failed")
+    for line in result.stdout.decode("utf-8", "replace").splitlines():
+        oid, _tab, name = line.partition("\t")
+        if name == ref:
+            return oid
+    raise ValueError(f"remote ref is absent: {ref}")
+
+
+def git_sync_commands(project: Path) -> str:
+    """Name the two Git synchronization commands the guard attests, with this host's Git."""
+    selected = shutil.which("git")
+    git = str(Path(selected).absolute()) if selected else "<absolute path of git>"
+    if selected:
+        git = subprocess.list2cmdline([git]) if os.name == "nt" else shlex.quote(git)
+    return (f"run Git by its absolute path, as a call of its own from {project}: "
+            f"`{git} restore --source=HEAD --worktree -- workspace/docs/experience-design` "
+            "materializes the Experience tree HEAD already holds, and "
+            f"`{git} merge --no-edit <source>` brings a later approved handoff in")
+
+
+def approved_git_sync_authority(project: Path) -> tuple[str, str]:
+    """Use the existing remote coordination authority, never a local commit alone."""
+    import delivery_git
+    executable = shutil.which("git")
+    if executable is None:
+        raise ValueError("approved Git executable is unavailable")
+    fence_oid = git_sync_remote_oid(project, executable, "refs/heads/agentrof/fence")
+    message = sync_git(project, executable, "show", "-s", "--format=%B", fence_oid).decode("utf-8")
+    delivery_git.require_fence_record(message)
+    if delivery_git.trailer(message, "Protocol") != "2":
+        raise ValueError("approved Git Fence protocol is unsupported")
+    values = {key: delivery_git.trailer(message, key) or "none"
+              for key in delivery_git.FENCE_CANONICAL_KEYS}
+    values["Barrier-Kind"] = delivery_git.trailer(message, "Barrier-Kind") or "none"
+    values["Barrier-Epoch"] = delivery_git.trailer(message, "Barrier-Epoch") or "none"
+    delivery_git._validate_fence_values(values)
+    branch = delivery_git.resolve_target_branch(project, "origin")
+    target = git_sync_remote_oid(project, executable, "refs/heads/" + branch)
+    if values["Mode"] != "open" or values["Target"] != target:
+        raise ValueError("approved Git target has not completed its handoff")
+    return fence_oid, target
+
+
+def attest_git_experience_sync(payload: dict, project: Path) -> dict | None:
+    spec = git_experience_sync_spec(payload, project)
+    if spec is None or not (project / "workspace/docs/experience-design").is_dir():
+        return None
+    executable = spec["executable"]
+    source = sync_git(project, executable, "rev-parse", "--verify",
+                      spec["source"] + "^{commit}").decode("ascii").strip()
+    prefix = "workspace/docs/experience-design"
+    tree = sync_git(project, executable, "rev-parse", source + ":" + prefix).decode("ascii").strip()
+    # Ordinary application-code merges with identical protected content keep
+    # their existing guard path and need no remote Experience authority.
+    if spec["action"] == "merge":
+        current = sync_git(project, executable, "rev-parse", "HEAD:" + prefix).decode("ascii").strip()
+        if current == tree:
+            return None
+    fence, target = approved_git_sync_authority(project)
+    sync_git(project, executable, "merge-base", "--is-ancestor", target, source)
+    approved_tree = sync_git(project, executable, "rev-parse", target + ":" + prefix).decode("ascii").strip()
+    if tree != approved_tree:
+        raise ValueError("approved Git source does not match the coordinated target")
+    if spec["action"] == "restore":
+        current = sync_git(project, executable, "rev-parse", "HEAD:" + prefix).decode("ascii").strip()
+        if current != tree:
+            raise ValueError("approved Git restore must materialize the already-committed HEAD tree")
+    head = sync_git(project, executable, "rev-parse", "HEAD").decode("ascii").strip()
+    index = hashlib.sha256(sync_git(project, executable, "ls-files", "--stage", "-z")).hexdigest()
+    return {**spec, "source_commit": source, "source_tree": tree,
+            "fence": fence, "target": target, "head_commit": head, "index_digest": index}
+
+
+def valid_git_experience_sync_result(payload: dict, project: Path,
+                                    vault: Path, attestation: dict,
+                                    problems: list[str] | None = None) -> bool:
+    """Attest exact committed bytes and owning checks before publishing authority.
+
+    ``problems`` receives the reason when the remote handoff check could not run.
+    """
+    try:
+        spec = git_experience_sync_spec(payload, project)
+        if spec is None or any(spec[key] != attestation.get(key) for key in spec):
+            return False
+        fence, target = approved_git_sync_authority(project)
+        if (fence, target) != (attestation["fence"], attestation["target"]):
+            return False
+        executable, source = attestation["executable"], attestation["source_commit"]
+        if spec["action"] == "restore":
+            head = sync_git(project, executable, "rev-parse", "HEAD").decode("ascii").strip()
+            index = hashlib.sha256(sync_git(project, executable, "ls-files", "--stage", "-z")).hexdigest()
+            if head != attestation["head_commit"] or index != attestation["index_digest"]:
+                return False
+        else:
+            sync_git(project, executable, "merge-base", "--is-ancestor", attestation["head_commit"], "HEAD")
+            sync_git(project, executable, "merge-base", "--is-ancestor", source, "HEAD")
+        prefix = "workspace/docs/experience-design"
+        source_tree = sync_git(project, executable, "rev-parse", source + ":" + prefix).decode("ascii").strip()
+        head_tree = sync_git(project, executable, "rev-parse", "HEAD:" + prefix).decode("ascii").strip()
+        if source_tree != attestation["source_tree"] or head_tree != source_tree:
+            return False
+        expected = {}
+        for row in sync_git(project, executable, "ls-tree", "-r", "-z", source, "--", prefix).split(b"\0"):
+            if not row:
+                continue
+            metadata, name = row.split(b"\t", 1)
+            mode, kind, oid = metadata.decode("ascii").split()
+            relative = name.decode("utf-8").removeprefix("workspace/docs/")
+            if kind != "blob" or mode not in {"100644", "100755"}:
+                return False
+            if author_owned_artifact_path(relative) or vault_check.is_os_metadata_path(relative):
+                continue
+            if experience_snapshot_path_problem(relative):
+                return False
+            expected[relative] = (mode, oid)
+        snapshot = experience_tree_snapshot(vault)
+        actual = {key: value for key, value in snapshot.items()
+                  if value["kind"] == "file" and not vault_check.is_os_metadata_path(key)}
+        if set(actual) != set(expected):
+            return False
+        object_format = sync_git(project, executable, "rev-parse", "--show-object-format").decode("ascii").strip()
+        for relative, (mode, oid) in expected.items():
+            value = actual[relative]
+            raw = base64.b64decode(value["content_base64"], validate=True)
+            digest = hashlib.new(object_format, b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+            if digest != oid or value.get("nlink") != 1 or value.get("flags"):
+                return False
+            if os.name != "nt" and bool(value["mode"] & 0o111) != (mode == "100755"):
+                return False
+        if experience_application_check is None:
+            return False
+        _registry, findings = experience_application_check.compile_application(
+            vault / EXPERIENCE_ROOT_RELATIVE, True,
+        )
+        return not findings
+    except GitSyncRemoteUnavailable as exc:
+        if problems is not None:
+            problems.append(str(exc))
+        return False
+    except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired):
+        return False
 
 
 def delivery_reader_barrier(payload: dict) -> int:
@@ -3414,6 +3548,13 @@ def load_recovery(payload: dict, path: Path) -> tuple[dict | None, str]:
         return None, "recovery application writer candidate is invalid"
     if not isinstance(state.get("authorized_experience_state_sha"), str):
         return None, "recovery Experience authority identity is invalid"
+    git_sync = state.get("git_experience_sync")
+    if git_sync is not None and (
+        not isinstance(git_sync, dict)
+        or set(git_sync) != {"executable", "action", "source", "source_commit", "source_tree", "fence", "target", "head_commit", "index_digest"}
+        or any(not isinstance(value, str) for value in git_sync.values())
+    ):
+        return None, "recovery approved Git attestation is invalid"
     recovery_artifacts = state.get("recovery_artifacts")
     if recovery_artifacts is not None and not valid_recovery_artifact_snapshot(
         recovery_artifacts,
@@ -3434,6 +3575,7 @@ def load_recovery(payload: dict, path: Path) -> tuple[dict | None, str]:
         state["autopilot_writer_allowed"] = False
         state["application_writer_allowed"] = False
         state["application_writer_candidate"] = False
+        state["git_experience_sync"] = None
         return state, "recovery shell command binding changed"
     return state, ""
 
@@ -3460,6 +3602,11 @@ def load_authorized_experience_state(
         return None, "", "Experience authority project cannot be resolved"
     if state.get("project") != expected_project:
         return None, "", "Experience authority project is invalid"
+    if "generation" in state and (
+        not isinstance(state["generation"], str)
+        or re.fullmatch(r"[0-9a-f]{32}", state["generation"]) is None
+    ):
+        return None, "", "Experience authority generation is invalid"
     snapshot = state.get("experience_tree")
     if not valid_experience_tree_snapshot(snapshot):
         return None, "", "Experience authority snapshot is invalid"
@@ -3475,6 +3622,7 @@ def publish_authorized_experience_state(project: Path, vault: Path) -> str:
     state = {
         "project": str(project.resolve()),
         "experience_tree": snapshot,
+        "generation": os.urandom(16).hex(),
     }
     digest = hashlib.sha256(canonical_json(state).encode("utf-8")).hexdigest()
     capsule = canonical_json({
@@ -3703,6 +3851,35 @@ def autopilot_violation(before: object, writer_allowed: bool) -> str:
 
 
 def shell_snapshot(payload: dict) -> int:
+    """Serialize protected capture before reading its tree or authority generation."""
+    root = shell_vault(payload)
+    project = shell_project(payload).resolve()
+    writer = bool(root and (
+        sanctioned_application_writer(payload, root)
+        or sanctioned_application_writer(payload, root, allow_bare_runtime=True)
+        or attested_recovery_writer_spec(payload, root)
+        or git_experience_sync_spec(payload, project)
+    ))
+    if not writer:
+        return capture_shell_snapshot(payload)
+    try:
+        prepare_recovery_root()
+        error = acquire_experience_writer_lock(project, payload)
+    except OSError as exc:
+        return deny("Experience writer capture lock is unavailable: " + str(exc))
+    if error:
+        return deny(error)
+    try:
+        code = capture_shell_snapshot(payload, writer_lock_held=True)
+    except Exception:
+        release_experience_writer_lock(project, payload)
+        raise
+    if code:
+        release_experience_writer_lock(project, payload)
+    return code
+
+
+def capture_shell_snapshot(payload: dict, *, writer_lock_held: bool = False) -> int:
     barrier = delivery_reader_barrier(payload)
     if barrier:
         return barrier
@@ -3737,6 +3914,9 @@ def shell_snapshot(payload: dict) -> int:
         preflight_problem = attested_recovery_preflight_problem(payload, root)
         if preflight_problem:
             return deny(preflight_problem)
+    _authority_before, authority_sha, authority_error = load_authorized_experience_state(project)
+    if authority_error:
+        return deny("Experience lifecycle authority state is unreadable: " + authority_error)
     try:
         experience_tree = experience_tree_snapshot(root or config_path.parent / "docs")
     except OSError as exc:
@@ -3772,7 +3952,17 @@ def shell_snapshot(payload: dict) -> int:
             payload, root, allow_bare_runtime=True,
         )
     )
-    _authority, authority_sha, authority_error = (
+    try:
+        git_sync = attest_git_experience_sync(payload, project) if root else None
+    except GitSyncRemoteUnavailable as exc:
+        return deny(
+            f"approved Git Experience synchronization did not run: {exc}, so the open Fence "
+            "and its target could not be verified and nothing changed; once the remote "
+            "answers, " + git_sync_commands(project))
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
+        return deny("approved Git Experience synchronization could not be attested; no writer authority was granted")
+    protected_writer_candidate = application_writer_candidate or git_sync is not None
+    _authority, authority_sha_after, authority_error = (
         load_authorized_experience_state(project)
     )
     if authority_error:
@@ -3780,6 +3970,10 @@ def shell_snapshot(payload: dict) -> int:
             "Experience lifecycle authority state is unreadable: "
             + authority_error
         )
+    if authority_sha_after != authority_sha:
+        return deny("Experience authority changed during snapshot capture; retry with its current state")
+    if protected_writer_candidate and not writer_lock_held:
+        return deny("Experience writer identity changed during snapshot capture; retry the direct command")
     autopilot = autopilot_snapshot(project)
     autopilot_writer_allowed = sanctioned_autopilot_writer(payload)
     value = {
@@ -3795,6 +3989,7 @@ def shell_snapshot(payload: dict) -> int:
         "application_writer_allowed": application_writer_allowed,
         "application_writer_candidate": application_writer_candidate,
         "authorized_experience_state_sha": authority_sha,
+        "git_experience_sync": git_sync,
     }
     primary_text = canonical_json(value)
     state = {
@@ -3818,6 +4013,7 @@ def shell_snapshot(payload: dict) -> int:
             "application_writer_candidate"
         ],
         "authorized_experience_state_sha": authority_sha,
+        "git_experience_sync": git_sync,
         "primary_sha256": hashlib.sha256(
             primary_text.encode("utf-8")
         ).hexdigest(),
@@ -3831,27 +4027,23 @@ def shell_snapshot(payload: dict) -> int:
     recovery = recovery_path(payload)
     try:
         prepare_recovery_root()
-        if root and application_writer_candidate:
-            lock_error = acquire_experience_writer_lock(project, payload)
-            if lock_error:
-                return deny(lock_error)
         atomic_create_text(recovery, capsule)
     except FileExistsError:
-        if root and application_writer_candidate:
+        if root and protected_writer_candidate:
             release_experience_writer_lock(project, payload)
         return deny(
             "a Bash guard already owns this session/event identity;"
             " refusing to overwrite its recovery state"
         )
     except OSError as exc:
-        if root and application_writer_candidate:
+        if root and protected_writer_candidate:
             release_experience_writer_lock(project, payload)
         return deny(f"Bash config recovery capsule could not be created: {exc}")
     try:
         atomic_replace_text(path, primary_text)
     except OSError as exc:
         recovery.unlink(missing_ok=True)
-        if root and application_writer_candidate:
+        if root and protected_writer_candidate:
             release_experience_writer_lock(project, payload)
         return deny(f"Bash vault inventory could not be snapshotted: {exc}")
     return 0
@@ -3889,6 +4081,7 @@ def shell_verify(payload: dict) -> int:
         authority_sha_before = str(
             recovery_state.get("authorized_experience_state_sha") or ""
         )
+        git_sync_before = recovery_state.get("git_experience_sync")
         root_value = str(recovery_state.get("vault") or "")
         primary_hash = hashlib.sha256(primary_raw or b"").hexdigest()
         if before is None:
@@ -3897,6 +4090,7 @@ def shell_verify(payload: dict) -> int:
             autopilot_writer = False
             application_writer_allowed = False
             application_writer_candidate = False
+            git_sync_before = None
         elif primary_hash != recovery_state.get("primary_sha256"):
             integrity_error = "project-local vault snapshot was tampered with"
             before = None
@@ -3904,6 +4098,7 @@ def shell_verify(payload: dict) -> int:
             autopilot_writer = False
             application_writer_allowed = False
             application_writer_candidate = False
+            git_sync_before = None
     else:
         integrity_error = (
             "config recovery capsule is missing or unreadable"
@@ -3937,6 +4132,7 @@ def shell_verify(payload: dict) -> int:
         application_writer_allowed = False
         application_writer_candidate = False
         authority_sha_before = ""
+        git_sync_before = None
         root_value = str(before.get("vault", "")) \
             if isinstance(before, dict) else ""
         expected_vault = project / "workspace" / "docs"
@@ -4151,6 +4347,15 @@ def shell_verify(payload: dict) -> int:
                 return deny(protected_message(
                     "protected shell effects were restored or verified"
                 ))
+            if git_sync_before is not None:
+                problems: list[str] = []
+                if not valid_git_experience_sync_result(payload, project, root, git_sync_before,
+                                                        problems):
+                    return deny("approved Git Experience synchronization left no attested postimage"
+                                + "".join(f"; {problem}" for problem in problems)
+                                + ("; once the remote answers, " + git_sync_commands(project)
+                                   if problems else ""))
+                publish_authorized_experience_state(project, root)
             return 0
         machine_changes = [
             key for key in changed
@@ -4213,9 +4418,15 @@ def shell_verify(payload: dict) -> int:
                     "its protected state was left unchanged"
                 ))
         candidate_is_valid = bool(recovery_candidate_is_valid)
+        git_sync_problems: list[str] = []
+        if machine_changes and git_sync_before is not None and not integrity_error and not config_violation:
+            candidate_is_valid = valid_git_experience_sync_result(
+                payload, project, root, git_sync_before, git_sync_problems,
+            )
         if (
             machine_changes
             and recovery_candidate_is_valid is None
+            and git_sync_before is None
             and not application_writer_allowed
             and application_writer_candidate
         ):
@@ -4249,6 +4460,9 @@ def shell_verify(payload: dict) -> int:
                 "official lifecycle or left compiler validation red; the "
                 "original Experience tree was "
                 f"restored ({detail})"
+                + "".join(f"; {problem}" for problem in git_sync_problems)
+                + "; if a Git merge or pull of an approved handoff made this "
+                "change, " + git_sync_commands(project)
             ))
         writer_postimage_is_valid = bool(machine_changes) and (
             application_writer_allowed or candidate_is_valid

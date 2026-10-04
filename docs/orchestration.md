@@ -107,6 +107,119 @@ that needs evidence outside its manifest reports it and is rerun with it.
 `backlog-plan/references/switch-review_manifest_scope-bounded.md` defines the
 read set.
 
+Process switch `review_scope_record` collects the data that scope's default is
+chosen on. At `off`, the default, nothing is measured. At `both_scopes`, an
+epic reader's manifest also derives the other scope's read set and carries
+both sizes, flags a transitive read set over the owner's
+`transitive_source_bytes` budget so the flow offers `bounded` before any
+reader starts, and `backlog_review_inputs.py --scope-findings` reports the
+review's blocking findings that cite a note outside the bounded read set; the
+coordinator appends both to the JSON Lines record
+`<workspace>/measurements/review-scope.jsonl`, which the backlog revision
+commits, and the command refuses a record inside the vault or one Git ignores.
+`backlog-plan/references/switch-review_scope_record-both_scopes.md` defines
+the record.
+
+Who applies the epic reviews' findings is process switch
+`remediation_writers`. At `single_writer`, the default, one Product Owner
+writer reads the union of every epic's review scope and applies them all. At
+`per_epic`, each epic with findings gets its own Product Owner writer, in
+parallel, whose `--epic` task reads that epic's review scope at the
+`review_manifest_scope` value in force and writes only that epic's notes;
+afterwards one cross-epic writer, derived without `--epic`, reads and writes
+only the notes the cross-epic findings name.
+`backlog-plan/references/switch-remediation_writers-per_epic.md` defines the
+writers.
+
+What the root reviewer of a backlog revision reads in full is process switch
+`root_review_scope`. At `full`, the default, it reads the complete package. At
+`revision_delta`, its manifest names in full only the stories the revision
+changed or added, their neighbours one dependency edge away, their test
+plans, every epic and the review notes, and gives every other story as a
+hash-bound summary in the compiler's whole-backlog graph with every
+dependency edge and the root review's compiler facts. A first backlog, a delta
+over the owner's `max_delta_share_percent` and a reader's stated request read
+the whole package.
+`backlog-plan/references/switch-root_review_scope-revision_delta.md` defines
+the read set.
+
+Who writes a backlog remediation pass's bookkeeping is process switch
+`remediation_bookkeeping`. At `writer`, the default, the Product Owner writer
+copies the rechecks' closure rows, reruns the expected-hash checks and writes
+the preservation evidence itself. At `compiler`, the writer does the content
+fixes and runs `backlog_compile.py record-rechecks` once: from the readers'
+closure tables and the pinned candidate it writes each review note's
+`Recheck Closures` table, the expected manifest hash of every touched scope
+and a preservation report, and `--verify` is the writer's check.
+`backlog-plan/references/switch-remediation_bookkeeping-compiler.md` defines
+the command.
+
+When epic reviews queue behind the host's agent limit, process switch
+`epic_review_cadence` sets when the next one starts. At `wait_per_panel`, the
+default, the coordinator waits for the previous review's calibration and its
+own record of that review. At `overlap_calibration`, the next review starts as
+soon as the previous review's last reader returns, a calibration reader starts
+for each reader's claims as soon as that reader returns, the coordinator
+writes only a fixed claim record at the boundary, and no writer action starts
+until every review and every calibration has returned.
+`backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md`
+defines the cadence.
+
+Whether a business rule that computes a number must show how is process
+switch `calculation_examples`. At `off`, the default, a calculation rule
+follows the space standard alone. At `required`, each such rule carries its
+formula or an AC with a worked example, inputs, parameters, expected output
+and the output after one parameter change; the analysis challenger reports a
+missing one as a major finding, and a backlog test plan takes its expected
+value from it and never invents one, as
+`requirements-analysis/references/switch-calculation_examples-required.md`
+defines.
+
+How many owner gates a decision that changes approved analysis documents
+takes is process switch `source_decision_gate`. At `two_gates`, the default,
+the owner picks a direction, and the drafted and reviewed change is approved
+as exact content in a second gate. At `one_gate_when_drafted`, when the
+recommended option needs no owner input, the change is drafted and reviewed
+first and one gate shows it as "approve this exact change" with its content
+hash from `ba_compile.py content-hash`, which `approve-package
+--expected-content-hash` then holds the package to; any other answer falls
+back to two gates, as
+`business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md`
+defines.
+
+Which owner gate approves the Experience rebinds a source approval makes
+necessary is process switch `dependent_rebind_gate`. At `separate`, the
+default, binding refresh finds the stale Experience package after the source
+approval and opens its own scope gate. At `with_source`,
+`experience_compile.py source-impact` lists the stale packages before the
+source gate and classes each as a `mechanical` rebind, when none of its notes
+cites a changed source row or document, or a `semantic` one; the source gate
+approves the mechanical rebinds with the source, and a semantic one keeps its
+own gate, as
+`business-analysis/references/switch-dependent_rebind_gate-with_source.md`
+defines.
+
+What the final snapshot review of a source-only Experience rebind reads is
+process switch `rebind_review_scope`. At `full`, the default, it reads the
+whole package and prototype tree. At `source_delta`, when `source-impact`
+reports `source_rebind_only` and no note citing a changed source row or
+document, the reviewer reads the source delta, the package notes and the
+attested hashes, not the prototype tree, and still writes the full
+attestation; any authored change or cited claim takes the full review, as
+`experience-modeling/references/switch-rebind_review_scope-source_delta.md`
+defines.
+
+How the readers of one review or recheck wave start is process switch
+`reader_waves`. At `as_slots_free`, the default, readers start as the host
+lets them. At `all_at_once`, the coordinator closes every finished worker,
+the writer between its passes included, and starts every reader of the wave
+before waiting on any of them, the largest inputs first when the host's
+thread cap is short, and each wave's progress message names its size and its
+readers running at once, as
+`challenge-review/references/switch-reader_waves-all_at_once.md` defines.
+Each host contract states how: Codex counts every open spawned thread against
+its cap, while a finished Claude Code subagent holds none.
+
 A Delivery Item's implementation writers run as process switch
 `implementation_schedule` selects. `sequential_v1`, the default, runs them one
 after another in their approved order. For an Item whose approved plan
@@ -133,7 +246,36 @@ test command, under the Item's environment lock, and repairs every failure
 before the freeze, which refuses until that run passed on the exact candidate.
 QA's first gate run reports every failing group where the approved command
 allows it. `deliver/references/switch-pre_handoff_regression-touched_suites.md`
-defines the run.
+defines the run. At process switch `own_target_reuse` `spot_run`, QA's final
+test run also takes the Item's own Test Plan targets from that run, but for the
+ones QA names to spot-run itself, as
+`deliver/references/switch-own_target_reuse-spot_run.md` defines.
+
+When QA starts its first test command of a round is process switch
+`qa_gate_order`. At `plan_first`, the default, QA plans and maps every check
+first. At `gate_first`, QA starts the command in the background and plans,
+maps and drafts its result while the command runs, as
+`qa-verification/references/switch-qa_gate_order-gate_first.md` defines.
+
+Whether a test run knows its groups is process switch `test_group_report`. At
+`off`, the default, the runner records a test command's exit code and output
+only. At `refuse_missing_groups`, where the Verification Contract declares
+`test_groups` and `test_group_report`, QA's test runs and the pre-handoff run
+read the group report the approved command writes, record each declared
+group's status, record a run whose report lacks a group not intact, and
+evidence approval refuses a final test run with a group that did not pass, as
+`deliver/references/switch-test_group_report-refuse_missing_groups.md`
+defines.
+
+How QA's final test run uses the test environment is process switch
+`test_engines`. At `single`, the default, it runs the approved test command
+once under the Item's environment lock. At `partitioned`, where the
+Verification Contract declares a partition command, its engines and a `Test
+Partitions` table and the Environment Contract provisions the engines,
+`run --kind test` runs every partition in its own private clone, in parallel
+over the engines, longest first, and merges them into one record whose exit
+code is 0 only when every partition passed intact, as
+`deliver/references/switch-test_engines-partitioned.md` defines.
 
 Backlog planning measures story size as process switch `story_size_budget`
 selects. At `off`, the default, nothing is measured or shown. At
@@ -148,6 +290,18 @@ verbatim. Review manifests carry the measures as given facts, and
 `/delivery-plan` shows them read-only.
 `product-planning/references/switch-story_size_budget-propose_split.md`
 defines the steps.
+
+What a Test Plan scenario costs to run is process switch `test_cost_budget`.
+A scenario may state `rows`, the table rows its automation target runs, and
+`row_split`, `serial`, `sharded` or `grouped`, which `backlog_compile.py check`
+validates at every value. At `off`, the default, nothing is flagged. At
+`flag_serial_rows`, `check --json`, the review manifests and
+`delivery_compile.py init` list each automation-required scenario whose rows
+exceed the owner's `serial_rows` limit while its split is `serial` or absent,
+and QA proposes a split before the epic review, or the owner keeps the scenario
+serial with a recorded reason. The flag is advisory, as
+`product-planning/references/switch-test_cost_budget-flag_serial_rows.md`
+defines.
 
 Execution planning writes and reviews the facts a plan needs as process switch
 `execution_planning` selects. `per_document`, the default, revises and reviews

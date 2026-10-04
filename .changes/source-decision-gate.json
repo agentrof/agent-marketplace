@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch `source_decision_gate` (`two_gates` | `one_gate_when_drafted`), at its default today's behaviour: at `one_gate_when_drafted`, a decision that changes approved analysis documents and whose recommended option needs no owner input is drafted and independently reviewed before the owner is asked, and one gate shows the options with the reviewed diff and content hash of the recommended one as \"approve this exact change\"; any other answer falls back to two gates, as `business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md` defines. New `ba_compile.py content-hash --space <space>` hashes a space's authored content without lifecycle stamps, status tags, generated relations or generated views, so a reviewed draft and the package approved from it share it, and `approve-package --expected-content-hash <hash>` refuses, without writing, content that differs from what the gate showed. In one measured project one source decision took a 19 min direction gate and a 2 h 10 min exact-change gate for a change that was ready with zero findings.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

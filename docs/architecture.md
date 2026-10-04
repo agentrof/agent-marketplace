@@ -45,8 +45,21 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     the story identities and dependency edges that reach them, except that at
     `bounded` an edge that reaches a story read only through a link leaves the
     manifest fresh; the root manifest's binds every backlog note.
+    Process switch `review_scope_record` at `both_scopes` adds to an epic
+    reader's manifest the sizes of both read sets, which its hash binds, and
+    never changes what the reader reads. At process switch
+    `remediation_writers` `per_epic`, an epic writer's manifest reads that
+    epic's review scope at the `review_manifest_scope` value in force. At
+    process switch `root_review_scope` `revision_delta`, the root reader of a
+    revision reads in full only the changed stories and their neighbours, with
+    every other story as a hash-bound summary; its manifest's hash still binds
+    every backlog note.
 12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
     scenarios; automation-required scenarios name an executable-test target.
+    A scenario may state `rows`, a positive integer, and `row_split`,
+    `serial`, `sharded` or `grouped`; process switch `test_cost_budget` at
+    `flag_serial_rows` flags one that runs more rows serially than the
+    owner's limit, and never fails a check.
 13. Every story has exactly one accountable implementation owner and may name
     supporting implementation roles with concrete body responsibilities.
     Runtime identities are not backlog properties. Process switch
@@ -165,10 +178,11 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     tested tree and current coverage contract; missing evidence runs fresh
     tests, and both host lifecycles always run fresh. Release-owned files
     change only in a release commit, the last commit of a pull request, whose
-    tree is the deterministic bump of its parent; the replay ignores ambient
-    Git attributes, excludes, replacement refs and graph overlays. A release
-    tags an approved `main` commit whose own push validation succeeded and
-    never runs the tests again. Snapshot records are prefix-free;
+    tree is the deterministic bump of its parent at its own commit date; the
+    replay ignores ambient Git attributes, excludes, replacement refs and
+    graph overlays. A release tags an approved `main` commit whose own push
+    validation succeeded and never runs the tests again. Snapshot records are
+    prefix-free;
     generated text uses LF, unknown/binary payloads remain byte-exact, and the
     tracked `package-modes.json` contract supplies platform-neutral executable
     modes. Schema-v4 package provenance binds the closed file inventory, hashes

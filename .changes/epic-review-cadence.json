@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch `epic_review_cadence` (`wait_per_panel` | `overlap_calibration`), off by default, so every default output and every bound instruction is unchanged. At `overlap_calibration`, when backlog epic reviews queue behind the host's agent limit, the next epic review starts as soon as the previous review's last reader returns; at `review_loop` `blocking_delta` a calibration reader starts for each reader's critical and major claims as soon as that reader returns, and each claim is still ruled once by a fresh reader on the claiming reviewer's role and tier; the coordinator writes only a fixed JSON claim record at a review boundary; and no writer action starts until every epic review and every calibration has returned. In one measured project, four panel transitions of one backlog revision lost 32.7 min to the severity check and the coordinator's record keeping, and the one transition that overlapped the check took 1.6 min.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

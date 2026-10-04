@@ -14,6 +14,15 @@ mode. Manual mode never reads, creates or binds Requirement state.
    read-only reviewer for the complete space and `domain-expert` only for an
    explicitly named domain. Each prompt includes exact paths, review lens,
    output contract and `SELF-CHECK`.
+   Switch `calculation_examples`: at `required`, every calculation rule
+   carries its formula or a worked example, and the challenger reports a
+   missing one as a major finding, as
+   `skill-content/requirements-analysis/references/switch-calculation_examples-required.md`
+   defines.
+   Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck
+   wave starts at once, after every finished worker is closed, as
+   `skill-content/challenge-review/references/switch-reader_waves-all_at_once.md`
+   and the host contract define.
 3. Render, move each ready draft through `ba_compile.py enter-review --space
    <space> --doc <relative-doc>`, close individual document gates with `approve`,
    then run `approve-package`. Review entry changes only document status and its
@@ -24,5 +33,17 @@ mode. Manual mode never reads, creates or binds Requirement state.
    same revision, then approve every gate-blocking document before closing it.
    Git history is the audit baseline; the workflow stores no revision marker
    or recovery receipt.
+   Switch `dependent_rebind_gate`: at `with_source`, the gate that approves a
+   change to an approved package also shows and approves the mechanical
+   rebinds of the Experience packages it makes stale, from
+   `experience_compile.py source-impact`, as
+   `skill-content/business-analysis/references/switch-dependent_rebind_gate-with_source.md`
+   defines.
+   Switch `source_decision_gate`: at `one_gate_when_drafted`, a decision that
+   changes approved documents and whose recommendation needs no owner input
+   is drafted and reviewed first and approved as exact content in one owner
+   gate, as
+   `skill-content/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md`
+   defines.
 4. Requirement mode binds the returned receipt. Manual mode returns the exact
    BA package receipt and suggests `/solution-design`; it does not run it.

@@ -53,6 +53,10 @@ Plan targets, before `freeze`, which refuses until that run passed on the exact
 candidate, as
 `skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md`
 defines.
+Switch `own_target_reuse`: at `spot_run`, QA's final test run also takes the
+Item's own Test Plan targets from that run, but for the ones QA spot-runs, as
+`skill-content/deliver/references/switch-own_target_reuse-spot_run.md`
+defines.
 
 Invoke Code Review and QA independently through the host's native agent
 mechanism. Keep the implementation writer idle until both readers finish or
@@ -85,9 +89,25 @@ the bound with the holder it still waits for; then call `wait` again at once,
 each time as a tool call of its own. Start a command that can outlast one
 `wait`, such as QA's full suite, in the background as the host runs a long
 command, wait for it with `wait --role qa_engineer`, then read the record the
-command printed.
+command printed. Read a recorded run again with `status --run <kind>`, or
+every run with the session identity through `status --summary`; plain
+`status` prints the whole session, bindings included.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
+Switch `qa_gate_order`: at `gate_first`, QA starts its first test command of a
+round before it plans and drafts its result, as
+`skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md`
+defines.
+Switch `test_group_report`: at `refuse_missing_groups`, a test run also reads
+the group report the approved command writes and records every declared group,
+as
+`skill-content/deliver/references/switch-test_group_report-refuse_missing_groups.md`
+defines.
+Switch `test_engines`: at `partitioned`, `run --kind test` runs the
+partitions the Verification Contract declares in parallel on isolated test
+engines and merges them into one record, as
+`skill-content/deliver/references/switch-test_engines-partitioned.md`
+defines.
 For failed or affected tests first, an optional approved
 `diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
 <scratch-selection.json>`. Copy the selector schema from the QA manifest,

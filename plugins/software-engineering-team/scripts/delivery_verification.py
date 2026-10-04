@@ -47,6 +47,24 @@ PRE_HANDOFF_IDENTITY = ("candidate_tree", "kind", "command", "workdir", "affecte
 # What the sessions carry of every pre-handoff run, until approve-item-evidence records it.
 PRE_HANDOFF_HISTORY_FIELDS = ("evidence_hash", "candidate_tree", "kind", "exit_code", "candidate_intact",
                               "duration_seconds", "earlier_stories")
+# At own_target_reuse spot_run QA's final test run also takes the Item's own Test
+# Plan targets from the accepted pre-handoff run, but for the spot-run targets QA
+# names, which the approved test command runs with every target the run did not cover.
+OWN_TARGET_SWITCH = "own_target_reuse"
+SPOT_RUN = "spot_run"
+# At test_group_report refuse_missing_groups a test run also reads the group
+# report its approved command writes, where the Verification Contract declares one.
+GROUP_REPORT_SWITCH = "test_group_report"
+REFUSE_MISSING_GROUPS = "refuse_missing_groups"
+GROUP_STATUSES = ("passed", "failed", "not_collected")
+GROUP_COUNTS = ("passed", "failed", "skipped")
+MISSING_GROUP = "missing"
+# At test_engines partitioned QA's final test run runs the partitions the
+# Verification Contract declares in parallel, one private clone each, over its
+# isolated test engines, longest first by the durations the Item's runtime keeps.
+ENGINE_SWITCH = "test_engines"
+PARTITIONED = "partitioned"
+PARTITION_DURATIONS = "partition-durations.json"
 # At process switch code_review_panel beside_official a lens panel reads the
 # frozen candidate beside the official code reviewer, and merge-panel
 # registers the one code review result from both.
@@ -73,8 +91,10 @@ COMMAND_VARIABLE_PREFIXES = ("AGENTROF_", "LC_")
 # The runner sets these for every command it runs.
 RUNNER_VARIABLES = ("AGENTROF_MUTATION_FILES", "AGENTROF_VERIFICATION_SCRATCH")
 # The runner's per-run inputs: an identity binds the data each carries, so it
-# names neither the variable nor its path.
-SELECTION_VARIABLES = ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS")
+# names neither the variable nor its path. A partitioned test run hands each
+# partition its own file and engine, which its record names, never the identity.
+PARTITION_VARIABLES = ("AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE")
+SELECTION_VARIABLES = ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
 # At touched_suites QA's final test run names here the earlier-story targets the
 # accepted pre-handoff run covered, for the approved test command to skip (#354).
 REUSED_TESTS = "reused-tests.json"
@@ -856,21 +876,27 @@ def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, c
     return completed, intact, difference, dropped, environment
 
 
-def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None) -> dict:
+def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
+              spot_file: Path | None = None) -> dict:
     root = root.resolve()
     read_session(root)
     with environment_lock(root, "qa_engineer", "run --kind " + kind), \
             command_lock(root, "qa_engineer", "run --kind " + kind):
-        return _run_check(root, kind, fresh=fresh, selection_file=selection_file)
+        return _run_check(root, kind, fresh=fresh, selection_file=selection_file, spot_file=spot_file)
 
 
-def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None) -> dict:
+def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
+               spot_file: Path | None = None) -> dict:
     """Run an approved command verbatim with a file-based mutation scope binding."""
     root = root.resolve()
     if kind not in {"test", "mutation", "dependency_audit", "diagnostic_test"}:
         raise RuntimeError("unsupported verification command kind")
     if (kind == "diagnostic_test") != (selection_file is not None):
         raise RuntimeError("diagnostic_test requires --selection-file; final commands do not accept a focused selection")
+    if spot_file is not None and kind != "test":
+        raise RuntimeError("only run --kind test takes --spot-run-file")
+    if spot_file is not None and fresh:
+        raise RuntimeError("run --fresh reuses nothing, so it takes no --spot-run-file")
     if selection_file is not None:
         selection_file = Path(selection_file)
         if not selection_file.is_absolute():
@@ -880,10 +906,21 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         current = require_current(root, session, allow_evidence=True)
         if session["workers"]["qa_engineer"]["state"] != "running":
             raise RuntimeError("verification commands require the active QA reader")
-        contract, _ = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+        spot = None
+        if spot_file is not None:
+            value = own_target_reuse(root, current["delivery"])
+            if value != SPOT_RUN:
+                raise RuntimeError(f"run --spot-run-file serves only process switch {OWN_TARGET_SWITCH} {SPOT_RUN};"
+                                   f" {current['delivery']} runs it at {value}")
+            spot = spot_run_selection(root, Path(spot_file), current)
+        contract, contract_body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
         command = contract.get(kind + "_command")
         if not isinstance(command, str) or not command.strip() or "{{" in command or "}}" in command:
             raise RuntimeError("approved verification command is missing or contains unresolved parameters")
+        partitions = (partition_declaration(root, current["delivery"], contract, contract_body)
+                      if kind == "test" else None)
+        if partitions is not None:
+            command = partitions["command"]
         workdir = str(contract.get(kind + "_workdir", "."))
         directory = (root / workdir).resolve()
         if directory != root and root not in directory.parents:
@@ -902,14 +939,28 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         scratch = safe_runtime_path(root, Path(environment["AGENTROF_VERIFICATION_SCRATCH"]))
         scratch.mkdir(exist_ok=True)
         declared = environment_identity(root, environment, contract)
-        reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh) if kind == "test"
-                          else (None, None))
+        reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
+                          if kind == "test" else (None, None))
+        own_note = None
+        if (reuse is not None and "own_targets" not in reuse
+                and own_target_reuse(root, current["delivery"]) == SPOT_RUN):
+            own_note = ("no --spot-run-file names the own targets QA runs itself, so the run reuses none of the"
+                        " Item's own targets" if spot is None else
+                        "the spot-run targets, with every own target that is, prefixes or lies under one of them,"
+                        " cover every own target, so the run reuses none of them")
         identity = {"candidate_hash": current["candidate_hash"], "kind": kind, "command": command,
                     "workdir": workdir, **declared, "execution_isolation": "private_clone_v1"}
         if selection is not None:
             identity["diagnostic_selection_hash"] = digest(selection)
         if reuse is not None:
             identity["reused_pre_handoff"] = reuse
+        groups = (group_report_declaration(root, current["delivery"], contract)
+                  if kind in {"test", "diagnostic_test"} else None)
+        if groups is not None:
+            identity["test_group_report"] = groups
+        if partitions is not None:
+            identity["test_partitions"] = {key: partitions[key] for key in
+                                           ("partitions", "test_engines", "shared_profiles")}
         key = digest(identity)
         old = session["raw_evidence"].get(kind)
         if (not fresh and old and old.get("identity") == identity and old.get("exit_code") == 0 and old.get("candidate_intact") is True
@@ -918,7 +969,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             if output.is_file() and not output.is_symlink() and hashlib.sha256(output.read_bytes()).hexdigest() == old["output_sha256"]:
                 session["metrics"]["command_cache_hits"] += 1
                 write_session(root, session)
-                return {**old, "reused": True}
+                return {**old, "reused": True, **({"own_target_reuse": own_note} if own_note else {})}
         if reuse is not None:
             reused = safe_runtime_path(root, session_path(root).parent / REUSED_TESTS, file_only=True)
             reused_bytes = (json.dumps(
@@ -931,9 +982,29 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         session["raw_evidence"].pop(kind, None)
         write_session(root, session)
         session_id = session["session_id"]
+        if groups is not None and partitions is None:
+            clear_group_report(scratch, groups)
     started = time.monotonic()
-    completed, intact, difference, _dropped, _ran = private_checkout_run(root, scratch, current["product_commit"],
-                                                                         workdir, command, environment)
+    partition_records = None
+    if partitions is not None:
+        partition_records = run_partitions(root, scratch, current, workdir, partitions, environment,
+                                           reuse["test_ids"] if reuse is not None else [], groups)
+        intact, difference = all(record["candidate_intact"] is True for record in partition_records), ""
+        completed = subprocess.CompletedProcess(command, 0 if all(record["passed"] for record in partition_records)
+                                                else 1, b"".join(
+            f"== partition {record['partition']} on engine {record['engine']}: exit {record['exit_code']}"
+            f" ==\n".encode("utf-8") + record["output"] for record in partition_records))
+        group_report = None if groups is None else {
+            "test_groups": {group: entry for record in partition_records
+                            for group, entry in record.get("test_groups", {}).items()},
+            "missing_test_groups": sorted(group for record in partition_records
+                                          for group in record.get("missing_test_groups", []))}
+    else:
+        completed, intact, difference, _dropped, _ran = private_checkout_run(
+            root, scratch, current["product_commit"], workdir, command, environment)
+        group_report = read_group_report(scratch, groups) if groups is not None else None
+    if group_report is not None and group_report["missing_test_groups"]:
+        intact = False
     selection_intact = None
     if selection is not None:
         try:
@@ -970,16 +1041,360 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             record["diagnostic_selection"] = selection
         if selection_intact is not None:
             record["selection_intact"] = selection_intact
+        if group_report is not None:
+            record.update(group_report)
+        if partition_records is not None:
+            record["partitions"] = []
+            for index, entry in enumerate(partition_records):
+                name = f"scratch/{kind}-{key.removeprefix('sha256:')}-partition-{index}.log"
+                atomic_file.replace_bytes(raw_output_path(root, name), entry["output"])
+                record["partitions"].append({**{field: value for field, value in entry.items()
+                                                if field not in {"output", "test_groups", "missing_test_groups"}},
+                                             "output_file": name,
+                                             "output_sha256": hashlib.sha256(entry["output"]).hexdigest()})
         record["evidence_hash"] = digest(record)
         session["raw_evidence"][kind] = record
         session["metrics"]["command_seconds"] += record["duration_seconds"]
         write_session(root, session)
-        return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {})}
+        return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {}),
+                **({"own_target_reuse": own_note} if own_note else {})}
+
+
+def own_target_reuse(root: Path, delivery_id: str) -> str:
+    """The own_target_reuse value the Delivery runs under, as its pinned policy sets it."""
+    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, OWN_TARGET_SWITCH)
+
+
+def group_report_declaration(root: Path, delivery_id: str, contract: dict) -> dict | None:
+    """The test groups and the group report path a test run checks, or None.
+
+    Only a Verification Contract that declares test_groups and
+    test_group_report under a Delivery that runs test_group_report at
+    refuse_missing_groups yields them; a contract without the fields never
+    reads the Process Policy, so every run without them is as released.
+    """
+    if "test_groups" not in contract and "test_group_report" not in contract:
+        return None
+    if delivery.delivery_switch_value(delivery.docs_root(root), delivery_id,
+                                      GROUP_REPORT_SWITCH) != REFUSE_MISSING_GROUPS:
+        return None
+    problems = operation_compile.test_group_problems(contract)
+    if problems:
+        raise RuntimeError("; ".join(problems))
+    return {"test_groups": list(contract["test_groups"]), "test_group_report": contract["test_group_report"]}
+
+
+def group_report_path(scratch: Path, declaration: dict) -> Path:
+    path = scratch / declaration["test_group_report"]
+    if scratch.resolve() not in path.resolve().parents:
+        raise RuntimeError("test_group_report escapes the verification scratch")
+    return path
+
+
+def clear_group_report(scratch: Path, declaration: dict) -> None:
+    """Remove an earlier run's group report, so only the command about to run can write one."""
+    path = group_report_path(scratch, declaration)
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        raise RuntimeError(f"test_group_report {declaration['test_group_report']} is no regular file")
+
+
+def read_group_report(scratch: Path, declaration: dict) -> dict:
+    """Each declared group's status and case counts, as the command's group report names them.
+
+    A group the report lacks, or names without a declared status and
+    non-negative case counts, is missing; so is every group when the report is
+    absent or no report of the declared shape.
+    """
+    path = group_report_path(scratch, declaration)
+    groups, problem = {}, None
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("the command wrote no group report")
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if (not isinstance(value, dict) or set(value) != {"schema_version", "groups"}
+                or type(value["schema_version"]) is not int or value["schema_version"] != 1
+                or not isinstance(value["groups"], dict)):
+            raise ValueError("the group report holds no schema_version 1 and groups")
+        groups = value["groups"]
+    except (OSError, ValueError) as exc:
+        problem = str(exc)
+    statuses = {}
+    for group in declaration["test_groups"]:
+        entry = groups.get(group)
+        if (isinstance(entry, dict) and set(entry) == {"status", *GROUP_COUNTS}
+                and entry["status"] in GROUP_STATUSES
+                and all(type(entry[count]) is int and entry[count] >= 0 for count in GROUP_COUNTS)):
+            statuses[group] = {key: entry[key] for key in ("status", *GROUP_COUNTS)}
+        else:
+            statuses[group] = {"status": MISSING_GROUP}
+    report = {"test_groups": statuses,
+              "missing_test_groups": [group for group, entry in statuses.items() if entry["status"] == MISSING_GROUP]}
+    if problem:
+        report["test_group_report_problem"] = problem
+    return report
+
+
+def group_report_problem(raw: dict, declaration: dict) -> str | None:
+    """Why a final test run's recorded group report does not show every declared group passed, or None."""
+    if raw.get("identity", {}).get("test_group_report") != declaration:
+        return "does not check the test groups and group report the approved Verification Contract declares"
+    recorded = raw.get("test_groups")
+    if not isinstance(recorded, dict) or set(recorded) != set(declaration["test_groups"]):
+        return "does not record every declared test group"
+    unpassed = {group: entry.get("status") if isinstance(entry, dict) else None
+                for group, entry in sorted(recorded.items())
+                if not isinstance(entry, dict) or entry.get("status") != "passed"}
+    if unpassed:
+        return "records test groups that did not pass: " + ", ".join(
+            f"{group} {status}" for group, status in unpassed.items())
+    return None
+
+
+def partition_declaration(root: Path, delivery_id: str, contract: dict, body: str) -> dict | None:
+    """The partition plan, command and engines QA's final test run runs under, or None.
+
+    Only a Verification Contract that declares test_partition_command under a
+    Delivery that runs test_engines at partitioned yields them; a contract
+    without it never reads the Process Policy. The plan must place every
+    declared group in exactly one partition, and the Environment Contract must
+    provision every engine.
+    """
+    if "test_partition_command" not in contract:
+        return None
+    docs = delivery.docs_root(root)
+    if delivery.delivery_switch_value(docs, delivery_id, ENGINE_SWITCH) != PARTITIONED:
+        return None
+    plan, problems = operation_compile.test_partition_plan(contract, body)
+    if problems or plan is None:
+        raise RuntimeError("; ".join(problems) or "the Verification Contract declares no test partition plan")
+    path = docs / "operation/environment-contract.md"
+    provisioned = delivery.split_note(path)[0].get("test_engines") if path.is_file() else None
+    missing = [engine for engine in contract["test_engines"]
+               if not isinstance(provisioned, list) or engine not in provisioned]
+    if missing:
+        raise RuntimeError("the Environment Contract provisions no test engine " + ", ".join(missing))
+    command = contract["test_partition_command"]
+    if "{{" in command or "}}" in command:
+        raise RuntimeError("approved test partition command contains unresolved parameters")
+    return {"command": command, "partitions": plan, "test_engines": list(contract["test_engines"]),
+            "shared_profiles": sorted(contract.get("shared_profiles", []))}
+
+
+def partition_durations_path(root: Path) -> Path:
+    return safe_runtime_path(root, session_path(root).parent / PARTITION_DURATIONS, file_only=True)
+
+
+def partition_durations(root: Path) -> dict:
+    try:
+        value = json.loads(partition_durations_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {name: seconds for name, seconds in value.items()
+            if isinstance(seconds, (int, float)) and not isinstance(seconds, bool)} if isinstance(value, dict) else {}
+
+
+def partition_order(root: Path, plan: list[dict]) -> list[dict]:
+    """The partitions longest first by their last recorded duration; one never recorded comes first."""
+    durations = partition_durations(root)
+    return sorted(plan, key=lambda entry: -durations.get(entry["partition"], float("inf")))
+
+
+def run_partitions(root: Path, scratch: Path, current: dict, workdir: str, partitions: dict, environment: dict,
+                   reused: list[str], groups: dict | None) -> list[dict]:
+    """Run every partition in its own private clone, in parallel over the declared test engines.
+
+    A partition of an exclusive profile takes an engine alone; partitions of a
+    shared profile may share one with each other. Never more partitions run at
+    once than there are engines. A partition that fails, cannot start or
+    misses a group never stops another. Each record names its partition,
+    engine, exit code, intactness, duration and output, in plan order.
+    """
+    import threading
+
+    engines, shared = partitions["test_engines"], set(partitions["shared_profiles"])
+    load = {engine: {"exclusive": False, "count": 0} for engine in engines}
+    pending, results, condition = partition_order(root, partitions["partitions"]), {}, threading.Condition()
+    directory = safe_runtime_path(root, session_path(root).parent / "partitions")
+    directory.mkdir(exist_ok=True)
+
+    def engine_for(entry: dict) -> str | None:
+        if sum(state["count"] for state in load.values()) >= len(engines):
+            return None
+        if entry["profile"] in shared:
+            free = [engine for engine in engines if not load[engine]["exclusive"]]
+            return min(free, key=lambda engine: load[engine]["count"]) if free else None
+        return next((engine for engine in engines if load[engine]["count"] == 0), None)
+
+    def run(entry: dict, engine: str, index: int) -> None:
+        record = {"partition": entry["partition"], "engine": engine, "groups": entry["groups"],
+                  "profile": entry["profile"]}
+        started = time.monotonic()
+        try:
+            own = safe_runtime_path(root, scratch / "partitions" / entry["partition"])
+            own.mkdir(parents=True, exist_ok=True)
+            selection = safe_runtime_path(root, directory / f"{index}.json", file_only=True)
+            data = (json.dumps({"schema_version": 1, "candidate_hash": current["candidate_hash"],
+                                "partition": entry["partition"], "groups": entry["groups"], "engine": engine,
+                                "reused_test_ids": reused}, indent=2, sort_keys=True) + "\n").encode("utf-8")
+            atomic_file.replace_bytes(selection, data)
+            generation = source_file_generation(selection)
+            own_groups = (None if groups is None else
+                          {**groups, "test_groups": [group for group in groups["test_groups"]
+                                                     if group in entry["groups"]]})
+            if own_groups is not None:
+                clear_group_report(own, own_groups)
+            completed, intact, difference, _dropped, _ran = private_checkout_run(
+                root, own, current["product_commit"], workdir, partitions["command"],
+                {**environment, "AGENTROF_TEST_PARTITION": str(selection), "AGENTROF_TEST_ENGINE": engine,
+                 "AGENTROF_VERIFICATION_SCRATCH": str(own)})
+            try:
+                intact = intact and selection.read_bytes() == data and source_file_generation(selection) == generation
+            except OSError:
+                intact = False
+            record.update(exit_code=completed.returncode, output=completed.stdout)
+            if difference:
+                record["checkout_difference"] = difference
+            if own_groups is not None:
+                report = read_group_report(own, own_groups)
+                record.update(report)
+                intact = intact and not report["missing_test_groups"]
+            record["candidate_intact"] = intact
+        except Exception as exc:  # noqa: BLE001 - any failure is this partition's result, never another's
+            record.update(exit_code=None, candidate_intact=False, output=f"{exc}\n".encode("utf-8"),
+                          error=f"the partition did not start or finish: {exc}")
+        record["duration_seconds"] = time.monotonic() - started
+        record["passed"] = (record["exit_code"] == 0 and record["candidate_intact"] is True
+                            and all(group.get("status") == "passed"
+                                    for group in record.get("test_groups", {}).values()))
+        with condition:
+            results[entry["partition"]] = record
+            load[engine]["count"] -= 1
+            load[engine]["exclusive"] = False
+            condition.notify_all()
+
+    threads = []
+    with condition:
+        while pending:
+            chosen = next(((entry, engine) for entry in pending
+                           for engine in [engine_for(entry)] if engine is not None), None)
+            if chosen is None:
+                condition.wait()
+                continue
+            entry, engine = chosen
+            pending.remove(entry)
+            load[engine]["count"] += 1
+            load[engine]["exclusive"] = entry["profile"] not in shared
+            thread = threading.Thread(target=run, args=(entry, engine, partitions["partitions"].index(entry)),
+                                      daemon=True)
+            threads.append(thread)
+            thread.start()
+    for thread in threads:
+        thread.join()
+    durations = partition_durations(root)
+    durations.update({partition: record["duration_seconds"] for partition, record in results.items()})
+    atomic_file.replace_text(partition_durations_path(root), json.dumps(durations, indent=2, sort_keys=True) + "\n")
+    return [results[entry["partition"]] for entry in partitions["partitions"]]
+
+
+def partition_problem(root: Path, raw: dict, partitions: dict) -> str | None:
+    """Why a final test run's record is no complete, passing run of the declared partition plan, or None."""
+    if raw.get("identity", {}).get("test_partitions") != {key: partitions[key] for key in (
+            "partitions", "test_engines", "shared_profiles")}:
+        return "does not run the test partition plan the approved Verification Contract declares"
+    records = raw.get("partitions")
+    if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
+        return "records no partition results"
+    names = [record.get("partition") for record in records]
+    twice = sorted({str(name) for name in names if names.count(name) > 1})
+    if twice:
+        return "holds partition " + ", ".join(twice) + " more than once"
+    declared = [entry["partition"] for entry in partitions["partitions"]]
+    missing = [name for name in declared if name not in names]
+    if missing:
+        return "lacks partition " + ", ".join(missing)
+    stray = sorted(str(name) for name in names if name not in declared)
+    if stray:
+        return "holds partition " + ", ".join(stray) + ", which the plan does not declare"
+    failed = [record["partition"] for record in records
+              if record.get("passed") is not True or record.get("exit_code") != 0
+              or record.get("candidate_intact") is not True]
+    if failed:
+        return "holds failed or not intact partition " + ", ".join(failed)
+    for record in records:
+        try:
+            output = raw_output_path(root, str(record.get("output_file")))
+        except RuntimeError:
+            return f"names no raw output of partition {record['partition']}"
+        if (not output.is_file() or output.is_symlink()
+                or hashlib.sha256(output.read_bytes()).hexdigest() != record.get("output_sha256")):
+            return f"partition {record['partition']} raw command output is missing or changed"
+    return None
+
+
+def own_plan_targets(root: Path, current: dict) -> list[str]:
+    """The automation targets of the Item's own Test Plan, in plan order."""
+    plan = str(item_record(root, current["delivery"], current["story"]).get("test_plan_path") or "")
+    return plan_automation_targets(delivery.docs_root(root), plan, f"{current['story']} of {current['delivery']}")
+
+
+def spot_run_selection(root: Path, path: Path, current: dict) -> list[str]:
+    """The own Test Plan targets QA's final test run runs itself at own_target_reuse spot_run, read as data.
+
+    The file lies in the verification scratch, binds the frozen candidate and
+    names at least one automation target of the Item's own Test Plan, each
+    once; no command receives it, so its ids are bound by value in the run's
+    identity.
+    """
+    path = path if path.is_absolute() else root / path
+    try:
+        relative = path.relative_to(session_path(root).parent).as_posix()
+    except ValueError as exc:
+        raise RuntimeError("spot-run selection must be a regular file inside verification scratch") from exc
+    if not path.is_file():
+        raise RuntimeError("spot-run selection must be a regular file inside verification scratch")
+    value = json.loads(raw_output_path(root, relative).read_text(encoding="utf-8"))
+    if (not isinstance(value, dict) or set(value) != {"schema_version", "candidate_hash", "spot_test_ids"}
+            or type(value.get("schema_version")) is not int or value["schema_version"] != 1
+            or value.get("candidate_hash") != current["candidate_hash"]):
+        raise RuntimeError("spot-run selection must bind this candidate and declare only schema_version,"
+                           " candidate_hash and spot_test_ids")
+    identifiers = value["spot_test_ids"]
+    if (not isinstance(identifiers, list) or not identifiers
+            or any(not literal_test_id(identifier) for identifier in identifiers)
+            or len(set(identifiers)) != len(identifiers)):
+        raise RuntimeError("spot_test_ids must name at least one unique literal test id, without option prefixes"
+                           " or control characters")
+    stray = sorted(set(identifiers) - set(own_plan_targets(root, current)))
+    if stray:
+        raise RuntimeError("spot_test_ids must be automation targets of the Item's own Test Plan; "
+                           + ", ".join(stray) + (" is" if len(stray) == 1 else " are") + " not")
+    return sorted(identifiers)
+
+
+def kept_own_targets(own: list[str], spot: list[str]) -> list[str]:
+    """The own targets the approved test command must run when QA spot-runs *spot*.
+
+    They are the spot-run targets and every own target that is, prefixes or
+    lies under one of them or under such a target in turn: a command that skips
+    a reused id by node id prefix would otherwise skip part of a target it
+    must run.
+    """
+    kept = set(spot)
+    grown = True
+    while grown:
+        grown = False
+        for target in own:
+            if target not in kept and overlaps(target, sorted(kept)):
+                kept.add(target)
+                grown = True
+    return sorted(kept)
 
 
 def pre_handoff_reuse(root: Path, session: dict, current: dict, environment: dict,
-                      *, fresh: bool = False) -> tuple[dict | None, str | None]:
-    """The earlier-story targets QA's final test run takes from the accepted pre-handoff run, or why it takes none.
+                      *, fresh: bool = False, spot: list[str] | None = None) -> tuple[dict | None, str | None]:
+    """The targets QA's final test run takes from the accepted pre-handoff run, or why it takes none.
 
     At pre_handoff_regression touched_suites the run the freeze accepted covers
     the targets of the earlier stories when it passed intact on the frozen
@@ -987,10 +1402,16 @@ def pre_handoff_reuse(root: Path, session: dict, current: dict, environment: dic
     candidate, in the declared environment of QA's run, and is as fresh as
     final evidence must be. The Item's own Test Plan targets stay QA's to run,
     with every earlier target that overlaps one, and a *fresh* run reuses
-    nothing. At any other value it returns (None, None).
+    nothing. With *spot*, the own targets QA names at own_target_reuse
+    spot_run, the run also covers every other own target, and only those
+    *spot* keeps with kept_own_targets stay QA's, with every target that
+    overlaps one. At any other value it returns (None, None), or with *spot*
+    why it reuses nothing.
     """
-    if pre_handoff_regression(root, current["delivery"]) != TOUCHED_SUITES:
-        return None, None
+    value = pre_handoff_regression(root, current["delivery"])
+    if value != TOUCHED_SUITES:
+        return None, (f"own targets are reused only from an accepted pre-handoff run, which"
+                      f" {PRE_HANDOFF_SWITCH} {value} never runs" if spot is not None else None)
     if fresh:
         return None, "run --fresh runs every suite itself"
     receipt = session.get("pre_handoff")
@@ -1011,14 +1432,20 @@ def pre_handoff_reuse(root: Path, session: dict, current: dict, environment: dic
     if {key: receipt.get(key) for key in ENVIRONMENT_FIELDS} != environment:
         return None, "the pre-handoff run's declared environment differs from this run's"
     own = derived["own_targets"]
+    kept = own if spot is None else kept_own_targets(own, spot)
     stories = [{"delivery": entry["delivery"], "story": entry["story"], "test_ids": test_ids}
                for entry in derived["earlier_stories"]
-               for test_ids in [sorted(test for test in set(entry["automation_targets"]) if not overlaps(test, own))]
+               for test_ids in [sorted(test for test in set(entry["automation_targets"]) if not overlaps(test, kept))]
                if test_ids]
-    test_ids = sorted({test for entry in stories for test in entry["test_ids"]})
+    reused_own = sorted(set(own) - set(kept))
+    test_ids = sorted({test for entry in stories for test in entry["test_ids"]} | set(reused_own))
     if not test_ids:
-        return None, "the pre-handoff run covered no earlier story's target beyond the Item's own"
-    return {"evidence_hash": receipt["evidence_hash"], "earlier_stories": stories, "test_ids": test_ids}, None
+        return None, ("the pre-handoff run covered no earlier story's target beyond the Item's own" if spot is None
+                      else "the pre-handoff run covered no target beyond the own targets QA's run keeps")
+    reuse = {"evidence_hash": receipt["evidence_hash"], "earlier_stories": stories, "test_ids": test_ids}
+    if reused_own:
+        reuse["own_targets"] = {"test_ids": reused_own, "spot_test_ids": sorted(spot)}
+    return reuse, None
 
 
 def overlaps(identifier: str, targets: list[str]) -> bool:
@@ -1026,7 +1453,7 @@ def overlaps(identifier: str, targets: list[str]) -> bool:
 
     A command that skips the reused ids by node id prefix, as pytest's
     --deselect does with no boundary, skips every target the id prefixes, so
-    an id that overlaps an own target is never reused.
+    an id that overlaps an own target the command must run is never reused.
     """
     return any(target.startswith(identifier) or identifier.startswith(target) for target in targets)
 
@@ -1038,17 +1465,30 @@ def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> 
     run, passed intact on the frozen tree, as fresh as final evidence must be
     now, of the approved command and in the declared environment of the final
     run, and the reused test ids are earlier story targets that run selected,
-    none that is, prefixes or lies under one of the Item's own.
+    none that is, prefixes or lies under one of the Item's own. A reuse of own
+    targets is valid only at own_target_reuse spot_run, with its spot-run
+    targets and its reused own targets disjoint automation targets of the
+    Item's own Test Plan, and no reused id overlaps a target kept_own_targets
+    keeps for the command instead.
     """
     reuse, receipt = identity["reused_pre_handoff"], session.get("pre_handoff")
     if (not isinstance(reuse, dict) or not isinstance(receipt, dict)
             or reuse.get("evidence_hash") != receipt.get("evidence_hash")):
         return "reuses a pre-handoff run the frozen session does not hold"
     stories, test_ids = reuse.get("earlier_stories"), reuse.get("test_ids")
-    if (not isinstance(stories, list) or not stories or not isinstance(test_ids, list) or not test_ids
+    own_reuse = reuse.get("own_targets")
+    if own_reuse is not None and (
+            not isinstance(own_reuse, dict) or set(own_reuse) != {"test_ids", "spot_test_ids"}
+            or any(not isinstance(own_reuse[key], list) or not own_reuse[key]
+                   or any(not isinstance(test, str) for test in own_reuse[key])
+                   or own_reuse[key] != sorted(set(own_reuse[key])) for key in own_reuse)):
+        return "names its reused own targets apart from its spot-run targets"
+    reused_own = own_reuse["test_ids"] if own_reuse is not None else []
+    if (not isinstance(stories, list) or (not stories and own_reuse is None)
+            or not isinstance(test_ids, list) or not test_ids
             or any(not isinstance(entry, dict) or not isinstance(entry.get("test_ids"), list) or not entry["test_ids"]
                    for entry in stories)
-            or test_ids != sorted({test for entry in stories for test in entry["test_ids"]})):
+            or test_ids != sorted({test for entry in stories for test in entry["test_ids"]} | set(reused_own))):
         return "names its reused test ids apart from their earlier stories"
     current = session["candidate"]
     if (receipt.get("exit_code") != 0 or receipt.get("candidate_intact") is not True
@@ -1062,9 +1502,20 @@ def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> 
         return "reuses a pre-handoff run of another command than the approved one"
     if not set(test_ids) <= set(receipt.get("affected_test_ids") or []):
         return "reuses test ids the pre-handoff run did not select"
-    plan = str(item_record(root, current["delivery"], current["story"]).get("test_plan_path") or "")
-    own = plan_automation_targets(delivery.docs_root(root), plan, f"{current['story']} of {current['delivery']}")
-    if any(overlaps(test, own) for test in test_ids):
+    own = own_plan_targets(root, current)
+    if own_reuse is not None:
+        value = own_target_reuse(root, current["delivery"])
+        if value != SPOT_RUN:
+            return (f"reuses the Item's own Test Plan targets, which only process switch {OWN_TARGET_SWITCH}"
+                    f" {SPOT_RUN} allows; {current['delivery']} runs it at {value}")
+        spot = own_reuse["spot_test_ids"]
+        if not set(spot) | set(reused_own) <= set(own) or set(spot) & set(reused_own):
+            return ("names spot-run targets or reused own targets that are no automation targets of the Item's own"
+                    " Test Plan, or one target as both")
+        if any(overlaps(test, kept_own_targets(own, spot)) for test in test_ids):
+            return ("reuses a test id that is, prefixes or lies under one of the Item's own Test Plan targets that"
+                    " QA's final test run spot-runs or keeps with them")
+    elif any(overlaps(test, own) for test in test_ids):
         return ("reuses a test id that is, prefixes or lies under one of the Item's own Test Plan targets,"
                 " which QA runs itself")
     if {key: receipt.get(key) for key in ENVIRONMENT_FIELDS} != {key: identity[key] for key in ENVIRONMENT_FIELDS}:
@@ -1089,7 +1540,7 @@ def require_raw_evidence(root: Path, session: dict, checks: dict) -> dict | None
     in a reader's shell is approved from any other.
     """
     kinds = {"full_test_suite": "test", "mutation_whole_changed_files": "mutation", "dependency_audit": "dependency_audit"}
-    contract = verification_contract(root)
+    contract, contract_body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
     shared: tuple[str, dict] | None = None
     for check in required_checks(root, session["candidate"], "qa_engineer"):
         if check not in kinds:
@@ -1103,12 +1554,25 @@ def require_raw_evidence(root: Path, session: dict, checks: dict) -> dict | None
         problem = environment_problem(identity, contract)
         if problem:
             raise RuntimeError(f"{check} evidence {problem}")
-        if (identity.get("kind") != kinds[check] or identity.get("command") != contract.get(kinds[check] + "_command")
+        partitions = (partition_declaration(root, session["candidate"]["delivery"], contract, contract_body)
+                      if check == "full_test_suite" else None)
+        approved = partitions["command"] if partitions is not None else contract.get(kinds[check] + "_command")
+        if (identity.get("kind") != kinds[check] or identity.get("command") != approved
                 or identity.get("workdir") != contract.get(kinds[check] + "_workdir", ".")
                 or identity.get("execution_isolation") != "private_clone_v1"):
             raise RuntimeError(f"{check} evidence does not run the approved command in its approved workdir")
         if not fresh_record(raw):
             raise RuntimeError(f"{check} evidence expired")
+        groups = (group_report_declaration(root, session["candidate"]["delivery"], contract)
+                  if check == "full_test_suite" else None)
+        if groups is not None:
+            problem = group_report_problem(raw, groups)
+            if problem:
+                raise RuntimeError(f"{check} evidence {problem}")
+        if partitions is not None:
+            problem = partition_problem(root, raw, partitions)
+            if problem:
+                raise RuntimeError(f"{check} evidence {problem}")
         if "reused_pre_handoff" in identity:
             problem = reuse_problem(root, session, identity, contract) if check == "full_test_suite" \
                 else "reuses a pre-handoff run, which only the full test suite does"
@@ -1509,8 +1973,10 @@ def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dic
                 raise RuntimeError("mutation evidence must cover every compiler-selected changed file")
         if role == "qa_engineer":
             test = checks["full_test_suite"]
-            contract, _ = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
-            if test.get("command") != contract.get("test_command") or test.get("exit_code") != 0:
+            contract, contract_body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+            partitions = partition_declaration(root, current["delivery"], contract, contract_body)
+            approved = partitions["command"] if partitions is not None else contract.get("test_command")
+            if test.get("command") != approved or test.get("exit_code") != 0:
                 raise RuntimeError("full suite evidence must identify the approved test command and successful exit")
             if not isinstance(test.get("environment"), str) or not test["environment"].strip():
                 raise RuntimeError("full suite evidence requires the verification environment identity")
@@ -2371,11 +2837,17 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
             selections = {path: (path.read_bytes(), source_file_generation(path)) for path in (selector, shared)}
         scratch = safe_runtime_path(root, Path(environment["AGENTROF_VERIFICATION_SCRATCH"]))
         scratch.mkdir(parents=True, exist_ok=True)
+        groups = group_report_declaration(root, delivery_id, contract)
+        if groups is not None:
+            clear_group_report(scratch, groups)
         started = time.monotonic()
         completed, intact, difference, dropped, ran = private_checkout_run(
             root, scratch, current["product_commit"], derived["workdir"], derived["command"], environment,
             isolate_search_paths=True, cloned=reading.close)
         duration = time.monotonic() - started
+        group_report = read_group_report(scratch, groups) if groups is not None else None
+        if group_report is not None and group_report["missing_test_groups"]:
+            intact = False
         selection_intact = None
         if selections:
             try:
@@ -2400,6 +2872,8 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
                 record["checkout_difference"] = difference
             if selection_intact is not None:
                 record["selection_intact"] = selection_intact
+            if group_report is not None:
+                record.update(group_report)
             record["evidence_hash"] = digest(record)
             atomic_file.replace_text(pre_handoff_record_path(root), json.dumps(
                 {"schema_version": 1, "runs": [*runs, record]}, indent=2, sort_keys=True) + "\n")
@@ -2427,6 +2901,8 @@ def accepted_pre_handoff(root: Path, delivery_id: str, story: str, current: dict
     if latest.get("exit_code") != 0 or latest.get("candidate_intact") is not True:
         changed = ("" if latest.get("candidate_intact") is True
                    else " and changed the selection it ran" if latest.get("selection_intact") is False
+                   else " and its group report lacks " + ", ".join(latest["missing_test_groups"])
+                   if latest.get("missing_test_groups")
                    else f" and changed its checkout ({latest['checkout_difference']})" if latest.get("checkout_difference")
                    else " and changed its checkout")
         raise RuntimeError(f"DELIVERY_PRE_HANDOFF_MISSING: the latest pre-handoff regression run on candidate tree"
@@ -2618,6 +3094,40 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str) -> 
     return result
 
 
+RUN_SUMMARY_FIELDS = ("exit_code", "candidate_intact", "selection_intact", "reused_pre_handoff", "duration_seconds",
+                      "completed_at", "evidence_hash", "environment_hash", "checkout_difference", "earlier_stories",
+                      "output_file")
+
+
+def run_summary(root: Path, record: dict) -> dict:
+    """One run's outcome without the identity and bindings that make the whole session large."""
+    fields = {**record.get("identity", {}), **record}
+    value = {key: fields[key] for key in RUN_SUMMARY_FIELDS if key in fields}
+    if "reused_pre_handoff" in value:
+        value["reused_pre_handoff"] = value["reused_pre_handoff"].get("evidence_hash")
+    if "output_file" in value:
+        value["output_path"] = str(raw_output_path(root, value["output_file"]))
+    return value
+
+
+def status_summary(root: Path, run: str | None = None) -> dict:
+    """The session's identity, readers and run outcomes; `run` narrows the runs to one kind."""
+    session = read_session(root)
+    runs = dict(session["raw_evidence"])
+    if "pre_handoff" in session:
+        runs["pre_handoff"] = session["pre_handoff"]
+    if run is not None:
+        if run not in runs:
+            raise RuntimeError(f"no {run} run is recorded in verification session {session['session_id']}")
+        runs = {run: runs[run]}
+    current = session["candidate"]
+    return {"session_id": session["session_id"], "delivery": current["delivery"], "story": current["story"],
+            "candidate_hash": current["candidate_hash"], "product_commit": current["product_commit"],
+            "workers": {role: worker["state"] for role, worker in session["workers"].items()},
+            "unresolved_findings": len(session.get("unresolved_findings", [])),
+            "metrics": session["metrics"], "runs": {kind: run_summary(root, record) for kind, record in runs.items()}}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", required=True)
@@ -2640,6 +3150,7 @@ def main(argv=None) -> int:
     run = subs.add_parser("run")
     run.add_argument("--kind", choices=("test", "mutation", "dependency_audit", "diagnostic_test"), required=True)
     run.add_argument("--selection-file", type=Path)
+    run.add_argument("--spot-run-file", type=Path)
     run.add_argument("--fresh", action="store_true")
     environment = subs.add_parser("environment")
     environment.add_argument("--verb", required=True, choices=("down", "up", "seed", "logs", "url"))
@@ -2659,7 +3170,9 @@ def main(argv=None) -> int:
     diff = subs.add_parser("diff")
     diff.add_argument("--path", action="append", default=[])
     subs.add_parser("resume-qa")
-    subs.add_parser("status")
+    status = subs.add_parser("status")
+    status.add_argument("--summary", action="store_true")
+    status.add_argument("--run", choices=("test", "mutation", "dependency_audit", "diagnostic_test", "pre_handoff"))
     wait = subs.add_parser("wait")
     wait.add_argument("--role", choices=ROLES)
     wait.add_argument("--seconds", type=float)
@@ -2695,9 +3208,12 @@ def main(argv=None) -> int:
         elif args.command == "wait":
             value = wait_for_release(root, args.role, args.seconds)
         elif args.command == "run":
-            value = run_check(root, args.kind, fresh=args.fresh, selection_file=args.selection_file)
+            value = run_check(root, args.kind, fresh=args.fresh, selection_file=args.selection_file,
+                              spot_file=args.spot_run_file)
         elif args.command == "manifest":
             value = manifest(root, args.delivery, args.story, args.role, args.mode)
+        elif args.summary or args.run:
+            value = status_summary(root, args.run)
         else:
             value = read_session(root)
         print(json.dumps({"ok": True, **value}, indent=2))

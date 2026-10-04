@@ -32,9 +32,14 @@ from backlog_fixture import make_approved_backlog  # noqa: E402
 from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 LIMITS = {"acceptance_criteria": 12, "test_scenarios": 20}
+SERIAL_ROWS = 100
 OWNER_GATES = "deliver/references/switch-owner_gates-two_fixed_gates.md"
 LANES = "deliver/references/switch-implementation_schedule-parallel_lanes_v1.md"
 PRE_HANDOFF = "deliver/references/switch-pre_handoff_regression-touched_suites.md"
+OWN_TARGETS = "deliver/references/switch-own_target_reuse-spot_run.md"
+GATE_FIRST = "qa-verification/references/switch-qa_gate_order-gate_first.md"
+GROUPS = "deliver/references/switch-test_group_report-refuse_missing_groups.md"
+ENGINES = "deliver/references/switch-test_engines-partitioned.md"
 BUNDLE = "execution_planning-single_source_bundle.md"
 REVIEW = ("challenge-review/references/switch-mechanical_pass_tier-mechanical.md",
           "challenge-review/references/switch-review_loop-blocking_delta.md",
@@ -43,7 +48,15 @@ PLANNING = ("execution-plan/references/switch-delivery_path-light_when_eligible.
             "execution-plan/references/switch-" + BUNDLE,
             "execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md")
 BOUNDED = "backlog-plan/references/switch-review_manifest_scope-bounded.md"
+# The backlog-plan switch references every backlog-plan task binds.
+BACKLOG = (BOUNDED,
+           "backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md",
+           "backlog-plan/references/switch-review_scope_record-both_scopes.md",
+           "backlog-plan/references/switch-remediation_writers-per_epic.md",
+           "backlog-plan/references/switch-root_review_scope-revision_delta.md",
+           "backlog-plan/references/switch-remediation_bookkeeping-compiler.md")
 SPLIT = "product-planning/references/switch-story_size_budget-propose_split.md"
+COST = "product-planning/references/switch-test_cost_budget-flag_serial_rows.md"
 # The switch references each shipped task binds, by entry and role. A task
 # binds a reference of a switch that owns one of its entry's flows, from a
 # skill it selects or, for owner_gates, from any skill.
@@ -56,24 +69,25 @@ EXPECTED = {
         ("organize-docs", "business-analyst"), ("requirement", "business-analyst"),
         ("setup", "delivery-coordinator"), ("sketch", "ux-designer"),
         ("solution-design", "domain-expert"), ("solution-design", "solution-architect"))},
-    "backlog-plan:product-owner": [BOUNDED, SPLIT],
-    "backlog-plan:backlog-reviewer": sorted([BOUNDED, SPLIT, *REVIEW]),
-    "backlog-plan:business-analyst": [BOUNDED],
-    "backlog-plan:qa-engineer": [BOUNDED],
+    "backlog-plan:product-owner": [*BACKLOG, SPLIT, COST],
+    "backlog-plan:backlog-reviewer": sorted([*BACKLOG, SPLIT, COST, *REVIEW]),
+    "backlog-plan:business-analyst": [*BACKLOG, COST],
+    "backlog-plan:qa-engineer": [*BACKLOG, COST],
     **{f"configure:{role}": ["configure/references/switch-" + BUNDLE, OWNER_GATES]
        for role in ("delivery-coordinator", "devops-engineer", "qa-engineer")},
-    **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF]
+    **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES]
        for role in ("backend-developer", "delivery-coordinator", "devops-engineer",
-                    "frontend-developer", "qa-engineer")},
+                    "frontend-developer")},
+    "deliver:qa-engineer": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GATE_FIRST, GROUPS, ENGINES],
     "deliver:code-reviewer": ["code-review/references/switch-code_review_panel-beside_official.md",
                               "code-review/references/switch-review_loop-blocking_delta.md",
-                              LANES, OWNER_GATES, PRE_HANDOFF],
-    "deliver:software-architect": [LANES, OWNER_GATES, PRE_HANDOFF,
+                              LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES],
+    "deliver:software-architect": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES,
                                    "software-architecture/references/switch-" + BUNDLE],
     "delivery-plan:delivery-coordinator": [
-        OWNER_GATES, "delivery-plan/references/switch-delivery_path-light_when_eligible.md"],
+        OWNER_GATES, "delivery-plan/references/switch-delivery_path-light_when_eligible.md", COST],
     "delivery-plan:product-owner": [
-        OWNER_GATES, "delivery-plan/references/switch-delivery_path-light_when_eligible.md", SPLIT],
+        OWNER_GATES, "delivery-plan/references/switch-delivery_path-light_when_eligible.md", SPLIT, COST],
     "design-system:design-system-reviewer": list(REVIEW[1:]),
     **{f"execution-plan:{role}": [OWNER_GATES, *PLANNING]
        for role in ("delivery-coordinator", "devops-engineer", "qa-engineer")},
@@ -81,6 +95,29 @@ EXPECTED = {
                                           "software-architecture/references/switch-" + BUNDLE],
     "solution-design:solution-reviewer": list(REVIEW),
 }
+# calculation_examples binds its reference to every task of the entries whose flows own it.
+CALCULATION = "requirements-analysis/references/switch-calculation_examples-required.md"
+# source_decision_gate binds its reference to the same tasks.
+ONE_GATE = "business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md"
+EXPECTED = {key: sorted([*value, CALCULATION, ONE_GATE])
+            if key.split(":")[0] in ("backlog-plan", "business-analysis") else value
+            for key, value in EXPECTED.items()}
+# dependent_rebind_gate binds its reference to every task of its owning flows' entries.
+REBIND_GATE = "business-analysis/references/switch-dependent_rebind_gate-with_source.md"
+EXPECTED = {key: sorted([*value, REBIND_GATE])
+            if key.split(":")[0] in ("business-analysis", "experience-design") else value
+            for key, value in EXPECTED.items()}
+# rebind_review_scope binds its reference to the tasks that select experience-modeling.
+SCOPED = "experience-modeling/references/switch-rebind_review_scope-source_delta.md"
+EXPECTED = {key: sorted([*value, SCOPED])
+            if key in ("experience-design:experience-reviewer", "experience-design:ux-designer")
+            else value for key, value in EXPECTED.items()}
+# reader_waves binds its reference to every task of the entries whose flows own it.
+WAVES = "challenge-review/references/switch-reader_waves-all_at_once.md"
+WAVE_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system",
+                "execution-plan", "solution-design")
+EXPECTED = {key: sorted([*value, WAVES]) if key.split(":")[0] in WAVE_ENTRIES else value
+            for key, value in EXPECTED.items()}
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")
 
@@ -112,6 +149,10 @@ class AllSwitchesOnTests(unittest.TestCase):
         for parameter, limit in LIMITS.items():
             self.policy("set", "--switch", "story_size_budget", "--parameter", parameter,
                         "--value", str(limit))
+        self.policy("set", "--switch", "root_review_scope", "--parameter",
+                    "max_delta_share_percent", "--value", "50")
+        self.policy("set", "--switch", "test_cost_budget", "--parameter", "serial_rows",
+                    "--value", str(SERIAL_ROWS))
         self.policy("approve")
         self.commit("Approve a Process Policy with every switch on")
 
@@ -162,13 +203,14 @@ class AllSwitchesOnTests(unittest.TestCase):
         result = json.loads(output)
         self.assertEqual((code, result["errors"]), (0, []), result)
         self.assertEqual(result["story_size"]["limits"], LIMITS)
+        self.assertEqual(result["test_cost"]["limits"], {"serial_rows": SERIAL_ROWS})
         manifest = backlog_review_inputs.manifest(self.docs, epic="EP-001")
         # The manifest names the panel and the bounded scope it was derived
         # under and carries the panel's compiler facts and the story measures.
         self.assertEqual((manifest["review_panels"], manifest["review_manifest_scope"]),
                          ("lens_panel", "bounded"))
         self.assertEqual(sorted(manifest["check"]), ["counts", "relation_audit", "review_note",
-                                                     "source_errors", "stories", "story_size"])
+                                                     "source_errors", "stories", "story_size", "test_cost"])
         self.assertEqual(backlog_review_inputs.manifest(
             self.docs, epic="EP-001", expected_hash=manifest["source_hash"]), manifest)
 

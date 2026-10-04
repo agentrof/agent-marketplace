@@ -2226,7 +2226,9 @@ class VaultHookShellContractTests(unittest.TestCase):
                     ))
 
     @unittest.skipIf(os.name == "nt", "POSIX Apple path topology")
-    def test_apple_launcher_requires_the_current_developer_runtime(self):
+    def test_apple_system_python_launcher_is_refused(self):
+        # Apple's fixed launcher runs whatever python3 xcrun selects; it stays
+        # guard-only even when that selection is the hook's own interpreter.
         root = Path("/tmp/project")
         runtime = Path("/Library/Developer/CommandLineTools/usr/bin/python3")
         completed = subprocess.CompletedProcess(
@@ -2234,58 +2236,17 @@ class VaultHookShellContractTests(unittest.TestCase):
         )
         with mock.patch.object(self.hook.sys, "platform", "darwin"), \
                 mock.patch.object(self.hook.sys, "executable", str(runtime)), \
-                mock.patch.object(self.hook.sys, "_base_executable", str(runtime), create=True), \
-                mock.patch.object(self.hook.Path, "stat", return_value=SimpleNamespace(
+                mock.patch.object(
+                    self.hook.sys, "_base_executable", str(runtime), create=True,
+                ), mock.patch.object(self.hook.Path, "stat", return_value=SimpleNamespace(
                     st_uid=0, st_mode=0o100755,
-                )), mock.patch.object(self.hook.subprocess, "run", return_value=completed), \
-                mock.patch.dict(self.hook.os.environ, {}, clear=True):
-            for launcher in (
-                Path("/usr/bin/python3"),
-                Path("/Library/Developer/CommandLineTools/usr/bin/python3"),
-            ):
-                self.assertTrue(
-                    self.hook._apple_python_launcher_matches(launcher, root)
-                )
-            with mock.patch.dict(self.hook.os.environ, {
-                "DEVELOPER_DIR": "/tmp/fake-developer",
-            }):
-                self.assertFalse(
-                    self.hook._apple_python_launcher_matches(
-                        Path("/usr/bin/python3"), root,
-                    )
-                )
-
-    @unittest.skipIf(os.name == "nt", "POSIX Apple path topology")
-    def test_apple_launcher_accepts_xcrun_alias_of_framework_runtime(self):
-        with tempfile.TemporaryDirectory() as runtime_temporary, \
-                tempfile.TemporaryDirectory() as project_temporary:
-            runtime = Path(runtime_temporary) / "python3.9"
-            runtime.write_bytes(b"runtime")
-            selected = Path(runtime_temporary) / "python3"
-            try:
-                selected.symlink_to(runtime)
-            except OSError as exc:
-                self.skipTest(f"symlinks unavailable: {exc}")
-            completed = subprocess.CompletedProcess(
-                ["/usr/bin/xcrun"], 0, str(selected) + "\n", "",
+                )), mock.patch.object(
+                    self.hook.subprocess, "run", return_value=completed,
+                ) as run, mock.patch.dict(self.hook.os.environ, {}, clear=True):
+            self.assertFalse(
+                self.hook.trusted_python_command("/usr/bin/python3", root)
             )
-            with mock.patch.object(self.hook.sys, "platform", "darwin"), \
-                    mock.patch.object(self.hook.sys, "executable", str(runtime)), \
-                    mock.patch.object(
-                        self.hook.sys, "_base_executable", str(runtime), create=True,
-                    ), mock.patch.object(
-                        self.hook, "_apple_developer_root",
-                        return_value=Path("/Library/Developer/CommandLineTools"),
-                    ), mock.patch.object(
-                        self.hook.Path, "stat", return_value=SimpleNamespace(
-                            st_uid=0, st_mode=0o100755,
-                        ),
-                    ), mock.patch.object(
-                        self.hook.subprocess, "run", return_value=completed,
-                    ), mock.patch.dict(self.hook.os.environ, {}, clear=True):
-                self.assertTrue(self.hook._apple_python_launcher_matches(
-                    Path("/usr/bin/python3"), Path(project_temporary),
-                ))
+            run.assert_not_called()
 
     def homebrew_prefix(self, root: Path, minor: str) -> Path:
         """Lay out Homebrew's keg, opt link and bin links under root/prefix."""
@@ -2345,66 +2306,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                     mock.patch.object(self.hook.sys, "executable", outside), \
                     mock.patch.object(self.hook.sys, "_base_executable", outside, create=True):
                 self.assertFalse(matches(prefix / "bin" / f"python{minor}"))
-
-    @unittest.skipUnless(sys.platform == "darwin", "Apple launcher topology")
-    def test_system_macos_python3_launcher_is_accepted(self):
-        if shutil.which("python3") != "/usr/bin/python3":
-            if os.environ.get("AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3") == "1":
-                self.fail("CI did not place the Apple python3 launcher first")
-            self.skipTest("python3 is not the Apple system launcher")
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            docs, config = self.project(root)
-            (docs / "experience-design").mkdir()
-            self.assertTrue(
-                self.hook.trusted_python_command("/usr/bin/python3", root)
-            )
-            guard = (
-                ROOT / "dist" / "claude" / "software-engineering-team"
-                / "scripts" / "team_guard.py"
-            )
-            marker = subprocess.run(
-                ["/usr/bin/python3", str(guard), "register"],
-                stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                check=False,
-            )
-            self.assertEqual(marker.returncode, 0, marker.stdout + marker.stderr)
-            context = json.loads(marker.stdout)["hookSpecificOutput"][
-                "additionalContext"
-            ]
-            announced = next(
-                line.split(": ", 1)[1] for line in context.splitlines()
-                if line.startswith("AGENT_MARKETPLACE_PYTHON: ")
-            )
-            self.assertTrue(self.hook.trusted_python_command(announced, root))
-            self.assertTrue(self.hook.sanctioned_application_writer(
-                self.payload(
-                    root, self.application_command(
-                        docs, interpreter="/usr/bin/python3",
-                    ),
-                ),
-                docs,
-            ))
-            command = self.config_command(
-                config, interpreter="/usr/bin/python3",
-            )
-            payload = self.payload(root, command)
-            before = self.run_hook("pre", payload)
-            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
-            mutation = subprocess.run(
-                self.command_tokens(payload), cwd=root,
-                capture_output=True, text=True,
-                check=False,
-            )
-            self.assertEqual(
-                mutation.returncode, 0, mutation.stdout + mutation.stderr,
-            )
-            after = self.run_hook("post", payload)
-            self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
-            self.assertEqual(
-                json.loads(config.read_text(encoding="utf-8"))["output_language"],
-                "Turkish",
-            )
 
     def test_all_writer_consumers_accept_cmd_alias(self):
         with tempfile.TemporaryDirectory() as temporary:

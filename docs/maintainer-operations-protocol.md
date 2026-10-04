@@ -252,18 +252,21 @@ approval unless scope becomes ambiguous or a gate fails:
    ```
 
    `bump` needs a clean worktree. It consumes every pending changeset,
-   applies the highest impact of each component to `versions.json` and every
-   version surface, appends the `CHANGELOG.md` section, writes
-   `.release/stable.json`, regenerates `dist/` and commits
-   `chore: release vX.Y.Z`. When every selected PR already merged, the
-   release commit goes alone on a branch from `main`. Push it.
+   names the release `YYYY.M.N` by the calendar (see
+   [Calendar versions](#calendar-versions)), sets `versions.json` and every
+   version surface to that one version, appends the `## YYYY.M.N` section of
+   `CHANGELOG.md`, writes `.release/stable.json`, regenerates `dist/` and
+   commits `chore: release vYYYY.M.N`, dated at the instant it named the
+   version. When every selected PR already merged, the release commit goes
+   alone on a branch from `main`. Push it.
 3. Wait for every check on that PR's exact head; its run tests the final
    release tree. `check-pr` accepts release-owned changes only as the release
    commit: the PR's last commit, with one parent that contains the base, whose
-   complete tree equals `bump` replayed on that parent in a disposable clone
-   that ignores ambient Git configuration, attributes, excludes, replacement
-   refs and graph overlays. The commits before it keep the normal changeset
-   rules. Merge the PR when green; the merge starts the release.
+   complete tree equals `bump` replayed on that parent at the release commit's
+   own committer date, in a disposable clone that ignores ambient Git
+   configuration, attributes, excludes, replacement refs and graph overlays.
+   The commits before it keep the normal changeset rules. Merge the PR when
+   green; the merge starts the release.
 4. On the merge's push the `Auto release` workflow finds that `versions.json`
    names a version no release tag holds yet and dispatches the `Release`
    workflow for that merge commit. Every other push to `main` starts
@@ -271,30 +274,34 @@ approval unless scope becomes ambiguous or a gate fails:
    resumes a failed or interrupted run:
 
    ```console
-   python3 tools/release.py ship --version X.Y.Z
+   python3 tools/release.py ship --version YYYY.M.N
    ```
 
    It dispatches the `Release` workflow on `main` and follows it to the
    immutable Release; `--sha <commit>` selects a `main` commit other than the
    dispatched head. The read-only verify job requires that the commit is on
-   `main`, that every version surface names X.Y.Z, that no changeset is
+   `main`, that every version surface names YYYY.M.N, that no changeset is
    pending, that the release metadata matches the sources, that
-   `CHANGELOG.md` has the X.Y.Z section, that X.Y.Z is newer than every
+   `CHANGELOG.md` has the YYYY.M.N section, that YYYY.M.N is newer than every
    release tag and that `stable` holds the previous release or this commit.
-   It then waits, at most 20 minutes, for `main`'s own `validate` push run of
-   that exact commit and requires its success; it never runs the tests
-   again. The stage job pushes the annotated `vX.Y.Z` tag and moves `stable`
-   in one atomic push with exact leases. The public smoke installs both hosts
-   from the real public `stable` channel. The finalize job creates the GitHub
-   Release with the `CHANGELOG.md` section as its notes and requires GitHub
+   The previous release is the newest older tag. With no release tag at all
+   it is the commit `stable` points to, which must be an ancestor of this
+   commit and name an older version; only a repository without `stable`
+   takes the first release path. It then waits, at most 20 minutes, for
+   `main`'s own `validate` push run of that exact commit and requires its
+   success; it never runs the tests again. The stage job pushes the annotated
+   `vYYYY.M.N` tag and moves `stable` in one atomic push with exact leases.
+   The public smoke installs both hosts from the real public `stable`
+   channel. The finalize job creates the GitHub Release with the
+   `CHANGELOG.md` section as its notes and requires GitHub
    to report it immutable. A smoke failure rolls both refs back atomically
    before any Release exists, and running `ship` again resumes a failed or
    interrupted run. Only code of the dispatched `main` head runs with write
    credentials, and a push to `stable` or a tag starts no workflow.
 5. Verify the GitHub Release is published, not a draft or prerelease,
    immutable and titled with its tag alone:
-   `gh release view vX.Y.Z --json name,isDraft,isPrerelease,isImmutable`
-   must report the `name` `vX.Y.Z`, `isDraft` and `isPrerelease` false and
+   `gh release view vYYYY.M.N --json name,isDraft,isPrerelease,isImmutable`
+   must report the `name` `vYYYY.M.N`, `isDraft` and `isPrerelease` false and
    `isImmutable` true. Publication refuses to adopt a Release with any other
    title. Require the tag and `origin/stable` to resolve to the same commit,
    and require that commit to be an ancestor of `origin/main`. Audit issue
@@ -309,7 +316,7 @@ approval unless scope becomes ambiguous or a gate fails:
    `codex/` for Codex:
 
    ```console
-   python3 tools/release.py finalize-local --version X.Y.Z \
+   python3 tools/release.py finalize-local --version YYYY.M.N \
      --branch claude/issue-123-summary --branch codex/issue-124-summary --apply
    ```
 
@@ -336,6 +343,39 @@ moves under it, drop it with `git reset --hard HEAD~1`, fix or rebase, and run
 other work after the release commit: release that merge commit with `--sha`,
 or make a new release commit. When `main`'s validation of the commit failed
 or was cancelled, rerun it with `gh run rerun <run-id>` and run `ship` again.
+A release with no older release tag, the first one after every tag was
+deleted, cannot resume through `ship` once its stage job moved `stable`: only
+that run's verify output still names the commit a rollback restores, so
+re-run the run's failed jobs with `gh run rerun <run-id> --failed`.
+
+## Calendar versions
+
+A stable release is named `YYYY.M.N`: the full year and the month, without a
+leading zero, of the UTC date on which `bump` made its release commit, and the
+release's number within that month, from 1. The first release of October 2026
+is `v2026.10.1`, the next `v2026.10.2` and the first of November
+`v2026.11.1`. The name stays a strict SemVer `X.Y.Z`, so every tool parses and
+orders it as before. The marketplace, every plugin and every version surface
+carry the same version.
+
+`bump` reads the latest release from `versions.json`. In the same year and
+month it counts on, `2026.10.2` after `2026.10.1`; in any later month it
+starts at 1, `2026.11.1` after `2026.10.2` and `2027.1.1` after `2026.12.4`,
+and so does a version of the earlier numbering, such as `0.0.3`. A latest
+release of a later month than the clock means a wrong clock, and `bump`
+refuses it. Changeset impacts no longer choose the number: a release still
+needs a changeset that declares one, `.release/stable.json` records the
+highest impact of each component, and the `CHANGELOG.md` section lists every
+summary.
+
+The release commit is dated at the instant `bump` named its version, and
+`check-pr` replays `bump` at that committer date, never at the time it runs. A
+release commit is therefore valid for the month it was made in. When its pull
+request merges in a later month, the release keeps that month's name: a commit
+made on 31 October and merged on 1 November releases `v2026.10.N`, and the next
+`bump` starts November at `v2026.11.1`. To name the new month instead, drop
+the release commit and run `bump` again. `check-pr` refuses a release commit
+dated in a month that has not begun, which only a clock running ahead makes.
 
 ## One-time release reset
 

@@ -160,9 +160,18 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
                 docs=str(self.docs), delivery_snapshot="", planning_mode="manual",
                 requirement_ref="", input_ref=["ba", "solution", "design", "application"],
             ))
-            record, errors = compiler.collect(self.docs)
+            record, errors = compiler.collect(self.docs, review_inputs=True)
+            _record, strict_errors = compiler.collect(self.docs)
+            check_output = io.StringIO()
+            with contextlib.redirect_stdout(check_output):
+                check_code = compiler.main(["check", "--docs", str(self.docs), "--json"])
+            approval_code, approval_output = self.approve()
         self.assertEqual(code, 0, output.getvalue())
         self.assertEqual(errors, [])
+        self.assertTrue(any("needs section-specific" in error for error in strict_errors), strict_errors)
+        self.assertEqual(check_code, 1, check_output.getvalue())
+        self.assertIn("needs section-specific", check_output.getvalue())
+        self.assertEqual(approval_code, 1, approval_output)
         new_review = self.docs / "backlog/reviews/round-2-backlog-review.md"
         review_props, review_body = compiler.parse_front_matter(new_review)
         self.assertEqual(review_props["title"], "Backlog review round 2 for Product Backlog")
@@ -172,11 +181,16 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
         self.assertNotIn("verdict", review_props)
         for key in ("approved_at_utc", "source_hash"):
             self.assertNotIn(key, review_props)
-        self.assertIn("Approval remains pending", compiler.section(review_body, "Verdict"))
+        self.assertIn("TODO: cite the exact reviewed vault note", compiler.section(review_body, "Verdict"))
         self.assertNotEqual(compiler.section(review_body, "Verdict"), compiler.section(body, "Verdict"))
-        self.assertEqual(compiler.section(review_body, "Deferred Criteria"), compiler.section(body, "Deferred Criteria"))
+        self.assertEqual(compiler.raw_section(review_body, "Deferred Criteria").strip(),
+                         compiler.raw_section(body, "Deferred Criteria").strip())
         self.assertIn(deferred_row, review_body)
-        self.assertEqual(compiler.section(review_body, "Requirement Coverage"), compiler.section(body, "Requirement Coverage"))
+        self.assertNotIn("Requirement Coverage", compiler.headings(review_body))
+        self.assertNotIn("is supported by the cited inputs", review_body)
+        self.assertIn("[[backlog/reviews/round-1-backlog-review", review_body)
+        for key in ("derives_from", "related_to", "dependency_refs"):
+            self.assertEqual(review_props[key], props[key])
         self.assertIn("latest cross-epic backlog review verdict is not approved", compiler.approval_readiness_findings(record))
         for path, content in original.items():
             if path != self.root:

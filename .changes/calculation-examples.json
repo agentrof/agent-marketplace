@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch `calculation_examples` (`off` | `required`), at its default today's behaviour: at `required`, every business rule that derives a number from inputs or configurable parameters carries its formula in its statement or an AC with a worked example (inputs, parameters, expected output and the output after one parameter change), the analysis challenger reports a missing or inconsistent one as a major finding, and a backlog test plan takes its expected value from that formula or example and never invents one, as `requirements-analysis/references/switch-calculation_examples-required.md` defines for every Business Analysis and Backlog Planning task. In one measured project a scoring rule with no computable expected value cost an analysis round trip of about 63 minutes during a backlog revision.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

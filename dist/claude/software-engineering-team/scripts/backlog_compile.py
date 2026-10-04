@@ -144,6 +144,17 @@ STORY_SIZE_SWITCH = "story_size_budget"
 STORY_SIZE_VALUE = "propose_split"
 STORY_SIZE_MEASURES_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
                             / "product-planning" / "data" / "story-size-measures.json")
+# A Test Plan scenario may state how many table rows its automation target runs
+# and how they are split; at test_cost_budget flag_serial_rows the compiler lists
+# each automation-required scenario that runs more rows serially than the owner's limit.
+TEST_COST_SWITCH = "test_cost_budget"
+TEST_COST_VALUE = "flag_serial_rows"
+SERIAL_ROWS = "serial_rows"
+# The registry reads the parameter's id here, so every package that ships this compiler ships the file.
+TEST_COST_LIMITS_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
+                         / "product-planning" / "data" / "test-cost-limits.json")
+ROW_SPLITS = ("serial", "sharded", "grouped")
+ROWS_RE = re.compile(r"^[1-9][0-9]*$")
 SIZE_EXCEPTIONS = "Size Exceptions"
 SIZE_EXCEPTION_COLUMNS = ("story", "measure", "reason")
 CHECKLIST_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\](?:\s|$)")
@@ -488,7 +499,7 @@ def validate_upstream_ref(docs: Path, value: str, label: str,
         errors.append(f"{label} targets the wrong vault subtree: {target}")
         return parsed
     status, type_name = planning_source_status_and_type(docs, target, label, errors)
-    if status != "approved":
+    if status != "approved" and not historical_source_approval(docs, target, label, status):
         errors.append(f"{label} target is not approved: {target}")
     if allowed_types and type_name not in allowed_types:
         errors.append(f"{label} targets unsupported type {type_name}: {target}")
@@ -1427,6 +1438,254 @@ def review_loop_record(docs: Path, body: str, path: str, props: dict) -> list[st
     return review_record_findings(docs, body, path, approved=approved)
 
 
+# Switch remediation_bookkeeping at compiler lets one compiler command write
+# the rechecks' closure rows into each review note, compute the expected
+# manifest hashes and write the preservation report after a remediation pass.
+BOOKKEEPING, COMPILER_BOOKKEEPING = "remediation_bookkeeping", "compiler"
+RECHECK_CLOSURES = "Recheck Closures"
+RECHECK_COLUMNS = ("finding", "reader", "result", "manifest_hash", "evidence")
+RECHECK_RESULTS = ("closed", "open")
+RECHECK_READER_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+MANIFEST_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def bookkeeping_value(docs: Path) -> str:
+    """The remediation_bookkeeping value of the project's approved Process Policy."""
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    return values[BOOKKEEPING]["value"]
+
+
+def recheck_rows(docs: Path, body: str, path: str) -> tuple[list[dict[str, str]], list[str]]:
+    """Read and validate a review note's Recheck Closures table."""
+    rows, errors = structured_table(section(body, RECHECK_CLOSURES), RECHECK_COLUMNS, path,
+                                    RECHECK_CLOSURES)
+    returned = (returned_findings(docs, body, path)[0]
+                if RETURNED_FINDINGS in headings(body) else None)
+    seen: set[tuple[str, str]] = set()
+    for number, row in enumerate(rows, 1):
+        label = f"{path} recheck closure {number}"
+        identifier, reader = row["finding"], row["reader"]
+        if not FINDING_ID_RE.fullmatch(identifier):
+            errors.append(f"{label} finding must be an id such as F-3: {identifier or '(missing)'}")
+        elif returned is not None and identifier not in returned:
+            errors.append(f"{label} closes {identifier}, which Returned Findings does not list")
+        if not RECHECK_READER_RE.fullmatch(reader):
+            errors.append(f"{label} reader must be a lens or role id: {reader or '(missing)'}")
+        if (identifier, reader) in seen:
+            errors.append(f"{path} records the recheck of {identifier} by {reader} twice")
+        seen.add((identifier, reader))
+        if row["result"] not in RECHECK_RESULTS:
+            errors.append(f"{label} result must be closed or open")
+        if not MANIFEST_HASH_RE.fullmatch(row["manifest_hash"]):
+            errors.append(f"{label} manifest_hash must be the sha256 of the manifest the reader read")
+        cited_statement(docs, row["evidence"], label, "evidence", errors)
+    return rows, errors
+
+
+def recheck_closure_record(docs: Path, body: str, path: str, props: dict) -> list[str]:
+    """Validate a review note's Recheck Closures when the compiler writes them.
+
+    A note without the section never reads the Process Policy, and an approved
+    note keeps what it was approved with. At any value but compiler a section
+    of that name is authored text.
+    """
+    if RECHECK_CLOSURES not in headings(body) or props.get("status") == "approved":
+        return []
+    try:
+        value = session_read(("remediation_bookkeeping", docs.resolve()),
+                             lambda: bookkeeping_value(docs))
+    except ValueError as exc:
+        return [f"{path} needs the remediation_bookkeeping value of the Process Policy: {exc}"]
+    if value != COMPILER_BOOKKEEPING:
+        return []
+    return recheck_rows(docs, body, path)[1]
+
+
+def table_cell(value: str) -> str:
+    """Escape a wikilink alias for a table cell; any other pipe or a line break is refused."""
+    escaped = re.sub(r"\[\[([^\[\]\n]+?)\]\]",
+                     lambda match: "[[" + re.sub(r"(?<!\\)\|", r"\\|", match.group(1)) + "]]",
+                     value.strip())
+    outside = re.sub(r"\[\[[^\[\]\n]+?\]\]", "", escaped)
+    if "\n" in value or re.search(r"(?<!\\)\|", outside):
+        raise ValueError(f"a closure cell holds a line break or a table pipe: {value!r}")
+    return escaped
+
+
+def with_recheck_section(body: str, rows: list[dict[str, str]]) -> str:
+    """Return a review body whose Recheck Closures section holds exactly ``rows``.
+
+    An existing section is replaced in place; a new one goes before Accepted
+    Minor Findings, or else before Verdict.
+    """
+    table = ["| " + " | ".join(RECHECK_COLUMNS) + " |",
+             "|" + "---|" * len(RECHECK_COLUMNS),
+             *("| " + " | ".join(row[column] for column in RECHECK_COLUMNS) + " |"
+               for row in rows)]
+    block = f"## {RECHECK_CLOSURES}\n\n" + "\n".join(table) + "\n\n"
+    existing = re.search(rf"^##\s+{re.escape(RECHECK_CLOSURES)}\s*$", body, flags=re.MULTILINE)
+    if existing:
+        following = re.search(r"^##\s+", body[existing.end():], flags=re.MULTILINE)
+        end = existing.end() + following.start() if following else len(body)
+        return body[:existing.start()] + block + body[end:]
+    for title in (ACCEPTED_MINOR_FINDINGS, "Verdict"):
+        anchor = re.search(rf"^##\s+{re.escape(title)}\s*$", body, flags=re.MULTILINE)
+        if anchor:
+            return body[:anchor.start()] + block + body[anchor.start():]
+    raise ValueError("review note has no Verdict section to place Recheck Closures before")
+
+
+def backlog_preservation(project: Path, docs: Path, candidate: str) -> dict:
+    """Compare the backlog's working files with the pinned candidate commit.
+
+    Every backlog file is changed, added, removed or preserved byte for byte;
+    a changed or removed review note that the candidate holds approved is a
+    violation, since an approved review is immutable.
+    """
+    prefix = (docs / "backlog").relative_to(project).as_posix()
+    committed = committed_approval_sources(project, docs, candidate)
+    before = {path.relative_to(docs).as_posix(): content for path, content in committed.items()
+              if "_generated" not in path.relative_to(docs).parts}
+    after = {path.relative_to(docs).as_posix(): path.read_bytes()
+             for path in sorted((docs / "backlog").rglob("*"))
+             if path.is_file() and "_generated" not in path.relative_to(docs).parts}
+    changed = sorted(path for path in set(before) & set(after) if before[path] != after[path])
+    violations = []
+    for path in changed + sorted(set(before) - set(after)):
+        if not path.endswith(".md"):
+            continue
+        props, _body = parse_front_matter_text(before[path].decode("utf-8"))
+        if props.get("type") in {"epic-review", "backlog-review"} and props.get("status") == "approved":
+            violations.append(f"{path} is an approved review the candidate holds; it is immutable")
+    return {"prefix": prefix, "changed": changed, "added": sorted(set(after) - set(before)),
+            "removed": sorted(set(before) - set(after)),
+            "preserved": len([path for path in before if path in after and before[path] == after[path]]),
+            "violations": violations}
+
+
+def record_rechecks(args) -> int:
+    """Write the rechecks' closure rows, the expected hashes and the preservation report.
+
+    One deterministic step after a remediation pass, at remediation_bookkeeping
+    compiler. ``--verify`` writes nothing and checks that the review notes and
+    the report still equal what the command would write.
+    """
+    import atomic_file
+    import backlog_review_inputs
+
+    docs = docs_root(args.docs)
+
+    def fail(errors: list[str]) -> int:
+        print(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False,
+                         sort_keys=True))
+        return 1
+
+    try:
+        if bookkeeping_value(docs) != COMPILER_BOOKKEEPING:
+            return fail([f"record-rechecks runs at switch {BOOKKEEPING} {COMPILER_BOOKKEEPING}"])
+    except ValueError as exc:
+        return fail([f"process policy cannot set {BOOKKEEPING}: {exc}"])
+    project = history_project(docs)
+    report_path = Path(args.report).resolve()
+    if project is None:
+        return fail(["record-rechecks needs the project's Git checkout for the candidate"])
+    if docs.resolve() in report_path.parents:
+        return fail(["the report is runtime data; write it outside the docs vault"])
+    resolved = subprocess.run(["git", "--no-replace-objects", "rev-parse", "--verify",
+                               args.candidate + "^{commit}"], cwd=project, capture_output=True,
+                              text=True, check=False)
+    if args.candidate.startswith("-") or resolved.returncode:
+        return fail([f"candidate does not resolve to a commit: {args.candidate}"])
+    candidate = resolved.stdout.strip()
+    try:
+        raw = Path(args.closures).read_bytes()
+        listed = json.loads(raw.decode("utf-8")).get("closures")
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError) as exc:
+        return fail([f"closures cannot be read: {exc}"])
+    if not isinstance(listed, list) or not listed or not all(
+            isinstance(item, dict) and set(item) == {"review", *RECHECK_COLUMNS}
+            and all(isinstance(value, str) for value in item.values()) for item in listed):
+        return fail(["closures must list each row's review, " + ", ".join(RECHECK_COLUMNS)])
+    record, _errors = collect(docs, review_inputs=True)
+    scopes = {latest(item["reviews"])["path"]: item["id"] for item in record["epics"]
+              if item["reviews"]}
+    if record["backlog_reviews"]:
+        scopes[latest(record["backlog_reviews"])["path"]] = "root"
+    grouped: dict[str, list[dict[str, str]]] = {}
+    errors = []
+    for item in listed:
+        if item["review"] not in scopes:
+            errors.append(f"{item['review']} is not the current review note of an epic or the root")
+            continue
+        try:
+            row = {column: table_cell(item[column]) for column in RECHECK_COLUMNS}
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
+        grouped.setdefault(item["review"], []).append(row)
+    if errors:
+        return fail(errors)
+    written = {}
+    for path, rows in sorted(grouped.items()):
+        note = docs / path
+        original = note.read_bytes()
+        props, body = parse_front_matter_text(original.decode("utf-8"))
+        if props.get("status") == "approved":
+            errors.append(f"{path} is approved; an approved review is immutable")
+            continue
+        try:
+            text = front_matter(props, with_recheck_section(body, rows))
+        except ValueError as exc:
+            errors.append(f"{path}: {exc}")
+            continue
+        errors.extend(recheck_rows(docs, with_recheck_section(body, rows), path)[1])
+        written[path] = (note, original, text.encode("utf-8"))
+    if errors:
+        return fail(errors)
+    for path, (note, original, content) in sorted(written.items()):
+        if args.verify:
+            if original != content:
+                errors.append(f"{path} Recheck Closures differ from the closures")
+            continue
+        if original != content:
+            atomic_file.replace_bytes(note, content)
+    hashes = {}
+    for path in sorted(grouped):
+        scope = scopes[path]
+        try:
+            hashes[scope] = backlog_review_inputs.manifest(
+                docs, epic=None if scope == "root" else scope)["source_hash"]
+        except (backlog_review_inputs.InputError, OSError, ValueError, RuntimeError) as exc:
+            hashes[scope] = f"error: {exc}"
+            errors.append(f"{scope} manifest cannot be derived: {exc}")
+    report = {"schema_version": 1, "candidate": candidate,
+              "closures_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+              "reviews": {path: "sha256:" + hashlib.sha256((docs / path).read_bytes()).hexdigest()
+                          for path in sorted(grouped)},
+              "expected_hashes": dict(sorted(hashes.items())),
+              "preservation": backlog_preservation(project, docs, candidate)}
+    errors.extend(report["preservation"]["violations"])
+    if args.verify:
+        try:
+            stored = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            stored = None
+            errors.append(f"report cannot be read: {exc}")
+        if stored is not None and stored != report:
+            errors.append("report is stale: " + ", ".join(
+                sorted(key for key in set(report) | set(stored)
+                       if report.get(key) != stored.get(key))))
+    else:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_file.replace_bytes(report_path, (json.dumps(
+            report, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8"))
+    print(json.dumps({"ok": not errors, "errors": errors, "report": report}, indent=2,
+                     ensure_ascii=False, sort_keys=True))
+    return 0 if not errors else 1
+
+
 def acceptance_checklist_lines(story: dict) -> int:
     """Count the checklist criteria of the Acceptance section, outside code blocks.
 
@@ -1529,6 +1788,48 @@ def story_size_budget(docs: Path) -> dict | None:
     if budget is None or budget["value"] != STORY_SIZE_VALUE:
         return None
     return {"value": budget["value"], "limits": dict(sorted(budget.get("parameters", {}).items()))}
+
+
+def test_cost_budget(docs: Path) -> dict | None:
+    """Return the serial-row limit in force, or None while test_cost_budget is off.
+
+    Without a Process Policy, or at the switch's default, nothing is read. A
+    draft or invalid policy raises ValueError: it is refused, never read.
+    """
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    budget = values.get(TEST_COST_SWITCH)
+    if budget is None or budget["value"] != TEST_COST_VALUE:
+        return None
+    return {"value": budget["value"], "limits": dict(sorted(budget.get("parameters", {}).items()))}
+
+
+def serial_row_scenarios(stories: list[dict], limit: int | None) -> list[dict]:
+    """List each automation-required scenario that runs more than *limit* rows serially.
+
+    A scenario runs them serially when its row_split is serial or absent. A
+    scenario without a valid rows count, one at or below the limit, or one
+    whose rows are sharded or grouped is never listed; without a limit none is.
+    """
+    flagged = []
+    for story in sorted(stories, key=lambda item: item["id"]):
+        for scenario_id, block in scenario_blocks(story["test_body"]):
+            fields, _duplicates = scenario_fields(block)
+            rows, split = fields.get("rows", ""), fields.get("row_split")
+            if (limit is None or fields.get("automation", "").lower() != "required"
+                    or not ROWS_RE.fullmatch(rows) or int(rows) <= limit or split not in (None, "serial")):
+                continue
+            flagged.append({"story": story["id"], "scenario": scenario_id,
+                            "automation_target": fields.get("automation_target", "").strip(),
+                            "rows": int(rows), "row_split": split})
+    return flagged
+
+
+def test_cost_block(budget: dict, stories: list[dict]) -> dict:
+    """The serial-row flags of *stories*, as check, review manifests and Delivery proposals show them."""
+    return {"switch": TEST_COST_SWITCH, "value": budget["value"], "limits": budget["limits"],
+            "serial_row_scenarios": serial_row_scenarios(stories, budget["limits"].get(SERIAL_ROWS))}
 
 
 def size_exception_rows(docs: Path, epic: dict, review: dict) -> tuple[set[tuple[str, str]],
@@ -1852,6 +2153,10 @@ def scenario_findings(docs: Path, body: str, story_id: str,
             errors.append(f"{path} scenario {scenario_id} has invalid automation value")
         if automation == "required" and not fields.get("automation_target", "").strip():
             errors.append(f"{path} scenario {scenario_id} is missing automation_target")
+        if "rows" in fields and not ROWS_RE.fullmatch(fields["rows"]):
+            errors.append(f"{path} scenario {scenario_id} rows must be a positive integer")
+        if "row_split" in fields and fields["row_split"] not in ROW_SPLITS:
+            errors.append(f"{path} scenario {scenario_id} row_split must be one of {', '.join(ROW_SPLITS)}")
         target = fields.get("automation_target", "").strip()
         if target and (target.startswith("/") or ".." in Path(target).parts
                        or any(char.isspace() for char in target)):
@@ -1981,7 +2286,7 @@ def validate_evidence_ref(docs: Path, value: str, label: str,
         )
         return parsed
     allowed_statuses = {"approved", "accepted"}
-    if status not in allowed_statuses:
+    if status not in allowed_statuses and not historical_source_approval(docs, target, label, status):
         errors.append(f"{label} target is not approved/accepted: {target}")
     return parsed
 
@@ -2029,7 +2334,8 @@ def round_number(path: Path, props: dict, suffix: str, errors: list[str]) -> int
 @stage_package.candidate_session()
 @experience_validation_session()
 def collect(docs: Path, *, historical_inputs: bool = False,
-            review_inputs: bool = False) -> tuple[dict, list[str]]:
+            review_inputs: bool = False, revision_inputs: bool = False,
+            prior_universe: bool = False) -> tuple[dict, list[str]]:
     """Validate sources; input discovery may precede authored review findings.
 
     ``record["scaffold_findings"]`` names the returned errors that exist only
@@ -2037,6 +2343,11 @@ def collect(docs: Path, *, historical_inputs: bool = False,
     ``record["advisory_findings"]`` names what is reported but never returned
     as an error: the empty last section of a story approved before the
     compiler read that section above the navigation.
+    ``prior_universe`` judges criterion coverage against the BA universe of the
+    last committed backlog approval, as begin-revision's intake check does: a
+    criterion approved upstream since then is the revision's work, never a
+    reason to refuse opening it. Every other reader, Delivery's historical read
+    included, judges coverage against the current approved universe.
     """
     contract = backlog_contract()
     root = docs / "backlog"
@@ -2083,15 +2394,13 @@ def collect(docs: Path, *, historical_inputs: bool = False,
         if review_round in rounds:
             errors.append(f"backlog review round {review_round} is duplicated")
         rounds.add(review_round)
-        if not review_inputs:
-            errors.extend(review_section_findings(
-                body, contract["required_backlog_review_sections"], rel, docs))
-            errors.extend(accepted_minor_findings(docs, body, rel, contract))
-            errors.extend(review_loop_record(docs, body, rel, review_props))
         record["backlog_reviews"].append({"path": rel, "props": review_props,
                                           "body": body,
                                           "id": note_id(review_props, path.stem),
                                           "round": review_round})
+    if not review_inputs:
+        errors.extend(review_completion_findings(
+            docs, record["backlog_reviews"], contract["required_backlog_review_sections"], contract))
 
     epics_root = root / "epics"
     for epic_dir in sorted(epics_root.iterdir() if epics_root.is_dir() else []):
@@ -2140,20 +2449,15 @@ def collect(docs: Path, *, historical_inputs: bool = False,
             if review_round in epic_rounds:
                 errors.append(f"{epic_id} review round {review_round} is duplicated")
             epic_rounds.add(review_round)
-            if not review_inputs:
-                errors.extend(review_section_findings(
-                    review_body_text, contract["required_epic_review_sections"],
-                    review_rel, docs))
-                errors.extend(accepted_minor_findings(
-                    docs, review_body_text, review_rel, contract))
-                errors.extend(review_loop_record(docs, review_body_text, review_rel,
-                                                 review_props))
             item = {"path": review_rel, "props": review_props,
                     "body": review_body_text,
                     "id": note_id(review_props, review.stem),
                     "round": review_round}
             epic["reviews"].append(item)
             record["epic_reviews"].append(item | {"epic_id": epic_id})
+        if not review_inputs:
+            errors.extend(review_completion_findings(
+                docs, epic["reviews"], contract["required_epic_review_sections"], contract))
 
         stories_root = epic_dir / "stories"
         for story_dir in sorted(stories_root.iterdir() if stories_root.is_dir() else []):
@@ -2413,7 +2717,8 @@ def collect(docs: Path, *, historical_inputs: bool = False,
 
     if not review_inputs:
         errors.extend(review_coverage_findings(record, docs))
-    errors.extend(global_criterion_coverage_findings(record, docs))
+    errors.extend(global_criterion_coverage_findings(
+        record, docs, prior_universe=prior_universe, revision_inputs=revision_inputs))
     if historical_inputs and {"input_contract", "absent_input_stages"}.intersection(record["backlog"]["props"]):
         errors.extend(backlog_input_policy.historical_absence_findings(docs, record))
     record["scaffold_findings"] = sorted(set(scaffolds))
@@ -2516,7 +2821,9 @@ def review_coverage_findings(record: dict, docs: Path) -> list[str]:
     return errors
 
 
-def global_criterion_coverage_findings(record: dict, docs: Path) -> list[str]:
+def global_criterion_coverage_findings(record: dict, docs: Path, *,
+                                     prior_universe: bool = False,
+                                     revision_inputs: bool = False) -> list[str]:
     errors: list[str] = []
     covered = {
         key for story in record["stories"]
@@ -2544,6 +2851,9 @@ def global_criterion_coverage_findings(record: dict, docs: Path) -> list[str]:
         universe = approved_ba_universe(docs, errors) if has_feature_story else {}
         if not universe:
             universe = {key: {} for key in covered}
+    prior = prior_approved_universe(docs) if prior_universe or revision_inputs else None
+    if prior_universe and prior is not None:
+        universe = {key: entry for key, entry in universe.items() if key in prior}
     unknown_covered = sorted(covered - set(universe))
     if unknown_covered:
         errors.append("story criterion_refs contain values outside the approved BA universe: "
@@ -2557,10 +2867,39 @@ def global_criterion_coverage_findings(record: dict, docs: Path) -> list[str]:
         errors.append("criteria cannot be both story-covered and deferred: "
                       + ", ".join(overlap))
     uncovered = sorted(set(universe) - covered - set(deferred))
+    if revision_inputs and prior is not None and record["backlog"]["props"].get("status") == "draft":
+        additions = sorted(set(uncovered) - prior)
+        if additions:
+            record["transition_findings"] = [
+                "new approved BA criteria/rules require story coverage or explicit deferral: "
+                + ", ".join(additions)]
+            uncovered = sorted(set(uncovered) - set(additions))
     if uncovered:
         errors.append("approved BA criteria/rules are neither story-covered nor deferred: "
                       + ", ".join(uncovered))
     return errors
+
+
+def review_completion_findings(docs: Path, reviews: list[dict], sections: list[str],
+                               contract: dict) -> list[str]:
+    errors = []
+    current = latest(reviews)
+    for review in reviews:
+        if review is not current and review["props"].get("status") != "approved" and not (
+                review["props"].get("source_hash") or review["props"].get("approved_at_utc")):
+            continue
+        errors.extend(review_section_findings(review["body"], sections, review["path"], docs))
+        errors.extend(accepted_minor_findings(docs, review["body"], review["path"], contract))
+        errors.extend(review_loop_record(docs, review["body"], review["path"], review["props"]))
+        errors.extend(recheck_closure_record(docs, review["body"], review["path"], review["props"]))
+    return errors
+
+
+def historical_unapproved_review_paths(record: dict, docs: Path) -> set[Path]:
+    groups = [record["backlog_reviews"], *(epic["reviews"] for epic in record["epics"])]
+    return {docs / review["path"] for reviews in groups for review in reviews
+            if review is not latest(reviews) and review["props"].get("status") != "approved"
+            and not (review["props"].get("source_hash") or review["props"].get("approved_at_utc"))}
 
 
 def package_paths(record: dict, docs: Path) -> list[Path]:
@@ -2613,10 +2952,10 @@ def approval_stamp_findings(path: Path, docs: Path) -> list[str]:
     return errors
 
 
-def committed_approval_sources(project: Path, docs: Path) -> dict[Path, bytes]:
+def committed_approval_sources(project: Path, docs: Path, commit: str = "HEAD") -> dict[Path, bytes]:
     """Read the backlog at one pinned HEAD, with object IDs as batch input."""
     head = subprocess.run(
-        ["git", "--no-replace-objects", "rev-parse", "--verify", "HEAD"],
+        ["git", "--no-replace-objects", "rev-parse", "--verify", commit],
         cwd=project, capture_output=True, check=False,
     )
     if head.returncode:
@@ -2634,7 +2973,9 @@ def committed_approval_sources(project: Path, docs: Path) -> dict[Path, bytes]:
         if not row:
             continue
         fields, raw = row.split(b"\t", 1)
-        _mode, kind, oid = fields.split(b" ")
+        mode, kind, oid = fields.split(b" ")
+        if mode not in {b"100644", b"100755"}:
+            raise ValueError("committed backlog approval contains a non-regular file")
         if kind == b"blob":
             selected[project / raw.decode("utf-8", errors="surrogateescape")] = oid
     if not selected:
@@ -2662,6 +3003,177 @@ def committed_approval_sources(project: Path, docs: Path) -> dict[Path, bytes]:
     return sources
 
 
+def history_project(docs: Path) -> Path | None:
+    return next((parent for parent in (docs, *docs.parents)
+                 if (parent / ".git").exists()), None)
+
+
+def history_listing(project: Path, commit: str, relative: str) -> list[bytes] | None:
+    """Return the tree rows of one path at one commit, or None when Git cannot list it."""
+    listing = subprocess.run(
+        ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-z",
+         commit, "--", relative], cwd=project, capture_output=True, check=False)
+    if listing.returncode:
+        return None
+    return [row for row in listing.stdout.split(b"\0") if row]
+
+
+def history_blob(project: Path, commit: str, relative: str) -> bytes | None:
+    rows = history_listing(project, commit, relative)
+    if rows is None or len(rows) != 1:
+        return None
+    fields, name = rows[0].split(b"\t", 1)
+    mode, kind, oid = fields.split(b" ")
+    if mode not in {b"100644", b"100755"} or kind != b"blob" or name != relative.encode("utf-8"):
+        return None
+    shown = subprocess.run(["git", "--no-replace-objects", "cat-file", "blob", oid.decode("ascii")],
+                           cwd=project, capture_output=True, check=False)
+    return shown.stdout if not shown.returncode else None
+
+
+def approved_history_sources(project: Path, docs: Path, commit: str) -> dict[Path, bytes] | None:
+    """Prove the complete committed approval boundary before using its sources."""
+    def read():
+        sources = committed_approval_sources(project, docs, commit)
+        root = sources.get(docs / "backlog/backlog.md")
+        if root is None:
+            return None
+        props, _body = parse_front_matter_text(root.decode("utf-8"))
+        if props.get("status") != "approved" or props.get("source_hash") != digest_text(root.decode("utf-8")):
+            return None
+        canonical_paths = re.compile(
+            r"backlog/(?:backlog\.md|reviews/round-[0-9]+-backlog-review\.md|"
+            r"epics/[^/]+/(?:epic\.md|reviews/round-[0-9]+-epic-review\.md|"
+            r"stories/[^/]+/(?:story|test-plan)\.md))")
+        notes = {}
+        for path, content in sources.items():
+            relative = path.relative_to(docs).as_posix()
+            if not canonical_paths.fullmatch(relative):
+                continue
+            text = content.decode("utf-8")
+            note_props, _body = parse_front_matter_text(text)
+            notes[path] = (text, note_props)
+        groups = {}
+        for path, (_text, note_props) in notes.items():
+            if note_props.get("type") in {"backlog-review", "epic-review"}:
+                errors = []
+                number = round_number(path, note_props, note_props["type"], errors)
+                if errors:
+                    return None
+                groups.setdefault(path.parent, []).append({"path": path.relative_to(docs).as_posix(),
+                                                            "props": note_props, "round": number})
+        group_record = {"backlog_reviews": [], "epics": [{"reviews": reviews} for reviews in groups.values()]}
+        historical = historical_unapproved_review_paths(group_record, docs)
+        manifest = {}
+        for path, (text, note_props) in notes.items():
+            relative = path.relative_to(docs).as_posix()
+            expected_status = "planned" if path.name == "story.md" else "approved"
+            if path in historical:
+                errors = status_findings(note_props, note_props["type"], relative, backlog_contract())
+                if errors:
+                    return None
+            else:
+                if note_props.get("status") != expected_status:
+                    return None
+                if note_props.get("source_hash") != digest_text(text) or not note_props.get("approved_at_utc"):
+                    return None
+            manifest[relative] = digest_text(text)
+        payload = json.dumps(manifest, sort_keys=True, ensure_ascii=False,
+                             separators=(",", ":")).encode("utf-8")
+        if props.get("package_hash") != "sha256:" + hashlib.sha256(payload).hexdigest():
+            return None
+        return sources
+    try:
+        return session_read(("approved-history", project, docs, commit), read)
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
+def history_commits(project: Path, path: Path, needle: str = "") -> list[str]:
+    command = ["git", "--no-replace-objects", "--literal-pathspecs", "log", "--format=%H"]
+    if needle:
+        command.extend(["-S", needle])
+    command.extend(["--", path.relative_to(project).as_posix()])
+    result = subprocess.run(command, cwd=project, capture_output=True, text=True, check=False)
+    return result.stdout.split() if not result.returncode else []
+
+
+def historical_source_approval(docs: Path, target: str, label: str, status: str) -> bool:
+    """An unchanged committed Story/Test Plan keeps its approved evidence history.
+
+    The target is a superseded Solution Design or System Architecture note; under
+    system-architecture/ only decisions carry that status. It counts when the
+    commit that approved the Story's or Test Plan's exact bytes held it approved
+    or accepted.
+    """
+    if status != "superseded" or not target.startswith(("solution-design/", "system-architecture/")):
+        return False
+    owner = docs / label.split(" ", 1)[0]
+    if not owner.is_file() or owner.name not in {"story.md", "test-plan.md"}:
+        return False
+    props, _body = parse_front_matter(owner)
+    if props.get("status") not in {"planned", "approved"} or approval_stamp_findings(owner, docs):
+        return False
+    project = history_project(docs)
+    if project is None:
+        return False
+    def read():
+        head = session_read(("head-approvals", project, docs),
+                            lambda: committed_approval_sources(project, docs)).get(owner)
+        if head is None or canonical_text(head.decode("utf-8")) != canonical(owner):
+            return False
+        for commit in history_commits(project, owner, str(props["source_hash"])):
+            sources = approved_history_sources(project, docs, commit)
+            original = sources.get(owner) if sources else None
+            if original is None or digest_text(original.decode("utf-8")) != props["source_hash"]:
+                continue
+            source = history_blob(project, commit, (docs / f"{target}.md").relative_to(project).as_posix())
+            if source is None:
+                continue
+            historical_props, _body = parse_front_matter_text(source.decode("utf-8"))
+            if historical_props.get("status") in {"approved", "accepted"}:
+                return True
+        return False
+    try:
+        return session_read(("historical-source", docs, owner, target), read)
+    except (OSError, ValueError, UnicodeError):
+        return False
+
+
+def prior_approved_universe(docs: Path) -> set[str] | None:
+    """Read the BA universe at the last hash-verified committed backlog approval."""
+    project = history_project(docs)
+    if project is None:
+        return None
+    def read():
+        for commit in history_commits(project, docs / "backlog/backlog.md"):
+            sources = approved_history_sources(project, docs, commit)
+            if sources is None:
+                continue
+            prior = set()
+            for path in sorted((docs / "business-analysis").glob("*/_generated/registry.json")):
+                relative = path.relative_to(project).as_posix()
+                if history_listing(project, commit, relative) == []:
+                    # A topic registry created after that approval approved nothing then.
+                    continue
+                content = history_blob(project, commit, relative)
+                if content is None:
+                    return None
+                registry = json.loads(content.decode("utf-8"))
+                ids = registry.get("ids", {})
+                if not isinstance(ids, dict):
+                    return None
+                for identifier, entry in ids.items():
+                    if isinstance(entry, dict) and entry.get("doc_status") == "approved" and entry.get("row_status", "active") == "active":
+                        prior.add(f"{path.parent.parent.name}:{identifier}")
+            return prior
+        return None
+    try:
+        return session_read(("prior-universe", docs), read)
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
 def preserved_approval_sources(
     record: dict, docs: Path, *, allow_new_approvals: bool = False,
 ) -> tuple[dict[Path, bytes], list[str]]:
@@ -2671,6 +3183,7 @@ def preserved_approval_sources(
     project = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), None)
     preserved, errors = {}, []
     committed = {}
+    historical = historical_unapproved_review_paths(record, docs)
     if project is not None:
         try:
             committed = committed_approval_sources(project, docs)
@@ -2704,6 +3217,9 @@ def preserved_approval_sources(
             if not head_stamped or head != path.read_bytes():
                 errors.append(f"{path.relative_to(docs).as_posix()} prior review approval must remain byte-exact in HEAD; create a new review round")
             errors.extend(approval_stamp_findings(path, docs))
+        if path in historical:
+            preserved[path] = path.read_bytes()
+            continue
         unchanged = (
             props.get("source_hash") == head_props.get("source_hash")
             and props.get("approved_at_utc") == head_props.get("approved_at_utc")
@@ -2734,8 +3250,10 @@ def approval_findings(record: dict, docs: Path) -> list[str]:
             if story["test_props"].get("status") != "approved":
                 errors.append(f"{story['id']} test plan is not approved")
     paths = package_paths(record, docs)
+    historical = historical_unapproved_review_paths(record, docs)
     for path in paths:
-        errors.extend(approval_stamp_findings(path, docs))
+        if path not in historical:
+            errors.extend(approval_stamp_findings(path, docs))
     expected_package = package_digest(docs, paths)
     if record["backlog"]["props"].get("package_hash") != expected_package:
         errors.append("backlog approved package_hash is stale")
@@ -2800,7 +3318,7 @@ def render_backlog_navigation(record: dict, docs: Path, *, preserved: set[Path] 
         preserved = {
             path for path in package_paths(record, docs)
             if not approval_stamp_findings(path, docs)
-        }
+        } | historical_unapproved_review_paths(record, docs)
 
     def append_current_nav(path: Path, links: list[str]) -> None:
         if path not in preserved:
@@ -3017,6 +3535,29 @@ def review_body(title: str, sections: list[str]) -> str:
     return "\n".join(lines)
 
 
+def revision_review_body(previous: dict, title: str, backlog_title: str, revision: int,
+                         sections: list[str] | None = None) -> str:
+    """Keep criterion dispositions and history without copying a prior verdict."""
+    root_link = wikilink("backlog/backlog.md", backlog_title)
+    previous_link = wikilink(previous["path"], str(previous["props"].get("title", previous["id"])))
+    body = review_body(title, sections or backlog_contract()["required_backlog_review_sections"])
+    deferred = "## Deferred Criteria\n\n" + raw_section(previous["body"], "Deferred Criteria").strip() + "\n\n"
+    body = re.sub(r"^## Deferred Criteria\n.*?(?=^## |\Z)", lambda _match: deferred,
+                  body, flags=re.MULTILINE | re.DOTALL)
+    context = (f"{root_link} is draft revision {revision}; this round has not evaluated its current inputs. "
+               f"{previous_link} retains the preceding approval's evidence.\n\n")
+    body = body.replace(f"# {title}\n\n", f"# {title}\n\n" + context, 1)
+    if set(REVIEW_RECORD_SECTIONS) & set(headings(previous["body"])):
+        body += "\n".join([
+            "## Prior Review Follow-ups", "",
+            f"{previous_link} retains the prior review's finding records and accepted minor follow-ups. "
+            "The Product Owner must triage those follow-ups against the current sources. "
+            "This review records only findings its own readers actually return and calibrate; "
+            "no prior finding is declared closed or accepted by opening this draft.", "",
+        ])
+    return body
+
+
 def coverage_class_table() -> str:
     lines = [
         "## Coverage Classes", "",
@@ -3194,6 +3735,14 @@ def check(args) -> int:
             errors.extend(size_exception_findings(record, docs))
     except (ValueError, RuntimeError) as exc:
         errors.append(str(exc))
+    # A scenario over the serial-row limit is advisory too; at the default nothing is read.
+    test_cost = None
+    try:
+        cost = test_cost_budget(docs)
+        if cost is not None:
+            test_cost = test_cost_block(cost, record["stories"])
+    except (ValueError, RuntimeError) as exc:
+        errors.append(str(exc))
     errors = sorted(set(errors))
     result = {
         "ok": not errors, "errors": errors,
@@ -3205,6 +3754,8 @@ def check(args) -> int:
     }
     if story_size is not None:
         result["story_size"] = story_size
+    if test_cost is not None:
+        result["test_cost"] = test_cost
     if pinned_reviews:
         result["pinned_reviews"] = pinned_reviews
     # Only a backlog that has one gains the key, so every other output is unchanged.
@@ -3616,7 +4167,7 @@ def begin_revision(args) -> int:
     records the new root/review revision; it never invents live Git state.
     """
     docs = docs_root(args.docs)
-    record, errors = collect(docs, historical_inputs=True)
+    record, errors = collect(docs, historical_inputs=True, prior_universe=True)
     errors.extend(approval_findings(record, docs))
     if errors:
         print(json.dumps({"ok": False, "errors": sorted(set(errors))}, indent=2,
@@ -3729,24 +4280,7 @@ def begin_revision(args) -> int:
     ] + ["status/draft"]
     # The new round records the Process Policy in force as it is written.
     review_props.update(round_pin(docs))
-    review_body_text, headings_replaced = re.subn(
-        r"^# [^\n]*$", lambda _match: f"# {review_title}",
-        latest_review["body"], count=1, flags=re.MULTILINE,
-    )
-    if not headings_replaced:
-        review_body_text = f"# {review_title}\n\n" + review_body_text.lstrip("\n")
-    pending_verdict = (
-        "## Verdict\n\n"
-        f"Evidence [Verdict]: [[backlog/backlog|{backlog_title}]] is now draft "
-        f"revision {revision}; review round {next_round} has not evaluated its current inputs.\n"
-        "Conclusion [Verdict]: Approval remains pending a fresh review of this "
-        "revision's scope, receipt bindings and coverage.\n\n"
-    )
-    review_body_text = re.sub(
-        r"^##[ \t]+Verdict[ \t]*\n.*?(?=^##[ \t]+|\Z)",
-        lambda _match: pending_verdict, review_body_text,
-        flags=re.MULTILINE | re.DOTALL,
-    )
+    review_body_text = revision_review_body(latest_review, review_title, backlog_title, revision)
     review_path = docs / "backlog" / "reviews" / f"round-{next_round}-backlog-review.md"
     # Navigation may touch every package note, home and the map. Snapshot only
     # those owned paths so rollback cannot erase unrelated concurrent work.
@@ -3765,7 +4299,8 @@ def begin_revision(args) -> int:
     try:
         backlog_path.write_bytes(front_matter(root_props, root_body).encode("utf-8"))
         review_path.write_bytes(front_matter(review_props, review_body_text).encode("utf-8"))
-        refreshed, render_errors = collect(docs)
+        refreshed, render_errors = collect(docs, review_inputs=True, revision_inputs=True)
+        render_errors.extend(review_coverage_findings(refreshed, docs))
         if render_errors:
             raise RuntimeError("; ".join(sorted(set(render_errors))))
         render_backlog_navigation(refreshed, docs)
@@ -3790,13 +4325,16 @@ def begin_revision(args) -> int:
         print(json.dumps({"ok": False, "errors": [f"{label}: {exc}", *restore_errors]}, indent=2,
                          ensure_ascii=False, sort_keys=True))
         return 1
-    print(json.dumps({
+    result = {
         "ok": True, "revision": revision, "review_round": next_round,
         "frozen_story_ids": sorted(set(snapshot.get("active_story_ids", []))
                                     | set(snapshot.get("delivered_story_ids", []))),
         "cancelled_story_ids": sorted(set(snapshot.get("cancelled_story_ids", []))),
         "backlog": str(backlog_path), "review": str(review_path),
-    }, indent=2, ensure_ascii=False, sort_keys=True))
+    }
+    if refreshed.get("transition_findings"):
+        result["transition_findings"] = refreshed["transition_findings"]
+    print(json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True))
     return 0
 
 
@@ -3823,11 +4361,124 @@ def revision_status(args) -> int:
     return 0
 
 
+def pending_review_policy_matches(docs: Path, props: dict, pin: dict) -> bool:
+    """Compare the values that govern review work, preserving the recorded pin."""
+    recorded = recorded_pin(props)
+    if not recorded or recorded == pin:
+        return True
+    import process_policy
+
+    registry = process_policy.load_registry()
+    ran = process_policy.pinned_values(
+        docs, {} if recorded == no_policy_pin() else recorded, registry)[0]
+    current = process_policy.effective_values(docs)[0]
+    return all((ran[switch]["value"], ran[switch].get("parameters"))
+               == (current[switch]["value"], current[switch].get("parameters"))
+               for switch, entry in registry.items()
+               if BACKLOG_FLOW in (entry["spec"].get("flows") or []))
+
+
+def stub_review(docs: Path, slug: str | None = None) -> int:
+    created = False
+    review_path = None
+    try:
+        record, errors = collect(docs, review_inputs=True, revision_inputs=True)
+        errors = [error for error in errors if error not in set(record["scaffold_findings"])]
+        epic = next((item for item in record["epics"] if item["folder"] == slug), None) if slug else None
+        if (record.get("backlog") or {}).get("props", {}).get("status") != "draft":
+            errors.append(f"a new {'epic' if slug else 'backlog'} review requires a draft backlog revision")
+        if slug and epic is None:
+            errors.append(f"unknown epic slug: {slug}")
+        pin, policy_errors = policy_pin(docs)
+        errors.extend(policy_errors)
+        if errors:
+            raise ValueError("; ".join(sorted(set(errors))))
+        _preserved, preservation_errors = preserved_approval_sources(record, docs)
+        if preservation_errors:
+            raise ValueError("; ".join(preservation_errors))
+        previous = latest(epic["reviews"] if epic else record["backlog_reviews"])
+        result = {"ok": True}
+        if epic:
+            result["epic_id"] = epic["id"]
+        if previous["props"].get("status") != "approved" and pending_review_policy_matches(
+                docs, previous["props"], pin):
+            result.update(created=False, review_round=previous["round"], review=str(docs / previous["path"]))
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        number = previous["round"] + 1
+        root_props = record["backlog"]["props"]
+        title = (f"Review round {number} for {epic['props']['title']}" if epic else
+                 f"Backlog review round {number} for {root_props['title']}")
+        parent = epic if epic else record["backlog"]
+        parent_link = wikilink(parent["path"], parent["props"]["title"])
+        kind = "epic-review" if epic else "backlog-review"
+        props = {
+            "type": kind, "title": title, "status": "draft",
+            "round": number, "owner_role": "product_owner",
+            "derives_from": [parent_link],
+        }
+        if epic:
+            props.update(
+                verifies=[wikilink(path, str(properties["title"]))
+                          for story in epic["stories"]
+                          for path, properties in ((story["path"], story["props"]),
+                                                   (story["test_plan"], story["test_props"]))],
+                scenario_refs=sorted({scenario for story in epic["stories"] for scenario in story["scenario_ids"]}),
+                dependency_refs=sorted(dependency_edges(epic["stories"], True, record)))
+        else:
+            props.update(related_to=[wikilink(item["path"], item["props"]["title"]) for item in record["epics"]],
+                         dependency_refs=sorted(dependency_edges(record["stories"], False, record)))
+        props.update(tags=[f"doc/{kind}", "status/draft"],
+                     aliases=[f"{epic['id']}-REVIEW-{number:03d}" if epic else f"BACKLOG-REVIEW-{number:03d}"],
+                     **pin)
+        body = revision_review_body(previous, title, str(root_props["title"]),
+                                    int(root_props["revision"]),
+                                    backlog_contract()[f"required_{'epic' if epic else 'backlog'}_review_sections"])
+        body = body.rstrip() + "\n\n" + NAV_MARKER + "\n- [[maps/backlog|Backlog map]]\n- " + parent_link + "\n"
+        review_path = docs / Path(parent["path"]).parent / "reviews" / f"round-{number}-{kind}.md"
+        with review_path.open("xb") as stream:
+            created = True
+            stream.write(front_matter(props, body).encode("utf-8"))
+        refreshed, errors = collect(docs, review_inputs=True, revision_inputs=True)
+        errors = [error for error in errors if error not in set(refreshed["scaffold_findings"])]
+        if errors:
+            raise ValueError("; ".join(sorted(set(errors))))
+        if epic:
+            selected = next(item for item in refreshed["epics"] if item["folder"] == slug)
+            scope = dict(refreshed, backlog_reviews=[], epics=[selected])
+        else:
+            scope = dict(refreshed, epics=[dict(item, reviews=[]) for item in refreshed["epics"]])
+        errors.extend(review_coverage_findings(scope, docs))
+        if errors:
+            raise ValueError("; ".join(sorted(set(errors))))
+    except (OSError, ValueError, RuntimeError) as exc:
+        if created:
+            try:
+                review_path.unlink()
+            except OSError as restore_exc:
+                exc = RuntimeError(f"{exc}; could not remove new review: {restore_exc}")
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2, sort_keys=True))
+        return 1
+    result.update(created=True, review_round=number, review=str(review_path))
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def stub_epic_review(docs: Path, slug: str) -> int:
+    return stub_review(docs, slug)
+
+
+def stub_backlog_review(args) -> int:
+    return stub_review(docs_root(args.docs))
+
+
 def stub_epic(args) -> int:
     docs = docs_root(args.docs)
     if not SLUG_RE.fullmatch(args.slug):
         print("invalid epic slug", file=sys.stderr)
         return 2
+    if getattr(args, "new_review", False):
+        return stub_epic_review(docs, args.slug)
     root = docs / "backlog" / "epics" / args.slug
     (root / "stories").mkdir(parents=True, exist_ok=True)
     (root / "reviews").mkdir(parents=True, exist_ok=True)
@@ -3998,7 +4649,12 @@ def main(argv=None) -> int:
     command.add_argument("--id")
     command.add_argument("--title")
     command.add_argument("--goal")
+    command.add_argument("--new-review", action="store_true",
+                         help="Open the next pending review of an existing epic in a draft backlog")
     command.set_defaults(func=stub_epic)
+    command = sub.add_parser("stub-backlog-review")
+    command.add_argument("--docs", default=None)
+    command.set_defaults(func=stub_backlog_review)
     command = sub.add_parser("stub-story")
     command.add_argument("epic")
     command.add_argument("slug")
@@ -4037,6 +4693,15 @@ def main(argv=None) -> int:
     command.add_argument("--absent-input", choices=("design-system", "experience-design"),
                          action="append", default=[], help="Revalidate an explicit headless Requirement input absence")
     command.set_defaults(func=begin_revision)
+    command = sub.add_parser("record-rechecks",
+                             help="write recheck closures, expected hashes and the preservation"
+                                  " report (remediation_bookkeeping compiler)")
+    command.add_argument("--docs", default=None)
+    command.add_argument("--closures", required=True)
+    command.add_argument("--candidate", required=True)
+    command.add_argument("--report", required=True)
+    command.add_argument("--verify", action="store_true")
+    command.set_defaults(func=record_rechecks)
     command = sub.add_parser("revision-status")
     command.add_argument("--docs", default=None)
     command.set_defaults(func=revision_status)

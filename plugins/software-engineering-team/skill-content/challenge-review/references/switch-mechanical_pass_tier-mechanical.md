@@ -109,6 +109,10 @@ frozen-task A/B sets before a project selects `mechanical`.
    change.
 
 After the owner selects `mechanical`, record per mechanical pass its kind,
-wall time, output tokens, re-check outcome and any unrelated edit the re-check
-found, and compare with the base writer's passes of the same kind. The
+whether it ran on the `-mechanical` variant or as the resumed base writer,
+the model and effort that ran it, wall time, output tokens, re-check outcome
+and any unrelated edit the re-check found, and compare with the base writer's
+passes of the same kind. A pass that resumed the base writer to reuse its
+read history ran on the writer's own tier, so it says so in its record and
+never counts as a variant pass. The
 registry's promotion rule judges these over at least 3 Deliveries.

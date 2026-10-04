@@ -26,7 +26,7 @@
       "e25b6d12f5523b008d119f8bf5fe05b66cd0e4d45b6beab4a05f6e13221ef1bd"
     ,
     "agents/backlog-reviewer-lens.md":
-      "95e0465155a37172ab34c545238af6974fe9a93c7aed5aed62fa7216a9c3d4ef"
+      "089388745f541fbd7bcb4518739ce5f3edf18ac582e180317668720a6cb58174"
     ,
     "agents/backlog-reviewer.md":
       "70addf26e955bcfea759e6a4054de0f0684a67e9ab7ae0ff2472ee8133b495fc"
@@ -35,7 +35,7 @@
       "2878504d82064e7219d115ab95f3bf5d1211f02e34a0fce14a93829e37e4fb49"
     ,
     "agents/code-reviewer-lens.md":
-      "d486f3ec29a60ae0dcdd0e7dac779c2f04697a2b3062d56b11636652b674692b"
+      "ad5050e9130374ca069a669f53ce4874f555e8c7f9cb9787fe48a5a34b0e867b"
     ,
     "agents/code-reviewer.md":
       "397008de7f378c6410db0cc1636fb58ea03e6f9aea449302ab4a8cd1e4f0dd4c"
@@ -44,13 +44,13 @@
       "8e9d590e272873348a1eebc68138ed62deb4c1ef045fc9e922842b656f3c9df3"
     ,
     "agents/design-system-reviewer-lens.md":
-      "29ab58f55ce6c11bc393de3e02ad51bab532ab2d2d2711ba1ddee9d293c67a0c"
+      "696d3c42448362eef7bc92e9909fcb4adc57a02d735194d15afb8d9bc90b17d8"
     ,
     "agents/design-system-reviewer.md":
       "03d123d5e24429d059eeda22118b8b55249517d4402ff9886002d461746d46bd"
     ,
     "agents/devops-engineer-mechanical.md":
-      "3ea1808be4eb29071f8fbf1ea83558de3aa8dbc369fbe8aa0fd9075e189a1e48"
+      "30f3568f81520075faae9aac18a67ddc480ecbdef419d79b02b849da1391ad8e"
     ,
     "agents/devops-engineer.md":
       "4c9f5c6f0013e90c3b5954f831024559f1b28f26de95c007cbbff3a6c29d8754"
@@ -65,13 +65,13 @@
       "0a5e2c25a7ae6fa802c2ffaeee8ac03c746a65f60784cac4642c4cb068ca03d5"
     ,
     "agents/product-owner-mechanical.md":
-      "c60baf8f2a580af34a496bb2dcd100576c3daa9aed07771ec8f51d1e7f49a109"
+      "60186c4cc771e3cae9f91bd75b42c5943a7d669289a7ec106b4b5e93c0e402a8"
     ,
     "agents/product-owner.md":
       "58ecbfb79ce41070537a95d207765770403cb2f79be24d1dafb3c75a9148366e"
     ,
     "agents/qa-engineer-mechanical.md":
-      "bde7e38306c77ff800ba6d23355ed0724792388c1a6b770de3e8d01b87fb49c6"
+      "84717e181c0df502fb982283689c255cf50b2c53c37df7006a4560e3ba4cf2f9"
     ,
     "agents/qa-engineer.md":
       "382b86650fc612172961a3e173734c80b90a0016b50d44a707071ff9b7dc27ba"
@@ -80,13 +80,13 @@
       "09e7b9c44d5116eaba3863683f0016fd96d8b5e34cddf2c03609e54c6ea6e7af"
     ,
     "agents/solution-architect-mechanical.md":
-      "304f4d1f8846342e60b1e8eaaa6b3af356066a8c5800abad3315c80606bfef3a"
+      "02d09fa061ff2f8f6d50bfa274596cae69049b840924e3efa314891536d5a862"
     ,
     "agents/solution-architect.md":
       "1a7840ada15660691ee671124e23b677011375b8be3e2ce0708254a2337ea00d"
     ,
     "agents/solution-reviewer-lens.md":
-      "31d475aef5783459d7b8256673c2f8a507ac10697bd551958bf632325125d7c1"
+      "8b4ccdf098e8fd840cb6e9a12518d28b89d19dfaeecda3dd9bef882d64a3e573"
     ,
     "agents/solution-reviewer.md":
       "1d803752a0dcc4243e15215db80fbc3f637d8e2fbecbb125dab969537b6ec4b3"
@@ -137,7 +137,7 @@
       "6907f6c826873e160a411f49ef34e346b7bbf4db046f50b46528184ace2d604a"
     ,
     "host-contract.md":
-      "2bdcf8e67e5eb107bcc7e499845c5c069fc9cfa08d05605043cb98afaa9b232e"
+      "a58295aa54836f8ab07aeeac5c5915be4c53eed8eb28c7f181ef53caffa34d8b"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -317,7 +317,7 @@
       "468169da1c43ecca6f7a955383b5b85d9dd24efbc6734f480cb9ef26f4c53fd1"
     ,
     "skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md":
-      "24ff27af6d9675f4f4853db2daadefb9e41d62b274681de14d8bfaca6211957e"
+      "bc0e1b68883d56f4e2c756164a0d8b9b2fba1bd827bec08c045fc7a92b149598"
     ,
     "skill-content/challenge-review/references/switch-review_loop-blocking_delta.md":
       "2ba3bd1a00cb627cafdf9edf34c7aba411e4bb49b5f6e3fef5843f4513f05452"
@@ -353,7 +353,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "33632710add03019911e4493c4909b0b57e0380326004fbc734d5dcf2ee08c2a"
+      "4b809a0023b54b134e42d10be849a4c2c6fa8227d9f3680a5598a54baf3c0797"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
@@ -923,7 +923,7 @@
       "bb8be95ad4d5c83eb37415e512af5b7c1ec653edddcdc3e13fcf5d06e14adcb7"
     ,
     "templates/tier-map.json":
-      "7520a0d1c1627d0d8c16c6b540ca3090bd889ffcdfe891bbc7e5081f04bf6c9f"
+      "93cee4b0559f85381609ab12195a8badecd0206a6bd0427b1a4824c4f0e00d5c"
     ,
     "templates/vault/.obsidian/app.json":
       "d81f5f2d2db5f65f24db5235301c5dffd41412e66db7202cf65f9f032cde078d"

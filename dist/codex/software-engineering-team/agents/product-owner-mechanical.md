@@ -2,7 +2,7 @@
 name: product-owner-mechanical
 description: Product owner role that groups approved product knowledge into the project-local epic and story backlog; never auto-triggered. Writer variant for passes that apply only the fixes a review verdict names.
 model: gpt-6.1-sol
-model_reasoning_effort: xhigh
+model_reasoning_effort: high
 output_contract: prose
 ---
 

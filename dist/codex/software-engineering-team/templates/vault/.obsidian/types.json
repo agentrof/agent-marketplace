@@ -149,6 +149,8 @@
     "scenarios": "multitext",
     "tolerated_warnings": "multitext",
     "service_catalog": "multitext",
+    "test_groups": "multitext",
+    "test_group_report": "text",
     "max_parallel": "number",
     "governance_hash": "text",
     "decision_kind": "text",

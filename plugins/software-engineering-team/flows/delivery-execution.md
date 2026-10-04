@@ -98,6 +98,11 @@ Switch `qa_gate_order`: at `gate_first`, QA starts its first test command of a
 round before it plans and drafts its result, as
 `skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md`
 defines.
+Switch `test_group_report`: at `refuse_missing_groups`, a test run also reads
+the group report the approved command writes and records every declared group,
+as
+`skill-content/deliver/references/switch-test_group_report-refuse_missing_groups.md`
+defines.
 For failed or affected tests first, an optional approved
 `diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
 <scratch-selection.json>`. Copy the selector schema from the QA manifest,

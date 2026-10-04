@@ -257,6 +257,16 @@ first. At `gate_first`, QA starts the command in the background and plans,
 maps and drafts its result while the command runs, as
 `qa-verification/references/switch-qa_gate_order-gate_first.md` defines.
 
+Whether a test run knows its groups is process switch `test_group_report`. At
+`off`, the default, the runner records a test command's exit code and output
+only. At `refuse_missing_groups`, where the Verification Contract declares
+`test_groups` and `test_group_report`, QA's test runs and the pre-handoff run
+read the group report the approved command writes, record each declared
+group's status, record a run whose report lacks a group not intact, and
+evidence approval refuses a final test run with a group that did not pass, as
+`deliver/references/switch-test_group_report-refuse_missing_groups.md`
+defines.
+
 Backlog planning measures story size as process switch `story_size_budget`
 selects. At `off`, the default, nothing is measured or shown. At
 `propose_split`, `backlog_compile.py check --json` reports each story's

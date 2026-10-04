@@ -235,7 +235,8 @@ owns. An `execution_approved` one runs only its `delivery-execution` flow
 until a plan revision, whose approval pins the policy anew, so it reads only
 the switches that flow owns: `code_review_panel`, `execution_planning`,
 `implementation_schedule`, `own_target_reuse`, `owner_gates`,
-`pre_handoff_regression`, `qa_gate_order` and `review_loop`. A switch no
+`pre_handoff_regression`, `qa_gate_order`, `review_loop` and
+`test_group_report`. A switch no
 Delivery flow owns, such as
 `mechanical_pass_tier`, is no part of the pin: inside a Delivery it is read
 from the current policy. While a new execution approval can still re-pin the
@@ -534,6 +535,19 @@ it executes anything. At `gate_first`, QA starts the command through the
 host's background command mechanism, then plans, maps and drafts its result
 while it runs, and reads its output only once the plan and the coverage matrix
 are written.
+
+Process switch `test_group_report` decides whether a test run knows its
+groups. At `off`, the default, the runner records the command's exit code,
+output and identity. At `refuse_missing_groups`, a Verification Contract may
+declare `test_groups`, the group ids its test command runs, and
+`test_group_report`, the file the command writes under
+`AGENTROF_VERIFICATION_SCRATCH` with each group's status, `passed`, `failed`
+or `not_collected`, and case counts; `operation_compile.py check` takes both or
+neither. With them, `run --kind test`, `run --kind diagnostic_test` and
+`regression-run` record each declared group's status, record a run whose report
+lacks a group not intact, and bind the declaration in the run's identity;
+evidence approval refuses a final test run with a group that is missing, not
+collected or failed.
 
 Process switch `execution_planning` decides how the facts a plan needs are
 written and reviewed. At `per_document`, the default, each Operation contract

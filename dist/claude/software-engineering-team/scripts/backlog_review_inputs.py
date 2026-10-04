@@ -163,7 +163,7 @@ def contract_hash() -> str:
              scripts / "ba_compile.py", scripts / "requirement_compile.py", scripts / "requirement_route.py",
              backlog.POLICY_PATH, scripts / "process_policy.py",
              scripts.parent / "skill-content/configure/data/process-switches.json",
-             backlog.STORY_SIZE_MEASURES_PATH]
+             backlog.STORY_SIZE_MEASURES_PATH, backlog.TEST_COST_LIMITS_PATH]
     return digest([[path.name, file_hash(path)] for path in files])
 
 

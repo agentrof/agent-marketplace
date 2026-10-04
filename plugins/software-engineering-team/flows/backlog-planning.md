@@ -327,6 +327,12 @@ the root review is authored, run the full
 `backlog_compile.py check --docs <workspace>/docs --render --json` and scoped
 vault gate. Both must pass before the package can be offered for approval.
 
+Switch `remediation_bookkeeping`: at `compiler`, a writer pass records its
+rechecks' closure rows, expected hashes and preservation report with one
+compiler command, as
+`skill-content/backlog-plan/references/switch-remediation_bookkeeping-compiler.md`
+defines.
+
 Use the current host's agent invocation and wait mechanism; no host-specific
 command is canonical. Reviewer responses are input, never durable state.
 Severity, dispositions and re-review scope follow the Review findings section

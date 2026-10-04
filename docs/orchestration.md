@@ -141,6 +141,17 @@ the whole package.
 `backlog-plan/references/switch-root_review_scope-revision_delta.md` defines
 the read set.
 
+Who writes a backlog remediation pass's bookkeeping is process switch
+`remediation_bookkeeping`. At `writer`, the default, the Product Owner writer
+copies the rechecks' closure rows, reruns the expected-hash checks and writes
+the preservation evidence itself. At `compiler`, the writer does the content
+fixes and runs `backlog_compile.py record-rechecks` once: from the readers'
+closure tables and the pinned candidate it writes each review note's
+`Recheck Closures` table, the expected manifest hash of every touched scope
+and a preservation report, and `--verify` is the writer's check.
+`backlog-plan/references/switch-remediation_bookkeeping-compiler.md` defines
+the command.
+
 When epic reviews queue behind the host's agent limit, process switch
 `epic_review_cadence` sets when the next one starts. At `wait_per_panel`, the
 default, the coordinator waits for the previous review's calibration and its

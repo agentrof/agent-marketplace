@@ -49,7 +49,11 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     reader's manifest the sizes of both read sets, which its hash binds, and
     never changes what the reader reads. At process switch
     `remediation_writers` `per_epic`, an epic writer's manifest reads that
-    epic's review scope at the `review_manifest_scope` value in force.
+    epic's review scope at the `review_manifest_scope` value in force. At
+    process switch `root_review_scope` `revision_delta`, the root reader of a
+    revision reads in full only the changed stories and their neighbours, with
+    every other story as a hash-bound summary; its manifest's hash still binds
+    every backlog note.
 12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
     scenarios; automation-required scenarios name an executable-test target.
 13. Every story has exactly one accountable implementation owner and may name

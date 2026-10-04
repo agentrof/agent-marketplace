@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "limits": {
+    "max_delta_share_percent": {
+      "summary": "The largest share of the backlog's stories, in percent, that a revision's delta, its changed stories and their neighbours one dependency edge away, may hold for the root reader to read only that delta; a larger delta reads the whole package."
+    }
+  }
+}

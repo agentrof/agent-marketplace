@@ -307,6 +307,11 @@ stub, of a story approved before the compiler read that section above the
 navigation; it never fails the check, and the Product Owner fills the section
 whenever that story is revised.
 
+Switch `root_review_scope`: at `revision_delta`, the root reader of a backlog
+revision reads in full only the revision's delta, as
+`skill-content/backlog-plan/references/switch-root_review_scope-revision_delta.md`
+defines.
+
 Only after every epic package and review is green, run
 `backlog_review_inputs.py --docs <workspace>/docs --root`. Invoke one fresh
 `backlog-reviewer` with that manifest: the root backlog, every epic, every

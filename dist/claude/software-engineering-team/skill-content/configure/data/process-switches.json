@@ -400,6 +400,40 @@
         "unit": "At least 2 backlog revisions run with per_epic, each with at least 3 epics with accepted findings. The switch changes only backlog planning, which runs outside any Delivery, so revisions replace the 3-Delivery default.",
         "threshold": "Remediation wall clock at most 40% of the single_writer baseline, at most 1 context compaction per writer and zero cross-epic defects the root review traces to a per-epic writer, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "root_review_scope": {
+      "summary": "What a backlog revision's root review reads in full: every story, test plan and the sources they cite, or only the revision's changed stories, their neighbours one dependency edge away and the epics, with every other story as a hash-bound summary in the compiler's whole-backlog graph.",
+      "issue": 405,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "full",
+          "tradeoffs": "The root reader reads the complete package and every source it cites, whatever the revision changed. Today's behaviour and the baseline the delta read is measured against: in one measured project, a revision that added four stories to 110 ran a three-reader root panel for 98.4 min and about 760 M input tokens, mostly re-reading the sources of unchanged stories, and found three minor record fixes."
+        },
+        {
+          "id": "revision_delta",
+          "tradeoffs": "The root reader's manifest names in full only the stories this revision changed or added, those one dependency edge away, their test plans, every epic and the review notes, and carries the compiler's graph of every story with its hashes, criteria, scenario count and dependencies, the dependency edges and the root review's compiler facts. A first backlog, a delta over the owner's share of stories and a reader's stated request read the whole package. A root review that scales with the change, while a cross-story defect between two unchanged stories is outside it, and an overlap with an unchanged story shows to the reader only through that story's title and criteria until it asks for the story."
+        }
+      ],
+      "default": "full",
+      "parameters": {
+        "summary": "Owner-set limit on the share of stories a revision's delta may hold for a delta root read. The package sets no limit, so the owner sets it with the value.",
+        "values": ["revision_delta"],
+        "declared_by": {
+          "path": "skill-content/backlog-plan/data/root-review-delta.json",
+          "key": "limits"
+        },
+        "type": "positive_integer",
+        "min_count": 1
+      },
+      "value_data": {
+        "revision_delta": ["skill-content/backlog-plan/data/root-review-delta.json"]
+      },
+      "metric": "Per backlog revision root review: wall clock, input tokens per reader, manifest paths and bytes, full-read fallbacks with their reasons and reader requests for an unchanged story, and the verdict and findings against a full root review of the same frozen revision; seeded cross-story defects caught.",
+      "promotion": {
+        "unit": "At least 3 backlog revisions run with revision_delta, each replayed as a frozen full root review. The switch changes only backlog planning, which runs outside any Delivery, so revisions replace the 3-Delivery default.",
+        "threshold": "The same verdict and every critical and major finding of the full replay, a median root review wall clock at most 40% of the full replay's, and every seeded cross-story defect reported, with every shared quality guard holding and the owner's approval. A promotion keeps full as the default, since only a value the owner chooses takes parameters, and ships package_limits for revision_delta."
+      }
     }
   }
 }

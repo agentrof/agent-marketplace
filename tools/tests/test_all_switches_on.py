@@ -49,7 +49,8 @@ BOUNDED = "backlog-plan/references/switch-review_manifest_scope-bounded.md"
 BACKLOG = (BOUNDED,
            "backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md",
            "backlog-plan/references/switch-review_scope_record-both_scopes.md",
-           "backlog-plan/references/switch-remediation_writers-per_epic.md")
+           "backlog-plan/references/switch-remediation_writers-per_epic.md",
+           "backlog-plan/references/switch-root_review_scope-revision_delta.md")
 SPLIT = "product-planning/references/switch-story_size_budget-propose_split.md"
 # The switch references each shipped task binds, by entry and role. A task
 # binds a reference of a switch that owns one of its entry's flows, from a
@@ -120,6 +121,8 @@ class AllSwitchesOnTests(unittest.TestCase):
         for parameter, limit in LIMITS.items():
             self.policy("set", "--switch", "story_size_budget", "--parameter", parameter,
                         "--value", str(limit))
+        self.policy("set", "--switch", "root_review_scope", "--parameter",
+                    "max_delta_share_percent", "--value", "50")
         self.policy("approve")
         self.commit("Approve a Process Policy with every switch on")
 

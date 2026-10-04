@@ -143,6 +143,52 @@ class ReviewScopeRecordTests(unittest.TestCase):
         self.assertEqual([row["kind"] for row in rows], ["findings", "manifest"])
         self.assertEqual(rows[1]["scope_sizes"], manifest["scope_sizes"])
 
+    def test_the_record_defaults_to_the_workspace_file_and_never_lies_outside_it(self):
+        self.chain()
+        choose(self.docs, "both_scopes", switch="review_scope_record")
+        code, manifest = run(["--docs", str(self.docs), "--epic", "EP-001", "--record"])
+        self.assertEqual(code, 0, manifest)
+        record = self.docs.parent / "measurements/review-scope.jsonl"
+        self.assertEqual([(row["kind"], row["source_hash"]) for row in map(
+            json.loads, record.read_text(encoding="utf-8").splitlines())],
+            [("manifest", manifest["source_hash"])])
+        # The record first lived under .agentrof/, outside the workspace; inside
+        # the vault it would be a non-markdown file in a note subtree.
+        for path in (self.docs.parents[1] / ".agentrof/agent-marketplace/measurements/review-scope.jsonl",
+                     self.docs / "backlog/review-scope.jsonl"):
+            with self.subTest(path=path):
+                code, result = run(["--docs", str(self.docs), "--epic", "EP-001", "--record", str(path)])
+                self.assertEqual(code, 1, result)
+                self.assertIn("must lie in the workspace outside the docs vault", result["errors"][0])
+                self.assertFalse(path.exists())
+        self.assertEqual(len(record.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_the_record_is_a_file_git_keeps_under_setups_ignore_rules(self):
+        """The backlog revision commits the record (#395): setup's managed
+        .gitignore ignores the runtime root where it first lived, and a record
+        Git ignores is refused instead of silently left out of the commit."""
+        import setup_project
+
+        project = self.docs.parents[1].resolve()
+        init_repository(project)
+        ignore = project / ".gitignore"
+        ignore.write_text(setup_project.managed_block("workspace") + "\n", encoding="utf-8")
+
+        def ignored(path: Path) -> bool:
+            return subprocess.run(["git", "check-ignore", "--quiet", "--", str(path)], cwd=project,
+                                  check=False).returncode == 0
+
+        self.assertTrue(ignored(project / ".agentrof/agent-marketplace/measurements/review-scope.jsonl"))
+        record = inputs.record_path(self.docs, None)
+        self.assertEqual(record, self.docs.resolve().parent / "measurements/review-scope.jsonl")
+        self.assertFalse(ignored(record))
+        ignore.write_text(ignore.read_text(encoding="utf-8") + "workspace/measurements/\n",
+                          encoding="utf-8")
+        with self.assertRaisesRegex(inputs.InputError, "Git ignores the review scope record"):
+            inputs.record_path(self.docs, None)
+        with self.assertRaisesRegex(inputs.InputError, "Git ignores the review scope record"):
+            inputs.record_path(self.docs, str(self.docs.parent / "measurements/other.jsonl"))
+
     def test_scope_findings_read_a_claim_record_and_its_calibrated_severity(self):
         notes = self.chain()
         choose(self.docs, "both_scopes", switch="review_scope_record")

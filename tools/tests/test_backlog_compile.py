@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -845,6 +846,30 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
                 self.docs, "solution-design", "solution-design/landscape", digest,
                 require_committed=True, allow_historical=True)
             self.assertIn("solution-design/landscape package hash is stale or does not match expected hash", errors)
+
+    def test_ci_checkout_can_resolve_an_earlier_approved_receipt(self):
+        self.approved_solution()
+        old, _new = self.revise_solution()
+        project = self.docs.parents[1].resolve()
+        template = (ROOT / "plugins/software-engineering-team/templates/ci-tests.yml").read_text(encoding="utf-8")
+        for job in ("vault_gate", "tests"):
+            with self.subTest(job=job):
+                block = re.search(rf"(?ms)^  {job}:\n(.*?)(?=^  \w+:|\Z)", template).group(1)
+                depth = re.search(r"(?m)^\s+fetch-depth:\s*(\d+)\s*$", block)
+                depth = int(depth.group(1)) if depth else 1
+                clone = project.parent / f"ci-{job}"
+                command = ["git", "clone", "--quiet", "-c", "gc.auto=0",
+                           "-c", "maintenance.auto=false"]
+                if depth:
+                    command.extend(["--depth", str(depth)])
+                cloned = subprocess.run([*command, project.as_uri(), str(clone)],
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(cloned.returncode, 0, cloned.stdout + cloned.stderr)
+                receipt, errors = stage_package.verify(
+                    clone / "workspace/docs", "solution-design", "solution-design/landscape", old,
+                    require_committed=True, allow_historical=True)
+                self.assertEqual(errors, [])
+                self.assertEqual(receipt["verification_profile"], "historical")
 
     def test_strict_binding_rejects_the_earlier_receipt_after_a_revision(self):
         self.approved_solution()

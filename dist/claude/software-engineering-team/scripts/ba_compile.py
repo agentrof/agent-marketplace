@@ -1945,6 +1945,53 @@ def package_hash(space_dir: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+# Keys a document's and the package's lifecycle stamp; the authored content
+# an owner approves at a gate stays the same while they change.
+LIFECYCLE_KEYS = frozenset({"status", "approved_at", "package_hash", "package_status",
+                            "package_approved_at_utc", "package_contract_version"})
+STATUS_TAG_RE = re.compile(r"^\s*-\s*[\"']?status/[a-z0-9-]+[\"']?\s*$")
+
+
+def content_hash(space_dir: Path) -> str:
+    """Hash the authored content of a BA space without its lifecycle.
+
+    A reviewed draft and the package approved from it share this hash: every
+    lifecycle key, status tag, renderer-owned relation and generated view is
+    left out, so a gate can name the exact content `approve-package` closes.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(space_dir.rglob("*.md")):
+        relative = path.relative_to(space_dir)
+        if relative.parts[0] == GENERATED_DIR:
+            continue
+        text = path.read_text(encoding="utf-8")
+        props, body_line, error = parse_frontmatter(text)
+        if not error and props:
+            lines = text.splitlines()
+            kept = ["---"] + [raw for raw in lines[1:body_line - 2]
+                              if raw.partition(":")[0].strip() not in LIFECYCLE_KEYS
+                              and not STATUS_TAG_RE.match(raw)]
+            kept.extend(lines[body_line - 1:])
+            text = "\n".join(kept).rstrip() + "\n"
+        text = without_generated_relations(text)
+        digest.update(relative.as_posix().encode())
+        digest.update(b"\0")
+        digest.update(text.encode())
+        digest.update(b"\0")
+    return "sha256:" + digest.hexdigest()
+
+
+def cmd_content_hash(args, schema: dict) -> int:
+    space_dir = Path(args.space)
+    if not space_dir.is_dir():
+        print(f"ba_compile: FAIL: unknown space {space_dir}", file=sys.stderr)
+        return 2
+    print(json.dumps({"content_hash": content_hash(space_dir),
+                      "result_ref": f"business-analysis/{space_dir.name}/space"},
+                     sort_keys=True))
+    return 0
+
+
 def classify_package(space_dir: Path, schema: dict | None = None,
                      vault_root: Path | None = None) -> dict:
     """Return the one BA receipt-verification verdict used by all consumers."""
@@ -2171,6 +2218,12 @@ def cmd_approve_package(args, schema: dict) -> int:
         return 1
     if str(root_doc.fm.get("package_status", "")) == "approved":
         print("ba_compile: FAIL: approved package needs begin-revision", file=sys.stderr)
+        return 1
+    expected_content = getattr(args, "expected_content_hash", None)
+    if expected_content is not None and content_hash(space_dir) != expected_content:
+        print("ba_compile: FAIL: package content differs from the content hash the owner"
+              f" approved ({expected_content}); show the owner the change again",
+              file=sys.stderr)
         return 1
     target = root_doc.abs_path
     original = target.read_text(encoding="utf-8")
@@ -2441,6 +2494,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--space", required=True)
     p.add_argument("--vault-root", default="", dest="vault_root")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--expected-content-hash", dest="expected_content_hash",
+                   help="refuse unless the authored content hashes to this content-hash value")
+
+    p = sub.add_parser("content-hash")
+    p.add_argument("--space", required=True)
 
     p = sub.add_parser("begin-revision")
     p.add_argument("--space", required=True)
@@ -2473,6 +2531,7 @@ def main(argv: list[str] | None = None) -> int:
                 "enter-review": cmd_enter_review,
                 "approve": cmd_approve, "approve-package": cmd_approve_package,
                 "begin-revision": cmd_begin_revision, "status": cmd_status,
+                "content-hash": cmd_content_hash,
                 "render": cmd_render,
                 "resolve": cmd_resolve, "verify-import": cmd_verify_import}
     return handlers[args.command](args, schema)

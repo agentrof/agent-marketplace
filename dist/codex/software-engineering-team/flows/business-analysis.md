@@ -33,5 +33,11 @@ mode. Manual mode never reads, creates or binds Requirement state.
    same revision, then approve every gate-blocking document before closing it.
    Git history is the audit baseline; the workflow stores no revision marker
    or recovery receipt.
+   Switch `source_decision_gate`: at `one_gate_when_drafted`, a decision that
+   changes approved documents and whose recommendation needs no owner input
+   is drafted and reviewed first and approved as exact content in one owner
+   gate, as
+   `skill-content/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md`
+   defines.
 4. Requirement mode binds the returned receipt. Manual mode returns the exact
    BA package receipt and suggests `/solution-design`; it does not run it.

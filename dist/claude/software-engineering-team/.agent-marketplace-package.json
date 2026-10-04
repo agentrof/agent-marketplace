@@ -98,10 +98,10 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "d3c0932121980a5cc4113b58a38740bee1a8d73ebac429054176f967a62e4009"
+      "adf608a53ffd3bb7a528659b6b39fe76447a47666cf523a082a205561a27a8a8"
     ,
     "flows/business-analysis.md":
-      "3fe7f15751a84616855217127e6ead7044dbbadbf1970273f05a46b40e9ccada"
+      "2553a8d1aacf1d399febe7129fa24360e1f0cec22d24d109ab967b2ee6d29fef"
     ,
     "flows/delivery-execution.md":
       "ef1c83fcad8215d4daa106fafebb47b483fa260b448c593be2fe78f563f1727d"
@@ -152,7 +152,7 @@
       "a3447fdf99814c542c915ed96b947e6d6661c52b3415592b61c4f7a0ab72b564"
     ,
     "scripts/ba_compile.py":
-      "6097b5a504ee3c8e98a414cb7a81961069d7435f92ce15882803b7cbec6a9899"
+      "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
     ,
     "scripts/backlog_compile.py":
       "9f3eeba54f61e899f1e14c9b7de470a4b93ea89a2e423257c0c085ad3d0032cc"
@@ -307,6 +307,9 @@
     "skill-content/business-analysis/data/space-schema.json":
       "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936"
     ,
+    "skill-content/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md":
+      "95c085c1aa2b5fa1f98074250468c469d014216d4361a8017a647d3125246a93"
+    ,
     "skill-content/challenge-review/SKILL.md":
       "0ec0116e2f8cadd9fadc4d8f15e2c2301579718df61e7f6e3e072031a16113ec"
     ,
@@ -359,7 +362,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "db1e12720f8c05e28afe1b0a36c4728a98f95aef63c391bfabee59a87c51ab5b"
+      "ab6046a05f0af730e42a678f295c948512a3ddd43c2529f6206644bfa8cf07a5"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"

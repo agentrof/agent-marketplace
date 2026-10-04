@@ -93,7 +93,9 @@ EXPECTED = {
 }
 # calculation_examples binds its reference to every task of the entries whose flows own it.
 CALCULATION = "requirements-analysis/references/switch-calculation_examples-required.md"
-EXPECTED = {key: sorted([*value, CALCULATION])
+# source_decision_gate binds its reference to the same tasks.
+ONE_GATE = "business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md"
+EXPECTED = {key: sorted([*value, CALCULATION, ONE_GATE])
             if key.split(":")[0] in ("backlog-plan", "business-analysis") else value
             for key, value in EXPECTED.items()}
 # reader_waves binds its reference to every task of the entries whose flows own it.

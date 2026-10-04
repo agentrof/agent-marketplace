@@ -499,6 +499,28 @@
         "unit": "At least 3 backlog revisions whose sources hold a calculation rule, run with required.",
         "threshold": "Zero findings that send a calculation gap back to analysis from backlog review, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "source_decision_gate": {
+      "summary": "Whether a decision that changes approved analysis documents asks the owner twice, a direction and then the reviewed exact change, or once on the reviewed exact change when its recommended option can be drafted without the owner's input.",
+      "issue": 401,
+      "flows": ["backlog-planning", "business-analysis"],
+      "values": [
+        {
+          "id": "two_gates",
+          "tradeoffs": "The owner picks a direction in a choice gate, the change is drafted and reviewed, and the owner approves its exact content in a second gate, with the run idle between them. Today's behaviour and the baseline the single gate is measured against: in one measured project, one source decision took a 19 min direction gate and then an exact-change gate that stayed open 2 h 10 min although the change was ready with zero findings."
+        },
+        {
+          "id": "one_gate_when_drafted",
+          "tradeoffs": "When the recommended option needs no owner input, the change is drafted and independently reviewed before the owner is asked, and one gate shows the options with the reviewed diff and content hash of the recommended one as \"approve this exact change\"; `approve-package --expected-content-hash` refuses content that differs from what the gate showed, and any other answer falls back to two gates. One owner round trip less when the recommendation is taken, while a draft the owner rejects is drafting and review work spent, and the owner reads a full diff in the first gate."
+        }
+      ],
+      "default": "two_gates",
+      "reference_scope": "owning_flows",
+      "metric": "Per source-changing decision: owner gates asked, minutes from the first gate question to the approved write, whether the recommendation was taken, and drafts discarded after a rejected recommendation.",
+      "promotion": {
+        "unit": "At least 5 source-changing decisions across at least 2 revisions, run with one_gate_when_drafted.",
+        "threshold": "One owner gate for every decision whose recommendation was taken, a median time from the first gate question to the approved write at most half of two_gates', zero approved packages whose content differs from the content hash the gate showed, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

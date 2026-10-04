@@ -76,6 +76,41 @@ class InstructionTests(unittest.TestCase):
             self.assertNotIn("switch-mechanical_pass_tier", skill.read_text(encoding="utf-8"))
 
 
+class CodexTierTests(unittest.TestCase):
+    """On Codex a variant runs its writer's model one effort step lower, so a
+    fix pass gains more than a fresh context (#404), and a pass that resumes
+    the base writer is recorded as such."""
+
+    def test_every_codex_variant_runs_below_the_writer_it_serves(self):
+        profile = json.loads((ROOT / "platforms/codex/execution-profiles.json").read_text(
+            encoding="utf-8"))["profiles"]["auto"]
+        efforts = ["low", "medium", "high", "xhigh", "max"]
+        agents = ROOT / "dist/codex/software-engineering-team/agents"
+
+        def setting(name: str) -> tuple[str, str]:
+            text = (agents / f"{name}.md").read_text(encoding="utf-8")
+            return (re.search(r"^model: (.+)$", text, re.M)[1],
+                    re.search(r"^model_reasoning_effort: (.+)$", text, re.M)[1])
+
+        self.assertEqual(setting("product-owner-mechanical"),
+                         (profile["low"]["model"], profile["low"]["effort"]))
+        for writer in WRITERS:
+            with self.subTest(writer=writer):
+                model, effort = setting(writer)
+                variant_model, variant_effort = setting(f"{writer}-mechanical")
+                self.assertEqual(variant_model, model)
+                self.assertLess(efforts.index(variant_effort), efforts.index(effort))
+
+    def test_a_resumed_writer_pass_is_recorded_on_its_own_tier(self):
+        text = " ".join(read(REFERENCE).split())
+        self.assertIn("whether it ran on the `-mechanical` variant or as the resumed base writer,"
+                      " the model and effort that ran it", text)
+        self.assertIn("never counts as a variant pass", text)
+        contract = " ".join((ROOT / "platforms/codex/software-engineering-team/host-contract.md")
+                            .read_text(encoding="utf-8").split())
+        self.assertIn("never resume the base writer for one", contract)
+
+
 class ValidatorTests(unittest.TestCase):
     """The validator refuses a mechanical variant on a reader, a missing
     variant declaration and a host table that omits or mis-maps the tier."""

@@ -98,11 +98,12 @@
 - Role agents use the package's `auto` execution profile: each of the
   three role tiers runs one model of the package's model catalog, named by
   its exact model ID, at the tier's reasoning effort, and every role file
-  carries both `model` and `model_reasoning_effort`. The high, medium and low
-  tiers all run `gpt-6.1-sol` at effort `xhigh`; the catalog keeps
+  carries both `model` and `model_reasoning_effort`. The high and medium
+  tiers run `gpt-6.1-sol` at effort `xhigh` and the low tier, which no
+  canonical role runs, `gpt-6.1-sol` at effort `high`; the catalog keeps
   `gpt-6-luna`, which no tier runs. Every build also ships the `-lens`
   variants of the read-only document reviewers on the `low` tier,
-  `gpt-6.1-sol` at effort `xhigh`; only review panels under switch
+  `gpt-6.1-sol` at effort `high`; only review panels under switch
   `review_panels` at `lens_panel` start them, and the reviewers themselves
   keep their own tier.
   Every build also ships `code-reviewer-lens` on the same tier; only the code
@@ -192,13 +193,15 @@
   record, then stop and report both errors.
 - Every build also ships the `-mechanical` variants of the document writers
   `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
-  on the `low` tier, `gpt-6.1-sol` at effort `xhigh`. Only switch
+  on the `low` tier, `gpt-6.1-sol` at effort `high`. Only switch
   `mechanical_pass_tier` at `mechanical` starts them, for a pass that applies
   the fixes a review names; the writers themselves keep their own tier, and
   no review, re-check or calibration runs on a variant. Every variant runs
-  its writer's own model and effort, so it changes only the fresh context of
-  the pass. These values are placeholders until the variants' frozen-task A/B
-  sets them. For that A/B, apply `--execution-profile inherit` in a scratch
+  its writer's own model one effort step below the writers' `xhigh`, so a
+  fix pass generates at a lower effort as well as in a fresh context. Start
+  the variant for every `apply_findings` pass; never resume the base writer
+  for one, since the resumed writer keeps its own effort. These values are
+  starting values until the variants' frozen-task A/B sets them. For that A/B, apply `--execution-profile inherit` in a scratch
   copy of the project, set the candidate model as the session's `model`, and
   set a candidate effort as `model_reasoning_effort` in that copy's
   `-mechanical` role files.

@@ -138,7 +138,7 @@
         },
         {
           "id": "mechanical",
-          "tradeoffs": "A writer pass whose findings each name their exact fix runs on the owning writer's -mechanical variant, a fresh agent on the low tier, and render, stamp and check steps run as direct entry commands with no role pass. The host contract states per host what a variant changes against its writer's own tier: today a smaller model on one host, and on the other only the fresh context, since its low tier runs the writers' own model and effort. The variants' values are placeholders until the frozen-task A/B sets them. Shorter fix passes where the low tier runs a lower model, while the fresh variant re-reads what a resumed writer held and a lower tier may misapply a fix, which the unchanged re-check catches at the cost of a round."
+          "tradeoffs": "A writer pass whose findings each name their exact fix runs on the owning writer's -mechanical variant, a fresh agent on the low tier, and render, stamp and check steps run as direct entry commands with no role pass. The host contract states per host what a variant changes against its writer's own tier: today a smaller model on one host, and on the other the writers' own model one effort step lower, which a resumed base writer does not get, so the coordinator starts the variant and the pass record says which ran. The variants' values are placeholders until the frozen-task A/B sets them. Shorter fix passes where the low tier runs a lower model, while the fresh variant re-reads what a resumed writer held and a lower tier may misapply a fix, which the unchanged re-check catches at the cost of a round."
         }
       ],
       "default": "role_tier",

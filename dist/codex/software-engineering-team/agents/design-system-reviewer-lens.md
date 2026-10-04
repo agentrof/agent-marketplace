@@ -2,7 +2,7 @@
 name: design-system-reviewer-lens
 description: Read-only challenger for the approved Design System package. Lens reader variant for review panels.
 model: gpt-6.1-sol
-model_reasoning_effort: xhigh
+model_reasoning_effort: high
 output_contract: prose
 tools: Read, Grep, Glob
 ---

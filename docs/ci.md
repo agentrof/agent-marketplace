@@ -140,9 +140,19 @@ select the full suite. The command never fetches refs.
 
 Every `check` executes static validation afresh. A successful local receipt
 binds HEAD/base/index bytes and modes, inventory, selected IDs, command and
-policy hashes, Python/Git/OS, Git configuration and environment digests. Secret
-environment values are never written. Make's orchestration variables are removed
-before checks so direct and Make entry points use the same effective environment.
+policy hashes, Python/Git/OS, Git configuration and environment digests. The
+environment digests cover only the variables `ci-local-policy.json` binds, the
+names and prefixes that can change what the tests do, such as `PATH`, `LANG`,
+`LC_*`, `TZ`, `PYTHON*`, `GIT_*` and the host variables the tools read. Host
+session ids, sandbox tokens and scratch roots are not bound, so a `verify` from
+another agent session of the same host accepts the receipt. Each bound value is
+written only as a digest keyed with a random key of the local cache, never as
+the value. A test fails when the tools read a variable that is neither bound
+nor listed as unbound with its reason. When the receipt differs from the plan only in its
+environment, `verify` names the changed variables, never their values. Make's
+orchestration variables are removed before checks so direct and Make entry
+points use the same effective environment. `verify` without `--jobs` uses the
+worker count of the receipt's `check`.
 Results expire after at most 24 hours; reuse does not extend that deadline.
 The latest failed, interrupted, changed or corrupt attempt invalidates prior
 success. The source is rechecked after statics and workers. Missing, duplicate,

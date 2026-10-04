@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -41,6 +42,10 @@ def policy_at(root):
     if any(type(value.get(key)) is not int for key in ("default_workers", "max_workers")) or \
             not 1 <= value.get("default_workers", 0) <= value.get("max_workers", 0) <= 4:
         raise tests.CIError("invalid local worker policy")
+    for key in ("environment_names", "environment_prefixes", "environment_ignored"):
+        names = value.get(key)
+        if not isinstance(names, list) or any(not isinstance(name, str) or not name for name in names):
+            raise tests.CIError("invalid local environment binding: " + key)
     commands = value.get("static_commands")
     if not isinstance(commands, list) or not commands or any(
             not isinstance(command, list) or not command or
@@ -119,14 +124,63 @@ def execution_environment(root):
             "PWD": str(root), "PYTHONDONTWRITEBYTECODE": "1"}
 
 
+def identity_key(root):
+    """A random key of this checkout's cache, so a recorded digest confirms no guess of a variable's value."""
+    cache = safe_cache(root)
+    path = cache / "identity-key"
+    if path_alias(path) or path.exists() and (not path.is_file() or path.stat().st_nlink != 1):
+        raise tests.CIError("unsafe local identity key")
+    if not path.exists():
+        descriptor, name = tempfile.mkstemp(prefix="identity-key.", dir=cache)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(os.urandom(32))
+            try:
+                os.link(name, path)
+            except FileExistsError:
+                pass
+        finally:
+            os.unlink(name)
+    key = path.read_bytes()
+    if len(key) != 32:
+        raise tests.CIError("local identity key is invalid; remove it and run check again")
+    return key
+
+
+def bound_environment(policy):
+    """The variables that can change what the tests do; host session ids and scratch roots are not among them."""
+    names, prefixes = set(policy["environment_names"]), tuple(policy["environment_prefixes"])
+    return {key: value for key, value in os.environ.items()
+            if key not in ORCHESTRATION_ENV and key not in policy["environment_ignored"]
+            and (key in names or key.startswith(prefixes))}
+
+
 def environment_identity(root):
-    # Only digests leave this function. Never record credential values in a receipt.
-    environment = {key: value for key, value in os.environ.items()
-                   if key not in ORCHESTRATION_ENV}
+    # Only keyed digests leave this function. Never record credential values in a receipt.
+    key = identity_key(root)
+    environment = {name: hmac.new(key, (name + "\0" + value).encode("utf-8", "surrogateescape"),
+                                  hashlib.sha256).hexdigest()
+                   for name, value in bound_environment(policy_at(root)).items()}
     configuration = tests.git(root, "config", "--null", "--list", "--show-origin")
     return {"runtime": tests.runtime_identity(), "python_executable": str(Path(sys.executable).resolve()),
-            "environment_hash": tests.digest(environment),
+            "environment": environment,
             "git_configuration_hash": hashlib.sha256(configuration).hexdigest()}
+
+
+def environment_difference(receipt, plan):
+    """What alone separates a receipt from this plan: the changed variable names, never their values."""
+    recorded = receipt.get("environment") if isinstance(receipt, dict) else None
+    if not isinstance(recorded, dict) or not isinstance(recorded.get("environment"), dict):
+        return None
+    same = {**{key: value for key, value in plan.items() if key != "plan_hash"}, "environment": recorded}
+    if receipt.get("plan_hash") != tests.digest(same):
+        return None
+    current = plan["environment"]
+    names = sorted(name for name in set(recorded["environment"]) | set(current["environment"])
+                   if recorded["environment"].get(name) != current["environment"].get(name))
+    labels = {"runtime": "Python, Git or OS runtime", "python_executable": "Python executable",
+              "git_configuration_hash": "Git configuration"}
+    return names + [label for key, label in labels.items() if recorded.get(key) != current.get(key)]
 
 
 def file_generation(path):
@@ -442,18 +496,28 @@ def check(root, target="origin/main", jobs=None, fresh=False, verify_only=False)
         previous = read_receipt(latest)
         attempt = {"schema_version": 1, "authority": "local_only", "status": "running", "started_at": time.time()}
         try:
+            policy = policy_at(root)
+            if verify_only and jobs is None and isinstance(previous, dict) and type(previous.get("jobs")) is int:
+                # The worker count partitions the receipt's tests; verify takes the one check used.
+                jobs = previous["jobs"]
+                print(f"ci-local: verifying with the receipt's {jobs} workers")
+            jobs = policy["default_workers"] if jobs is None else jobs
             plan = make_plan(root, target, jobs)
             generation = generation_token(root)
-            policy = policy_at(root)
             valid = reusable(previous, plan, policy["max_age_seconds"])
             if verify_only:
                 if not valid:
+                    changed = environment_difference(previous, plan)
+                    if changed:
+                        raise tests.CIError("no current successful local receipt: the receipt for this candidate"
+                                            " was made in another validation environment (changed: "
+                                            + ", ".join(changed) + "); run make check-local here")
                     raise tests.CIError("no current successful local receipt; run make check-local")
                 assert_current(root, plan)
                 assert_generation(root, generation)
                 print("ci-local: exact staged candidate has a current local receipt")
                 return previous
-            attempt["plan_hash"] = plan["plan_hash"]
+            attempt.update(plan_hash=plan["plan_hash"], environment=plan["environment"], jobs=jobs)
             tests.write_json(latest, attempt)
             started = time.monotonic()
             for command in plan["static_commands"]:

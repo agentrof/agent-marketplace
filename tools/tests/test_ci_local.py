@@ -5,6 +5,7 @@ import copy
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -48,6 +49,8 @@ class LocalValidationTests(unittest.TestCase):
         ci_tests.write_json(self.root / ci_tests.POLICY_PATH, self.policy)
         ci_tests.write_json(self.root / ci_local.POLICY_PATH, {'schema_version': 1, 'max_age_seconds': 86400,
             'default_workers': 2, 'max_workers': 4, 'static_commands': [['static.py']],
+            'environment_names': ['PATH', 'LANG'], 'environment_prefixes': ['PYTHON', 'GIT_'],
+            'environment_ignored': ['GIT_EDITOR'],
             'ignored_cache_paths': ['.agentrof/*', '**/__pycache__/*']})
         git_fixture.init_repository(self.root)
         self.git('config', 'core.autocrlf', 'false')
@@ -160,7 +163,7 @@ class LocalValidationTests(unittest.TestCase):
             with self.subTest(change=change):
                 plan = ci_local.make_plan(self.root)
                 if change == 'environment':
-                    with mock.patch.dict(os.environ, {'LOCAL_CI_TEST': 'different'}):
+                    with mock.patch.dict(os.environ, {'PYTHONPATH': 'different'}):
                         plan = ci_local.make_plan(self.root)
                 else:
                     plan[change + '_hash'] = 'different'
@@ -438,6 +441,45 @@ class LocalValidationTests(unittest.TestCase):
             self.assertEqual(os.environ['MAKELEVEL'], '7')
         with mock.patch.dict(os.environ, {'MAKELEVEL': '2', 'MAKEFLAGS': 'other', 'LOCAL_SECRET': 'do-not-record'}):
             self.assertEqual(ci_local.environment_identity(self.root), identity)
+
+    def test_verify_without_jobs_takes_the_worker_count_check_used(self):
+        with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
+            receipt = self.run_check(jobs=1)
+        self.assertEqual((receipt['jobs'], receipt['worker_count']), (1, 1))
+        self.assertEqual(self.run_check(verify_only=True), receipt)
+        with self.assertRaisesRegex(ci_tests.CIError, 'no current'):
+            self.run_check(verify_only=True, jobs=2)
+
+    def test_verify_ignores_host_session_variables_and_names_a_changed_bound_one(self):
+        with mock.patch.dict(os.environ, {'PYTHONPATH': 'first-secret-path'}):
+            with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
+                receipt = self.run_check()
+            session = {'CLAUDE_CODE_SESSION_ID': 'another-session', 'CODEX_THREAD_ID': 'another-thread',
+                       'GIT_EDITOR': 'another-editor', 'TMPDIR': os.environ.get('TMPDIR', tempfile.gettempdir())}
+            with mock.patch.dict(os.environ, session):
+                self.assertEqual(self.run_check(verify_only=True), receipt)
+        self.assertNotIn('first-secret-path', (self.root / ci_local.CACHE_PATH / 'latest.json').read_text())
+        with mock.patch.dict(os.environ, {'PYTHONPATH': 'second-secret-path'}):
+            with self.assertRaises(ci_tests.CIError) as raised:
+                self.run_check(verify_only=True)
+        self.assertIn('changed: PYTHONPATH)', str(raised.exception))
+        self.assertNotIn('secret-path', str(raised.exception))
+
+    def test_every_variable_the_source_reads_is_bound_or_named_as_unbound(self):
+        # A variable the tools read changes what the tests do, so the receipt binds it.
+        # Workers set their own scratch roots and drop CLAUDE_PID; Make's level is orchestration.
+        unbound = {'TMPDIR', 'TMP', 'TEMP', 'CLAUDE_PID', 'MAKELEVEL'}
+        policy = ci_local.policy_at(ci_tests.ROOT)
+        pattern = re.compile(r'''(?:environ(?:\.get|\.pop|\.setdefault)?\(|environ\[|getenv\()\s*["']([A-Za-z_0-9]+)["']''')
+        read = set()
+        for directory in ('tools', 'plugins', 'platforms'):
+            for path in (ci_tests.ROOT / directory).rglob('*.py'):
+                if 'tests' not in path.relative_to(ci_tests.ROOT).parts[:2]:
+                    read.update(pattern.findall(path.read_text(encoding='utf-8')))
+        self.assertIn('CLAUDE_CODE_EXECPATH', read)
+        with mock.patch.dict(os.environ, {name: 'value' for name in read}, clear=True):
+            bound = ci_local.bound_environment(policy)
+        self.assertEqual(sorted(read - set(bound) - unbound), [])
 
 
 if __name__ == '__main__':

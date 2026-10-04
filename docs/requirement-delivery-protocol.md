@@ -701,7 +701,12 @@ New Items approve an explicit `parallel_snapshot_v1` verification schedule.
 An absent schedule preserves `sequential_v1` for legacy approved Items without
 altering their bytes or hashes. Parallel Code Review and QA bind one committed
 candidate and its exact plan, source and instruction identities. Both readers
-must settle or confirm cancellation before the owner can write. The compiler
+must settle or confirm cancellation before the owner can write. A reader's
+registration waits only for its own verification command, and a role waits
+for the Item's commands and locks only through the runner's `wait`, which
+returns once the holder releases its lock and at the latest after the
+verification policy's `wait_bound_seconds`, so each model call of a waiting
+role still finds its context in the host's prompt cache. The compiler
 requires independent final results, including source-bound raw command evidence;
 diagnostic QA can return findings but cannot approve. Run evidence binds the
 variables that can change a command's result, `PATH`, `HOME`, `LANG`, `LC_*`,

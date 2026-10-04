@@ -96,5 +96,6 @@
     "low",
     "info",
     "P3"
-  ]
+  ],
+  "wait_bound_seconds": 240
 }

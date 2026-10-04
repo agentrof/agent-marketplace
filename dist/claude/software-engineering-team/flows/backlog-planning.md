@@ -329,9 +329,9 @@ a changed input requires a fresh affected review. The Product Owner then
 writes the root review note and any source fixes. The root review covers
 cross-epic overlap, dependency direction, cycles, delivery sequencing, shared
 contracts, deferred criteria, global test coverage, findings and verdict. After
-the root review is authored, run the full
-`backlog_compile.py check --docs <workspace>/docs --render --json` and scoped
-vault gate. Both must pass before the package can be offered for approval.
+the root review is authored, run the full `backlog_compile.py check --docs
+<workspace>/docs --render --pre-approval --json`, which adds approval's own
+checks, and scoped vault gate. Both must pass before the package can be offered for approval.
 
 Switch `remediation_bookkeeping`: at `compiler`, a writer pass records its rechecks' closure rows,
 expected hashes and preservation report with one compiler command, as

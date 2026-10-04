@@ -40,6 +40,12 @@ the proposal shows read-only, as
 `skill-content/product-planning/references/switch-story_size_budget-propose_split.md`
 defines.
 
+Switch `test_cost_budget`: at `flag_serial_rows`, `init` also prints the
+selected Stories' scenarios over the serial-row limit as `test_cost`, which the
+proposal shows read-only, as
+`skill-content/product-planning/references/switch-test_cost_budget-flag_serial_rows.md`
+defines.
+
 Switch `delivery_path`: at `light_when_eligible`, `init` also reports whether
 the selection may take the light path, and a Delivery the compiler finds
 eligible plans its scope and its Item topology in this flow with one owner

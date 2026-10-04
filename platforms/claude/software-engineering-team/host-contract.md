@@ -30,6 +30,15 @@
   Bash-compatible tool contract for machine-owned writers. Shared hook logic
   is portable to Windows, but native Windows writer preservation is not a
   real-host Claude claim.
+- Bring an approved source handoff into the local checkout with Git itself,
+  never a pull or a wrapped script: fetch it first, then run one direct Bash
+  call from the checkout root with Git's absolute path, `<git> merge --no-edit
+  <source>`, or, when `HEAD` already holds that source, `<git>
+  restore --source=<source> --worktree -- workspace/docs/experience-design`.
+  `<source>` is a committed source holding the current remote target. The
+  vault hook attests only these two forms, against the open project Fence and
+  its target; another merge, pull or checkout that changes compiler-owned
+  Experience state is restored, and the hook's message names the form to run.
 - Vault hooks are workflow-integrity controls for host-dispatched tool effects,
   not a same-user operating-system sandbox. A process deliberately targeting
   hook scratch or recovery files has the user's filesystem authority; host
@@ -82,6 +91,12 @@
 - Under switch `execution_planning` at `single_source_bundle`, start every
   reader of an execution-plan bundle together: spawn them in one message, then
   wait for all of them before triage.
+- Under switch `reader_waves` at `all_at_once`, spawn every reader of a
+  review or recheck wave in one message, then wait for all of them before
+  triage; a
+  finished Claude Code subagent holds no thread, so there is nothing to close
+  first. Every wave's progress message names the wave size and how many of
+  its readers run at once.
 - Claude Code's prompt cache keeps a role's context for five minutes from the
   start of the model call that last used it, and a model call after a longer
   pause writes the whole context into the cache again, at more than ten times

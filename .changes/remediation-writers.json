@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch `remediation_writers` (`single_writer` | `per_epic`), off by default, so every default manifest, task and bound instruction is unchanged. At `per_epic`, after every epic review returns, each epic with accepted findings gets its own Product Owner writer, in parallel within the host's agent limit: its `task_inputs.py --epic` task reads that epic's review scope at the `review_manifest_scope` value in force, so at `bounded` the epic reader's read set, names `remediation_writers: per_epic` and writes only that epic's notes. Findings that name notes of several epics, the backlog root or the backlog as a whole go afterwards to one cross-epic writer, derived without `--epic` but with `--findings`, whose write scope is exactly the notes it is given with `--input`. A writer that only applies named fixes may run as the Product Owner's mechanical variant under `mechanical_pass_tier`. In one measured project, the single writer was bound to 1,063 inputs and 21.5 MB of sources, read for about 88 min, compacted its context 7 times and had changed no canonical file after 96 min.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

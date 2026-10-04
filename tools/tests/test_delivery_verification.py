@@ -407,6 +407,34 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertEqual(failed["exit_code"], 1)
         self.assertEqual(verification.read_session(self.root)["raw_evidence"]["test"]["exit_code"], 1)
 
+    def status(self, *arguments):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = verification.main(["--worktree", str(self.root), "status", *arguments])
+        return code, json.loads(output.getvalue())
+
+    def test_status_summary_prints_run_outcomes_without_the_session_bindings(self):
+        frozen = self.freeze()
+        raw = verification.run_check(self.root, "test")
+        code, summary = self.status("--summary")
+        self.assertEqual(code, 0)
+        self.assertEqual(summary["session_id"], frozen["session_id"])
+        self.assertEqual(summary["candidate_hash"], frozen["candidate"]["candidate_hash"])
+        self.assertEqual(summary["workers"], {"code_reviewer": "running", "qa_engineer": "running"})
+        run = summary["runs"]["test"]
+        self.assertEqual({key: run[key] for key in ("exit_code", "candidate_intact", "evidence_hash")},
+                         {"exit_code": 0, "candidate_intact": True, "evidence_hash": raw["evidence_hash"]})
+        self.assertEqual(run["environment_hash"], raw["identity"]["environment_hash"])
+        self.assertEqual(Path(run["output_path"]).read_text().strip(), "123")
+        self.assertNotIn("source_observations", json.dumps(summary))
+        _code, whole = self.status()
+        self.assertLess(len(json.dumps(summary)), len(json.dumps(whole)))
+        code, narrowed = self.status("--run", "test")
+        self.assertEqual((code, narrowed["runs"]), (0, {"test": run}))
+        code, missing = self.status("--run", "mutation")
+        self.assertEqual(code, 2)
+        self.assertIn("no mutation run is recorded", missing["errors"][0])
+
     def test_forged_session_and_missing_runtime_do_not_grant_approval(self):
         self.freeze()
         path = verification.session_path(self.root)
@@ -1428,9 +1456,13 @@ print(sys.argv[1])
         contract["test_command"] = subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
         self.write(contract_path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
         self.commit()
-        self.assertEqual(names, ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS"))
+        # The partition variables of switch test_engines partitioned are per-run inputs too (#386).
+        self.assertEqual(names, ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS",
+                                 "AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE"))
         with mock.patch.dict(os.environ, {"AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json",
-                                          "AGENTROF_REUSED_TESTS": "inherited-reuse.json"}):
+                                          "AGENTROF_REUSED_TESTS": "inherited-reuse.json",
+                                          "AGENTROF_TEST_PARTITION": "inherited-partition.json",
+                                          "AGENTROF_TEST_ENGINE": "inherited-engine"}):
             result = self.lane("backend_developer", "test")
         output = Path(result["output_file"]).read_text(encoding="utf-8")
         self.assertEqual(result["exit_code"], 0, output)

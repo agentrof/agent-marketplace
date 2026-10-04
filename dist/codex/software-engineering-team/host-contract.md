@@ -29,6 +29,15 @@
 - Native Windows lifecycle writer preservation is not claimed until Codex
   supplies an attested shell-family contract. Shared hook logic is portable to
   Windows and fails closed there; real lifecycle parity remains a host gate.
+- Bring an approved source handoff into the local checkout with Git itself,
+  never a pull or a wrapped script: fetch it first, then run one direct shell
+  command from the checkout root with Git's absolute path, `<git> merge
+  --no-edit <source>`, or, when `HEAD` already holds that source, `<git>
+  restore --source=<source> --worktree -- workspace/docs/experience-design`.
+  `<source>` is a committed source holding the current remote target. The
+  vault hook attests only these two forms, against the open project Fence and
+  its target; another merge, pull or checkout that changes compiler-owned
+  Experience state is restored, and the hook's message names the form to run.
 - Vault hooks are workflow-integrity controls for host-dispatched tool effects,
   not a same-user operating-system sandbox. A process deliberately targeting
   hook scratch or recovery files has the user's filesystem authority; host
@@ -62,6 +71,18 @@
 - Under switch `execution_planning` at `single_source_bundle`, start every
   reader of an execution-plan bundle before waiting on any of them, then wait
   for all of them before triage.
+- Under switch `reader_waves` at `all_at_once`, start a review or recheck
+  wave only after closing every finished agent thread with `close_agent`, a
+  writer between its passes included: Codex counts every open spawned thread,
+  finished or not, against the session's thread cap,
+  `agents.max_concurrent_threads_per_session` or its older alias
+  `agents.max_threads`. Then start every reader of the wave before waiting on
+  any of them, and wait for all of them before triage. When fewer threads are free than the wave has readers, start
+  the readers with the largest inputs first, say so in the progress message,
+  and start each remaining reader as soon as a reader finishes and is closed.
+  Every wave's progress message names the wave size and how many of its
+  readers run at once. A closed writer's next pass starts fresh from its task
+  manifest and the returned findings.
 - Depending on the model, the provider's prompt cache can drop a role's
   context five minutes after the model call that last used it, and a model
   call after that pays the full price for the whole context again. So a role
@@ -185,8 +206,11 @@
   the fixes a review names; the writers themselves keep their own tier, and
   no review, re-check or calibration runs on a variant. Every variant runs
   its writer's own model and effort, so it changes only the fresh context of
-  the pass. These values are placeholders until the variants' frozen-task A/B
-  sets them. For that A/B, apply `--execution-profile inherit` in a scratch
+  the pass. Start the variant for every `apply_findings` pass; never resume
+  the base writer for one, so the pass record shows the variant's tier and
+  the A/B measures it. These values are placeholders until the variants'
+  frozen-task A/B sets them; a lower low-tier effort waits for that A/B
+  (#404). For that A/B, apply `--execution-profile inherit` in a scratch
   copy of the project, set the candidate model as the session's `model`, and
   set a candidate effort as `model_reasoning_effort` in that copy's
   `-mechanical` role files.

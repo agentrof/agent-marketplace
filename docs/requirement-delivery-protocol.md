@@ -234,8 +234,10 @@ with the pin. A `scope_approved` Delivery reads every switch a Delivery flow
 owns. An `execution_approved` one runs only its `delivery-execution` flow
 until a plan revision, whose approval pins the policy anew, so it reads only
 the switches that flow owns: `code_review_panel`, `execution_planning`,
-`implementation_schedule`, `owner_gates`, `pre_handoff_regression` and
-`review_loop`. A switch no Delivery flow owns, such as
+`implementation_schedule`, `own_target_reuse`, `owner_gates`,
+`pre_handoff_regression`, `qa_gate_order`, `review_loop`, `test_engines`
+and `test_group_report`. A switch no
+Delivery flow owns, such as
 `mechanical_pass_tier`, is no part of the pin: inside a Delivery it is read
 from the current policy. While a new execution approval can still re-pin the
 Delivery, that is while it is `scope_approved` or `execution_approved`, a
@@ -511,6 +513,58 @@ every earlier target that prefixes or lies under one for QA, records the reuse
 in the run's identity, and evidence approval checks it as recorded and writes
 it into the Item's verification record; when a binding differs, every suite
 runs.
+
+Process switch `own_target_reuse` decides whether that reuse covers the Item's
+own Test Plan targets too. At `off`, the default, QA's final test run runs
+them itself. At `spot_run`, QA names at least one own target in a spot-run
+selection, `run --kind test --spot-run-file <file>`, and the run takes every
+other own target from the accepted run as well, apart from the own targets
+that are, prefix or lie under a spot-run target, or under such a target in
+turn, which the approved test command runs with every target the run did not
+cover. The run's identity records the reused own targets and the spot-run
+targets, evidence approval checks that the Delivery runs `spot_run`, that both
+sets are disjoint automation targets of the Item's own Test Plan and that no
+reused id overlaps a target the command had to run, and
+`approve-item-evidence` writes both sets into the Item's verification record.
+Without a pre-handoff run, at `pre_handoff_regression` `off`, nothing is
+reused.
+
+Process switch `qa_gate_order` decides when QA starts its first test command
+of a round. At `plan_first`, the default, QA plans and maps every check before
+it executes anything. At `gate_first`, QA starts the command in the
+background, as the host runs a long command, then plans, maps and drafts its
+result while it runs, reads its output only once the plan and the coverage
+matrix are written, and waits for it only through `wait --role qa_engineer`.
+
+Process switch `test_group_report` decides whether a test run knows its
+groups. At `off`, the default, the runner records the command's exit code,
+output and identity. At `refuse_missing_groups`, a Verification Contract may
+declare `test_groups`, the group ids its test command runs, and
+`test_group_report`, the file the command writes under
+`AGENTROF_VERIFICATION_SCRATCH` with each group's status, `passed`, `failed`
+or `not_collected`, and case counts; `operation_compile.py check` takes both or
+neither. With them, `run --kind test`, `run --kind diagnostic_test` and
+`regression-run` record each declared group's status, record a run whose report
+lacks a group not intact, and bind the declaration in the run's identity;
+evidence approval refuses a final test run with a group that is missing, not
+collected or failed.
+
+Process switch `test_engines` decides whether QA's final test run is one
+command. At `single`, the default, it is. At `partitioned`, a Verification
+Contract may declare `test_partition_command`, `test_engines`, a `Test
+Partitions` table that places every declared test group in exactly one
+partition with the runtime profile it needs, and `shared_profiles`, the
+profiles whose partitions may share an engine; the Environment Contract
+declares the same `test_engines`. `run --kind test` then runs each partition in
+its own private clone with `AGENTROF_TEST_PARTITION` and
+`AGENTROF_TEST_ENGINE`, longest first by its last recorded duration, at most
+one exclusive partition per engine and never more partitions than engines at
+once, under the Item's environment lock until the last one ends. A failing or
+unstarted partition never stops another, and one record merges them; its
+identity binds the plan, the partition command and the declared environment,
+not the schedule. Evidence approval refuses a record that lacks a declared
+partition, holds one twice, holds a failed or not intact one or ran another
+command.
 
 Process switch `execution_planning` decides how the facts a plan needs are
 written and reviewed. At `per_document`, the default, each Operation contract

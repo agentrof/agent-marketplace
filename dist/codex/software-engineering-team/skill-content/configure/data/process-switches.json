@@ -138,7 +138,7 @@
         },
         {
           "id": "mechanical",
-          "tradeoffs": "A writer pass whose findings each name their exact fix runs on the owning writer's -mechanical variant, a fresh agent on the low tier, and render, stamp and check steps run as direct entry commands with no role pass. The host contract states per host what a variant changes against its writer's own tier: today a smaller model on one host, and on the other only the fresh context, since its low tier runs the writers' own model and effort. The variants' values are placeholders until the frozen-task A/B sets them. Shorter fix passes where the low tier runs a lower model, while the fresh variant re-reads what a resumed writer held and a lower tier may misapply a fix, which the unchanged re-check catches at the cost of a round."
+          "tradeoffs": "A writer pass whose findings each name their exact fix runs on the owning writer's -mechanical variant, a fresh agent on the low tier, and render, stamp and check steps run as direct entry commands with no role pass. The host contract states per host what a variant changes against its writer's own tier: today a smaller model on one host, and on the other only the fresh context, since its low tier runs the writers' own model and effort; the coordinator starts the variant for every fix pass and the pass record says which ran with its model and effort. The variants' values are placeholders until the frozen-task A/B sets them. Shorter fix passes where the low tier runs a lower model, while the fresh variant re-reads what a resumed writer held and a lower tier may misapply a fix, which the unchanged re-check catches at the cost of a round."
         }
       ],
       "default": "role_tier",
@@ -264,6 +264,41 @@
         "threshold": "The owner accepts at least half of the split proposals, stories within budget reach integration with a median cycle time at most half that of stories over budget in the same period, and no split loses, merges or rewords a criterion, creates a dependency cycle or yields a story verifiable only after a sibling lands, with every shared quality guard holding and the owner's approval. A promotion keeps off as the default, since only a value the owner chooses takes parameters, and ships package_limits for propose_split, which a project at that value applies to each limit it leaves unset."
       }
     },
+    "test_cost_budget": {
+      "summary": "Whether backlog planning asks what a Test Plan scenario costs to run, and flags each automation-required scenario that runs more table rows serially than an owner-set limit, so QA plans a split before the epic review.",
+      "issue": 385,
+      "flows": ["backlog-planning", "delivery-planning"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "No planning step asks what a scenario costs to run, so the cost of a long table-driven test shows only in Delivery, after a gate waited for it; the compiler still validates rows and row_split where a scenario states them. Today's behaviour and the baseline the flag is measured against: in one measured project, one test ran 260 rows serially for 58 minutes, 25% of QA's 227-minute final gate, and bounded the implementation's own repair runs too."
+        },
+        {
+          "id": "flag_serial_rows",
+          "tradeoffs": "backlog_compile.py check --json, the review manifests and delivery_compile.py init list each automation-required scenario whose declared rows exceed the owner's serial_rows limit while its row_split is serial or absent, and QA proposes a split before the epic review: rows sharded into independent groups that can run in parallel or grouped under one shared setup, or the owner keeps the scenario serial with a recorded reason. Advisory only: it never fails a check or blocks an approval. A declared row count can go stale as the table grows and then misses a test, sharding can expose order dependence between rows, and QA fills one more optional field for the flagged scenarios."
+        }
+      ],
+      "default": "off",
+      "parameters": {
+        "summary": "Owner-set limit on the table rows a scenario may run serially. The package sets no limit.",
+        "values": ["flag_serial_rows"],
+        "declared_by": {
+          "path": "skill-content/product-planning/data/test-cost-limits.json",
+          "key": "limits"
+        },
+        "type": "positive_integer",
+        "min_count": 1
+      },
+      "value_data": {
+        "flag_serial_rows": ["skill-content/product-planning/data/test-cost-limits.json"]
+      },
+      "metric": "Per backlog revision run with flag_serial_rows: the scenarios flagged, split and kept serial with a reason; per Delivery: the wall clock of the longest test in QA's final gate and of the gate itself, compared with Deliveries of stories planned at off.",
+      "promotion": {
+        "unit": "At least 3 backlog revisions run with flag_serial_rows and 3 Deliveries that contain stories planned under it.",
+        "threshold": "No single test runs longer than a quarter of QA's final gate in those Deliveries, and the gate's median wall clock is at most that of Deliveries planned at off for a similar suite, with every shared quality guard holding and the owner's approval. A promotion keeps off as the default, since only a value the owner chooses takes parameters, and ships package_limits for flag_serial_rows."
+      }
+    },
     "pre_handoff_regression": {
       "summary": "Whether an Item's candidate goes to Code Review and QA after its implementation's own tests, or only once the automated suites of the earlier stories its change touches, with its own Test Plan targets, pass on that exact candidate.",
       "issue": 351,
@@ -283,6 +318,330 @@
       "promotion": {
         "unit": "At least 3 Deliveries run with touched_suites.",
         "threshold": "Zero blocking findings that are regressions in an earlier story's suite after the first review round of any Item, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "own_target_reuse": {
+      "summary": "Whether QA's final test run on a frozen candidate runs every own Test Plan target of the Item itself, or takes them, but for the ones QA spot-runs, from the pre-handoff regression run that passed on the same tree.",
+      "issue": 383,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "QA's final test run runs every own Test Plan target of the Item itself; at pre_handoff_regression touched_suites it takes only the earlier stories' targets from the accepted run. Today's behaviour and the baseline the reuse is measured against: in one measured project, QA's final test run took 227 minutes, 163 of them on the story's own cases, and about 94% of the run repeated tests the implementation had run on the identical tree in the hours before the handoff."
+        },
+        {
+          "id": "spot_run",
+          "tradeoffs": "Where the freeze accepted a pre-handoff run at pre_handoff_regression touched_suites, QA's final test run also takes the Item's own Test Plan targets from it, under the bindings the earlier stories' targets need: the frozen tree, the selection and approved command derived for it, the declared environment of QA's run and the age final evidence may have. QA names at least one own target in a spot-run selection, and the approved test command runs those, every own target that overlaps them and every target the run did not cover. QA's gate stops repeating the new story's cases the run covered, while a flaky own test outside the spot run passes on one green run, QA's coverage audit needs the accepted run's results, so the approved commands must keep each run's JUnit apart, and at pre_handoff_regression off nothing is reused."
+        }
+      ],
+      "default": "off",
+      "metric": "Per Delivery: the wall clock of QA's final test run, the own targets it reused and spot-ran per Item, and every defect found after a passing QA gate, in a later review round, in the Delivery Review or after merge, in an own target that gate reused.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with spot_run, each with pre_handoff_regression at touched_suites.",
+        "threshold": "No defect found after a passing QA gate in an own target that gate reused, and a median wall clock of QA's final test run at most half of the project's final test runs at off for stories of a similar suite, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "qa_gate_order": {
+      "summary": "Whether QA plans and maps every check before it starts its first test command of a round, or starts that command first and plans, maps and drafts its result while the command works.",
+      "issue": 382,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "plan_first",
+          "tradeoffs": "QA derives its partitions and coverage matrix before it executes anything, then runs its gate and writes its result once the gate has ended. Today's behaviour and the baseline the order is measured against: in one measured project, QA spent 12 to 18 minutes per round writing its result after a gate of several hours, through most of which the model sat idle."
+        },
+        {
+          "id": "gate_first",
+          "tradeoffs": "QA starts its first test command of the round in the background, as the host runs a long command, then derives its partitions, maps its coverage matrix and drafts its verification record while the command works, reads the command's output only once the plan and the matrix are written, so the plan-first rule keeps its intent, and waits for it only through `wait --role qa_engineer`. Most of QA's own work overlaps the gate, while any input the command needs, such as a spot-run selection, must be written before it starts, and the mutation, dependency audit and runtime commands still wait for it, since the runner runs one command at a time on an Item."
+        }
+      ],
+      "default": "plan_first",
+      "metric": "Per QA round: the wall clock from the end of QA's last runner command to the registration of QA's result, compared with plan_first rounds.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with gate_first.",
+        "threshold": "A median wall clock from the end of QA's last runner command to the registration of its result at most half of plan_first's, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "epic_review_cadence": {
+      "summary": "When the next backlog epic review starts while the epic reviews run one after another: after the previous review's calibration and the coordinator's record of it, or as soon as the previous review's last reader returns, with calibration and record keeping running beside it.",
+      "issue": 397,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "wait_per_panel",
+          "tradeoffs": "The coordinator waits for the calibration of one epic review's claims and for its own record of that review before it starts the next epic review. Today's behaviour and the baseline the overlap is measured against: in one measured project, a revision with eight epics and three-lens panels lost 32.7 min over four panel transitions, 3.4 to 4.4 min of each to the severity check and up to 10.9 min to the coordinator, and one transition that overlapped the check took 1.6 min."
+        },
+        {
+          "id": "overlap_calibration",
+          "tradeoffs": "The next epic review starts as soon as the previous review's last reader returns; a calibration reader starts for each reader's critical or major claims as soon as that reader returns, and the coordinator records only the fixed claim record at a panel boundary. Shorter gaps between epic reviews on the same frozen inputs, while more agents run at once within the host's limit, a calibration can still be running when the last epic review returns, and every writer action waits for every calibration as well."
+        }
+      ],
+      "default": "wait_per_panel",
+      "metric": "Per backlog revision with at least 2 epic reviews run one after another: the time from one epic review's last reader return to the next epic review's first reader start, calibration minutes per claim, and the confirmed critical and major findings against a wait_per_panel run of the same frozen inputs.",
+      "promotion": {
+        "unit": "At least 2 backlog revisions run with overlap_calibration, at least 6 epic review transitions in all. The switch changes only backlog planning, which runs outside any Delivery, so review transitions replace the 3-Delivery default.",
+        "threshold": "A median transition gap under 2 min, and confirmed critical and major findings equal to the wait_per_panel run's on the same frozen inputs, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "review_scope_record": {
+      "summary": "Whether each backlog epic review records how large its read set is under both review_manifest_scope values, which of its blocking findings cite a note outside the bounded read set, and flags a transitive read set over the owner's budget before its readers start.",
+      "issue": 395,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "Nothing is measured, and an over-large transitive read set shows only when its readers return without real coverage. Today's behaviour and the baseline the record is measured against: in one measured project, a 23-story epic handed each reader 1,002 files and 21.6 MB of sources under transitive, its first panel was discarded, and the switch change and repair cost 64 min before the bounded panel started."
+        },
+        {
+          "id": "both_scopes",
+          "tradeoffs": "Each epic reader's manifest also derives the other scope's read set and records files, source bytes and manifest bytes for both, flags a transitive read set over the owner's budget so the flow can offer bounded before readers start, and a command reports which blocking findings of the review cite a note outside the bounded read set; the coordinator appends both to a tracked JSON Lines record. The data the review_manifest_scope default is chosen on, while every epic manifest takes a second derivation, about as long as the first."
+        }
+      ],
+      "default": "off",
+      "parameters": {
+        "summary": "Owner-set budget for an epic reader's transitive read set. The package sets no budget: without it no read set is flagged.",
+        "values": ["both_scopes"],
+        "declared_by": {
+          "path": "skill-content/backlog-plan/data/review-scope-budget.json",
+          "key": "budgets"
+        },
+        "type": "positive_integer",
+        "min_count": 0
+      },
+      "value_data": {
+        "both_scopes": ["skill-content/backlog-plan/data/review-scope-budget.json"]
+      },
+      "metric": "Per epic review: files, source bytes and manifest bytes of both read sets, reader wall time, blocking findings and those citing a note outside the bounded read set, and discarded panels after an over-budget flag was offered or ignored.",
+      "promotion": {
+        "unit": "At least 5 epic reviews recorded across at least 2 backlog revisions. The switch changes only backlog planning, which runs outside any Delivery, so epic reviews replace the 3-Delivery default.",
+        "threshold": "A record for every epic review of those revisions and zero discarded panels after an over-budget flag, with every shared quality guard holding and the owner's approval. The records then decide review_manifest_scope's default, a separate owner decision."
+      }
+    },
+    "remediation_writers": {
+      "summary": "Who applies the accepted findings of a backlog revision's epic reviews: one Product Owner writer over the union of every epic's review scope, or one writer per epic with findings over that epic's review scope, in parallel, followed by one cross-epic writer that reads only the notes the cross-epic findings name.",
+      "issue": 394,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "single_writer",
+          "tradeoffs": "One Product Owner writer reads the union of every epic's review scope before its first edit and applies every accepted finding. Today's behaviour and the baseline per-epic writers are measured against: in one measured project, a writer bound to 1,063 inputs, 21.5 MB of sources, read for about 88 min, compacted its context 7 times and had changed no canonical file after 96 min."
+        },
+        {
+          "id": "per_epic",
+          "tradeoffs": "After every epic review returns, each epic with accepted findings gets its own Product Owner writer, in parallel within the host's agent limit, whose manifest is that epic's review scope at the review_manifest_scope value in force and whose write scope is that epic's own notes; findings that cross epics go to one cross-epic writer afterwards, whose task binds only the notes those findings name. A writer that only applies named fixes may run as the mechanical variant under mechanical_pass_tier. A shorter read before the first edit and parallel writers, while a fix that a per-epic writer's scope cannot hold must be routed to the cross-epic writer, the parallel writers' edits meet only at the cross-epic pass and the root review, and more agents run at once."
+        }
+      ],
+      "default": "single_writer",
+      "metric": "Per backlog revision: wall clock from the last epic review's return to the last remediation writer's return, input tokens and context compactions per writer, and findings each writer returned for another writer's scope, against a single_writer revision; guard: the root review after remediation finds every accepted finding resolved and no new cross-epic defect.",
+      "promotion": {
+        "unit": "At least 2 backlog revisions run with per_epic, each with at least 3 epics with accepted findings. The switch changes only backlog planning, which runs outside any Delivery, so revisions replace the 3-Delivery default.",
+        "threshold": "Remediation wall clock at most 40% of the single_writer baseline, at most 1 context compaction per writer and zero cross-epic defects the root review traces to a per-epic writer, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "root_review_scope": {
+      "summary": "What a backlog revision's root review reads in full: every story, test plan and the sources they cite, or only the revision's changed stories, their neighbours one dependency edge away and the epics, with every other story as a hash-bound summary in the compiler's whole-backlog graph.",
+      "issue": 405,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "full",
+          "tradeoffs": "The root reader reads the complete package and every source it cites, whatever the revision changed. Today's behaviour and the baseline the delta read is measured against: in one measured project, a revision that added four stories to 110 ran a three-reader root panel for 98.4 min and about 760 M input tokens, mostly re-reading the sources of unchanged stories, and found three minor record fixes."
+        },
+        {
+          "id": "revision_delta",
+          "tradeoffs": "The root reader's manifest names in full only the stories this revision changed or added, those one dependency edge away, their test plans, every epic and the review notes, and carries the compiler's graph of every story with its hashes, criteria, scenario count and dependencies, the dependency edges and the root review's compiler facts. A first backlog, a delta over the owner's share of stories and a reader's stated request read the whole package. A root review that scales with the change, while a cross-story defect between two unchanged stories is outside it, and an overlap with an unchanged story shows to the reader only through that story's title and criteria until it asks for the story."
+        }
+      ],
+      "default": "full",
+      "parameters": {
+        "summary": "Owner-set limit on the share of stories a revision's delta may hold for a delta root read. The package sets no limit, so the owner sets it with the value.",
+        "values": ["revision_delta"],
+        "declared_by": {
+          "path": "skill-content/backlog-plan/data/root-review-delta.json",
+          "key": "limits"
+        },
+        "type": "positive_integer",
+        "min_count": 1
+      },
+      "value_data": {
+        "revision_delta": ["skill-content/backlog-plan/data/root-review-delta.json"]
+      },
+      "metric": "Per backlog revision root review: wall clock, input tokens per reader, manifest paths and bytes, full-read fallbacks with their reasons and reader requests for an unchanged story, and the verdict and findings against a full root review of the same frozen revision; seeded cross-story defects caught.",
+      "promotion": {
+        "unit": "At least 3 backlog revisions run with revision_delta, each replayed as a frozen full root review. The switch changes only backlog planning, which runs outside any Delivery, so revisions replace the 3-Delivery default.",
+        "threshold": "The same verdict and every critical and major finding of the full replay, a median root review wall clock at most 40% of the full replay's, and every seeded cross-story defect reported, with every shared quality guard holding and the owner's approval. A promotion keeps full as the default, since only a value the owner chooses takes parameters, and ships package_limits for revision_delta."
+      }
+    },
+    "remediation_bookkeeping": {
+      "summary": "Who writes the bookkeeping of a backlog remediation pass: the Product Owner writer copies each recheck's closure rows into the review notes, reruns the expected-hash checks and writes the preservation report itself, or the writer does content fixes only and one compiler command writes the closure rows, the expected manifest hashes and the preservation report from the readers' closure tables and the pinned candidate.",
+      "issue": 398,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "writer",
+          "tradeoffs": "The writer copies closure rows, reruns each expected-hash check and writes the preservation report on its own tier, and a wording change in one record repeats every check. Today's behaviour and the baseline the command is measured against: in one measured project, this tail took about 26 min and 18 min of two writer passes, about 44 min of one backlog revision on the highest tier."
+        },
+        {
+          "id": "compiler",
+          "tradeoffs": "The coordinator writes the readers' closure tables to one JSON file and the writer runs `backlog_compile.py record-rechecks` once after its content fixes: it writes each review note's `Recheck Closures` table, derives the expected manifest hash of every touched scope and writes a preservation report against the pinned candidate, and its `--verify` mode is the writer's check. A tail of minutes instead of a model pass, while the closure tables must already be structured, and the compiler validates the `Recheck Closures` rows of a draft review note only at this value."
+        }
+      ],
+      "default": "writer",
+      "metric": "Per remediation writer pass: the time from the coordinator's fixes-ready message to the writer's final answer, against writer passes of the same kind, and the review notes' closure rows against the readers' closure tables, which must match row for row.",
+      "promotion": {
+        "unit": "At least 2 backlog revisions run with compiler, at least 3 remediation writer passes in all. The switch changes only backlog planning, which runs outside any Delivery, so writer passes replace the 3-Delivery default.",
+        "threshold": "A median bookkeeping tail of at most 5 min per pass and zero closure rows that differ from the readers' tables, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "reader_waves": {
+      "summary": "How a coordinator starts the independent readers of one review or recheck wave on a host that caps its open agent threads: each as a thread frees up, or all at once after closing every finished worker.",
+      "issue": 399,
+      "flows": ["backlog-planning", "business-analysis", "design-system", "execution-planning", "operation", "solution-design"],
+      "values": [
+        {
+          "id": "as_slots_free",
+          "tradeoffs": "Readers start as the host lets them, and a finished worker or a writer between its passes may keep its thread open. Today's behaviour and the baseline the wave start is measured against: in one measured project, a recheck wave of 12 independent readers ran in batches of at most three for 51 min, where its slowest reader took 20.7 min, and one panel's third reader started about 28 min late behind a finished worker's open thread."
+        },
+        {
+          "id": "all_at_once",
+          "tradeoffs": "Before a wave starts the coordinator closes every finished worker, the writer between its passes included, counts the free threads and starts every reader of the wave before waiting on any of them; when threads are short it starts the readers with the largest inputs first and says so, and each wave's progress message names its size and its readers running at once. A wave takes about as long as its slowest reader, while a closed writer starts its next pass fresh from its manifest and the findings, without its earlier read history, and a host thread cap below the wave size still batches the rest."
+        }
+      ],
+      "default": "as_slots_free",
+      "reference_scope": "owning_flows",
+      "metric": "Per review or recheck wave: its wall time against its slowest reader's, its size, the most readers running at once and the minutes between the first and the last reader's start.",
+      "promotion": {
+        "unit": "At least 5 review or recheck waves of at least 3 readers each, across at least 2 flows, run with all_at_once.",
+        "threshold": "A median ratio of wave wall time to slowest reader of at most 1.2 and readers running at once equal to the wave size wherever the host's thread cap allows it and no rise in writer fix-pass rework, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "calculation_examples": {
+      "summary": "Whether a business rule that computes a number from inputs or configurable parameters must state its formula or a worked input-to-output example in analysis, checked by the analysis challenger and read as the oracle by backlog test plans.",
+      "issue": 400,
+      "flows": ["backlog-planning", "business-analysis"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "A calculation rule follows the space standard alone, and no review asks how its inputs become the number. Today's behaviour and the baseline the requirement is measured against: in one measured project, a scoring rule whose weights were a tenant setting reached backlog test planning with no computable expected score, and the analysis round trip it caused, a read-only analysis, a direction gate, a source revision with two readers and an approval gate, added about 63 min of agent and owner time while the backlog revision waited."
+        },
+        {
+          "id": "required",
+          "tradeoffs": "Every active rule that derives a number carries its formula in its statement or an AC citing it with a worked example, inputs, parameters, expected output and the output after one parameter change; the analysis challenger reports a missing or inconsistent one as a major finding, and a backlog scenario takes its expected value from that formula or example and never invents one. The gap surfaces at analysis review instead of backlog review, while the analyst writes more rows per calculation rule, and the challenger must judge which rules derive a number."
+        }
+      ],
+      "default": "off",
+      "reference_scope": "owning_flows",
+      "metric": "Per backlog revision: findings that send a calculation gap back to analysis and the minutes from that finding to the approved source revision; per analysis review: calculation example findings raised.",
+      "promotion": {
+        "unit": "At least 3 backlog revisions whose sources hold a calculation rule, run with required.",
+        "threshold": "Zero findings that send a calculation gap back to analysis from backlog review, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "source_decision_gate": {
+      "summary": "Whether a decision that changes approved analysis documents asks the owner twice, a direction and then the reviewed exact change, or once on the reviewed exact change when its recommended option can be drafted without the owner's input.",
+      "issue": 401,
+      "flows": ["backlog-planning", "business-analysis"],
+      "values": [
+        {
+          "id": "two_gates",
+          "tradeoffs": "The owner picks a direction in a choice gate, the change is drafted and reviewed, and the owner approves its exact content in a second gate, with the run idle between them. Today's behaviour and the baseline the single gate is measured against: in one measured project, one source decision took a 19 min direction gate and then an exact-change gate that stayed open 2 h 10 min although the change was ready with zero findings."
+        },
+        {
+          "id": "one_gate_when_drafted",
+          "tradeoffs": "When the recommended option needs no owner input, the change is drafted and independently reviewed before the owner is asked, and one gate shows the options with the reviewed diff and content hash of the recommended one as \"approve this exact change\"; `approve-package --expected-content-hash` refuses content that differs from what the gate showed, and any other answer falls back to two gates. One owner round trip less when the recommendation is taken, while a draft the owner rejects is drafting and review work spent, and the owner reads a full diff in the first gate."
+        }
+      ],
+      "default": "two_gates",
+      "reference_scope": "owning_flows",
+      "metric": "Per source-changing decision: owner gates asked, minutes from the first gate question to the approved write, whether the recommendation was taken, and drafts discarded after a rejected recommendation.",
+      "promotion": {
+        "unit": "At least 5 source-changing decisions across at least 2 revisions, run with one_gate_when_drafted.",
+        "threshold": "One owner gate for every decision whose recommendation was taken, a median time from the first gate question to the approved write at most half of two_gates', zero approved packages whose content differs from the content hash the gate showed, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "dependent_rebind_gate": {
+      "summary": "Whether the owner gate that approves a change to an approved business-analysis package also shows and approves the mechanical rebinds of the Experience packages it makes stale, or each stale package is found after the approval and gets its own scope gate.",
+      "issue": 402,
+      "flows": ["business-analysis", "experience-design"],
+      "values": [
+        {
+          "id": "separate",
+          "tradeoffs": "Binding refresh finds an Experience package bound to the previous source receipt after the source approval, and its update opens its own scope gate, even when it only moves the source binding. Today's behaviour and the baseline the combined gate is measured against: in one measured project, such a gate asked nothing new and stayed open 4 h 19 min while nothing ran, the third sequential owner gate of one source decision."
+        },
+        {
+          "id": "with_source",
+          "tradeoffs": "Before the source gate, `experience_compile.py source-impact` lists every approved Experience package that binds the source's current receipt and classes it `mechanical`, when none of its notes cites a changed source row or document, or `semantic`; the source gate opens with one plain sentence of the whole action and approves the mechanical rebinds with the source, and the rebind then runs without a second gate while its scope is exactly those rebinds and `source-impact` still reports a receipt-only change. One owner round less per source change with mechanical dependents, while the owner reads a larger first gate, and a note that depends on a changed rule without citing it is classed mechanical and caught only by the rebind's final review."
+        }
+      ],
+      "default": "separate",
+      "reference_scope": "owning_flows",
+      "metric": "Per source change that makes an approved Experience package stale: owner gates opened after the source approval for mechanical rebinds, minutes from the source approval to the backlog rebind, and mechanical rebinds whose final review found a source-caused finding.",
+      "promotion": {
+        "unit": "At least 3 source changes with at least one mechanical Experience dependent, run with with_source.",
+        "threshold": "Zero owner gates opened after a source approval for a mechanical rebind and zero mechanical rebinds whose final review found a source-caused finding, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "rebind_review_scope": {
+      "summary": "What the final snapshot review of an Experience revision that only moved its source receipts reads: the whole package and prototype tree, or the source delta with the package notes once the compiler proves every record and artifact byte unchanged.",
+      "issue": 403,
+      "flows": ["experience-design"],
+      "values": [
+        {
+          "id": "full",
+          "tradeoffs": "Every final snapshot review reads the whole package and its prototype tree at the reviewer's own tier, even for a rebind that changed no record and no prototype byte. Today's behaviour and the baseline the scoped review is measured against: in one measured project, the review of such a rebind took about 28 min and 70.3 M input tokens to confirm the same zero changed bytes the compiler had proved in 2 min, about 72% of the time from the rebind gate's answer to the backlog rebind."
+        },
+        {
+          "id": "source_delta",
+          "tradeoffs": "When `experience_compile.py source-impact` reports `source_rebind_only` and no note citing a changed source row or document, the fresh reviewer reads the source diff, the package notes and the attested hashes instead of the prototype tree, reports any claim that depends on the changed source, which starts the full review, and writes the same attestation. A shorter rebind review, while a claim that depends on a changed rule without citing it relies on the reviewer reading the notes, and a prototype screen that shows a changed rule's outcome is not reread."
+        }
+      ],
+      "default": "full",
+      "metric": "Per source-only rebind review: its scope, wall time, input tokens and findings, and source-caused findings that a later full review of the same package raised.",
+      "promotion": {
+        "unit": "At least 3 source-only rebind reviews run with source_delta, each with a replay of the full review on the same frozen inputs.",
+        "threshold": "The same source-caused findings as the full replay, a median review wall time under 8 min and a seeded source change that contradicts a cited claim still producing a finding, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "test_engines": {
+      "summary": "Whether QA's final test run runs the whole suite as one serial command on the Item's one test environment, or runs the partitions the Verification Contract declares in parallel, each in its own private clone on an isolated test engine, and merges them into one piece of evidence.",
+      "issue": 386,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "single",
+          "tradeoffs": "QA's final test run is one approved command under the Item's environment lock, so the suite runs as one serial job. Today's behaviour and the baseline the partitions are measured against: in one measured project, a local test engine was busy for at least 64% of a Delivery's wall clock, and QA's final gate alone ran 227 minutes for 166 cases."
+        },
+        {
+          "id": "partitioned",
+          "tradeoffs": "Where the Verification Contract declares test_partition_command, test_engines and a Test Partitions table and the Environment Contract provisions the engines, run --kind test runs each partition in its own private clone with AGENTROF_TEST_PARTITION and AGENTROF_TEST_ENGINE, longest first, at most one exclusive partition per engine and never more partitions than engines at once, holds the Item's environment lock until the last one ends and merges their results into one record whose exit code is 0 only when every partition passed intact; evidence approval refuses a record that lacks a partition, holds one twice, holds a failed one or runs another command. The gate is bounded by its longest partition instead of the sum, while engines on one host contend for its CPU, memory and disk, a leak between engines gives flaky failures that look like product defects, hidden order dependence between groups surfaces as new failures, and implementation lanes wait for every engine during the gate."
+        }
+      ],
+      "default": "single",
+      "metric": "Per Delivery: the wall clock of QA's final test run against the sum of its partitions' durations, the host's CPU and memory pressure during the run, and the failures later traced to an isolation leak between engines or to order dependence between groups.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with partitioned.",
+        "threshold": "A median wall clock of QA's final test run at most half of the single runs of a similar suite, and no failure traced to an isolation leak between engines that reached a review round, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "test_group_report": {
+      "summary": "Whether a test run counts only its command's exit code and output, or also reads a group report the approved command writes, so that a group that never ran or failed to collect never passes for a green one.",
+      "issue": 384,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "The runner records a test command's exit code, output and identity and knows no groups; whether every group ran is QA's reading of the output. Today's behaviour and the baseline the report is measured against: in one measured project, QA's first gate ran 58 of the suite's 166 cases, since the command stopped at its first failure and two groups never collected, and five of the seven blockers of the next repair sat in tests that first round never ran."
+        },
+        {
+          "id": "refuse_missing_groups",
+          "tradeoffs": "Where the approved Verification Contract declares test_groups and test_group_report, run --kind test, run --kind diagnostic_test and regression-run read the group report the command writes under AGENTROF_VERIFICATION_SCRATCH, record each declared group's status and case counts, and record the run not intact when the report lacks a declared group; evidence approval refuses a final test run whose report lacks a declared group or names one not_collected. A group that never ran or never collected no longer passes for a green one, while the report stays the command's own claim, of which the runner checks only completeness and statuses, and the project's command must write it, which takes a Verification Contract revision."
+        }
+      ],
+      "default": "off",
+      "metric": "Per Delivery: the declared groups and test cases each Item's first QA gate run reached against the suite's, the blocking findings a later round raised in tests the first round never ran, and the runs recorded not intact for a missing group.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with refuse_missing_groups, each under a Verification Contract that declares its test groups.",
+        "threshold": "Every first QA gate run reaches every declared group, and no later round raises a blocking finding in a group the first round never ran, with every shared quality guard holding and the owner's approval."
       }
     }
   }

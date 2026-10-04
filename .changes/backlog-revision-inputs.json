@@ -1,0 +1,6 @@
+{
+  "summary": "Open backlog revisions against evolved approved inputs and scaffold fresh review rounds while preserving historical approvals and coverage gates. Opening a revision judges criterion coverage against the BA universe of the last committed backlog approval, in which a topic registry created since then holds no ids, while Delivery still refuses an approved backlog that misses a criterion approved after it. An unchanged approved Story keeps a superseded Solution Design or System Architecture note it cited while that note was approved or accepted.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "summary": "Open fresh policy-aware root and epic review rounds and approve only current completed reviews, preserving unapproved history, approved evidence and source bytes.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

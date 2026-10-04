@@ -105,7 +105,8 @@ recreate it without changing Requirement or Delivery state.
 
 - A `.changes/*.json` file declares release impact. The release commit, which
   `python3 tools/release.py bump` makes, is the only writer that bumps
-  `versions.json`; host manifests expose that semantic plugin version.
+  `versions.json`; host manifests expose that calendar release version,
+  `YYYY.M.N`.
 - Each generated package carries `.agent-marketplace-package.json` with its
   plugin and marketplace release versions, the closed file/hash inventory,
   executable paths and the closed `delivery_protocol` read/write capability.

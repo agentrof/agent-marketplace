@@ -513,22 +513,45 @@ HOSTS = {host: f"platforms/{host}/software-engineering-team/host-contract.md"
 SWITCH_REFERENCE = re.compile(r"switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md")
 # The value each switch ships at: a flip changes every project that chose nothing.
 RELEASED_DEFAULTS = {
+    "calculation_examples": "off",
     "code_review_panel": "single_reader",
     "delivery_path": "standard",
+    "dependent_rebind_gate": "separate",
+    "epic_review_cadence": "wait_per_panel",
     "execution_planning": "per_document",
     "implementation_schedule": "sequential_v1",
     "mechanical_pass_tier": "role_tier",
+    "own_target_reuse": "off",
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
+    "qa_gate_order": "plan_first",
+    "reader_waves": "as_slots_free",
+    "rebind_review_scope": "full",
+    "remediation_bookkeeping": "writer",
+    "remediation_writers": "single_writer",
     "review_loop": "current",
     "review_manifest_scope": "transitive",
     "review_panels": "single_reader",
+    "review_scope_record": "off",
+    "root_review_scope": "full",
+    "source_decision_gate": "two_gates",
     "story_size_budget": "off",
+    "test_cost_budget": "off",
+    "test_engines": "single",
+    "test_group_report": "off",
 }
 # The rules that keep a switch value safe, in the files agents read them from:
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "calculation_examples": {
+        f"{SKILLS}/requirements-analysis/references/switch-calculation_examples-required.md": (
+            "A gap the owner must close is an open question, not a guessed formula",
+            "A finding names the missing part, never a formula of its own",
+            "never invent a formula, a weight or an expected number",
+            "an expected value with no cited source as a major finding",
+        ),
+    },
     "code_review_panel": {
         f"{SKILLS}/code-review/references/switch-code_review_panel-beside_official.md": (
             "The panel never replaces the official code reviewer",
@@ -631,6 +654,19 @@ SAFETY_RULES = {
         HOSTS["claude"]: ("`AskUserQuestion` takes at most four questions per call",),
         HOSTS["codex"]: ("`request_user_input` takes at most three questions per call",),
     },
+    "own_target_reuse": {
+        f"{SKILLS}/deliver/references/switch-own_target_reuse-spot_run.md": (
+            "At `off` of that switch no such run exists and nothing is reused",
+            "QA runs itself only the own targets it spot-runs and those the runner keeps with them",
+            "names a target that is no `automation_target` of an `automation: required` scenario in the Item's own"
+            " Test Plan",
+            "It refuses the option with `--fresh`, which reuses nothing, with any kind but `test` and at"
+            " `own_target_reuse` `off`",
+            "no reused id is, prefixes or lies under a target the command had to run",
+            "the audit then reports them as NO-TEST and fails, which is a finding for the Verification Contract",
+            "a skip, a retry or a warning it cannot explain is a finding",
+        ),
+    },
     "pre_handoff_regression": {
         f"{SKILLS}/deliver/references/switch-pre_handoff_regression-touched_suites.md": (
             "A failing run is repaired before the freeze",
@@ -641,6 +677,43 @@ SAFETY_RULES = {
             "No other command receives the variable, an inherited one included",
             "which QA always runs itself",
             "Evidence approval checks the reuse as recorded",
+            "Like QA's first gate below, the run reports every failing group of what it runs where the approved"
+            " command allows it, so one repair queue holds every failure, and a group that fails to collect is a"
+            " failed group, never one left out",
+            "A command that stops at its first failing group or drops a group it could not collect is a finding for"
+            " the Verification Contract",
+            "A group that fails to collect is a failed group: name it in a finding with its collection error, never"
+            " leave it out of the result",
+        ),
+    },
+    "qa_gate_order": {
+        f"{SKILLS}/qa-verification/references/switch-qa_gate_order-gate_first.md": (
+            "at the default, `plan_first`, QA plans and maps every check before it executes anything",
+            "start no other `run` or `environment` command until it ends",
+            "Read the command's output only once the plan and the matrix are written",
+            "no check is planned, or left out, because of what the run showed",
+            "Never wait through a sleep, a polling loop or a long timeout of your own",
+        ),
+    },
+    "reader_waves": {
+        f"{SKILLS}/challenge-review/references/switch-reader_waves-all_at_once.md": (
+            "a role never starts or closes another agent",
+            "No writer runs while its readers run",
+            "Wait for every reader of the wave before triage or any writer action",
+            "never who reads, what each reader is given or how findings are triaged",
+        ),
+        # A wave starts readers only; the writer waits for every reader.
+        **{path: ("Under switch `reader_waves` at `all_at_once`",
+                  "wait for all of them before triage")
+           for path in HOSTS.values()},
+    },
+    "rebind_review_scope": {
+        f"{SKILLS}/experience-modeling/references/switch-rebind_review_scope-source_delta.md": (
+            "the final attestation binds the exact inputs after the last authored change",
+            "Any other row, a second source in the same revision, or a changed input after the review"
+            " takes the full review",
+            "which ends the scoped review and starts the full one",
+            "Never use the scoped review for a package with an authored change",
         ),
     },
     "review_loop": {
@@ -662,6 +735,33 @@ SAFETY_RULES = {
             "Credentials or secrets that reach a client artifact or a log stay critical",
             "Neither the claiming reviewer nor the writer changes a severity",
             "QA keeps its own blocking severities",
+        ),
+    },
+    "epic_review_cadence": {
+        f"{SKILLS}/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md": (
+            "It changes when work starts, never what anyone reads or decides",
+            "Each claim is still ruled once by a fresh calibration reader, neither the writer nor"
+            " a reader that returned a finding of the review",
+            "No writer action starts until every epic review and every calibration of its claims"
+            " has returned",
+        ),
+    },
+    "remediation_bookkeeping": {
+        f"{SKILLS}/backlog-plan/references/switch-remediation_bookkeeping-compiler.md": (
+            "The command records; it decides nothing",
+            "A closure row only copies what a recheck reader returned",
+            "rerun it after any change instead of editing a row, a hash or the report by hand",
+            "Each `--expected-hash` recheck the flow requires before accepting a result is"
+            " unchanged",
+        ),
+    },
+    "remediation_writers": {
+        f"{SKILLS}/backlog-plan/references/switch-remediation_writers-per_epic.md": (
+            "The Product Owner stays the only backlog writer role",
+            "before any writer starts, as the flow requires",
+            "No two writers ever write the same note",
+            "the cross-epic writer starts only after every epic writer has returned",
+            "Each fix's re-review runs exactly as the step's review loop says",
         ),
     },
     "review_manifest_scope": {
@@ -695,6 +795,38 @@ SAFETY_RULES = {
         f"{FLOWS}/operation.md": ("Spawn the non-writing counterpart as a read-only reviewer",),
         **{path: ("the reviewers themselves keep their own tier",) for path in HOSTS.values()},
     },
+    "review_scope_record": {
+        f"{SKILLS}/backlog-plan/references/switch-review_scope_record-both_scopes.md": (
+            "The record measures; it never changes what a reader reads",
+            "so no reader may start on an earlier manifest",
+            "A record row is measurement data, never review evidence",
+            "Never delete or rewrite a row without the owner's approval",
+        ),
+    },
+    "root_review_scope": {
+        f"{SKILLS}/backlog-plan/references/switch-root_review_scope-revision_delta.md": (
+            "The root review stays the backlog's cross-story gate",
+            "backlog approval still checks the whole backlog",
+            "never infer the story's content from its summary",
+            "so any change to the backlog stales it",
+        ),
+    },
+    "dependent_rebind_gate": {
+        f"{SKILLS}/business-analysis/references/switch-dependent_rebind_gate-with_source.md": (
+            "the owner approves the complete action set before any lifecycle mutation",
+            "never approved here",
+            "Never widen the approved set, and never let an authored record or artifact change ride on"
+            " this approval",
+        ),
+    },
+    "source_decision_gate": {
+        f"{SKILLS}/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md": (
+            "A choice pick sets a direction only and never approves a write",
+            "the owner approves exact content that the gate shows, never a summary of it",
+            "Never approve a document the gate did not show",
+            "never treat silence or a timeout as approval",
+        ),
+    },
     "story_size_budget": {
         f"{SKILLS}/product-planning/references/switch-story_size_budget-propose_split.md": (
             "it never fails `backlog_compile.py check`, never blocks a review or an approval and"
@@ -704,6 +836,35 @@ SAFETY_RULES = {
             "every moved criterion is covered by exactly one of the two stories",
             "Never classify a story to fit a limit",
             "the budget never changes the selection or the scope decision",
+        ),
+    },
+    "test_cost_budget": {
+        f"{SKILLS}/product-planning/references/switch-test_cost_budget-flag_serial_rows.md": (
+            "The flag is advisory: it never fails a check, never blocks a review or an approval and never rewrites"
+            " a scenario",
+            "A split changes how the target runs its rows, never what the scenario verifies",
+            "ask the owner one choice-gate question per flagged scenario, with the split as the recommended option",
+            "record the owner's decision and its reason in the epic review note",
+        ),
+    },
+    "test_engines": {
+        f"{SKILLS}/deliver/references/switch-test_engines-partitioned.md": (
+            "never two partitions of an exclusive profile on one engine at once, and never more partitions at"
+            " once than there are engines",
+            "Holds the Item's environment and verification command locks from the first partition's start until"
+            " the last one ends, and releases them on every exit path",
+            "an exit code of 0 only when every partition passed intact",
+            "never a reason to rerun until green",
+            "Both contracts change only through the Operation flow, never in a task",
+        ),
+    },
+    "test_group_report": {
+        f"{SKILLS}/deliver/references/switch-test_group_report-refuse_missing_groups.md": (
+            "a group that fails to collect is `not_collected`, never left out",
+            "A run with a missing group is recorded not intact. The exit code stays the command's.",
+            "Never edit, wrap or extend the command in a task, and never write or change the group report by"
+            " hand",
+            "the coverage audit and the right-reason rule still read the run's results and output",
         ),
     },
 }
@@ -723,12 +884,18 @@ POLICY_RULES = {
     f"{SKILLS}/configure/references/config-contract.md": (
         "the config stays closed, and the Process Policy is the one place for process choices",),
 }
-# Steps whose order is the rule: the pre-handoff run sits between the freeze and the readers.
+# Steps whose order is the rule: the pre-handoff run and the own-target reuse sit
+# between the freeze and the readers, and gate-first follows QA's approved commands.
 ORDERED_STEPS = {
     f"{FLOWS}/delivery-execution.md": (
         "freeze --delivery DLV-### --story <story>",
         "Switch `pre_handoff_regression`",
+        "Switch `own_target_reuse`: at `spot_run`",
         "Invoke Code Review and QA independently",
+        "QA uses `run --kind test|mutation|dependency_audit`",
+        "Switch `qa_gate_order`: at `gate_first`",
+        "Switch `test_group_report`: at `refuse_missing_groups`",
+        "Switch `test_engines`: at `partitioned`",
     ),
 }
 
@@ -802,8 +969,14 @@ class MeasuredBaselineTests(unittest.TestCase):
                 cited.append(name)
                 with self.subTest(switch=name):
                     self.assertTrue(evidence.startswith(" in one measured project"), evidence)
-        self.assertEqual(cited, ["code_review_panel", "delivery_path", "execution_planning",
-                                 "owner_gates", "pre_handoff_regression"])
+        self.assertEqual(cited, ["calculation_examples", "code_review_panel", "delivery_path",
+                                 "dependent_rebind_gate", "epic_review_cadence",
+                                 "execution_planning", "own_target_reuse", "owner_gates",
+                                 "pre_handoff_regression", "qa_gate_order", "reader_waves",
+                                 "rebind_review_scope", "remediation_bookkeeping",
+                                 "remediation_writers", "review_scope_record", "root_review_scope",
+                                 "source_decision_gate", "test_cost_budget", "test_engines",
+                                 "test_group_report"])
 
 
 if __name__ == "__main__":

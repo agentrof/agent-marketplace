@@ -637,6 +637,14 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(release_publish.PublishError):
             release_publish.ReleaseSpec("1.2.3", "ABC", PRIOR)
 
+    def test_calendar_release_names_are_strict_semver(self):
+        calendar = release_publish.ReleaseSpec("2026.10.1", CANDIDATE, PRIOR)
+        self.assertEqual((calendar.tag, calendar.title), ("v2026.10.1", "v2026.10.1"))
+        self.assertEqual(release_publish.strict_semver("2027.1.12"), "2027.1.12")
+        for value in ("2026.09.1", "2026.10.01", "v2026.10.1", "2026.10"):
+            with self.subTest(value=value), self.assertRaises(release_publish.PublishError):
+                release_publish.strict_semver(value)
+
     def test_cli_requires_explicit_bootstrap_or_prior_stable_mode(self):
         parser = release_publish.build_parser()
         with self.assertRaises(release_publish.PublishError):

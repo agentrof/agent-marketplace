@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import unicodedata
 
 import backlog_compile as backlog
@@ -106,6 +107,17 @@ def read_scope(docs: Path) -> str:
     return values[SCOPE_SWITCH]["value"]
 
 
+def read_switch(docs: Path, switch: str) -> dict:
+    """Return one switch's value in force, with its parameters when it declares any."""
+    import process_policy
+
+    try:
+        values, _snapshot = process_policy.effective_values(docs)
+    except ValueError as exc:
+        raise InputError(f"process policy cannot set {switch}: {exc}") from exc
+    return values[switch]
+
+
 def read_panels(docs: Path) -> bool:
     """Return whether the project's Process Policy sets review_panels to lens_panel.
 
@@ -151,7 +163,7 @@ def contract_hash() -> str:
              scripts / "ba_compile.py", scripts / "requirement_compile.py", scripts / "requirement_route.py",
              backlog.POLICY_PATH, scripts / "process_policy.py",
              scripts.parent / "skill-content/configure/data/process-switches.json",
-             backlog.STORY_SIZE_MEASURES_PATH]
+             backlog.STORY_SIZE_MEASURES_PATH, backlog.TEST_COST_LIMITS_PATH]
     return digest([[path.name, file_hash(path)] for path in files])
 
 
@@ -200,6 +212,7 @@ def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: di
     pending = backlog.review_section_findings(review["body"], sections, review["path"], docs)
     pending += backlog.accepted_minor_findings(docs, review["body"], review["path"], contract)
     pending += backlog.review_loop_record(docs, review["body"], review["path"], review["props"])
+    pending += backlog.recheck_closure_record(docs, review["body"], review["path"], review["props"])
     if budget is not None and not root:
         pending += backlog.size_exception_rows(docs, scope_epics[0], review)[1]
     # The coverage check reads every current review; hand it only this one.
@@ -285,7 +298,8 @@ def epic_structure(record: dict, read: set[str]) -> dict:
 
 
 def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None = None,
-             writer: bool = False) -> dict:
+             writer: bool = False, scope: str | None = None,
+             full_root_reason: str | None = None) -> dict:
     """Bound one review or writer task; a reader never reads an untouched stub.
 
     An epic manifest fails only on a finding in a note it reads, or on one
@@ -300,8 +314,17 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
 
     ``check`` holds only what a switch or those stubs put there: the compiler
     facts at review_panels ``lens_panel``, which the manifest then names, and
-    the story size measures at story_size_budget ``propose_split``. Without
-    any of them a manifest has no ``check``.
+    the story size measures at story_size_budget ``propose_split`` and the
+    scenarios over the serial-row limit at test_cost_budget
+    ``flag_serial_rows``. Without any of them a manifest has no ``check``.
+
+    ``scope`` derives an epic reader's manifest under that review_manifest_scope
+    value instead of the policy's, for review_scope_record ``both_scopes``,
+    which measures the read sets of both values.
+
+    At root_review_scope ``revision_delta`` the root reader's manifest reads in
+    full only the revision delta, unless ``full_root_reason`` records a reader's
+    request for the whole package; see ``revision_delta``.
 
     ``source_hash`` binds what the task reads. The root manifest binds every
     backlog note. An epic manifest binds the notes it names and the story
@@ -316,11 +339,23 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     before = snapshot(docs)
     contract = contract_hash()
     # Only an epic reader follows the switch; a writer and the root reader
-    # keep the transitive closure.
-    bounded = epic is not None and not writer and read_scope(docs) == "bounded"
+    # keep the transitive closure, except a per-epic remediation writer,
+    # which reads its epic's review scope.
+    reader = epic is not None and not writer
+    per_epic = (epic is not None and writer
+                and read_switch(docs, WRITERS_SWITCH)["value"] == WRITERS_VALUE)
+    bounded = (reader or per_epic) and (scope or read_scope(docs)) == "bounded"
+    measure = (reader and scope is None
+               and read_switch(docs, RECORD_SWITCH)["value"] == RECORD_VALUE)
     panels = read_panels(docs)
+    root_reader = epic is None and not writer
+    root_scope = read_switch(docs, ROOT_SWITCH) if root_reader else None
+    delta_requested = root_scope is not None and root_scope["value"] == ROOT_VALUE
+    if full_root_reason is not None and (not delta_requested or not full_root_reason.strip()):
+        raise InputError(f"a full root read request belongs to the root reader at {ROOT_SWITCH}"
+                         f" {ROOT_VALUE} and states its reason")
     with stage_package.candidate_session(), backlog.experience_validation_session():
-        record, errors = backlog.collect(docs, review_inputs=True)
+        record, errors = backlog.collect(docs, review_inputs=True, revision_inputs=writer)
         errors = sorted(set(errors))
         stubs = set(record["scaffold_findings"])
         notes = finding_notes(record)
@@ -344,11 +379,20 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
             owning_epics = matches
         else:
             owning_epics = epics
+        delta = (revision_delta(record, docs, root_scope["parameters"].get(DELTA_LIMIT),
+                                full_root_reason) if delta_requested else None)
+        delta_read = delta is not None and delta["read"] == "delta"
         primary = {record["backlog"]["path"]}
         selected_stories = {story["id"] for item in owning_epics for story in item["stories"]}
+        if delta_read:
+            selected_stories &= set(delta["changed"]) | set(delta["neighbours"])
         primary.update(item["path"] for item in owning_epics)
         primary.update(path for story in record["stories"] if story["id"] in selected_stories
                        for path in (story["path"], story["test_plan"]))
+        # A delta read takes an unchanged story from the compiler's graph; a link
+        # to one reads that note alone.
+        summarized = ({path for story in record["stories"] if story["id"] not in selected_stories
+                       for path in (story["path"], story["test_plan"])} if delta_read else set())
 
         by_id = {story["id"]: story for story in record["stories"]}
         by_path = {story["path"]: story for story in record["stories"]}
@@ -372,6 +416,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         def include(relative: str, reason: str, hop: int = 0) -> None:
             # A path is validated and hashed once per run; the closing
             # freshness check re-validates every included path.
+            if relative in summarized:
+                hop = LEAF_HOP
             if relative not in hashes:
                 hashes[relative] = file_hash(regular_file(docs, relative))
                 pending.append(relative)
@@ -415,8 +461,9 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                 target = parsed[0] + ".md"
                 include(target, f"reference from {source}", hop)
             # The bounded scope's dependency closure is complete before any
-            # link is read, so a linked story is read alone.
-            if target in by_path and not bounded:
+            # link is read, so a linked story is read alone, as a delta read
+            # reads one outside its delta.
+            if target in by_path and not bounded and not delta_read:
                 story_context(by_path[target]["id"], f"Story context from {source}")
 
         def package_reference(value: str, source: str, stage: str | None = None,
@@ -473,13 +520,19 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
 
         # The bounded scope reads the backlog root and the review history
         # without following their links; the root review reads them in full.
-        context_hop = LEAF_HOP if bounded else 0
+        context_hop = LEAF_HOP if bounded or delta_read else 0
         for path in sorted(primary):
             include(path, "primary review scope",
                     context_hop if path == record["backlog"]["path"] else 0)
-        for story_id in sorted(selected_stories):
-            story_context(story_id, "incoming/outgoing dependency closure")
+        # A delta holds its changed stories and their direct neighbours; every
+        # other edge is in the compiler's graph.
+        if not delta_read:
+            for story_id in sorted(selected_stories):
+                story_context(story_id, "incoming/outgoing dependency closure")
         review_notes = [review for item in owning_epics for review in item["reviews"]]
+        if delta_read:
+            # The current epic reviews closed this revision's epic findings.
+            review_notes = [backlog.latest(item["reviews"]) for item in owning_epics]
         if epic is None:
             review_notes += record["backlog_reviews"]
         for review in review_notes:
@@ -553,16 +606,24 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
             scope = selected["path"]
         try:
             budget = backlog.story_size_budget(docs)
+            cost = backlog.test_cost_budget(docs)
         except ValueError as exc:
             raise InputError(str(exc)) from exc
         check = compiler_check(docs, record, owning_epics, current_review, relations, epic is None,
-                               budget) if panels else {}
+                               budget) if panels or delta_read else {}
+        if delta_read:
+            check["backlog_graph"] = backlog_graph(record, docs, selected_stories)
         if budget is not None:
             check["story_size"] = backlog.story_size_report(
                 record, docs, budget, {story["id"] for item in owning_epics
                                        for story in item["stories"]})
+        if cost is not None:
+            check["test_cost"] = backlog.test_cost_block(
+                cost, [story for item in owning_epics for story in item["stories"]])
         if carried:
             check["scaffold_findings"] = carried
+        if writer and record.get("transition_findings"):
+            check["transition_findings"] = record["transition_findings"]
 
     after = snapshot(docs)
     if before != after or contract != contract_hash() or any(
@@ -588,15 +649,234 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         result["check"] = check
     if bounded:
         result[SCOPE_SWITCH] = "bounded"
+    if per_epic:
+        result[WRITERS_SWITCH] = WRITERS_VALUE
+    if delta is not None:
+        result[ROOT_SWITCH] = ROOT_VALUE
+        result["revision_delta"] = delta
     # Naming the value makes a switch change stale every manifest it derived.
     if panels:
         result[PANEL_SWITCH] = PANEL_VALUE
     if unparsed:
         result["unparsed_link_sources"] = sorted(unparsed)
     result["source_hash"] = digest(bound_view(result))
+    if measure:
+        # The sizes are facts of the sources, so they bind like every other field.
+        result[RECORD_SWITCH] = RECORD_VALUE
+        result["scope_sizes"] = scope_sizes(docs, epic, result, bounded)
+        result["source_hash"] = digest(bound_view(result))
     if expected_hash is not None and result["source_hash"] != expected_hash:
         raise InputError("review input manifest is stale; regenerate and review the changed sources")
     return result
+
+
+WRITERS_SWITCH = "remediation_writers"
+WRITERS_VALUE = "per_epic"
+ROOT_SWITCH = "root_review_scope"
+ROOT_VALUE = "revision_delta"
+DELTA_LIMIT = "max_delta_share_percent"
+RECORD_SWITCH = "review_scope_record"
+RECORD_VALUE = "both_scopes"
+SCOPE_BUDGET = "transitive_source_bytes"
+RECORD_FILE = Path("measurements") / "review-scope.jsonl"
+
+
+def story_adjacency(record: dict) -> dict[str, set[str]]:
+    """Map each story id to the stories one dependency edge away, either way."""
+    by_path = {story["path"]: story["id"] for story in record["stories"]}
+    adjacency: dict[str, set[str]] = {story["id"]: set() for story in record["stories"]}
+    for story in record["stories"]:
+        for target in story["dependency_targets"]:
+            dependency = by_path.get(target + ".md")
+            if dependency is not None:
+                adjacency[story["id"]].add(dependency)
+                adjacency[dependency].add(story["id"])
+    return adjacency
+
+
+def revision_delta(record: dict, docs: Path, limit: int | None,
+                   full_root_reason: str | None) -> dict:
+    """Return what a backlog revision changed and whether the root reader reads only that.
+
+    A story is changed when it or its test plan is new or no longer carries
+    the approval stamp of its bytes, so a changed dependency edge changes the
+    story that declares it. Its neighbours are the stories one edge away. The
+    root reader reads the whole package for a first backlog, for a delta whose
+    share of stories exceeds the owner's limit and on a reader's request with
+    its reason.
+    """
+    stories = record["stories"]
+    changed = sorted(story["id"] for story in stories
+                     if backlog.approval_stamp_findings(docs / story["path"], docs)
+                     or backlog.approval_stamp_findings(docs / story["test_plan"], docs))
+    adjacency = story_adjacency(record)
+    neighbours = sorted({other for identity in changed for other in adjacency[identity]}
+                        - set(changed))
+    share = len(changed) + len(neighbours)
+    result = {"changed": changed, "neighbours": neighbours,
+              "share_percent": (100 * share) // len(stories) if stories else 0,
+              "max_share_percent": limit, "read": "delta"}
+    revision = int(record["backlog"]["props"].get("revision", 1) or 1)
+    if revision < 2:
+        result.update(read="full", reason="first backlog revision")
+    elif limit is None:
+        result.update(read="full", reason=f"no {DELTA_LIMIT} parameter is set")
+    elif 100 * share > limit * len(stories):
+        result.update(read="full", reason=f"the delta holds more than {limit}% of the stories")
+    elif full_root_reason is not None:
+        result.update(read="full", reason="reader request: " + full_root_reason.strip())
+    return result
+
+
+def backlog_graph(record: dict, docs: Path, delta: set[str]) -> dict:
+    """Return the whole-backlog facts a delta root reader takes from the compiler.
+
+    Every story appears with its epic, title, criteria, scenario count,
+    dependencies and the hashes of its story and test plan; a story outside the
+    delta is this summary alone, bound by those hashes.
+    """
+    adjacency = {story["id"]: sorted(
+        other["id"] for other in record["stories"]
+        if other["path"][:-3] in story["dependency_targets"]) for story in record["stories"]}
+    stories = {}
+    for story in record["stories"]:
+        stories[story["id"]] = {
+            "epic": story["epic_id"], "title": str(story["props"].get("title", "")),
+            "path": story["path"], "test_plan": story["test_plan"],
+            "story_sha256": file_hash(docs / story["path"]),
+            "test_plan_sha256": file_hash(docs / story["test_plan"]),
+            "criteria": sorted(link_target(value) for value in story["criteria"]),
+            "scenarios": len(story["scenario_ids"]), "depends_on": adjacency[story["id"]],
+            "read": "full" if story["id"] in delta else "summary"}
+    return {"stories": stories,
+            "dependency_edges": sorted(backlog.dependency_edges(record["stories"], None, record))}
+
+
+def read_set_size(docs: Path, result: dict) -> dict:
+    """Return how much one manifest hands its reader: files, source bytes and JSON bytes."""
+    return {"files": len(result["paths"]),
+            "source_bytes": sum((docs / path).stat().st_size for path in result["paths"]),
+            "manifest_bytes": len(json.dumps(result, indent=2, sort_keys=True).encode("utf-8"))}
+
+
+def scope_sizes(docs: Path, epic: str, result: dict, bounded: bool) -> dict:
+    """Measure the epic reader's read set under both review_manifest_scope values.
+
+    The value in force is ``result``; the other one is derived from the same
+    sources. A transitive read set over the owner's budget is flagged, so the
+    flow can offer the bounded scope before any reader starts.
+    """
+    docs = docs.resolve()
+    current = "bounded" if bounded else "transitive"
+    other = "transitive" if bounded else "bounded"
+    sizes = {current: read_set_size(docs, result),
+             other: read_set_size(docs, manifest(docs, epic=epic, scope=other))}
+    record = {"read": current, **sizes}
+    limit = read_switch(docs, RECORD_SWITCH).get("parameters", {}).get(SCOPE_BUDGET)
+    if limit is not None:
+        record["transitive_budget"] = {
+            "source_bytes": limit, "over": sizes["transitive"]["source_bytes"] > limit}
+    return record
+
+
+def cited_notes(value: object) -> set[str]:
+    """Return the vault notes a finding cites: its wikilinks and a path-like anchor."""
+    notes = set()
+    for text in strings(value):
+        for match in WIKILINK_RE.finditer(text):
+            parsed = backlog.split_wikilink(match.group(0).lstrip("!"))
+            if parsed is not None:
+                notes.add(parsed[0] if parsed[0].endswith(".md") else parsed[0] + ".md")
+    return notes
+
+
+def scope_findings(docs: Path, epic: str, findings: Path | None = None) -> dict:
+    """Say which blocking findings of an epic review cite a note outside the bounded read set.
+
+    The findings come from ``findings``, a claim record with each finding's id,
+    severity and cited paths, or else from the epic's current review note's
+    Returned Findings and Severity Calibration. A calibrated severity replaces
+    the returned one.
+    """
+    docs = docs.resolve()
+    bounded = set(manifest(docs, epic=epic, scope="bounded")["paths"])
+    record, _errors = backlog.collect(docs, review_inputs=True)
+    matches = [item for item in record["epics"] if epic in {item["id"], item["path"], item["folder"]}]
+    if len(matches) != 1:
+        raise InputError(f"epic must resolve uniquely: {epic}")
+    review = backlog.latest(matches[0]["reviews"])
+    rows = []
+    if findings is not None:
+        try:
+            data = json.loads(findings.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise InputError(f"findings record cannot be read: {exc}") from exc
+        listed = data.get("findings") if isinstance(data, dict) else None
+        if not isinstance(listed, list) or not all(
+                isinstance(item, dict) and isinstance(item.get("id"), str)
+                and isinstance(item.get("severity"), str) for item in listed):
+            raise InputError("findings record needs a findings list with each id and severity")
+        for item in listed:
+            notes = cited_notes(item)
+            anchor = item.get("anchor")
+            if isinstance(anchor, str) and "/" in anchor and not anchor.startswith("/"):
+                notes.add(anchor if anchor.endswith(".md") else anchor + ".md")
+            rows.append((item["id"], item["severity"].casefold(), notes))
+        source = "findings record"
+    else:
+        body = review["body"]
+        returned, _errors = backlog.returned_findings(docs, body, review["path"])
+        ruled, _calibration_errors = backlog.severity_calibration(docs, body, review["path"], returned)
+        descriptions = {}
+        if backlog.RETURNED_FINDINGS in backlog.headings(body):
+            table, _table_errors = backlog.structured_table(
+                backlog.section(body, backlog.RETURNED_FINDINGS),
+                backlog.RETURNED_FINDING_COLUMNS, review["path"], backlog.RETURNED_FINDINGS)
+            descriptions = {row["finding"]: row["description"] for row in table}
+        for identifier, severity in sorted(returned.items()):
+            rows.append((identifier, ruled.get(identifier, severity),
+                         cited_notes(descriptions.get(identifier, ""))))
+        source = "review note" if returned else "none"
+    result = []
+    for identifier, severity, notes in rows:
+        if severity not in backlog.CLAIM_SEVERITIES:
+            continue
+        result.append({"finding": identifier, "severity": severity, "notes": sorted(notes),
+                       "outside_bounded": sorted(notes - bounded)})
+    return {"ok": True, "epic": matches[0]["id"], "review": review["path"], "source": source,
+            "bounded_paths": len(bounded), "blocking": len(result),
+            "blocking_outside_bounded": sum(1 for row in result if row["outside_bounded"]),
+            "findings": result}
+
+
+def record_path(docs: Path, value: str | None) -> Path:
+    """Return the review scope record, a file Git keeps beside the docs vault.
+
+    The record outlives every revision, so the backlog revision commits it.
+    Setup's managed .gitignore ignores the runtime and host roots, and the vault
+    gate refuses a non-markdown file in a note subtree, so the record lies in
+    the workspace outside the vault, at ``measurements/review-scope.jsonl``
+    unless a path is given, and a path Git ignores is refused.
+    """
+    vault = docs.resolve()
+    workspace = vault.parent
+    path = Path(value).resolve() if value else workspace / RECORD_FILE
+    if not path.is_relative_to(workspace) or path.is_relative_to(vault):
+        raise InputError("the review scope record must lie in the workspace outside the docs"
+                         f" vault: {path}")
+    ignored = subprocess.run(["git", "check-ignore", "--quiet", "--", str(path)],
+                             cwd=workspace, capture_output=True, check=False)
+    if ignored.returncode == 0:
+        raise InputError(f"Git ignores the review scope record {path}; keep it where the"
+                         " backlog revision commits it")
+    return path
+
+
+def append_record(path: Path, entry: dict) -> None:
+    """Append one measurement row as a JSON line, the record the owner keeps."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(entry, sort_keys=True, ensure_ascii=False) + "\n")
 
 
 def bound_view(result: dict) -> dict:
@@ -630,9 +910,41 @@ def main(argv: list[str] | None = None) -> int:
     scope.add_argument("--epic")
     scope.add_argument("--root", action="store_true")
     parser.add_argument("--expected-hash")
+    parser.add_argument("--scope-findings", action="store_true",
+                        help="report the epic review's blocking findings that cite a note outside"
+                             " the bounded read set (review_scope_record both_scopes)")
+    parser.add_argument("--findings", type=Path,
+                        help="with --scope-findings, a claim record to read instead of the review note")
+    parser.add_argument("--full-root-reason",
+                        help="a root reader's reason to read the whole package"
+                             " (root_review_scope revision_delta)")
+    parser.add_argument("--record", nargs="?", const="", metavar="FILE",
+                        help="append the scope measurement as one JSON line to the tracked record,"
+                             f" <workspace>/{RECORD_FILE.as_posix()} unless FILE names another"
+                             " workspace file (review_scope_record both_scopes)")
     args = parser.parse_args(argv)
     try:
-        result = manifest(args.docs, epic=args.epic, expected_hash=args.expected_hash)
+        if (args.scope_findings or args.record is not None or args.findings) and (
+                args.epic is None or read_switch(args.docs, RECORD_SWITCH)["value"] != RECORD_VALUE):
+            raise InputError("--scope-findings, --findings and --record measure an epic review"
+                             f" under switch {RECORD_SWITCH} at {RECORD_VALUE}")
+        if args.findings and not args.scope_findings:
+            raise InputError("--findings belongs to --scope-findings")
+        record = None if args.record is None else record_path(args.docs, args.record or None)
+        if args.scope_findings:
+            result = scope_findings(args.docs, args.epic, args.findings)
+            entry = {"kind": "findings", **{key: value for key, value in result.items()
+                                            if key != "ok"}}
+        else:
+            if args.full_root_reason is not None and not args.root:
+                raise InputError("--full-root-reason belongs to --root")
+            result = manifest(args.docs, epic=args.epic, expected_hash=args.expected_hash,
+                              full_root_reason=args.full_root_reason)
+            entry = {"kind": "manifest", "epic": args.epic, "scope": result["scope"],
+                     "source_hash": result["source_hash"],
+                     "scope_sizes": result.get("scope_sizes")}
+        if record is not None:
+            append_record(record, entry)
     except (InputError, OSError, ValueError, RuntimeError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2, sort_keys=True))
         return 1

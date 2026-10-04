@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "limits": {
+    "serial_rows": {
+      "summary": "The most table rows an automation-required Test Plan scenario may run serially, its declared rows with a row_split of serial or none, before the backlog compiler flags it for a split."
+    }
+  }
+}

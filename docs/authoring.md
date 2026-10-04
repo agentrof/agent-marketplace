@@ -92,6 +92,30 @@ application-only revision changes no process revision but creates a new current
 `experience-design/_ledger/application-revisions.json`; the current projection
 is `experience-design/_generated/application-registry.json`.
 
+After an approved source handoff, synchronize the local checkout in a separate
+direct shell call using the resolved absolute Git executable from the checkout
+root. The Experience guard attests only `merge --no-edit <committed-source>` or
+`restore --source=<committed-source> --worktree -- workspace/docs/experience-design`.
+Fetch required target and Fence objects separately before synchronization. The immutable source
+must contain the current remote target and its exact Experience tree, and the
+remote protocol-2 Fence must be open and target that same commit. A local commit
+alone does not establish this authority. Wrapped scripts, mixed shell commands,
+bare executable names, PowerShell and unknown shell identities receive no Git
+writer exemption. Native cmd commands retain canonical quoting requirements.
+
+Synchronization verifies exact committed protected bytes and the owning
+application gate, preserves existing local history and the restore's index,
+and publishes the accepted postimage through the same serialized authority as
+compiler writers. A shell reader that began earlier then recognizes that
+postimage instead of restoring its older snapshot. Authoring new approval
+receipts continues through the owning compiler lifecycle.
+
+Protected writers acquire their lock before reading the recovery preimage.
+Every snapshot captures and rechecks the authority generation around its tree;
+a concurrent transition rejects capture before any capsule is published.
+Every accepted publication advances that transient generation even when its
+content is unchanged. Durable approval receipts and revisions are unaffected.
+
 Reviewers, not the snapshot compiler, judge prototype fidelity, usability,
 accessibility, visual quality, behavior and design coherence. Approval requires
 a fresh transient schema-v4 attestation bound to proposal, artifact-tree,
@@ -217,7 +241,14 @@ $1.04 per task, where Claude Code with Opus 5.5 at `max` scores 66 at 1.1
 hours and $13.0 and Claude Code with Sonnet 5.5 at `max` scores 68 at 1.5
 hours and $14.2. Every generated variant, the four `-lens` readers and the
 four `-mechanical` writers, runs on the `low` tier and so keeps the values
-the owner chose for it. Every tier pins an effort, because a Claude Code
+the owner chose for it. No canonical role runs the low tier, which on Codex
+stays at Sol `xhigh`, so a `-mechanical` fix pass, such as one that rewrote a
+single numeric test in about 16 minutes in one measured project, still
+generates at the writers' effort. On OpenAI's own charts Sol scores 75.2% on
+DeepSWE v1.1 at `high`, above its 71.9% at `max`
+([GPT-6.1 Sol](https://openai.com/index/introducing-gpt-6-1-sol/)), but
+lowering the Codex low tier waits for the frozen-task A/B of #404 on
+recorded fix passes. Every tier pins an effort, because a Claude Code
 subagent without `effort` follows the session's level, `max` included
 ([subagents](https://code.claude.com/docs/en/sub-agents)). No tier defaults
 to `max` or `ultra`: each host's effort policy asks the owner to confirm
@@ -583,8 +614,10 @@ moves every writer from Opus to Sonnet, above the `medium` of
 `product-owner`, `qa-engineer` and `devops-engineer` and below the `xhigh`
 of `solution-architect`. On Codex every tier runs Sol at `xhigh`, so a
 variant keeps its writer's own model and effort and changes only the fresh
-context of the pass. These values are placeholders until the variants'
-frozen-task A/B sets them.
+context of the pass; the coordinator still starts the variant for every
+fix pass, and the pass record says which ran with its model and effort.
+These values are placeholders until the variants' frozen-task A/B sets
+them; lowering the Codex low tier waits for that A/B (#404).
 
 ## Story size budget
 

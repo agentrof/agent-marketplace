@@ -1370,6 +1370,8 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertIn(f"The high tier runs `{claude['high'][0]}` at effort `{claude['high'][1]}`, the"
                       f" medium tier `{claude['medium'][0]}` at effort `{claude['medium'][1]}` and the"
                       f" low tier `{claude['low'][0]}` at effort `{claude['low'][1]}`", contracts["claude"])
+        # Every Codex tier stays on one effort; lowering the low tier, which
+        # only the generated variants run, waits for the frozen-task A/B (#404).
         self.assertEqual(set(codex.values()), {codex["high"]})
         self.assertIn(f"The high, medium and low tiers all run `{codex['high'][0]}` at effort"
                       f" `{codex['high'][1]}`", contracts["codex"])

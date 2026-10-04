@@ -3,6 +3,47 @@
   "max_age_seconds": 86400,
   "default_workers": 2,
   "max_workers": 4,
+  "environment_names": [
+    "CI",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
+    "CLAUDE_PROJECT_DIR",
+    "CODEX_CLI_PATH",
+    "CODEX_HOME",
+    "CODEX_VERSION",
+    "DEVELOPER_DIR",
+    "GITHUB_EVENT_NAME",
+    "GITHUB_EVENT_PATH",
+    "GITHUB_REF",
+    "GITHUB_REPOSITORY",
+    "GITHUB_RUN_ATTEMPT",
+    "GITHUB_RUN_ID",
+    "GITHUB_SHA",
+    "GITHUB_STEP_SUMMARY",
+    "HOME",
+    "LANG",
+    "PATH",
+    "SDKROOT",
+    "TOOLCHAINS",
+    "TZ"
+  ],
+  "environment_prefixes": [
+    "AGENTROF_",
+    "AGENT_MARKETPLACE_",
+    "CODEX_SANDBOX",
+    "GIT_",
+    "LC_",
+    "PYTHON"
+  ],
+  "environment_ignored": [
+    "GIT_EDITOR",
+    "GIT_PAGER",
+    "GIT_SEQUENCE_EDITOR"
+  ],
+  "git_configuration_ignored": [
+    "branch.*",
+    "remote.*.fetch"
+  ],
   "static_commands": [
     [
       "tools/validate.py"

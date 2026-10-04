@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -841,26 +842,90 @@ class SetupProjectTests(unittest.TestCase):
             self.assertFalse((target / "agent-marketplace").exists())
 
     def test_concurrent_identical_setup_converges(self):
+        """Two applies that find the setup guard taken run one after the other and both converge (#388).
+
+        The test holds the guard until both applies wait for it, so they always
+        contend, and each waits up to the test's process timeout instead of the
+        product's 3 seconds, so how long the other apply holds the guard on a
+        loaded machine no longer decides the outcome.
+        """
+        timeout = 60
+        apply = (
+            "import contextlib, sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import setup_project\n"
+            "guard = setup_project.refresh_guard\n"
+            "@contextlib.contextmanager\n"
+            "def waiting_guard(root):\n"
+            "    print('waiting', file=sys.stderr, flush=True)\n"
+            "    with guard(root, timeout_seconds=float(sys.argv[2])):\n"
+            "        yield\n"
+            "setup_project.refresh_guard = waiting_guard\n"
+            "sys.exit(setup_project.main(sys.argv[3:]))\n"
+        )
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             init_repository(project)
             command = [
-                sys.executable, str(SETUP), "--project-root", str(project), "--json"
+                sys.executable, "-c", apply, str(SCRIPTS), str(timeout),
+                "--project-root", str(project), "--json",
             ]
-            processes = [
-                subprocess.Popen(
-                    command, cwd=ROOT, stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE, text=True,
-                )
-                for _ in range(2)
-            ]
-            results = [process.communicate(timeout=60) for process in processes]
+            processes = []
+            try:
+                with setup_module.refresh_guard(project):
+                    for _ in range(2):
+                        processes.append(subprocess.Popen(
+                            command, cwd=ROOT, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True,
+                        ))
+                    for process in processes:
+                        self.assertEqual(process.stderr.readline(), "waiting\n")
+                results = [
+                    process.communicate(timeout=timeout) for process in processes
+                ]
+            finally:
+                for process in processes:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate()
             for process, (stdout, stderr) in zip(processes, results):
                 self.assertEqual(process.returncode, 0, stdout + stderr)
             checked = self.run_script(
                 CHECK, "check", "--project-root", str(project), "--json"
             )
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
+    def test_apply_refuses_after_three_seconds_while_the_setup_guard_is_held(self):
+        """Setup keeps its own bounded wait (#388): an apply that finds the guard
+        taken polls it for 3 seconds of monotonic time, then refuses with
+        maintenance_busy and writes nothing."""
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            init_repository(project)
+            clock = [0.0]
+
+            def sleep(seconds: float) -> None:
+                clock[0] += seconds
+
+            output = io.StringIO()
+            with setup_module.refresh_guard(project), \
+                    mock.patch.object(setup_module, "time", types.SimpleNamespace(
+                        monotonic=lambda: clock[0], sleep=sleep)), \
+                    contextlib.redirect_stdout(output), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = setup_module.main(
+                    ["apply", "--project-root", str(project), "--json"]
+                )
+            self.assertEqual(code, 1)
+            self.assertEqual(
+                json.loads(output.getvalue())["error"],
+                "maintenance_busy: setup/projector maintenance lock is busy",
+            )
+            self.assertTrue(3.0 <= clock[0] < 3.1, clock[0])
+            self.assertEqual(
+                sorted(path.name for path in project.iterdir()),
+                [".agentrof", ".git"],
+            )
 
     def git(self, project: Path, *args: str) -> bytes:
         return subprocess.run(

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
+import io
 import json
 import os
 import stat
@@ -21,30 +23,93 @@ import build_distributions  # noqa: E402
 import fixtures  # noqa: E402
 import git_fixture  # noqa: E402
 import release  # noqa: E402
+import scaffold  # noqa: E402
 import validate  # noqa: E402
+
+# Release commits of the fixtures are dated here, so their versions hold in
+# every month the suite runs; the date is past, so no check finds it ahead.
+OCTOBER = datetime.datetime(2026, 10, 2, 12, tzinfo=datetime.timezone.utc)
+VERSION = "2026.10.1"
+
+
+def at(*moment: int, offset: int = 0) -> datetime.datetime:
+    """A moment of the release clock, in UTC unless ``offset`` hours apart."""
+    zone = datetime.timezone(datetime.timedelta(hours=offset))
+    return datetime.datetime(*moment, tzinfo=zone)
 
 
 def changeset(path: Path, summary: str, components: dict[str, str]) -> release.Changeset:
     return release.Changeset(path, summary, components)
 
 
-class SemVerTests(unittest.TestCase):
-    def test_patch_minor_and_major(self):
-        self.assertEqual(release.bump("0.0.1", "patch"), "0.0.2")
-        self.assertEqual(release.bump("0.0.1", "minor"), "0.1.0")
-        self.assertEqual(release.bump("1.1.0", "patch"), "1.1.1")
-        self.assertEqual(release.bump("1.1.0", "minor"), "1.2.0")
-        self.assertEqual(release.bump("1.1.0", "major"), "2.0.0")
+class CalendarVersionTests(unittest.TestCase):
+    """bump names a release YYYY.M.N by the UTC month it runs in."""
 
-    def test_strict_semver_rejects_prefix_prerelease_and_leading_zero(self):
-        for value in ("v1.2.3", "1.2.3-beta", "01.2.3", "1.2"):
-            with self.subTest(value=value), self.assertRaises(release.ReleaseError):
+    def test_the_same_month_counts_on(self):
+        self.assertEqual(release.next_version("2026.10.1", at(2026, 10, 2)), "2026.10.2")
+        self.assertEqual(
+            release.next_version("2026.10.9", at(2026, 10, 31, 23, 59, 59)), "2026.10.10",
+        )
+
+    def test_a_new_month_starts_at_one(self):
+        for latest, moment, expected in (
+            ("2026.10.3", (2026, 11, 1), "2026.11.1"),
+            ("2026.9.14", (2026, 10, 3), "2026.10.1"),
+            ("2026.10.2", (2027, 3, 9), "2027.3.1"),
+            # The numbering before calendar versions starts the month too.
+            ("0.0.3", (2026, 10, 3), "2026.10.1"),
+        ):
+            with self.subTest(latest=latest):
+                self.assertEqual(release.next_version(latest, at(*moment)), expected)
+
+    def test_a_new_year_starts_at_one(self):
+        self.assertEqual(
+            release.next_version("2026.12.4", at(2026, 12, 31, 23, 59, 59)), "2026.12.5",
+        )
+        self.assertEqual(release.next_version("2026.12.4", at(2027, 1, 1)), "2027.1.1")
+
+    def test_the_month_is_the_utc_month(self):
+        # 22:30 at UTC-3 on 31 October is 1 November in UTC, and 01:30 at
+        # UTC+5 on 1 November is still 31 October.
+        self.assertEqual(
+            release.next_version("2026.10.2", at(2026, 10, 31, 22, 30, offset=-3)),
+            "2026.11.1",
+        )
+        self.assertEqual(
+            release.next_version("2026.10.2", at(2026, 11, 1, 1, 30, offset=5)),
+            "2026.10.3",
+        )
+
+    def test_a_clock_behind_the_latest_release_or_without_a_zone_is_refused(self):
+        with self.assertRaisesRegex(
+            release.ReleaseError,
+            "latest release 2026.11.1 is newer than 2026-10, the UTC month of the"
+            " release clock",
+        ):
+            release.next_version("2026.11.1", at(2026, 10, 31, 23, 59, 59))
+        with self.assertRaisesRegex(release.ReleaseError, "must carry its timezone"):
+            release.next_version("2026.10.1", datetime.datetime(2026, 10, 3))
+
+    def test_calendar_names_are_strict_semver(self):
+        self.assertEqual(release.parse_semver("2026.10.1"), (2026, 10, 1))
+        self.assertEqual(release.parse_semver("2027.1.12"), (2027, 1, 12))
+        ordered = [
+            "0.0.3", "2026.9.4", "2026.10.1", "2026.10.2", "2026.10.10",
+            "2026.11.1", "2027.1.1",
+        ]
+        self.assertEqual(sorted(reversed(ordered), key=release.parse_semver), ordered)
+        for value in (
+            "2026.09.1", "2026.10.01", "v2026.10.1", "2026.10", "2026.10.1-rc.1",
+            "v1.2.3", "1.2.3-beta", "01.2.3",
+        ):
+            with self.subTest(value=value), \
+                    self.assertRaisesRegex(release.ReleaseError, "strict SemVer"):
                 release.parse_semver(value)
 
-    def test_highest_effect_wins_and_plugins_remain_independent(self):
+    def test_every_component_takes_the_one_version_and_every_summary_stays(self):
         versions = {
-            "marketplace": "1.1.0",
-            "plugins": {"alpha-team": "2.0.0", "beta-team": "3.4.5"},
+            "marketplace": "2026.10.1",
+            "plugins": {"alpha-team": "2026.10.1", "beta-team": "0.0.1"},
         }
         plan = release.release_plan(versions, [
             changeset(Path("a.json"), "patch alpha", {"alpha-team": "patch"}),
@@ -52,17 +117,25 @@ class SemVerTests(unittest.TestCase):
             changeset(Path("c.json"), "major catalog", {
                 release.MARKETPLACE_COMPONENT: "major"
             }),
-        ])
-        self.assertEqual(plan["marketplace"], "2.0.0")
+            changeset(Path("d.json"), "docs", {}),
+        ], at(2026, 10, 20))
+        # A major impact no longer moves the number.
+        self.assertEqual((plan["has_release"], plan["marketplace"]), (True, "2026.10.2"))
         self.assertEqual(plan["plugins"], {
-            "alpha-team": "2.1.0", "beta-team": "3.4.5"
+            "alpha-team": "2026.10.2", "beta-team": "2026.10.2",
         })
+        self.assertEqual(plan["impacts"], {
+            "alpha-team": "minor", release.MARKETPLACE_COMPONENT: "major",
+        })
+        self.assertEqual(
+            plan["summaries"], ["patch alpha", "minor alpha", "major catalog", "docs"],
+        )
 
     def test_empty_components_do_not_create_a_release(self):
         versions = {"marketplace": "0.0.1", "plugins": {"team": "0.0.1"}}
         plan = release.release_plan(versions, [
             changeset(Path("docs.json"), "docs", {})
-        ])
+        ], OCTOBER)
         self.assertFalse(plan["has_release"])
         self.assertEqual(plan["marketplace"], "0.0.1")
         self.assertEqual(plan["plugins"]["team"], "0.0.1")
@@ -138,18 +211,19 @@ class ReleaseRepositoryTests(unittest.TestCase):
     def test_prepare_consumes_changesets_and_updates_both_hosts(self):
         self.write_changeset("patch-team", {fixtures.PLUGIN: "patch"})
         self.write_changeset("minor-team", {fixtures.PLUGIN: "minor"})
-        metadata = release.prepare_release(self.root)
+        metadata = release.prepare_release(self.root, OCTOBER)
         versions = release.load_versions(self.root)
-        self.assertEqual(versions["marketplace"], "0.1.0")
-        self.assertEqual(versions["plugins"][fixtures.PLUGIN], "0.1.0")
+        self.assertEqual(versions["marketplace"], VERSION)
+        self.assertEqual(versions["plugins"][fixtures.PLUGIN], VERSION)
         self.assertEqual(sorted(metadata), sorted(release.METADATA_KEYS))
         self.assertEqual(
-            (metadata["schema_version"], metadata["version"]), (2, "0.1.0"),
+            (metadata["schema_version"], metadata["version"], metadata["impacts"]),
+            (2, VERSION, {fixtures.PLUGIN: "minor"}),
         )
+        changelog = (self.root / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn(f"\n## {VERSION}\n", changelog)
         self.assertEqual(
-            release.changelog_section(
-                (self.root / "CHANGELOG.md").read_text(encoding="utf-8"), "0.1.0",
-            ),
+            release.changelog_section(changelog, VERSION),
             "- Fixture baseline.\n- Apply minor-team.\n- Apply patch-team.\n",
         )
         self.assertEqual(list((self.root / ".changes").glob("*.json")), [])
@@ -159,13 +233,83 @@ class ReleaseRepositoryTests(unittest.TestCase):
                 self.root / "dist" / host / fixtures.PLUGIN
                 / f".{host}-plugin" / "plugin.json"
             ).read_text(encoding="utf-8"))
-            self.assertEqual(manifest["version"], "0.1.0")
+            self.assertEqual(manifest["version"], VERSION)
 
     def test_prepare_refuses_release_free_changesets_without_writes(self):
         versions_before = (self.root / "versions.json").read_bytes()
         with self.assertRaisesRegex(release.ReleaseError, "no pending"):
-            release.prepare_release(self.root)
+            release.prepare_release(self.root, OCTOBER)
         self.assertEqual((self.root / "versions.json").read_bytes(), versions_before)
+
+    def test_one_version_reaches_every_version_surface(self):
+        # A second plugin at another version, without an impact of its own,
+        # takes the release version on every surface too.
+        with git_fixture.temporary_directory() as temporary:
+            root = Path(temporary)
+            fixtures.make_valid_root(root, "0.0.3")
+            with contextlib.redirect_stdout(io.StringIO()):
+                scaffold.new_plugin(root, "sample-team")
+            plugins = (fixtures.PLUGIN, "sample-team")
+            self.assertEqual(release.load_versions(root)["plugins"], {
+                fixtures.PLUGIN: "0.0.3", "sample-team": "0.0.1",
+            })
+            fixtures.write(root / ".changes" / "team-patch.json", json.dumps({
+                "summary": "Patch the fixture team.",
+                "components": {fixtures.PLUGIN: "patch"},
+            }))
+            release.prepare_release(root, OCTOBER)
+
+            def version_of(relative: str, *keys: str) -> str:
+                value = release.read_json(root / relative)
+                for key in keys:
+                    value = value[key]
+                return value
+
+            versions = release.load_versions(root)
+            surfaces = {"versions.json marketplace": versions["marketplace"]}
+            surfaces.update({
+                f"versions.json {plugin}": value
+                for plugin, value in versions["plugins"].items()
+            })
+            claude = release.read_json(root / ".claude-plugin" / "marketplace.json")
+            surfaces["claude catalog"] = claude["metadata"]["version"]
+            surfaces.update({
+                f"claude catalog {entry['name']}": entry["version"]
+                for entry in claude["plugins"]
+            })
+            provenance = build_distributions.packaging_names(root)[1]
+            for host in ("claude", "codex"):
+                for plugin in plugins:
+                    package = f"dist/{host}/{plugin}"
+                    surfaces.update({
+                        f"{host} {plugin} source manifest": version_of(
+                            f"platforms/{host}/{plugin}/manifest.json", "version",
+                        ),
+                        f"{host} {plugin} manifest": version_of(
+                            f"{package}/.{host}-plugin/plugin.json", "version",
+                        ),
+                        f"{host} {plugin} provenance": version_of(
+                            f"{package}/{provenance}", "version",
+                        ),
+                        f"{host} {plugin} provenance release": version_of(
+                            f"{package}/{provenance}", "marketplace_release",
+                        ),
+                    })
+            surfaces["release metadata"] = version_of(release.STABLE_METADATA, "version")
+            self.assertEqual(len(surfaces), 23, surfaces)
+            self.assertEqual(set(surfaces.values()), {VERSION}, surfaces)
+            self.assertEqual(release.verify_release(root)["version"], VERSION)
+            # A release whose plugin kept another version is no release.
+            versions["plugins"]["sample-team"] = "0.0.1"
+            release.write_json(root / "versions.json", versions)
+            release.sync_version_surfaces(root, versions)
+            build_distributions.replace_generated(root, root / "dist")
+            self.assertEqual(release.validate_version_surfaces(root), [])
+            with self.assertRaisesRegex(
+                release.ReleaseError,
+                f"every plugin carries the release version {VERSION}; sample-team does not",
+            ):
+                release.verify_release(root)
 
     def test_changeset_rejects_unknown_component_and_impact(self):
         self.write_changeset("unknown-component", {"ghost-team": "patch"})
@@ -477,7 +621,12 @@ def change_package(root: Path, note: str) -> None:
     build_distributions.replace_generated(root, root / "dist")
 
 
-def commit_release_fixture(case) -> None:
+def bump_at(root: Path, when: datetime.datetime = OCTOBER) -> str:
+    """Make the release commit as `bump` does, with the release clock at ``when``."""
+    return release.commit_release(root, now=lambda: when)["commit"]
+
+
+def commit_release_fixture(case, when: datetime.datetime = OCTOBER) -> None:
     """Commit a main baseline, one feature and its release commit on top."""
     case.tmp = tempfile.TemporaryDirectory()
     case.root = Path(case.tmp.name) / "repository"
@@ -503,10 +652,7 @@ def commit_release_fixture(case) -> None:
     case.git("add", "--all")
     case.git("commit", "-qm", "feat: candidate change")
     case.feature_sha = case.git("rev-parse", "HEAD")
-    release.prepare_release(case.root)
-    case.git("add", "--all")
-    case.git("commit", "-qm", "chore: release v0.0.2")
-    case.head_sha = case.git("rev-parse", "HEAD")
+    case.head_sha = bump_at(case.root, when)
 
 
 class ReleaseCommitPolicyTests(unittest.TestCase):
@@ -559,12 +705,16 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
         return self.git("rev-parse", "HEAD")
 
     def test_the_exact_release_commit_is_accepted(self):
-        self.assertEqual(self.check(), {"mode": "release", "version": "0.0.2"})
+        self.assertEqual(self.check(), {"mode": "release", "version": VERSION})
+        self.assertEqual(
+            self.git("log", "-1", "--format=%s", self.head_sha),
+            f"chore: release v{VERSION}",
+        )
 
     def test_a_pull_request_of_the_release_commit_alone_is_accepted(self):
         # The feature merged first; the pull request holds only the bump.
         self.assertEqual(
-            self.check(self.feature_sha), {"mode": "release", "version": "0.0.2"},
+            self.check(self.feature_sha), {"mode": "release", "version": VERSION},
         )
 
     def test_ci_checks_the_pull_request_head_beside_its_merge_commit(self):
@@ -618,7 +768,7 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
     def test_a_hand_edit_of_a_release_owned_file_is_refused(self):
         self.git("checkout", "-q", "--detach", self.feature_sha)
         versions = release.load_versions(self.root)
-        versions["marketplace"] = "0.0.2"
+        versions["marketplace"] = VERSION
         release.write_json(self.root / "versions.json", versions)
         self.git("add", "--all")
         self.git("commit", "-qm", "chore: edit the marketplace version by hand")
@@ -668,9 +818,7 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
         change_package(self.root, "An undeclared package change.")
         self.git("add", "--all")
         self.git("commit", "-qm", "feat: undeclared package change")
-        release.prepare_release(self.root)
-        self.git("add", "--all")
-        self.git("commit", "-qm", "chore: release v0.0.2")
+        bump_at(self.root)
         with self.assertRaisesRegex(
             release.ReleaseError,
             "break the changeset rules: changeset omits changed release"
@@ -681,10 +829,10 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
     def test_a_parent_without_release_impact_cannot_be_bumped(self):
         self.git("checkout", "-q", "--detach", self.base_sha)
         fixtures.write(
-            self.root / "CHANGELOG.md", "# Changelog\n\n## 0.0.2\n\n- Invented.\n",
+            self.root / "CHANGELOG.md", f"# Changelog\n\n## {VERSION}\n\n- Invented.\n",
         )
         self.git("add", "--all")
-        self.git("commit", "-qm", "chore: release v0.0.2")
+        self.git("commit", "-qm", f"chore: release v{VERSION}")
         with self.assertRaisesRegex(
             release.ReleaseError, "cannot be bumped: no pending stable release impact",
         ):
@@ -704,9 +852,7 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
         write_changeset(self.root, "probe", {fixtures.PLUGIN: "patch"})
         self.git("add", "--all")
         self.git("commit", "-qm", "feat: a new executable before its distributions")
-        release.prepare_release(self.root)
-        self.git("add", "--all")
-        self.git("commit", "-qm", "chore: release v0.0.2")
+        bump_at(self.root)
         staged = self.git(
             "ls-files", "-s", f"dist/codex/{fixtures.PLUGIN}/scripts/release_probe.py",
         )
@@ -777,9 +923,7 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
             )
 
         with mock.patch.object(Path, "write_text", new=windows_write_text):
-            release.prepare_release(self.root)
-        self.git("add", "--all")
-        self.git("commit", "-qm", "chore: release v0.0.2")
+            bump_at(self.root)
         self.assertEqual(self.check()["mode"], "release")
 
     def test_replacement_ref_cannot_substitute_the_release_commit(self):
@@ -844,6 +988,83 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
             release.verify_release(self.root)
 
 
+class ReleaseMonthBoundaryTests(unittest.TestCase):
+    """check-pr replays a release commit at its own date: it stays valid for
+    the month it was made in, whenever its pull request merges."""
+
+    LAST_SECOND = at(2026, 10, 31, 23, 59, 59) + datetime.timedelta(microseconds=999999)
+
+    @classmethod
+    def setUpClass(cls):
+        commit_release_fixture(cls, cls.LAST_SECOND)
+
+    @classmethod
+    def tearDownClass(cls):
+        git_fixture.remove_temporary(cls.tmp)
+
+    @classmethod
+    def git(cls, *args: str, **environment: str) -> str:
+        completed = subprocess.run(
+            ["git", *args], cwd=cls.root, capture_output=True, text=True,
+            check=True, env={**os.environ, **environment},
+        )
+        return completed.stdout.strip()
+
+    def setUp(self):
+        self.git("checkout", "-q", "--detach", "--force", self.head_sha)
+        self.git("clean", "-qfdx")
+
+    def check(self, now: datetime.datetime) -> dict:
+        return release.check_pr_changeset(self.root, self.base_sha, now=lambda: now)
+
+    def test_bump_dates_its_commit_at_the_instant_it_named_the_version(self):
+        # Truncated to whole seconds, the month's last second stays in it.
+        second = str(int(at(2026, 10, 31, 23, 59, 59).timestamp()))
+        self.assertEqual(self.git("log", "-1", "--format=%ct %at").split(), [second, second])
+        self.assertEqual(release.load_versions(self.root)["marketplace"], VERSION)
+
+    def test_a_release_commit_merged_in_a_later_month_keeps_its_month(self):
+        for now in (at(2026, 11, 1, 0, 0, 5), at(2026, 12, 15), at(2027, 1, 2)):
+            with self.subTest(now=now):
+                self.assertEqual(self.check(now), {"mode": "release", "version": VERSION})
+        # Once it is released, the next release commit starts November at 1.
+        write_changeset(self.root, "november-fix", {fixtures.PLUGIN: "patch"})
+        change_package(self.root, "A November fix.")
+        self.git("add", "--all")
+        self.git("commit", "-qm", "fix: a November fix")
+        bump_at(self.root, at(2026, 11, 1, 9))
+        self.assertEqual(release.load_versions(self.root)["marketplace"], "2026.11.1")
+
+    def test_the_committer_date_decides_the_month(self):
+        def redate(author: datetime.datetime, committer: datetime.datetime) -> None:
+            self.git("checkout", "-q", "--detach", self.head_sha)
+            self.git(
+                "commit", "-q", "--amend", "--no-edit", f"--date={author.isoformat()}",
+                GIT_COMMITTER_DATE=committer.isoformat(),
+            )
+
+        redate(at(2026, 10, 31, 23, 59, 59), at(2026, 11, 1))
+        with self.assertRaisesRegex(
+            release.ReleaseError, "differs from the deterministic bump of its parent",
+        ):
+            self.check(at(2026, 11, 2))
+        redate(at(2026, 11, 5), at(2026, 10, 31, 23, 59, 59))
+        self.assertEqual(self.check(at(2026, 11, 6)), {"mode": "release", "version": VERSION})
+
+    def test_a_release_commit_of_a_month_not_begun_is_refused(self):
+        # Only a clock that runs ahead dates a commit in a later month.
+        self.git("checkout", "-q", "--detach", self.feature_sha)
+        bump_at(self.root, at(2026, 11, 1, 0, 0, 1))
+        with self.assertRaisesRegex(
+            release.ReleaseError,
+            "it is dated 2026-11-01, in a month that has not begun; fix the clock",
+        ):
+            self.check(at(2026, 10, 31, 23, 59, 59))
+        self.assertEqual(
+            self.check(at(2026, 11, 1, 0, 0, 2)), {"mode": "release", "version": "2026.11.1"},
+        )
+
+
 class BumpCommandTests(unittest.TestCase):
     """The maintainer's one command for the release commit."""
 
@@ -874,22 +1095,24 @@ class BumpCommandTests(unittest.TestCase):
         made = self.cli("bump")
         self.assertEqual(made.returncode, 0, made.stderr)
         result = json.loads(made.stdout)
+        # The command reads the real clock; its commit records the instant.
+        committed, authored = self.git("log", "-1", "--format=%ct %at").split()
+        self.assertEqual(committed, authored)
+        version = release.next_version("0.0.1", datetime.datetime.fromtimestamp(
+            int(committed), datetime.timezone.utc,
+        ))
         self.assertEqual(
             (result["version"], result["message"]),
-            ("0.0.2", "chore: release v0.0.2"),
+            (version, f"chore: release v{version}"),
         )
         self.assertEqual(result["commit"], self.git("rev-parse", "HEAD"))
         self.assertEqual(self.git("rev-parse", "HEAD^"), self.feature_sha)
-        self.assertEqual(
-            self.git("rev-parse", "HEAD^{tree}"),
-            self.git("rev-parse", f"{self.head_sha}^{{tree}}"),
-        )
         self.assertEqual(self.git("status", "--porcelain"), "")
         checked = self.cli("check-pr", "--base", self.base_sha)
         self.assertEqual(checked.returncode, 0, checked.stderr)
         self.assertEqual(checked.stdout.splitlines()[0], (
             "release: release commit valid; it is the deterministic bump of its"
-            " parent to v0.0.2"
+            f" parent to v{version}"
         ))
 
     def test_bump_refuses_a_dirty_worktree_without_writing(self):
@@ -1060,10 +1283,7 @@ class ReleaseCandidateTests(unittest.TestCase):
         cls.git("add", "--all")
         cls.git("commit", "-qm", "feat: candidate change")
         cls.feature = cls.git("rev-parse", "HEAD")
-        release.prepare_release(cls.root)
-        cls.git("add", "--all")
-        cls.git("commit", "-qm", "chore: release v0.0.2")
-        cls.candidate = cls.git("rev-parse", "HEAD")
+        cls.candidate = bump_at(cls.root)
 
     @classmethod
     def tearDownClass(cls):
@@ -1095,14 +1315,14 @@ class ReleaseCandidateTests(unittest.TestCase):
     def api(self, _endpoint: str) -> dict:
         return {"total_count": len(self.runs), "workflow_runs": self.runs}
 
-    def verify(self, version: str = "0.0.2", sha: str | None = None) -> dict:
+    def verify(self, version: str = VERSION, sha: str | None = None) -> dict:
         clock = FakeClock()
         return release.verify_candidate(
             self.root, version, sha or self.candidate, repository=REPOSITORY,
             api=self.api, clock=clock, sleep=clock.sleep,
         )
 
-    def refused(self, message: str, version: str = "0.0.2", sha: str | None = None) -> None:
+    def refused(self, message: str, version: str = VERSION, sha: str | None = None) -> None:
         with self.assertRaisesRegex(release.ReleaseError, message):
             self.verify(version, sha)
 
@@ -1120,14 +1340,69 @@ class ReleaseCandidateTests(unittest.TestCase):
         self.assertEqual(result["validation_run"], self.runs[0]["html_url"])
 
     def test_an_interrupted_release_resumes_on_its_own_tag_and_stable(self):
-        self.git("tag", "-a", "v0.0.2", "-m", "v0.0.2", self.candidate)
-        self.push(f"{self.candidate}:refs/heads/stable", "v0.0.2")
+        self.git("tag", "-a", f"v{VERSION}", "-m", f"v{VERSION}", self.candidate)
+        self.push(f"{self.candidate}:refs/heads/stable", f"v{VERSION}")
         result = self.verify()
         self.assertEqual(result["prior_stable_sha"], self.first)
 
+    def test_without_any_release_tag_stable_is_the_prior_release(self):
+        # The tags of a whole line are deleted; stable keeps its last release.
+        self.push(":refs/tags/v0.0.1")
+        result = self.verify()
+        self.assertEqual(
+            (result["prior_version"], result["prior_stable_sha"]), ("0.0.1", self.first),
+        )
+        self.assertEqual(result["notes"], "- Ship the candidate patch.\n- Fixture baseline.\n")
+
+    def test_without_any_release_tag_stable_must_be_an_older_ancestor(self):
+        self.push(":refs/tags/v0.0.1")
+        self.git("checkout", "-q", "--detach", self.first)
+        fixtures.write(self.root / "side.md", "side\n")
+        self.git("add", "--all")
+        self.git("commit", "-qm", "docs: side")
+        side = self.git("rev-parse", "HEAD")
+        self.push(f"{side}:refs/heads/stable")
+        self.refused(
+            f"the untagged stable release v0.0.1 at {side} is not an ancestor of"
+            f" {self.candidate}; stable only moves forward"
+        )
+        self.push(f"{self.candidate}:refs/heads/stable")
+        self.refused(f"{self.candidate} is already the stable release")
+        self.push(f"{self.first}:refs/heads/stable")
+        # The first-release path is only for a repository that never released.
+        self.refused(
+            f"remote stable at {self.first} names v0.0.1; a release never goes"
+            " back to v0.0.1", version="0.0.1",
+        )
+        unseen = subprocess.run(
+            ["git", "--git-dir", str(self.remote), "commit-tree", "-p", self.first,
+             "-m", "unseen", f"{self.first}^{{tree}}"],
+            capture_output=True, text=True, check=True,
+            env={**os.environ, "GIT_AUTHOR_NAME": "Release Candidate Test",
+                 "GIT_AUTHOR_EMAIL": "release-candidate@example.test",
+                 "GIT_COMMITTER_NAME": "Release Candidate Test",
+                 "GIT_COMMITTER_EMAIL": "release-candidate@example.test"},
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "--git-dir", str(self.remote), "update-ref", "refs/heads/stable", unseen],
+            check=True,
+        )
+        self.refused(f"remote stable is at {unseen}, which this checkout lacks")
+
+    def test_an_interrupted_release_without_an_older_tag_resumes_from_its_run(self):
+        # Staging moved stable off the untagged prior release, so no ref
+        # records the commit a rollback needs; the staging run's outputs do.
+        self.git("tag", "-a", f"v{VERSION}", "-m", f"v{VERSION}", self.candidate)
+        self.push(":refs/tags/v0.0.1", f"{self.candidate}:refs/heads/stable", f"v{VERSION}")
+        self.refused(
+            f"v{VERSION} and stable already sit on {self.candidate}, and no older"
+            " release tag records the commit stable moved from.*"
+            r"`gh run rerun <run-id> --failed`"
+        )
+
     def test_versions_must_name_the_requested_release(self):
-        self.refused("names 0.0.2, not 0.0.3", version="0.0.3")
-        self.refused("names 0.0.1, not 0.0.2", sha=self.feature)
+        self.refused(f"names {VERSION}, not 2026.10.2", version="2026.10.2")
+        self.refused(f"names 0.0.1, not {VERSION}", sha=self.feature)
 
     def test_a_commit_with_unconsumed_changesets_is_refused(self):
         write_changeset(self.root, "later-docs", {})
@@ -1148,19 +1423,21 @@ class ReleaseCandidateTests(unittest.TestCase):
         self.refused("is not a commit on main", sha="e" * 40)
 
     def test_a_newer_release_tag_is_refused(self):
-        self.git("tag", "-a", "v0.1.0", "-m", "v0.1.0", self.first)
-        self.push("v0.1.0")
-        self.refused("v0.1.0 is already released; a release never goes back to v0.0.2")
+        self.git("tag", "-a", "v2026.11.1", "-m", "v2026.11.1", self.first)
+        self.push("v2026.11.1")
+        self.refused(
+            f"v2026.11.1 is already released; a release never goes back to v{VERSION}"
+        )
 
     def test_the_version_tagged_on_another_commit_is_refused(self):
-        self.git("tag", "-a", "v0.0.2", "-m", "v0.0.2", self.feature)
-        self.push("v0.0.2")
-        self.refused(f"v0.0.2 already tags {self.feature}")
+        self.git("tag", "-a", f"v{VERSION}", "-m", f"v{VERSION}", self.feature)
+        self.push(f"v{VERSION}")
+        self.refused(f"v{VERSION} already tags {self.feature}")
 
     def test_a_lightweight_release_tag_is_refused(self):
-        self.git("tag", "v0.0.2", self.candidate)
-        self.push("v0.0.2")
-        self.refused("release tags must be annotated: v0.0.2")
+        self.git("tag", f"v{VERSION}", self.candidate)
+        self.push(f"v{VERSION}")
+        self.refused(f"release tags must be annotated: v{VERSION}")
 
     def test_stable_must_hold_the_previous_release_or_this_commit(self):
         self.push(f"{self.feature}:refs/heads/stable")
@@ -1175,7 +1452,8 @@ class ReleaseCandidateTests(unittest.TestCase):
         self.refused("main has no push validation run")
 
     def test_the_first_release_is_the_bootstrap_state(self):
-        # Without a release tag the commit must be the first stable baseline.
+        # Without a release tag and stable the commit must be the first
+        # stable baseline, and resuming it stays on that path.
         self.push(":refs/heads/stable", ":refs/tags/v0.0.1")
         self.refused("the first stable release must use 0.0.1 everywhere")
         self.git("checkout", "-q", "--detach", self.first)
@@ -1189,6 +1467,11 @@ class ReleaseCandidateTests(unittest.TestCase):
         result = self.verify("0.0.1", bootstrap)
         self.assertEqual((result["prior_version"], result["prior_stable_sha"]), (None, None))
         self.assertEqual(result["notes"], f"- {release.BOOTSTRAP_NOTE}\n")
+        self.addCleanup(self.git, "tag", "-f", "-a", "v0.0.1", "-m", "v0.0.1", self.first)
+        self.git("tag", "-f", "-a", "v0.0.1", "-m", "v0.0.1", bootstrap)
+        self.push(f"{bootstrap}:refs/heads/stable", "v0.0.1")
+        result = self.verify("0.0.1", bootstrap)
+        self.assertEqual((result["prior_version"], result["prior_stable_sha"]), (None, None))
 
     def test_a_push_that_moves_the_version_dispatches_its_release(self):
         commands = FakeShipCommands()
@@ -1197,18 +1480,18 @@ class ReleaseCandidateTests(unittest.TestCase):
         )
         self.assertEqual(commands.captured, [[
             "gh", "workflow", "run", "release.yml", "--ref", "main",
-            "-f", "version=0.0.2", "-f", f"sha={self.candidate}",
+            "-f", f"version={VERSION}", "-f", f"sha={self.candidate}",
         ]])
         self.assertEqual(commands.streamed, [])
         self.assertEqual(
-            (result["release"], result["version"], result["run_id"]), (True, "0.0.2", "42"),
+            (result["release"], result["version"], result["run_id"]), (True, VERSION, "42"),
         )
 
     def test_a_push_that_keeps_the_version_or_finds_its_tag_starts_nothing(self):
         self.git("commit", "-q", "--allow-empty", "-m", "docs: after the release")
         later = self.git("rev-parse", "HEAD")
         for before, after, version in (
-            (self.candidate, later, "0.0.2"),
+            (self.candidate, later, VERSION),
             (self.first, self.feature, "0.0.1"),
         ):
             with self.subTest(after=after):
@@ -1219,13 +1502,13 @@ class ReleaseCandidateTests(unittest.TestCase):
                     "reason": f"this push keeps v{version}; nothing to release",
                 })
                 self.assertEqual(commands.captured, [])
-        self.git("tag", "-a", "v0.0.2", "-m", "v0.0.2", self.candidate)
-        self.push("v0.0.2")
+        self.git("tag", "-a", f"v{VERSION}", "-m", f"v{VERSION}", self.candidate)
+        self.push(f"v{VERSION}")
         commands = FakeShipCommands()
         result = release.auto_release(
             self.root, self.feature, self.candidate, commands=commands,
         )
-        self.assertEqual(result["reason"], f"v0.0.2 already tags {self.candidate}")
+        self.assertEqual(result["reason"], f"v{VERSION} already tags {self.candidate}")
         self.assertEqual(commands.captured, [])
 
     def test_an_absent_previous_head_falls_back_to_the_first_parent(self):
@@ -1233,7 +1516,7 @@ class ReleaseCandidateTests(unittest.TestCase):
         for before in ("0" * 40, "", "f" * 40):
             with self.subTest(before=before):
                 intent = release.release_intent(self.root, before, self.candidate)
-                self.assertEqual((intent["release"], intent["version"]), (True, "0.0.2"))
+                self.assertEqual((intent["release"], intent["version"]), (True, VERSION))
         with self.assertRaisesRegex(release.ReleaseError, "exact lowercase 40-hex"):
             release.release_intent(self.root, "", "HEAD")
 

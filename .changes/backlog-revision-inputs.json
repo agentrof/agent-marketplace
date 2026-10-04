@@ -1,0 +1,6 @@
+{
+  "summary": "Open backlog revisions against evolved approved inputs and scaffold fresh review rounds while preserving historical approvals and coverage gates.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

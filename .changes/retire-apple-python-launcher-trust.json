@@ -1,0 +1,6 @@
+{
+  "summary": "Remove the vault hook's trust path for Apple's /usr/bin/python3 launcher: the hooks require Python 3.14 and the Apple system launcher can no longer run them, so it is refused like any other foreign interpreter.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -13,7 +13,7 @@ dependency closures and initial duration weights. CI tests that Python once per
 operating system. Linux runs every test. macOS and Windows run only the tests
 that prove behavior of their own system, each named by its exact ID: the
 platform group both run (worker processes, the hook launcher, case-insensitive
-file systems), the macOS group (file flags, the bare system interpreter) and
+file systems), the macOS group (file flags, bare `python3` commands) and
 the Windows group (path separators, junctions, long paths, CRLF checkouts,
 locks, text pipes and Git for Windows). A test that repeats platform-neutral
 logic runs on Linux only. The plan job sets up the version itself and every

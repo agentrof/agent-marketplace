@@ -377,7 +377,6 @@
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_has_an_exact_attested_delta",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_preserves_real_codex_draft",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_python_cmd_preserves_attested_codex_result",
-        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_system_macos_python3_launcher_is_accepted",
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_safe_os_metadata_is_preserved_without_entering_the_committed_postimage"
       ],
       "depends_on": [

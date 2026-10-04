@@ -1647,75 +1647,6 @@ def _trusted_runtime_origins() -> set[Path]:
     return origins
 
 
-def _apple_developer_root(executables: set[Path]) -> Path | None:
-    command_line_tools = Path("/Library/Developer/CommandLineTools")
-    if any(_path_within(value, command_line_tools) for value in executables):
-        return command_line_tools
-    for value in executables:
-        parts = value.parts
-        try:
-            index = parts.index("Contents")
-        except ValueError:
-            continue
-        if index > 0 and index + 1 < len(parts) \
-                and parts[index - 1].endswith(".app") \
-                and parts[index + 1] == "Developer":
-            return Path(*parts[:index + 2])
-    return None
-
-
-def _apple_python_launcher_matches(candidate: Path, cwd: Path) -> bool:
-    """Bind Apple's fixed launcher to the interpreter running this hook."""
-    launchers = {
-        Path("/usr/bin/python3"),
-        Path("/Library/Developer/CommandLineTools/usr/bin/python3"),
-    }
-    if sys.platform != "darwin" or candidate not in launchers:
-        return False
-    try:
-        mode = candidate.stat()
-    except OSError:
-        return False
-    if mode.st_uid != 0 or mode.st_mode & 0o022 or os.environ.get("TOOLCHAINS"):
-        return False
-    current = {
-        Path(value)
-        for value in (sys.executable, getattr(sys, "_base_executable", ""))
-        if value and Path(value).is_absolute()
-    }
-    developer_root = _apple_developer_root(current)
-    if developer_root is None:
-        return False
-    configured = os.environ.get("DEVELOPER_DIR")
-    if configured:
-        try:
-            if Path(configured).resolve() != developer_root.resolve():
-                return False
-        except (OSError, RuntimeError):
-            return False
-    sdk_root = os.environ.get("SDKROOT")
-    if sdk_root:
-        try:
-            if not _path_within(Path(sdk_root).resolve(), developer_root.resolve()):
-                return False
-        except (OSError, RuntimeError):
-            return False
-    try:
-        result = subprocess.run(
-            ["/usr/bin/xcrun", "--find", "python3"],
-            capture_output=True, text=True, check=False, timeout=2,
-        )
-        lines = result.stdout.splitlines()
-        selected = Path(lines[0]) if result.returncode == 0 and len(lines) == 1 else None
-        if selected is None \
-                or selected.resolve() not in _trusted_runtime_targets():
-            return False
-        project = shell_project({"cwd": str(cwd)}).resolve()
-        return not _path_within(selected.resolve(), project)
-    except (OSError, RuntimeError, subprocess.TimeoutExpired):
-        return False
-
-
 # Homebrew links python3 into <prefix>/bin, outside the keg directory that
 # sys.executable reports (<prefix>/opt/python@3.X/bin).
 HOMEBREW_PREFIXES = (
@@ -1804,7 +1735,7 @@ def trusted_python_command(
                 return allow_bare or Path(value).is_absolute()
         if _homebrew_python_launcher_matches(candidate):
             return allow_bare or Path(value).is_absolute()
-        return _apple_python_launcher_matches(candidate, cwd)
+        return False
     except (OSError, RuntimeError):
         return False
 

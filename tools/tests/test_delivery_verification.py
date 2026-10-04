@@ -766,7 +766,7 @@ print("suite passed")
                          {"role": "qa_engineer", "command": "run --kind test", "pid": os.getpid()})
         self.assertRegex(holder["started_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         waiting = (r"^wait for qa_engineer's verification command `run --kind test` in process \d+ since \S+ to exit"
-                   r" before settling its reader$")
+                   r" before settling its reader; `wait --role qa_engineer` returns once it has$")
         with self.assertRaisesRegex(RuntimeError, waiting):
             verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic"))
         verification.register_result(self.root, self.result())
@@ -844,7 +844,7 @@ print(sys.argv[2])
                          {"role": "qa_engineer", "command": "environment --verb up", "pid": os.getpid()})
         with self.assertRaisesRegex(RuntimeError, r"^wait for qa_engineer's verification command `environment --verb"
                                                   r" up` in process \d+ since \S+ to exit before settling its"
-                                                  r" reader$"):
+                                                  r" reader; `wait --role qa_engineer` returns once it has$"):
             verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic"))
         verification.register_result(self.root, self.result())
         release()
@@ -863,8 +863,137 @@ print(sys.argv[2])
         for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_diagnostic")):
             with self.subTest(role=role), self.assertRaisesRegex(
                     RuntimeError, "^wait for a verification command that has not recorded its owner yet to exit"
-                                  " before settling its reader$"):
+                                  f" before settling its reader; `wait --role {role}` returns once it has$"):
                 verification.register_result(self.root, self.result(role, mode))
+            # The wait holds the same readers the registration refuses.
+            with self.subTest(role=role, step="wait"):
+                waited = verification.wait_for_release(self.root, role, 0.2)
+                self.assertEqual((waited["released"], waited["holder"]),
+                                 (False, {"lock": "verification_command"}))
+
+    def test_wait_returns_once_the_readers_own_command_exits(self):
+        """QA waits for its own verification command through wait, which returns as soon as the command exits
+        and otherwise at the call's bound with the holder; the code reviewer, which runs none, is never held."""
+        markers = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, markers)
+        gate = Path(markers.name).resolve()
+        (gate / "suite.py").write_text(self.GATED_SUITE, encoding="utf-8")
+        arguments = [sys.executable, str(gate / "suite.py"), str(gate)]
+        self.command = subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
+        path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(path)
+        contract["test_command"] = self.command
+        self.write(path.relative_to(self.root), delivery.frontmatter(contract, body))
+        self.commit()
+        self.freeze()
+        outcome: dict = {}
+
+        def run() -> None:
+            try:
+                outcome["run"] = verification.run_check(self.root, "test")
+            except Exception as exc:  # noqa: BLE001 - reported by the assertions below
+                outcome["error"] = exc
+
+        thread = threading.Thread(target=run)
+        thread.start()
+
+        def release() -> None:
+            (gate / "release").write_text("release", encoding="utf-8")
+            thread.join(60)
+
+        self.addCleanup(release)
+        deadline = time.monotonic() + 60
+        while not (gate / "started").exists() and thread.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue((gate / "started").exists(), outcome)
+        waited = verification.wait_for_release(self.root, "code_reviewer", 5)
+        self.assertEqual((waited["released"], "holder" in waited), (True, False))
+        self.assertLess(waited["waited_seconds"], 1)
+        # A wait with no role also waits for the environment lock, which the command holds outside its own.
+        for role, lock in (("qa_engineer", "verification_command"), (None, "environment")):
+            with self.subTest(role=role):
+                started = time.monotonic()
+                waited = verification.wait_for_release(self.root, role, 0.3)
+                self.assertGreaterEqual(time.monotonic() - started, 0.3)
+                self.assertFalse(waited["released"])
+                self.assertEqual({key: waited["holder"].get(key) for key in ("lock", "command", "pid")},
+                                 {"lock": lock, "command": "run --kind test", "pid": os.getpid()})
+                self.assertEqual(waited["bound_seconds"], verification.policy()["wait_bound_seconds"])
+                self.assertEqual(waited["next"], "call wait again now, as a tool call of its own")
+        timer = threading.Timer(0.5, lambda: (gate / "release").write_text("release", encoding="utf-8"))
+        timer.start()
+        self.addCleanup(timer.cancel)
+        started = time.monotonic()
+        waited = verification.wait_for_release(self.root, "qa_engineer", 60)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual((waited["released"], "holder" in waited, "next" in waited), (True, False, False))
+        # The command records its evidence before it releases its lock, so QA reads it at once.
+        recorded = verification.read_session(self.root)["raw_evidence"]["test"]
+        thread.join(60)
+        self.assertNotIn("error", outcome)
+        self.assertEqual(recorded["evidence_hash"], outcome["run"]["evidence_hash"])
+        self.assertTrue(verification.wait_for_release(self.root, None, 5)["released"])
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic"))
+
+    def test_wait_never_blocks_past_the_policy_bound(self):
+        """One wait call blocks at most the policy's wait_bound_seconds, which a call may shorten but never
+        lengthen, and it only reads lock state, so it answers before any freeze."""
+        bound = verification.policy()["wait_bound_seconds"]
+        waited = verification.wait_for_release(self.root)
+        self.assertEqual({key: waited[key] for key in ("role", "released", "bound_seconds")},
+                         {"role": None, "released": True, "bound_seconds": bound})
+        self.assertLess(waited["waited_seconds"], 1)
+        self.assertIsNone(verification.read_session(self.root, required=False))
+        for role, seconds in ((None, 0), (None, -1), (None, bound + 0.5), (None, float("nan")),
+                              (None, float("inf")), ("delivery_coordinator", 1)):
+            with self.subTest(role=role, seconds=seconds), self.assertRaises(RuntimeError):
+                verification.wait_for_release(self.root, role, seconds)
+        for arguments, code in ((["wait", "--seconds", "1"], 0), (["wait", "--role", "qa_engineer"], 0),
+                                (["wait", "--seconds", str(bound + 1)], 2)):
+            output = io.StringIO()
+            with self.subTest(arguments=arguments), contextlib.redirect_stdout(output):
+                self.assertEqual(verification.main(["--worktree", str(self.root), *arguments]), code)
+            reply = json.loads(output.getvalue())
+            if code:
+                self.assertEqual(reply, {"ok": False, "errors": [
+                    f"one wait blocks for more than 0 and at most {bound} seconds, so the next model call finds"
+                    " the prompt cache warm; call wait again to wait longer"]})
+            else:
+                self.assertEqual((reply["ok"], reply["released"], reply["bound_seconds"]), (True, True, bound))
+
+    def test_every_refusal_that_leaves_a_role_waiting_names_wait(self):
+        """A role that a held command makes wait learns from the refusal itself that wait is how it waits."""
+        self.freeze()
+        with verification.command_lock(self.root, "qa_engineer", "run --kind test"):
+            with self.assertRaisesRegex(RuntimeError, "^another verification command is still running; `wait`"
+                                                      " returns once it has exited$"):
+                with verification.command_lock(self.root, "qa_engineer", "run --kind mutation"):
+                    pass
+            with self.assertRaisesRegex(RuntimeError, "^wait for the verification command to exit before resuming"
+                                                      " QA; `wait` returns once it has$"):
+                verification.resume_qa(self.root)
+
+    def test_instructions_bound_every_wait_by_the_policy(self):
+        """The flow and both host contracts state the policy's wait bound, and the Bash timeout Claude's contract
+        gives a wait call outlasts it, so the runner, never the host, ends each wait."""
+        bound = verification.policy()["wait_bound_seconds"]
+
+        def text(relative):
+            return " ".join((ROOT / relative).read_text(encoding="utf-8").split())
+
+        flow = text("plugins/software-engineering-team/flows/delivery-execution.md")
+        for phrase in (f"`wait_bound_seconds`, {bound} seconds, in any one tool call",
+                       "never through a sleep, a polling loop or a long timeout of its own",
+                       "`wait --role <role>` returns once that reader's own verification command has exited",
+                       "The code reviewer runs no command, so it registers its finished result at once and returns"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, flow)
+        for host in ("claude", "codex"):
+            with self.subTest(host=host):
+                self.assertIn(f"longer than the Delivery runner's {bound}-second `wait` bound",
+                              text(f"platforms/{host}/software-engineering-team/host-contract.md"))
+        timeout = re.search(r"Bash `timeout` of (\d+)", text("platforms/claude/software-engineering-team/host-contract.md"))
+        self.assertGreater(int(timeout.group(1)), bound * 1000)
 
     def test_original_write_then_restore_invalidates_source_observations(self):
         frozen = self.freeze()

@@ -89,7 +89,8 @@ verb with `--kind environment --verb down|up|seed|logs|url [--value
 Each such command holds the Item's environment lock, which QA's `run` and
 `environment` take as well. While another command holds it, the command
 refuses with `DELIVERY_ENVIRONMENT_BUSY` and names the holder: run it again
-once the holder finishes. A holder that died loses the lock with its process;
+once the holder finishes, which `wait` reports as the flow says. A holder that
+died loses the lock with its process;
 the next command reports it as `interrupted_holder`, and after an interrupted
 environment verb the environment goes down before anything trusts it again.
 

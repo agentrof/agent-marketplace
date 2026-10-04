@@ -98,7 +98,7 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "99e9d8033068b05a00f5de4c0a1560da1e8f2f2b527265bee3d77a5c02c14441"
+      "2ded31a9a1eb1bfe04a5039099a854aa8301aedfd78f4b35352c3365b2b3eb82"
     ,
     "flows/business-analysis.md":
       "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3"
@@ -161,7 +161,7 @@
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
     ,
     "scripts/backlog_review_inputs.py":
-      "74f899b5a8bd01fb6520e2b0759cb6b991bf65147768893ddd439ccc01e6e399"
+      "ac4c4df0849f7838ebc81b6e112c8e004aa3b573b1fadded1dce043a77591fd7"
     ,
     "scripts/delivery_compile.py":
       "296875bd6c03f5ad73eb80a93a6f7575af9a88a4c3f563ea912c088dda200437"
@@ -277,11 +277,17 @@
     "skill-content/backlog-plan/SKILL.md":
       "f4314b20877593f179f92b726b93dc88e82e33781603599db0af98fe43349643"
     ,
+    "skill-content/backlog-plan/data/review-scope-budget.json":
+      "6bcbd98535f3475d4e66dfe911e63ede1742133e3bd0ee745d784662a7dcb62b"
+    ,
     "skill-content/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md":
       "4126c93245f53e049273a3fdb3394c6bc74158d1ba6c8f6a6c991dabd089bca5"
     ,
     "skill-content/backlog-plan/references/switch-review_manifest_scope-bounded.md":
       "dc84f3e14ceda303a735f0394dfa7fb4c3f8a2ba5d94cca203bfec69495cec3c"
+    ,
+    "skill-content/backlog-plan/references/switch-review_scope_record-both_scopes.md":
+      "d9b18d355d0b2593bea127de4cd5d35d931546285df8cf81c612020e2d93ac3f"
     ,
     "skill-content/business-analysis/SKILL.md":
       "2847ac9940f93cac7fb9d045dcba0b7bdcff5162f40949fece8161de6c7d195c"
@@ -338,7 +344,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "fdf912d1d77e2469e2439f08c1c1c5046b629b2d42ee19a87be06a218d695d35"
+      "7a2e5a1770544ee7b901f5d88bbbfa6e630a49bdfc5966ab9d413b85329082b3"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"

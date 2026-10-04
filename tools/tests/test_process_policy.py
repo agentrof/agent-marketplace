@@ -526,6 +526,7 @@ RELEASED_DEFAULTS = {
     "review_loop": "current",
     "review_manifest_scope": "transitive",
     "review_panels": "single_reader",
+    "review_scope_record": "off",
     "story_size_budget": "off",
 }
 # The rules that keep a switch value safe, in the files agents read them from:
@@ -735,6 +736,14 @@ SAFETY_RULES = {
         f"{FLOWS}/operation.md": ("Spawn the non-writing counterpart as a read-only reviewer",),
         **{path: ("the reviewers themselves keep their own tier",) for path in HOSTS.values()},
     },
+    "review_scope_record": {
+        f"{SKILLS}/backlog-plan/references/switch-review_scope_record-both_scopes.md": (
+            "The record measures; it never changes what a reader reads",
+            "so no reader may start on an earlier manifest",
+            "A record row is measurement data, never review evidence",
+            "Never delete or rewrite a row without the owner's approval",
+        ),
+    },
     "story_size_budget": {
         f"{SKILLS}/product-planning/references/switch-story_size_budget-propose_split.md": (
             "it never fails `backlog_compile.py check`, never blocks a review or an approval and"
@@ -849,7 +858,7 @@ class MeasuredBaselineTests(unittest.TestCase):
         self.assertEqual(cited, ["code_review_panel", "delivery_path", "epic_review_cadence",
                                  "execution_planning",
                                  "own_target_reuse", "owner_gates", "pre_handoff_regression",
-                                 "qa_gate_order"])
+                                 "qa_gate_order", "review_scope_record"])
 
 
 if __name__ == "__main__":

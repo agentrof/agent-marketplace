@@ -44,8 +44,8 @@ TABLE = """## Test Partitions
 """
 # The approved partition command: it runs the groups its partition file names,
 # but for the reused ids, after the delay partition-delay.txt asks for, fails
-# the partition fail-partition.txt names, writes a group report and logs when
-# it ran on which engine to FIXTURE_LOG.
+# the partition fail-partition.txt names, writes a group report and records
+# when it ran on which engine in its own file under FIXTURE_LOG.
 PARTITION = """import json, os, pathlib, runpy, sys, time
 part = json.loads(pathlib.Path(os.environ["AGENTROF_TEST_PARTITION"]).read_text(encoding="utf-8"))
 assert part["engine"] == os.environ["AGENTROF_TEST_ENGINE"]
@@ -81,10 +81,10 @@ report = pathlib.Path(os.environ["AGENTROF_VERIFICATION_SCRATCH"]) / "reports" /
 report.parent.mkdir(parents=True, exist_ok=True)
 report.write_text(json.dumps({"schema_version": 1, "groups": groups}), encoding="utf-8")
 if os.environ.get("FIXTURE_LOG"):
-    with open(os.environ["FIXTURE_LOG"], "a", encoding="utf-8") as log:
-        log.write(json.dumps({"partition": part["partition"], "engine": part["engine"], "start": started,
-                              "end": time.time(), "scratch": os.environ["AGENTROF_VERIFICATION_SCRATCH"],
-                              "reused": sorted(reused)}) + "\\n")
+    record = pathlib.Path(os.environ["FIXTURE_LOG"]) / f"{part['partition']}-{os.getpid()}-{time.time_ns()}.json"
+    record.write_text(json.dumps({"partition": part["partition"], "engine": part["engine"], "start": started,
+                                  "end": time.time(), "scratch": os.environ["AGENTROF_VERIFICATION_SCRATCH"],
+                                  "reused": sorted(reused)}), encoding="utf-8")
 sys.exit(1 if failed else 0)
 """
 
@@ -217,11 +217,13 @@ class PartitionedRunTests(unittest.TestCase):
         self.freeze()
 
     def final_run(self) -> tuple[dict, list[dict]]:
-        log = self.root.parent / (self.root.name + "-partitions.log")
-        self.addCleanup(lambda: log.unlink(missing_ok=True))
+        # One file per partition run: concurrent appends to one shared file can overwrite each other on Windows.
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        log = Path(temporary.name)
         with mock.patch.dict(os.environ, {"FIXTURE_LOG": str(log)}):
             raw = verification.run_check(self.root, "test")
-        runs = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
+        runs = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(log.glob("*.json"))]
         return raw, runs
 
     def register(self, raw: dict) -> None:

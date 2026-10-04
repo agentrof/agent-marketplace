@@ -207,6 +207,10 @@ review manifest the Product Owner proposes a split for each story over budget,
 which the owner accepts or keeps, as
 `skill-content/product-planning/references/switch-story_size_budget-propose_split.md`
 defines.
+Switch `epic_review_cadence`: at `overlap_calibration`, epic reviews that run
+one after another start as
+`skill-content/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md`
+defines.
 
 ### Recovery that removes only operating-system metadata
 

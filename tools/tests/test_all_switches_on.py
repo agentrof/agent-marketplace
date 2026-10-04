@@ -45,6 +45,9 @@ PLANNING = ("execution-plan/references/switch-delivery_path-light_when_eligible.
             "execution-plan/references/switch-" + BUNDLE,
             "execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md")
 BOUNDED = "backlog-plan/references/switch-review_manifest_scope-bounded.md"
+# The backlog-plan switch references every backlog-plan task binds.
+BACKLOG = (BOUNDED,
+           "backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md")
 SPLIT = "product-planning/references/switch-story_size_budget-propose_split.md"
 # The switch references each shipped task binds, by entry and role. A task
 # binds a reference of a switch that owns one of its entry's flows, from a
@@ -58,10 +61,10 @@ EXPECTED = {
         ("organize-docs", "business-analyst"), ("requirement", "business-analyst"),
         ("setup", "delivery-coordinator"), ("sketch", "ux-designer"),
         ("solution-design", "domain-expert"), ("solution-design", "solution-architect"))},
-    "backlog-plan:product-owner": [BOUNDED, SPLIT],
-    "backlog-plan:backlog-reviewer": sorted([BOUNDED, SPLIT, *REVIEW]),
-    "backlog-plan:business-analyst": [BOUNDED],
-    "backlog-plan:qa-engineer": [BOUNDED],
+    "backlog-plan:product-owner": [*BACKLOG, SPLIT],
+    "backlog-plan:backlog-reviewer": sorted([*BACKLOG, SPLIT, *REVIEW]),
+    "backlog-plan:business-analyst": list(BACKLOG),
+    "backlog-plan:qa-engineer": list(BACKLOG),
     **{f"configure:{role}": ["configure/references/switch-" + BUNDLE, OWNER_GATES]
        for role in ("delivery-coordinator", "devops-engineer", "qa-engineer")},
     **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS]

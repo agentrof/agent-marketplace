@@ -107,6 +107,17 @@ that needs evidence outside its manifest reports it and is rerun with it.
 `backlog-plan/references/switch-review_manifest_scope-bounded.md` defines the
 read set.
 
+When epic reviews queue behind the host's agent limit, process switch
+`epic_review_cadence` sets when the next one starts. At `wait_per_panel`, the
+default, the coordinator waits for the previous review's calibration and its
+own record of that review. At `overlap_calibration`, the next review starts as
+soon as the previous review's last reader returns, a calibration reader starts
+for each reader's claims as soon as that reader returns, the coordinator
+writes only a fixed claim record at the boundary, and no writer action starts
+until every review and every calibration has returned.
+`backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md`
+defines the cadence.
+
 A Delivery Item's implementation writers run as process switch
 `implementation_schedule` selects. `sequential_v1`, the default, runs them one
 after another in their approved order. For an Item whose approved plan

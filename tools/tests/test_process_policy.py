@@ -515,6 +515,7 @@ SWITCH_REFERENCE = re.compile(r"switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md")
 RELEASED_DEFAULTS = {
     "code_review_panel": "single_reader",
     "delivery_path": "standard",
+    "epic_review_cadence": "wait_per_panel",
     "execution_planning": "per_document",
     "implementation_schedule": "sequential_v1",
     "mechanical_pass_tier": "role_tier",
@@ -694,6 +695,15 @@ SAFETY_RULES = {
             "QA keeps its own blocking severities",
         ),
     },
+    "epic_review_cadence": {
+        f"{SKILLS}/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md": (
+            "It changes when work starts, never what anyone reads or decides",
+            "Each claim is still ruled once by a fresh calibration reader, neither the writer nor"
+            " a reader that returned a finding of the review",
+            "No writer action starts until every epic review and every calibration of its claims"
+            " has returned",
+        ),
+    },
     "review_manifest_scope": {
         f"{SKILLS}/backlog-plan/references/switch-review_manifest_scope-bounded.md": (
             "The root manifest and a writer's manifest keep the transitive read set, and backlog"
@@ -836,7 +846,8 @@ class MeasuredBaselineTests(unittest.TestCase):
                 cited.append(name)
                 with self.subTest(switch=name):
                     self.assertTrue(evidence.startswith(" in one measured project"), evidence)
-        self.assertEqual(cited, ["code_review_panel", "delivery_path", "execution_planning",
+        self.assertEqual(cited, ["code_review_panel", "delivery_path", "epic_review_cadence",
+                                 "execution_planning",
                                  "own_target_reuse", "owner_gates", "pre_handoff_regression",
                                  "qa_gate_order"])
 

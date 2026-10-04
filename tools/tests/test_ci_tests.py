@@ -748,7 +748,8 @@ class CITestPlannerTests(unittest.TestCase):
         policy = ci_tests.policy_at(ci_tests.ROOT)
         ids, _ = ci_tests.inventory(ci_tests.ROOT)
         modules = {"tools.tests.test_delivery_verification", "tools.tests.test_performance_contracts",
-                   "tools.tests.test_task_inputs", "tools.tests.test_ci_local"}
+                   "tools.tests.test_task_inputs", "tools.tests.test_ci_local",
+                   "tools.tests.test_vault_hook_git_sync"}
         native = ci_tests.group_ids(["windows"], policy, ids)
         self.assertTrue({test_id for test_id in ids if ci_tests.module_of(test_id) in modules}.issubset(native))
         selected, _mode, _reason = ci_tests.select_ids("impact",

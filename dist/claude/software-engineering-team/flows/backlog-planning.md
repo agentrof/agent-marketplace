@@ -201,6 +201,9 @@ defines.
 Switch `review_loop`: at `blocking_delta`, this section's review loops
 follow
 `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck
+wave starts at once, after every finished worker is closed, as the host
+contract defines.
 Switch `story_size_budget`: at `propose_split`, `check --json` also reports
 each story's size against the owner-set limits, and before the first epic
 review manifest the Product Owner proposes a split for each story over budget,

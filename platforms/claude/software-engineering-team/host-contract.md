@@ -82,6 +82,12 @@
 - Under switch `execution_planning` at `single_source_bundle`, start every
   reader of an execution-plan bundle together: spawn them in one message, then
   wait for all of them before triage.
+- Under switch `reader_waves` at `all_at_once`, spawn every reader of a
+  review or recheck wave in one message, then wait for all of them before
+  triage; a
+  finished Claude Code subagent holds no thread, so there is nothing to close
+  first. Every wave's progress message names the wave size and how many of
+  its readers run at once.
 - Claude Code's prompt cache keeps a role's context for five minutes from the
   start of the model call that last used it, and a model call after a longer
   pause writes the whole context into the cache again, at more than ten times

@@ -98,10 +98,10 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "d39633f87455578df4e7c47298422658d72a78416c61636e692a8cc1b773c495"
+      "8bfbd0060fcb310534e76a0f5ff9991bcfc33fab0545e15d24d28e9d850317fa"
     ,
     "flows/business-analysis.md":
-      "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3"
+      "c0d33f02f48d864b5437efd34ae5e899f2ebee3f4b433fae9bbc09b43bcf0f7b"
     ,
     "flows/delivery-execution.md":
       "ef1c83fcad8215d4daa106fafebb47b483fa260b448c593be2fe78f563f1727d"
@@ -113,31 +113,31 @@
       "8f4680d9e6b128dd725f2e616a132b478529379f8c80a118097448f3fb41ad7e"
     ,
     "flows/design-system.md":
-      "b2690f943def375af5410f258dd24ece27c28798c310f96c4991687f466fd5fd"
+      "fca0925db4c915d03a0d8ce15e70bab8144d7345c94a04d647c385f952cbb073"
     ,
     "flows/design.md":
       "5e87edb63497b9b06deff9bf210b6674bc7990245d70b4f7e2be1b1fad9dfbca"
     ,
     "flows/execution-planning.md":
-      "02b7f30335f435d7410d99b6ad1b630a245d67b786c12a0a83bf665cb0d4a153"
+      "223775e5eb4a54b1cb04159486f0adec76701b2d198526f31e4895da2f9277a3"
     ,
     "flows/experience-design.md":
       "5a75a218158906de88db0791092079dc8ec9c29ab7c38804dc003411aa1848dc"
     ,
     "flows/operation.md":
-      "1619950ede0c3a38941f6e3933974eacacdae7ac59cd0bb875d8f178c29074ce"
+      "48778a7d148c640efdc6cc67a81bc5acb2c5b7c3bb21b77cec4a752805f527a2"
     ,
     "flows/requirement.md":
       "fc7930f17daf899ed2375d4c67bf0fefcc86be7894f0f8d02b276527e67a3c04"
     ,
     "flows/solution-design.md":
-      "d972c46964ec83c1387e656a4fa2d1c52e38bd92a90f26a90adbcd68652b856f"
+      "bf60e1205bb0f1376ac640c6ec6f73bedfd58e30cc5f454d88473d9b18d955f9"
     ,
     "hooks/hooks.json":
       "f6056501a31710a1c702f64ae0f5bd38c62240d40224b46844eed13467c31e96"
     ,
     "host-contract.md":
-      "962ae85040ce5907905119d9cf53f29ada43f397f7e1188061e8669aa3620a66"
+      "34666ef77068a8a283d251463632057d5cdef1a52e18a1a4d6c9df577f81fa8d"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -356,7 +356,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "4f111a1be9713cec4166946d92bb47b85bd26acd8b848929e7e41579700dcf51"
+      "33632710add03019911e4493c4909b0b57e0380326004fbc734d5dcf2ee08c2a"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"

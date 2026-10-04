@@ -62,6 +62,18 @@
 - Under switch `execution_planning` at `single_source_bundle`, start every
   reader of an execution-plan bundle before waiting on any of them, then wait
   for all of them before triage.
+- Under switch `reader_waves` at `all_at_once`, start a review or recheck
+  wave only after closing every finished agent thread with `close_agent`, a
+  writer between its passes included: Codex counts every open spawned thread,
+  finished or not, against the session's thread cap,
+  `agents.max_concurrent_threads_per_session` or its older alias
+  `agents.max_threads`. Then start every reader of the wave before waiting on
+  any of them, and wait for all of them before triage. When fewer threads are free than the wave has readers, start
+  the readers with the largest inputs first, say so in the progress message,
+  and start each remaining reader as soon as a reader finishes and is closed.
+  Every wave's progress message names the wave size and how many of its
+  readers run at once. A closed writer's next pass starts fresh from its task
+  manifest and the returned findings.
 - Depending on the model, the provider's prompt cache can drop a role's
   context five minutes after the model call that last used it, and a model
   call after that pays the full price for the whole context again. So a role

@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Issue Report
 
-Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/issue-report/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter.
+Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/issue-report/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. When the session context reports `AGENT_MARKETPLACE_PYTHON: unsupported`, stop and tell the user the reason and the fix it gives.

@@ -6,6 +6,13 @@
   never registers global state or blocks project work. `vault_hook.py`
   protects only compiler-owned fields and immediately checks changed vault
   documents.
+- Every hook runs through `hook_launcher.py`, which first checks the plugin's
+  Python runtime floor. Below it the launcher denies only a write to a path the
+  vault hook governs and a command that runs one of the plugin's scripts; a raw
+  shell write to a governed file goes unchecked, since the plugin's own flows
+  are halted. When the session context reports
+  `AGENT_MARKETPLACE_PYTHON: unsupported`, stop the entry and tell the user the
+  reason and the fix that context gives.
 - One Software Engineering Team owns a project. There is no shared project
   state service or cross-project work key.
 - Resolve every canonical "packaged script" reference beneath

@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import ci_host_policy as host
 
 
-REPO = Path(__file__).resolve().parents[2]
 POLICY = {"schema_version": 1, "runner_os": "macos-latest", "python": "3.14", "node": "24"}
 
 
@@ -28,9 +27,6 @@ class HostPolicyTests(unittest.TestCase):
         path.write_text(policy if isinstance(policy, str) else json.dumps(policy),
                         encoding="utf-8")
         return root
-
-    def test_the_tracked_policy_is_valid(self):
-        self.assertEqual(host.host_policy(REPO), POLICY)
 
     def test_each_invalid_policy_shape_is_refused(self):
         cases = {

@@ -103,6 +103,36 @@ class PerformanceContractsTests(unittest.TestCase):
         self.assertGreater(final["seed_copy"], initial["seed_copy"])
         self.assertGreater(final["seed_validate"], initial["seed_validate"])
 
+    def test_an_applied_project_copy_equals_a_fresh_apply_and_stays_isolated(self):
+        cache = fixture_cache.AppliedProjectCache()
+        self.addCleanup(cache.close)
+        context = fixture_cache.context_snapshot((subprocess, fixture_cache))
+        with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second, \
+                tempfile.TemporaryDirectory() as fresh:
+            cache.apply_to(Path(first), context)
+            cache.apply_to(Path(second), context)
+            fixture_cache.apply_project(Path(fresh))
+            snapshot = fixture_cache.RepositorySeedCache.snapshot
+            self.assertEqual({snapshot(Path(path)) for path in (first, second, fresh)},
+                             {cache.fingerprint})
+            (Path(first) / "workspace/config.json").write_text("{}\n", encoding="utf-8")
+            self.assertEqual(snapshot(Path(second)), snapshot(Path(fresh)))
+            self.assertEqual(snapshot(cache.root), cache.fingerprint)
+        with tempfile.TemporaryDirectory() as raw:
+            guard = Path(raw) / fixture_cache.RUNTIME / cache.GUARD
+            guard.parent.mkdir(parents=True)
+            guard.write_bytes(b"")
+            cache.require_seed(Path(raw))
+            (guard.parent / "receipt.json").write_text("{}\n", encoding="utf-8")
+            with self.assertRaisesRegex(AssertionError, "empty setup guard"):
+                cache.require_seed(Path(raw))
+        # A changed environment applies afresh and never reads the seed.
+        with mock.patch.dict(os.environ, {"AGENTROF_FIXTURE_CONTEXT": "changed"}), \
+                mock.patch.object(cache, "seed", side_effect=AssertionError("seed used")), \
+                tempfile.TemporaryDirectory() as raw:
+            cache.apply_to(Path(raw), context)
+            self.assertTrue((Path(raw) / "workspace/config.json").is_file())
+
     def test_seed_rejects_shared_git_pointer_and_explicit_worktree(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

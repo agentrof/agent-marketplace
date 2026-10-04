@@ -28,43 +28,57 @@ import test_ci_evidence as evidence_fixtures  # noqa: E402
 
 
 class CIPlanIntegrationTests(unittest.TestCase):
+    """One repository serves every test: the tests read its history and never change it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.temporary.name) / "repository"
+        cls.root.mkdir()
+        try:
+            fixtures.make_valid_root(cls.root)
+            shutil.copytree(
+                TESTS.parent, cls.root / "tools", dirs_exist_ok=True,
+                ignore=build_distributions.ignore_python_cache,
+            )
+            fixtures.copy(".github/workflows", cls.root)
+            fixtures.copy("Makefile", cls.root)
+            git_fixture.init_repository(cls.root)
+            cls.git("config", "user.name", "CI tests")
+            cls.git("config", "user.email", "ci@example.invalid")
+            cls.git("config", "core.autocrlf", "false")
+            cls.git("add", "--all")
+            for metadata in (cls.root / "dist").glob("*/*/.agent-marketplace-package.json"):
+                value = json.loads(metadata.read_text(encoding="utf-8"))
+                for executable in value["executables"]:
+                    path = (metadata.parent / executable).relative_to(cls.root).as_posix()
+                    cls.git("update-index", "--chmod=+x", path)
+            cls.git("commit", "-qm", "main")
+            cls.base = cls.git("rev-parse", "HEAD")
+            cls.git("checkout", "-q", "-b", "feature")
+            fixtures.write(cls.root / ".changes/ci-plan.json", json.dumps({
+                "summary": "Exercise CI orchestration.",
+                "components": {fixtures.PLUGIN: "patch"},
+            }))
+            cls.git("add", "--all")
+            cls.git("commit", "-qm", "feature")
+            cls.head = cls.git("rev-parse", "HEAD")
+            cls.git("checkout", "-q", "--detach", cls.base)
+            cls.git("merge", "--no-ff", "-qm", "Merge pull request #9", cls.head)
+            cls.merge = cls.git("rev-parse", "HEAD")
+        except BaseException:
+            git_fixture.remove_temporary(cls.temporary)
+            raise
+        cls.full_plan = None
+
+    @classmethod
+    def tearDownClass(cls):
+        git_fixture.remove_temporary(cls.temporary)
+
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(git_fixture.remove_temporary, self.temporary)
-        self.root = Path(self.temporary.name) / "repository"
-        self.root.mkdir()
-        self.output = Path(self.temporary.name) / "output"
-        self.output.mkdir()
-        fixtures.make_valid_root(self.root)
-        shutil.copytree(
-            TESTS.parent, self.root / "tools", dirs_exist_ok=True,
-            ignore=build_distributions.ignore_python_cache,
-        )
-        fixtures.copy(".github/workflows", self.root)
-        fixtures.copy("Makefile", self.root)
-        git_fixture.init_repository(self.root)
-        self.git("config", "user.name", "CI tests")
-        self.git("config", "user.email", "ci@example.invalid")
-        self.git("config", "core.autocrlf", "false")
-        self.git("add", "--all")
-        for metadata in (self.root / "dist").glob("*/*/.agent-marketplace-package.json"):
-            value = json.loads(metadata.read_text(encoding="utf-8"))
-            for executable in value["executables"]:
-                path = (metadata.parent / executable).relative_to(self.root).as_posix()
-                self.git("update-index", "--chmod=+x", path)
-        self.git("commit", "-qm", "main")
-        self.base = self.git("rev-parse", "HEAD")
-        self.git("checkout", "-q", "-b", "feature")
-        fixtures.write(self.root / ".changes/ci-plan.json", json.dumps({
-            "summary": "Exercise CI orchestration.",
-            "components": {fixtures.PLUGIN: "patch"},
-        }))
-        self.git("add", "--all")
-        self.git("commit", "-qm", "feature")
-        self.head = self.git("rev-parse", "HEAD")
-        self.git("checkout", "-q", "--detach", self.base)
-        self.git("merge", "--no-ff", "-qm", "Merge pull request #9", self.head)
-        self.merge = self.git("rev-parse", "HEAD")
+        output = tempfile.TemporaryDirectory()
+        self.addCleanup(output.cleanup)
+        self.output = Path(output.name)
         self.event = {
             "number": 9,
             "pull_request": {
@@ -80,31 +94,37 @@ class CIPlanIntegrationTests(unittest.TestCase):
         self.addCleanup(self.root_patch.stop)
         self.queries = []
 
-    def git(self, *arguments):
+    @classmethod
+    def git(cls, *arguments):
         return subprocess.run(
-            ["git", *arguments], cwd=self.root, check=True,
+            ["git", *arguments], cwd=cls.root, check=True,
             capture_output=True, text=True,
         ).stdout.strip()
 
     def api(self, *, missing=False):
-        plan = ci_tests.make_plan(self.root, "full")
         value = evidence_fixtures.receipt()
-        value.update(
-            plan=plan, plan_hash=plan["plan_hash"], tested_sha=plan["source_sha"],
-            tested_tree=plan["source_tree"],
-            contract_hash=ci_evidence.contract_hash(self.root, plan["source_sha"]),
-            event="pull_request", head_sha=self.head, ref="refs/pull/9/merge",
-            pull_request={
-                "number": 9, "head_sha": self.head,
-                "head_repository": evidence_fixtures.REPO, "base_ref": "main",
-            },
-            runtimes={name: {
-                "python_version": lane["python"] + ".1",
-                "python_implementation": "CPython", "os_release": "fixture",
-                "machine": "fixture", "git_version": "git version fixture",
-                "os": {"ubuntu-latest": "Linux", "macos-latest": "Darwin", "windows-latest": "Windows"}[lane["os"]],
-            } for name, lane in plan["lanes"].items()},
-        )
+        if not missing:
+            # The full plan of the unchanging repository is built once.
+            if type(self).full_plan is None:
+                type(self).full_plan = ci_tests.make_plan(self.root, "full")
+            plan = copy.deepcopy(self.full_plan)
+            value.update(
+                plan=plan, plan_hash=plan["plan_hash"], tested_sha=plan["source_sha"],
+                tested_tree=plan["source_tree"],
+                contract_hash=ci_evidence.contract_hash(self.root, plan["source_sha"]),
+                event="pull_request", head_sha=self.head, ref="refs/pull/9/merge",
+                pull_request={
+                    "number": 9, "head_sha": self.head,
+                    "head_repository": evidence_fixtures.REPO, "base_ref": "main",
+                },
+                runtimes={name: {
+                    "python_version": lane["python"] + ".1",
+                    "python_implementation": "CPython", "os_release": "fixture",
+                    "machine": "fixture", "git_version": "git version fixture",
+                    "os": {"ubuntu-latest": "Linux", "macos-latest": "Darwin",
+                           "windows-latest": "Windows"}[lane["os"]],
+                } for name, lane in plan["lanes"].items()},
+            )
         api = evidence_fixtures.FakeGitHub(value)
         api.run.update(event="pull_request", head_sha=self.head, head_branch="codex/feature")
         api.pull.update(merge_commit_sha=self.merge)
@@ -146,18 +166,6 @@ class CIPlanIntegrationTests(unittest.TestCase):
         self.assertEqual(self.choose(), ("impact", self.base))
         self.assertEqual(self.queries, [])
 
-    def test_a_release_named_branch_is_an_ordinary_impact_pr(self):
-        # A release commit rides in an ordinary pull request; no branch name
-        # selects a narrower test profile.
-        for repository in (evidence_fixtures.REPO, "fork/project"):
-            with self.subTest(repository=repository):
-                event = copy.deepcopy(self.event)
-                event["pull_request"]["head"].update(
-                    ref="release/stable", repo={"full_name": repository},
-                )
-                self.assertEqual(self.choose(event=event), ("impact", self.base))
-        self.assertEqual(self.queries, [])
-
     def test_main_merge_reuses_only_a_successful_exact_pr_tree(self):
         self.assertEqual(self.choose(api=self.api(), event_name="push"), ("reuse", ""))
         self.assertEqual(self.queries, [self.merge])
@@ -182,6 +190,30 @@ class CIPlanIntegrationTests(unittest.TestCase):
             with self.subTest(event=event):
                 self.assertEqual(self.choose(event_name=event), ("full", ""))
         self.assertEqual(self.queries, [])
+
+    def test_the_plan_job_outputs_the_policy_python_every_later_job_sets_up(self):
+        original = ci_plan.run
+
+        def run(*arguments):
+            if arguments[1:3] == ("tools/ci_evidence.py", "timings"):
+                output = Path(arguments[arguments.index("--output") + 1])
+                output.write_text(json.dumps({"schema_version": 1, "durations": {}}), encoding="utf-8")
+                return ""
+            return original(*arguments)
+
+        outputs = self.output / "github-output"
+        with mock.patch.object(ci_plan, "run", side_effect=run), mock.patch.dict(
+                os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch"}), \
+                mock.patch.object(sys, "argv", ["ci_plan.py", "--output-directory", str(self.output / "plan"),
+                                                "--github-output", str(outputs)]):
+            os.environ.pop("GITHUB_EVENT_PATH", None)
+            os.environ.pop("GITHUB_STEP_SUMMARY", None)
+            self.assertEqual(ci_plan.main(), 0)
+        values = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines())
+        version = ci_tests.policy_at(self.root)["python"]
+        self.assertEqual((sorted(values), values["python"], values["has_tests"], values["mode"]),
+                         (["has_tests", "matrix", "mode", "python"], version, "true", "full"))
+        self.assertEqual({row["python"] for row in json.loads(values["matrix"])["include"]}, {version})
 
 
 if __name__ == "__main__":

@@ -7,4 +7,4 @@ description: User-gated planning entry that turns either an approved Requirement
 
 # Backlog Plan
 
-Read `../../host-contract.md` and `../../skill-content/backlog-plan/SKILL.md` completely, resolving both paths relative to this file. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, confirm the project-local workspace config and docs contract.
+Read `../../host-contract.md` and `../../skill-content/backlog-plan/SKILL.md` completely, resolving both paths relative to this file. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, confirm the project-local workspace config and docs contract. When the session context reports `AGENT_MARKETPLACE_PYTHON: unsupported`, stop and tell the user the reason and the fix it gives.

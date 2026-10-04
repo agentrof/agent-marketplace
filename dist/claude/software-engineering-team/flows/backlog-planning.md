@@ -84,6 +84,13 @@ The root contains `backlog.md` and `reviews/`. Each epic is a folder with an
 `epic.md`, `reviews/`, and `stories/`. Each story folder contains exactly
 `story.md` and `test-plan.md`. Membership is derived from the path.
 
+In a draft backlog revision, materialize planned story/test-plan scaffolds
+before opening an existing epic's next review with
+`backlog_compile.py stub-epic <epic-slug> --docs <workspace>/docs --new-review`.
+This creates a fresh TODO round with current policy and exact current
+membership, preserving prior evidence. Retrying keeps an already-open pending
+round byte-exact. Derive writer inputs after these owning-compiler writes.
+
 ## 2. Author stories
 
 The Product Owner authors each `story.md` with exactly these sections:

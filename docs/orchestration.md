@@ -107,6 +107,17 @@ that needs evidence outside its manifest reports it and is rerun with it.
 `backlog-plan/references/switch-review_manifest_scope-bounded.md` defines the
 read set.
 
+Process switch `review_scope_record` collects the data that scope's default is
+chosen on. At `off`, the default, nothing is measured. At `both_scopes`, an
+epic reader's manifest also derives the other scope's read set and carries
+both sizes, flags a transitive read set over the owner's
+`transitive_source_bytes` budget so the flow offers `bounded` before any
+reader starts, and `backlog_review_inputs.py --scope-findings` reports the
+review's blocking findings that cite a note outside the bounded read set; the
+coordinator appends both to a tracked JSON Lines record.
+`backlog-plan/references/switch-review_scope_record-both_scopes.md` defines
+the record.
+
 When epic reviews queue behind the host's agent limit, process switch
 `epic_review_cadence` sets when the next one starts. At `wait_per_panel`, the
 default, the coordinator waits for the previous review's calibration and its

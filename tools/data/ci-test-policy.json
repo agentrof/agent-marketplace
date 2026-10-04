@@ -267,6 +267,7 @@
         "tools.tests.test_backlog_headless_handoff.*",
         "tools.tests.test_backlog_render_noop.*",
         "tools.tests.test_backlog_review_inputs.*",
+        "tools.tests.test_backlog_review_speed.*",
         "tools.tests.test_backlog_revision_atomicity.*",
         "tools.tests.test_backlog_pending_review_policy.*",
         "tools.tests.test_backlog_upstream_transition.*"
@@ -540,6 +541,7 @@
     "tools.tests.test_backlog_render_noop",
     "tools.tests.test_backlog_requirement_bindings",
     "tools.tests.test_backlog_review_inputs",
+    "tools.tests.test_backlog_review_speed",
     "tools.tests.test_backlog_revision_atomicity",
     "tools.tests.test_backlog_pending_review_policy",
     "tools.tests.test_backlog_upstream_transition",

@@ -345,6 +345,40 @@
         "unit": "At least 2 backlog revisions run with overlap_calibration, at least 6 epic review transitions in all. The switch changes only backlog planning, which runs outside any Delivery, so review transitions replace the 3-Delivery default.",
         "threshold": "A median transition gap under 2 min, and confirmed critical and major findings equal to the wait_per_panel run's on the same frozen inputs, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "review_scope_record": {
+      "summary": "Whether each backlog epic review records how large its read set is under both review_manifest_scope values, which of its blocking findings cite a note outside the bounded read set, and flags a transitive read set over the owner's budget before its readers start.",
+      "issue": 395,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "Nothing is measured, and an over-large transitive read set shows only when its readers return without real coverage. Today's behaviour and the baseline the record is measured against: in one measured project, a 23-story epic handed each reader 1,002 files and 21.6 MB of sources under transitive, its first panel was discarded, and the switch change and repair cost 64 min before the bounded panel started."
+        },
+        {
+          "id": "both_scopes",
+          "tradeoffs": "Each epic reader's manifest also derives the other scope's read set and records files, source bytes and manifest bytes for both, flags a transitive read set over the owner's budget so the flow can offer bounded before readers start, and a command reports which blocking findings of the review cite a note outside the bounded read set; the coordinator appends both to a tracked JSON Lines record. The data the review_manifest_scope default is chosen on, while every epic manifest takes a second derivation, about as long as the first."
+        }
+      ],
+      "default": "off",
+      "parameters": {
+        "summary": "Owner-set budget for an epic reader's transitive read set. The package sets no budget: without it no read set is flagged.",
+        "values": ["both_scopes"],
+        "declared_by": {
+          "path": "skill-content/backlog-plan/data/review-scope-budget.json",
+          "key": "budgets"
+        },
+        "type": "positive_integer",
+        "min_count": 0
+      },
+      "value_data": {
+        "both_scopes": ["skill-content/backlog-plan/data/review-scope-budget.json"]
+      },
+      "metric": "Per epic review: files, source bytes and manifest bytes of both read sets, reader wall time, blocking findings and those citing a note outside the bounded read set, and discarded panels after an over-budget flag was offered or ignored.",
+      "promotion": {
+        "unit": "At least 5 epic reviews recorded across at least 2 backlog revisions. The switch changes only backlog planning, which runs outside any Delivery, so epic reviews replace the 3-Delivery default.",
+        "threshold": "A record for every epic review of those revisions and zero discarded panels after an over-budget flag, with every shared quality guard holding and the owner's approval. The records then decide review_manifest_scope's default, a separate owner decision."
+      }
     }
   }
 }

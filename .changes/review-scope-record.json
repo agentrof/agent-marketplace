@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch `review_scope_record` (`off` | `both_scopes`), off by default, so every default manifest and every bound instruction is unchanged. At `both_scopes`, `backlog_review_inputs.py --epic` also derives the epic's manifest under the other `review_manifest_scope` value and adds `scope_sizes` to the reader's manifest: files, source bytes and manifest bytes of both read sets, and, when the owner sets the switch's `transitive_source_bytes` parameter, whether the transitive read set exceeds it, which the flow shows before any reader starts and answers with a choice gate offering `bounded`. `--scope-findings` lists the review's blocking findings, after calibration, with the notes each cites and those outside the bounded read set, read from the review note's Returned Findings or a `--findings` claim record, and `--record <file>` appends either measurement as a JSON line to a tracked record. In one measured project, a 23-story epic's transitive read set handed each reader 1,002 files and 21.6 MB of sources against 8.9 MB bounded, and the discarded first panel cost 64 min.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

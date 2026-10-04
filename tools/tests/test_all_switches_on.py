@@ -47,7 +47,8 @@ PLANNING = ("execution-plan/references/switch-delivery_path-light_when_eligible.
 BOUNDED = "backlog-plan/references/switch-review_manifest_scope-bounded.md"
 # The backlog-plan switch references every backlog-plan task binds.
 BACKLOG = (BOUNDED,
-           "backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md")
+           "backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md",
+           "backlog-plan/references/switch-review_scope_record-both_scopes.md")
 SPLIT = "product-planning/references/switch-story_size_budget-propose_split.md"
 # The switch references each shipped task binds, by entry and role. A task
 # binds a reference of a switch that owns one of its entry's flows, from a

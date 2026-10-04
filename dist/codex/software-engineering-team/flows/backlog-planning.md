@@ -259,6 +259,10 @@ the epic's dependency closure, the notes it links to or cites and their
 front-matter relations, as
 `skill-content/backlog-plan/references/switch-review_manifest_scope-bounded.md`
 defines.
+Switch `review_scope_record`: at `both_scopes`, an epic reader's manifest
+also measures the other scope's read set, and each epic review is recorded as
+`skill-content/backlog-plan/references/switch-review_scope_record-both_scopes.md`
+defines.
 
 Give one fresh `backlog-reviewer` the returned manifest and every named path:
 the root backlog, that epic, its child stories and test plans, and the incoming

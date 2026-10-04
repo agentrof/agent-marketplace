@@ -268,6 +268,7 @@ def approved_backlog_sources(
     *,
     historical_inputs: bool = False,
     story_size: dict | None = None,
+    test_cost: dict | None = None,
 ) -> tuple[dict[str, dict], dict, list[str]]:
     """Resolve the exact approved Story/Test Plan snapshots a Delivery may use.
 
@@ -275,7 +276,9 @@ def approved_backlog_sources(
     accept caller-provided hashes or treat a generated registry as a source of
     truth, so this resolver checks the authored package and its approval stamps
     before exposing one selected Story. With a story size budget, each selected
-    Story also carries its measures under ``story_size`` for display only. A
+    Story also carries its measures under ``story_size`` for display only, and
+    with a test cost budget its scenarios over the serial-row limit under
+    ``serial_row_scenarios``, for display only too. A
     Story that classifies its Operation impact carries it under
     ``operation_impact``; an unclassified one carries no such key.
     """
@@ -349,6 +352,10 @@ def approved_backlog_sources(
         entries = backlog_compile.story_size_entries(record, docs, story_size, set(selected))
         for story_id, entry in entries.items():
             selected[story_id]["story_size"] = entry
+    if test_cost is not None:
+        for story_id in selected:
+            selected[story_id]["serial_row_scenarios"] = backlog_compile.test_cost_block(
+                test_cost, [stories[story_id]])["serial_row_scenarios"]
     backlog_props = record["backlog"]["props"]
     snapshot = {
         "backlog_path": str(record["backlog"]["path"]),
@@ -795,13 +802,15 @@ def init_delivery(args) -> int:
     stories = list(args.story or [])
     # One read-only candidate snapshot serves the strict read and the handoff check.
     with stage_package.candidate_session():
-        # The proposal shows story sizes under story_size_budget; never a scope rule.
+        # The proposal shows story sizes under story_size_budget and the scenarios
+        # over the serial-row limit under test_cost_budget; neither is a scope rule.
         try:
             budget, budget_errors = backlog_compile.story_size_budget(docs), []
+            cost = backlog_compile.test_cost_budget(docs)
         except ValueError as exc:
-            budget, budget_errors = None, [str(exc)]
+            budget, cost, budget_errors = None, None, [str(exc)]
         sources, backlog_snapshot, source_errors = approved_backlog_sources(
-            docs, stories, story_size=budget)
+            docs, stories, story_size=budget, test_cost=cost)
         dod_snapshot, dod_errors = approved_dod_source(docs)
         # New Items declare the implementation schedule the Process Policy selects.
         schedule, policy_errors = policy_implementation_schedule(docs)
@@ -866,6 +875,11 @@ def init_delivery(args) -> int:
     if budget is not None:
         result["story_size"] = backlog_compile.story_size_block(
             budget, {story: sources[story]["story_size"] for story in stories})
+    if cost is not None:
+        result["test_cost"] = {"switch": backlog_compile.TEST_COST_SWITCH, "value": cost["value"],
+                               "limits": cost["limits"],
+                               "serial_row_scenarios": [entry for story in stories
+                                                        for entry in sources[story]["serial_row_scenarios"]]}
     if light is not None:
         result["delivery_path"] = {"value": LIGHT_WHEN_ELIGIBLE, "eligible": light["eligible"],
                                    "failed": light["failed"], "pending": light["pending"],

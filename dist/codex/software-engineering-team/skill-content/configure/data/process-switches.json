@@ -264,6 +264,41 @@
         "threshold": "The owner accepts at least half of the split proposals, stories within budget reach integration with a median cycle time at most half that of stories over budget in the same period, and no split loses, merges or rewords a criterion, creates a dependency cycle or yields a story verifiable only after a sibling lands, with every shared quality guard holding and the owner's approval. A promotion keeps off as the default, since only a value the owner chooses takes parameters, and ships package_limits for propose_split, which a project at that value applies to each limit it leaves unset."
       }
     },
+    "test_cost_budget": {
+      "summary": "Whether backlog planning asks what a Test Plan scenario costs to run, and flags each automation-required scenario that runs more table rows serially than an owner-set limit, so QA plans a split before the epic review.",
+      "issue": 385,
+      "flows": ["backlog-planning", "delivery-planning"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "No planning step asks what a scenario costs to run, so the cost of a long table-driven test shows only in Delivery, after a gate waited for it; the compiler still validates rows and row_split where a scenario states them. Today's behaviour and the baseline the flag is measured against: in one measured project, one test ran 260 rows serially for 58 minutes, 25% of QA's 227-minute final gate, and bounded the implementation's own repair runs too."
+        },
+        {
+          "id": "flag_serial_rows",
+          "tradeoffs": "backlog_compile.py check --json, the review manifests and delivery_compile.py init list each automation-required scenario whose declared rows exceed the owner's serial_rows limit while its row_split is serial or absent, and QA proposes a split before the epic review: rows sharded into independent groups that can run in parallel or grouped under one shared setup, or the owner keeps the scenario serial with a recorded reason. Advisory only: it never fails a check or blocks an approval. A declared row count can go stale as the table grows and then misses a test, sharding can expose order dependence between rows, and QA fills one more optional field for the flagged scenarios."
+        }
+      ],
+      "default": "off",
+      "parameters": {
+        "summary": "Owner-set limit on the table rows a scenario may run serially. The package sets no limit.",
+        "values": ["flag_serial_rows"],
+        "declared_by": {
+          "path": "skill-content/product-planning/data/test-cost-limits.json",
+          "key": "limits"
+        },
+        "type": "positive_integer",
+        "min_count": 1
+      },
+      "value_data": {
+        "flag_serial_rows": ["skill-content/product-planning/data/test-cost-limits.json"]
+      },
+      "metric": "Per backlog revision run with flag_serial_rows: the scenarios flagged, split and kept serial with a reason; per Delivery: the wall clock of the longest test in QA's final gate and of the gate itself, compared with Deliveries of stories planned at off.",
+      "promotion": {
+        "unit": "At least 3 backlog revisions run with flag_serial_rows and 3 Deliveries that contain stories planned under it.",
+        "threshold": "No single test runs longer than a quarter of QA's final gate in those Deliveries, and the gate's median wall clock is at most that of Deliveries planned at off for a similar suite, with every shared quality guard holding and the owner's approval. A promotion keeps off as the default, since only a value the owner chooses takes parameters, and ships package_limits for flag_serial_rows."
+      }
+    },
     "pre_handoff_regression": {
       "summary": "Whether an Item's candidate goes to Code Review and QA after its implementation's own tests, or only once the automated suites of the earlier stories its change touches, with its own Test Plan targets, pass on that exact candidate.",
       "issue": 351,

@@ -98,7 +98,7 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "adf608a53ffd3bb7a528659b6b39fe76447a47666cf523a082a205561a27a8a8"
+      "d801ca112ba498c2770bea145aec95af24ec4a69d227cc43b9ec28bcb26ef386"
     ,
     "flows/business-analysis.md":
       "aaebfe00ee5e062d23a881e0d0c989563426b2c026dcb07c78d74b0929477e5c"
@@ -110,7 +110,7 @@
       "ef2fa67262e0f500ba49b80d2865af6038638327745b989303acfaf1b1446fb7"
     ,
     "flows/delivery-planning.md":
-      "8f4680d9e6b128dd725f2e616a132b478529379f8c80a118097448f3fb41ad7e"
+      "b50562693ec7405e057eef126d7d4bf7e5872ca4facbb46b8e77992b20d61805"
     ,
     "flows/design-system.md":
       "17c2305579e348874cc6eebfdc7a5fce32ad4377ff96a6aeb1b74e3b610f0e81"
@@ -155,16 +155,16 @@
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
     ,
     "scripts/backlog_compile.py":
-      "9f3eeba54f61e899f1e14c9b7de470a4b93ea89a2e423257c0c085ad3d0032cc"
+      "020824453d6f47108929a3c9c8d1f6f852dde2155a0736b3f970e270ad21ec8b"
     ,
     "scripts/backlog_input_policy.py":
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
     ,
     "scripts/backlog_review_inputs.py":
-      "829b6f7d4b14e2317cdfd967545b42674dc0f9b28923598c2c3394edcb0272f5"
+      "7e414846a247a9b5043b8946fb9299f60650aec0cf2eeabc83eb63d0fe573e8c"
     ,
     "scripts/delivery_compile.py":
-      "296875bd6c03f5ad73eb80a93a6f7575af9a88a4c3f563ea912c088dda200437"
+      "847bb77cd14e26aebabd812e478a072c4ec5e998c53bc3334cb82a879657ab58"
     ,
     "scripts/delivery_git.py":
       "1ee8e9238ac55c27a095035239026868235aaaa4b8b00998faf7a5742ff5617e"
@@ -362,7 +362,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "0fdd6e6abec90d6fe09658c457f30098a5b87446ecfcb56d1ce2da94327338b5"
+      "df5d7725a63843f80f0b163e65030a9a476c012cd4abe26f491ec888956e5ff8"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
@@ -541,6 +541,9 @@
     "skill-content/product-planning/data/story-size-measures.json":
       "5a1b6d644cecbed97a872c3921a1354bb94277c4f8ae32161181cd9723c36af8"
     ,
+    "skill-content/product-planning/data/test-cost-limits.json":
+      "0584be762eca0ee0cf7d1286253e6e5fb97bcbe33afbdf1c3b74ed931e7e0c79"
+    ,
     "skill-content/product-planning/references/flow-metrics.md":
       "891e42fcf0eb759a0307491ceca79e247bab0e1a81c4bcbade51c36ad621a2e0"
     ,
@@ -558,6 +561,9 @@
     ,
     "skill-content/product-planning/references/switch-story_size_budget-propose_split.md":
       "2518ebe50edf8d0778395117c6147346dad8f543d6380e5f1a50e9292ec75c0f"
+    ,
+    "skill-content/product-planning/references/switch-test_cost_budget-flag_serial_rows.md":
+      "1fd06c0b8751dbc57e8618cd455011502ba59b123b0ac2ef7462b894158e1fc0"
     ,
     "skill-content/python-fastapi/SKILL.md":
       "b335164b3bc4bdc80be739b1a99606881577ae198307d0ce89c9a819e1d51421"

@@ -281,6 +281,18 @@ verbatim. Review manifests carry the measures as given facts, and
 `product-planning/references/switch-story_size_budget-propose_split.md`
 defines the steps.
 
+What a Test Plan scenario costs to run is process switch `test_cost_budget`.
+A scenario may state `rows`, the table rows its automation target runs, and
+`row_split`, `serial`, `sharded` or `grouped`, which `backlog_compile.py check`
+validates at every value. At `off`, the default, nothing is flagged. At
+`flag_serial_rows`, `check --json`, the review manifests and
+`delivery_compile.py init` list each automation-required scenario whose rows
+exceed the owner's `serial_rows` limit while its split is `serial` or absent,
+and QA proposes a split before the epic review, or the owner keeps the scenario
+serial with a recorded reason. The flag is advisory, as
+`product-planning/references/switch-test_cost_budget-flag_serial_rows.md`
+defines.
+
 Execution planning writes and reviews the facts a plan needs as process switch
 `execution_planning` selects. `per_document`, the default, revises and reviews
 each Operation contract on its own through the Operation flow.

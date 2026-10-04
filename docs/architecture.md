@@ -56,6 +56,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     every backlog note.
 12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
     scenarios; automation-required scenarios name an executable-test target.
+    A scenario may state `rows`, a positive integer, and `row_split`,
+    `serial`, `sharded` or `grouped`; process switch `test_cost_budget` at
+    `flag_serial_rows` flags one that runs more rows serially than the
+    owner's limit, and never fails a check.
 13. Every story has exactly one accountable implementation owner and may name
     supporting implementation roles with concrete body responsibilities.
     Runtime identities are not backlog properties. Process switch

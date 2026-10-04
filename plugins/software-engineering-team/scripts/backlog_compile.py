@@ -144,6 +144,14 @@ STORY_SIZE_SWITCH = "story_size_budget"
 STORY_SIZE_VALUE = "propose_split"
 STORY_SIZE_MEASURES_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
                             / "product-planning" / "data" / "story-size-measures.json")
+# A Test Plan scenario may state how many table rows its automation target runs
+# and how they are split; at test_cost_budget flag_serial_rows the compiler lists
+# each automation-required scenario that runs more rows serially than the owner's limit.
+TEST_COST_SWITCH = "test_cost_budget"
+TEST_COST_VALUE = "flag_serial_rows"
+SERIAL_ROWS = "serial_rows"
+ROW_SPLITS = ("serial", "sharded", "grouped")
+ROWS_RE = re.compile(r"^[1-9][0-9]*$")
 SIZE_EXCEPTIONS = "Size Exceptions"
 SIZE_EXCEPTION_COLUMNS = ("story", "measure", "reason")
 CHECKLIST_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\](?:\s|$)")
@@ -1779,6 +1787,48 @@ def story_size_budget(docs: Path) -> dict | None:
     return {"value": budget["value"], "limits": dict(sorted(budget.get("parameters", {}).items()))}
 
 
+def test_cost_budget(docs: Path) -> dict | None:
+    """Return the serial-row limit in force, or None while test_cost_budget is off.
+
+    Without a Process Policy, or at the switch's default, nothing is read. A
+    draft or invalid policy raises ValueError: it is refused, never read.
+    """
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    budget = values.get(TEST_COST_SWITCH)
+    if budget is None or budget["value"] != TEST_COST_VALUE:
+        return None
+    return {"value": budget["value"], "limits": dict(sorted(budget.get("parameters", {}).items()))}
+
+
+def serial_row_scenarios(stories: list[dict], limit: int | None) -> list[dict]:
+    """List each automation-required scenario that runs more than *limit* rows serially.
+
+    A scenario runs them serially when its row_split is serial or absent. A
+    scenario without a valid rows count, one at or below the limit, or one
+    whose rows are sharded or grouped is never listed; without a limit none is.
+    """
+    flagged = []
+    for story in sorted(stories, key=lambda item: item["id"]):
+        for scenario_id, block in scenario_blocks(story["test_body"]):
+            fields, _duplicates = scenario_fields(block)
+            rows, split = fields.get("rows", ""), fields.get("row_split")
+            if (limit is None or fields.get("automation", "").lower() != "required"
+                    or not ROWS_RE.fullmatch(rows) or int(rows) <= limit or split not in (None, "serial")):
+                continue
+            flagged.append({"story": story["id"], "scenario": scenario_id,
+                            "automation_target": fields.get("automation_target", "").strip(),
+                            "rows": int(rows), "row_split": split})
+    return flagged
+
+
+def test_cost_block(budget: dict, stories: list[dict]) -> dict:
+    """The serial-row flags of *stories*, as check, review manifests and Delivery proposals show them."""
+    return {"switch": TEST_COST_SWITCH, "value": budget["value"], "limits": budget["limits"],
+            "serial_row_scenarios": serial_row_scenarios(stories, budget["limits"].get(SERIAL_ROWS))}
+
+
 def size_exception_rows(docs: Path, epic: dict, review: dict) -> tuple[set[tuple[str, str]],
                                                                       list[str]]:
     """Read an epic review's optional Size Exceptions: each kept (story, measure)."""
@@ -2100,6 +2150,10 @@ def scenario_findings(docs: Path, body: str, story_id: str,
             errors.append(f"{path} scenario {scenario_id} has invalid automation value")
         if automation == "required" and not fields.get("automation_target", "").strip():
             errors.append(f"{path} scenario {scenario_id} is missing automation_target")
+        if "rows" in fields and not ROWS_RE.fullmatch(fields["rows"]):
+            errors.append(f"{path} scenario {scenario_id} rows must be a positive integer")
+        if "row_split" in fields and fields["row_split"] not in ROW_SPLITS:
+            errors.append(f"{path} scenario {scenario_id} row_split must be one of {', '.join(ROW_SPLITS)}")
         target = fields.get("automation_target", "").strip()
         if target and (target.startswith("/") or ".." in Path(target).parts
                        or any(char.isspace() for char in target)):
@@ -3655,6 +3709,14 @@ def check(args) -> int:
             errors.extend(size_exception_findings(record, docs))
     except (ValueError, RuntimeError) as exc:
         errors.append(str(exc))
+    # A scenario over the serial-row limit is advisory too; at the default nothing is read.
+    test_cost = None
+    try:
+        cost = test_cost_budget(docs)
+        if cost is not None:
+            test_cost = test_cost_block(cost, record["stories"])
+    except (ValueError, RuntimeError) as exc:
+        errors.append(str(exc))
     errors = sorted(set(errors))
     result = {
         "ok": not errors, "errors": errors,
@@ -3666,6 +3728,8 @@ def check(args) -> int:
     }
     if story_size is not None:
         result["story_size"] = story_size
+    if test_cost is not None:
+        result["test_cost"] = test_cost
     if pinned_reviews:
         result["pinned_reviews"] = pinned_reviews
     # Only a backlog that has one gains the key, so every other output is unchanged.

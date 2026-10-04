@@ -14,8 +14,40 @@ from tools.tests import test_backlog_revision_atomicity as fixtures
 
 compiler = fixtures.compiler
 import backlog_review_inputs as inputs
+import delivery_compile
 import process_policy
 import task_inputs
+
+
+def approve_with_evidence(case: unittest.TestCase, evidence: str) -> None:
+    """Approve and commit the fixture backlog with AUTH-01 and its Test Plan citing one note."""
+    case.story = case.docs / "backlog/epics/delivery-fixture/stories/auth-01/story.md"
+    case.plan = case.story.with_name("test-plan.md")
+    receipt = case.docs / "business-analysis/core/space.md"
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write_text("# Approved input boundary\n", encoding="utf-8")
+    for path in (case.story, case.plan):
+        props, body = compiler.parse_front_matter(path)
+        props["related_to"] = [evidence]
+        compiler.status_tag(props, "planned" if path == case.story else "draft")
+        for key in compiler.APPROVAL_FIELDS:
+            props.pop(key, None)
+        if path == case.story:
+            props["work_kind"] = "technical"
+        else:
+            body = body.replace("- source_refs:", f"- source_refs:\n  - {evidence}", 1)
+        path.write_text(compiler.front_matter(props, body), encoding="utf-8")
+    props, body = compiler.parse_front_matter(case.root)
+    props["analysis_scopes"] = ["delivery"]
+    compiler.status_tag(props, "draft")
+    for key in compiler.APPROVAL_FIELDS:
+        props.pop(key, None)
+    case.root.write_text(compiler.front_matter(props, body), encoding="utf-8")
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        result = compiler.approve(case.args)
+    case.assertEqual(result, 0, output.getvalue())
+    case.commit("Approved evidence boundary")
 
 
 class BacklogUpstreamTransitionTests(unittest.TestCase):
@@ -24,35 +56,8 @@ class BacklogUpstreamTransitionTests(unittest.TestCase):
 
     def setUp(self):
         fixtures.BacklogRevisionAtomicityTests.setUp(self)
-        self.story = self.docs / "backlog/epics/delivery-fixture/stories/auth-01/story.md"
-        self.plan = self.story.with_name("test-plan.md")
         self.decision = self.docs / "solution-design/decisions/fixture-api.md"
-        receipt = self.docs / "business-analysis/core/space.md"
-        receipt.parent.mkdir(parents=True, exist_ok=True)
-        receipt.write_text("# Approved input boundary\n", encoding="utf-8")
-        evidence = "[[solution-design/decisions/fixture-api|API decision]]"
-        for path in (self.story, self.plan):
-            props, body = compiler.parse_front_matter(path)
-            props["related_to"] = [evidence]
-            compiler.status_tag(props, "planned" if path == self.story else "draft")
-            for key in compiler.APPROVAL_FIELDS:
-                props.pop(key, None)
-            if path == self.story:
-                props["work_kind"] = "technical"
-            else:
-                body = body.replace("- source_refs:", f"- source_refs:\n  - {evidence}", 1)
-            path.write_text(compiler.front_matter(props, body), encoding="utf-8")
-        props, body = compiler.parse_front_matter(self.root)
-        props["analysis_scopes"] = ["delivery"]
-        compiler.status_tag(props, "draft")
-        for key in compiler.APPROVAL_FIELDS:
-            props.pop(key, None)
-        self.root.write_text(compiler.front_matter(props, body), encoding="utf-8")
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            result = compiler.approve(self.args)
-        self.assertEqual(result, 0, output.getvalue())
-        self.commit("Approved evidence boundary")
+        approve_with_evidence(self, "[[solution-design/decisions/fixture-api|API decision]]")
 
     def commit(self, message):
         for args in (["add", "-A"], ["-c", "user.name=Fixture", "-c",
@@ -63,6 +68,10 @@ class BacklogUpstreamTransitionTests(unittest.TestCase):
         props, body = compiler.parse_front_matter(self.decision)
         props["status"] = "superseded"
         self.decision.write_text(compiler.front_matter(props, body), encoding="utf-8")
+        self.add_criterion()
+        self.commit("Approved upstream evolution")
+
+    def add_criterion(self):
         acceptance = self.docs / "business-analysis/delivery/domains/identity/acceptance/delivery-acceptance.md"
         acceptance.write_text(acceptance.read_text(encoding="utf-8") +
                               "\nA second observable outcome. ^AC-DEL-002\n", encoding="utf-8")
@@ -70,7 +79,15 @@ class BacklogUpstreamTransitionTests(unittest.TestCase):
         registry = json.loads(registry_path.read_text(encoding="utf-8"))
         registry["ids"]["AC-DEL-002"] = dict(registry["ids"]["AC-DEL-001"])
         registry_path.write_text(json.dumps(registry), encoding="utf-8")
-        self.commit("Approved upstream evolution")
+
+    def add_topic_registry(self):
+        """A BA topic outside analysis_scopes whose registry the approval did not hold."""
+        registry_path = self.docs / "business-analysis/billing/_generated/registry.json"
+        registry_path.parent.mkdir(parents=True)
+        source = json.loads((self.docs / "business-analysis/delivery/_generated/registry.json")
+                            .read_text(encoding="utf-8"))
+        registry_path.write_text(json.dumps({"ids": {"AC-BIL-001": dict(source["ids"]["AC-DEL-001"])}}),
+                                 encoding="utf-8")
 
     def run_epic_review(self, slug="delivery-fixture"):
         output = io.StringIO()
@@ -240,6 +257,38 @@ class BacklogUpstreamTransitionTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(compiler.approve(self.args), 1)
 
+    def test_a_topic_registry_created_since_the_approval_holds_no_prior_ids(self):
+        self.add_topic_registry()
+        self.evolve_inputs()
+        prior = compiler.prior_approved_universe(self.docs)
+        self.assertIsNotNone(prior)
+        self.assertIn("delivery:AC-DEL-001", prior)
+        self.assertFalse({key for key in prior if key == "delivery:AC-DEL-002" or key.startswith("billing:")})
+        result, output = self.run_revision(allow_legacy_experience=True)
+        self.assertEqual(result, 0, output)
+        self.assertIn("require story coverage or explicit deferral: delivery:AC-DEL-002", output)
+
+    def test_an_unreadable_prior_registry_gives_no_transition_baseline(self):
+        self.evolve_inputs()
+        # The delivery registry is listed at the approval commit but cannot be read.
+        with mock.patch.object(compiler, "history_blob", return_value=None):
+            self.assertIsNone(compiler.prior_approved_universe(self.docs))
+
+    def test_delivery_still_refuses_a_backlog_missing_a_new_upstream_criterion(self):
+        """Only begin-revision's intake judges coverage against the last approval's
+        universe; Delivery's historical read keeps the current one."""
+        self.add_criterion()
+        self.commit("Approved upstream criterion")
+        with self.fixture.upstreams(), mock.patch.object(compiler, "validate_experience_ref"):
+            sources, _snapshot, errors = delivery_compile.approved_backlog_sources(
+                self.docs, ["AUTH-01"], historical_inputs=True)
+        self.assertEqual(sources, {})
+        self.assertIn("approved backlog: approved BA criteria/rules are neither story-covered nor deferred: "
+                      "delivery:AC-DEL-002", errors)
+        result, output = self.run_revision(allow_legacy_experience=True)
+        self.assertEqual(result, 0, output)
+        self.assertIn("require story coverage or explicit deferral: delivery:AC-DEL-002", output)
+
     def test_revising_the_story_requires_current_evidence(self):
         self.evolve_inputs()
         result, output = self.run_revision(allow_legacy_experience=True)
@@ -369,6 +418,44 @@ class BacklogUpstreamTransitionTests(unittest.TestCase):
         self.assertNotIn("is supported by the cited inputs", new_body)
         self.assertIn("TODO: cite the exact reviewed vault note", new_body)
         self.assertEqual(compiler.review_loop_record(self.docs, new_body, str(self.review), new_props), [])
+
+
+class SupersededArchitectureEvidenceTests(unittest.TestCase):
+    """A System Architecture decision superseded after the approval keeps an unchanged
+    Story's evidence, as a Solution Design one does; a revised Story needs current evidence."""
+
+    files = fixtures.BacklogRevisionAtomicityTests.files
+    run_revision = fixtures.BacklogRevisionAtomicityTests.run_revision
+    commit = BacklogUpstreamTransitionTests.commit
+    TARGET = "system-architecture/decisions/api-boundary-decision"
+
+    def setUp(self):
+        fixtures.BacklogRevisionAtomicityTests.setUp(self)
+        self.decision = self.docs / f"{self.TARGET}.md"
+        self.decision.parent.mkdir(parents=True, exist_ok=True)
+        self.decision.write_text(compiler.front_matter(
+            {"type": "decision", "title": "API boundary decision", "status": "accepted",
+             "tags": ["doc/decision", "status/accepted"], "aliases": ["ADR-001"]},
+            "# API boundary decision\n\nThe API keeps one public boundary.\n"), encoding="utf-8")
+        approve_with_evidence(self, f"[[{self.TARGET}|API boundary decision]]")
+        props, body = compiler.parse_front_matter(self.decision)
+        compiler.status_tag(props, "superseded")
+        self.decision.write_text(compiler.front_matter(props, body), encoding="utf-8")
+        self.commit("Superseded architecture decision")
+
+    def test_an_unchanged_story_keeps_its_superseded_architecture_evidence(self):
+        result, output = self.run_revision(allow_legacy_experience=True)
+        self.assertEqual(result, 0, output)
+
+    def test_a_revised_story_needs_current_architecture_evidence(self):
+        result, output = self.run_revision(allow_legacy_experience=True)
+        self.assertEqual(result, 0, output)
+        self.story.write_text(self.story.read_text(encoding="utf-8").replace(
+            "Users receive", "Customers receive"), encoding="utf-8")
+        with self.fixture.upstreams(), mock.patch.object(compiler, "validate_experience_ref"):
+            _record, errors = compiler.collect(self.docs, revision_inputs=True)
+        self.assertIn("backlog/epics/delivery-fixture/stories/auth-01/story.md related_to evidence target"
+                      f" is not approved/accepted: {self.TARGET}", errors)
 
 
 if __name__ == "__main__":

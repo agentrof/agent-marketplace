@@ -536,6 +536,7 @@ RELEASED_DEFAULTS = {
     "root_review_scope": "full",
     "source_decision_gate": "two_gates",
     "story_size_budget": "off",
+    "test_cost_budget": "off",
     "test_group_report": "off",
 }
 # The rules that keep a switch value safe, in the files agents read them from:
@@ -835,6 +836,15 @@ SAFETY_RULES = {
             "the budget never changes the selection or the scope decision",
         ),
     },
+    "test_cost_budget": {
+        f"{SKILLS}/product-planning/references/switch-test_cost_budget-flag_serial_rows.md": (
+            "The flag is advisory: it never fails a check, never blocks a review or an approval and never rewrites"
+            " a scenario",
+            "A split changes how the target runs its rows, never what the scenario verifies",
+            "ask the owner one choice-gate question per flagged scenario, with the split as the recommended option",
+            "record the owner's decision and its reason in the epic review note",
+        ),
+    },
     "test_group_report": {
         f"{SKILLS}/deliver/references/switch-test_group_report-refuse_missing_groups.md": (
             "a group that fails to collect is `not_collected`, never left out",
@@ -951,7 +961,7 @@ class MeasuredBaselineTests(unittest.TestCase):
                                  "pre_handoff_regression", "qa_gate_order", "reader_waves",
                                  "rebind_review_scope", "remediation_bookkeeping",
                                  "remediation_writers", "review_scope_record", "root_review_scope",
-                                 "source_decision_gate", "test_group_report"])
+                                 "source_decision_gate", "test_cost_budget", "test_group_report"])
 
 
 if __name__ == "__main__":

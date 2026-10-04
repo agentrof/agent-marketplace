@@ -222,6 +222,12 @@ review manifest the Product Owner proposes a split for each story over budget,
 which the owner accepts or keeps, as
 `skill-content/product-planning/references/switch-story_size_budget-propose_split.md`
 defines.
+Switch `test_cost_budget`: at `flag_serial_rows`, `check --json` also lists
+each automation-required scenario that runs more rows serially than the
+owner-set limit, and before the first epic review manifest QA proposes a split
+for each, as
+`skill-content/product-planning/references/switch-test_cost_budget-flag_serial_rows.md`
+defines.
 Switch `epic_review_cadence`: at `overlap_calibration`, epic reviews that run
 one after another start as
 `skill-content/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md`

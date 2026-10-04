@@ -356,6 +356,7 @@
         "tools.tests.test_runtime_floor.RuntimeFloorTests.test_every_hook_command_and_scaffolded_hook_runs_through_the_launcher",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_noncanonical_artifact_case_is_rejected_without_overwrite",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_restore_never_descends_into_case_changed_artifacts",
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_a_plain_merge_is_restored_with_the_attested_restore_named",
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_git_capture_locks_before_reading_the_tree_or_authority",
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_metadata_symlink_never_receives_a_safety_exemption",
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_restore_replays_the_approved_target_and_publishes_its_postimage",

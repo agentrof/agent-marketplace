@@ -47,5 +47,9 @@ exceptions and are never inferred from a generic rejection.
 
 Backlog approval is committed through the project's ordinary Git policy. Only
 after the exact Requirement and backlog revision reach target may Delivery
-Planning consume them. Requirement Flow never creates Delivery branches,
+Planning consume them. Bring that target into a local checkout only with the
+two Git synchronization forms the host contract names, `merge --no-edit
+<source>` or `restore --source=<source> --worktree --
+workspace/docs/experience-design`, each run with Git's absolute path as its own
+call from the checkout root. Requirement Flow never creates Delivery branches,
 worktrees, slots, PRs or Release Management state.

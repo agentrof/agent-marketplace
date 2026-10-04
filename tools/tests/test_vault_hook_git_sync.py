@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -252,6 +253,91 @@ class VaultHookGitSyncTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(self.path.read_bytes(), before)
 
+    def restore_command(self):
+        """The attested restore the guard names, with this host's quoting of Git's path."""
+        git = subprocess.list2cmdline([self.git_path]) if os.name == "nt" else shlex.quote(self.git_path)
+        return f"{git} restore --source=HEAD --worktree -- workspace/docs/experience-design"
+
+    def unanswered_remote(self):
+        """Make every ls-remote the hook runs time out, recording the bound it set."""
+        real_run = subprocess.run
+        self.remote_timeouts = []
+
+        def run(command, *args, **kwargs):
+            if "ls-remote" in command:
+                self.remote_timeouts.append(kwargs.get("timeout"))
+                raise subprocess.TimeoutExpired(command, kwargs.get("timeout") or 0)
+            return real_run(command, *args, **kwargs)
+        return mock.patch.object(self.hook.subprocess, "run", side_effect=run)
+
+    def test_a_plain_merge_is_restored_with_the_attested_restore_named(self):
+        self.git("checkout", "-b", "local-owner", self.old)
+        (self.root / "owner.txt").write_text("local owner content\n", encoding="utf-8")
+        self.commit("Preserve local owner content")
+        before = self.path.read_bytes()
+        payload = self.payload("merge", "--no-edit", self.target)
+        payload["tool_input"] = {"command": payload["tool_input"]["command"].replace(self.git_path, "git", 1)}
+        self.assertEqual(self.hook.shell_snapshot(payload), 0)
+        self.git("merge", "--no-edit", self.target)
+        code, error = self.verify(payload)
+        self.assertEqual(code, 2, error)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertIn("original Experience tree was restored", error)
+        self.assertIn(f"if a Git merge or pull of an approved handoff made this change, run Git by its "
+                      f"absolute path, as a call of its own from {self.root}: `{self.restore_command()}`", error)
+        # The command the guard names, as this host quotes it, completes the synchronization.
+        named = re.search(r"`([^`]* restore --source=HEAD [^`]*)`", error).group(1)
+        restore = hook_tests.VaultHookShellContractTests.attested_writer_payload(self.root, named)
+        restore["tool_use_id"] = "named-restore"
+        restore = self.hook.normalize(restore)
+        self.assertIsNotNone(self.hook.git_experience_sync_spec(restore, self.root))
+        self.assertEqual(self.hook.shell_snapshot(restore), 0)
+        self.git("restore", "--source=HEAD", "--worktree", "--", "workspace/docs/experience-design")
+        code, error = self.verify(restore)
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.path.read_bytes(), self.expected)
+
+    def test_an_unanswered_remote_refuses_the_sync_before_it_runs(self):
+        self.path.write_bytes(b'{"revision": 1}\n')
+        output = io.StringIO()
+        with self.unanswered_remote(), redirect_stderr(output):
+            self.assertEqual(self.hook.shell_snapshot(self.restore_payload()), 2)
+        message = output.getvalue()
+        self.assertIn("did not answer `git ls-remote origin refs/heads/agentrof/fence` within", message)
+        self.assertIn("nothing changed", message)
+        self.assertIn(self.restore_command(), message)
+        self.assertEqual(self.remote_timeouts, [self.hook.GIT_SYNC_REMOTE_TIMEOUT_SECONDS])
+        self.assertFalse(self.hook.experience_writer_lock_path(self.root).exists())
+
+    def test_an_unanswered_remote_after_the_sync_restores_and_says_why(self):
+        before = b'{"revision": 1}\n'
+        self.path.write_bytes(before)
+        payload = self.restore_payload()
+        self.assertEqual(self.hook.shell_snapshot(payload), 0)
+        self.git("restore", "--source=HEAD", "--worktree", "--", "workspace/docs/experience-design")
+        with self.unanswered_remote():
+            code, error = self.verify(payload)
+        self.assertEqual(code, 2, error)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertIn("did not answer `git ls-remote origin refs/heads/agentrof/fence`", error)
+        self.assertIn(self.restore_command(), error)
+        self.assertEqual(self.remote_timeouts, [self.hook.GIT_SYNC_REMOTE_TIMEOUT_SECONDS])
+
+    def test_an_unanswered_remote_after_a_noop_sync_publishes_nothing_and_says_why(self):
+        payload = self.restore_payload()
+        self.assertEqual(self.hook.shell_snapshot(payload), 0)
+        self.git("restore", "--source=HEAD", "--worktree", "--", "workspace/docs/experience-design")
+        with self.unanswered_remote():
+            code, error = self.verify(payload)
+        self.assertEqual(code, 2, error)
+        self.assertIn("left no attested postimage; the remote did not answer "
+                      "`git ls-remote origin refs/heads/agentrof/fence`", error)
+        self.assertIn("once the remote answers, run Git by its absolute path", error)
+        self.assertIn(self.restore_command(), error)
+        state, _, load_error = self.hook.load_authorized_experience_state(self.root)
+        self.assertFalse(load_error)
+        self.assertIsNone(state)
+
     def test_application_code_merge_keeps_existing_guard_behavior(self):
         self.git("push", "origin", ":refs/heads/agentrof/fence")
         payload = self.payload("merge", "--no-edit", "HEAD")
@@ -353,3 +439,21 @@ class VaultHookGitSyncTests(unittest.TestCase):
             self.skipTest(str(exc))
         with redirect_stderr(io.StringIO()):
             self.assertEqual(self.hook.shell_snapshot(self.restore_payload()), 2)
+
+
+class GitSyncInstructionTests(unittest.TestCase):
+    """The agent learns the two attested forms from what both hosts ship, not only
+    from the maintainer docs."""
+
+    def test_the_host_contracts_and_the_handoff_name_both_forms(self):
+        root = Path(__file__).resolve().parents[2]
+        forms = ("merge --no-edit <source>",
+                 "restore --source=<source> --worktree -- workspace/docs/experience-design")
+        for host in ("claude", "codex"):
+            for relative in ("host-contract.md", "flows/requirement.md"):
+                text = " ".join((root / "dist" / host / "software-engineering-team" / relative)
+                                .read_text(encoding="utf-8").split())
+                for form in forms:
+                    with self.subTest(host=host, file=relative, form=form):
+                        self.assertIn(form, text)
+                        self.assertIn("absolute path", text)

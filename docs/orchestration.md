@@ -165,6 +165,16 @@ until every review and every calibration has returned.
 `backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md`
 defines the cadence.
 
+Whether a business rule that computes a number must show how is process
+switch `calculation_examples`. At `off`, the default, a calculation rule
+follows the space standard alone. At `required`, each such rule carries its
+formula or an AC with a worked example, inputs, parameters, expected output
+and the output after one parameter change; the analysis challenger reports a
+missing one as a major finding, and a backlog test plan takes its expected
+value from it and never invents one, as
+`requirements-analysis/references/switch-calculation_examples-required.md`
+defines.
+
 How the readers of one review or recheck wave start is process switch
 `reader_waves`. At `as_slots_free`, the default, readers start as the host
 lets them. At `all_at_once`, the coordinator closes every finished worker,

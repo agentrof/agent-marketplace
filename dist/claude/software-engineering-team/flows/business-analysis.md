@@ -14,6 +14,11 @@ mode. Manual mode never reads, creates or binds Requirement state.
    read-only reviewer for the complete space and `domain-expert` only for an
    explicitly named domain. Each prompt includes exact paths, review lens,
    output contract and `SELF-CHECK`.
+   Switch `calculation_examples`: at `required`, every calculation rule
+   carries its formula or a worked example, and the challenger reports a
+   missing one as a major finding, as
+   `skill-content/requirements-analysis/references/switch-calculation_examples-required.md`
+   defines.
    Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck
    wave starts at once, after every finished worker is closed, as
    `skill-content/challenge-review/references/switch-reader_waves-all_at_once.md`

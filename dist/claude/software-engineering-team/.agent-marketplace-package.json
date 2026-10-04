@@ -98,10 +98,10 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "6651abf06782bd965d04422d3b5b618c668a6aaa8d9086c1d43d14246b6808f0"
+      "d3c0932121980a5cc4113b58a38740bee1a8d73ebac429054176f967a62e4009"
     ,
     "flows/business-analysis.md":
-      "34e8f6cd76c218e148fe7c4b4064cb4f1b4db6bb54239a8e99e24f38e97468c5"
+      "3fe7f15751a84616855217127e6ead7044dbbadbf1970273f05a46b40e9ccada"
     ,
     "flows/delivery-execution.md":
       "ef1c83fcad8215d4daa106fafebb47b483fa260b448c593be2fe78f563f1727d"
@@ -359,7 +359,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "cc1ee35298439ab1790b633faa17fec0353786b4216da104c34f6743dbce20c3"
+      "db1e12720f8c05e28afe1b0a36c4728a98f95aef63c391bfabee59a87c51ab5b"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
@@ -639,6 +639,9 @@
     ,
     "skill-content/requirements-analysis/references/space-standard.md":
       "cc8eab275082721a22c16d4d0d545e62faefdab626e7cdfefffc899f8abb28c8"
+    ,
+    "skill-content/requirements-analysis/references/switch-calculation_examples-required.md":
+      "d80a7689c022cca319bfa34a9d98816889a9f0c6968e2cb7ceb5dfd911060852"
     ,
     "skill-content/setup/SKILL.md":
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"

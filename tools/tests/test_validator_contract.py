@@ -370,6 +370,32 @@ class ValidatorContractTests(unittest.TestCase):
                 path.write_text(json.dumps(value))
                 self.assert_reported(root, "delivery_contract_shape")
 
+    def test_delivery_verification_policy_bounds_every_wait_under_the_prompt_cache(self):
+        """A wait call that leaves no room under the shortest host prompt cache lifetime, 300 seconds, one so
+        short that its cache reads add up, a bound that is no whole number of seconds and none at all each fail
+        validation."""
+        wait_bound = "verification wait bound must be a whole number of seconds from 60 to 270"
+        field_set = "verification policy has an unsupported schema or field set"
+        for mutate, problem in (
+                (lambda value: value.update(wait_bound_seconds=300), wait_bound),
+                (lambda value: value.update(wait_bound_seconds=271), wait_bound),
+                (lambda value: value.update(wait_bound_seconds=59), wait_bound),
+                (lambda value: value.update(wait_bound_seconds=True), wait_bound),
+                (lambda value: value.update(wait_bound_seconds=240.0), wait_bound),
+                (lambda value: value.update(wait_bound_seconds="240"), wait_bound),
+                (lambda value: value.pop("wait_bound_seconds"), field_set)):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as temporary:
+                root = self.fixture(temporary)
+                path = root / "plugins/software-engineering-team/skill-content/deliver/data/delivery-verification-policy.json"
+                value = json.loads(path.read_text())
+                mutate(value)
+                path.write_text(json.dumps(value))
+                self.assertTrue(any(finding.check == "delivery_contract_shape" and problem in finding.message
+                                    for finding in validate.run(root)))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            self.assertFalse(any(finding.check == "delivery_contract_shape" for finding in validate.run(root)))
+
     def test_item_implementation_schedules_follow_the_switch_registry(self):
         """An Item records an implementation_schedule switch value, and one without reads as today's order."""
         document = "plugins/software-engineering-team/skill-content/deliver/data/delivery-document-contract.json"

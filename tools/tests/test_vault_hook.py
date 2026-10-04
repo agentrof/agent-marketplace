@@ -150,7 +150,8 @@ class VaultHookPrototypeTests(unittest.TestCase):
             def shell_payload(value):
                 return {"cwd": str(project), "tool_name": "Bash", "shell_family": "cmd" if os.name == "nt" else "posix",
                         "tool_input": {"command": value}}
-            for verb in ("status", "inspect", "diff", "environment"):
+            # A reader waits through wait while both readers run.
+            for verb in ("status", "inspect", "diff", "environment", "wait"):
                 routed = [*command[:-1], verb]
                 routed_text = subprocess.list2cmdline(routed) if os.name == "nt" else shlex.join(routed)
                 self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(routed_text)), 0)

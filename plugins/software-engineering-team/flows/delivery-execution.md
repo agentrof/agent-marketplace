@@ -61,13 +61,31 @@ their cancellation is confirmed. Readers return separate JSON results through
 reports after the barrier. A reader registers as soon as it finishes, also
 while the other reader's verification command runs: the runner records which
 role runs each command, and a registration waits only for the settling
-reader's own command to exit. A cancelled or diagnostic result cannot approve an
-Item. Code, test, contract or instruction drift invalidates the candidate.
+reader's own command to exit. The code reviewer runs no command, so it
+registers its finished result at once and returns. A reader whose result is
+refused until a step only another role takes, such as a calibration, does not
+wait for it: it returns the result unregistered for the coordinator. A
+cancelled or diagnostic result cannot approve an Item. Code, test, contract or
+instruction drift invalidates the candidate.
 Switch `code_review_panel`: at `beside_official`, a lens panel reads the frozen
 candidate beside the official code reviewer and `merge-panel` registers the
 one code review result, as
 `skill-content/code-review/references/switch-code_review_panel-beside_official.md`
 defines.
+
+A role that waits inside its turn waits at most the Delivery verification
+policy's `wait_bound_seconds`, 240 seconds, in any one tool call, so its next
+model call reads its context from the host's prompt cache instead of writing
+it there again. On the Item it waits only through the runner's `wait`, never
+through a sleep, a polling loop or a long timeout of its own:
+`wait --role <role>` returns once that reader's own verification command has
+exited, and `wait` alone once no command holds the Item's environment or
+verification command lock. Each call returns as soon as that happens, or at
+the bound with the holder it still waits for; then call `wait` again at once,
+each time as a tool call of its own. Start a command that can outlast one
+`wait`, such as QA's full suite, in the background as the host runs a long
+command, wait for it with `wait --role qa_engineer`, then read the record the
+command printed.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
 For failed or affected tests first, an optional approved

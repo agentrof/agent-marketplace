@@ -104,7 +104,7 @@
       "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3"
     ,
     "flows/delivery-execution.md":
-      "f185a3f6d9f278cd2add27b0b8db8d0658bf7ddf6daa04c89cf3169797428a6c"
+      "d69db00bfde2d15874979a5e11a3a52865851a64db219642b2a3410a5e741821"
     ,
     "flows/delivery-governance.md":
       "ef2fa67262e0f500ba49b80d2865af6038638327745b989303acfaf1b1446fb7"
@@ -137,7 +137,7 @@
       "6907f6c826873e160a411f49ef34e346b7bbf4db046f50b46528184ace2d604a"
     ,
     "host-contract.md":
-      "f99776aca809ce4fe0fbacd0d7379ee6a7c2def684f4238932dd83e1198c4f78"
+      "ccd1f513fb9a0f6048ed1c7f57ae420135fa8d04bf0d6a6eff7397f7ccb5aee5"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -179,7 +179,7 @@
       "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
     ,
     "scripts/delivery_verification.py":
-      "a7dc29a8bd398e4ea6a29fff52850a81c2b87b3dbe8910534477767f922c8ce9"
+      "3c35e08ab9b69666042132cb6e7cd7f7334bad901d52bfa19e7f53a5b8854159"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -260,7 +260,7 @@
       "11db27127fdb550ab9e3d43b03724ab07b58c216d905f42d3529fd2e03e46ef9"
     ,
     "scripts/vault_hook.py":
-      "f6ca38683c4bd241c0cbdea5761bd77794ebfbcf6ffb9f536ab7adaa84933e08"
+      "c86d14ac6a8ef827bd78c5a85700bb99810af07e3c38323a0d1820764318a5ad"
     ,
     "skill-content/autopilot/SKILL.md":
       "cc422eb06937e9e1a6312aaba10a922a5aedc6d0ddb0c461face9288ddcffb25"
@@ -368,13 +368,13 @@
       "fdc4f0102291b4c87ab213b034f2d51c8037bfdd640e85d21d9ace8c387b1980"
     ,
     "skill-content/deliver/data/delivery-verification-policy.json":
-      "838a04fc434cbab3063b0721237dbbcc25712f2ece4b345654cc248aee740f7c"
+      "a0e4d9344a90c4fd222491b55953017c3e8b5f245c8d041dd69f405adf13e236"
     ,
     "skill-content/deliver/data/owner-decision-classes.json":
       "ce9f4eb4c264c77cc1e80f949b6ba36444dd508f86d95edbbc30aa60e3e00495"
     ,
     "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md":
-      "bc691eb8c16795038a33cb35c2e2aeb769f6454a88b10d787fc45aa55175bdfd"
+      "ba72b5918302dbaf9d63f88c9854e0d7edfb329bb59e196935ddc54b35080691"
     ,
     "skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md":
       "9b18128e9329d69c9ecda42be3df30bb2f7861561c6c4293748c7e3b33c2b9c2"

@@ -175,6 +175,18 @@ value from it and never invents one, as
 `requirements-analysis/references/switch-calculation_examples-required.md`
 defines.
 
+How many owner gates a decision that changes approved analysis documents
+takes is process switch `source_decision_gate`. At `two_gates`, the default,
+the owner picks a direction, and the drafted and reviewed change is approved
+as exact content in a second gate. At `one_gate_when_drafted`, when the
+recommended option needs no owner input, the change is drafted and reviewed
+first and one gate shows it as "approve this exact change" with its content
+hash from `ba_compile.py content-hash`, which `approve-package
+--expected-content-hash` then holds the package to; any other answer falls
+back to two gates, as
+`business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md`
+defines.
+
 How the readers of one review or recheck wave start is process switch
 `reader_waves`. At `as_slots_free`, the default, readers start as the host
 lets them. At `all_at_once`, the coordinator closes every finished worker,

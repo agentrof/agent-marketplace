@@ -207,6 +207,11 @@ defines.
 Switch `review_loop`: at `blocking_delta`, this section's review loops
 follow
 `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+Switch `source_decision_gate`: at `one_gate_when_drafted`, a finding whose
+fix changes approved analysis documents reaches the owner as one gate on the
+reviewed exact change when its recommendation needs no owner input, as
+`skill-content/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md`
+defines.
 Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck
 wave starts at once, after every finished worker is closed, as
 `skill-content/challenge-review/references/switch-reader_waves-all_at_once.md`

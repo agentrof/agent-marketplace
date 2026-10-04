@@ -532,6 +532,7 @@ RELEASED_DEFAULTS = {
     "review_panels": "single_reader",
     "review_scope_record": "off",
     "root_review_scope": "full",
+    "source_decision_gate": "two_gates",
     "story_size_budget": "off",
 }
 # The rules that keep a switch value safe, in the files agents read them from:
@@ -795,6 +796,14 @@ SAFETY_RULES = {
             "so any change to the backlog stales it",
         ),
     },
+    "source_decision_gate": {
+        f"{SKILLS}/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md": (
+            "A choice pick sets a direction only and never approves a write",
+            "the owner approves exact content that the gate shows, never a summary of it",
+            "Never approve a document the gate did not show",
+            "never treat silence or a timeout as approval",
+        ),
+    },
     "story_size_budget": {
         f"{SKILLS}/product-planning/references/switch-story_size_budget-propose_split.md": (
             "it never fails `backlog_compile.py check`, never blocks a review or an approval and"
@@ -910,7 +919,8 @@ class MeasuredBaselineTests(unittest.TestCase):
                                  "epic_review_cadence", "execution_planning", "own_target_reuse",
                                  "owner_gates", "pre_handoff_regression", "qa_gate_order",
                                  "reader_waves", "remediation_bookkeeping", "remediation_writers",
-                                 "review_scope_record", "root_review_scope"])
+                                 "review_scope_record", "root_review_scope",
+                                 "source_decision_gate"])
 
 
 if __name__ == "__main__":

@@ -322,6 +322,7 @@
     },
     "own_target_reuse": {
       "summary": "Whether QA's final test run on a frozen candidate runs every own Test Plan target of the Item itself, or takes them, but for the ones QA spot-runs, from the pre-handoff regression run that passed on the same tree.",
+      "issue": 383,
       "flows": ["delivery-execution"],
       "values": [
         {
@@ -342,6 +343,7 @@
     },
     "qa_gate_order": {
       "summary": "Whether QA plans and maps every check before it starts its first test command of a round, or starts that command first and plans, maps and drafts its result while the command works.",
+      "issue": 382,
       "flows": ["delivery-execution"],
       "values": [
         {
@@ -350,7 +352,7 @@
         },
         {
           "id": "gate_first",
-          "tradeoffs": "QA starts its first test command of the round through the host's background command mechanism, then derives its partitions, maps its coverage matrix and drafts its verification record while the command works, and reads the command's output only once the plan and the matrix are written, so the plan-first rule keeps its intent. Most of QA's own work overlaps the gate, while any input the command needs, such as a spot-run selection, must be written before it starts, and the mutation, dependency audit and runtime commands still wait for it, since the runner runs one command at a time on an Item."
+          "tradeoffs": "QA starts its first test command of the round in the background, as the host runs a long command, then derives its partitions, maps its coverage matrix and drafts its verification record while the command works, reads the command's output only once the plan and the matrix are written, so the plan-first rule keeps its intent, and waits for it only through `wait --role qa_engineer`. Most of QA's own work overlaps the gate, while any input the command needs, such as a spot-run selection, must be written before it starts, and the mutation, dependency audit and runtime commands still wait for it, since the runner runs one command at a time on an Item."
         }
       ],
       "default": "plan_first",

@@ -17,10 +17,10 @@ overlaps the command instead of coming before and after it.
    needs before it starts, such as a diagnostic selection or a spot-run
    selection another switch value asks for.
 2. Start that command, `run --kind test` in a final round or `run --kind
-   diagnostic_test` in a diagnostic one, through the host's background command
-   mechanism, so that it runs while you work. Once it ends, `status --run
-   <kind>` prints its record, with the evidence hash and environment hash
-   the result copies.
+   diagnostic_test` in a diagnostic one, in the background as the host runs a
+   long command, before you plan anything, so that it runs while you work.
+   Once it ends, the record it printed holds the evidence hash and environment
+   hash the result copies, and `status --run <kind>` prints it again.
 3. While it runs, do the work that needs none of its results: derive the
    risk-ordered partitions from the Test Plan, the criteria and the rules; map
    every criterion, rule and planned partition to its tagged tests and write
@@ -33,19 +33,19 @@ overlaps the command instead of coming before and after it.
    That keeps the intent of the skill's rule that the plan and the matrix come
    before execution: no check is planned, or left out, because of what the run
    showed.
-5. Wait for the command to end without polling it: take the host's completion
-   notice where it gives one, and where it gives none, call the runner's
-   `wait --role qa_engineer`, one tool call at a time, each bounded by the
-   Delivery verification policy as the Delivery flow says, never a loop of
-   short sleeps or repeated status reads.
+5. Once the draft is written, wait for the command only through the runner's
+   `wait --role qa_engineer`, as the flow's wait rule says: a call returns once
+   the command has exited, or at the verification policy's `wait_bound_seconds`
+   with the command it still waits for, and then you call it again at once, as
+   a tool call of its own. Never wait through a sleep, a polling loop or a long
+   timeout of your own.
 6. When it ends, run the coverage audit on its results, fill the open cells and
    findings, then run the mutation and dependency audit commands and the live
    runtime protocol where the Item needs them, and register the result.
 
 A command that fails early ends the overlap early: read its output at step 4
 as soon as the plan and the matrix are written, and run any further command the
-round needs only after it. On a host that cannot run a command in the
-background, run the round as at `plan_first`.
+round needs only after it.
 
 ## Measurement
 

@@ -1,0 +1,6 @@
+{
+  "summary": "Fetch complete Git history in generated vault and verification CI jobs so earlier approved evidence remains readable.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

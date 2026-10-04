@@ -56,6 +56,15 @@ The template always runs the tracked portable single-vault gate before the
 project-specific jobs. Do not replace it with an installed plugin path; every
 supported host and CI must execute the same `.pyz` bytes.
 
+The `vault_gate` and `tests` jobs require complete Git history. The gate can
+resolve previously accepted sources from earlier committed blobs, and Item
+verification can read pinned approved receipts and Test Plans after later
+revisions replace them. Use `fetch-depth: 0` with `actions/checkout`; its
+[default checkout fetches one commit](https://github.com/actions/checkout/blob/v4/README.md).
+Custom workflows and external CI that run these checks need equivalent
+history. Existing committed workflows need the same checkout setting;
+changing the packaged template does not edit them.
+
 The Delivery activation materializer, `operation_compile.py render-ci`, reads
 the approved Verification and, when required, Environment Contracts. It
 substitutes the test command and renders optional dependency-audit and

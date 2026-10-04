@@ -1370,14 +1370,11 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertIn(f"The high tier runs `{claude['high'][0]}` at effort `{claude['high'][1]}`, the"
                       f" medium tier `{claude['medium'][0]}` at effort `{claude['medium'][1]}` and the"
                       f" low tier `{claude['low'][0]}` at effort `{claude['low'][1]}`", contracts["claude"])
-        # No canonical role runs Codex's low tier; only the generated variants
-        # do, one effort step below the writers (#404).
-        self.assertEqual(codex["medium"], codex["high"])
-        self.assertEqual(codex["low"][0], codex["high"][0])
-        self.assertNotEqual(codex["low"][1], codex["high"][1])
-        self.assertIn(f"The high and medium tiers run `{codex['high'][0]}` at effort"
-                      f" `{codex['high'][1]}` and the low tier, which no canonical role runs,"
-                      f" `{codex['low'][0]}` at effort `{codex['low'][1]}`", contracts["codex"])
+        # Every Codex tier stays on one effort; lowering the low tier, which
+        # only the generated variants run, waits for the frozen-task A/B (#404).
+        self.assertEqual(set(codex.values()), {codex["high"]})
+        self.assertIn(f"The high, medium and low tiers all run `{codex['high'][0]}` at effort"
+                      f" `{codex['high'][1]}`", contracts["codex"])
 
     def test_host_contracts_state_the_oldest_cli_the_pinned_models_need(self):
         adapters = build_distributions.load_adapters(self.root)

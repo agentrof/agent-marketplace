@@ -1,6 +1,6 @@
 {
-  "summary": "On Codex the `low` tier, which no canonical role runs and which the `-mechanical` writer variants and the `-lens` readers run on, moves from `gpt-6.1-sol` at effort `xhigh` to `gpt-6.1-sol` at `high`, so a fix pass under process switch `mechanical_pass_tier` at `mechanical` generates one effort step below its writer instead of only in a fresh context. At every switch default no role changes. The Codex host contract starts the variant for every `apply_findings` pass and never resumes the base writer for one, and the mechanical pass record names whether the variant or the resumed writer ran, with its model and effort. The values stay starting values until the variants' frozen-task A/B sets them. In one measured project a Codex fix pass that rewrote a single numeric test ran about 16 minutes at the writers' effort.",
+  "summary": "On Codex the `-mechanical` writer variants keep running on the `low` tier, `gpt-6.1-sol` at effort `xhigh`, until the variants' frozen-task A/B sets a lower effort. Under process switch `mechanical_pass_tier` at `mechanical`, the Codex host contract starts the variant for every `apply_findings` pass and never resumes the base writer for one, and the mechanical pass record names whether the variant or the resumed writer ran, with its model and effort, so the A/B and later passes show the tier that really ran. At every switch default no role changes. In one measured project a Codex fix pass that rewrote a single numeric test ran about 16 minutes at the writers' effort.",
   "components": {
-    "software-engineering-team": "minor"
+    "software-engineering-team": "patch"
   }
 }

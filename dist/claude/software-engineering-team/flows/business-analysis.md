@@ -33,6 +33,12 @@ mode. Manual mode never reads, creates or binds Requirement state.
    same revision, then approve every gate-blocking document before closing it.
    Git history is the audit baseline; the workflow stores no revision marker
    or recovery receipt.
+   Switch `dependent_rebind_gate`: at `with_source`, the gate that approves a
+   change to an approved package also shows and approves the mechanical
+   rebinds of the Experience packages it makes stale, from
+   `experience_compile.py source-impact`, as
+   `skill-content/business-analysis/references/switch-dependent_rebind_gate-with_source.md`
+   defines.
    Switch `source_decision_gate`: at `one_gate_when_drafted`, a decision that
    changes approved documents and whose recommendation needs no owner input
    is drafted and reviewed first and approved as exact content in one owner

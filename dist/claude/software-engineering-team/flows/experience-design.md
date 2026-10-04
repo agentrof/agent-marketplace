@@ -31,6 +31,11 @@ that application receipt or author-owned artifacts.
    each action then binds only its primary process owner plus the shared Solution
    and Design receipts. Requirement mode keeps one BA receipt. Obtain approval
    for the entire action set.
+   Switch `dependent_rebind_gate`: at `with_source`, a scope whose actions are
+   exactly the mechanical source rebinds a source gate already approved needs
+   no second approval, as
+   `skill-content/business-analysis/references/switch-dependent_rebind_gate-with_source.md`
+   defines.
 
 ## Approved artifact recovery
 

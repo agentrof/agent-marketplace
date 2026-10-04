@@ -521,6 +521,28 @@
         "unit": "At least 5 source-changing decisions across at least 2 revisions, run with one_gate_when_drafted.",
         "threshold": "One owner gate for every decision whose recommendation was taken, a median time from the first gate question to the approved write at most half of two_gates', zero approved packages whose content differs from the content hash the gate showed, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "dependent_rebind_gate": {
+      "summary": "Whether the owner gate that approves a change to an approved business-analysis package also shows and approves the mechanical rebinds of the Experience packages it makes stale, or each stale package is found after the approval and gets its own scope gate.",
+      "issue": 402,
+      "flows": ["business-analysis", "experience-design"],
+      "values": [
+        {
+          "id": "separate",
+          "tradeoffs": "Binding refresh finds an Experience package bound to the previous source receipt after the source approval, and its update opens its own scope gate, even when it only moves the source binding. Today's behaviour and the baseline the combined gate is measured against: in one measured project, such a gate asked nothing new and stayed open 4 h 19 min while nothing ran, the third sequential owner gate of one source decision."
+        },
+        {
+          "id": "with_source",
+          "tradeoffs": "Before the source gate, `experience_compile.py source-impact` lists every approved Experience package that binds the source's current receipt and classes it `mechanical`, when none of its notes cites a changed source row or document, or `semantic`; the source gate opens with one plain sentence of the whole action and approves the mechanical rebinds with the source, and the rebind then runs without a second gate while its scope is exactly those rebinds and `source-impact` still reports a receipt-only change. One owner round less per source change with mechanical dependents, while the owner reads a larger first gate, and a note that depends on a changed rule without citing it is classed mechanical and caught only by the rebind's final review."
+        }
+      ],
+      "default": "separate",
+      "reference_scope": "owning_flows",
+      "metric": "Per source change that makes an approved Experience package stale: owner gates opened after the source approval for mechanical rebinds, minutes from the source approval to the backlog rebind, and mechanical rebinds whose final review found a source-caused finding.",
+      "promotion": {
+        "unit": "At least 3 source changes with at least one mechanical Experience dependent, run with with_source.",
+        "threshold": "Zero owner gates opened after a source approval for a mechanical rebind and zero mechanical rebinds whose final review found a source-caused finding, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

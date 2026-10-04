@@ -150,6 +150,9 @@ STORY_SIZE_MEASURES_PATH = (Path(__file__).resolve().parent.parent / "skill-cont
 TEST_COST_SWITCH = "test_cost_budget"
 TEST_COST_VALUE = "flag_serial_rows"
 SERIAL_ROWS = "serial_rows"
+# The registry reads the parameter's id here, so every package that ships this compiler ships the file.
+TEST_COST_LIMITS_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
+                         / "product-planning" / "data" / "test-cost-limits.json")
 ROW_SPLITS = ("serial", "sharded", "grouped")
 ROWS_RE = re.compile(r"^[1-9][0-9]*$")
 SIZE_EXCEPTIONS = "Size Exceptions"

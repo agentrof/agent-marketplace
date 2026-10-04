@@ -88,8 +88,19 @@ In a draft backlog revision, materialize planned story/test-plan scaffolds
 before opening an existing epic's next review with
 `backlog_compile.py stub-epic <epic-slug> --docs <workspace>/docs --new-review`.
 This creates a fresh TODO round with current policy and exact current
-membership, preserving prior evidence. Retrying keeps an already-open pending
-round byte-exact. Derive writer inputs after these owning-compiler writes.
+membership, preserving prior evidence. An existing pending round is reused
+byte-exact only when its recorded backlog-owned switch values and parameters
+match the current approved policy; a changed value creates a fresh successor.
+Delivery-only changes and policy revisions with the same owned values do not
+require a new round. An unreadable recorded policy or an invalid current policy
+refuses creation. For the root review alone, run
+`backlog_compile.py stub-backlog-review --docs <workspace>/docs` with the same
+rules. These round-only writes preserve every prior review and all source,
+revision and input-binding bytes. Derive writer inputs after these writes.
+The final check requires completed current root and epic rounds and retains
+completion/integrity checks for historical approved evidence. Earlier
+unfinished rounds remain unapproved, byte-exact history included in the
+package digest; approval never stamps, retags or rewrites their pins.
 
 ## 2. Author stories
 

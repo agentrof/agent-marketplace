@@ -477,6 +477,28 @@
         "unit": "At least 5 review or recheck waves of at least 3 readers each, across at least 2 flows, run with all_at_once.",
         "threshold": "A median ratio of wave wall time to slowest reader of at most 1.2 and readers running at once equal to the wave size wherever the host's thread cap allows it and no rise in writer fix-pass rework, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "calculation_examples": {
+      "summary": "Whether a business rule that computes a number from inputs or configurable parameters must state its formula or a worked input-to-output example in analysis, checked by the analysis challenger and read as the oracle by backlog test plans.",
+      "issue": 400,
+      "flows": ["backlog-planning", "business-analysis"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "A calculation rule follows the space standard alone, and no review asks how its inputs become the number. Today's behaviour and the baseline the requirement is measured against: in one measured project, a scoring rule whose weights were a tenant setting reached backlog test planning with no computable expected score, and the analysis round trip it caused, a read-only analysis, a direction gate, a source revision with two readers and an approval gate, added about 63 min of agent and owner time while the backlog revision waited."
+        },
+        {
+          "id": "required",
+          "tradeoffs": "Every active rule that derives a number carries its formula in its statement or an AC citing it with a worked example, inputs, parameters, expected output and the output after one parameter change; the analysis challenger reports a missing or inconsistent one as a major finding, and a backlog scenario takes its expected value from that formula or example and never invents one. The gap surfaces at analysis review instead of backlog review, while the analyst writes more rows per calculation rule, and the challenger must judge which rules derive a number."
+        }
+      ],
+      "default": "off",
+      "reference_scope": "owning_flows",
+      "metric": "Per backlog revision: findings that send a calculation gap back to analysis and the minutes from that finding to the approved source revision; per analysis review: calculation example findings raised.",
+      "promotion": {
+        "unit": "At least 3 backlog revisions whose sources hold a calculation rule, run with required.",
+        "threshold": "Zero findings that send a calculation gap back to analysis from backlog review, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

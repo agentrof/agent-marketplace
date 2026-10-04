@@ -513,6 +513,7 @@ HOSTS = {host: f"platforms/{host}/software-engineering-team/host-contract.md"
 SWITCH_REFERENCE = re.compile(r"switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md")
 # The value each switch ships at: a flip changes every project that chose nothing.
 RELEASED_DEFAULTS = {
+    "calculation_examples": "off",
     "code_review_panel": "single_reader",
     "delivery_path": "standard",
     "epic_review_cadence": "wait_per_panel",
@@ -537,6 +538,14 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "calculation_examples": {
+        f"{SKILLS}/requirements-analysis/references/switch-calculation_examples-required.md": (
+            "A gap the owner must close is an open question, not a guessed formula",
+            "A finding names the missing part, never a formula of its own",
+            "never invent a formula, a weight or an expected number",
+            "an expected value with no cited source as a major finding",
+        ),
+    },
     "code_review_panel": {
         f"{SKILLS}/code-review/references/switch-code_review_panel-beside_official.md": (
             "The panel never replaces the official code reviewer",
@@ -897,11 +906,11 @@ class MeasuredBaselineTests(unittest.TestCase):
                 cited.append(name)
                 with self.subTest(switch=name):
                     self.assertTrue(evidence.startswith(" in one measured project"), evidence)
-        self.assertEqual(cited, ["code_review_panel", "delivery_path", "epic_review_cadence",
-                                 "execution_planning",
-                                 "own_target_reuse", "owner_gates", "pre_handoff_regression",
-                                 "qa_gate_order", "reader_waves", "remediation_bookkeeping",
-                                 "remediation_writers", "review_scope_record", "root_review_scope"])
+        self.assertEqual(cited, ["calculation_examples", "code_review_panel", "delivery_path",
+                                 "epic_review_cadence", "execution_planning", "own_target_reuse",
+                                 "owner_gates", "pre_handoff_regression", "qa_gate_order",
+                                 "reader_waves", "remediation_bookkeeping", "remediation_writers",
+                                 "review_scope_record", "root_review_scope"])
 
 
 if __name__ == "__main__":

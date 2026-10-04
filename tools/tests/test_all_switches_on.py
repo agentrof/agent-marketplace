@@ -91,6 +91,11 @@ EXPECTED = {
                                           "software-architecture/references/switch-" + BUNDLE],
     "solution-design:solution-reviewer": list(REVIEW),
 }
+# calculation_examples binds its reference to every task of the entries whose flows own it.
+CALCULATION = "requirements-analysis/references/switch-calculation_examples-required.md"
+EXPECTED = {key: sorted([*value, CALCULATION])
+            if key.split(":")[0] in ("backlog-plan", "business-analysis") else value
+            for key, value in EXPECTED.items()}
 # reader_waves binds its reference to every task of the entries whose flows own it.
 WAVES = "challenge-review/references/switch-reader_waves-all_at_once.md"
 WAVE_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system",

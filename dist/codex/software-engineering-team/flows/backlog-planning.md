@@ -185,6 +185,12 @@ The Requirement trace ends at planned verification:
 criterion or rule -> scenario -> automation target
 ```
 
+Switch `calculation_examples`: at `required`, a scenario that exercises a
+calculation rule takes its expected value from the rule's formula or cited
+worked example and never invents one, as
+`skill-content/requirements-analysis/references/switch-calculation_examples-required.md`
+defines.
+
 Executable tests, execution results, story completion and release readiness
 belong to delivery.
 

@@ -942,7 +942,9 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
                           if kind == "test" else (None, None))
         own_note = None
-        if (reuse is not None and "own_targets" not in reuse
+        # Without a spot-run file the run says so even when it reuses nothing else; with one that
+        # reuses nothing, its pre_handoff_reuse refusal says why.
+        if (kind == "test" and (reuse is None and spot is None or reuse is not None and "own_targets" not in reuse)
                 and own_target_reuse(root, current["delivery"]) == SPOT_RUN):
             own_note = ("no --spot-run-file names the own targets QA runs itself, so the run reuses none of the"
                         " Item's own targets" if spot is None else

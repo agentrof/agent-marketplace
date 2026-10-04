@@ -564,6 +564,27 @@
         "unit": "At least 3 source-only rebind reviews run with source_delta, each with a replay of the full review on the same frozen inputs.",
         "threshold": "The same source-caused findings as the full replay, a median review wall time under 8 min and a seeded source change that contradicts a cited claim still producing a finding, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "test_group_report": {
+      "summary": "Whether a test run counts only its command's exit code and output, or also reads a group report the approved command writes, so that a group that never ran or failed to collect never passes for a green one.",
+      "issue": 384,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "The runner records a test command's exit code, output and identity and knows no groups; whether every group ran is QA's reading of the output. Today's behaviour and the baseline the report is measured against: in one measured project, QA's first gate ran 58 of the suite's 166 cases, since the command stopped at its first failure and two groups never collected, and five of the seven blockers of the next repair sat in tests that first round never ran."
+        },
+        {
+          "id": "refuse_missing_groups",
+          "tradeoffs": "Where the approved Verification Contract declares test_groups and test_group_report, run --kind test, run --kind diagnostic_test and regression-run read the group report the command writes under AGENTROF_VERIFICATION_SCRATCH, record each declared group's status and case counts, and record the run not intact when the report lacks a declared group; evidence approval refuses a final test run whose report lacks a declared group or names one not_collected. A group that never ran or never collected no longer passes for a green one, while the report stays the command's own claim, of which the runner checks only completeness and statuses, and the project's command must write it, which takes a Verification Contract revision."
+        }
+      ],
+      "default": "off",
+      "metric": "Per Delivery: the declared groups and test cases each Item's first QA gate run reached against the suite's, the blocking findings a later round raised in tests the first round never ran, and the runs recorded not intact for a missing group.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with refuse_missing_groups, each under a Verification Contract that declares its test groups.",
+        "threshold": "Every first QA gate run reaches every declared group, and no later round raises a blocking finding in a group the first round never ran, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

@@ -163,6 +163,43 @@ def command_variable_problem(names: object) -> str | None:
     return None
 
 
+def literal_id(value: object) -> bool:
+    """Whether a declared id passes as data: nonempty, unpadded, no option prefix or control character."""
+    return (isinstance(value, str) and bool(value) and value == value.strip() and not value.startswith("-")
+            and not any(ord(character) < 32 or ord(character) == 127 for character in value))
+
+
+def unique_literal_ids(values: object) -> bool:
+    return (isinstance(values, list) and bool(values) and all(literal_id(value) for value in values)
+            and len(set(values)) == len(values))
+
+
+def scratch_relative_path(value: object) -> bool:
+    """Whether a path is a normalized relative file path that stays inside the directory it is joined to."""
+    return (valid_workdir(value) and value != "." and ":" not in value
+            and all(part.rstrip(". ") == part for part in PurePosixPath(value).parts))
+
+
+def test_group_problems(props: dict) -> list[str]:
+    """Why a Verification Contract's optional test group report declaration is invalid.
+
+    test_groups names the groups the test command runs and test_group_report
+    the file it writes under AGENTROF_VERIFICATION_SCRATCH with one status per
+    group; a contract declares both or neither.
+    """
+    declared = [name for name in ("test_groups", "test_group_report") if name in props]
+    if not declared:
+        return []
+    errors = []
+    if len(declared) == 1:
+        errors.append("test_groups and test_group_report are declared together or not at all")
+    if "test_groups" in props and not unique_literal_ids(props["test_groups"]):
+        errors.append("test_groups must list unique literal group ids")
+    if "test_group_report" in props and not scratch_relative_path(props["test_group_report"]):
+        errors.append("test_group_report must be a normalized relative path under the verification scratch")
+    return errors
+
+
 def pull_request_checks(props: dict) -> tuple[object, object]:
     """The declared source of Delivery PR checks and the provider that reports them."""
     return (props.get("pull_request_check_source", PULL_REQUEST_CHECK_SOURCES[0]),
@@ -280,6 +317,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         problem = command_variable_problem(props.get("command_variables", []))
         if problem:
             errors.append(problem)
+        errors.extend(test_group_problems(props))
         source, provider = pull_request_checks(props)
         if source not in PULL_REQUEST_CHECK_SOURCES:
             errors.append("pull_request_check_source must be repository_workflow or external")

@@ -536,6 +536,7 @@ RELEASED_DEFAULTS = {
     "root_review_scope": "full",
     "source_decision_gate": "two_gates",
     "story_size_budget": "off",
+    "test_group_report": "off",
 }
 # The rules that keep a switch value safe, in the files agents read them from:
 # who decides, who reads independently, which severity holds, which gate stays
@@ -834,6 +835,15 @@ SAFETY_RULES = {
             "the budget never changes the selection or the scope decision",
         ),
     },
+    "test_group_report": {
+        f"{SKILLS}/deliver/references/switch-test_group_report-refuse_missing_groups.md": (
+            "a group that fails to collect is `not_collected`, never left out",
+            "A run with a missing group is recorded not intact. The exit code stays the command's.",
+            "Never edit, wrap or extend the command in a task, and never write or change the group report by"
+            " hand",
+            "the coverage audit and the right-reason rule still read the run's results and output",
+        ),
+    },
 }
 # Choices reach a project only through the Process Policy lifecycle.
 POLICY_RULES = {
@@ -861,6 +871,7 @@ ORDERED_STEPS = {
         "Invoke Code Review and QA independently",
         "QA uses `run --kind test|mutation|dependency_audit`",
         "Switch `qa_gate_order`: at `gate_first`",
+        "Switch `test_group_report`: at `refuse_missing_groups`",
     ),
 }
 
@@ -940,7 +951,7 @@ class MeasuredBaselineTests(unittest.TestCase):
                                  "pre_handoff_regression", "qa_gate_order", "reader_waves",
                                  "rebind_review_scope", "remediation_bookkeeping",
                                  "remediation_writers", "review_scope_record", "root_review_scope",
-                                 "source_decision_gate"])
+                                 "source_decision_gate", "test_group_report"])
 
 
 if __name__ == "__main__":

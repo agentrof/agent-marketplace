@@ -37,6 +37,7 @@ LANES = "deliver/references/switch-implementation_schedule-parallel_lanes_v1.md"
 PRE_HANDOFF = "deliver/references/switch-pre_handoff_regression-touched_suites.md"
 OWN_TARGETS = "deliver/references/switch-own_target_reuse-spot_run.md"
 GATE_FIRST = "qa-verification/references/switch-qa_gate_order-gate_first.md"
+GROUPS = "deliver/references/switch-test_group_report-refuse_missing_groups.md"
 BUNDLE = "execution_planning-single_source_bundle.md"
 REVIEW = ("challenge-review/references/switch-mechanical_pass_tier-mechanical.md",
           "challenge-review/references/switch-review_loop-blocking_delta.md",
@@ -71,14 +72,14 @@ EXPECTED = {
     "backlog-plan:qa-engineer": list(BACKLOG),
     **{f"configure:{role}": ["configure/references/switch-" + BUNDLE, OWNER_GATES]
        for role in ("delivery-coordinator", "devops-engineer", "qa-engineer")},
-    **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS]
+    **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS]
        for role in ("backend-developer", "delivery-coordinator", "devops-engineer",
                     "frontend-developer")},
-    "deliver:qa-engineer": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GATE_FIRST],
+    "deliver:qa-engineer": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GATE_FIRST, GROUPS],
     "deliver:code-reviewer": ["code-review/references/switch-code_review_panel-beside_official.md",
                               "code-review/references/switch-review_loop-blocking_delta.md",
-                              LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS],
-    "deliver:software-architect": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS,
+                              LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS],
+    "deliver:software-architect": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS,
                                    "software-architecture/references/switch-" + BUNDLE],
     "delivery-plan:delivery-coordinator": [
         OWNER_GATES, "delivery-plan/references/switch-delivery_path-light_when_eligible.md"],

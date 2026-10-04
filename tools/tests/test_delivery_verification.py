@@ -1456,9 +1456,13 @@ print(sys.argv[1])
         contract["test_command"] = subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
         self.write(contract_path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
         self.commit()
-        self.assertEqual(names, ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS"))
+        # The partition variables of switch test_engines partitioned are per-run inputs too (#386).
+        self.assertEqual(names, ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS",
+                                 "AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE"))
         with mock.patch.dict(os.environ, {"AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json",
-                                          "AGENTROF_REUSED_TESTS": "inherited-reuse.json"}):
+                                          "AGENTROF_REUSED_TESTS": "inherited-reuse.json",
+                                          "AGENTROF_TEST_PARTITION": "inherited-partition.json",
+                                          "AGENTROF_TEST_ENGINE": "inherited-engine"}):
             result = self.lane("backend_developer", "test")
         output = Path(result["output_file"]).read_text(encoding="utf-8")
         self.assertEqual(result["exit_code"], 0, output)

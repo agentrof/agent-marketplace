@@ -324,6 +324,27 @@
         "unit": "At least 3 Deliveries run with gate_first.",
         "threshold": "A median wall clock from the end of QA's last runner command to the registration of its result at most half of plan_first's, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "epic_review_cadence": {
+      "summary": "When the next backlog epic review starts while the epic reviews run one after another: after the previous review's calibration and the coordinator's record of it, or as soon as the previous review's last reader returns, with calibration and record keeping running beside it.",
+      "issue": 397,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "wait_per_panel",
+          "tradeoffs": "The coordinator waits for the calibration of one epic review's claims and for its own record of that review before it starts the next epic review. Today's behaviour and the baseline the overlap is measured against: in one measured project, a revision with eight epics and three-lens panels lost 32.7 min over four panel transitions, 3.4 to 4.4 min of each to the severity check and up to 10.9 min to the coordinator, and one transition that overlapped the check took 1.6 min."
+        },
+        {
+          "id": "overlap_calibration",
+          "tradeoffs": "The next epic review starts as soon as the previous review's last reader returns; a calibration reader starts for each reader's critical or major claims as soon as that reader returns, and the coordinator records only the fixed claim record at a panel boundary. Shorter gaps between epic reviews on the same frozen inputs, while more agents run at once within the host's limit, a calibration can still be running when the last epic review returns, and every writer action waits for every calibration as well."
+        }
+      ],
+      "default": "wait_per_panel",
+      "metric": "Per backlog revision with at least 2 epic reviews run one after another: the time from one epic review's last reader return to the next epic review's first reader start, calibration minutes per claim, and the confirmed critical and major findings against a wait_per_panel run of the same frozen inputs.",
+      "promotion": {
+        "unit": "At least 2 backlog revisions run with overlap_calibration, at least 6 epic review transitions in all. The switch changes only backlog planning, which runs outside any Delivery, so review transitions replace the 3-Delivery default.",
+        "threshold": "A median transition gap under 2 min, and confirmed critical and major findings equal to the wait_per_panel run's on the same frozen inputs, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

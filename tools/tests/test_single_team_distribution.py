@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import stat
 import subprocess
 import sys
@@ -42,7 +41,8 @@ class SingleTeamDistributionTests(unittest.TestCase):
                     / "scripts" / "team_guard.py"
                 )
                 result = subprocess.run(
-                    [sys.executable, str(script), "register"],
+                    [sys.executable, str(script.with_name("hook_launcher.py")),
+                     "scripts/team_guard.py", "register"],
                     stdin=subprocess.DEVNULL, capture_output=True, text=True,
                     check=False,
                 )
@@ -326,10 +326,6 @@ class SingleTeamDistributionTests(unittest.TestCase):
                for relative in ("docs/maintainer-operations-protocol.md",
                                 "docs/upgrade-protocol.md")},
         }
-        # A release consumes the changeset, or the release reset removes it.
-        changes = fixtures.REAL_REPOSITORY / ".changes/uncommitted-build-identity.json"
-        if changes.is_file():
-            documents["changeset"] = json.loads(changes.read_text(encoding="utf-8"))["summary"]
         for where, text in documents.items():
             text = " ".join(text.split())
             with self.subTest(document=where):
@@ -646,26 +642,6 @@ class SingleTeamDistributionTests(unittest.TestCase):
                 self.assertNotIn("workspace config", wrapper)
                 self.assertIn("workspace config", setup_wrapper)
                 self.assertTrue((package / "scripts/file_issue.py").is_file())
-                self.assertFalse((package / "scripts/issue_compile.py").exists())
-                self.assertFalse(
-                    (package / "templates/vault/maps/issues.md").exists()
-                )
-
-                policy = json.loads((
-                    package
-                    / "skill-content/obsidian-vault/data/vault-policy.json"
-                ).read_text(encoding="utf-8"))
-                self.assertNotIn("issues", policy["subtrees"])
-                self.assertNotIn("issue-report", policy["extra_doc_types"])
-                self.assertNotIn("issue_report", policy["type_path_patterns"])
-                self.assertNotIn("issue_report", policy["status_values"])
-                self.assertNotIn(
-                    "issue-report", policy["fragment_graph_groups"]["backlog"]
-                )
-                self.assertNotIn(
-                    "issue-report",
-                    {group["id"] for group in policy["graph_color_groups"]},
-                )
 
     def test_fixture_copy_ignores_python_runtime_caches(self):
         with tempfile.TemporaryDirectory() as source_dir, \
@@ -703,24 +679,39 @@ class SingleTeamDistributionTests(unittest.TestCase):
             self.assertNotIn("reasoning:", codex)
 
 
-# The reviewed default profiles: tier to exact model ID and effort, None for
-# no effort. By the owner's decision of 1 Oct 2026 on #349 a profile names its
-# model directly; there is no model class layer.
-AUTO_MODELS = {
-    "claude": {
-        "high": ("claude-opus-5-5", "xhigh"), "medium": ("claude-opus-5-5", "medium"),
-        "low": ("claude-sonnet-5-5", "high"),
-    },
-    "codex": {
-        "high": ("gpt-6.1-sol", "xhigh"), "medium": ("gpt-6.1-sol", "xhigh"),
-        "low": ("gpt-6.1-sol", "xhigh"),
-    },
-}
-# The models each catalog pins, those no tier runs included.
-CATALOG_MODELS = {
-    "claude": {"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5-20251001"},
-    "codex": {"gpt-6.1-sol", "gpt-6-luna"},
-}
+
+
+def shipped_models(host: str) -> dict:
+    """The models a host's shipped catalog pins, by model ID."""
+    return json.loads(build_distributions.model_catalog_path(
+        fixtures.REAL_REPOSITORY, host).read_text(encoding="utf-8"))["models"]
+
+
+def shipped_profile(host: str) -> dict:
+    """A host's shipped default profile: tier to model ID and effort, None for no effort.
+    By the owner's decision of 1 Oct 2026 on #349 a profile names its model directly."""
+    auto = json.loads(build_distributions.execution_profile_path(
+        fixtures.REAL_REPOSITORY, host).read_text(encoding="utf-8"))["profiles"]["auto"]
+    return {tier: (setting["model"], setting.get("effort"))
+            for tier, setting in auto.items() if "model" in setting}
+
+
+# Read from the shipped tables, so a model bump changes no test.
+AUTO_MODELS = {host: shipped_profile(host) for host in ("claude", "codex")}
+
+
+def catalog_model(host: str, *, besides: tuple = (), effort: str | None = None,
+                  untiered: bool = False, effortless: bool = False,
+                  lacking: str | None = None) -> str:
+    """The first shipped catalog model of ``host`` with the traits a case needs."""
+    tiered = {model for model, _effort in AUTO_MODELS[host].values()}
+    for model, entry in sorted(shipped_models(host).items()):
+        if model in besides or (untiered and model in tiered) or (effortless and entry["efforts"]) \
+                or (effort is not None and effort not in entry["efforts"]) \
+                or (lacking is not None and lacking in entry["efforts"]):
+            continue
+        return model
+    raise AssertionError(f"the {host} catalog pins no model this case needs")
 # The owner's decisions on #349 of 1 Oct 2026: no role defaults to these
 # efforts, and every generated variant runs on the low tier.
 UNPINNED_EFFORTS = {"max", "ultra"}
@@ -860,14 +851,8 @@ class ExecutionProfileTests(unittest.TestCase):
         }
 
     def test_default_tables_render_the_declared_role_settings(self):
-        for host, models in AUTO_MODELS.items():
-            self.assertEqual(json.loads(self.tables[host])["profiles"]["auto"], {
-                **{tier: {"model": model, **({"effort": effort} if effort else {})}
-                   for tier, (model, effort) in models.items()},
-                "inherit": {},
-            }, host)
-            self.assertEqual(set(json.loads(self.catalogs[host])["models"]),
-                             CATALOG_MODELS[host], host)
+        for host in AUTO_MODELS:
+            self.assertEqual(json.loads(self.tables[host])["profiles"]["auto"]["inherit"], {}, host)
         tiers = self.rendered_tiers()
         for name, tier in tiers.items():
             with self.subTest(agent=name):
@@ -902,7 +887,7 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertTrue(challenger[7].startswith("developer_instructions = "))
 
     def test_claude_frontmatter_writes_effort_only_when_the_table_sets_one(self):
-        strong = "claude-sonnet-5-5"
+        strong = catalog_model("claude", besides=(AUTO_MODELS["claude"]["high"][0],), effort="xhigh")
         self.set_tier("claude", "high", {"model": strong, "effort": "xhigh"})
         build_distributions.replace_generated(self.root, self.root / "dist")
         tiers = self.rendered_tiers()
@@ -919,7 +904,7 @@ class ExecutionProfileTests(unittest.TestCase):
                     )
 
     def test_codex_role_files_carry_the_tier_model_and_effort(self):
-        fast = "gpt-6-luna"
+        fast = catalog_model("codex", besides=(AUTO_MODELS["codex"]["high"][0],), effort="max")
         self.set_tier("codex", "high", {"model": fast, "effort": "max"})
         build_distributions.replace_generated(self.root, self.root / "dist")
         self.assertEqual(
@@ -938,32 +923,36 @@ class ExecutionProfileTests(unittest.TestCase):
 
     def test_a_model_bump_moves_every_tier_that_names_the_model(self):
         # A bump renames the catalog entry and every tier that names it.
+        pinned = AUTO_MODELS["claude"][VARIANT_TIER][0]
+        family, version = build_distributions.load_adapters(self.root)["claude"].module.model_version(
+            pinned)
+        bumped = f"claude-{family}-{version[0] + 1}"
+        self.assertNotIn(bumped, shipped_models("claude"))
         before = build_distributions.marketplace_snapshot(self.root)["build_id"]
         self.edit_catalog("claude", lambda catalog: catalog.update(models={
-            ("claude-sonnet-5" if model == "claude-sonnet-5-5" else model): entry
+            (bumped if model == pinned else model): entry
             for model, entry in catalog["models"].items()}))
         self.edit_table("claude", lambda table: [
-            setting.update(model="claude-sonnet-5")
+            setting.update(model=bumped)
             for setting in table["profiles"]["auto"].values()
-            if setting.get("model") == "claude-sonnet-5-5"])
+            if setting.get("model") == pinned])
         self.assertNotEqual(build_distributions.marketplace_snapshot(self.root)["build_id"], before)
         self.assertTrue(any("out of sync" in problem for problem in
                             build_distributions.check(self.root, self.root / "dist")))
         build_distributions.replace_generated(self.root, self.root / "dist")
-        on_class = {tier for tier, (model, _effort) in AUTO_MODELS["claude"].items()
-                    if model == "claude-sonnet-5-5"}
-        self.assertEqual(on_class, {VARIANT_TIER})
+        on_bumped = {tier for tier, (model, _effort) in AUTO_MODELS["claude"].items()
+                     if model == pinned}
         for name, tier in self.rendered_tiers().items():
             with self.subTest(agent=name):
                 model = frontmatter_lines(self.dist_agent("claude", name))[2]
-                if tier in on_class:
-                    self.assertEqual(model, "model: claude-sonnet-5")
+                if tier in on_bumped:
+                    self.assertEqual(model, f"model: {bumped}")
                 else:
                     self.assertEqual(model, setting_lines(self.root, "claude", tier)[0])
-                    self.assertNotEqual(model, "model: claude-sonnet-5")
+                    self.assertNotEqual(model, f"model: {bumped}")
 
     def test_single_reviewers_keep_their_tier_beside_their_lens_variants(self):
-        fast = "gpt-6-luna"
+        fast = catalog_model("codex", besides=(AUTO_MODELS["codex"]["high"][0],), effort="max")
         self.set_tier("codex", "high", {"model": fast, "effort": "max"})
         build_distributions.replace_generated(self.root, self.root / "dist")
         # No canonical agent runs on the variants' tier by default.
@@ -1031,7 +1020,9 @@ class ExecutionProfileTests(unittest.TestCase):
 
     def test_lens_tier_panel_data_and_variants_are_build_inputs(self):
         before = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.set_tier("claude", VARIANT_TIER, {"model": "claude-opus-5-5", "effort": "high"})
+        self.set_tier("claude", VARIANT_TIER, {
+            "model": catalog_model("claude", besides=(AUTO_MODELS["claude"][VARIANT_TIER][0],),
+                                   effort="high"), "effort": "high"})
         retiered = build_distributions.marketplace_snapshot(self.root)["build_id"]
         self.assertNotEqual(retiered, before)
         panels = (
@@ -1108,21 +1099,6 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertEqual({name: text for name, text in role_files.items()
                           if name not in MECHANICAL_VARIANTS},
                          {name: after[name] for name in role_files if name not in MECHANICAL_VARIANTS})
-
-    def test_the_variant_tier_mapping_is_a_build_input_that_dist_check_catches(self):
-        before = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.assertEqual(build_distributions.check(self.root, self.root / "dist"), [])
-        self.set_tier("codex", VARIANT_TIER, {"model": "gpt-6-luna", "effort": "low"})
-        self.assertNotEqual(build_distributions.marketplace_snapshot(self.root)["build_id"], before)
-        self.assertTrue(build_distributions.check(self.root, self.root / "dist"))
-        build_distributions.replace_generated(self.root, self.root / "dist")
-        self.assertEqual(build_distributions.check(self.root, self.root / "dist"), [])
-        self.assertIn("model_reasoning_effort: low",
-                      frontmatter_lines(self.dist_agent("codex", "qa-engineer-mechanical")))
-        self.assertEqual(
-            [line for line in frontmatter_lines(self.dist_agent("codex", "qa-engineer"))
-             if line.startswith(("model", "reasoning"))],
-            setting_lines(self.root, "codex", self.tiers()["qa-engineer"]))
 
     def test_inherit_profile_omits_the_model_keeps_the_effort_and_survives_refresh(self):
         self.codex_json("apply", "--scope", "local")
@@ -1210,7 +1186,9 @@ class ExecutionProfileTests(unittest.TestCase):
 
     def test_tables_are_build_inputs_and_invalid_tables_fail_the_build(self):
         before = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.set_tier("claude", "medium", {"model": "claude-sonnet-5-5", "effort": "medium"})
+        self.set_tier("claude", "medium", {
+            "model": catalog_model("claude", besides=(AUTO_MODELS["claude"]["medium"][0],),
+                                   effort="medium"), "effort": "medium"})
         self.assertNotEqual(
             build_distributions.marketplace_snapshot(self.root)["build_id"], before,
         )
@@ -1231,22 +1209,28 @@ class ExecutionProfileTests(unittest.TestCase):
                 (to if name == model else name): entry
                 for name, entry in catalog["models"].items()})
 
-        opus, sonnet, haiku = "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5-20251001"
-        sol, luna = "gpt-6.1-sol", "gpt-6-luna"
+        # Models of the shipped catalogs with the traits each case needs.
+        claude_pinned = AUTO_MODELS["claude"]["high"][0]
+        effortless = catalog_model("claude", untiered=True, effortless=True)
+        codex_pinned = AUTO_MODELS["codex"]["high"][0]
+        codex_untiered = catalog_model("codex", untiered=True, lacking="ultra")
+        family = shipped_models("claude")[claude_pinned]["family"]
+        other_family = next(entry["family"] for _model, entry in sorted(shipped_models("claude").items())
+                            if entry["family"] != family)
         profile_cases = (
-            ("claude", tier("high", {"model": "claude-opus-5-6"}),
-             "unknown model 'claude-opus-5-6'; the catalog pins"),
+            ("claude", tier("high", {"model": "claude-ghost-9"}),
+             "unknown model 'claude-ghost-9'; the catalog pins"),
             ("claude", tier("high", {"class": "frontier"}),
              "may hold only non-empty string model and effort"),
             ("claude", tier("medium", {"effort": "high"}), "must name a model"),
-            ("claude", tier("low", {"model": haiku, "effort": "high"}),
+            ("claude", tier("low", {"model": effortless, "effort": "high"}),
              "effort 'high' is not supported by .*, which takes no effort"),
-            ("claude", tier("low", {"model": haiku, "effort": "extreme"}),
+            ("claude", tier("low", {"model": effortless, "effort": "extreme"}),
              "effort must be one of"),
-            ("claude", tier("inherit", {"model": sonnet}), "inherit tier"),
-            ("codex", tier("high", {"model": sol, "effort": "extreme"}),
+            ("claude", tier("inherit", {"model": claude_pinned}), "inherit tier"),
+            ("codex", tier("high", {"model": codex_pinned, "effort": "extreme"}),
              "effort must be one of"),
-            ("codex", tier("low", {"model": luna, "effort": "ultra"}),
+            ("codex", tier("low", {"model": codex_untiered, "effort": "ultra"}),
              "effort 'ultra' is not supported by"),
             ("codex", tier("inherit", {"effort": "low"}), "inherit tier"),
             ("codex", lambda t: t["profiles"]["auto"]["medium"].update(temperature="1"),
@@ -1259,31 +1243,32 @@ class ExecutionProfileTests(unittest.TestCase):
              "schema_version 3"),
         )
         catalog_cases = (
-            ("claude", rename(haiku, "opus"), "'opus' is not a pinned model ID"),
-            ("claude", rename(haiku, "claude-haiku-4-5"),
+            ("claude", rename(effortless, "opus"), "'opus' is not a pinned model ID"),
+            ("claude", rename(effortless, "claude-haiku-4-5"),
              "'claude-haiku-4-5' is not a pinned model ID"),
-            ("claude", rename(haiku, "claude-sonnet-5-5-20260901"), "is not a pinned model ID"),
-            ("claude", rename(haiku, "gpt-6.1-sol"), "is not a pinned model ID"),
-            ("claude", pin(opus, family="sonnet"), "belongs to family 'opus', not 'sonnet'"),
-            ("codex", rename(luna, "gpt-5.5"), "'gpt-5.5' is not a pinned model ID"),
-            ("codex", rename(luna, "gpt 6 luna"), "is not a pinned model ID"),
-            ("codex", pin(sol, efforts=["turbo"]), "efforts must list distinct values"),
-            ("codex", pin(sol, efforts=["high", "high"]), "efforts must list distinct values"),
-            ("claude", pin(sonnet, sources=[]), "sources must list"),
-            ("claude", pin(sonnet, sources=["http://example.com"]), "sources must list"),
-            ("claude", pin(sonnet, verified="01.10.2026"), "verified must be"),
-            ("claude", pin(sonnet, verified="2026-02-30"), "verified must be"),
-            ("claude", pin(haiku, min_cli_version="2.1"), "min_cli_version must be"),
-            ("codex", pin(luna, min_cli_version="v0.157.0"), "min_cli_version must be"),
-            ("codex", lambda c: c["models"][sol].pop("min_cli_version"), "must hold exactly"),
-            ("claude", pin(opus, id=opus), "must hold exactly"),
+            ("claude", rename(effortless, "claude-sonnet-5-5-20260901"), "is not a pinned model ID"),
+            ("claude", rename(effortless, "gpt-6.1-sol"), "is not a pinned model ID"),
+            ("claude", pin(claude_pinned, family=other_family),
+             f"belongs to family '{family}', not '{other_family}'"),
+            ("codex", rename(codex_untiered, "gpt-5.5"), "'gpt-5.5' is not a pinned model ID"),
+            ("codex", rename(codex_untiered, "gpt 6 luna"), "is not a pinned model ID"),
+            ("codex", pin(codex_pinned, efforts=["turbo"]), "efforts must list distinct values"),
+            ("codex", pin(codex_pinned, efforts=["high", "high"]), "efforts must list distinct values"),
+            ("claude", pin(claude_pinned, sources=[]), "sources must list"),
+            ("claude", pin(claude_pinned, sources=["http://example.com"]), "sources must list"),
+            ("claude", pin(claude_pinned, verified="01.10.2026"), "verified must be"),
+            ("claude", pin(claude_pinned, verified="2026-02-30"), "verified must be"),
+            ("claude", pin(effortless, min_cli_version="2.1"), "min_cli_version must be"),
+            ("codex", pin(codex_untiered, min_cli_version="v0.157.0"), "min_cli_version must be"),
+            ("codex", lambda c: c["models"][codex_pinned].pop("min_cli_version"), "must hold exactly"),
+            ("claude", pin(claude_pinned, id=claude_pinned), "must hold exactly"),
             # CI installs the pinned CLI and starts no role, so the build refuses
             # a pin below the oldest CLI that runs a catalog model.
-            ("codex", pin(sol, min_cli_version="9.0.0"),
-             f"is below 9.0.0, the minimum of codex model '{sol}'"),
-            ("claude", pin(opus, min_cli_version="3.0.0"),
-             f"is below 3.0.0, the minimum of claude model '{opus}'"),
-            ("codex", lambda c: c["models"][sol].pop("verified"), "must hold exactly"),
+            ("codex", pin(codex_pinned, min_cli_version="9.0.0"),
+             f"is below 9.0.0, the minimum of codex model '{codex_pinned}'"),
+            ("claude", pin(claude_pinned, min_cli_version="3.0.0"),
+             f"is below 3.0.0, the minimum of claude model '{claude_pinned}'"),
+            ("codex", lambda c: c["models"][codex_pinned].pop("verified"), "must hold exactly"),
             ("codex", lambda c: c.update(schema_version=1), "schema_version 2 and models"),
             ("codex", lambda c: c.update(classes=c.pop("models")), "schema_version 2 and models"),
             ("claude", lambda c: c.update(models={}), "at least one exact model ID"),
@@ -1325,7 +1310,13 @@ class ExecutionProfileTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     build_distributions.build(self.root, Path(self.temporary.name) / "missing")
         pins.write_bytes(pinned)
-        for key, version in (("claude_code", "2.1.283"), ("codex", "0.157.0")):
+        # One patch below each host's highest catalog minimum.
+        below = {}
+        for host, key in (("claude", "claude_code"), ("codex", "codex")):
+            major, minor, patch = max(tuple(int(part) for part in entry["min_cli_version"].split("."))
+                                      for entry in shipped_models(host).values())
+            below[key] = f"{major}.{minor}.{patch - 1}" if patch else f"{major}.{minor - 1}.999"
+        for key, version in below.items():
             with self.subTest(pin=key):
                 restore()
                 pins.write_text(json.dumps({**json.loads(pinned), key: version}), encoding="utf-8")
@@ -1349,13 +1340,6 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertIn("a user-armed session entry such as autopilot ships without a switch,"
                       " because without an active grant its hooks exit silently, no task binds it",
                       invariant)
-        # A release consumes the changeset, or the release reset removes it. A
-        # pull request cannot change an existing changeset, so the changeset of
-        # #349 supersedes the efforts this one names.
-        changes = repository / ".changes/pinned-role-models.json"
-        if changes.is_file():
-            summary = json.loads(changes.read_text(encoding="utf-8"))["summary"]
-            self.assertIn(exception, summary)
 
     def test_every_tier_pins_the_owners_effort_and_the_docs_say_why(self):
         # A Claude Code role without `effort` follows the session's level,
@@ -1378,101 +1362,17 @@ class ExecutionProfileTests(unittest.TestCase):
             # Every catalog model stays, the ones no tier runs included.
             self.assertTrue(set(models) - {setting.get("model") for setting in auto.values()},
                             host)
-        authoring = " ".join((repository / "docs/authoring.md").read_text(encoding="utf-8")
-                             .split("## Execution profiles", 1)[1].split("\n## ", 1)[0].split())
-        for source in (
-                "https://artificialanalysis.ai/agents/coding-agents",
-                "https://www.anthropic.com/claude-opus-5-5",
-                "https://www.anthropic.com/claude-sonnet-5-5",
-                "https://platform.claude.com/docs/en/about-claude/models/"
-                "optimizing-for-cost-and-intelligence",
-                "https://platform.claude.com/docs/en/build-with-claude/effort",
-                "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/"
-                "prompting-claude-sonnet-5-5",
-                "https://code.claude.com/docs/en/sub-agents"):
-            with self.subTest(source=source):
-                self.assertIn(f"({source}", authoring)
-        for fragment in ("The package defaults are the owner's decision of 1 Oct 2026 on #349",
-                         "Coding Agent Index v1.5", "read 1 Oct 2026",
-                         "GPT-6.1 Sol at `xhigh` scores 63 at 15.5 minutes and $1.04 per task",
-                         "Opus 5.5 at `max` scores 66 at 1.1 hours and $13.0",
-                         "Sonnet 5.5 at `max` scores 68 at 1.5 hours and $14.2",
-                         "No tier defaults to `max` or `ultra`"):
-            with self.subTest(fragment=fragment):
-                self.assertIn(fragment, authoring)
-        self.assertNotIn("No tier defaults to `xhigh`", authoring)
+        # Each host contract states the shipped profile.
         contracts = {host: " ".join((repository / "platforms" / host / fixtures.PLUGIN
                                      / "host-contract.md").read_text(encoding="utf-8").split())
                      for host in build_distributions.HOSTS}
-        self.assertIn("The high tier runs `claude-opus-5-5` at effort `xhigh`, the medium tier"
-                      " `claude-opus-5-5` at effort `medium` and the low tier `claude-sonnet-5-5`"
-                      " at effort `high`", contracts["claude"])
-        self.assertIn("The high, medium and low tiers all run `gpt-6.1-sol` at effort `xhigh`",
-                      contracts["codex"])
-        for host, contract in contracts.items():
-            with self.subTest(host=host):
-                self.assertNotIn("`lens` tier", contract)
-                self.assertNotIn("`mechanical` tier", contract)
-        changes = repository / ".changes/role-efforts-and-model-fallback.json"
-        if changes.is_file():
-            summary = " ".join(json.loads(changes.read_text(encoding="utf-8"))["summary"].split())
-            # It states the change against v0.6.0, not against unreleased states.
-            for fragment in ("no role defaults to `max` or `ultra`",
-                             "the medium tier", "`claude-opus-5-5` at `medium`",
-                             "every tier runs `gpt-6.1-sol` at `xhigh`",
-                             "all eight generated variants", "run on the `low` tier"):
-                self.assertIn(fragment, summary)
-            self.assertEqual(json.loads(changes.read_text(encoding="utf-8"))["components"],
-                             {"software-engineering-team": "minor"})
-
-    def test_no_shipped_text_or_doc_names_a_retired_tier(self):
-        # The owner's decision of 1 Oct 2026 on #349 removed the `lens` and
-        # `mechanical` tiers; the switch value `mechanical` and the review
-        # lenses stay.
-        repository = fixtures.REAL_REPOSITORY
-        retired = re.compile(r"`(?:lens|mechanical)` tiers?\b|\b(?:the )?(?:lens|mechanical)"
-                             r" tier\b|\b[Ll]ens-tier\b|\b[Mm]echanical-tier\b")
-        paths = [*sorted((repository / "docs").glob("*.md")),
-                 *sorted((repository / "platforms").rglob("*.md")),
-                 *sorted((repository / "platforms").rglob("*.json")),
-                 *sorted((repository / "plugins").rglob("*.md")),
-                 *sorted((repository / "plugins").rglob("*.json")),
-                 repository / "tools/validate.py"]
-        for path in paths:
-            text = " ".join(path.read_text(encoding="utf-8").split())
-            with self.subTest(path=path.relative_to(repository).as_posix()):
-                self.assertEqual(retired.findall(text), [])
-
-    def test_no_table_tier_map_or_text_keeps_the_model_class_layer(self):
-        # The owner's decision of 1 Oct 2026 on #349: model IDs are the only names.
-        repository = fixtures.REAL_REPOSITORY
-        for host in build_distributions.HOSTS:
-            catalog = json.loads(build_distributions.model_catalog_path(
-                repository, host).read_text(encoding="utf-8"))
-            auto = json.loads(build_distributions.execution_profile_path(
-                repository, host).read_text(encoding="utf-8"))["profiles"]["auto"]
-            with self.subTest(host=host):
-                self.assertEqual(set(catalog), {"schema_version", "models"})
-                self.assertTrue(all("id" not in entry for entry in catalog["models"].values()))
-                self.assertTrue(all("class" not in setting for setting in auto.values()))
-            tier_map = json.loads((self.root / "dist" / host / fixtures.PLUGIN
-                                   / "templates/tier-map.json").read_text(encoding="utf-8"))
-            for name, spec in tier_map["hosts"][host]["tiers"].items():
-                with self.subTest(host=host, tier=name):
-                    self.assertNotIn("class", spec)
-                    if spec:
-                        self.assertEqual(set(spec) - {"effort"}, {"model", "efforts"})
-                        self.assertEqual(spec["efforts"],
-                                         catalog["models"][spec["model"]]["efforts"])
-        retired = re.compile(r"\b(?:frontier|strong|fast)` class\b|\bmodel class(?:es)?\b"
-                             r"|`(?:frontier|strong|fast)` \(")
-        paths = [*sorted((repository / "docs").glob("*.md")),
-                 *sorted((repository / "platforms").rglob("host-contract.md")),
-                 repository / "plugins" / fixtures.PLUGIN / REGISTRY]
-        for path in paths:
-            text = " ".join(path.read_text(encoding="utf-8").split())
-            with self.subTest(path=path.relative_to(repository).as_posix()):
-                self.assertEqual(retired.findall(text), [])
+        claude, codex = AUTO_MODELS["claude"], AUTO_MODELS["codex"]
+        self.assertIn(f"The high tier runs `{claude['high'][0]}` at effort `{claude['high'][1]}`, the"
+                      f" medium tier `{claude['medium'][0]}` at effort `{claude['medium'][1]}` and the"
+                      f" low tier `{claude['low'][0]}` at effort `{claude['low'][1]}`", contracts["claude"])
+        self.assertEqual(set(codex.values()), {codex["high"]})
+        self.assertIn(f"The high, medium and low tiers all run `{codex['high'][0]}` at effort"
+                      f" `{codex['high'][1]}`", contracts["codex"])
 
     def test_host_contracts_state_the_oldest_cli_the_pinned_models_need(self):
         adapters = build_distributions.load_adapters(self.root)

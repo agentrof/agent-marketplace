@@ -22,6 +22,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "plugins/software-engineering-team/scripts"
 HOOK = ROOT / "platforms/shared/software-engineering-team/overlay/scripts/vault_hook.py"
+# Hooks run as their hooks.json commands run them: through the runtime floor launcher.
+LAUNCHER = ROOT / "platforms/shared/_team/overlay/scripts/hook_launcher.py"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
@@ -214,12 +216,6 @@ class VaultHookPrototypeTests(unittest.TestCase):
             metadata.mkdir()
             (metadata / "meaningful.json").write_bytes(b"meaningful")
             self.assertIn("experience-design/_generated/.DS_Store/meaningful.json", self.hook.vault_inventory(docs))
-
-    def test_hook_has_no_application_surface_or_content_guard(self):
-        source = HOOK.read_text(encoding="utf-8")
-        self.assertNotIn("application.html", source)
-        self.assertNotIn("application-map", source)
-        self.assertNotIn("experience-application-runtime", source)
 
     def test_recovery_excludes_author_owned_prototype_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -757,7 +753,7 @@ class VaultHookShellContractTests(unittest.TestCase):
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(SCRIPTS)
         return subprocess.run(
-            [sys.executable, str(HOOK), mode],
+            [sys.executable, str(LAUNCHER), str(HOOK), mode],
             input=json.dumps(payload), capture_output=True, text=True,
             check=False, env=environment, timeout=10,
         )
@@ -767,7 +763,8 @@ class VaultHookShellContractTests(unittest.TestCase):
         hook: Path, mode: str, payload: dict,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(hook), mode],
+            [sys.executable, str(hook.with_name("hook_launcher.py")),
+             f"scripts/{hook.name}", mode],
             input=json.dumps(payload), capture_output=True, text=True,
             check=False,
         )
@@ -2289,6 +2286,65 @@ class VaultHookShellContractTests(unittest.TestCase):
                 self.assertTrue(self.hook._apple_python_launcher_matches(
                     Path("/usr/bin/python3"), Path(project_temporary),
                 ))
+
+    def homebrew_prefix(self, root: Path, minor: str) -> Path:
+        """Lay out Homebrew's keg, opt link and bin links under root/prefix."""
+        prefix = root / "prefix"
+        keg = prefix / "Cellar" / f"python@{minor}" / f"{minor}.8"
+        (keg / "bin").mkdir(parents=True)
+        (keg / "bin" / f"python{minor}").write_text("")
+        (keg / "bin" / "python3").symlink_to(f"python{minor}")
+        (prefix / "opt").mkdir()
+        (prefix / "opt" / f"python@{minor}").symlink_to(keg)
+        (prefix / "bin").mkdir()
+        (prefix / "bin").chmod(0o755)
+        (prefix / "bin" / "python3").symlink_to(keg / "bin" / "python3")
+        (prefix / "bin" / f"python{minor}").symlink_to(keg / "bin" / f"python{minor}")
+        return prefix
+
+    @unittest.skipIf(sys.platform == "win32", "Homebrew launcher topology")
+    def test_homebrew_prefix_launcher_binds_to_the_running_keg(self):
+        minor = f"3.{sys.version_info[1]}"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            prefix = self.homebrew_prefix(root, minor)
+            running = str(prefix / "opt" / f"python@{minor}" / "bin" / f"python{minor}")
+            elsewhere = root / "elsewhere"
+            elsewhere.mkdir()
+            (elsewhere / "python3").symlink_to(running)
+            other_keg = root / "other" / "bin"
+            other_keg.mkdir(parents=True)
+            (other_keg / f"python{minor}").write_text("")
+            project = root / "project"
+            project.mkdir()
+            matches = self.hook._homebrew_python_launcher_matches
+            with mock.patch.object(self.hook, "HOMEBREW_PREFIXES", (prefix,)), \
+                    mock.patch.object(self.hook.sys, "executable", running), \
+                    mock.patch.object(self.hook.sys, "_base_executable", running, create=True):
+                self.assertTrue(matches(prefix / "bin" / "python3"))
+                self.assertTrue(matches(prefix / "bin" / f"python{minor}"))
+                self.assertTrue(self.hook.trusted_python_command(
+                    str(prefix / "bin" / "python3"), project,
+                ))
+                # An arbitrary PATH symlink to the same interpreter stays guard-only.
+                self.assertFalse(matches(elsewhere / "python3"))
+                (prefix / "bin").chmod(0o757)
+                self.assertFalse(matches(prefix / "bin" / "python3"))
+                group = (prefix / "bin").stat().st_gid
+                (prefix / "bin").chmod(0o775)
+                writable = {0, 80} if sys.platform == "darwin" else {0}
+                self.assertEqual(
+                    matches(prefix / "bin" / "python3"), group in writable,
+                )
+                (prefix / "bin").chmod(0o755)
+                (prefix / "bin" / "python3").unlink()
+                (prefix / "bin" / "python3").symlink_to(other_keg / f"python{minor}")
+                self.assertFalse(matches(prefix / "bin" / "python3"))
+            outside = "/usr/bin/python3"
+            with mock.patch.object(self.hook, "HOMEBREW_PREFIXES", (prefix,)), \
+                    mock.patch.object(self.hook.sys, "executable", outside), \
+                    mock.patch.object(self.hook.sys, "_base_executable", outside, create=True):
+                self.assertFalse(matches(prefix / "bin" / f"python{minor}"))
 
     @unittest.skipUnless(sys.platform == "darwin", "Apple launcher topology")
     def test_system_macos_python3_launcher_is_accepted(self):

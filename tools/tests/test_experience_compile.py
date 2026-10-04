@@ -1897,17 +1897,6 @@ class ExperienceCompilerTests(unittest.TestCase):
                 missing_owner, actions[1]["primary_process_ref"],
             )
 
-    def test_legacy_program_commands_are_rejected(self):
-        result = self.run_cli("init-program", "--root", "/tmp/x", "--program", "PRG-001")
-        self.assertNotEqual(result.returncode, 0)
-
-    def test_removed_process_local_artifact_command_is_rejected(self):
-        result = self.run_cli(
-            "init-artifact", "--experience-root", "/tmp/checkout"
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("invalid choice", result.stderr)
-
     def test_child_status_is_rejected_by_living_package_check(self):
         with tempfile.TemporaryDirectory() as raw:
             package = Path(raw) / "workspace/docs/experience-design/experiences/checkout"

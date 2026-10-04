@@ -43,7 +43,7 @@ class LocalValidationTests(unittest.TestCase):
         self.policy = {'schema_version': 1, 'groups': {'all': {'tests': ['tools.tests.test_example.*']}},
             'always_groups': ['all'], 'lanes': {},
             'full_paths': ['tools/*'], 'rules': [{'paths': ['source.py', '*.md'], 'groups': ['all']}],
-            'module_seconds': {}, 'default_seconds': 1,
+            'module_seconds': {}, 'default_seconds': 1, 'python': '3.14',
             'known_test_modules': ['tools.tests.test_example']}
         ci_tests.write_json(self.root / ci_tests.POLICY_PATH, self.policy)
         ci_tests.write_json(self.root / ci_local.POLICY_PATH, {'schema_version': 1, 'max_age_seconds': 86400,
@@ -388,7 +388,7 @@ class LocalValidationTests(unittest.TestCase):
         self.git('add', '--all')
         heavy = 'tools.tests.test_example.Example.test_one'
         self.assertEqual(ci_local.make_plan(self.root)['shards'][0], [heavy, 'tools.tests.test_example.Example.test_two'])
-        self.policy['lanes'] = {'full': {'os': 'ubuntu-latest', 'python': '3.14', 'shards': 1, 'groups': ['all']}}
+        self.policy['lanes'] = {'full': {'os': 'ubuntu-latest', 'shards': 1, 'groups': ['all']}}
         self.policy['test_seconds'] = {'ubuntu-latest': {heavy: 50.0}}
         ci_tests.write_json(self.root / ci_tests.POLICY_PATH, self.policy)
         self.git('add', '--all')

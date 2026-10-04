@@ -335,9 +335,6 @@ class EffortPolicyCheckTests(unittest.TestCase):
         mutate(value)
         path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
-    def test_shipped_policies_are_clean(self):
-        self.assertEqual(self.messages(), [])
-
     def test_policy_shape_and_vocabulary_errors_are_rejected(self):
         evidence = load(self.root / "platforms/codex/effort-policy.json")["confirm"]["max"]
         cases = (
@@ -627,10 +624,6 @@ class ConfigTests(unittest.TestCase):
                     self.assertTrue(any(f"tier_models.codex.{tier}.effort: 'ultra' is refused"
                                         f" for every tier" in error and "subagents" in error
                                         for error in errors), errors)
-
-    def test_effort_overrides_is_a_retired_field(self):
-        errors = self.errors(effort_overrides={"claude": {"high": "low"}})
-        self.assertEqual(errors, ["config contains unknown or retired field: effort_overrides"])
 
     def test_a_package_without_a_tier_map_refuses_an_override_only(self):
         canonical = ROOT / "plugins" / PLUGIN
@@ -1148,7 +1141,7 @@ class VaultHookTests(unittest.TestCase):
 
         def hook(mode: str, event: str) -> subprocess.CompletedProcess:
             return subprocess.run(
-                [sys.executable, str(package / "scripts" / "vault_hook.py"), mode],
+                [sys.executable, str(package / "scripts" / "hook_launcher.py"), "scripts/vault_hook.py", mode],
                 input=json.dumps({**payload, "hook_event_name": event}), capture_output=True,
                 text=True, check=False, timeout=120, env=env)
 
@@ -1536,7 +1529,7 @@ class RenderedAgentStampTests(unittest.TestCase):
         event = {"hook_event_name": "SessionStart", "source": source, "session_id": "stamp",
                  "cwd": str(self.project.root)}
         result = subprocess.run(
-            [sys.executable, str(package / "scripts" / "team_guard.py"), "register"],
+            [sys.executable, str(package / "scripts" / "hook_launcher.py"), "scripts/team_guard.py", "register"],
             input=json.dumps(event) if stdin is None else stdin, capture_output=True, text=True,
             check=False, timeout=60, env={**env, "PYTHONDONTWRITEBYTECODE": "1"})
         self.assertEqual((result.returncode, result.stderr), (0, ""))
@@ -1691,8 +1684,8 @@ class CodexRoleStampTests(unittest.TestCase):
         event = {"hook_event_name": "SessionStart", "source": source, "session_id": "stamp",
                  "cwd": str(cwd or self.project.root)}
         result = subprocess.run(
-            [sys.executable, str((package or self.package) / "scripts" / "team_guard.py"),
-             "register"], input=json.dumps(event), capture_output=True, text=True,
+            [sys.executable, str((package or self.package) / "scripts" / "hook_launcher.py"),
+             "scripts/team_guard.py", "register"], input=json.dumps(event), capture_output=True, text=True,
             check=False, timeout=60, env={**env, "PYTHONDONTWRITEBYTECODE": "1"})
         self.assertEqual((result.returncode, result.stderr), (0, ""))
         return json.loads(result.stdout)

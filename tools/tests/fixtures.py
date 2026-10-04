@@ -164,6 +164,22 @@ def install_fixture_package(root: Path, host: str, install_root: Path) -> Path:
     return target
 
 
+def validator_findings(root: Path, *checks: str) -> list:
+    """The findings of the named validator checks on ``root``, in a full run's order.
+
+    A mutation test reads the check its mutation targets; a full run adds the
+    cost of every other check and proves nothing more about that one.
+    """
+    import validate
+
+    tree = validate.build_tree(root)
+    found: list = []
+    for name in checks:
+        validate.CHECKS[name](tree, found)
+    return sorted(found, key=lambda finding: (finding.path, finding.line, finding.check,
+                                              finding.message))
+
+
 # A fake host binary: a sh wrapper around this program, which logs its
 # arguments and stdin and answers from the JSON file beside it. A case with
 # `reply` answers Claude Code's `initialize` request with its request id.

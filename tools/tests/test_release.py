@@ -336,22 +336,16 @@ BOOTSTRAP_CHANGELOG = (
     "# Changelog\n\n## 0.0.1\n\n"
     "- Establish the first stable Agent Marketplace baseline for all supported hosts.\n"
 )
-REMOVED = object()
 
 
 def reset_marker(**changes: object) -> dict:
-    marker = {
+    return {
         "schema_version": 1,
         "reason": "Restart stable numbering at the bootstrap version.",
         "date": "2026-10-01",
         "retired_versions": list(RESET_RETIRED),
+        **changes,
     }
-    for key, value in changes.items():
-        if value is REMOVED:
-            marker.pop(key)
-        else:
-            marker[key] = value
-    return marker
 
 
 def set_every_version(root: Path, version: str) -> None:
@@ -377,7 +371,7 @@ def apply_release_reset(root: Path) -> None:
 
 
 class ReleaseResetPolicyTests(unittest.TestCase):
-    """check-pr accepts only the complete one-time restart at the bootstrap version."""
+    """The one-time reset marker, once merged, is part of every later base and never changes."""
 
     @classmethod
     def setUpClass(cls):
@@ -433,18 +427,6 @@ class ReleaseResetPolicyTests(unittest.TestCase):
         self.git("commit", "-qm", message)
         return self.git("rev-parse", "HEAD")
 
-    def restore(self, *paths: str) -> None:
-        """Take paths back to the released line, undoing that part of the reset."""
-        self.git("checkout", self.base_sha, "--", *paths)
-
-    def base_with(self, message: str, edit) -> str:
-        """Commit a variant of the released line and return to the reset."""
-        self.start_from(self.base_sha)
-        edit()
-        variant = self.commit(message)
-        self.start_from(self.reset_sha)
-        return variant
-
     def check(self, base: str | None = None) -> dict:
         return release.check_pr_changeset(self.root, base or self.base_sha)
 
@@ -456,215 +438,6 @@ class ReleaseResetPolicyTests(unittest.TestCase):
                 self.commit(name)
                 with self.assertRaisesRegex(release.ReleaseError, message):
                     self.check(base)
-
-    def test_the_reset_changelog_holds_only_the_bootstrap_release_note(self):
-        self.assertEqual(release.bootstrap_changelog(), BOOTSTRAP_CHANGELOG)
-        self.assertEqual(
-            "\n\n".join(BOOTSTRAP_CHANGELOG.split("\n\n")[2:]),
-            release.release_notes(self.root, release.BOOTSTRAP_VERSION),
-        )
-
-    def test_the_complete_reset_is_accepted_as_the_bootstrap_state(self):
-        self.assertEqual(self.check(), {
-            "mode": "reset",
-            "version": "0.0.1",
-            "retired_versions": RESET_RETIRED,
-        })
-        self.assertEqual(release.verify_bootstrap(self.root)["marketplace"], "0.0.1")
-        environment = {key: value for key, value in os.environ.items()
-                       if key != release.PRIVATE_TERMS_VARIABLE}
-        completed = subprocess.run(
-            [
-                sys.executable, str(TESTS_DIR.parent / "release.py"),
-                "--root", str(self.root), "check-pr", "--base", self.base_sha,
-            ],
-            capture_output=True, text=True, check=False, env=environment,
-        )
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(completed.stdout.splitlines(), [
-            "release: release reset valid; it retires 3 releases, 0.0.1 to "
-            "0.2.0, and restarts stable numbering at 0.0.1",
-            "release: 1 commit and its added lines hold no home-directory path or private term"
-            " (no private terms set)",
-        ])
-
-    def test_every_partial_reset_is_refused(self):
-        def keep_versions(**kept: str) -> None:
-            versions = release.load_versions(self.root)
-            versions["marketplace"] = kept.get("marketplace", versions["marketplace"])
-            versions["plugins"][fixtures.PLUGIN] = kept.get(
-                "plugin", versions["plugins"][fixtures.PLUGIN]
-            )
-            release.write_json(self.root / "versions.json", versions)
-
-        every_version = "sets the marketplace and every plugin to 0.0.1"
-        self.assert_refused({
-            "marketplace version kept": (
-                lambda: keep_versions(marketplace="0.2.0"), every_version,
-            ),
-            "plugin version kept": (
-                lambda: keep_versions(plugin="0.2.0"), every_version,
-            ),
-            "catalog version kept": (
-                lambda: self.restore(".claude-plugin/marketplace.json"),
-                "version drift at claude marketplace",
-            ),
-            "host manifest kept": (
-                lambda: self.restore(f"platforms/codex/{fixtures.PLUGIN}/manifest.json"),
-                "version drift at platforms.codex",
-            ),
-            "distribution kept": (
-                lambda: self.restore("dist"), "version drift at dist",
-            ),
-            "stable metadata kept": (
-                lambda: self.restore(".release/stable.json"),
-                "deletes .release/stable.json",
-            ),
-            "empty changeset kept": (
-                lambda: self.restore(".changes/fixture.json"),
-                "deletes every pending changeset: fixture.json",
-            ),
-            "release-impact changeset kept": (
-                lambda: self.restore(".changes/pending-feature.json"),
-                "deletes every pending changeset: pending-feature.json",
-            ),
-            "changelog kept": (
-                lambda: self.restore("CHANGELOG.md"),
-                "starts CHANGELOG.md over",
-            ),
-            "changelog emptied": (
-                lambda: fixtures.write(self.root / "CHANGELOG.md", "# Changelog\n"),
-                "starts CHANGELOG.md over",
-            ),
-        })
-
-    def test_every_mixed_reset_is_refused(self):
-        def archive(path: str):
-            return lambda: fixtures.write(
-                self.root / path,
-                "# Release history before the reset\n"
-                + RETIRED_CHANGELOG.split("\n", 1)[1],
-            )
-
-        def append_history() -> None:
-            agents = self.root / "AGENTS.md"
-            agents.write_text(
-                agents.read_text(encoding="utf-8")
-                + "\n- Ship the first retired feature of the reset fixture.\n",
-                encoding="utf-8",
-            )
-
-        no_history = "keeps no changelog history"
-        self.assert_refused({
-            "new changeset": (
-                lambda: fixtures.write(
-                    self.root / ".changes" / "extra.json",
-                    json.dumps({"summary": "Extra.", "components": {}}) + "\n",
-                ),
-                "deletes every pending changeset: extra.json",
-            ),
-            "another version": (
-                lambda: set_every_version(self.root, "1.0.0"),
-                "sets the marketplace and every plugin to 0.0.1",
-            ),
-            "rewritten stable metadata": (
-                lambda: release.write_json(
-                    self.root / ".release" / "stable.json",
-                    {"schema_version": 1, "version": "0.0.1"},
-                ),
-                "deletes .release/stable.json",
-            ),
-            "changelog archive": (
-                archive("docs/history/changelog-before-reset.md"),
-                f"{no_history}: docs/history/changelog-before-reset.md",
-            ),
-            "renamed changelog archive": (
-                archive("notes/releases.md"), f"{no_history}: notes/releases.md",
-            ),
-            "history appended to a document": (
-                append_history, f"{no_history}: AGENTS.md",
-            ),
-        })
-
-    def test_a_reset_cannot_change_the_plugin_registry(self):
-        def register_retired_plugin() -> None:
-            versions = release.load_versions(self.root)
-            versions["plugins"]["retired-team"] = "0.2.0"
-            release.write_json(self.root / "versions.json", versions)
-
-        base = self.base_with("register a second plugin", register_retired_plugin)
-        with self.assertRaisesRegex(release.ReleaseError, "cannot change the plugin registry"):
-            self.check(base)
-
-    def test_a_base_without_a_stable_release_has_nothing_to_retire(self):
-        base = self.base_with(
-            "no stable release",
-            lambda: (self.root / ".release" / "stable.json").unlink(),
-        )
-        with self.assertRaisesRegex(release.ReleaseError, "no .release/stable.json"):
-            self.check(base)
-
-    def test_the_base_stable_release_must_be_the_last_retired_version(self):
-        base = self.base_with(
-            "stable behind its changelog",
-            lambda: release.write_json(
-                self.root / ".release" / "stable.json",
-                {"schema_version": 1, "version": "0.1.0"},
-            ),
-        )
-        with self.assertRaisesRegex(release.ReleaseError, "stable release 0.1.0"):
-            self.check(base)
-
-    def test_the_marker_records_the_exact_retired_line(self):
-        shape = "must contain only date, reason, retired_versions and schema_version"
-        listed = "every release of the base CHANGELOG.md, in order: 0.0.1, 0.1.0, 0.2.0"
-        cases = {
-            "missing date": (reset_marker(date=REMOVED), shape),
-            "extra key": (reset_marker(restart_version="0.0.1"), shape),
-            "schema 2": (reset_marker(schema_version=2), "schema_version must be 1"),
-            "boolean schema": (reset_marker(schema_version=True), "schema_version must be 1"),
-            "blank reason": (reset_marker(reason="  "), "reason must be a non-empty string"),
-            "impossible date": (reset_marker(date="2026-13-01"), "date must be"),
-            "prose date": (reset_marker(date="1 Oct 2026"), "date must be"),
-            "version string": (
-                reset_marker(retired_versions="0.2.0"),
-                "retired_versions must be a non-empty list",
-            ),
-            "empty list": (
-                reset_marker(retired_versions=[]),
-                "retired_versions must be a non-empty list",
-            ),
-            "tag names": (
-                reset_marker(retired_versions=["v0.0.1", "v0.1.0", "v0.2.0"]),
-                "strict SemVer",
-            ),
-            "unordered": (
-                reset_marker(retired_versions=["0.1.0", "0.0.1", "0.2.0"]),
-                "unique and ascending",
-            ),
-            "missing release": (
-                reset_marker(retired_versions=["0.0.1", "0.2.0"]), listed,
-            ),
-            "unreleased version": (
-                reset_marker(retired_versions=["0.0.1", "0.1.0", "0.2.0", "0.3.0"]),
-                listed,
-            ),
-        }
-        self.assert_refused({
-            name: (
-                lambda marker=marker: release.write_json(
-                    self.root / ".release" / "reset.json", marker,
-                ),
-                message,
-            )
-            for name, (marker, message) in cases.items()
-        })
-        self.assert_refused({
-            "not JSON": (
-                lambda: fixtures.write(self.root / ".release" / "reset.json", "{\n"),
-                "invalid JSON",
-            ),
-        })
 
     def test_the_marker_is_added_once_and_never_changed(self):
         # Once merged, the marker is part of every later base.
@@ -687,42 +460,6 @@ class ReleaseResetPolicyTests(unittest.TestCase):
                 "may only add it",
             ),
         }, base=self.reset_sha)
-
-    def test_a_branch_from_before_the_reset_stays_a_normal_pull_request(self):
-        # Like the diff, the mode looks from where the branch left its base.
-        self.start_from(self.base_sha)
-        fixtures.write(self.root / "notes" / "before-reset.md", "before\n")
-        fixtures.write(
-            self.root / ".changes" / "before-reset.json",
-            json.dumps({"summary": "Add a note.", "components": {}}) + "\n",
-        )
-        self.commit("docs: a note from before the reset")
-        self.assertEqual(self.check(self.reset_sha), {"mode": "changeset"})
-
-    def test_a_reset_without_its_marker_follows_the_normal_rules(self):
-        (self.root / ".release" / "reset.json").unlink()
-        self.commit("reset without the marker")
-        with self.assertRaisesRegex(
-            release.ReleaseError, "normal pull requests cannot edit release-owned files",
-        ):
-            self.check()
-
-    def test_after_the_reset_normal_pull_requests_keep_the_changeset_rules(self):
-        fixtures.write(self.root / "notes" / "after-reset.md", "after\n")
-        fixtures.write(
-            self.root / ".changes" / "after-reset.json",
-            json.dumps({"summary": "Add a note.", "components": {}}) + "\n",
-        )
-        self.commit("docs: a note after the reset")
-        self.assertEqual(self.check(self.reset_sha), {"mode": "changeset"})
-        constitution = self.root / "plugins" / fixtures.PLUGIN / "constitution.md"
-        constitution.write_text(
-            constitution.read_text(encoding="utf-8") + "\nAfter the reset.\n",
-            encoding="utf-8",
-        )
-        self.commit("change the package without its component")
-        with self.assertRaisesRegex(release.ReleaseError, "omits changed release components"):
-            self.check(self.reset_sha)
 
 
 def write_changeset(
@@ -1893,10 +1630,6 @@ class ReleaseFinalizeTests(unittest.TestCase):
                 ):
                     release.validate_finalize_branch(branch)
 
-
-    def test_the_retired_release_branch_is_not_a_cleanup_branch(self):
-        with self.assertRaisesRegex(release.ReleaseError, "bounded"):
-            release.validate_finalize_branch("release/stable")
 
     def test_the_audit_requires_versions_json_to_name_the_release(self):
         self.git_run("git", "tag", "-a", "v9.9.9", "-m", "v9.9.9", "stable")

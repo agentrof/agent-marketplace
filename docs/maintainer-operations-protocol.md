@@ -432,10 +432,10 @@ checks again. A merge queue instead tests each queued PR merged onto the
 latest `main` and the PRs ahead of it, and moves `main` to that exact tested
 commit.
 
-Every workflow that reports a required context (`check`, both
-`compatibility` contexts, `analyze-python` and `Claude Code and Codex
-lifecycle`) also runs on `merge_group`. A queue run selects impact coverage
-over the group's complete diff from its base. No release gate runs there:
+Every workflow that reports a required context (`check`, `analyze-python`
+and `Claude Code and Codex lifecycle`) also runs on `merge_group`. A queue run
+selects impact coverage over the group's complete diff from its base. No
+release gate runs there:
 `check-pr` proved the release commit when its pull request ran, and the
 release refuses a commit that holds a changeset the release commit did not
 consume. Queue the pull request that carries a release commit alone and last,
@@ -532,7 +532,7 @@ Release takes `--bootstrap` in place of `--prior-stable-sha`.
 | Issue intake | No background consumption or model/API invocation | Maintainer must explicitly select each issue; live issue evidence prevents stale assumptions |
 | Agent behavior | One short instruction expands to a repository-defined procedure | Scope and irreversible transitions remain bound to explicit user authority |
 | CI | One stable-name aggregate requires the changeset or release-commit check on every PR, plus fresh static gates and complete selected test coverage or verified equivalent evidence | Every expected report and test ID is checked; missing, failed, cancelled or unjustified skipped work fails closed |
-| Hosts and operating systems | Every PR runs the required Claude Code and Codex lifecycle; policy selects complete Linux, macOS and native Windows partitions | Unknown/shared changes run full coverage; native Windows regressions cannot be replaced by emulation or unexpected skips |
+| Hosts and operating systems | Every PR runs the required Claude Code and Codex lifecycle; policy selects complete Linux, macOS and native Windows partitions on the one supported Python | Unknown/shared changes run full coverage; native Windows regressions cannot be replaced by emulation or unexpected skips |
 | Releases | One command tags a validated `main` commit and publishes it | Selected-set rule, deterministic release-commit replay, the commit's own `main` validation, public-host smoke, exact leases, resumable reconciliation and no force repair |
 | Branch cleanup | Deletes merged refs after a published release | Only named, bounded branches proven merged are eligible; ambiguity or drift stops cleanup |
 

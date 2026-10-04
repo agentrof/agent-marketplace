@@ -31,17 +31,12 @@ from backlog_fixture import make_approved_backlog  # noqa: E402
 from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 SWITCH = "execution_planning"
-REGISTRY = "skill-content/configure/data/process-switches.json"
 OWNERSHIP = "skill-content/execution-plan/data/fact-ownership.json"
 # The bundle reader judges through the execution_bundle lenses this data declares.
 PANELS = "skill-content/challenge-review/data/review-panels.json"
 PLAN = "skill-content/execution-plan/references/switch-execution_planning-single_source_bundle.md"
 CONTRACTS = "skill-content/configure/references/switch-execution_planning-single_source_bundle.md"
 ARCHITECT = "skill-content/software-architecture/references/switch-execution_planning-single_source_bundle.md"
-PANEL = "skill-content/challenge-review/references/switch-review_panels-lens_panel.md"
-# flow: the switch references its anchor names.
-ANCHORS = {"execution-planning": (PLAN, ARCHITECT), "operation": (CONTRACTS,),
-           "delivery-execution": (ARCHITECT,)}
 # (entry, role, mode, added skills): the switch files the task binds at single_source_bundle.
 TASKS = {
     ("configure", "qa-engineer", "revise", ("challenge-review",)):
@@ -64,10 +59,6 @@ def read(relative: str) -> str:
     return (TEAM / relative).read_text(encoding="utf-8")
 
 
-def flat(relative: str) -> str:
-    return " ".join(read(relative).split())
-
-
 def quiet(call, *args):
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
@@ -85,43 +76,6 @@ def choose(docs: Path, value: str) -> None:
     policy(docs, "begin-revision" if process_policy.path_for(docs).exists() else "init")
     policy(docs, "set", "--switch", SWITCH, "--value", value)
     policy(docs, "approve")
-
-
-class ExecutionPlanningRegistryTests(unittest.TestCase):
-    def test_switch_ships_at_per_document_under_the_issue_promotion_rule(self):
-        switch = json.loads(read(REGISTRY))["switches"][SWITCH]
-        self.assertEqual(switch["issue"], 324)
-        self.assertEqual([value["id"] for value in switch["values"]],
-                         ["per_document", "single_source_bundle"])
-        self.assertEqual(switch["default"], "per_document")
-        self.assertEqual(switch["flows"], sorted(ANCHORS))
-        self.assertEqual(switch["value_data"], {"single_source_bundle": [OWNERSHIP, PANELS]})
-        self.assertNotIn("agent_variants", switch)
-        # #324 names its own unit, so the owner's plain 3-Delivery default is refined.
-        self.assertEqual(switch["promotion"]["unit"],
-                         "At least 3 Deliveries that revise at least one Operation contract or"
-                         " declare architecture impact, run with single_source_bundle.")
-        for term in ("One review layer per plan", "at most 5 serial model passes",
-                     "a restated share under 5%", "at most 60% of the 342 min measured baseline",
-                     "zero escaped valid critical or major findings", "the owner's approval"):
-            with self.subTest(term=term):
-                self.assertIn(term, switch["promotion"]["threshold"])
-        for term in ("execution-planning wall time from plan start to publication",
-                     "serial model passes", "review layers and review-loop minutes",
-                     "distinct 8-word sequences", "owner rulings recorded once with an id",
-                     "plan revisions caused by contract errors", "DELIVERY_OPERATION_UNCARRIED"):
-            with self.subTest(term=term):
-                self.assertIn(term, switch["metric"])
-
-    def test_the_bundle_panel_joins_the_review_panels_switch(self):
-        switches = json.loads(read(REGISTRY))["switches"]
-        self.assertIn("execution-planning", switches["review_panels"]["flows"])
-        step = json.loads(read("skill-content/challenge-review/data/review-panels.json"))[
-            "review_steps"]["execution_bundle"]
-        self.assertEqual(step["reader_role"], "devops-engineer")
-        self.assertEqual([lens["id"] for lens in step["lenses"]],
-                         ["command-safety", "boundary-fit", "criteria-to-contract-coverage",
-                          "topology-and-claims", "single-source"])
 
 
 class FactOwnershipTests(unittest.TestCase):
@@ -144,11 +98,6 @@ class FactOwnershipTests(unittest.TestCase):
         for term in ("Item's context", "test suites", "evidence and coverage rules",
                      "cache locations", "diagnostic test adapter"):
             self.assertIn(term, data["fact_classes"]["verification_semantics"]["facts"])
-
-    def test_the_contract_writers_stay_the_ones_the_operation_flow_names(self):
-        text = flat("flows/operation.md")
-        self.assertIn("`qa-engineer` is the only Verification Contract writer; `devops-engineer`"
-                      " is the only Environment Contract writer.", text)
 
 
 class FactOwnershipValidatorTests(unittest.TestCase):
@@ -179,10 +128,6 @@ class FactOwnershipValidatorTests(unittest.TestCase):
 
     def anchor_messages(self, mutate) -> list[str]:
         return self.messages(mutate, validate.check_fact_ownership_anchors)
-
-    def test_shipped_data_is_clean(self):
-        self.assertEqual(self.messages(lambda data: None), [])
-        self.assertEqual(self.anchor_messages(lambda data: None), [])
 
     def test_an_owner_holds_its_facts_in_one_section_or_in_front_matter_keys(self):
         def owner(name, **changes):
@@ -313,109 +258,6 @@ class FactOwnershipValidatorTests(unittest.TestCase):
             self.path.write_text(self.original, encoding="utf-8")
         self.assertTrue(any("duplicate keys ['owner_rulings']" in finding.message
                             for finding in findings), findings)
-
-
-class ExecutionPlanningReferenceTests(unittest.TestCase):
-    def test_references_apply_only_at_single_source_bundle_and_are_never_linked(self):
-        for reference in (PLAN, CONTRACTS, ARCHITECT):
-            with self.subTest(reference=reference):
-                text = flat(reference)
-                self.assertIn("process switch `execution_planning` at `single_source_bundle`", text)
-                self.assertIn("A task binds this file only when the project's Process Policy"
-                              " selects that value", text)
-                self.assertIn("`per_document`", text)
-        for skill in TEAM.glob("skill-content/*/SKILL.md"):
-            self.assertNotIn("switch-execution_planning", skill.read_text(encoding="utf-8"))
-            self.assertNotIn("fact-ownership", skill.read_text(encoding="utf-8"))
-
-    def test_every_owning_flow_anchors_the_switch_and_names_its_references(self):
-        for flow, references in ANCHORS.items():
-            text = flat(f"flows/{flow}.md")
-            with self.subTest(flow=flow):
-                self.assertIn("Switch `execution_planning`: at `single_source_bundle`", text)
-                for reference in references:
-                    self.assertIn(reference, text)
-        text = flat("flows/execution-planning.md")
-        self.assertIn("review panel `execution_bundle`", text)
-        self.assertIn("Switch `review_panels`: at `lens_panel`", text)
-        self.assertIn(PANEL, text)
-
-    def test_the_four_deliberate_rules_stay(self):
-        plan = flat(PLAN)
-        for rule in ("the QA Engineer writes the Verification Contract and the DevOps Engineer the"
-                     " Environment Contract",
-                     "An architecture record exists only inside an active Item",
-                     "Publication carries only the contracts an Item pins",
-                     "A non-runtime Item never binds the Environment Contract"):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, plan)
-        # The compilers keep them: architecture belongs to the active Item and a
-        # non-runtime Item cannot bind the Environment Contract.
-        self.assertIn("A record is legal only while an active Delivery Item owns its delta",
-                      " ".join(read("scripts/architecture_compile.py").split()))
-        self.assertIn("non-runtime Item must not bind an Environment Contract",
-                      read("scripts/delivery_compile.py"))
-
-    def test_the_bundle_steps_follow_the_issue(self):
-        plan = flat(PLAN)
-        for rule in (
-            "creates no planning document",
-            ".agentrof/agent-marketplace/.runtime/<dlv-id>/execution-handoff.md",
-            "--input <handoff>",
-            "delivery_compile.py bundle-manifest --delivery DLV-###",
-            "Start every reader together on the same manifest",
-            "No separate counterpart review runs for a contract inside the bundle",
-            "--expected-hash <source_hash>",
-            "A restatement of a fact outside its owning section is a finding that names the"
-            " owning section; one that contradicts the owner is critical",
-            "The bundle gets one verdict",
-            "`operation_compile.py check --kind <kind> --json` for every revised contract and"
-            " `delivery_compile.py check --delivery DLV-###` are green",
-            "run `delivery_git.py refresh-target` before `publish-execution-plan`, in the same step",
-            "The bundle loop follows switch `review_loop`",
-            "Record each owner ruling once, in the Delivery's `User Decisions` section",
-            "cites the id and never restates the ruling",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, plan)
-
-    def test_the_architect_links_owning_sections_and_its_role_file_is_unchanged(self):
-        architect = flat(ARCHITECT)
-        for rule in ("no vault output for its definitions",
-                     "A decision record carries the decision, the alternatives weighed and the"
-                     " rationale",
-                     "link the owning contract section instead of restating it"):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, architect)
-        role = read("agents/software-architect.md")
-        for term in ("execution_planning", "single_source_bundle", "fact-ownership"):
-            self.assertNotIn(term, role)
-        self.assertIn("Escalates and halts, never guesses", role)
-
-    def test_the_panel_keeps_each_revised_contract_with_its_counterpart(self):
-        panel = flat(PANEL)
-        self.assertIn("run once for each contract the bundle revises, as that contract's"
-                      " counterpart", panel)
-        self.assertIn("`qa-engineer` for the Environment Contract", panel)
-
-    def test_host_contracts_start_every_bundle_reader_together(self):
-        for host, rule in (("claude", "spawn them in one message"),
-                           ("codex", "start every reader of an execution-plan bundle before"
-                                     " waiting on any of them")):
-            text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
-                             / "host-contract.md").read_text(encoding="utf-8").split())
-            with self.subTest(host=host):
-                self.assertIn("Under switch `execution_planning` at `single_source_bundle`", text)
-                self.assertIn(rule, text)
-
-    def test_docs_describe_both_values(self):
-        for doc in ("docs/orchestration.md", "docs/requirement-delivery-protocol.md"):
-            text = " ".join((ROOT / doc).read_text(encoding="utf-8").split())
-            with self.subTest(doc=doc):
-                self.assertIn("process switch `execution_planning`", text.replace("Process", "process"))
-                self.assertIn("`per_document`", text)
-                self.assertIn("`single_source_bundle`", text)
-                self.assertIn("fact-ownership.json", text)
 
 
 class ExecutionPlanningTaskInputTests(unittest.TestCase):

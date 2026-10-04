@@ -4,11 +4,12 @@ import json
 import io
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import ExitStack, redirect_stderr
+from contextlib import ExitStack, contextmanager, redirect_stderr
 from pathlib import Path
 from unittest import mock
 
@@ -131,6 +132,26 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
         fixture.update(plan=plan, plan_path=plan_path, paths=paths)
         return fixture
 
+    @contextmanager
+    def variants(self, **options):
+        """One fixture for many variants; ``reset()`` puts back every byte and mode it was built with."""
+        with tempfile.TemporaryDirectory() as temporary, \
+                tempfile.TemporaryDirectory() as pristine:
+            fixture = self.fixture(temporary, **options)
+            shutil.copytree(temporary, pristine, dirs_exist_ok=True, symlinks=True)
+            built = self.helpers.tree_snapshot(Path(temporary))
+
+            def reset():
+                for child in Path(temporary).iterdir():
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+                shutil.copytree(pristine, temporary, dirs_exist_ok=True, symlinks=True)
+                self.assertEqual(self.helpers.tree_snapshot(Path(temporary)), built)
+
+            yield fixture, reset
+
     def arguments(self, fixture, refs=None):
         args = [
             "revise-records", "--root", fixture["root"],
@@ -209,10 +230,11 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
             ["checkout:FLW-001@r1", "checkout:FLW-001@r1"],
             ["checkout:FLW-001@r1", "returns:FLW-999@r1"],
         )
-        for refs in cases:
-            with self.subTest(refs=refs), tempfile.TemporaryDirectory() as temporary:
-                fixture = self.fixture(temporary)
-                self.assert_rejected_unchanged(fixture, refs)
+        with self.variants() as (fixture, reset):
+            for refs in cases:
+                with self.subTest(refs=refs):
+                    self.assert_rejected_unchanged(fixture, refs)
+                reset()
 
     def test_wrong_proposal_rejects_without_writes(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -255,40 +277,41 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
             "experience-design/experiences/checkout/flows/flow-3-flow-set",
         )
         # The alias may name either the revised seed or another unchanged record.
-        for field in fields:
-            for target in targets:
-                for alias in ("checkout:FLW-002@r1", "checkout:FLW-001@r1"):
-                    with self.subTest(field=field, target=target, alias=alias), \
-                            tempfile.TemporaryDirectory() as temporary:
-                        fixture = self.fixture(temporary)
-                        path = fixture["paths"]["checkout:FLW-002@r1"]
-                        data, body = compiler.fm(path)
-                        data[field] = [f"[[{target}|{alias}]]"]
-                        compiler.rewrite(path, data, body)
-                        self.assert_preflight_rejected_unchanged(
-                            fixture, ["checkout:FLW-002@r1"],
-                        )
+        with self.variants() as (fixture, reset):
+            path = fixture["paths"]["checkout:FLW-002@r1"]
+            for field in fields:
+                for target in targets:
+                    for alias in ("checkout:FLW-002@r1", "checkout:FLW-001@r1"):
+                        with self.subTest(field=field, target=target, alias=alias):
+                            data, body = compiler.fm(path)
+                            data[field] = [f"[[{target}|{alias}]]"]
+                            compiler.rewrite(path, data, body)
+                            self.assert_preflight_rejected_unchanged(
+                                fixture, ["checkout:FLW-002@r1"],
+                            )
+                        reset()
 
     def test_bare_exact_references_remain_allowed_in_all_typed_fields(self):
-        for field in (
-            "journey_refs", "flow_refs", "screen_refs", "state_refs",
-            "transition_refs", "related_to",
-        ):
-            with self.subTest(field=field), tempfile.TemporaryDirectory() as temporary:
-                fixture = self.fixture(temporary)
-                path = fixture["paths"]["checkout:FLW-002@r1"]
-                data, body = compiler.fm(path)
-                data[field] = ["checkout:FLW-002@r1"]
-                compiler.rewrite(path, data, body)
-                code, output, errors = self.revise(fixture, ["checkout:FLW-002@r1"])
-                self.assertEqual(code, 0, output + errors)
-                self.assertEqual(json.loads(output), {
-                    "ok": True, "changed_records": 1,
-                    "record_refs": {"checkout:FLW-002@r1": "checkout:FLW-002@r2"},
-                })
-                updated, updated_body = compiler.fm(path)
-                self.assertEqual(updated[field], ["checkout:FLW-002@r2"])
-                self.assertEqual(updated_body, body)
+        with self.variants() as (fixture, reset):
+            path = fixture["paths"]["checkout:FLW-002@r1"]
+            for field in (
+                "journey_refs", "flow_refs", "screen_refs", "state_refs",
+                "transition_refs", "related_to",
+            ):
+                with self.subTest(field=field):
+                    data, body = compiler.fm(path)
+                    data[field] = ["checkout:FLW-002@r1"]
+                    compiler.rewrite(path, data, body)
+                    code, output, errors = self.revise(fixture, ["checkout:FLW-002@r1"])
+                    self.assertEqual(code, 0, output + errors)
+                    self.assertEqual(json.loads(output), {
+                        "ok": True, "changed_records": 1,
+                        "record_refs": {"checkout:FLW-002@r1": "checkout:FLW-002@r2"},
+                    })
+                    updated, updated_body = compiler.fm(path)
+                    self.assertEqual(updated[field], ["checkout:FLW-002@r2"])
+                    self.assertEqual(updated_body, body)
+                reset()
 
     def test_missing_record_argument_rejects_at_cli_boundary_without_writes(self):
         with tempfile.TemporaryDirectory() as temporary:

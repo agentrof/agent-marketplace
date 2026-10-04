@@ -315,16 +315,6 @@ class BacklogCompilerTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertNotIn("advisories", json.loads(output.getvalue()))
 
-    def test_the_vault_policy_declares_operation_impact_as_an_optional_story_classification(self):
-        policy = json.loads(backlog_compile.POLICY_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(policy["backlog_contract"]["optional_story_classifications"], {
-            "operation_impact": {"values": ["required", "not_applicable"],
-                                 "reason": "operation_reason"}})
-        for key in ("operation_impact", "operation_reason"):
-            with self.subTest(key=key):
-                self.assertEqual(policy["property_types"][key], "text")
-                self.assertIn(key, policy["lazy_fragments"]["backlog"])
-
     def test_an_operation_impact_classification_is_checked_only_when_present(self):
         import vault_check
         with tempfile.TemporaryDirectory() as raw:

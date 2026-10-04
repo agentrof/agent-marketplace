@@ -49,6 +49,11 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
         "contract are present; setup is the only entry that may create them."
         if exposure == "entry" and project_scope == "project" else ""
     )
+    floor = (
+        " When the session context reports `AGENT_MARKETPLACE_PYTHON: unsupported`,"
+        " stop and tell the user the reason and the fix it gives."
+        if exposure == "entry" else ""
+    )
     text = (
         "---\n"
         f"name: {name}\n"
@@ -60,7 +65,7 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
         "Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and "
         f"`${{CLAUDE_PLUGIN_ROOT}}/skill-content/{name}/SKILL.md` completely. "
         "Follow the canonical skill as the authoritative workflow and the host "
-        f"contract as its platform adapter.{gate}\n"
+        f"contract as its platform adapter.{gate}{floor}\n"
     )
     return [(f"skills/{name}/SKILL.md", text)]
 
@@ -166,7 +171,7 @@ def scaffold_overlay_files() -> dict[str, dict]:
             "hooks": {
                 "SessionStart": [{"hooks": [{
                     "type": "command",
-                    "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/team_guard.py register",
+                    "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/team_guard.py register",
                 }]}],
             },
         },

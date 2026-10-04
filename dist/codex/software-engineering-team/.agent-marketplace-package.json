@@ -134,10 +134,10 @@
       "d972c46964ec83c1387e656a4fa2d1c52e38bd92a90f26a90adbcd68652b856f"
     ,
     "hooks/hooks.json":
-      "5ddbd99f207c73d0ee3880b1324c6eb4b3532f15a9b65945384edf899680b1ba"
+      "6907f6c826873e160a411f49ef34e346b7bbf4db046f50b46528184ace2d604a"
     ,
     "host-contract.md":
-      "be1491ee85846272f8e4fb59bb6a99e5bbecacb89b3fca04f00dbda29a4c7130"
+      "ccd1f513fb9a0f6048ed1c7f57ae420135fa8d04bf0d6a6eff7397f7ccb5aee5"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -199,6 +199,9 @@
     "scripts/generate_codex_project.py":
       "50cf0dcb2b0bae7c7e81a386a900ee2954615d4ef11eb2b96d6f5879b98994ba"
     ,
+    "scripts/hook_launcher.py":
+      "450086b054cecaa8070947ea5829691c7278f88df05a684555101dfdac23196a"
+    ,
     "scripts/host_listing.py":
       "dbaca8977555d96f71b80e6e6b842ebfa242501c24d6ba04763990a5316451d6"
     ,
@@ -232,6 +235,9 @@
     "scripts/role_settings.py":
       "bb29528f8f415836298dd51cbad4a1d084ffde15c2130641d65e4e92bf5c5062"
     ,
+    "scripts/runtime_floor.py":
+      "511eaa656636b33440f7eb752c960934fc516d81deeeb06b1f009268128ce283"
+    ,
     "scripts/setup_check.py":
       "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
     ,
@@ -254,7 +260,7 @@
       "11db27127fdb550ab9e3d43b03724ab07b58c216d905f42d3529fd2e03e46ef9"
     ,
     "scripts/vault_hook.py":
-      "c86d14ac6a8ef827bd78c5a85700bb99810af07e3c38323a0d1820764318a5ad"
+      "bd500613c3ea9470c486673fed440894fe5600a5f2db9d05c819e00912875873"
     ,
     "skill-content/autopilot/SKILL.md":
       "cc422eb06937e9e1a6312aaba10a922a5aedc6d0ddb0c461face9288ddcffb25"
@@ -752,97 +758,97 @@
       "03e6a9afbb7c4d38dfe3434cba4750a6439e858d4aeea34e9810e8cca917f5cf"
     ,
     "skills/autopilot/SKILL.md":
-      "c910124577d8050e783c9a4091d30684942b6e0e457b61267e2fc8a72888ab07"
+      "76e901f4591b4d61c54b81ed9a20f90c29b63d0b772f606a66c6b0fc1adee332"
     ,
     "skills/autopilot/agents/openai.yaml":
       "0f2bc579c6d541b0a3744be0898a672006bbc9e82c7e41d14c6b77c608b562e7"
     ,
     "skills/backlog-plan/SKILL.md":
-      "351a86df622b1a1027a3f1034071255d552281470b95eb0d7566134932daffb6"
+      "2bbc3346d0c79eb11c9ab05f6db1b6814f348a55731a1130c22ba73988a05e27"
     ,
     "skills/backlog-plan/agents/openai.yaml":
       "c6248dabcc8c10e049664c290a10b39cff0e07a624ee24b6ef54d20deb3d75cc"
     ,
     "skills/business-analysis/SKILL.md":
-      "019f7c815203aa2a94d4e6398b051249f9a8f520889748d38d13177c782e5476"
+      "d99cc20f5cef536748b6ace0c5eadfca757e25cffd14a679c7dd332787ab005c"
     ,
     "skills/business-analysis/agents/openai.yaml":
       "d465c4a5efd3d627233f727aaa1a6463c5c495393a5c4df63586137e0624eb52"
     ,
     "skills/configure/SKILL.md":
-      "3c5e573f4f194f70b8832a4474e9a00d1c8e9c6f148059972ae503ae82e2adfa"
+      "4ac5c2a5e96145e5b8dd26088847b8750262c22cddc0d4ee0f23e28015449372"
     ,
     "skills/configure/agents/openai.yaml":
       "b632fc369e53d7d3d008510ca4af2030917f85b2e1d6cc6c360eef6b74482b3b"
     ,
     "skills/deliver/SKILL.md":
-      "2bae182828407b90a206448b65b2eb5408e094e0dd8673c46042f37b9319e56a"
+      "77aaba68f5f874d63e4d9f4bd2a36a4231544603c4bcf888ac293e17b105dc53"
     ,
     "skills/deliver/agents/openai.yaml":
       "49cf26cb9debf99968b30ec8d1635682aafa7bf50c02b5c6da1b3a157458a3b6"
     ,
     "skills/delivery-plan/SKILL.md":
-      "0523d6dd649a46c83a8d820d9f2c2642ddab457df2db5724d909253753793900"
+      "123467425892f7ba6313fa8ca36d28f8169acc4456212439b7d6daa219f06eef"
     ,
     "skills/delivery-plan/agents/openai.yaml":
       "e5c01a32fe893be4b0fa12435e22cddcff2f73df99b901c65471fae20dda7981"
     ,
     "skills/demo/SKILL.md":
-      "b9de8d7e51d3bb6ce77730dc72cea7261b3ddb9551e4623075f033a515ac5d57"
+      "1fc987bda09784f270b9126e5507747af3c51541f8cbc5e7758652029ea42402"
     ,
     "skills/demo/agents/openai.yaml":
       "9ca2fd30a62b377fc0ade63a8482bdf2a8beaabf4330eb460bb0e809c1dc8bf0"
     ,
     "skills/design-system/SKILL.md":
-      "5825ed4144c88512b284074a0329e73c048c8d6dc6a05c33cb4938bd763d0231"
+      "a5dd703581157c39b0b60757e1d3fbb8b11c389c5a1388c3bfb2df2a5a290d9b"
     ,
     "skills/design-system/agents/openai.yaml":
       "ab9ab1c971b783cb963acfe8e96ddb51da3baf7384dba3bfcb6bf541dd3e48d8"
     ,
     "skills/execution-plan/SKILL.md":
-      "9322c7d0f04568a1bcfed73eb31ec01b30928eed7ffa42aecb7d8861e07c41a3"
+      "79c456080a70a7987d3d8461b1e658c07a3edba8ab7e888f413af62fac862263"
     ,
     "skills/execution-plan/agents/openai.yaml":
       "85e6c0e15b3d2dd9077860ac1361c98c0365a96ceee16f81c0d3d2163eaffd91"
     ,
     "skills/experience-design/SKILL.md":
-      "9c68d5bb4d4595c9375209b78828496c5baf65e91109e5e263b07adf20c94257"
+      "465abfddb12c4cfffd246c45dbf3889a04ecc27f443db2b84bb7d6680dccbc78"
     ,
     "skills/experience-design/agents/openai.yaml":
       "017564b16299c2b2b681a4d0b9e1a0273d5601e301fa399c9f2e6b9f3a687825"
     ,
     "skills/issue-report/SKILL.md":
-      "6a735feeab64ebc57d64e9df188bfabe8f3f83bcc329ead86e08d37d6f58a747"
+      "9209e4719a09c23d113119a42605fd1490d8720a928ac3d4d1eb4eb393ca729f"
     ,
     "skills/issue-report/agents/openai.yaml":
       "5bab1db53e224e3cb0d2c389a5ea09323e414f7fb48568cd01ccf527ebb80954"
     ,
     "skills/organize-docs/SKILL.md":
-      "45516844bae8ed1853481ce60d33470189d886cb8567f595c26a6ed860eb2971"
+      "27c765b4c790d705e2b09ef156ca55dd12643d96ae4b42e2c769e45998de3563"
     ,
     "skills/organize-docs/agents/openai.yaml":
       "12df6d837ff2676cb016ff5e7e25ae0b1f1ab63b34d4faaf52472a099e04019c"
     ,
     "skills/requirement/SKILL.md":
-      "63bf023a1e834aeab3c96897b236fd321c9ae2dfabbeb01653512ef81de113c8"
+      "4e2dd981b631f4af4f5dd5efa0cea1cf63f349165a9e0091bceb3e5da98e9e80"
     ,
     "skills/requirement/agents/openai.yaml":
       "1b9139db34b7c1d3be77cc195b50a038958dbef3a945529e33f3033e75931da6"
     ,
     "skills/setup/SKILL.md":
-      "94cd155b871f1f40d231d2a37ebc3f4dd7b2d74505d17caf17544054a85ae384"
+      "27afa663afa8af4a41330f5924a0829465b9b862baa1c2a7070c3c6f34eba889"
     ,
     "skills/setup/agents/openai.yaml":
       "13579189bbf7b1f7b9f48c9491883cee666d0f9e6b95cee54b9c2a2dda980914"
     ,
     "skills/sketch/SKILL.md":
-      "910138f1d015f071cc86ce36fc602224e057efd18375be5c5668fd69c5a15bcc"
+      "e9cb7ed991e3252e743a80304b3ad189c5d25147ee9356046865c1d50c91f46b"
     ,
     "skills/sketch/agents/openai.yaml":
       "2c5a886e4b37ccc772a35c1c82c7a258f20017fd5828a668123c5bd35897af7c"
     ,
     "skills/solution-design/SKILL.md":
-      "7fa6cc24b057e2ff6a7c64c7f5ef52a140e5a81b922e861689718930757ac5cf"
+      "89dfa1149cd2e39de0dc1f8d49cbef026f8e61f92094ff97e81be0da8c6b76a1"
     ,
     "skills/solution-design/agents/openai.yaml":
       "4b42a50fb8966874cbd89a37253240fba87533496e8d0462c69a7745b874cfe9"

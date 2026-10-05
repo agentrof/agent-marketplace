@@ -1,0 +1,6 @@
+{
+  "summary": "Backlog commands read each Git commit once per process. `backlog_compile.py` read the same committed backlog tree, BA registry listing and blob again for every approval and history check; these reads are now kept for the process by resolved repository path, object id and arguments. HEAD is still resolved on every call, every read keeps `--no-replace-objects`, a failed read is not kept and each caller gets its own copy, so results are unchanged. In one measured run a single `stub-backlog-review` started 12 instead of 26 Git processes, and the backlog pre-approval test module 340 instead of 812.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

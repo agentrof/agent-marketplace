@@ -79,6 +79,86 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
         with mock.patch.object(compiler.subprocess, "run", side_effect=damaged):
             with self.assertRaises(ValueError):
                 compiler.committed_approval_sources(self.project, self.docs)
+        # A failed read is not kept.
+        self.assertEqual(compiler.committed_approval_sources(self.project, self.docs)[self.root],
+                         self.root.read_bytes())
+
+    def git_runs(self):
+        return mock.patch.object(compiler.subprocess, "run", wraps=subprocess.run)
+
+    @staticmethod
+    def subcommands(run):
+        return [next(arg for arg in call.args[0][1:] if not arg.startswith("-")) for call in run.call_args_list]
+
+    def history_reads(self, commit):
+        relative = self.root.relative_to(self.project).as_posix()
+        return (compiler.committed_approval_sources(self.project, self.docs, commit),
+                compiler.history_listing(self.project, commit, relative),
+                compiler.history_blob(self.project, commit, relative))
+
+    def test_reading_a_commit_again_starts_no_git_process(self):
+        head = self.git("rev-parse", "HEAD").strip()
+        self.assertEqual(compiler.history_commits(self.project, self.root), [head])
+        with self.git_runs() as run:
+            first = self.history_reads(head)
+        # git log printed the full object id, so no read resolves it again.
+        self.assertEqual(self.subcommands(run), ["ls-tree", "cat-file", "ls-tree", "cat-file"])
+        self.assertEqual(first[2], self.root.read_bytes())
+        with self.git_runs() as run:
+            self.assertEqual(self.history_reads(head), first)
+        self.assertEqual(run.call_args_list, [])
+        # HEAD is resolved on every call; only the reads below its resolution are kept.
+        with self.git_runs() as run:
+            self.assertEqual(self.history_reads("HEAD"), first)
+        self.assertEqual(self.subcommands(run), ["rev-parse"] * 3)
+
+    def test_a_moved_head_is_read_fresh(self):
+        old_head = self.git("rev-parse", "HEAD").strip()
+        before = self.history_reads("HEAD")
+        self.root.write_bytes(self.root.read_bytes() + b"\nA committed edit.\n")
+        self.commit()
+        with self.git_runs() as run:
+            after = self.history_reads("HEAD")
+        self.assertEqual(self.subcommands(run), ["rev-parse", "ls-tree", "cat-file",
+                                                 "rev-parse", "ls-tree", "rev-parse", "cat-file"])
+        self.assertEqual(after[0][self.root], self.root.read_bytes())
+        self.assertEqual(after[2], self.root.read_bytes())
+        self.assertNotEqual(after[1], before[1])
+        self.assertEqual(self.history_reads(old_head), before)
+
+    def test_kept_reads_equal_fresh_reads(self):
+        head = self.git("rev-parse", "HEAD").strip()
+        self.history_reads(head)
+        with self.git_runs() as run:
+            kept = self.history_reads(head)
+        self.assertEqual(run.call_args_list, [])
+        with mock.patch.dict(compiler._GIT_OBJECT_READS, clear=True), self.git_runs() as run:
+            fresh = self.history_reads(head)
+        self.assertEqual(self.subcommands(run), ["rev-parse", "ls-tree", "cat-file", "ls-tree", "cat-file"])
+        self.assertEqual(kept, fresh)
+        self.assertEqual(list(kept[0].items()), list(fresh[0].items()))
+
+    def test_another_spelling_of_the_project_keeps_its_paths_without_a_new_read(self):
+        head = self.git("rev-parse", "HEAD").strip()
+        sources = compiler.committed_approval_sources(self.project, self.docs, head)
+        alias = self.project / "workspace" / ".."
+        with self.git_runs() as run:
+            aliased = compiler.committed_approval_sources(alias, alias / "workspace/docs", head)
+        self.assertEqual(run.call_args_list, [])
+        self.assertEqual([(path.relative_to(alias), content) for path, content in aliased.items()],
+                         [(path.relative_to(self.project), content) for path, content in sources.items()])
+
+    def test_a_caller_cannot_change_a_kept_read(self):
+        head = self.git("rev-parse", "HEAD").strip()
+        sources, listing, blob = self.history_reads(head)
+        expected = (dict(sources), list(listing), blob)
+        sources[self.root] = b"changed"
+        sources.pop(self.story)
+        sources[self.project / "added.md"] = b"added"
+        listing[:] = [b"changed"]
+        self.assertIs(type(blob), bytes)
+        self.assertEqual(self.history_reads(head), expected)
+        self.assertEqual(self.history_reads("HEAD"), expected)
 
     def source_bytes(self):
         record, errors = compiler.collect(self.docs)

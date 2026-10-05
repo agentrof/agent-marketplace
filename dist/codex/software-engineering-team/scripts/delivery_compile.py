@@ -791,7 +791,7 @@ def init_delivery(args) -> int:
     if not DELIVERY_ID_RE.fullmatch(identifier):
         print(json.dumps({"ok": False, "errors": ["invalid Delivery id"]}))
         return 2
-    slug = args.slug or re.sub(r"[^a-z0-9]+", "-", args.goal.lower()).strip("-")[:48]
+    slug = args.slug or re.sub(r"[^a-z0-9]+", "-", args.goal.lower()).strip("-")[:48].rstrip("-")
     if not SLUG_RE.fullmatch(slug):
         print(json.dumps({"ok": False, "errors": ["invalid Delivery slug"]}))
         return 2

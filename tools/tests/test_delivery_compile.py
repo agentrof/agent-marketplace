@@ -285,6 +285,19 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertIsNot(seen[0][0], seen[1][0])
         self.assertIsNot(seen[0][1], seen[1][1])
 
+    def test_init_derives_a_valid_slug_when_the_cut_falls_on_a_word_break(self):
+        """The derived slug is cut at 48 characters and never ends on the cut hyphen."""
+        self.approve_dod()
+        init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": None,
+                                      "goal": "Let every partner region reach the new checkout flow without a manual step",
+                                      "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+        self.assertEqual(json.loads(output.getvalue())["slug"], "let-every-partner-region-reach-the-new-checkout")
+        self.assertTrue((self.docs / "delivery" / "deliveries"
+                         / "dlv-001-let-every-partner-region-reach-the-new-checkout").is_dir())
+
     def approved_execution_with_revised_contract(self):
         """Approve one Item, then approve a second revision of its contract."""
         self.approve_verification_contract()

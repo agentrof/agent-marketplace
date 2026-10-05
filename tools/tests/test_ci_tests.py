@@ -464,13 +464,12 @@ class CITestPlannerTests(unittest.TestCase):
         self.assertEqual({name: (lane["os"], lane["python"], lane["workers"], lane["groups"])
                           for name, lane in policy["lanes"].items()},
                          {"linux": ("ubuntu-latest", policy["python"], 3, ["all"]),
-                          "macos": ("macos-latest", policy["python"], 3, ["all"]),
+                          "macos": ("macos-latest", policy["python"], 3, ["macos"]),
                           "windows": ("windows-latest", policy["python"], 3, ["windows"])})
         self.assertEqual(set(policy["lanes"]["windows"]["required_tests"]), required)
         self.assertTrue(required <= set(ci_tests.group_ids(["windows"], policy, ids)))
-        # Linux and macOS run every test, since the local gate runs only the change's own tests;
-        # Windows and the macOS record name each test that proves behavior of their own system,
-        # never a whole module.
+        # Linux runs every test; macOS and Windows name each test that proves behavior of
+        # their own system, never a whole module.
         for group in ("platform", "macos", "windows"):
             with self.subTest(group=group):
                 self.assertEqual([selector for selector in policy["groups"][group]["tests"]

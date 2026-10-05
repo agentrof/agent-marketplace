@@ -468,7 +468,7 @@ def make_plan(root, target="origin/main", jobs=None, full=False):
     elif source["base"] is None:
         selected, mode, reason = list(ids), "full", "target merge-base unavailable; full local suite required"
     else:
-        # Pull request CI runs every test on every lane; this gate gives the change's own tests before the push.
+        # Pull request CI runs every test on Linux; this gate gives the change's own tests before the push.
         selected, mode, reason = (changed_ids(root, source, policy, ids, weights,
                                               local_policy["budget_estimated_seconds"])
                                   if local_policy["test_selection"] == "changed" else

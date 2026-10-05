@@ -10,14 +10,15 @@ requires `check`, `analyze-python` and `Claude Code and Codex lifecycle`.
 `tools/data/ci-test-policy.json` owns the one supported Python version,
 operating systems, shard jobs and worker processes per job, impact groups,
 dependency closures and initial duration weights. CI tests that Python once per
-operating system. Linux and macOS run every test, macOS in five shard jobs, the
-most macOS jobs the organization's plan runs at once, because the local gate
-runs only a change's own tests. Windows runs only the tests that prove behavior
-of its own system, each named by its exact ID: the platform group (worker
-processes, the hook launcher, case-insensitive file systems) and the Windows
-group (path separators, junctions, long paths, CRLF checkouts, locks, text
-pipes and Git for Windows). The macOS group keeps naming the tests that prove
-macOS behavior (file flags, bare `python3` commands). The plan job sets up the version itself and every
+operating system. Linux runs every test. macOS and Windows run only the tests
+that prove behavior of their own system, each named by its exact ID: the
+platform group both run (worker processes, the hook launcher, case-insensitive
+file systems), the macOS group (file flags, bare `python3` commands, the git
+that a macOS gate worker calls) and the Windows group (path separators,
+junctions, long paths, CRLF checkouts, locks, text pipes and Git for Windows).
+A test that repeats platform-neutral logic runs on Linux only. Running every
+test on macOS was measured and left out: the macOS runners took pull request CI
+from 2 min 32 s to 6 to 7.5 minutes. The plan job sets up the version itself and every
 other validation job takes it from the plan's output; a test pins that literal,
 the release workflows' versions, the host lifecycle policy and the plugin's
 runtime floor to the policy. `tools/ci_tests.py` inventories individual
@@ -69,7 +70,7 @@ observations, remain real.
 
 | Profile | Selection |
 | --- | --- |
-| `full` | Every test on Linux and macOS; on Windows the platform and Windows groups, with the mandatory native regressions |
+| `full` | Every test on Linux; on macOS the platform and macOS groups; on Windows the platform and Windows groups, with the mandatory native regressions |
 | `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff of a PR or merge queue group |
 | `reuse` | Prior successful validation of identical input, with fresh static and transition checks |
 
@@ -110,7 +111,7 @@ The direct interfaces are `python3 tools/ci_local.py check --staged --target
 origin/main` and `python3 tools/ci_local.py verify --staged --target origin/main`.
 `check --fresh` ignores saved test results. `ci-local-policy.json` sets
 `test_selection`. At `changed` the gate runs the change's own tests, most
-specific first, while pull request CI runs every test on Linux and macOS:
+specific first, while pull request CI runs every test on Linux:
 1. the changed test methods of each changed test module, or the whole module
    when code outside its test methods changed (blank lines aside);
 2. the test methods whose source names a changed non-Python input (by file

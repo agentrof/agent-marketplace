@@ -49,6 +49,7 @@ class LocalValidationTests(unittest.TestCase):
         ci_tests.write_json(self.root / ci_tests.POLICY_PATH, self.policy)
         ci_tests.write_json(self.root / ci_local.POLICY_PATH, {'schema_version': 1, 'max_age_seconds': 86400,
             'default_workers': 2, 'max_workers': 4, 'static_commands': [['static.py']],
+            'test_selection': 'impact', 'budget_estimated_seconds': 0, 'direct_tools': [],
             'environment_names': ['PATH', 'LANG'], 'environment_prefixes': ['PYTHON', 'GIT_'],
             'environment_ignored': ['GIT_EDITOR'], 'git_configuration_ignored': ['branch.*', 'remote.*.fetch'],
             'ignored_cache_paths': ['.agentrof/*', '**/__pycache__/*']})
@@ -463,6 +464,129 @@ class LocalValidationTests(unittest.TestCase):
         self.git('config', 'core.autocrlf', 'true')
         with self.assertRaisesRegex(ci_tests.CIError, 'Git configuration'):
             self.run_check(verify_only=True)
+
+    def changed_fixture(self, budget=0):
+        modules = {'test_helper': 'from tools import helper\n', 'test_uses_helper': 'from tools import helper\n',
+                   'test_names_input': 'INPUT = "data.json"\n'}
+        for name, header in modules.items():
+            (self.root / f'tools/tests/{name}.py').write_text(
+                header + 'import unittest\nclass Case(unittest.TestCase):\n    def test_it(self): pass\n')
+        (self.root / 'tools/helper.py').write_text('value = 1\n')
+        (self.root / 'data.json').write_text('{}\n')
+        self.policy['known_test_modules'] += [f'tools.tests.{name}' for name in modules]
+        ci_tests.write_json(self.root / ci_tests.POLICY_PATH, self.policy)
+        local = ci_tests.read_json(self.root / ci_local.POLICY_PATH)
+        local.update(test_selection='changed', budget_estimated_seconds=budget)
+        ci_tests.write_json(self.root / ci_local.POLICY_PATH, local)
+        self.git('add', '--all')
+        self.git('commit', '-qm', 'changed fixture')
+        self.git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+
+    def selected_modules(self):
+        plan = ci_local.make_plan(self.root)
+        self.assertEqual(plan['mode'], 'changed')
+        return sorted({ci_tests.module_of(test_id) for test_id in plan['selected_ids']}), plan
+
+    def test_changed_selection_runs_the_changes_own_tests_and_leaves_the_rest_to_ci(self):
+        self.changed_fixture()
+        # A changed module selects its own test module, not every module that imports it.
+        (self.root / 'tools/helper.py').write_text('value = 2\n')
+        self.git('add', '--all')
+        self.assertEqual(self.selected_modules()[0], ['tools.tests.test_helper'])
+        # A changed test module runs, and so does a test that names a changed input.
+        (self.root / 'tools/tests/test_uses_helper.py').write_text(
+            'import unittest\nclass Case(unittest.TestCase):\n    def test_it(self): self.assertTrue(True)\n')
+        (self.root / 'data.json').write_text('{"changed": true}\n')
+        self.git('add', '--all')
+        self.assertEqual(self.selected_modules()[0], ['tools.tests.test_helper', 'tools.tests.test_names_input',
+                                                      'tools.tests.test_uses_helper'])
+
+    def test_changed_selection_stops_at_the_budget_in_its_order(self):
+        self.changed_fixture(budget=2)
+        (self.root / 'tools/helper.py').write_text('value = 2\n')
+        (self.root / 'tools/tests/test_uses_helper.py').write_text(
+            'import unittest\nclass Case(unittest.TestCase):\n    def test_it(self): self.assertTrue(True)\n')
+        (self.root / 'data.json').write_text('{"changed": true}\n')
+        self.git('add', '--all')
+        modules, plan = self.selected_modules()
+        # Changed test modules come first, then the test modules of changed modules; the rest waits for CI.
+        self.assertEqual(modules, ['tools.tests.test_helper', 'tools.tests.test_uses_helper'])
+        self.assertIn('1 more left to pull request CI past the local budget', plan['selection_reason'])
+
+    def test_a_failed_run_names_its_failing_tests_last_and_keeps_the_worker_logs(self):
+        self.test_path.write_text('import unittest\nclass Example(unittest.TestCase):\n'
+                                  '    def test_one(self): self.fail("broken on purpose")\n'
+                                  '    def test_two(self): pass\n')
+        self.git('add', '--all')
+        output = io.StringIO()
+        with mock.patch('sys.stdout', output), self.assertRaisesRegex(ci_tests.CIError, 'worker logs kept at'):
+            ci_local.check(self.root)
+        lines = output.getvalue().strip().splitlines()
+        self.assertEqual(lines[-3], 'ci-local: 1 failing tests:')
+        self.assertRegex(lines[-2], r'^  shard \d: FAIL tools\.tests\.test_example\.Example\.test_one: '
+                                    r'AssertionError: broken on purpose$')
+        kept = Path(lines[-1].removeprefix('ci-local: worker logs kept at '))
+        self.assertEqual(kept, self.root / ci_local.CACHE_PATH / 'last-failure')
+        self.assertTrue(any('broken on purpose' in path.read_text() for path in kept.glob('*/output.log')))
+        # The next passing run removes them.
+        self.test_path.write_text('import unittest\nclass Example(unittest.TestCase):\n'
+                                  '    def test_one(self): pass\n    def test_two(self): pass\n')
+        self.git('add', '--all')
+        self.run_check()
+        self.assertFalse(kept.exists())
+
+    def test_macos_workers_call_the_tool_its_xcrun_trampoline_resolves(self):
+        local = ci_tests.read_json(self.root / ci_local.POLICY_PATH)
+        local['direct_tools'] = ['git']
+        ci_tests.write_json(self.root / ci_local.POLICY_PATH, local)
+        real_prefix = self.root / 'developer/usr'
+        real = real_prefix / 'bin/git'
+        for folder in ('bin', 'libexec/git-core', 'share/git-core/templates'):
+            (real_prefix / folder).mkdir(parents=True)
+        real.write_text('#!/bin/sh\n')
+        real.chmod(0o755)
+        resolved = subprocess.CompletedProcess(['xcrun'], 0, stdout=str(real) + '\n', stderr='')
+        with tempfile.TemporaryDirectory() as raw, \
+                mock.patch.object(ci_local.subprocess, 'run', return_value=resolved) as xcrun:
+            directory = Path(raw)
+            for system, found, expected in (('Linux', '/usr/bin/git', None),
+                                            ('Darwin', '/opt/homebrew/bin/git', None),
+                                            ('Darwin', '/usr/bin/git', directory / 'direct-tools/bin')):
+                with self.subTest(system=system, found=found), \
+                        mock.patch.object(ci_tests.platform, 'system', return_value=system), \
+                        mock.patch.object(ci_local.shutil, 'which', return_value=found):
+                    self.assertEqual(ci_local.direct_tool_directory(self.root, directory), expected)
+            self.assertEqual((directory / 'direct-tools/bin/git').readlink(), real)
+            # Helpers and templates resolve beside the bin directory, as they do beside the real one.
+            for sibling in ('libexec', 'share'):
+                self.assertEqual((directory / 'direct-tools' / sibling).readlink(), real_prefix / sibling)
+            xcrun.assert_called_once_with(['xcrun', '--find', 'git'], capture_output=True, text=True, check=False)
+
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('git') == '/usr/bin/git'
+                         and shutil.which('xcrun'), 'needs the macOS git trampoline')
+    def test_the_direct_git_keeps_its_templates_and_helpers(self):
+        local = ci_tests.read_json(self.root / ci_local.POLICY_PATH)
+        local['direct_tools'] = ['git']
+        ci_tests.write_json(self.root / ci_local.POLICY_PATH, local)
+        with tempfile.TemporaryDirectory() as raw:
+            git = ci_local.direct_tool_directory(self.root, Path(raw)) / 'git'
+            repository = Path(raw) / 'repository'
+            created = subprocess.run([str(git), 'init', '-q', str(repository)], capture_output=True, text=True)
+            self.assertEqual((created.returncode, created.stderr), (0, ''))
+            self.assertTrue((repository / '.git/info/exclude').is_file())
+            helpers = Path(subprocess.run([str(git), '--exec-path'], capture_output=True, text=True,
+                                          check=True).stdout.strip())
+            self.assertTrue((helpers / 'git-upload-pack').exists())
+
+    def test_a_requested_full_suite_is_what_verify_checks(self):
+        self.changed_fixture()
+        self.source.write_text('value = 2\n')
+        self.git('add', '--all')
+        with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
+            receipt = self.run_check(full=True)
+        self.assertTrue(receipt['full'])
+        self.assertEqual(receipt['selected_count'], len(ci_tests.inventory(self.root)[0]))
+        self.assertEqual(self.run_check(verify_only=True), receipt)
 
     def test_verify_without_jobs_takes_the_worker_count_check_used(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):

@@ -1,8 +1,13 @@
 {
   "schema_version": 1,
   "max_age_seconds": 86400,
-  "default_workers": 2,
+  "default_workers": 4,
   "max_workers": 4,
+  "test_selection": "changed",
+  "budget_estimated_seconds": 720,
+  "direct_tools": [
+    "git"
+  ],
   "environment_names": [
     "CI",
     "CLAUDE_CODE_EXECPATH",

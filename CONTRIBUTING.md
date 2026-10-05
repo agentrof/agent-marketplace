@@ -27,10 +27,16 @@ make check-local
 make verify-local
 ```
 
-`check-local` always runs static gates, selects tests from the full branch
-base-to-staged-candidate diff and uses two isolated workers by default.
-Unknown/shared inputs run the full suite. Partial staging and worktree/index
-mismatches are rejected. Identical successful local results can be reused for
+`check-local` always runs static gates and the change's own tests from the
+full branch base-to-staged-candidate diff, with four isolated workers by
+default: the changed test modules, the test module of each changed module and
+the tests that name a changed input, within a budget of about three minutes.
+Pull request CI runs every test on Linux and macOS, so the local gate never
+runs the whole suite on its own;
+`python3 tools/ci_local.py check --staged --full` runs every test on request,
+for a change whose host-specific behavior CI cannot cover. After committing and
+before pushing, run `make check-pr`, the confidentiality and release-impact
+scan of the committed branch. Partial staging and worktree/index mismatches are rejected. Identical successful local results can be reused for
 at most 24 hours; a changed or failed candidate invalidates them. Verify the
 exact staged candidate again immediately before commit. `make check` remains
 the exhaustive local gate. Independent remote platform checks and release

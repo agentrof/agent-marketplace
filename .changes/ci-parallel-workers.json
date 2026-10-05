@@ -1,4 +1,0 @@
-{
-  "summary": "CI runs each test shard in three worker processes, each with its own temporary directory and host tripwires, and balances the tests over every process by their measured durations. The Windows minimum-version lane installs its pinned python.org NuGet build of Python instead of running the setup-python installer, and Windows tests keep their scratch files on the runner's work disk.",
-  "components": {}
-}

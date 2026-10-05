@@ -1,4 +1,0 @@
-{
-  "summary": "Stable releases are named by the calendar. A release is `YYYY.M.N`: the UTC year and month in which `python3 tools/release.py bump` made its release commit, the month without a leading zero, and its number within that month from 1, so the first release of October 2026 is `v2026.10.1`, the next `v2026.10.2` and the first of November `v2026.11.1`. `bump` sets the marketplace, every plugin and every version surface to that one version; changeset impacts no longer choose it, and the release metadata still records them. The release commit is dated at the instant `bump` named its version and `check-pr` replays it at that date, so a release commit made at the end of a month stays valid when its pull request merges in the next month, and the release keeps that month's name. With no release tag at all, the Release workflow takes the commit `stable` points to as the previous release instead of the first-release path.",
-  "components": {}
-}

@@ -1,4 +1,0 @@
-{
-  "summary": "The test suite runs faster with the same product guards. CI runs every test on Linux and, on macOS and Windows, only the tests that prove behavior of that system. Validator mutation tests run the one check they target; setup, project vault, Delivery PR-intent, Experience record revision and CI plan tests copy a prepared fixture instead of rebuilding it; the coordinator's verb help renders in process. Stale and redundant tests are gone, the process switches' sentence-copying tests become one registry-driven check plus the safety rules each switch value keeps, and model tests read model IDs from the shipped catalogs.",
-  "components": {}
-}

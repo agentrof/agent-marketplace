@@ -1,4 +1,0 @@
-{
-  "summary": "Bind local validation receipts to the variables that can change test behaviour, name the changed variables when verify refuses for that reason, and let verify take the worker count of the receipt's check.",
-  "components": {}
-}

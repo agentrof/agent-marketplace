@@ -1,4 +1,0 @@
-{
-  "summary": "Merging the pull request that carries a release commit now publishes that release without a command: the new Auto release workflow sees the version change on the push to main and dispatches the Release workflow for the merge commit, while every other push starts nothing; `python3 tools/release.py ship` still starts or resumes a release by hand.",
-  "components": {}
-}

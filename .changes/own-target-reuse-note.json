@@ -1,6 +1,0 @@
-{
-  "summary": "At own_target_reuse spot_run, QA's final test run without a spot-run file says why it reuses no own target even when it reuses nothing else or no pre-handoff run exists.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

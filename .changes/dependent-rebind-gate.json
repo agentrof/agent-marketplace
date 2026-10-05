@@ -1,6 +1,0 @@
-{
-  "summary": "New read-only `experience_compile.py source-impact --root <experience-design> --source-ref business-analysis/<space>/space` lists every approved Experience package that binds the source's receipt, the source rows and documents that changed since that receipt, the package notes that cite them, and per package whether it is a `mechanical` rebind, when no note cites a change, or a `semantic` one, and whether its open revision changed anything besides the source receipts. Process switch `dependent_rebind_gate` (`separate` | `with_source`), at its default today's behaviour: at `with_source`, the gate that approves a business-analysis change opens with one plain sentence of the whole action and also approves the mechanical Experience rebinds it makes necessary, which then run without a second scope gate while `source-impact` still reports a receipt-only change, as `business-analysis/references/switch-dependent_rebind_gate-with_source.md` defines; a semantic dependent keeps its own gate. In one measured project such a second gate asked nothing new and stayed open 4 h 19 min.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

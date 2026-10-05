@@ -1,6 +1,0 @@
-{
-  "summary": "The plugin supports Python 3.14 only. Every hook now runs through a small launcher that checks the Python version before anything else: below 3.14 the plugin stops only its own work, with one message that names the Python it found, the fix (macOS: `brew install python3`) and a session restart, and it never blocks the host session, other prompts or any tool call that is not the plugin's own work. CI tests one Python per operating system.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

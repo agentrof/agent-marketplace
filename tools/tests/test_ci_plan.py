@@ -162,8 +162,8 @@ class CIPlanIntegrationTests(unittest.TestCase):
                 event_name, self.git("rev-parse", "HEAD"), self.output,
             )
 
-    def test_normal_pr_selects_impact_without_consulting_prior_runs(self):
-        self.assertEqual(self.choose(), ("impact", self.base))
+    def test_normal_pr_runs_the_full_suite_without_consulting_prior_runs(self):
+        self.assertEqual(self.choose(), ("full", ""))
         self.assertEqual(self.queries, [])
 
     def test_main_merge_reuses_only_a_successful_exact_pr_tree(self):
@@ -176,13 +176,13 @@ class CIPlanIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(self.queries, [self.merge])
 
-    def test_merge_queue_group_selects_impact_against_the_queue_base(self):
+    def test_merge_queue_group_runs_the_full_suite(self):
         event = {"merge_group": {
             "base_sha": self.base, "head_sha": self.merge,
             "base_ref": "refs/heads/main",
             "head_ref": f"refs/heads/gh-readonly-queue/main/pr-9-{self.base}",
         }}
-        self.assertEqual(self.choose(event_name="merge_group", event=event), ("impact", self.base))
+        self.assertEqual(self.choose(event_name="merge_group", event=event), ("full", ""))
         self.assertEqual(self.queries, [])
 
     def test_manual_scheduled_and_other_events_always_run_full(self):

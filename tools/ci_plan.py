@@ -19,12 +19,9 @@ def run(*args: str) -> str:
 
 
 def choose_mode(event: dict, event_name: str, head: str, directory: Path) -> tuple[str, str]:
-    if event_name == "merge_group":
-        # The queue commit becomes main unchanged, so it is selected the way a
-        # PR merge is: over the complete diff from the queue's base.
-        return "impact", event["merge_group"]["base_sha"]
-    if event_name == "pull_request":
-        return "impact", event["pull_request"]["base"]["sha"]
+    # Every pull request and merge queue group runs the full suite: on the
+    # sharded Linux lane it takes about as long as an impact selection, and
+    # the local gate runs only a change's own tests. Main reuses that proof.
     if event_name != "push" or os.environ.get("GITHUB_REF") != "refs/heads/main":
         return "full", ""
     evidence = directory / "ci-reuse.json"

@@ -1,6 +1,0 @@
-{
-  "summary": "On Codex the `-mechanical` writer variants keep running on the `low` tier, `gpt-6.1-sol` at effort `xhigh`, until the variants' frozen-task A/B sets a lower effort. Under process switch `mechanical_pass_tier` at `mechanical`, the Codex host contract starts the variant for every `apply_findings` pass and never resumes the base writer for one, and the mechanical pass record names whether the variant or the resumed writer ran, with its model and effort, so the A/B and later passes show the tier that really ran. At every switch default no role changes. In one measured project a Codex fix pass that rewrote a single numeric test ran about 16 minutes at the writers' effort.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

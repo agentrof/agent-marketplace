@@ -1,6 +1,0 @@
-{
-  "summary": "Process switch `rebind_review_scope` (`full` | `source_delta`), at its default today's behaviour: at `source_delta`, when `experience_compile.py source-impact` reports that an Experience revision only moved its source receipts (`source_rebind_only`) and no package note cites a changed source row or document, the fresh `experience-reviewer` reads the source diff, the package notes and the attested hashes instead of the prototype tree, reports any claim that depends on the changed source, which starts the full review, and writes the same schema-v4 attestation, as `experience-modeling/references/switch-rebind_review_scope-source_delta.md` defines. In one measured project the full review of such a rebind took about 28 minutes and 70.3 M input tokens to confirm the zero changed bytes the compiler had proved in 2 minutes.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

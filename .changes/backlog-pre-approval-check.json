@@ -1,6 +1,0 @@
-{
-  "summary": "Backlog planning offers the owner only a package atomic approval accepts: check --pre-approval runs approval's own checks, and check refuses a review being written whose verdict field is empty under a concluded Verdict section or contradicts its status.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

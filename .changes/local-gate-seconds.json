@@ -1,4 +1,0 @@
-{
-  "summary": "The local pre-push gate selects the changed test methods and the tests that name a changed input or function, runs static checks beside the test workers and keeps the change's own tests within about 40 seconds.",
-  "components": {}
-}

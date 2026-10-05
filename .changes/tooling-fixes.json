@@ -1,4 +1,0 @@
-{
-  "summary": "The concurrent setup test no longer fails on a loaded machine. It required two setup applies started together to both succeed, which held only while the first finished within setup's 3-second guard wait. The test now holds the guard until both applies wait for it, so they always contend, and gives each a wait as long as its process timeout; a new test keeps setup's own 3-second bound and its maintenance_busy refusal.",
-  "components": {}
-}

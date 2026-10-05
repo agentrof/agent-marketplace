@@ -1,4 +1,0 @@
-{
-  "summary": "CI balances its shards on the durations a full run measured on each system.",
-  "components": {}
-}

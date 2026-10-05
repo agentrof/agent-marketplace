@@ -1,4 +1,0 @@
-{
-  "summary": "As released, the local pre-push gate runs a change's own tests in about 40 seconds and pull request CI runs every test on Linux, with the tests that prove macOS and Windows behavior on those systems; the Windows minimum-version lane and its NuGet Python left with the move to Python 3.14.",
-  "components": {}
-}

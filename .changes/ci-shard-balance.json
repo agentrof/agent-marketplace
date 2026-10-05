@@ -1,4 +1,0 @@
-{
-  "summary": "CI splits the full Linux test runs into more shards and runs only the platform group on the current macOS lane, whose full suite every contributor already runs in the local gate, so a pull request checks in about half the time.",
-  "components": {}
-}

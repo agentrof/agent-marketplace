@@ -1,6 +1,0 @@
-{
-  "summary": "Add a compact `delivery_verification.py status --summary` and `status --run <kind>` that print the session identity, reader states and run outcomes with their report paths, and point the reader instructions at them instead of the whole session.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

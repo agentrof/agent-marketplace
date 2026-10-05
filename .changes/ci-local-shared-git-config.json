@@ -1,4 +1,0 @@
-{
-  "summary": "Keep a local validation receipt valid when another worktree of the same repository creates, tracks, fetches or deletes branches during the run.",
-  "components": {}
-}

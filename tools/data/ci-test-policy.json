@@ -517,10 +517,10 @@
     },
     "macos": {
       "os": "macos-latest",
-      "shards": 5,
+      "shards": 1,
       "workers": 3,
       "groups": [
-        "all"
+        "macos"
       ]
     },
     "windows": {

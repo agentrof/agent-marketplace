@@ -277,6 +277,16 @@ def group_ids(names, policy, all_ids):
 def dependency_tests(root, paths, all_ids):
     """Follow local imports and literal script paths, conservatively by module stem."""
     affected = {Path(path).stem for path in paths if path.endswith(".py")}
+    graph = import_graph(root)
+    previous = set()
+    while previous != affected:
+        previous = set(affected)
+        affected.update(name for name, dependencies in graph.items() if dependencies & previous)
+    return {test_id for test_id in all_ids if module_of(test_id).rsplit(".", 1)[-1] in affected}
+
+
+def import_graph(root):
+    """Each Python module stem with the stems it imports or names as a literal script path."""
     graph = {}
     for directory in ("tools", "plugins", "platforms"):
         for path in (root / directory).rglob("*.py"):
@@ -294,11 +304,7 @@ def dependency_tests(root, paths, all_ids):
                     dependencies.update(alias.name for alias in node.names)
                 elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.endswith(".py"):
                     dependencies.add(Path(node.value).stem)
-    previous = set()
-    while previous != affected:
-        previous = set(affected)
-        affected.update(name for name, dependencies in graph.items() if dependencies & previous)
-    return {test_id for test_id in all_ids if module_of(test_id).rsplit(".", 1)[-1] in affected}
+    return graph
 
 
 def select_ids(mode, paths, policy, all_ids, root=None):

@@ -1,0 +1,4 @@
+{
+  "summary": "The macOS CI lane runs the tests that prove macOS behavior again, as one shard; running every test there took pull request CI from 2 min 32 s to 6 to 7.5 minutes.",
+  "components": {}
+}

@@ -32,8 +32,8 @@ full branch base-to-staged-candidate diff, with four isolated workers by
 default: the changed test methods, the tests that name a changed input or a
 changed function, and the modules that import a changed test helper, within a
 budget of about 40 seconds.
-Pull request CI runs every test on Linux and macOS, so the local gate never
-runs the whole suite on its own;
+Pull request CI runs every test on Linux and each system's own tests on macOS
+and Windows, so the local gate never runs the whole suite on its own;
 `python3 tools/ci_local.py check --staged --full` runs every test on request,
 for a change whose host-specific behavior CI cannot cover. After committing and
 before pushing, run `make check-pr`, the confidentiality and release-impact

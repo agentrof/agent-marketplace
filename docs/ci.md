@@ -10,13 +10,14 @@ requires `check`, `analyze-python` and `Claude Code and Codex lifecycle`.
 `tools/data/ci-test-policy.json` owns the one supported Python version,
 operating systems, shard jobs and worker processes per job, impact groups,
 dependency closures and initial duration weights. CI tests that Python once per
-operating system. Linux runs every test. macOS and Windows run only the tests
-that prove behavior of their own system, each named by its exact ID: the
-platform group both run (worker processes, the hook launcher, case-insensitive
-file systems), the macOS group (file flags, bare `python3` commands) and
-the Windows group (path separators, junctions, long paths, CRLF checkouts,
-locks, text pipes and Git for Windows). A test that repeats platform-neutral
-logic runs on Linux only. The plan job sets up the version itself and every
+operating system. Linux and macOS run every test, macOS in five shard jobs, the
+most macOS jobs the organization's plan runs at once, because the local gate
+runs only a change's own tests. Windows runs only the tests that prove behavior
+of its own system, each named by its exact ID: the platform group (worker
+processes, the hook launcher, case-insensitive file systems) and the Windows
+group (path separators, junctions, long paths, CRLF checkouts, locks, text
+pipes and Git for Windows). The macOS group keeps naming the tests that prove
+macOS behavior (file flags, bare `python3` commands). The plan job sets up the version itself and every
 other validation job takes it from the plan's output; a test pins that literal,
 the release workflows' versions, the host lifecycle policy and the plugin's
 runtime floor to the policy. `tools/ci_tests.py` inventories individual
@@ -68,7 +69,7 @@ observations, remain real.
 
 | Profile | Selection |
 | --- | --- |
-| `full` | Every test on Linux; on macOS the platform and macOS groups; on Windows the platform and Windows groups, with the mandatory native regressions |
+| `full` | Every test on Linux and macOS; on Windows the platform and Windows groups, with the mandatory native regressions |
 | `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff of a PR or merge queue group |
 | `reuse` | Prior successful validation of identical input, with fresh static and transition checks |
 
@@ -107,8 +108,28 @@ make verify-local
 
 The direct interfaces are `python3 tools/ci_local.py check --staged --target
 origin/main` and `python3 tools/ci_local.py verify --staged --target origin/main`.
-`check --fresh` ignores saved test results. `--jobs` selects one to four separate
-processes, bounded by CPU count; policy defaults to two. The processes are
+`check --fresh` ignores saved test results. `ci-local-policy.json` sets
+`test_selection`. At `changed` the gate runs the change's own tests, in this
+order, while pull request CI runs every test on Linux and macOS: the changed
+test modules, the test module named after each changed Python module
+(`test_<module>.py`), and the tests whose source names a changed non-Python
+input (by file name, or by folder and name when the name repeats). Generated
+`dist/` copies select nothing of their own; the distribution sync check and
+their canonical sources cover them. `budget_estimated_seconds` bounds that
+selection by the full-suite lane's per-test estimates: a test that would pass
+the budget is left to pull request CI, and the selection reason counts those
+tests; 720 estimated seconds run in about three minutes with four workers on a
+recent Mac. At `impact` the gate selects as pull request impact selection does.
+`check --full` runs every test, for a change whose host-specific behavior CI
+cannot cover; `verify` then checks that full receipt. On macOS, `direct_tools`
+names the tools whose `/usr/bin` entry is an `xcrun` trampoline, which resolves
+the developer directory on every call; workers call the tool it resolves to,
+which in measured runs cut a Git call from about 9 ms to 3 ms. When a worker
+fails, the gate's last lines name each failing test with the last line of its
+traceback, and it keeps that run's worker logs and reports in
+`.agentrof/agent-marketplace/.runtime/ci-local/last-failure/` until the next
+run. `--jobs` selects one to four separate
+processes, bounded by CPU count; policy defaults to four. The processes are
 balanced with the per-test estimates of the full-suite lane's system, refined
 by the local system's own. Every worker receives
 its own `TMPDIR`, `TMP` and `TEMP`, exact test IDs and an independent result file.
@@ -135,8 +156,7 @@ executable bits remain the index's identity because the filesystem does not
 provide POSIX executable modes. Checkouts transformed by text filters must
 first match their staged bytes. Impact includes the entire merge-base to index
 candidate, including earlier branch commits, deletion and both sides of a
-rename. Missing base, unknown/shared inputs or incomplete inventory mappings
-select the full suite. The command never fetches refs.
+rename. A missing base selects the full suite. The command never fetches refs.
 
 Every `check` executes static validation afresh. A successful local receipt
 binds HEAD/base/index bytes and modes, inventory, selected IDs, command and

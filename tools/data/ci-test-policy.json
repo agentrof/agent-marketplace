@@ -366,6 +366,7 @@
     },
     "macos": {
       "tests": [
+        "tools.tests.test_ci_local.LocalValidationTests.test_the_direct_git_keeps_its_templates_and_helpers",
         "tools.tests.test_experience_compile.ExperienceCompilerTests.test_transaction_commit_cleans_an_immutable_backup_file",
         "tools.tests.test_experience_compile.ExperienceCompilerTests.test_transaction_rollback_cleans_an_immutable_journal",
         "tools.tests.test_experience_compile.ExperienceCompilerTests.test_transaction_rollback_opens_and_recloses_immutable_docs_parent",
@@ -516,10 +517,10 @@
     },
     "macos": {
       "os": "macos-latest",
-      "shards": 1,
+      "shards": 5,
       "workers": 3,
       "groups": [
-        "macos"
+        "all"
       ]
     },
     "windows": {

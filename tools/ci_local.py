@@ -8,7 +8,9 @@ import hashlib
 import hmac
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
+import shutil
 import signal
 import stat
 import subprocess
@@ -46,6 +48,14 @@ def policy_at(root):
         names = value.get(key)
         if not isinstance(names, list) or any(not isinstance(name, str) or not name for name in names):
             raise tests.CIError("invalid local environment binding: " + key)
+    if value.get("test_selection") not in {"changed", "impact"}:
+        raise tests.CIError("invalid local test selection")
+    if type(value.get("budget_estimated_seconds")) is not int or value["budget_estimated_seconds"] < 0:
+        raise tests.CIError("invalid local test budget")
+    direct = value.get("direct_tools")
+    if not isinstance(direct, list) or any(
+            not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", name) for name in direct):
+        raise tests.CIError("invalid local direct tools")
     commands = value.get("static_commands")
     if not isinstance(commands, list) or not commands or any(
             not isinstance(command, list) or not command or
@@ -246,28 +256,91 @@ def assert_generation(root, expected):
         raise tests.CIError("source or Git state was written during local validation; restored bytes do not preserve this attempt")
 
 
-def make_plan(root, target="origin/main", jobs=None):
-    local_policy = policy_at(root)
-    source = candidate(root, target)
-    policy = tests.policy_at(root)
-    ids, inventory_hash = tests.inventory(root)
-    selected, mode, reason = tests.select_ids("impact" if source["base"] else "full",
-                                               source["changed_paths"], policy, ids, root)
-    if source["base"] is None:
-        reason = "target merge-base unavailable; full local suite required"
-    jobs = local_policy["default_workers"] if jobs is None else jobs
-    if type(jobs) is not int or not 1 <= jobs <= local_policy["max_workers"]:
-        raise tests.CIError("worker count is outside local policy")
-    jobs = min(jobs, os.cpu_count() or 1)
-    runner_os = {"Linux": "ubuntu-latest", "Darwin": "macos-latest", "Windows": "windows-latest"}.get(tests.platform.system())
-    must_run = sorted(set(selected) & {test_id for lane in policy["lanes"].values()
-                      if lane["os"] == runner_os for test_id in lane.get("required_tests", [])})
-    # The full-suite lane's measured estimates cover every module; this
-    # system's own estimates refine the tests its lanes measured.
+def referencing_tests(root, paths, policy, all_ids):
+    """Tests whose module names a changed non-Python input: by file name, or by folder and name when the name repeats."""
+    tracked = [PurePosixPath(os.fsdecode(raw)) for raw in tests.git(root, "ls-files", "-z").split(b"\0") if raw]
+    counts = {}
+    for path in tracked:
+        counts[path.name] = counts.get(path.name, 0) + 1
+    needles = set()
+    for path in map(PurePosixPath, paths):
+        if path.suffix == ".py" or tests.matches(path.as_posix(), policy.get("generated_paths", [])):
+            continue
+        needles.add(path.name if counts.get(path.name, 0) <= 1 or len(path.parts) < 2 else "/".join(path.parts[-2:]))
+    modules = {tests.module_of(test_id) for test_id in all_ids}
+    named = {module for module in modules if needles and any(
+        needle in (root / (module.replace(".", "/") + ".py")).read_text(encoding="utf-8") for needle in needles)}
+    return {test_id for test_id in all_ids if tests.module_of(test_id) in named}
+
+
+def estimate_weights(policy, runner_os):
+    """Per-test seconds: the full-suite lanes' measured estimates, refined by this system's own."""
     estimates = policy.get("test_seconds", {})
     weights = {test_id: seconds for lane in policy["lanes"].values() if lane["groups"] == ["all"]
                for test_id, seconds in estimates.get(lane["os"], {}).items()}
     weights.update(estimates.get(runner_os, {}))
+    return weights
+
+
+def changed_ids(root, paths, policy, all_ids, weights, budget):
+    """The change's own tests, in order, within the local budget.
+
+    First the changed test modules, then the test module named after each
+    changed Python module, then the tests whose source names a changed
+    non-Python input. Pull request CI runs everything; a test that would take
+    the estimate past the budget is left to it.
+    """
+    # A generated copy is checked by the distribution sync; its canonical source selects the tests.
+    real = [path for path in paths if not tests.matches(path, policy.get("generated_paths", []))]
+    stems = {tests.module_of(test_id).rsplit(".", 1)[-1]: tests.module_of(test_id) for test_id in all_ids}
+    names = [PurePosixPath(path).stem for path in real if path.endswith(".py")]
+    changed = {stems[name] for name in names if name in stems}
+    own = {stems["test_" + name] for name in names if "test_" + name in stems}
+    tiers = [[test_id for test_id in all_ids if tests.module_of(test_id) in changed],
+             [test_id for test_id in all_ids if tests.module_of(test_id) in own],
+             sorted(referencing_tests(root, real, policy, all_ids))]
+    selected, seen, spent, deferred = [], set(), 0.0, 0
+    for tier in tiers:
+        for test_id in tier:
+            if test_id in seen:
+                continue
+            seen.add(test_id)
+            cost = tests.test_weight(test_id, weights, policy)
+            if budget and spent + cost > budget:
+                deferred += 1
+                continue
+            selected.append(test_id)
+            spent += cost
+    reason = (f"{len(selected)} tests of the change: changed test modules, the test modules of changed"
+              " modules, tests naming a changed input")
+    if deferred:
+        reason += f"; {deferred} more left to pull request CI past the local budget"
+    return sorted(selected), "changed", reason
+
+
+def make_plan(root, target="origin/main", jobs=None, full=False):
+    local_policy = policy_at(root)
+    source = candidate(root, target)
+    policy = tests.policy_at(root)
+    ids, inventory_hash = tests.inventory(root)
+    runner_os = {"Linux": "ubuntu-latest", "Darwin": "macos-latest", "Windows": "windows-latest"}.get(tests.platform.system())
+    weights = estimate_weights(policy, runner_os)
+    if full:
+        selected, mode, reason = list(ids), "full", "full local suite requested"
+    elif source["base"] is None:
+        selected, mode, reason = list(ids), "full", "target merge-base unavailable; full local suite required"
+    else:
+        # Pull request CI runs every test on every lane; this gate gives the change's own tests before the push.
+        selected, mode, reason = (changed_ids(root, source["changed_paths"], policy, ids, weights,
+                                              local_policy["budget_estimated_seconds"])
+                                  if local_policy["test_selection"] == "changed" else
+                                  tests.select_ids("impact", source["changed_paths"], policy, ids, root))
+    jobs = local_policy["default_workers"] if jobs is None else jobs
+    if type(jobs) is not int or not 1 <= jobs <= local_policy["max_workers"]:
+        raise tests.CIError("worker count is outside local policy")
+    jobs = min(jobs, os.cpu_count() or 1)
+    must_run = sorted(set(selected) & {test_id for lane in policy["lanes"].values()
+                      if lane["os"] == runner_os for test_id in lane.get("required_tests", [])})
     plan = {"schema_version": 1, "authority": "local_only", "candidate": source,
             "must_run_ids": must_run,
             "environment": environment_identity(root), "policy_hash": tests.digest(policy),
@@ -453,6 +526,74 @@ def prewarm_stdlib(directory):
     return cache, cache_identity(cache)
 
 
+FAILURE_LINE = re.compile(r"^(FAIL|ERROR): \S+ \(([^)]+)\)")
+SEPARATOR = "-" * 70
+
+
+def failure_summary(logs):
+    """Each failing or erroring test in the worker logs, with the last line of its traceback."""
+    lines = []
+    for shard, path in enumerate(logs):
+        text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+        for block in text.split("=" * 70):
+            parts = block.strip("\n").split(SEPARATOR)
+            match = FAILURE_LINE.match(parts[0])
+            if match is None:
+                continue
+            body = [line.strip() for line in (parts[1] if len(parts) > 1 else "").splitlines() if line.strip()]
+            message = body[-1][:160] if body else ""
+            lines.append(f"shard {shard}: {match.group(1)} {match.group(2)}" + (f": {message}" if message else ""))
+    return lines
+
+
+def keep_failure_logs(cache, scratches):
+    """Replace the kept logs of the last failed run with this run's worker logs and reports."""
+    kept = cache / "last-failure"
+    shutil.rmtree(kept, ignore_errors=True)
+    for shard, scratch in enumerate(scratches):
+        target = kept / str(shard)
+        target.mkdir(parents=True)
+        for name in ("output.log", "report.json"):
+            if (scratch / name).is_file():
+                shutil.copyfile(scratch / name, target / name)
+    return kept
+
+
+def direct_tool_directory(root, directory):
+    """On macOS, a bin directory with the tools whose /usr/bin entry is an xcrun trampoline.
+
+    The trampoline resolves the developer directory on every call, which in
+    measured runs tripled the cost of a git call; workers call the tool it
+    resolves to. Such a tool finds its helpers and templates beside its own
+    bin directory, so that directory's siblings link to those of the tool's
+    real prefix. Other systems, and tools found elsewhere first, are unchanged.
+    """
+    if tests.platform.system() != "Darwin":
+        return None
+    prefix = directory / "direct-tools"
+    linked = prefix / "bin"
+    for name in policy_at(root)["direct_tools"]:
+        found = shutil.which(name)
+        if found is None or Path(found).parent != Path("/usr/bin"):
+            continue
+        resolved = subprocess.run(["xcrun", "--find", name], capture_output=True, text=True, check=False)
+        target = Path(resolved.stdout.strip())
+        if resolved.returncode or not target.is_absolute() or target.parent.name != "bin" \
+                or not os.access(target, os.X_OK):
+            continue
+        siblings = {entry.name: entry for entry in target.parent.parent.iterdir() if entry.name != "bin"}
+        # A sibling another tool's prefix already claims would send this tool to the wrong helpers.
+        if any((prefix / sibling).is_symlink() and (prefix / sibling).readlink() != entry
+               for sibling, entry in siblings.items()):
+            continue
+        linked.mkdir(parents=True, exist_ok=True)
+        for sibling, entry in siblings.items():
+            if not (prefix / sibling).is_symlink():
+                (prefix / sibling).symlink_to(entry)
+        (linked / name).symlink_to(target)
+    return linked if linked.is_dir() else None
+
+
 def execute_workers(root, plan, cache):
     workers = []
     with tempfile.TemporaryDirectory(prefix="agentrof-ci-workers-", dir=worker_temp_parent(root)) as temporary:
@@ -460,6 +601,7 @@ def execute_workers(root, plan, cache):
         plan_path = directory / "plan.json"
         tests.write_json(plan_path, plan)
         stdlib_cache, stdlib_identity = prewarm_stdlib(directory)
+        tools_bin = direct_tool_directory(root, directory)
         try:
             for index in range(len(plan["shards"])):
                 scratch = directory / str(index)
@@ -468,6 +610,8 @@ def execute_workers(root, plan, cache):
                 environment = {**execution_environment(root),
                                "TMPDIR": str(scratch), "TMP": str(scratch), "TEMP": str(scratch),
                                "PYTHONPYCACHEPREFIX": str(stdlib_cache)}
+                if tools_bin is not None:
+                    environment["PATH"] = str(tools_bin) + os.pathsep + environment.get("PATH", "")
                 process = subprocess.Popen([sys.executable, str(root / "tools/ci_local.py"), "worker",
                     "--plan", str(plan_path), "--shard", str(index), "--report", str(scratch / "report.json")],
                     cwd=root, env=environment, stdout=output, stderr=subprocess.STDOUT)
@@ -484,11 +628,20 @@ def execute_workers(root, plan, cache):
             for process, output, scratch in workers:
                 output.close()
                 print((scratch / "output.log").read_text(encoding="utf-8", errors="replace"), end="")
+            if any(codes):
+                # The summary comes last and the logs outlive this directory, so a cut output still names the failure.
+                scratches = [scratch for _process, _output, scratch in workers]
+                kept = keep_failure_logs(cache, scratches)
+                failures = failure_summary([scratch / "output.log" for scratch in scratches])
+                print(f"ci-local: {len(failures)} failing tests" + (":" if failures else "; see the worker logs"))
+                for line in failures:
+                    print("  " + line)
+                print(f"ci-local: worker logs kept at {kept}")
+                raise tests.CIError(f"one or more local test workers failed; worker logs kept at {kept}")
             reports = [tests.read_json(scratch / "report.json") for _process, _output, scratch in workers]
             if cache_identity(stdlib_cache) != stdlib_identity:
                 raise tests.CIError("read-only stdlib cache changed during local validation")
-            if any(codes):
-                raise tests.CIError("one or more local test workers failed")
+            shutil.rmtree(cache / "last-failure", ignore_errors=True)
             return verify_reports(plan, reports)
         finally:
             for process, output, _scratch in workers:
@@ -502,7 +655,7 @@ def execute_workers(root, plan, cache):
                 output.close()
 
 
-def check(root, target="origin/main", jobs=None, fresh=False, verify_only=False):
+def check(root, target="origin/main", jobs=None, fresh=False, verify_only=False, full=False):
     cache = safe_cache(root)
     with receipt_lock(cache):
         latest = cache / "latest.json"
@@ -515,8 +668,11 @@ def check(root, target="origin/main", jobs=None, fresh=False, verify_only=False)
                 # The worker count partitions the receipt's tests; verify takes the one check used.
                 jobs = previous["jobs"]
                 print(f"ci-local: verifying with the receipt's {jobs} workers")
+            if verify_only and isinstance(previous, dict) and previous.get("full") is True:
+                full = True
+                print("ci-local: verifying the receipt's full local suite")
             jobs = policy["default_workers"] if jobs is None else jobs
-            plan = make_plan(root, target, jobs)
+            plan = make_plan(root, target, jobs, full)
             generation = generation_token(root)
             valid = reusable(previous, plan, policy["max_age_seconds"])
             if verify_only:
@@ -531,7 +687,7 @@ def check(root, target="origin/main", jobs=None, fresh=False, verify_only=False)
                 assert_generation(root, generation)
                 print("ci-local: exact staged candidate has a current local receipt")
                 return previous
-            attempt.update(plan_hash=plan["plan_hash"], environment=plan["environment"], jobs=jobs)
+            attempt.update(plan_hash=plan["plan_hash"], environment=plan["environment"], jobs=jobs, full=full)
             tests.write_json(latest, attempt)
             started = time.monotonic()
             for command in plan["static_commands"]:
@@ -573,6 +729,8 @@ def main(argv=None):
         command.add_argument("--jobs", type=int)
         if name == "check":
             command.add_argument("--fresh", action="store_true")
+            command.add_argument("--full", action="store_true",
+                                 help="run every test, for changes whose host-specific behavior CI cannot cover")
     worker = commands.add_parser("worker", help=argparse.SUPPRESS)
     worker.add_argument("--plan", type=Path, required=True)
     worker.add_argument("--shard", type=int, required=True)
@@ -583,7 +741,8 @@ def main(argv=None):
     try:
         if args.command == "worker":
             return run_worker(ROOT, tests.read_json(args.plan), args.shard, args.report)
-        check(ROOT, args.target, args.jobs, getattr(args, "fresh", False), args.command == "verify")
+        check(ROOT, args.target, args.jobs, getattr(args, "fresh", False), args.command == "verify",
+              getattr(args, "full", False))
         return 0
     except (tests.CIError, OSError, KeyError, TypeError, ValueError, subprocess.SubprocessError) as error:
         print(f"ci-local: {error}", file=sys.stderr)

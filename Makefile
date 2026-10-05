@@ -1,4 +1,4 @@
-.PHONY: validate release-validate counts counts-check dist-check test eval static-check check check-local verify-local scaffold release-check public-release-check public-release-smoke
+.PHONY: validate release-validate counts counts-check dist-check test eval static-check check check-local verify-local check-pr scaffold release-check public-release-check public-release-smoke
 
 PY := python3
 
@@ -31,6 +31,9 @@ check-local:
 
 verify-local:
 	$(PY) tools/ci_local.py verify --staged --target origin/main
+
+check-pr:
+	$(PY) tools/release.py check-pr --base origin/main
 
 check: static-check test
 	@echo "check: all gates green"

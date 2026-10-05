@@ -98,7 +98,7 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "8537ef6588c06fc634735e2136311756030816322326c8db941ec6b5d850555b"
+      "cae2fad52238af4445b3a3f58b8d3f3091550875ccca594dbbf0928a9f0347d9"
     ,
     "flows/business-analysis.md":
       "aaebfe00ee5e062d23a881e0d0c989563426b2c026dcb07c78d74b0929477e5c"
@@ -155,7 +155,7 @@
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
     ,
     "scripts/backlog_compile.py":
-      "a1f3a3c3667f1690a4389cdd8c32eaaa6950d0bfe3c66cb0a37866d08939e86f"
+      "d04729a1f1c9bb84ed3f3e0ea61c33d31c9bab024776c2528fe2f8f7875b9c5b"
     ,
     "scripts/backlog_input_policy.py":
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
@@ -179,7 +179,7 @@
       "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
     ,
     "scripts/delivery_verification.py":
-      "88c8ab11b6d7bcd7ec471e9247252bcd4941ed90c6d0f889d7b50cc871c6247b"
+      "55f93cbcb2e9dc7387a4372f8ae22efe5fdd2010b2c369c76d7103601711f5d8"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -563,7 +563,7 @@
       "133710c7ea873588dab8559850ad3ac372dc8d2cd66d98bfe305ed82ad59226e"
     ,
     "skill-content/product-planning/references/structured-records.md":
-      "36c8d8889482e9f146f184bcd7e2becdda004bccc654b537196827c5e272ab66"
+      "f94756ed0c1cb85cf1675b9cd41f95793bffb028f684b1d49ee4711131bf53f7"
     ,
     "skill-content/product-planning/references/switch-story_size_budget-propose_split.md":
       "2518ebe50edf8d0778395117c6147346dad8f543d6380e5f1a50e9292ec75c0f"

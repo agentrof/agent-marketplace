@@ -2892,6 +2892,36 @@ def review_completion_findings(docs: Path, reviews: list[dict], sections: list[s
         errors.extend(accepted_minor_findings(docs, review["body"], review["path"], contract))
         errors.extend(review_loop_record(docs, review["body"], review["path"], review["props"]))
         errors.extend(recheck_closure_record(docs, review["body"], review["path"], review["props"]))
+        if review is current and review["props"].get("status") != "approved":
+            errors.extend(review_verdict_findings(review))
+    return errors
+
+
+REVIEW_VERDICTS = ("approved", "changes_requested")
+
+
+def review_verdict_findings(review: dict) -> list[str]:
+    """Check the verdict field of the review being written.
+
+    Atomic approval reads only this field, so an empty one under a concluded
+    Verdict section, or an approved one under a changes_requested status,
+    would otherwise refuse only after the owner approved the package.
+    """
+    props, path = review["props"], review["path"]
+    verdict = str(props.get("verdict") or "")
+    conclusion = re.search(r"(?m)^Conclusion \[Verdict\]:\s*(\S.+?)\s*$",
+                           section(review["body"], "Verdict"))
+    concluded = (conclusion is not None and meaningful_text(conclusion.group(1))
+                 and not generic_review_text(conclusion.group(1)))
+    errors = []
+    if verdict and verdict not in REVIEW_VERDICTS:
+        errors.append(f"{path} verdict must be approved or changes_requested")
+    elif concluded and not verdict:
+        errors.append(f"{path} concludes its Verdict section but its verdict field is empty;"
+                      " record the reader's verdict")
+    if verdict == "approved" and props.get("status") == "changes_requested":
+        errors.append(f"{path} verdict approved contradicts status changes_requested;"
+                      " set status draft, approval stamps approved")
     return errors
 
 
@@ -3724,6 +3754,17 @@ def check(args) -> int:
                       if record["backlog"] and getattr(args, "pin_reviews", True) else [])
     if args.approved and record["backlog"]:
         errors.extend(approval_findings(record, docs))
+    if getattr(args, "pre_approval", False) and record["backlog"]:
+        # The offer to the owner runs approval's own checks, on the reviews as
+        # approval will read them, so a refusal surfaces before the owner gate.
+        current, collect_errors = record, list(errors)
+        if pinned_reviews:
+            try:
+                with stage_package.candidate_session(), experience_validation_session():
+                    current, collect_errors = collect(docs)
+            except RuntimeError as exc:
+                collect_errors = [str(exc)]
+        errors.extend(approval_preflight(docs, current, collect_errors)[0])
     # A story over budget is advisory: the block adds no error of its own.
     # Only the Size Exceptions a review records are checked, and only while
     # the budget is on; at the default nothing is read.
@@ -4031,6 +4072,34 @@ def with_policy_pin(props: dict, pin: dict) -> dict:
     return result
 
 
+def approval_preflight(docs: Path, record: dict,
+                       collect_errors: list[str]) -> tuple[list[str], dict, dict, bool]:
+    """Run every check atomic approval runs before it writes.
+
+    Returns the findings beyond the collect errors, the preserved approved
+    sources, the policy pin and whether the backlog is already approved.
+    """
+    findings = approval_readiness_findings(record)
+    already_approved = (record.get("backlog") or {}).get("props", {}).get("status") == "approved"
+    preserved, pin = {}, {}
+    if not collect_errors and not findings:
+        if already_approved:
+            findings.extend(approval_findings(record, docs))
+            _preserved, preserve_errors = preserved_approval_sources(
+                record, docs, allow_new_approvals=True,
+            )
+            findings.extend(preserve_errors)
+        else:
+            preserved, preserve_errors = preserved_approval_sources(record, docs)
+            findings.extend(preserve_errors)
+            pin, pin_errors = policy_pin(docs)
+            findings.extend(pin_errors)
+            if not pin_errors:
+                findings.extend(review_pin_findings(record, docs, pin, preserved))
+                findings.extend(size_exception_approval_findings(record, docs))
+    return findings, preserved, pin, already_approved
+
+
 def approve(args) -> int:
     docs = docs_root(args.docs)
     # Experience receipt validation is expensive but immutable during this
@@ -4039,25 +4108,8 @@ def approve(args) -> int:
     # stale receipt data after the approval transition mutates Markdown.
     with stage_package.candidate_session(), experience_validation_session():
         record, errors = collect(docs)
-    errors.extend(approval_readiness_findings(record))
-    already_approved = record.get("backlog", {}).get("props", {}).get("status") == "approved"
-    preserved, pin = {}, {}
-    if not errors:
-        if already_approved:
-            errors.extend(approval_findings(record, docs))
-            _preserved, preserve_errors = preserved_approval_sources(
-                record, docs, allow_new_approvals=True,
-            )
-            errors.extend(preserve_errors)
-        else:
-            preserved, preserve_errors = preserved_approval_sources(record, docs)
-            errors.extend(preserve_errors)
-            pin, pin_errors = policy_pin(docs)
-            errors.extend(pin_errors)
-            if not pin_errors:
-                errors.extend(review_pin_findings(record, docs, pin, preserved))
-                errors.extend(size_exception_approval_findings(record, docs))
-    errors = sorted(set(errors))
+    findings, preserved, pin, already_approved = approval_preflight(docs, record, errors)
+    errors = sorted(set(errors + findings))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2,
                          ensure_ascii=False, sort_keys=True))
@@ -4672,7 +4724,10 @@ def main(argv=None) -> int:
     command.set_defaults(func=stub_story)
     command = sub.add_parser("check")
     command.add_argument("--docs", default=None)
-    command.add_argument("--approved", action="store_true")
+    stage = command.add_mutually_exclusive_group()
+    stage.add_argument("--approved", action="store_true")
+    stage.add_argument("--pre-approval", action="store_true",
+                       help="Also run every check atomic approval runs before it writes")
     command.add_argument("--render", action="store_true")
     command.add_argument("--json", action="store_true")
     command.set_defaults(func=check)

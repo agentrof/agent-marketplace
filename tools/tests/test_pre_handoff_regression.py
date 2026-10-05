@@ -1252,6 +1252,40 @@ class CandidateTests(unittest.TestCase):
         section = delivery.section_bodies(self.approve_evidence())["Implementation Evidence"]
         self.assertTrue(section.endswith("\n\n" + OWN_MARKER + " none."), section)
 
+    def test_at_spot_run_a_run_that_reuses_nothing_still_says_why_it_keeps_the_own_targets(self):
+        self.build(own="spot_run")
+        # The own target lies under the earlier story's only target, so nothing else is left to reuse.
+        self.write("tests/st001/test_api.py", suite("src/api/limit.txt", "test_limit", "10")
+                   + "\n\ndef test_limit_total():\n"
+                     "    assert pathlib.Path('src/api/total.txt').read_text(encoding='utf-8').strip() == '30'\n")
+        self.plan("ST-005", scenario("ST-005-TS-001", "required", "tests/st001/test_api.py::test_limit_total"))
+        self.write("run_all.py", PREFIX_SKIP)
+        self.write("src/api/limit.txt", "10\n")
+        self.commit("Plan an own target under the earlier story's target and repair its regression")
+        passed = self.run_regression()
+        self.assertEqual((passed["exit_code"], passed["candidate_intact"]), (0, True), self.output(passed))
+        self.freeze()
+        raw = verification.run_check(self.root, "test")
+        self.assertEqual(raw["pre_handoff_reuse"],
+                         "the pre-handoff run covered no earlier story's target beyond the Item's own")
+        self.assertEqual(raw["own_target_reuse"], "no --spot-run-file names the own targets QA runs itself, so the"
+                                                  " run reuses none of the Item's own targets")
+        self.assertNotIn("reused_pre_handoff", raw["identity"])
+
+    def test_at_spot_run_without_a_pre_handoff_run_the_run_says_why_it_keeps_the_own_targets(self):
+        self.build(value=None)
+        policy(self.docs, "init")
+        policy(self.docs, "set", "--switch", OWN_SWITCH, "--value", "spot_run")
+        policy(self.docs, "approve")
+        self.commit("Approve own_target_reuse spot_run with pre_handoff_regression off")
+        self.write("src/api/limit.txt", "10\n")
+        self.commit("Repair the earlier story's regression")
+        self.freeze()
+        raw = verification.run_check(self.root, "test")
+        self.assertNotIn("pre_handoff_reuse", raw)
+        self.assertEqual(raw["own_target_reuse"], "no --spot-run-file names the own targets QA runs itself, so the"
+                                                  " run reuses none of the Item's own targets")
+
     def test_the_record_keeps_no_own_target_block_at_off(self):
         self.frozen_after_a_passing_run()
         raw = verification.run_check(self.root, "test")

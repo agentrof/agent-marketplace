@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 from contextlib import contextmanager
 import hashlib
 import hmac
@@ -256,8 +257,94 @@ def assert_generation(root, expected):
         raise tests.CIError("source or Git state was written during local validation; restored bytes do not preserve this attempt")
 
 
-def referencing_tests(root, paths, policy, all_ids):
-    """Tests whose module names a changed non-Python input: by file name, or by folder and name when the name repeats."""
+HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.M)
+TESTS_DIRECTORY = "tools/tests/"
+
+
+def changed_lines(root, source, path, text):
+    """The non-blank lines of the candidate's version of a file that differ from the base.
+
+    A deletion counts as the lines around it. Blank lines are left out, so the
+    blank line a diff takes between two functions does not count as code
+    outside them, and a change of blank lines alone changes nothing.
+    """
+    raw = tests.git(root, "diff", "--no-ext-diff", "--no-color", "--unified=0", source["base"], source["tree"],
+                    "--", path).decode("utf-8", "replace")
+    lines = text.splitlines()
+    changed = set()
+    for start, count in HUNK.findall(raw):
+        low = int(start)
+        high = low + int(count or 1) - 1 if count != "0" else low + 1
+        changed.update(number for number in range(low, high + 1)
+                       if 0 < number <= len(lines) and lines[number - 1].strip())
+    return sorted(changed)
+
+
+def candidate_text(root, source, path):
+    try:
+        return tests.git(root, "show", f"{source['tree']}:{path}").decode("utf-8")
+    except (tests.CIError, UnicodeDecodeError):
+        return None
+
+
+def definitions(text):
+    """Each top-level function and class and each method: (first line, last line, class, function), or None."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    def first(node):
+        return min([node.lineno, *(decorator.lineno for decorator in node.decorator_list)])
+    found = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            found.append((first(node), node.end_lineno, None, node.name))
+        elif isinstance(node, ast.ClassDef):
+            found.append((first(node), node.end_lineno, node.name, None))
+            found.extend((first(item), item.end_lineno, node.name, item.name) for item in node.body
+                         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    return found
+
+
+def enclosing_functions(lines, found):
+    """The (class, function) each line lies in, or None when one lies outside every function."""
+    names = set()
+    for line in lines:
+        enclosing = [item for item in found if item[3] is not None and item[0] <= line <= item[1]]
+        if not enclosing:
+            return None
+        names.add(max(enclosing, key=lambda item: item[0])[2:])
+    return names
+
+
+def module_path(module):
+    return module.replace(".", "/") + ".py"
+
+
+def method_ids(module, methods, all_ids):
+    # An inherited test runs under each class that has it, so the method name selects it everywhere in the module.
+    return [test_id for test_id in all_ids if tests.module_of(test_id) == module and test_id.rsplit(".", 1)[-1] in methods]
+
+
+def module_ids(module, all_ids):
+    return [test_id for test_id in all_ids if tests.module_of(test_id) == module]
+
+
+def changed_test_ids(root, source, path, module, all_ids):
+    """The changed test methods of a changed test module, or the whole module when other code changed."""
+    text = candidate_text(root, source, path)
+    found = definitions(text) if text is not None else None
+    names = enclosing_functions(changed_lines(root, source, path, text), found) if found is not None else None
+    if names is None or any(not name.startswith("test") for _cls, name in names):
+        return module_ids(module, all_ids), True
+    return method_ids(module, {name for _cls, name in names}, all_ids), False
+
+
+def naming_ids(root, paths, policy, all_ids):
+    """Tests that name a changed non-Python input: by file name, or by folder and name when the name repeats.
+
+    Only the test methods that name it run, unless the module names it outside them.
+    """
     tracked = [PurePosixPath(os.fsdecode(raw)) for raw in tests.git(root, "ls-files", "-z").split(b"\0") if raw]
     counts = {}
     for path in tracked:
@@ -267,10 +354,38 @@ def referencing_tests(root, paths, policy, all_ids):
         if path.suffix == ".py" or tests.matches(path.as_posix(), policy.get("generated_paths", [])):
             continue
         needles.add(path.name if counts.get(path.name, 0) <= 1 or len(path.parts) < 2 else "/".join(path.parts[-2:]))
-    modules = {tests.module_of(test_id) for test_id in all_ids}
-    named = {module for module in modules if needles and any(
-        needle in (root / (module.replace(".", "/") + ".py")).read_text(encoding="utf-8") for needle in needles)}
-    return {test_id for test_id in all_ids if tests.module_of(test_id) in named}
+    selected = []
+    for module in sorted({tests.module_of(test_id) for test_id in all_ids}) if needles else []:
+        text = (root / module_path(module)).read_text(encoding="utf-8")
+        lines = [number for number, line in enumerate(text.splitlines(), 1) if any(needle in line for needle in needles)]
+        if not lines:
+            continue
+        found = definitions(text)
+        names = enclosing_functions(lines, found) if found is not None else None
+        if names is None or any(not name.startswith("test") for _cls, name in names):
+            selected += module_ids(module, all_ids)
+        else:
+            selected += method_ids(module, {name for _cls, name in names}, all_ids)
+    return selected
+
+
+def own_test_ids(root, source, path, module, all_ids):
+    """The tests of a changed module's own test module, those that name a changed definition first."""
+    text = candidate_text(root, source, path)
+    found = definitions(text) if text is not None else None
+    names = enclosing_functions(changed_lines(root, source, path, text), found) if found is not None else None
+    every = module_ids(module, all_ids)
+    if names is None:
+        return [], every
+    if not names:
+        return [], []
+    words = re.compile(r"\b(?:" + "|".join(sorted({re.escape(name) for pair in names for name in pair if name})) + r")\b")
+    test_text = (root / module_path(module)).read_text(encoding="utf-8").splitlines()
+    test_found = definitions("\n".join(test_text)) or []
+    naming = {name for start, end, _cls, name in test_found if name and name.startswith("test")
+              and words.search("\n".join(test_text[start - 1:end]))}
+    first = method_ids(module, naming, all_ids)
+    return first, [test_id for test_id in every if test_id not in set(first)]
 
 
 def estimate_weights(policy, runner_os):
@@ -282,25 +397,46 @@ def estimate_weights(policy, runner_os):
     return weights
 
 
-def changed_ids(root, paths, policy, all_ids, weights, budget):
-    """The change's own tests, in order, within the local budget.
+def changed_ids(root, source, policy, all_ids, weights, budget):
+    """The change's own tests, most specific first, within the local budget.
 
-    First the changed test modules, then the test module named after each
-    changed Python module, then the tests whose source names a changed
-    non-Python input. Pull request CI runs everything; a test that would take
-    the estimate past the budget is left to it.
+    In order: the changed test methods (a whole changed test module when code
+    outside its test methods changed); the test methods that name a changed
+    non-Python input; in the own test module of each changed Python module,
+    the tests that name a changed function or class, then the test modules
+    that import a changed test helper, then the rest of each own test module.
+    Pull request CI runs everything; a test that would take the estimate past
+    the budget is left to it.
     """
     # A generated copy is checked by the distribution sync; its canonical source selects the tests.
-    real = [path for path in paths if not tests.matches(path, policy.get("generated_paths", []))]
+    real = [path for path in source["changed_paths"] if not tests.matches(path, policy.get("generated_paths", []))]
     stems = {tests.module_of(test_id).rsplit(".", 1)[-1]: tests.module_of(test_id) for test_id in all_ids}
-    names = [PurePosixPath(path).stem for path in real if path.endswith(".py")]
-    changed = {stems[name] for name in names if name in stems}
-    own = {stems["test_" + name] for name in names if "test_" + name in stems}
-    tiers = [[test_id for test_id in all_ids if tests.module_of(test_id) in changed],
-             [test_id for test_id in all_ids if tests.module_of(test_id) in own],
-             sorted(referencing_tests(root, real, policy, all_ids))]
-    selected, seen, spent, deferred = [], set(), 0.0, 0
-    for tier in tiers:
+    python = [path for path in real if path.endswith(".py") and candidate_text(root, source, path) is not None]
+    changed_tests, own_first, own_rest, helpers = [], [], [], set()
+    for path in python:
+        stem = PurePosixPath(path).stem
+        if path.startswith(TESTS_DIRECTORY) and stem in stems:
+            ids, whole = changed_test_ids(root, source, path, stems[stem], all_ids)
+            changed_tests += ids
+            if whole:
+                helpers.add(stem)
+        elif path.startswith(TESTS_DIRECTORY):
+            helpers.add(stem)
+        if not path.startswith(TESTS_DIRECTORY) and "test_" + stem in stems:
+            first, rest = own_test_ids(root, source, path, stems["test_" + stem], all_ids)
+            own_first += first
+            own_rest += rest
+    importers = []
+    if helpers:
+        graph = tests.import_graph(root)
+        modules = sorted({module for stem, module in stems.items() if graph.get(stem, set()) & helpers})
+        importers = [test_id for module in modules for test_id in module_ids(module, all_ids)]
+    tiers = [("changed tests", changed_tests), ("tests naming a changed input", naming_ids(root, real, policy, all_ids)),
+             ("tests naming a changed definition", own_first), ("importers of changed test code", importers),
+             ("other own-module tests", own_rest)]
+    selected, seen, spent, deferred, counts = [], set(), 0.0, 0, []
+    for label, tier in tiers:
+        taken = 0
         for test_id in tier:
             if test_id in seen:
                 continue
@@ -311,8 +447,10 @@ def changed_ids(root, paths, policy, all_ids, weights, budget):
                 continue
             selected.append(test_id)
             spent += cost
-    reason = (f"{len(selected)} tests of the change: changed test modules, the test modules of changed"
-              " modules, tests naming a changed input")
+            taken += 1
+        if taken:
+            counts.append(f"{label} {taken}")
+    reason = f"{len(selected)} tests of the change: " + (", ".join(counts) or "none")
     if deferred:
         reason += f"; {deferred} more left to pull request CI past the local budget"
     return sorted(selected), "changed", reason
@@ -331,7 +469,7 @@ def make_plan(root, target="origin/main", jobs=None, full=False):
         selected, mode, reason = list(ids), "full", "target merge-base unavailable; full local suite required"
     else:
         # Pull request CI runs every test on every lane; this gate gives the change's own tests before the push.
-        selected, mode, reason = (changed_ids(root, source["changed_paths"], policy, ids, weights,
+        selected, mode, reason = (changed_ids(root, source, policy, ids, weights,
                                               local_policy["budget_estimated_seconds"])
                                   if local_policy["test_selection"] == "changed" else
                                   tests.select_ids("impact", source["changed_paths"], policy, ids, root))
@@ -690,14 +828,19 @@ def check(root, target="origin/main", jobs=None, fresh=False, verify_only=False,
             attempt.update(plan_hash=plan["plan_hash"], environment=plan["environment"], jobs=jobs, full=full)
             tests.write_json(latest, attempt)
             started = time.monotonic()
-            for command in plan["static_commands"]:
-                subprocess.run([sys.executable, *command], cwd=root, check=True,
-                               env=execution_environment(root))
-            static_seconds = time.monotonic() - started
-            assert_current(root, plan)
-            assert_generation(root, generation)
+            # Static checks only read the candidate, so they run beside the test workers.
+            static = [subprocess.Popen([sys.executable, *command], cwd=root, env=execution_environment(root),
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT) for command in plan["static_commands"]]
             run_started = time.monotonic()
-            reports = previous["reports"] if valid and not fresh else execute_workers(root, plan, cache)
+            try:
+                reports = previous["reports"] if valid and not fresh else execute_workers(root, plan, cache)
+            finally:
+                outputs = [process.communicate()[0] for process in static]
+            static_seconds = time.monotonic() - started
+            for command, process, output in zip(plan["static_commands"], static, outputs):
+                print(output.decode("utf-8", "replace"), end="")
+                if process.returncode:
+                    raise subprocess.CalledProcessError(process.returncode, [sys.executable, *command])
             assert_current(root, plan)
             assert_generation(root, generation)
             verify_reports(plan, reports)

@@ -29,8 +29,9 @@ make verify-local
 
 `check-local` always runs static gates and the change's own tests from the
 full branch base-to-staged-candidate diff, with four isolated workers by
-default: the changed test modules, the test module of each changed module and
-the tests that name a changed input, within a budget of about three minutes.
+default: the changed test methods, the tests that name a changed input or a
+changed function, and the modules that import a changed test helper, within a
+budget of about 40 seconds.
 Pull request CI runs every test on Linux and macOS, so the local gate never
 runs the whole suite on its own;
 `python3 tools/ci_local.py check --staged --full` runs every test on request,

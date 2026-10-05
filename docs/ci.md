@@ -109,17 +109,25 @@ make verify-local
 The direct interfaces are `python3 tools/ci_local.py check --staged --target
 origin/main` and `python3 tools/ci_local.py verify --staged --target origin/main`.
 `check --fresh` ignores saved test results. `ci-local-policy.json` sets
-`test_selection`. At `changed` the gate runs the change's own tests, in this
-order, while pull request CI runs every test on Linux and macOS: the changed
-test modules, the test module named after each changed Python module
-(`test_<module>.py`), and the tests whose source names a changed non-Python
-input (by file name, or by folder and name when the name repeats). Generated
-`dist/` copies select nothing of their own; the distribution sync check and
-their canonical sources cover them. `budget_estimated_seconds` bounds that
-selection by the full-suite lane's per-test estimates: a test that would pass
-the budget is left to pull request CI, and the selection reason counts those
-tests; 720 estimated seconds run in about three minutes with four workers on a
-recent Mac. At `impact` the gate selects as pull request impact selection does.
+`test_selection`. At `changed` the gate runs the change's own tests, most
+specific first, while pull request CI runs every test on Linux and macOS:
+1. the changed test methods of each changed test module, or the whole module
+   when code outside its test methods changed (blank lines aside);
+2. the test methods whose source names a changed non-Python input (by file
+   name, or by folder and name when the name repeats), or the whole module
+   when it names the input outside its test methods;
+3. in the test module named after each changed Python module
+   (`test_<module>.py`), the tests that name a changed function or class;
+4. the test modules that import a changed test helper;
+5. the rest of each such own test module.
+
+Generated `dist/` copies select nothing of their own; the distribution sync
+check and their canonical sources cover them. `budget_estimated_seconds` bounds
+the selection by the full-suite lane's per-test estimates, in that order: a
+test that would pass the budget is left to pull request CI, and the selection
+reason counts those tests. 120 estimated seconds run in about 35 seconds with
+four workers on a recent Mac, static checks included, which run beside the
+test workers. At `impact` the gate selects as pull request impact selection does.
 `check --full` runs every test, for a change whose host-specific behavior CI
 cannot cover; `verify` then checks that full receipt. On macOS, `direct_tools`
 names the tools whose `/usr/bin` entry is an `xcrun` trampoline, which resolves

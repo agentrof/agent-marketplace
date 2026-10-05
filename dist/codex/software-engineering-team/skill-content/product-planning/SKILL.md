@@ -90,7 +90,7 @@ and test plan. It covers scope, slicing, criteria, test design, dependencies,
 role ownership, findings and verdict. The root review derives from the backlog
 and relates to exactly every epic. It covers cross-epic overlap, dependency
 direction, cycles, delivery sequencing, shared contracts, deferred criteria,
-global coverage, findings and verdict.
+global and, in Requirement mode, Requirement coverage, findings and verdict.
 
 The latest root review's `Deferred Criteria` table records exactly four fields:
 `criterion_ref`, `owner_role`, `reason`, `revisit_trigger`. The criterion is a

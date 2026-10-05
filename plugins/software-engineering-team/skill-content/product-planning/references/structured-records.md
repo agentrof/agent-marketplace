@@ -187,6 +187,9 @@ Findings
 Verdict
 ```
 
+A Requirement-mode root review also has `Requirement Coverage` after
+`Deferred Criteria`; a manual-mode root review has none.
+
 `Deferred Criteria` is not prose. It is a table with exactly these columns:
 
 ```markdown
@@ -204,13 +207,32 @@ active AC and BR in an approved BA registry is either covered by one or more
 stories or occurs once in this table. A shared criterion may support multiple
 delivery slices, but it cannot be both covered and deferred. A root
 `analysis_scopes` declaration expands that equality to a complete named scope.
-Overlap, unknown/wrong-owner links and uncovered
-identities fail. Every other review section contains section-labelled
-`Evidence [<section>]:` and `Conclusion [<section>]:` lines. Evidence cites at
-least one resolvable vault-absolute
-wikilink and explains why it supports that lens; the conclusion states the
-lens-specific result. Long generic prose, `approved`, `pass`, `looks good`,
-`no findings`, `none` and untouched placeholders fail.
+Overlap, unknown/wrong-owner links and uncovered identities fail. Every review
+section other than `Deferred Criteria` and `Requirement Coverage` contains
+section-labelled `Evidence [<section>]:` and `Conclusion [<section>]:` lines.
+Evidence cites at least one resolvable vault-absolute wikilink and explains why
+it supports that lens; the conclusion states the lens-specific result. Long
+generic prose, `approved`, `pass`, `looks good`, `no findings`, `none` and
+untouched placeholders fail.
+
+`Requirement Coverage` is not prose either. It is a table with exactly these
+columns:
+
+```markdown
+| requirement | story_ids | disposition |
+|---|---|---|
+| REQ-001 | ST-001, ST-002 | covered |
+```
+
+`requirement` is a Requirement id, and `story_ids` lists, separated by commas,
+the stories whose `implements` link names it. `init`, `begin-revision` and
+`stub-backlog-review` write the table, and each new round carries the previous
+round's rows. Once a story implements the root `requirement_ref`, the
+pre-approval check and approval require exactly one row for it whose
+`story_ids` are exactly those stories. A Requirement reads as incorporated only
+while a row of the latest approved root review names every story that
+implements it, so keep the row of every Requirement an earlier revision
+incorporated.
 
 Authored titles and matching H1s are direct, natural graph labels in the
 configured output language. Stable type keys, paths, IDs, registry JSON and

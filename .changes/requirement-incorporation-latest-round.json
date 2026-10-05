@@ -1,0 +1,6 @@
+{
+  "summary": "Requirement incorporation reads the approved root backlog review with the highest round number, so a round from 10 on no longer loses to round 9. A Requirement-mode root review carries a `Requirement Coverage` table with `requirement`, `story_ids` and `disposition`: `init`, `begin-revision` and `stub-backlog-review` write it and carry the previous round's rows, and once a story implements the backlog's Requirement, `check --pre-approval` and `approve` require exactly one row for it whose `story_ids` are exactly those stories. Manual mode is unchanged.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

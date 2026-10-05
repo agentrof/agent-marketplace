@@ -175,9 +175,9 @@ Use `make counts` only to refresh derived README counts. Never edit `dist/`
 directly.
 
 `check-local` requires complete staging and exact worktree/index equality.
-It always runs static checks, then the complete affected selection or valid
-local evidence for exactly that candidate. Unknown/shared inputs select full
-coverage. Verify again immediately before commit. `make check` remains the
+It always runs static checks, then the change's own tests or valid local
+evidence for exactly that candidate; pull request CI runs every test on Linux
+and macOS, and `check --full` runs them locally on request. Verify again immediately before commit. `make check` remains the
 exhaustive sequential oracle; local receipts never replace required remote
 platform, installation or release checks.
 

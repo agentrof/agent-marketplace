@@ -1,0 +1,4 @@
+{
+  "summary": "The local pre-push gate runs only the change's own tests within a budget of about three minutes, with four workers that call Git directly on macOS, names failing tests last and keeps their logs; pull request CI runs every test on Linux and macOS.",
+  "components": {}
+}

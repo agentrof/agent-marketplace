@@ -1,0 +1,4 @@
+{
+  "summary": "Every pull request and merge queue group runs the full test suite in CI; main reuses that proof for the identical tree.",
+  "components": {}
+}

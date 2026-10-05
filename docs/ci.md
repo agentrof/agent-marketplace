@@ -70,9 +70,13 @@ observations, remain real.
 
 | Profile | Selection |
 | --- | --- |
-| `full` | Every test on Linux; on macOS the platform and macOS groups; on Windows the platform and Windows groups, with the mandatory native regressions |
-| `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff of a PR or merge queue group |
-| `reuse` | Prior successful validation of identical input, with fresh static and transition checks |
+| `full` | Every test on Linux; on macOS the platform and macOS groups; on Windows the platform and Windows groups, with the mandatory native regressions. Every PR, merge queue group, manual and scheduled run, and main without reusable proof |
+| `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff; on request only, no event selects it |
+| `reuse` | Main's prior successful validation of the identical input, its PR's full run, with fresh static and transition checks |
+
+Every pull request runs `full`: the sharded Linux lane runs the whole suite in
+about as long as an impact selection, and the local gate runs only a change's
+own tests, so the full suite runs before every merge.
 
 Unknown paths, new test modules, shared fixtures, workflow/selection changes
 and shared runtime inputs select full coverage. Existing test changes include
@@ -128,7 +132,7 @@ the selection by the full-suite lane's per-test estimates, in that order: a
 test that would pass the budget is left to pull request CI, and the selection
 reason counts those tests. 120 estimated seconds run in about 35 seconds with
 four workers on a recent Mac, static checks included, which run beside the
-test workers. At `impact` the gate selects as pull request impact selection does.
+test workers. At `impact` the gate selects as `ci_tests.py plan --mode impact` does.
 `check --full` runs every test, for a change whose host-specific behavior CI
 cannot cover; `verify` then checks that full receipt. On macOS, `direct_tools`
 names the tools whose `/usr/bin` entry is an `xcrun` trampoline, which resolves

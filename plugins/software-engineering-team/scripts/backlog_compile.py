@@ -72,6 +72,11 @@ REVIEW_PLACEHOLDER_RE = re.compile(
 _EXPERIENCE_APPLICATION_CACHE_STACK: list[dict[Path, tuple[dict, list[str]]]] = []
 _EXPERIENCE_PACKAGE_CACHE_STACK: list[dict[Path, tuple[dict, list[str]]]] = []
 _READ_CACHE_STACK: list[dict[tuple, object]] = []
+# Successful Git reads kept for the life of the process, keyed by the resolved
+# repository path, an object id and the exact read arguments. An object id
+# names immutable content and every read passes --no-replace-objects, so a kept
+# read equals a fresh one; a name such as HEAD is resolved again on every call.
+_GIT_OBJECT_READS: dict[tuple, object] = {}
 
 
 @contextlib.contextmanager
@@ -2982,18 +2987,55 @@ def approval_stamp_findings(path: Path, docs: Path) -> list[str]:
     return errors
 
 
-def committed_approval_sources(project: Path, docs: Path, commit: str = "HEAD") -> dict[Path, bytes]:
-    """Read the backlog at one pinned HEAD, with object IDs as batch input."""
-    head = subprocess.run(
-        ["git", "--no-replace-objects", "rev-parse", "--verify", commit],
+def git_object_id(project: Path, name: str) -> str | None:
+    """Return the object id that a name resolves to, or None when Git cannot resolve it.
+
+    Git resolves a full object id to itself whatever the refs hold, so a name
+    that resolved to itself is not resolved again; HEAD and every other name
+    are resolved on every call.
+    """
+    key = ("object-id", project.resolve(), name)
+    if key in _GIT_OBJECT_READS:
+        return name
+    resolved = subprocess.run(
+        ["git", "--no-replace-objects", "rev-parse", "--verify", name],
         cwd=project, capture_output=True, check=False,
     )
-    if head.returncode:
+    if resolved.returncode:
+        return None
+    object_id = resolved.stdout.decode("ascii").strip()
+    if object_id == name:
+        _GIT_OBJECT_READS[key] = object_id
+    return object_id
+
+
+def committed_approval_sources(project: Path, docs: Path, commit: str = "HEAD") -> dict[Path, bytes]:
+    """Read the backlog at one pinned HEAD, with object IDs as batch input.
+
+    Each commit is read once per process. Its dict is kept for each given
+    project path, which the dict's paths start with, and every call returns a
+    new copy.
+    """
+    head = git_object_id(project, commit)
+    if head is None:
         return {}
     prefix = (docs / "backlog").relative_to(project).as_posix()
+    repository = project.resolve()
+    read = ("tree-sources", repository, head, prefix)
+    if read not in _GIT_OBJECT_READS:
+        _GIT_OBJECT_READS[read] = committed_tree_sources(project, head, prefix)
+    paths = ("approval-sources", repository, head, prefix, project)
+    if paths not in _GIT_OBJECT_READS:
+        _GIT_OBJECT_READS[paths] = {project / relative: content
+                                    for relative, content in _GIT_OBJECT_READS[read].items()}
+    return dict(_GIT_OBJECT_READS[paths])
+
+
+def committed_tree_sources(project: Path, head: str, prefix: str) -> dict[str, bytes]:
+    """Read every regular file under a prefix at one commit object id, by repository path."""
     listing = subprocess.run(
         ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-r", "-z",
-         head.stdout.decode("ascii").strip(), "--", prefix],
+         head, "--", prefix],
         cwd=project, capture_output=True, check=False,
     )
     if listing.returncode:
@@ -3007,7 +3049,7 @@ def committed_approval_sources(project: Path, docs: Path, commit: str = "HEAD") 
         if mode not in {b"100644", b"100755"}:
             raise ValueError("committed backlog approval contains a non-regular file")
         if kind == b"blob":
-            selected[project / raw.decode("utf-8", errors="surrogateescape")] = oid
+            selected[raw.decode("utf-8", errors="surrogateescape")] = oid
     if not selected:
         return {}
     objects = subprocess.run(
@@ -3040,12 +3082,18 @@ def history_project(docs: Path) -> Path | None:
 
 def history_listing(project: Path, commit: str, relative: str) -> list[bytes] | None:
     """Return the tree rows of one path at one commit, or None when Git cannot list it."""
-    listing = subprocess.run(
-        ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-z",
-         commit, "--", relative], cwd=project, capture_output=True, check=False)
-    if listing.returncode:
+    object_id = git_object_id(project, commit)
+    if object_id is None:
         return None
-    return [row for row in listing.stdout.split(b"\0") if row]
+    key = ("listing", project.resolve(), object_id, relative)
+    if key not in _GIT_OBJECT_READS:
+        listing = subprocess.run(
+            ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-z",
+             object_id, "--", relative], cwd=project, capture_output=True, check=False)
+        if listing.returncode:
+            return None
+        _GIT_OBJECT_READS[key] = tuple(row for row in listing.stdout.split(b"\0") if row)
+    return list(_GIT_OBJECT_READS[key])
 
 
 def history_blob(project: Path, commit: str, relative: str) -> bytes | None:
@@ -3056,9 +3104,14 @@ def history_blob(project: Path, commit: str, relative: str) -> bytes | None:
     mode, kind, oid = fields.split(b" ")
     if mode not in {b"100644", b"100755"} or kind != b"blob" or name != relative.encode("utf-8"):
         return None
-    shown = subprocess.run(["git", "--no-replace-objects", "cat-file", "blob", oid.decode("ascii")],
-                           cwd=project, capture_output=True, check=False)
-    return shown.stdout if not shown.returncode else None
+    key = ("blob", project.resolve(), oid)
+    if key not in _GIT_OBJECT_READS:
+        shown = subprocess.run(["git", "--no-replace-objects", "cat-file", "blob", oid.decode("ascii")],
+                               cwd=project, capture_output=True, check=False)
+        if shown.returncode:
+            return None
+        _GIT_OBJECT_READS[key] = shown.stdout
+    return _GIT_OBJECT_READS[key]
 
 
 def approved_history_sources(project: Path, docs: Path, commit: str) -> dict[Path, bytes] | None:
@@ -3125,7 +3178,11 @@ def history_commits(project: Path, path: Path, needle: str = "") -> list[str]:
         command.extend(["-S", needle])
     command.extend(["--", path.relative_to(project).as_posix()])
     result = subprocess.run(command, cwd=project, capture_output=True, text=True, check=False)
-    return result.stdout.split() if not result.returncode else []
+    commits = result.stdout.split() if not result.returncode else []
+    # %H prints full object ids, which git_object_id would resolve to themselves.
+    repository = project.resolve()
+    _GIT_OBJECT_READS.update({("object-id", repository, commit): commit for commit in commits})
+    return commits
 
 
 def historical_source_approval(docs: Path, target: str, label: str, status: str) -> bool:

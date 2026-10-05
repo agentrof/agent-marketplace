@@ -121,16 +121,28 @@ class LocalValidationTests(unittest.TestCase):
     def test_candidate_change_during_static_check_invalidates_previous_success(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
             self.run_check()
-            original = subprocess.run
-            def mutate_static(command, **kwargs):
-                if command[-1] == 'static.py':
+            original = subprocess.Popen
+            def mutate_static(command, *args, **kwargs):
+                if isinstance(command, list) and command[-1] == 'static.py':
                     self.source.write_text('different')
-                return original(command, **kwargs)
-            with mock.patch.object(ci_local.subprocess, 'run', side_effect=mutate_static):
+                return original(command, *args, **kwargs)
+            with mock.patch.object(ci_local.subprocess, 'Popen', side_effect=mutate_static):
                 with self.assertRaises(ci_tests.CIError):
                     self.run_check()
         receipt = ci_tests.read_json(self.root / ci_local.CACHE_PATH / 'latest.json')
         self.assertEqual(receipt['status'], 'failed')
+
+    def test_a_failing_static_check_fails_the_attempt_after_the_workers_it_ran_beside(self):
+        (self.root / 'static.py').write_text('import sys\nprint("static finding")\nsys.exit(3)\n')
+        self.git('add', '--all')
+        output = io.StringIO()
+        with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)) as worker, \
+                mock.patch('sys.stdout', output), self.assertRaises(subprocess.CalledProcessError) as raised:
+            ci_local.check(self.root)
+        self.assertEqual(raised.exception.returncode, 3)
+        self.assertEqual(worker.call_count, 1)
+        self.assertIn('static finding', output.getvalue())
+        self.assertEqual(ci_tests.read_json(self.root / ci_local.CACHE_PATH / 'latest.json')['status'], 'failed')
 
     def test_reuse_is_exact_fresh_static_and_does_not_extend_expiry(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)) as worker:
@@ -509,9 +521,78 @@ class LocalValidationTests(unittest.TestCase):
         (self.root / 'data.json').write_text('{"changed": true}\n')
         self.git('add', '--all')
         modules, plan = self.selected_modules()
-        # Changed test modules come first, then the test modules of changed modules; the rest waits for CI.
-        self.assertEqual(modules, ['tools.tests.test_helper', 'tools.tests.test_uses_helper'])
+        # Changed tests come first, then tests naming a changed input; the own test module waits for CI.
+        self.assertEqual(modules, ['tools.tests.test_names_input', 'tools.tests.test_uses_helper'])
         self.assertIn('1 more left to pull request CI past the local budget', plan['selection_reason'])
+
+    def write_module(self, name, text):
+        path = self.root / f'tools/tests/{name}.py'
+        path.write_text(text)
+        if f'tools.tests.{name}' not in self.policy['known_test_modules']:
+            self.policy['known_test_modules'].append(f'tools.tests.{name}')
+            ci_tests.write_json(self.root / ci_tests.POLICY_PATH, self.policy)
+        return path
+
+    def commit_base(self):
+        self.git('add', '--all')
+        self.git('commit', '-qm', 'base')
+        self.git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+
+    def selected_ids(self):
+        self.git('add', '--all')
+        return ci_local.make_plan(self.root)['selected_ids']
+
+    def test_a_changed_test_method_selects_that_method_and_other_code_its_module(self):
+        self.changed_fixture()
+        module = ('import unittest\nclass Case(unittest.TestCase):\n    def setUp(self):\n        self.value = 1\n'
+                  '    def test_first(self):\n        self.assertEqual(self.value, 1)\n'
+                  '    def test_second(self):\n        self.assertTrue(True)\n')
+        path = self.write_module('test_methods', module)
+        self.commit_base()
+        path.write_text(module.replace('self.assertTrue(True)', 'self.assertFalse(False)'))
+        self.assertEqual(self.selected_ids(), ['tools.tests.test_methods.Case.test_second'])
+        path.write_text(module + '    def test_third(self):\n        pass\n')
+        self.assertEqual(self.selected_ids(), ['tools.tests.test_methods.Case.test_third'])
+        path.write_text(module.replace('self.value = 1', 'self.value = 1  # shared'))
+        self.assertEqual(self.selected_ids(), ['tools.tests.test_methods.Case.test_first',
+                                               'tools.tests.test_methods.Case.test_second'])
+
+    def test_a_named_input_selects_the_methods_that_name_it_or_the_module_that_does(self):
+        self.changed_fixture()
+        self.write_module('test_inside', 'import unittest\nclass Case(unittest.TestCase):\n'
+                          '    def test_reads(self):\n        self.assertTrue("data.json")\n'
+                          '    def test_other(self):\n        pass\n')
+        self.commit_base()
+        (self.root / 'data.json').write_text('{"changed": true}\n')
+        selected = self.selected_ids()
+        self.assertIn('tools.tests.test_inside.Case.test_reads', selected)
+        self.assertNotIn('tools.tests.test_inside.Case.test_other', selected)
+        # test_names_input names it at module level, so its whole module runs.
+        self.assertIn('tools.tests.test_names_input.Case.test_it', selected)
+
+    def test_own_module_tests_that_name_a_changed_function_run_first(self):
+        self.changed_fixture(budget=1)
+        source = 'def alpha():\n    return 1\n\n\ndef beta():\n    return 2\n'
+        (self.root / 'tools/helper.py').write_text(source)
+        self.write_module('test_helper', 'import unittest\nfrom tools import helper\n'
+                          'class Case(unittest.TestCase):\n'
+                          '    def test_alpha(self):\n        self.assertEqual(helper.alpha(), 1)\n'
+                          '    def test_beta(self):\n        self.assertEqual(helper.beta(), 2)\n')
+        self.commit_base()
+        (self.root / 'tools/helper.py').write_text(source.replace('return 2', 'return 2  # changed'))
+        plan_ids = self.selected_ids()
+        self.assertEqual(plan_ids, ['tools.tests.test_helper.Case.test_beta'])
+
+    def test_a_changed_test_helper_selects_the_modules_that_import_it(self):
+        self.changed_fixture()
+        support = self.root / 'tools/tests/support.py'
+        support.write_text('VALUE = 1\n')
+        self.write_module('test_uses_support', 'import unittest\nfrom tools.tests import support\n'
+                          'class Case(unittest.TestCase):\n    def test_it(self):\n'
+                          '        self.assertEqual(support.VALUE, 1)\n')
+        self.commit_base()
+        support.write_text('VALUE = 1  # changed\n')
+        self.assertEqual(self.selected_ids(), ['tools.tests.test_uses_support.Case.test_it'])
 
     def test_a_failed_run_names_its_failing_tests_last_and_keeps_the_worker_logs(self):
         self.test_path.write_text('import unittest\nclass Example(unittest.TestCase):\n'

@@ -165,19 +165,16 @@ Every scenario has a stable `<story-id>-TS-###` heading and this shape:
 - Then: the observable outcome is correct
 ```
 
-`automation` is `required` or `manual`; `required` needs an
-`automation_target`. The target records intended delivery work and need not
-exist yet. Every scenario has non-empty `source_refs`. Feature scenarios cite
-only their story's declared criteria. Defect and technical scenarios may cite
-their story's declared criteria and approved `related_to` evidence. Every
-declared planning source appears in at least one scenario.
-The `Coverage Classes` table contains exactly `empty`, `boundary`,
-`invalid-input`, `authorization`, `duplicate-concurrent`, `failure` and
-`adjacent-regression`. Each row is `covered` with existing scenario IDs or
-`not_applicable` with no scenario IDs and a concrete reason. The union of all
-`covered` rows equals the story's exact scenario set; one scenario may cover
-multiple classes, but none may remain unclassified. A missing class, unknown
-scenario, orphan scenario or unexplained exclusion fails the compiler.
+`automation` is `required` or `manual`; `required` needs an `automation_target`. The target records
+intended delivery work and need not exist yet. Every scenario has non-empty `source_refs`. Feature
+scenarios cite only their story's declared criteria. Defect and technical scenarios may cite their
+story's declared criteria and approved `related_to` evidence. Every declared planning source appears
+in at least one scenario. The `Coverage Classes` table contains exactly `empty`, `boundary`,
+`invalid-input`, `authorization`, `duplicate-concurrent`, `failure` and `adjacent-regression`. Each
+row is `covered` with existing scenario IDs or `not_applicable` with no scenario IDs and a concrete
+reason. The union of all `covered` rows equals the story's exact scenario set; one scenario may
+cover multiple classes, but none may remain unclassified. A missing class, unknown scenario, orphan
+scenario or unexplained exclusion fails the compiler.
 
 The Requirement trace ends at planned verification:
 
@@ -188,6 +185,9 @@ criterion or rule -> scenario -> automation target
 Switch `calculation_examples`: at `required`, a scenario that exercises a calculation rule takes its
 expected value from the rule's formula or cited worked example and never invents one, as
 `skill-content/requirements-analysis/references/switch-calculation_examples-required.md` defines.
+Switch `test_levels`: at `declared`, QA gives each automation-required scenario a `level` and each
+`fixture` or `live` one a `level_reason`, and the reviewer questions every `live` scenario, as
+`skill-content/product-planning/references/switch-test_levels-declared.md` defines.
 
 Executable tests, execution results, story completion and release readiness
 belong to delivery.

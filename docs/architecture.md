@@ -59,7 +59,12 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     A scenario may state `rows`, a positive integer, and `row_split`,
     `serial`, `sharded` or `grouped`; process switch `test_cost_budget` at
     `flag_serial_rows` flags one that runs more rows serially than the
-    owner's limit, and never fails a check.
+    owner's limit, and never fails a check. A scenario may also state the
+    `level` its target runs at, `unit`, `fixture` or `live`, which `check`
+    validates at every value, and a `level_reason`; process switch
+    `test_levels` at `declared` lists each automation-required scenario that
+    states no level and each `fixture` or `live` one that states no reason,
+    and the list never fails a check.
 13. Every story has exactly one accountable implementation owner and may name
     supporting implementation roles with concrete body responsibilities.
     Runtime identities are not backlog properties. Process switch

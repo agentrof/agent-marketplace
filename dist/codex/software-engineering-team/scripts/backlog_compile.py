@@ -160,6 +160,13 @@ TEST_COST_LIMITS_PATH = (Path(__file__).resolve().parent.parent / "skill-content
                          / "product-planning" / "data" / "test-cost-limits.json")
 ROW_SPLITS = ("serial", "sharded", "grouped")
 ROWS_RE = re.compile(r"^[1-9][0-9]*$")
+# A Test Plan scenario may state the level its automation target runs at; at
+# test_levels declared the compiler lists each automation-required scenario
+# that states none and each fixture or live one that states no reason.
+TEST_LEVELS_SWITCH = "test_levels"
+TEST_LEVELS_VALUE = "declared"
+LEVELS = ("unit", "fixture", "live")
+REASONED_LEVELS = ("fixture", "live")
 SIZE_EXCEPTIONS = "Size Exceptions"
 SIZE_EXCEPTION_COLUMNS = ("story", "measure", "reason")
 CHECKLIST_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\](?:\s|$)")
@@ -1810,12 +1817,30 @@ def test_cost_budget(docs: Path) -> dict | None:
     return {"value": budget["value"], "limits": dict(sorted(budget.get("parameters", {}).items()))}
 
 
-def serial_row_scenarios(stories: list[dict], limit: int | None) -> list[dict]:
+def test_levels(docs: Path) -> dict | None:
+    """Return the test_levels value in force, or None while the switch is off.
+
+    Without a Process Policy, or at the switch's default, nothing is read. A
+    draft or invalid policy raises ValueError: it is refused, never read.
+    """
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    declared = values.get(TEST_LEVELS_SWITCH)
+    if declared is None or declared["value"] != TEST_LEVELS_VALUE:
+        return None
+    return {"value": declared["value"]}
+
+
+def serial_row_scenarios(stories: list[dict], limit: int | None,
+                         levels: bool = False) -> list[dict]:
     """List each automation-required scenario that runs more than *limit* rows serially.
 
     A scenario runs them serially when its row_split is serial or absent. A
     scenario without a valid rows count, one at or below the limit, or one
     whose rows are sharded or grouped is never listed; without a limit none is.
+    With *levels*, under test_levels declared, each entry also names the level
+    its scenario states, none when it states none.
     """
     flagged = []
     for story in sorted(stories, key=lambda item: item["id"]):
@@ -1825,16 +1850,50 @@ def serial_row_scenarios(stories: list[dict], limit: int | None) -> list[dict]:
             if (limit is None or fields.get("automation", "").lower() != "required"
                     or not ROWS_RE.fullmatch(rows) or int(rows) <= limit or split not in (None, "serial")):
                 continue
-            flagged.append({"story": story["id"], "scenario": scenario_id,
-                            "automation_target": fields.get("automation_target", "").strip(),
-                            "rows": int(rows), "row_split": split})
+            entry = {"story": story["id"], "scenario": scenario_id,
+                     "automation_target": fields.get("automation_target", "").strip(),
+                     "rows": int(rows), "row_split": split}
+            if levels:
+                entry["level"] = fields.get("level")
+            flagged.append(entry)
     return flagged
 
 
-def test_cost_block(budget: dict, stories: list[dict]) -> dict:
+def test_cost_block(budget: dict, stories: list[dict], levels: bool = False) -> dict:
     """The serial-row flags of *stories*, as check, review manifests and Delivery proposals show them."""
     return {"switch": TEST_COST_SWITCH, "value": budget["value"], "limits": budget["limits"],
-            "serial_row_scenarios": serial_row_scenarios(stories, budget["limits"].get(SERIAL_ROWS))}
+            "serial_row_scenarios": serial_row_scenarios(
+                stories, budget["limits"].get(SERIAL_ROWS), levels)}
+
+
+def level_gap_scenarios(stories: list[dict]) -> dict[str, list[dict]]:
+    """List the scenarios that state no level and the ones that state no reason for it.
+
+    ``without_level`` holds each automation-required scenario that states no
+    level; ``without_level_reason`` each automation-required fixture or live
+    scenario whose level_reason is absent or blank. A manual scenario is never
+    listed, and nor is one whose stated level is outside the three values,
+    which check refuses on its own.
+    """
+    gaps: dict[str, list[dict]] = {"without_level": [], "without_level_reason": []}
+    for story in sorted(stories, key=lambda item: item["id"]):
+        for scenario_id, block in scenario_blocks(story["test_body"]):
+            fields, _duplicates = scenario_fields(block)
+            if fields.get("automation", "").lower() != "required":
+                continue
+            level = fields.get("level")
+            entry = {"story": story["id"], "scenario": scenario_id,
+                     "automation_target": fields.get("automation_target", "").strip()}
+            if level is None:
+                gaps["without_level"].append(entry)
+            elif level in REASONED_LEVELS and not fields.get("level_reason", "").strip():
+                gaps["without_level_reason"].append({**entry, "level": level})
+    return gaps
+
+
+def test_levels_block(levels: dict, stories: list[dict]) -> dict:
+    """The level gaps of *stories*, as check and the review manifests show them."""
+    return {"switch": TEST_LEVELS_SWITCH, "value": levels["value"], **level_gap_scenarios(stories)}
 
 
 def size_exception_rows(docs: Path, epic: dict, review: dict) -> tuple[set[tuple[str, str]],
@@ -2162,6 +2221,8 @@ def scenario_findings(docs: Path, body: str, story_id: str,
             errors.append(f"{path} scenario {scenario_id} rows must be a positive integer")
         if "row_split" in fields and fields["row_split"] not in ROW_SPLITS:
             errors.append(f"{path} scenario {scenario_id} row_split must be one of {', '.join(ROW_SPLITS)}")
+        if "level" in fields and fields["level"] not in LEVELS:
+            errors.append(f"{path} scenario {scenario_id} level must be one of {', '.join(LEVELS)}")
         target = fields.get("automation_target", "").strip()
         if target and (target.startswith("/") or ".." in Path(target).parts
                        or any(char.isspace() for char in target)):
@@ -3833,12 +3894,16 @@ def check(args) -> int:
             errors.extend(size_exception_findings(record, docs))
     except (ValueError, RuntimeError) as exc:
         errors.append(str(exc))
-    # A scenario over the serial-row limit is advisory too; at the default nothing is read.
-    test_cost = None
+    # A scenario over the serial-row limit is advisory too, and so is one that
+    # states no level or no reason for it under test_levels; at the default
+    # nothing is read. Only a stated level outside the three values is an error.
+    test_cost = test_level_gaps = None
     try:
-        cost = test_cost_budget(docs)
+        cost, levels = test_cost_budget(docs), test_levels(docs)
         if cost is not None:
-            test_cost = test_cost_block(cost, record["stories"])
+            test_cost = test_cost_block(cost, record["stories"], levels is not None)
+        if levels is not None:
+            test_level_gaps = test_levels_block(levels, record["stories"])
     except (ValueError, RuntimeError) as exc:
         errors.append(str(exc))
     errors = sorted(set(errors))
@@ -3854,6 +3919,8 @@ def check(args) -> int:
         result["story_size"] = story_size
     if test_cost is not None:
         result["test_cost"] = test_cost
+    if test_level_gaps is not None:
+        result["test_levels"] = test_level_gaps
     if pinned_reviews:
         result["pinned_reviews"] = pinned_reviews
     # Only a backlog that has one gains the key, so every other output is unchanged.

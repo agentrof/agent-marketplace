@@ -303,6 +303,20 @@ serial with a recorded reason. The flag is advisory, as
 `product-planning/references/switch-test_cost_budget-flag_serial_rows.md`
 defines.
 
+At what level a Test Plan scenario has to run is process switch `test_levels`.
+A scenario may state `level`, `unit`, `fixture` or `live`, which
+`backlog_compile.py check` validates at every value, and a `level_reason` for
+a `fixture` or `live` one. At `off`, the default, nothing is listed. At
+`declared`, QA proves a decision rule at `unit` level over every combination
+of its inputs, adds one `fixture` scenario per entry point and decision
+family, and keeps `live` for engine or operating-system behaviour;
+`check --json` and the review manifests list each automation-required
+scenario that states no level and each `fixture` or `live` one that states no
+reason, the `test_cost_budget` list names each flagged scenario's level, and
+the backlog reviewer asks of every `live` scenario whether its assertion is a
+decision. The list is advisory, as
+`product-planning/references/switch-test_levels-declared.md` defines.
+
 Execution planning writes and reviews the facts a plan needs as process switch
 `execution_planning` selects. `per_document`, the default, revises and reviews
 each Operation contract on its own through the Operation flow.

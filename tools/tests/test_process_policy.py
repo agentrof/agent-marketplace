@@ -539,6 +539,7 @@ RELEASED_DEFAULTS = {
     "test_cost_budget": "off",
     "test_engines": "single",
     "test_group_report": "off",
+    "test_levels": "off",
 }
 # The rules that keep a switch value safe, in the files agents read them from:
 # who decides, who reads independently, which severity holds, which gate stays
@@ -858,6 +859,19 @@ SAFETY_RULES = {
             "Both contracts change only through the Operation flow, never in a task",
         ),
     },
+    "test_levels": {
+        f"{SKILLS}/product-planning/references/switch-test_levels-declared.md": (
+            "The list is advisory: it never fails a check, never blocks a review or an approval and never rewrites"
+            " a scenario",
+            "refuses a `level` outside the three values whenever a scenario states it, at every value of this"
+            " switch",
+            "A decision rule is proven at `unit` level, over every combination of its inputs",
+            "Coverage never drops: the Test Plan still maps every acceptance criterion to at least one proving"
+            " scenario",
+            "never what it asserts",
+            "The level question only ever yields a minor finding",
+        ),
+    },
     "test_group_report": {
         f"{SKILLS}/deliver/references/switch-test_group_report-refuse_missing_groups.md": (
             "a group that fails to collect is `not_collected`, never left out",
@@ -976,7 +990,7 @@ class MeasuredBaselineTests(unittest.TestCase):
                                  "rebind_review_scope", "remediation_bookkeeping",
                                  "remediation_writers", "review_scope_record", "root_review_scope",
                                  "source_decision_gate", "test_cost_budget", "test_engines",
-                                 "test_group_report"])
+                                 "test_group_report", "test_levels"])
 
 
 if __name__ == "__main__":

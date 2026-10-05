@@ -57,6 +57,7 @@ BACKLOG = (BOUNDED,
            "backlog-plan/references/switch-remediation_bookkeeping-compiler.md")
 SPLIT = "product-planning/references/switch-story_size_budget-propose_split.md"
 COST = "product-planning/references/switch-test_cost_budget-flag_serial_rows.md"
+LEVELS = "product-planning/references/switch-test_levels-declared.md"
 # The switch references each shipped task binds, by entry and role. A task
 # binds a reference of a switch that owns one of its entry's flows, from a
 # skill it selects or, for owner_gates, from any skill.
@@ -69,10 +70,10 @@ EXPECTED = {
         ("organize-docs", "business-analyst"), ("requirement", "business-analyst"),
         ("setup", "delivery-coordinator"), ("sketch", "ux-designer"),
         ("solution-design", "domain-expert"), ("solution-design", "solution-architect"))},
-    "backlog-plan:product-owner": [*BACKLOG, SPLIT, COST],
-    "backlog-plan:backlog-reviewer": sorted([*BACKLOG, SPLIT, COST, *REVIEW]),
-    "backlog-plan:business-analyst": [*BACKLOG, COST],
-    "backlog-plan:qa-engineer": [*BACKLOG, COST],
+    "backlog-plan:product-owner": [*BACKLOG, SPLIT, COST, LEVELS],
+    "backlog-plan:backlog-reviewer": sorted([*BACKLOG, SPLIT, COST, LEVELS, *REVIEW]),
+    "backlog-plan:business-analyst": [*BACKLOG, COST, LEVELS],
+    "backlog-plan:qa-engineer": [*BACKLOG, COST, LEVELS],
     **{f"configure:{role}": ["configure/references/switch-" + BUNDLE, OWNER_GATES]
        for role in ("delivery-coordinator", "devops-engineer", "qa-engineer")},
     **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES]
@@ -204,13 +205,19 @@ class AllSwitchesOnTests(unittest.TestCase):
         self.assertEqual((code, result["errors"]), (0, []), result)
         self.assertEqual(result["story_size"]["limits"], LIMITS)
         self.assertEqual(result["test_cost"]["limits"], {"serial_rows": SERIAL_ROWS})
+        # The fixture's scenarios state no level, which is listed and never an error.
+        self.assertEqual(sorted(result["test_levels"]), ["switch", "value", "without_level",
+                                                         "without_level_reason"])
+        self.assertEqual(len(result["test_levels"]["without_level"]), 1)
         manifest = backlog_review_inputs.manifest(self.docs, epic="EP-001")
         # The manifest names the panel and the bounded scope it was derived
         # under and carries the panel's compiler facts and the story measures.
         self.assertEqual((manifest["review_panels"], manifest["review_manifest_scope"]),
                          ("lens_panel", "bounded"))
         self.assertEqual(sorted(manifest["check"]), ["counts", "relation_audit", "review_note",
-                                                     "source_errors", "stories", "story_size", "test_cost"])
+                                                     "source_errors", "stories", "story_size", "test_cost",
+                                                     "test_levels"])
+        self.assertEqual(manifest["check"]["test_levels"], result["test_levels"])
         self.assertEqual(backlog_review_inputs.manifest(
             self.docs, epic="EP-001", expected_hash=manifest["source_hash"]), manifest)
 

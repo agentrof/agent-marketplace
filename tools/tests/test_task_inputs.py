@@ -103,8 +103,11 @@ class TaskInputTests(unittest.TestCase):
             self.assertEqual(result["allowed_write_area"],
                              [{"path": own, "coverage": "exact_file", "source": own}])
             self.assertFalse(result["writer_authority"])
-            # The manifest's entry_gate transition carries the entry's next_transition.
-            self.assertIn("ba_compile.py", task_inputs.catalog()["entries"]["business-analysis"]["next_transition"])
+            self.make_project(root)
+            manifest = task_inputs.manifest(**kwargs, project=root)
+            self.assertEqual(manifest["write_scope"]["allowed_write_area"], result["allowed_write_area"])
+            self.assertIn("ba_compile.py", next(row["detail"] for row in manifest["next_transition_conditions"]
+                                               if row["condition"] == "entry_gate"))
             unresolved = task_scope(root, **{**kwargs, "inputs": [own, other]})
             self.assertEqual(unresolved["status"], "unresolved")
             self.assertEqual(unresolved["allowed_write_area"], [])

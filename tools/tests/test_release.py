@@ -625,14 +625,6 @@ def file_digests(root: Path) -> dict[str, str]:
     return {path: hashlib.sha256(data).hexdigest() for path, data in file_map(root).items()}
 
 
-def tree_identity(files: dict[str, bytes]) -> str:
-    """One name for a file map, as a tree id names a Git tree."""
-    digest = hashlib.sha256()
-    for path in sorted(files):
-        digest.update(path.encode("utf-8") + b"\0" + hashlib.sha256(files[path]).digest())
-    return digest.hexdigest()
-
-
 def write_changeset(
     root: Path, name: str, components: dict[str, str], summary: str | None = None,
 ) -> None:
@@ -752,8 +744,23 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
             self.check()
 
     def test_every_edit_of_the_release_commit_is_refused(self):
-        # The content edits are decided in ReleaseCommitRuleTests; this keeps
-        # the replay's wiring and the execute bit as Git records it.
+        metadata_path = self.root / release.STABLE_METADATA
+
+        def forge_build_identity() -> None:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            release.write_json(
+                metadata_path, dict(metadata, build_id="snapshot." + "0" * 64),
+            )
+
+        def rewrite_notes() -> None:
+            changelog = self.root / "CHANGELOG.md"
+            changelog.write_text(changelog.read_text(encoding="utf-8").replace(
+                "Ship the candidate patch.", "Ship another patch.",
+            ), encoding="utf-8")
+
+        def keep_a_changeset() -> None:
+            self.git("checkout", self.feature_sha, "--", ".changes/candidate-patch.json")
+
         def add_a_file() -> None:
             fixtures.write(self.root / "extra.txt", "not deterministic\n")
 
@@ -762,7 +769,10 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
             path.chmod(path.stat().st_mode & ~(stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH))
             self.git("update-index", "--chmod=-x", path.relative_to(self.root).as_posix())
 
-        edits = {"extra file": add_a_file}
+        edits = {
+            "build identity": forge_build_identity, "notes": rewrite_notes,
+            "kept changeset": keep_a_changeset, "extra file": add_a_file,
+        }
         if os.name != "nt":
             edits["execute bit"] = drop_an_execute_bit
         for name, edit in edits.items():
@@ -1043,42 +1053,6 @@ class ReleaseCommitRuleTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.tmp.cleanup()
-
-    def test_every_edit_of_the_release_commit_is_refused(self):
-        self.assertEqual(self.metadata["version"], VERSION)
-        expected = tree_identity(self.bumped)
-        release.require_bumped_tree(expected, expected)
-
-        def forge_build_identity(files: dict[str, bytes]) -> None:
-            metadata = json.loads(files[release.STABLE_METADATA])
-            files[release.STABLE_METADATA] = (json.dumps(
-                dict(metadata, build_id="snapshot." + "0" * 64), indent=2,
-            ) + "\n").encode("utf-8")
-
-        def rewrite_notes(files: dict[str, bytes]) -> None:
-            files["CHANGELOG.md"] = files["CHANGELOG.md"].replace(
-                b"Ship the candidate patch.", b"Ship another patch.",
-            )
-
-        def keep_a_changeset(files: dict[str, bytes]) -> None:
-            path = ".changes/candidate-patch.json"
-            files[path] = self.parent[path]
-
-        def add_a_file(files: dict[str, bytes]) -> None:
-            files["extra.txt"] = b"not deterministic\n"
-
-        for name, edit in {
-            "build identity": forge_build_identity, "notes": rewrite_notes,
-            "kept changeset": keep_a_changeset, "extra file": add_a_file,
-        }.items():
-            with self.subTest(name):
-                edited = dict(self.bumped)
-                edit(edited)
-                with self.assertRaisesRegex(
-                    release.ReleaseError,
-                    "differs from the deterministic bump of its parent",
-                ):
-                    release.require_bumped_tree(tree_identity(edited), expected)
 
     def test_a_commit_after_the_release_commit_is_refused(self):
         # The commits before the last one already hold a release or a reset.

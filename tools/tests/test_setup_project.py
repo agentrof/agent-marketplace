@@ -978,6 +978,30 @@ class SetupProjectTests(unittest.TestCase):
             self.merged_attributes(converged),
         ), [])
 
+    def test_a_failed_apply_puts_back_a_stale_gitattributes_block(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            owned = Path(temporary) / "owned"
+            owned.mkdir()
+            init_repository(owned)
+            attributes = owned / ".gitattributes"
+            before, after = "* text=auto\n*.png binary\n", "*.sh text eol=lf\n"
+            stale = ATTRIBUTES_BLOCK.replace("** -text", "** text")
+            attributes.write_bytes((before + stale + after).encode("utf-8"))
+            original = attributes.read_bytes()
+            args = argparse.Namespace(
+                project_root=str(owned), workspace="workspace",
+                output_language="English", terminology_language="English",
+                command="apply", json=True,
+            )
+            with mock.patch.object(
+                setup_module.setup_check, "closing",
+                return_value=["forced closing failure"],
+            ):
+                code, result = setup_module.apply_plan(args)
+            self.assertEqual(code, 1)
+            self.assertTrue(result["rolled_back"])
+            self.assertEqual(attributes.read_bytes(), original)
+
     def test_setup_check_reports_a_missing_stale_or_overridden_gitattributes_rule(self):
         with self.applied_project() as project:
             attributes = project / ".gitattributes"

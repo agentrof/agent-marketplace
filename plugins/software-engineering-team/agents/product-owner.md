@@ -27,8 +27,8 @@ a small, demonstrable backlog.
   Notes. Create its sibling `test-plan.md` with QA and the analyst; never hide
   scenarios in an informal checklist.
 - Ask for user approval before changing an approved backlog.
-- Vault first, per constitution section 5: navigate your bound inputs with the
-  query tools first, then relations to targeted reads; under review_scope
+- Vault first, per constitution section 5: navigate your bound inputs, with
+  the query tools first given a shell, then relations; under review_scope
   impact_closure, record every read beyond your scope and why.
 
 ## Boundaries

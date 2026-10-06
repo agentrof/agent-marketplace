@@ -29,6 +29,7 @@ No embeddings, no database; stdlib only.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import os
 import json
@@ -49,6 +50,7 @@ RUNTIME = Path(".agentrof") / "agent-marketplace" / ".runtime" / "vault-index"
 BUILDER_FILES = ("impact_closure.py", "vault_check.py", "vault_query.py", "ba_compile.py")
 
 
+READ_ONLY_ERRORS = {errno.EACCES, errno.EPERM, errno.EROFS}
 SHARD_NAME = re.compile(r"^[0-9a-f]{64}\.json$")
 
 
@@ -183,7 +185,8 @@ def locked_refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict,
         os.close(descriptor)
 
 
-def refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
+def refresh(docs: Path, cache: Path, verify: bool = False,
+            persist: bool = True) -> tuple[dict, dict]:
     """Bring the cache up to the vault's current bytes: (index, what was redone).
 
     ``index.json`` holds the graph, proofs and file hashes; each scanned note
@@ -201,9 +204,10 @@ def refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
     changed = sorted(rel for rel, entry in current.items()
                      if rel not in cached or cached[rel]["sha"] != entry["sha"])
     removed = sorted(set(cached) - set(current))
-    status = {"path": str(cache), "full": full, "changed": changed, "removed": removed}
+    status = {"path": str(cache), "full": full, "changed": changed, "removed": removed,
+              "persisted": persist}
     if not changed and not removed and not full:
-        if current != cached:  # touched, same bytes: keep the stat fast path warm
+        if current != cached and persist:  # touched, same bytes: keep the stat fast path warm
             data["files"] = dict(sorted(current.items()))
             atomic_file.replace_text(cache, json.dumps(data, indent=1, ensure_ascii=False) + "\n")
         status["ms"] = round((time.perf_counter() - started) * 1000, 1)
@@ -238,17 +242,19 @@ def refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
     snap = impact_closure.snapshot(vault, proofs={})
     authored_set = set(snap["notes"])
 
-    atomic_file.real_directory(cache.parent, Path(shards.name))
-    for rel, note in vault.notes.items():
-        shard = shards / f"{current[rel]['sha']}.json"
-        if rel not in reuse and not shard.is_file():
-            atomic_file.replace_text(shard, json.dumps(note_to_json(note), ensure_ascii=False))
-    live = {f"{entry['sha']}.json" for rel, entry in current.items() if rel in vault.notes}
-    for shard in shards.iterdir():
-        # Only the index's own shards are ever removed.
-        if SHARD_NAME.match(shard.name) and shard.is_file() and not shard.is_symlink() \
-                and shard.name not in live:
-            shard.unlink(missing_ok=True)  # a parallel rebuild may have removed it
+    if persist:
+        atomic_file.real_directory(cache.parent, Path(shards.name))
+        for rel, note in vault.notes.items():
+            shard = shards / f"{current[rel]['sha']}.json"
+            if rel not in reuse and not shard.is_file():
+                atomic_file.replace_text(shard, json.dumps(note_to_json(note), ensure_ascii=False))
+        live = {f"{entry['sha']}.json" for rel, entry in current.items() if rel in vault.notes}
+        for shard in shards.iterdir():
+            # Only the index's own shards are ever removed.
+            if SHARD_NAME.match(shard.name) and shard.is_file() and not shard.is_symlink() \
+                    and shard.name not in live:
+                shard.unlink(missing_ok=True)  # a parallel rebuild may have removed it
+
     data = {
         "schema_version": SCHEMA_VERSION,
         "builder": builder,
@@ -265,7 +271,8 @@ def refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
         "gaps": snap["gaps"],
         "files": dict(sorted(current.items())),
     }
-    atomic_file.replace_text(cache, json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+    if persist:
+        atomic_file.replace_text(cache, json.dumps(data, indent=1, ensure_ascii=False) + "\n")
     status["ms"] = round((time.perf_counter() - started) * 1000, 1)
     return data, status
 
@@ -470,7 +477,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"vault_query: {exc}", file=sys.stderr)
         return 2
     try:
-        data, status = locked_refresh(args.docs, cache, args.verify)
+        try:
+            data, status = locked_refresh(args.docs, cache, args.verify)
+        except OSError as exc:
+            if exc.errno not in READ_ONLY_ERRORS:
+                raise
+            # A read-only file system or sandbox: build the index in memory,
+            # reusing a warm cache read-only, and write nothing.
+            data, status = refresh(args.docs, cache, args.verify, persist=False)
     except (OSError, ValueError) as exc:
         print(f"vault_query: {exc}", file=sys.stderr)
         return 2

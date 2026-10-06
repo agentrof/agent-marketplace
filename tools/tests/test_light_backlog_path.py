@@ -239,6 +239,25 @@ class LightBacklogPathTests(unittest.TestCase):
         code, output = self.call(compiler.approve)
         self.assertNotEqual(code, 0, output)
         self.assertIn("stamped by an earlier revision", output)
+    def test_a_deleted_approved_story_counts_as_changed(self):
+        self.light_revision()
+        import shutil
+        shutil.rmtree(self.docs / "backlog/epics" / EPIC / "stories/st-001")
+        status = self.status()
+        self.assertFalse(status["eligible"], status)
+        self.assertEqual(status["changed"], ["ST-001", "ST-002"])
+        self.assertIn("ST-001 work_kind is feature, not defect or technical", status["reasons"])
+        code, output = self.call(compiler.record_light_root_review)
+        self.assertEqual(code, 1, output)
+        self.assertIn("takes the standard path", output)
+    def test_the_stub_flag_is_documented_only_for_the_light_path(self):
+        from pathlib import Path
+        text = (Path(compiler.__file__).resolve().parents[1]
+                / "skill-content/product-planning/references/structured-records.md").read_text(
+                    encoding="utf-8")
+        paragraph = next(block for block in text.split("\n\n") if "--from-requirement" in block)
+        flat = " ".join(paragraph.split())
+        self.assertIn("Only when switch `backlog_path` is at `light_when_eligible`", flat)
 
 if __name__ == "__main__":
     unittest.main()

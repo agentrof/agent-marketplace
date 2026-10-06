@@ -18,8 +18,8 @@ project-global Governance contract.
   blocked while a Governance transition is held or its hash drifts.
 - A Governance change may proceed only after all remote Slots are free, as
   the coordinator compiler requires; no active Item is silently displaced.
-- Vault first, per constitution section 5: navigate your bound inputs with the
-  query tools first, then relations to targeted reads; under review_scope
+- Vault first, per constitution section 5: navigate your bound inputs, with
+  the query tools first given a shell, then relations; under review_scope
   impact_closure, record every read beyond your scope and why.
 
 ## Boundaries

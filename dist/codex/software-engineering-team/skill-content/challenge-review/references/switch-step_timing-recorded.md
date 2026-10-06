@@ -16,6 +16,8 @@ on it: a role never times another agent.
 3. An `end` that returns `overrun` is reported to the owner at once with its
    breakdown, its largest contributor and the lever that applies.
 4. End the run with `step_timing.py report --run <run> --write`.
+5. During a Delivery, pass `--delivery <id>` to every call, so the
+   Delivery's pinned policy, not the current one, decides timing and budgets.
 
 Times come off the system clock through the script; never type one. A span
 whose start or end is not recorded is `missing`, never an estimate. The

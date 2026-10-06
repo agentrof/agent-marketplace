@@ -159,6 +159,39 @@ class VaultQueryTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIn("vault", self.run_query("closure", "--changed", path, code=1)["stderr"])
 
+    def make_read_only(self) -> None:
+        def chmod(mode_dir: int, mode_file: int) -> None:
+            for folder, _dirs, files in os.walk(self.project):
+                for name in files:
+                    path = os.path.join(folder, name)
+                    if not os.path.islink(path):
+                        os.chmod(path, mode_file)
+                os.chmod(folder, mode_dir)
+        chmod(0o555, 0o444)
+        self.addCleanup(chmod, 0o755, 0o644)
+
+    def test_a_read_only_project_is_queried_in_memory(self) -> None:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root ignores file modes")
+        warm = self.run_query("gaps")["gaps"]
+        self.make_read_only()
+        before = self.vault_bytes()
+        result = self.run_query("gaps")
+        self.assertEqual(result["gaps"], warm)
+        self.assertFalse(result["cache"]["persisted"])
+        self.assertEqual(self.run_query("closure", "--changed", f"{REQ}.md")["changed"],
+                         [f"{REQ}.md"])
+        self.assertEqual(self.vault_bytes(), before)
+
+    def test_a_read_only_project_with_no_cache_is_queried_in_memory(self) -> None:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root ignores file modes")
+        self.make_read_only()
+        result = self.run_query("gaps")
+        self.assertTrue(result["gaps"])
+        self.assertFalse(result["cache"]["persisted"])
+        self.assertFalse((self.project / ".agentrof").exists())
+
     def test_index_is_json_under_the_project_runtime_scratch(self) -> None:
         result = self.run_query("gaps")
         self.assertEqual(result["cache"]["path"], str(self.cache))

@@ -132,14 +132,15 @@ declared criteria and/or approved `related_to` evidence. Every declared
 planning source appears in at least one scenario. A test plan records intended
 verification only.
 
-In Requirement mode, `backlog_compile.py stub-story <epic> <slug> --docs
+Only when switch `backlog_path` is at `light_when_eligible` and the backlog
+is in Requirement mode, `backlog_compile.py stub-story <epic> <slug> --docs
 <workspace>/docs --from-requirement` writes the story and its test plan from
 the approved Requirement: its `request_kind` as `work_kind`, each item of its
 `Outcome and Acceptance` list as an acceptance line and one scenario whose
 `Then` states it, its approved evidence links as `related_to` and
 `source_refs`, and the empty coverage table. Fill only what the stub leaves:
 each scenario's Given and When, its automation target and the coverage
-reasons.
+reasons. At the default, `standard`, stub a story without the flag.
 
 Every test plan also has one exact coverage-class table:
 

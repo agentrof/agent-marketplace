@@ -4817,6 +4817,51 @@ def changed_story_ids(record: dict, docs: Path) -> list[str]:
                   or approval_stamp_findings(docs / story["test_plan"], docs))
 
 
+def approved_stories(record: dict, docs: Path) -> dict[str, dict]:
+    """The stories of the last approved backlog revision, by id, from Git.
+
+    The newest commit whose backlog root reads approved is the last approval;
+    each story there carries its approved work_kind and epic id. Without Git
+    history nothing is known, and only the current stories count.
+    """
+    where = [Path(docs)]
+
+    def git(*argv: str) -> str | None:
+        out = subprocess.run(["git", "--no-replace-objects", *argv], cwd=where[0],
+                             capture_output=True, check=False)
+        return out.stdout.decode("utf-8", "replace") if out.returncode == 0 else None
+
+    top = git("rev-parse", "--show-toplevel")
+    if top is not None:
+        where[0] = Path(top.strip())
+    root = (record.get("backlog") or {}).get("path")
+    if top is None or not root:
+        return {}
+    prefix = Path(docs).resolve().relative_to(Path(top.strip()).resolve()).as_posix()
+    root_rel = f"{prefix}/{root}"
+    folder = root_rel.rsplit("/", 1)[0]
+    for commit in (git("log", "--format=%H", "--", root_rel) or "").split():
+        text = git("show", f"{commit}:{root_rel}")
+        if text is None or parse_front_matter_text(text)[0].get("status") != "approved":
+            continue
+        epics, stories = {}, {}
+        names = (git("ls-tree", "-r", "--name-only", commit, "--", folder) or "").splitlines()
+        for name in names:
+            if name.endswith("/epic.md"):
+                epics[name.rsplit("/", 1)[0]] = parse_front_matter_text(
+                    git("show", f"{commit}:{name}") or "")[0].get("id")
+        for name in names:
+            if name.endswith("/story.md"):
+                props = parse_front_matter_text(git("show", f"{commit}:{name}") or "")[0]
+                epic_dir = name.split("/stories/", 1)[0]
+                if props.get("id"):
+                    stories[str(props["id"])] = {
+                        "id": str(props["id"]), "work_kind": props.get("work_kind"),
+                        "epic_id": epics.get(epic_dir), "deleted": True}
+        return stories
+    return {}
+
+
 def light_path_status(record: dict, docs: Path) -> dict:
     """Return whether this revision may take the light backlog path, and why not.
 
@@ -4842,8 +4887,12 @@ def light_path_status(record: dict, docs: Path) -> dict:
                            f" not {' or '.join(kinds)}")
     if int(props.get("revision", 1) or 1) < 2:
         reasons.append("the backlog has no earlier approved revision")
-    changed = changed_story_ids(record, docs)
     by_id = {story["id"]: story for story in record["stories"]}
+    # A story the last approval held and the revision removed is a change too.
+    deleted = {story_id: story for story_id, story in approved_stories(record, docs).items()
+               if story_id not in by_id}
+    changed = sorted({*changed_story_ids(record, docs), *deleted})
+    by_id.update(deleted)
     if not changed:
         reasons.append("the revision changes no story")
     elif len(changed) > limit:
@@ -4881,8 +4930,8 @@ def light_epic_review_findings(record: dict, docs: Path, status: dict) -> list[s
         errors.append(f"{path} verdict is not approved")
     by_id = {story["id"]: story for story in record["stories"]}
     verified = set(link_targets(docs, props, "verifies", f"{path} verifies", []))
-    missing = [story_id for story_id in status.get("changed", [])
-               if not {by_id[story_id]["path"].removesuffix(".md"),
+    missing = [story_id for story_id in status.get("changed", []) if story_id in by_id
+               and not {by_id[story_id]["path"].removesuffix(".md"),
                        by_id[story_id]["test_plan"].removesuffix(".md")} <= verified]
     if missing:
         errors.append(f"{path} does not verify the changed stories {', '.join(missing)}")

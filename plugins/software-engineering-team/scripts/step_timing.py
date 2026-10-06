@@ -36,6 +36,9 @@ Commands:
   step_timing.py report --run R [--project-root P] [--write]
   step_timing.py runs   [--project-root P]
 
+During a Delivery, start, end, overruns and report take --delivery D and read
+that Delivery's pinned policy rather than the current one.
+
 ``--at`` replaces the clock for a backfilled or replayed record.
 """
 
@@ -110,10 +113,14 @@ def project_root(value: Path | None) -> Path:
     return Path(out.stdout.strip()).resolve()
 
 
-def policy_values(root: Path) -> dict:
+def policy_values(root: Path, delivery: str | None = None) -> dict:
+    """The values in force: a Delivery's pinned values while it runs, else the policy's."""
     import process_policy
     try:
-        return process_policy.effective_values(process_policy.docs_root(root))[0]
+        docs = process_policy.docs_root(root)
+        if delivery:
+            return process_policy.delivery_values(docs, delivery)["values"]
+        return process_policy.effective_values(docs)[0]
     except ValueError as exc:
         raise Refused("TIMING_POLICY", f"process policy cannot set {SWITCH}: {exc}") from exc
 
@@ -400,6 +407,8 @@ def main(argv: list[str] | None = None) -> int:
     listed = sub.add_parser("runs")
     for command in (begun, finished, late, shown, listed):
         command.add_argument("--project-root", type=Path)
+    for command in (begun, finished, late, shown):
+        command.add_argument("--delivery", help="the active Delivery, whose pinned policy applies")
     for command in (begun, finished, late):
         command.add_argument("--at")
     args = parser.parse_args(argv)
@@ -408,7 +417,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "runs":
             result = runs(root)
         else:
-            values = policy_values(root)
+            values = policy_values(root, args.delivery)
             if args.command == "start":
                 result = start(root, values, run=args.run, step=args.step, kind=args.kind,
                                phase=args.phase, role=args.role, parent=args.parent,

@@ -1175,6 +1175,9 @@ class ReadingSwitchTests(unittest.TestCase):
         section = constitution[constitution.index("## 5. Vault first"):
                                constitution.index("## Escape hatch")]
         self.assertIn("Navigate the inputs your task binds", section)
+        self.assertIn("With a shell, query it with the packaged `vault_query.py` verbs first",
+                      section)
+        self.assertIn("without a shell, follow the relations of your bound inputs", section)
         for sentence in section.split(". "):
             if "read beyond" in sentence:
                 self.assertIn("`review_scope` at `impact_closure`", sentence)
@@ -1187,8 +1190,12 @@ class ReadingSwitchTests(unittest.TestCase):
                                   text)
         for flow in sorted((ROOT / FLOWS).glob("*.md")):
             with self.subTest(flow=flow.name):
-                self.assertIn("every role navigates its bound inputs with",
-                              flat_text(flow.relative_to(ROOT).as_posix()))
+                text = flat_text(flow.relative_to(ROOT).as_posix())
+                self.assertIn("every role navigates its bound inputs: a role with a shell"
+                              " queries the packaged `vault_query.py` verbs first, a read-only"
+                              " reader the views its manifest binds", text)
+                # A view a reader's manifest may not bind is named for roles with a shell.
+                self.assertNotIn("This flow starts from", text)
         # The verbs the constitution names are the subcommands of the scripts it names.
         import re
         listed = re.search(r"`vault_query.py` verbs first \(([^;)]*);", constitution).group(1)

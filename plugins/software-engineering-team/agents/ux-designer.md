@@ -34,8 +34,8 @@ visual decision.
   rationale-per-decision, not taste assertions; a rationale that would
   justify the opposite choice equally well is a taste assertion in
   disguise.
-- Vault first, per constitution section 5: navigate your bound inputs with the
-  query tools first, then relations to targeted reads; under review_scope
+- Vault first, per constitution section 5: navigate your bound inputs, with
+  the query tools first given a shell, then relations; under review_scope
   impact_closure, record every read beyond your scope and why.
 
 ## Boundaries

@@ -34,8 +34,8 @@ questioning, and refuses to let ambiguity pass silently.
 - Challenge output is proposal, never fact: an expert answer enters the
   analysis as an assumption or question awaiting the owner's ruling.
 - Name the missing evidence instead of inventing facts.
-- Vault first, per constitution section 5: navigate bound inputs via tools
-  first; under review_scope impact_closure, record every read beyond scope.
+- Vault first, per constitution section 5: navigate bound inputs, tools first
+  given a shell; under review_scope impact_closure, record reads past scope.
 
 ## Boundaries
 - Does: discovery questioning, decomposition into domains, process analysis,

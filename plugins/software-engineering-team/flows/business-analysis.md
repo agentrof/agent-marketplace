@@ -4,36 +4,37 @@ Spawn template: paste `{{constitution}}`, exact input/output paths, review
 lens and `SELF-CHECK` into every reviewer prompt.
 
 Vault first, in the order the constitution's section 5 sets: every role
-navigates its bound inputs with the packaged `vault_query.py` verbs first, then
-follows machine indexes and generated views, typed frontmatter, relation
-blocks and wikilinks, then maps, and runs a targeted search only for a gap;
-when the tools give too little or look wrong it uses its own methods and
-records that it did. This flow starts from `home.md`,
-`maps/_generated/relation-status.md`,
+navigates its bound inputs: a role with a shell queries the packaged
+`vault_query.py` verbs first, a read-only reader the views its manifest
+binds, then follows machine indexes and generated views, typed
+frontmatter, relation blocks and wikilinks, then maps, and runs a
+targeted search only for a gap; when the tools give too little or look
+wrong it uses its own methods and records that it did. With a shell,
+this flow starts from `home.md`, `maps/_generated/relation-status.md`,
 `maps/_generated/cross-subtree-matrix.md` and
-`maps/_generated/stale-relations.md`, the space's `_generated/registry.json`,
-`_generated/status.md` and `_generated/open-questions.md`, and
-`maps/_generated/uncovered-analysis.md`.
-Switch `context_pack`: at `role_digest`, a spawned role receives its pack from
-`context_pack.py build --entry <entry> --role <role> --mode <mode>
---project-root <root>` instead of the full required reads; it reads a named
-source in full only when the pack does not cover a case, and records that read
-and why, as
+`maps/_generated/stale-relations.md`, the space's
+`_generated/registry.json`, `_generated/status.md` and
+`_generated/open-questions.md`, and
+`maps/_generated/uncovered-analysis.md`. Switch `context_pack`: at
+`role_digest`, a spawned role receives its pack from `context_pack.py
+build --entry <entry> --role <role> --mode <mode> --project-root <root>`
+instead of the full required reads; it reads a named source in full only
+when the pack does not cover a case, and records that read and why, as
 `skill-content/challenge-review/references/switch-context_pack-role_digest.md`
-defines.
-Switch `step_timing`: at `recorded`, the coordinator runs `step_timing.py
-start --run <run> --step <step> [--budget <id>]` before each step and
-`step_timing.py end --run <run> --span <span>` after it, and records each role
-spawn with `--kind spawn --parent <step span> --role <role> --phase
-reading|writing|review|re_review|waiting`. An end that returns overrun is
-reported to the owner at once with its breakdown, largest contributor and
-lever. The run ends with `step_timing.py report --run <run> --write`, as
+defines. Switch `step_timing`: at `recorded`, the coordinator runs
+`step_timing.py start --run <run> --step <step> [--budget <id>]` before
+each step and `step_timing.py end --run <run> --span <span>` after it,
+and records each role spawn with `--kind spawn --parent <step span>
+--role <role> --phase reading|writing|review|re_review|waiting`. An end
+that returns overrun is reported to the owner at once with its
+breakdown, largest contributor and lever. The run ends with
+`step_timing.py report --run <run> --write`, as
 `skill-content/challenge-review/references/switch-step_timing-recorded.md`
-defines.
-Switch `step_budgets`: at `enforced`, each budgeted step is compared with its
-maximum, the owner's parameter or the package target in
-`skill-content/configure/data/step-budgets.json`; a step may finish well under
-it, and only an exceeded maximum is reported, never blocking, as
+defines. Switch `step_budgets`: at `enforced`, each budgeted step is
+compared with its maximum, the owner's parameter or the package target
+in `skill-content/configure/data/step-budgets.json`; a step may finish
+well under it, and only an exceeded maximum is reported, never blocking,
+as
 `skill-content/challenge-review/references/switch-step_budgets-enforced.md`
 defines.
 

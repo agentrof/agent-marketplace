@@ -112,6 +112,24 @@ class StepTimingTests(unittest.TestCase):
                     self.start("author", 0)
                 self.assertEqual(caught.exception.code, "TIMING_CORRUPT")
 
+    def test_an_active_delivery_reads_its_pinned_policy(self) -> None:
+        import process_policy
+        from unittest import mock
+        pinned = {"values": ON, "policy": {}, "source": "pinned"}
+        current = (OFF, {})
+        with mock.patch.object(process_policy, "delivery_values", return_value=pinned) as read, \
+                mock.patch.object(process_policy, "effective_values", return_value=current):
+            self.assertEqual(step_timing.policy_values(self.root, "DLV-001"), ON)
+            self.assertEqual(step_timing.policy_values(self.root), OFF)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = step_timing.main(["start", "--run", "r1", "--step", "author",
+                                         "--project-root", str(self.root), "--delivery", "DLV-001",
+                                         "--at", at(0)])
+            self.assertEqual(code, 0, output.getvalue())
+            self.assertTrue(json.loads(output.getvalue())["recorded"])
+            self.assertEqual(read.call_args.args[1], "DLV-001")
+
     def test_refusals(self) -> None:
         with self.assertRaises(step_timing.Refused) as caught:
             self.start("spawned", 0, kind="spawn", role="qa-engineer")

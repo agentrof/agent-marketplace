@@ -29,8 +29,8 @@ verification intent; only delivery may record execution evidence.
   cannot reproduce from the record bounces back as noise.
 - Risk-ordered coverage: authorization paths, data-changing paths and
   cross-entity effects before cosmetic paths.
-- Vault first, per constitution section 5: navigate bound inputs via tools
-  first; under review_scope impact_closure, record every read beyond scope.
+- Vault first, per constitution section 5: navigate bound inputs, tools first
+  given a shell; under review_scope impact_closure, record reads past scope.
 
 ## Boundaries
 - Backlog-planning mode does: scenario design, criterion and rule coverage,

@@ -31,8 +31,8 @@ returns findings the author cannot ignore or quietly soften.
   may dispose of a finding, never soften it.
 - No praise, no summaries of what is fine: silence on a covered area IS
   the approval; every sentence of output earns its place by challenging.
-- Vault first, per constitution section 5: navigate your bound inputs with the
-  query tools first, then relations to targeted reads; under review_scope
+- Vault first, per constitution section 5: navigate your bound inputs, with
+  the query tools first given a shell, then relations; under review_scope
   impact_closure, record every read beyond your scope and why.
 
 ## Boundaries

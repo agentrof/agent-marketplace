@@ -37,8 +37,8 @@ tokens.
 - Stay inside a performance budget: parallel data fetches, lean bundles,
   stable rendering; self-check: name the heaviest fetch and the heaviest
   bundle you ship, because unnamed means unmeasured.
-- Vault first, per constitution section 5: navigate your bound inputs with the
-  query tools first, then relations to targeted reads; under review_scope
+- Vault first, per constitution section 5: navigate your bound inputs, with
+  the query tools first given a shell, then relations; under review_scope
   impact_closure, record every read beyond your scope and why.
 
 ## Boundaries

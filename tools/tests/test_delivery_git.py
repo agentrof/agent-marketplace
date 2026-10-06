@@ -5847,9 +5847,9 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.atomic_push(project, "origin", [("refs/heads/main", target, advanced)])
         return advanced
 
-    def reserve_overlapping_delivery(self, project: Path, plan: bool = True) -> None:
+    def reserve_overlapping_delivery(self, project: Path, plan: bool = True) -> str:
         """Reserve DLV-003 for AUTH-01, the Story of DLV-001, on the current target, and publish its
-        plan unless *plan* is false."""
+        plan unless *plan* is false. Returns its id."""
         docs = project / "workspace" / "docs"
         init = type("Args", (), {"docs": str(docs), "id": "DLV-003", "slug": "again", "goal": "Deliver AUTH-01 again",
                                  "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
@@ -5864,20 +5864,21 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_projections=True)
         delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-003")["integration"], "", reservation)])
         if not plan:
-            return
+            return init.id
         self.author_execution_topology(docs, "DLV-003")
         self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": "DLV-003"})), 0)
         delivery_git.publish_execution_plan(project, "DLV-003")
+        return init.id
 
     def test_claim_refuses_a_story_a_merged_delivery_delivered(self):
         """A merged Delivery keeps no Item ref, so claim-items finds AUTH-01 integrated in the
         merged package of DLV-001 and refuses it to a later Delivery instead of claiming it again (#286)."""
         project = self.claim_waiting_deliveries()
         self.merge_waited_for_delivery(project)
-        self.reserve_overlapping_delivery(project)
-        delivery_git.refresh_target(project, "DLV-003")
+        later = self.reserve_overlapping_delivery(project)
+        delivery_git.refresh_target(project, later)
         before = delivery_git.run_git(project, "ls-remote", "origin")
-        self.assertEqual(self.refused_finding(lambda: delivery_git.claim_items(project, "DLV-003")),
+        self.assertEqual(self.refused_finding(lambda: delivery_git.claim_items(project, later)),
                          ("DELIVERY_CLAIM_CONFLICT", "story is already delivered by DLV-001: AUTH-01"))
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
 

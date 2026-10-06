@@ -20,7 +20,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Container
 
 import build_distributions
 
@@ -787,6 +787,15 @@ def changelog_history_kept(root: Path, base: str, entries: set[str]) -> list[str
     return kept
 
 
+def require_reset_marker_added(base_marker: bytes | None, present: bool) -> None:
+    """Refuse a pull request that edits, renames or deletes the reset marker."""
+    if base_marker is not None or not present:
+        raise ReleaseError(
+            f"{RESET_MARKER} records a one-time release reset: a pull request "
+            "may only add it, never edit, rename or delete it"
+        )
+
+
 def check_release_reset(root: Path, base: str, fork: str) -> dict:
     """Accept only the complete one-time restart of stable numbering.
 
@@ -799,12 +808,9 @@ def check_release_reset(root: Path, base: str, fork: str) -> dict:
     retired entry is kept anywhere else. Any other mix is refused. ``fork``
     is where the pull request left ``base``.
     """
-    if blob_at_ref(root, fork, RESET_MARKER) is not None \
-            or not (root / RESET_MARKER).is_file():
-        raise ReleaseError(
-            f"{RESET_MARKER} records a one-time release reset: a pull request "
-            "may only add it, never edit, rename or delete it"
-        )
+    require_reset_marker_added(
+        blob_at_ref(root, fork, RESET_MARKER), (root / RESET_MARKER).is_file(),
+    )
     marker = read_reset_marker(root)
     retired = marker["retired_versions"]
     base_stable = json_at_ref(root, base, STABLE_METADATA)
@@ -948,15 +954,25 @@ def check_pr_changeset(
     added = [path for status, path in changed if status == "A" and path.startswith(".changes/") and path.endswith(".json")]
     selected = [item for item in load_changesets(root, versions) if item.path.relative_to(root).as_posix() in added]
     declared = {component for item in selected for component in item.components}
-    required: set[str] = set()
     adapters = build_distributions.load_adapters(root)
+    return changeset_components_rule(
+        changed, versions["plugins"], adapters, added, declared,
+    )
+
+
+def changeset_components_rule(
+    changed: list[tuple[str, str]], plugins: Container[str], hosts: Container[str],
+    added: list[str], declared: set[str],
+) -> dict:
+    """Require a normal pull request's changesets to declare each changed component."""
+    required: set[str] = set()
     for _status, path in changed:
         parts = Path(path).parts
-        if len(parts) >= 2 and parts[0] == "plugins" and parts[1] in versions["plugins"]:
+        if len(parts) >= 2 and parts[0] == "plugins" and parts[1] in plugins:
             required.add(parts[1])
-        if len(parts) >= 3 and parts[0] == "platforms" and parts[1] in adapters and parts[2] in versions["plugins"]:
+        if len(parts) >= 3 and parts[0] == "platforms" and parts[1] in hosts and parts[2] in plugins:
             required.add(parts[2])
-        if len(parts) >= 3 and parts[0] == "dist" and parts[1] in adapters and parts[2] in versions["plugins"]:
+        if len(parts) >= 3 and parts[0] == "dist" and parts[1] in hosts and parts[2] in plugins:
             required.add(parts[2])
         if path in {".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"}:
             required.add(MARKETPLACE_COMPONENT)
@@ -1258,6 +1274,68 @@ def apply_package_index_modes(root: Path, environment: dict[str, str]) -> None:
         git(root, "update-index", "--chmod=-x", "--", *to_regular, environment=environment)
 
 
+def release_replay_instant(
+    made: datetime.datetime, now: datetime.datetime,
+) -> datetime.datetime:
+    """The instant a release commit made at ``made`` is replayed at: its own.
+
+    A date in a month that has not begun at ``now`` comes from a wrong clock.
+    """
+    today = release_instant(now)
+    if (made.year, made.month) > (today.year, today.month):
+        raise ReleaseError(
+            f"it is dated {made:%Y-%m-%d}, in a month that has not begun; fix"
+            " the clock, drop it and run bump again"
+        )
+    return made
+
+
+def release_commit_parent(
+    parents: list[str], base_is_ancestor: Callable[[str], bool],
+) -> str:
+    """The one parent of a release commit, which must descend from the base."""
+    if len(parents) != 1:
+        raise ReleaseError(f"its last commit has {len(parents)} parents, not one")
+    parent = parents[0]
+    if not base_is_ancestor(parent):
+        raise ReleaseError(
+            "the base advanced after the release commit was made; rebase the"
+            " pull request onto the base and run bump again"
+        )
+    return parent
+
+
+def require_changeset_commits(check: Callable[[], dict]) -> None:
+    """Require the commits before a release commit to pass as a normal pull request."""
+    try:
+        earlier = check()
+    except ReleaseError as exc:
+        raise ReleaseError(
+            f"the commits before it break the changeset rules: {exc}"
+        ) from exc
+    if earlier["mode"] != "changeset":
+        raise ReleaseError(
+            "the commits before it already make a release or a reset"
+        )
+
+
+def bump_parent(root: Path, when: datetime.datetime) -> dict:
+    """Bump a release commit's parent as bump did at ``when``."""
+    try:
+        return prepare_release(root, when)
+    except ReleaseError as exc:
+        raise ReleaseError(f"its parent cannot be bumped: {exc}") from exc
+
+
+def require_bumped_tree(head_tree: str, expected_tree: str) -> None:
+    """Refuse a release commit whose tree is not the replayed bump's."""
+    if head_tree != expected_tree:
+        raise ReleaseError(
+            "its tree differs from the deterministic bump of its parent; drop"
+            " it and run bump again"
+        )
+
+
 def verify_release_commit(
     root: Path, base: str, head: str = "HEAD", *,
     now: Callable[[], datetime.datetime] = utc_now,
@@ -1282,58 +1360,32 @@ def verify_release_commit(
         root, "log", "-1", "--no-show-signature", "--format=%ct", head_sha,
         environment=environment,
     )), datetime.timezone.utc)
-    today = release_instant(now())
-    if (made.year, made.month) > (today.year, today.month):
-        raise ReleaseError(
-            f"it is dated {made:%Y-%m-%d}, in a month that has not begun; fix"
-            " the clock, drop it and run bump again"
-        )
+    when = release_replay_instant(made, now())
     base_sha = git(
         root, "rev-parse", "--verify", f"{base}^{{commit}}", environment=environment,
     )
     parents = git(
         root, "rev-list", "--parents", "-n", "1", head_sha, environment=environment,
     ).split()[1:]
-    if len(parents) != 1:
-        raise ReleaseError(f"its last commit has {len(parents)} parents, not one")
-    parent = parents[0]
-    if not git_ok(
+    parent = release_commit_parent(parents, lambda parent: git_ok(
         root, "merge-base", "--is-ancestor", base_sha, parent,
         environment=environment,
-    ):
-        raise ReleaseError(
-            "the base advanced after the release commit was made; rebase the"
-            " pull request onto the base and run bump again"
-        )
+    ))
     with tempfile.TemporaryDirectory(prefix="release-commit.") as temporary:
         replay = Path(temporary) / "replay"
         replay_checkout(root, replay, parent, environment)
         if parent != base_sha:
-            try:
-                earlier = check_pr_changeset(replay, base_sha, now=now)
-            except ReleaseError as exc:
-                raise ReleaseError(
-                    f"the commits before it break the changeset rules: {exc}"
-                ) from exc
-            if earlier["mode"] != "changeset":
-                raise ReleaseError(
-                    "the commits before it already make a release or a reset"
-                )
-        try:
-            metadata = prepare_release(replay, made)
-        except ReleaseError as exc:
-            raise ReleaseError(f"its parent cannot be bumped: {exc}") from exc
+            require_changeset_commits(
+                lambda: check_pr_changeset(replay, base_sha, now=now),
+            )
+        metadata = bump_parent(replay, when)
         git(replay, "add", "--all", environment=environment)
         apply_package_index_modes(replay, environment)
         expected_tree = git(replay, "write-tree", environment=environment)
     head_tree = git(
         root, "rev-parse", f"{head_sha}^{{tree}}", environment=environment,
     )
-    if head_tree != expected_tree:
-        raise ReleaseError(
-            "its tree differs from the deterministic bump of its parent; drop"
-            " it and run bump again"
-        )
+    require_bumped_tree(head_tree, expected_tree)
     return metadata["version"]
 
 

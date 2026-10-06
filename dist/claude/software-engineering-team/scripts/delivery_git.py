@@ -2171,19 +2171,9 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
     if fence_exists:
         refuse_merged_delivery(root, delivery_id, remote)
         _fence_ref, previous_fence, values = _fence_context(root, remote)
-        busy = [f"{key} {values[key]}" for key, idle in (
-            ("Mode", "open"), ("Barrier-Kind", "none"), ("Source-Intent", "none"), ("Target-Update-Intent", "none"),
-        ) if values[key] != idle]
-        if busy:
-            raise RuntimeError("DELIVERY_REF_COLLISION: reservation requires an idle open Fence, not one with "
-                               + ", ".join(busy))
-        listed = run_git(root, "ls-remote", remote, "refs/heads/agentrof/deliveries/*", "refs/heads/agentrof/slots/*")
-        holders = sorted(line.partition("\t")[2].removeprefix("refs/heads/") for line in listed.splitlines())
-        if holders:
-            raise RuntimeError("DELIVERY_REF_COLLISION: another Delivery or Slot holds the Fence: " + ", ".join(holders))
-        if values["Governance-Hash"] != governed_governance_hash(root):
-            raise RuntimeError("DELIVERY_FENCE_GOVERNANCE: the Fence does not carry the approved Governance; "
-                               "apply it with apply-governance before reserving")
+        require_fence_takeover(values, lambda: run_git(
+            root, "ls-remote", remote, "refs/heads/agentrof/deliveries/*", "refs/heads/agentrof/slots/*"),
+            lambda: governed_governance_hash(root))
     package = package_paths(root, directory, docs, include_map=False)
     policy = carried_policy_blobs(root, directory, docs)
     integration_oid = commit_tree(
@@ -2210,6 +2200,23 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
     return {"ok": True, "delivery": delivery_id, "target_branch": target_branch,
             "target": target_oid, "fence": fence_oid, "integration": integration_oid,
             "refs": short_refs(delivery_id)}
+
+
+def require_fence_takeover(values: dict[str, str], listed, governance_hash) -> None:
+    """Refuse to take over a Fence that is not idle and open, that a Delivery or Slot ref in the
+    ls-remote output *listed* returns holds, or that lacks the approved *governance_hash*."""
+    busy = [f"{key} {values[key]}" for key, idle in (
+        ("Mode", "open"), ("Barrier-Kind", "none"), ("Source-Intent", "none"), ("Target-Update-Intent", "none"),
+    ) if values[key] != idle]
+    if busy:
+        raise RuntimeError("DELIVERY_REF_COLLISION: reservation requires an idle open Fence, not one with "
+                           + ", ".join(busy))
+    holders = sorted(line.partition("\t")[2].removeprefix("refs/heads/") for line in listed().splitlines())
+    if holders:
+        raise RuntimeError("DELIVERY_REF_COLLISION: another Delivery or Slot holds the Fence: " + ", ".join(holders))
+    if values["Governance-Hash"] != governance_hash():
+        raise RuntimeError("DELIVERY_FENCE_GOVERNANCE: the Fence does not carry the approved Governance; "
+                           "apply it with apply-governance before reserving")
 
 
 def execution_operation_inputs(root: Path, directory: Path, docs: Path) -> tuple[list[str], dict[str, dict]]:
@@ -2378,6 +2385,17 @@ def refuse_superseded_approval(root: Path, directory: Path, docs: Path, integrat
     held = published_plan_blobs(root, integration_oid, [rel_posix(root, plan), *pinned_paths])
     published = front_matter(held.get(rel_posix(root, plan)))
     contracts = {path: front_matter(held.get(path)) for path in pinned_paths}
+    local = split_note(plan)[0] if plan.is_file() else {}
+    require_unsuperseded_approval(kinds, published, local, contracts,
+                                  lambda path: operation_compile.parse(root / path)[0])
+
+
+def require_unsuperseded_approval(kinds: dict[str, str], published: dict | None, local: dict,
+                                  contracts: dict[str, dict | None], local_contract) -> None:
+    """Refuse a checkout's plan approval *local* that the Integration's *published* plan has moved
+    past, or a pinned contract the Integration holds in *contracts* at a later or different revision
+    than the checkout's, which *local_contract* reads by path."""
+    import operation_compile
 
     def holds(paths: list[str]) -> str:
         described = []
@@ -2391,17 +2409,15 @@ def refuse_superseded_approval(root: Path, directory: Path, docs: Path, integrat
 
     remedy = ("take the Delivery package and the Operation contracts from the Integration, "
               "then revise inside begin-plan-revision")
-    local = split_note(plan)[0] if plan.is_file() else {}
     lineage = local.get("superseded_plan_approvals")
     if (published is not None and published.get("plan_hash") != local.get("plan_hash")
             and published.get("source_hash") not in (lineage if isinstance(lineage, list) else [])):
-        raise RuntimeError(f"DELIVERY_PLAN_SUPERSEDED: {holds(pinned_paths)}, which this checkout's approval of "
+        raise RuntimeError(f"DELIVERY_PLAN_SUPERSEDED: {holds(list(contracts))}, which this checkout's approval of "
                            f"execution plan {local.get('plan_hash')} does not supersede; {remedy}")
-    for path in pinned_paths:
-        copy = contracts[path]
+    for path, copy in contracts.items():
         if not copy or copy.get("status") != "approved" or not isinstance(copy.get("revision"), int):
             continue
-        props = operation_compile.parse(root / path)[0]
+        props = local_contract(path)
         revision = props.get("revision") if isinstance(props.get("revision"), int) else 0
         if copy["revision"] > revision or (copy["revision"] == revision
                                            and copy.get("source_hash") != props.get("source_hash")):
@@ -2555,10 +2571,24 @@ def published_pr_recorded(root: Path, remote: str, delivery_id: str, tip: str, d
     review = published(review_path)
     if review is not None and review.get("pull_request_url"):
         return True
-    if (published(rel_posix(root, directory / "delivery.md")) or {}).get("status") != "awaiting_merge":
+    status = (published(rel_posix(root, directory / "delivery.md")) or {}).get("status")
+    return review_records_pr(ref, review_path, review, status)
+
+
+def review_records_pr(ref: str, review_path: str, review: dict | None, status) -> bool:
+    """Whether the published *review* records the PR, given the published Delivery *status*.
+
+    A Review that is missing or lacks pull_request_url cannot say so while the
+    Delivery is awaiting_merge, which only the PR record sets.
+    """
+    if review is not None and review.get("pull_request_url"):
+        return True
+    if status != "awaiting_merge":
         return False
-    raise unknown(review_path, ("is missing" if review is None else "records no pull_request_url")
-                  + ", but a Delivery reaches awaiting_merge only with its PR recorded there")
+    raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: Delivery merge state cannot be evaluated: "
+                       f"{review_path} on {ref.removeprefix('refs/heads/')} "
+                       + ("is missing" if review is None else "records no pull_request_url")
+                       + ", but a Delivery reaches awaiting_merge only with its PR recorded there")
 
 
 def refuse_merged_delivery(root: Path, delivery_id: str, remote: str = "origin") -> None:
@@ -2588,6 +2618,11 @@ def refuse_merged_delivery(root: Path, delivery_id: str, remote: str = "origin")
         merged = recorded_pr_merged(root, delivery_id, target)
     else:
         merged = merged_record(root, remote, delivery_id) is not None
+    require_unmerged(delivery_id, merged)
+
+
+def require_unmerged(delivery_id: str, merged: bool) -> None:
+    """Refuse a change to a Delivery whose PR the target has *merged*."""
     if merged:
         raise RuntimeError(f"DELIVERY_POST_MERGE_TRANSITION: the target has merged the PR of {delivery_id}, "
                            "so the Delivery is closed")
@@ -2604,7 +2639,12 @@ def refuse_cancelled_delivery(root: Path, directory: Path, integration_oid: str,
     """
     from delivery_compile import split_note
     props, _body = split_remote_note(root, integration_oid, rel_posix(root, directory / "delivery.md"), split_note)
-    if props.get("status") == "cancelled":
+    require_not_cancelled(props.get("status"), verb)
+
+
+def require_not_cancelled(status, verb: str) -> None:
+    """Refuse *verb* on a Delivery whose published *status* is cancelled."""
+    if status == "cancelled":
         raise RuntimeError(f"DELIVERY_CANCELLATION_INVALID: the published Delivery is cancelled and a cancellation "
                            f"is final, so {verb} cannot continue it; its cancellation Review reaches the target "
                            "through its PR")
@@ -2763,8 +2803,7 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
         if path not in changed:
             continue
         props, digest = split_remote_note(root, target, path, reader)
-        if props.get("status") != status or props.get("source_hash") != expected or digest != expected:
-            raise RuntimeError("DELIVERY_TARGET_SOURCE_VIOLATION: target changed a pinned source or Operation receipt: " + path)
+        require_pinned_input(path, props, digest, expected, status)
     # The Process Policy pin is compared only while a new execution approval can
     # re-pin it. From the Delivery Review on it records the policy the Delivery
     # ran under, so a policy set for the next Delivery never strands this one.
@@ -2786,6 +2825,12 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
             if not current:
                 raise RuntimeError("DELIVERY_TARGET_SOURCE_VIOLATION: target changed a pinned source or Operation receipt: " + path)
     return bindings
+
+
+def require_pinned_input(path: str, props: dict, digest: str, expected: str, status: str) -> None:
+    """Refuse a target copy of a pinned input that lost its approved *status* or the pinned hash *expected*."""
+    if props.get("status") != status or props.get("source_hash") != expected or digest != expected:
+        raise RuntimeError("DELIVERY_TARGET_SOURCE_VIOLATION: target changed a pinned source or Operation receipt: " + path)
 
 
 def refreshed_claim_updates(root: Path, remote: str, delivery_id: str, directory: Path,
@@ -3750,10 +3795,7 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
         claimed, holder = item_claim(root, remote, delivery_id, story)
-        if claimed:
-            raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: story is already claimed by {holder or 'another Delivery'}: {story}")
-        if story in delivered:
-            raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: story is already delivered by {delivered[story]}: {story}")
+        require_claimable(story, claimed, holder, delivered)
         item_props, item_body = split_note(item_path)
         item_props["integration_base_commit"] = marker
         item_props["source_hash"] = content_hash(item_props, item_body)
@@ -3768,6 +3810,14 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     atomic_push(root, remote, updates)
     return {"ok": True, "delivery": delivery_id, "claims": stories,
             "integration": marker, "refs": short_refs(delivery_id)}
+
+
+def require_claimable(story: str, claimed: str, holder: str, delivered: dict[str, str]) -> None:
+    """Refuse to claim *story* while an Item ref holds it or a merged Delivery in *delivered* delivered it."""
+    if claimed:
+        raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: story is already claimed by {holder or 'another Delivery'}: {story}")
+    if story in delivered:
+        raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: story is already delivered by {delivered[story]}: {story}")
 
 
 def remote_slot_oids(root: Path, remote: str) -> dict[str, str]:
@@ -3815,16 +3865,10 @@ def require_item_operation_bindings(root: Path, item_props: dict) -> None:
 def require_item_architecture_binding(worktree: Path, item_props: dict,
                                       story_id: str, *, tree: str | None = None) -> None:
     """Require a compiler-stamped Architecture delta only when planned."""
-    impact = str(item_props.get("architecture_impact", "not_applicable"))
-    if impact == "not_applicable":
+    expected = item_architecture_delta_hash(item_props)
+    if expected is None:
         return
-    if impact != "required":
-        raise RuntimeError("Item architecture_impact is invalid")
-    expected = str(item_props.get("architecture_delta_hash", ""))
-    if not expected.startswith("sha256:"):
-        raise RuntimeError("architecture-impact Item lacks architecture_delta_hash")
     try:
-        import architecture_compile
         # Read committed blobs: a local edit must never authorize the reviewed tip.
         tree = tree or run_git(worktree, "--no-replace-objects", "rev-parse", "HEAD")
         prefix = "workspace/docs/system-architecture/"
@@ -3841,32 +3885,53 @@ def require_item_architecture_binding(worktree: Path, item_props: dict,
                 target.write_bytes(subprocess.run(
                     ["git", "--no-replace-objects", "cat-file", "blob", oid], cwd=worktree,
                     capture_output=True, check=True).stdout)
-            delta = architecture_compile.current_item_delta(architecture, story_id)
-            if expected != delta.get("architecture_delta_hash"):
-                raise RuntimeError("architecture_delta_hash is stale")
-            _registry, findings = architecture_compile.registry(architecture)
-            if findings:
-                raise RuntimeError("Item Architecture sealed records are invalid: " + "; ".join(findings))
-            components = set(item_props.get("architecture_components", []))
-            kinds = set(item_props.get("architecture_record_kinds", []))
-            if not delta.get("records") or not components or not kinds:
-                raise RuntimeError("Item Architecture requires a nonempty claimed delta")
-            for row in delta["records"]:
-                props = architecture_compile.record_props(architecture / row["path"])
-                affected = {scope.split("#module/", 1)[0] for scope in props.get("affected_scopes", [])}
-                if (props.get("revision_state") != "sealed"
-                        or row["type"] not in kinds
-                        or (row["component_ref"] and row["component_ref"] not in components)
-                        or not set(row["connects"]).issubset(components)
-                        or not affected.issubset(components)):
-                    raise RuntimeError("Item Architecture delta is unsealed or exceeds approved claims")
+            require_architecture_delta(architecture, item_props, story_id, expected)
+    except (ImportError, OSError, ValueError) as exc:
+        raise RuntimeError("Item Architecture binding is invalid: " + str(exc)) from exc
+
+
+def item_architecture_delta_hash(item_props: dict) -> str | None:
+    """The Architecture delta hash an Item record must carry, or None when it plans no Architecture."""
+    impact = str(item_props.get("architecture_impact", "not_applicable"))
+    if impact == "not_applicable":
+        return None
+    if impact != "required":
+        raise RuntimeError("Item architecture_impact is invalid")
+    expected = str(item_props.get("architecture_delta_hash", ""))
+    if not expected.startswith("sha256:"):
+        raise RuntimeError("architecture-impact Item lacks architecture_delta_hash")
+    return expected
+
+
+def require_architecture_delta(architecture: Path, item_props: dict, story_id: str, expected: str) -> None:
+    """Require that the Architecture tree holds the sealed delta *expected* names, within the Item's claims."""
+    try:
+        import architecture_compile
+        delta = architecture_compile.current_item_delta(architecture, story_id)
+        if expected != delta.get("architecture_delta_hash"):
+            raise RuntimeError("architecture_delta_hash is stale")
+        _registry, findings = architecture_compile.registry(architecture)
+        if findings:
+            raise RuntimeError("Item Architecture sealed records are invalid: " + "; ".join(findings))
+        components = set(item_props.get("architecture_components", []))
+        kinds = set(item_props.get("architecture_record_kinds", []))
+        if not delta.get("records") or not components or not kinds:
+            raise RuntimeError("Item Architecture requires a nonempty claimed delta")
+        for row in delta["records"]:
+            props = architecture_compile.record_props(architecture / row["path"])
+            affected = {scope.split("#module/", 1)[0] for scope in props.get("affected_scopes", [])}
+            if (props.get("revision_state") != "sealed"
+                    or row["type"] not in kinds
+                    or (row["component_ref"] and row["component_ref"] not in components)
+                    or not set(row["connects"]).issubset(components)
+                    or not affected.issubset(components)):
+                raise RuntimeError("Item Architecture delta is unsealed or exceeds approved claims")
     except (ImportError, OSError, ValueError) as exc:
         raise RuntimeError("Item Architecture binding is invalid: " + str(exc)) from exc
 
 
 def item_control_note(root: Path, tree: str, relative_item: str) -> tuple[str, str, dict, str]:
     """The Item control file in one tree: its mode, text, frontmatter and body."""
-    from delivery_compile import parse_frontmatter
     entry = run_git(root, "--no-replace-objects", "ls-tree", tree, "--", relative_item)
     if not entry:
         raise RuntimeError("product/test commits may not add or remove the active Item")
@@ -3876,6 +3941,12 @@ def item_control_note(root: Path, tree: str, relative_item: str) -> tuple[str, s
         raise RuntimeError("Item publication requires a regular control file")
     text = subprocess.run(["git", "--no-replace-objects", "cat-file", "blob", oid], cwd=root,
                           capture_output=True, check=True).stdout.decode("utf-8")
+    return parse_item_control(mode, text)
+
+
+def parse_item_control(mode: str, text: str) -> tuple[str, str, dict, str]:
+    """An Item control file's mode and committed text with its frontmatter and body."""
+    from delivery_compile import parse_frontmatter
     props, body_line, error = parse_frontmatter(text)
     if error:
         raise RuntimeError("Item publication frontmatter is invalid: " + error)
@@ -3930,7 +4001,6 @@ def require_item_publication_controls(root: Path, before: str, after: str,
     took, byte for byte. The Item record then holds that commit's plan-owned
     fields while it keeps its own lifecycle, its stamp and its new base.
     """
-    from delivery_compile import content_hash
     prefix = relative_delivery.rstrip("/") + "/"
     changed = git_paths(root, "--no-replace-objects", "diff", "--name-only", "-z", before, after, "--", prefix)
     notes = {}
@@ -3938,23 +4008,33 @@ def require_item_publication_controls(root: Path, before: str, after: str,
     if relative_item in changed:
         notes = {tree: item_control_note(root, tree, relative_item) for tree in (before, after)}
         converged = converged_integration(root, notes[before][2], notes[after][2], after, integration)
-    for path in changed:
-        if path == relative_item:
-            continue
-        carried = converged is not None and (
-            run_git(root, "--no-replace-objects", "ls-tree", after, "--", path)
-            == run_git(root, "--no-replace-objects", "ls-tree", converged, "--", path))
-        if not carried:
-            raise RuntimeError("product/test commits may not edit Delivery control files")
+    require_carried_control_paths(changed, relative_item, lambda path: converged is not None and (
+        run_git(root, "--no-replace-objects", "ls-tree", after, "--", path)
+        == run_git(root, "--no-replace-objects", "ls-tree", converged, "--", path)))
     if relative_item not in changed:
         return
-    if converged is None:
+    published = None if converged is None else item_control_note(root, converged, relative_item)
+    require_item_controls(notes[before], notes[after], published)
+
+
+def require_carried_control_paths(changed: list[str], relative_item: str, carried) -> None:
+    """Refuse a changed Delivery control path other than the Item record that *carried* does not vouch for."""
+    for path in changed:
+        if path != relative_item and not carried(path):
+            raise RuntimeError("product/test commits may not edit Delivery control files")
+
+
+def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, str, dict, str],
+                          published: tuple[str, str, dict, str] | None = None) -> None:
+    """Permit an Item record change only as its Architecture stamp, or as the record of the
+    converged Integration commit whose control note is *published*, keeping its lifecycle and stamp."""
+    from delivery_compile import content_hash
+    if published is None:
         versions = []
-        for tree in (before, after):
-            mode, text, props, body = notes[tree]
+        for index, (mode, text, props, body) in enumerate((before, after)):
             if props.get("architecture_impact") != "required":
                 raise RuntimeError("only a required Architecture Item may publish its stamp")
-            if tree == after and props.get("source_hash") != content_hash(props, body):
+            if index and props.get("source_hash") != content_hash(props, body):
                 raise RuntimeError("Item Architecture stamp source_hash is stale")
             # The closing delimiter line may end with CRLF, as a text-mode write on native
             # Windows commits it under setup's -text rule; the bytes around it compare exactly.
@@ -3967,9 +4047,9 @@ def require_item_publication_controls(root: Path, before: str, after: str,
         if versions[0] != versions[1]:
             raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp")
         return
-    previous_mode, _previous_text, previous, _previous_body = notes[before]
-    mode, _text, props, body = notes[after]
-    _published_mode, _published_text, published, published_body = item_control_note(root, converged, relative_item)
+    previous_mode, _previous_text, previous, _previous_body = before
+    mode, _text, props, body = after
+    _published_mode, _published_text, published, published_body = published
     if props.get("source_hash") != content_hash(props, body):
         raise RuntimeError("Item Architecture stamp source_hash is stale")
     if (props.get("architecture_delta_hash") != previous.get("architecture_delta_hash")
@@ -3991,10 +4071,7 @@ def require_item_path_claims(root: Path, before: str, after: str, relative_item:
     recorded integration base holds it is not the Item's change; its writer took
     it with that Integration.
     """
-    from delivery_compile import _is_normalized_claim
     props = item_control_note(root, after, relative_item)[2]
-    claims = [claim for claim in props.get("path_claims") or []
-              if isinstance(claim, str) and _is_normalized_claim(claim)]
 
     def product_paths(start: str) -> set[str]:
         listing = git_paths(root, "--no-replace-objects", "diff", "--no-renames", "--name-only", "-z", start, after,
@@ -4005,6 +4082,14 @@ def require_item_path_claims(root: Path, before: str, after: str, relative_item:
     base = props.get("integration_base_commit")
     if changed and isinstance(base, str) and OID_RE.fullmatch(base):
         changed &= product_paths(base)
+    require_paths_within_claims(changed, props.get("path_claims"))
+
+
+def require_paths_within_claims(changed: set[str], path_claims) -> None:
+    """Refuse a changed product path that no normalized path claim covers, by its exact path or a parent."""
+    from delivery_compile import _is_normalized_claim
+    claims = [claim for claim in path_claims or []
+              if isinstance(claim, str) and _is_normalized_claim(claim)]
     outside = sorted(path for path in changed
                      if not any(path == claim or path.startswith(claim + "/") for claim in claims))
     if outside:

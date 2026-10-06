@@ -934,80 +934,49 @@ class SetupProjectTests(unittest.TestCase):
             cwd=project, capture_output=True, check=True,
         ).stdout
 
-    def test_setup_adds_the_gitattributes_block_once_and_keeps_project_lines(self):
+    @staticmethod
+    def merged_attributes(current):
+        return setup_module.merged_managed_text(
+            current, ".gitattributes", setup_module.setup_check.ATTRIBUTES_START,
+            setup_module.setup_check.ATTRIBUTES_END,
+            setup_module.setup_check.managed_attributes_block("workspace"),
+        )
+
+    def test_setup_plans_the_gitattributes_block_as_a_created_managed_block(self):
         with tempfile.TemporaryDirectory() as temporary:
-            fresh = Path(temporary) / "fresh"
-            fresh.mkdir()
-            init_repository(fresh)
-            inspected = self.run_script(
-                SETUP, "inspect", "--project-root", str(fresh), "--json"
+            current, target = setup_module.proposed_gitattributes(
+                Path(temporary), "workspace",
             )
-            self.assertEqual(
-                inspected.returncode, 0, inspected.stdout + inspected.stderr
-            )
-            planned = {
-                item["path"]: item
-                for item in json.loads(inspected.stdout)["operations"]
-            }
-            self.assertIn(".gitattributes", planned)
-            self.assertEqual(planned[".gitattributes"]["action"], "create")
-            self.assertEqual(
-                planned[".gitattributes"]["ownership"], "tracked_managed_block"
-            )
-            self.assertFalse((fresh / ".gitattributes").exists())
-            applied = self.run_script(
-                SETUP, "apply", "--project-root", str(fresh), "--json"
-            )
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            self.assertEqual(
-                (fresh / ".gitattributes").read_bytes(),
-                ATTRIBUTES_BLOCK.encode("utf-8"),
-            )
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+        self.assertEqual((current, target), ("", ATTRIBUTES_BLOCK))
+        [operation] = setup_module.managed_block_operations(
+            "gitattributes", ".gitattributes", False, current, target,
+        )
+        self.assertEqual(operation["path"], ".gitattributes")
+        self.assertEqual(operation["action"], "create")
+        self.assertEqual(operation["ownership"], "tracked_managed_block")
 
-            owned = Path(temporary) / "owned"
-            owned.mkdir()
-            init_repository(owned)
-            attributes = owned / ".gitattributes"
-            before, after = "* text=auto\n*.png binary\n", "*.sh text eol=lf\n"
-            attributes.write_bytes(before.encode("utf-8"))
-            applied = self.run_script(
-                SETUP, "apply", "--project-root", str(owned), "--json"
-            )
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            self.assertEqual(
-                attributes.read_bytes(),
-                (before + "\n" + ATTRIBUTES_BLOCK).encode("utf-8"),
-            )
+    def test_setup_adds_the_gitattributes_block_once_after_project_lines(self):
+        before = "* text=auto\n*.png binary\n"
+        self.assertEqual(
+            self.merged_attributes(before), before + "\n" + ATTRIBUTES_BLOCK,
+        )
 
-            stale = ATTRIBUTES_BLOCK.replace("** -text", "** text")
-            attributes.write_bytes((before + stale + after).encode("utf-8"))
-            original = attributes.read_bytes()
-            args = argparse.Namespace(
-                project_root=str(owned), workspace="workspace",
-                output_language="English", terminology_language="English",
-                command="apply", json=True,
-            )
-            with mock.patch.object(
-                setup_module.setup_check, "closing",
-                return_value=["forced closing failure"],
-            ):
-                code, result = setup_module.apply_plan(args)
-            self.assertEqual(code, 1)
-            self.assertTrue(result["rolled_back"])
-            self.assertEqual(attributes.read_bytes(), original)
+    def test_setup_replaces_a_stale_gitattributes_block_in_place(self):
+        before, after = "* text=auto\n*.png binary\n", "*.sh text eol=lf\n"
+        stale = ATTRIBUTES_BLOCK.replace("** -text", "** text")
+        self.assertEqual(
+            self.merged_attributes(before + stale + after),
+            before + ATTRIBUTES_BLOCK + after,
+        )
 
-            applied = self.run_script(
-                SETUP, "apply", "--project-root", str(owned), "--json"
-            )
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            converged = (before + ATTRIBUTES_BLOCK + after).encode("utf-8")
-            self.assertEqual(attributes.read_bytes(), converged)
-            repeated = self.run_script(
-                SETUP, "apply", "--project-root", str(owned), "--json"
-            )
-            self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
-            self.assertEqual(json.loads(repeated.stdout)["applied_operations"], [])
-            self.assertEqual(attributes.read_bytes(), converged)
+    def test_setup_leaves_a_converged_gitattributes_file_unchanged(self):
+        converged = "* text=auto\n*.png binary\n" + ATTRIBUTES_BLOCK + "*.sh text eol=lf\n"
+        self.assertEqual(self.merged_attributes(converged), converged)
+        self.assertEqual(setup_module.managed_block_operations(
+            "gitattributes", ".gitattributes", True, converged,
+            self.merged_attributes(converged),
+        ), [])
 
     def test_setup_check_reports_a_missing_stale_or_overridden_gitattributes_rule(self):
         with self.applied_project() as project:

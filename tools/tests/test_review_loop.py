@@ -92,6 +92,30 @@ def bound(result: dict) -> set[str]:
     return {path for path in result["required_reads"] if "/references/switch-" in path}
 
 
+def commit_project(root: Path) -> None:
+    """Make the project a committed Git worktree, as a full task manifest needs."""
+    init_repository(root)
+    git(root, "config", "core.autocrlf", "false")
+    write(root, ".gitignore", ".agentrof/\n")
+    write(root, "brief.md", "Accepted intent.\n")
+    commit(root)
+
+
+def instruction_reads(project: Path, entry: str, role: str, skills: list[str], catalog: dict) -> set[str]:
+    """The required reads of a task, as task_inputs.manifest derives them from the project's
+    Process Policy, without the Git reads of a full manifest."""
+    route = catalog["entries"][entry]
+    chosen, _policy_inputs = task_inputs.switch_choices(project, route, task_inputs.PACKAGE)
+    return task_inputs.instruction_reads(
+        catalog, task_inputs.PACKAGE, route, role,
+        task_inputs.task_skills(catalog, entry, role, skills, route), chosen)[2]
+
+
+def switch_reads(project: Path, entry: str, role: str, skills: list[str], catalog: dict) -> set[str]:
+    return {path for path in instruction_reads(project, entry, role, skills, catalog)
+            if "/references/switch-" in path}
+
+
 class ReviewLoopReferenceTests(unittest.TestCase):
     def test_calibration_runs_on_the_claiming_reviewers_own_tier(self):
         # The only calibration evidence comes from a judge on the strongest tier;
@@ -134,19 +158,10 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        init_repository(self.root)
-        git(self.root, "config", "core.autocrlf", "false")
-        write(self.root, ".gitignore", ".agentrof/\n")
-        write(self.root, "brief.md", "Accepted intent.\n")
-        commit(self.root)
         self.docs = self.root / "workspace" / "docs"
 
-    def manifests(self) -> dict:
-        return {task[:3]: task_inputs.manifest(entry=task[0], role=task[1], mode=task[2],
-                                               project=self.root, skills=task[3])
-                for task in REVIEW_TASKS}
-
     def test_review_tasks_bind_the_loop_only_at_blocking_delta_with_either_panel_value(self):
+        catalog = task_inputs.catalog()
         states = (
             ("single_reader", "current", ()),
             ("single_reader", "blocking_delta", ("review_loop", "--value", "blocking_delta")),
@@ -158,16 +173,26 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                 policy(self.docs, "begin-revision" if process_policy.path_for(self.docs).exists() else "init")
                 policy(self.docs, "set", "--switch", *change)
                 policy(self.docs, "approve")
-            manifests = self.manifests()
             for task in REVIEW_TASKS:
                 expected = set()
                 if loop == "blocking_delta":
                     expected.add(task[4])
                 if panels == "lens_panel" and "challenge-review" in (
-                        task[3] + task_inputs.catalog()["required_role_skills"][task[1]]):
+                        task[3] + catalog["required_role_skills"][task[1]]):
                     expected.add(PANEL)
                 with self.subTest(panels=panels, loop=loop, task=task[:3]):
-                    self.assertEqual(bound(manifests[task[:3]]), expected)
+                    self.assertEqual(switch_reads(self.root, task[0], task[1], task[3], catalog), expected)
+
+    def test_a_derived_review_task_manifest_binds_the_loop_and_the_panel(self):
+        """The one Git-backed derivation of a review task at blocking_delta and lens_panel."""
+        commit_project(self.root)
+        policy(self.docs, "init")
+        policy(self.docs, "set", "--switch", "review_loop", "--value", "blocking_delta")
+        policy(self.docs, "set", "--switch", "review_panels", "--value", "lens_panel")
+        policy(self.docs, "approve")
+        result = task_inputs.manifest(entry="backlog-plan", role="product-owner", mode="revise",
+                                      project=self.root, skills=["challenge-review"])
+        self.assertEqual(bound(result), {DOCUMENT, PANEL})
 
     def writers(self, entry: str, kind: str | None) -> set[str]:
         """The step's writer roles as the package declares them, never as this test lists them."""
@@ -178,8 +203,7 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
         return {role for role in catalog["entries"][entry]["roles"] if role not in read_only}
 
     def test_the_calibration_reader_is_a_fresh_read_only_non_writer(self):
-        claims = write(self.root, ".agentrof/agent-marketplace/.runtime/review-loop/claims.md",
-                       "| id | severity | evidence |\n|---|---|---|\n| F-3 | major | Scope repeats. |\n")
+        catalog = task_inputs.catalog()
         policy(self.docs, "init")
         policy(self.docs, "set", "--switch", "review_loop", "--value", "blocking_delta")
         policy(self.docs, "approve")
@@ -190,33 +214,53 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                              ("approve",)):
                     policy(self.docs, *step)
             for step, (entry, role, skills, kind) in CALIBRATION_READERS.items():
-                derive = functools.partial(task_inputs.manifest, entry=entry, project=self.root,
-                                           skills=skills)
-                calibration = derive(role=role, mode="review", findings=claims)
-                claimant = derive(role=role, mode="review")
+                route = catalog["entries"][entry]
+                read_only = task_inputs.read_only_task(catalog, entry, role, "review")
                 with self.subTest(panels=panels, step=step):
-                    self.assertEqual(calibration["write_boundary"], "read_only")
-                    self.assertEqual(calibration["write_scope"]["allowed_write_area"], [])
-                    self.assertFalse(calibration["write_scope"]["writer_authority"])
-                    # Fresh: a task of its own that binds the claims record, which the
-                    # claiming reader's task never does.
-                    self.assertIsNone(claimant["open_findings"])
-                    self.assertEqual(calibration["open_findings"], claims)
-                    self.assertIn(claims, {record["path"] for record in calibration["project_inputs"]})
-                    self.assertNotEqual(calibration["source_hash"], claimant["source_hash"])
+                    self.assertTrue(read_only)
+                    scope = task_inputs.write_scope(self.root, set(), role, route, read_only, None,
+                                                    task_inputs.PACKAGE)
+                    self.assertEqual(scope["allowed_write_area"], [])
+                    self.assertFalse(scope["writer_authority"])
                     # The claiming reviewer's own role, bound to its own agent file.
-                    self.assertEqual(calibration["role"], claimant["role"])
-                    self.assertIn(f"agents/{role}.md", calibration["required_reads"])
-                    self.assertIn(CODE if step == "code_review" else DOCUMENT,
-                                  calibration["required_reads"])
+                    required = instruction_reads(self.root, entry, role, skills, catalog)
+                    self.assertIn(f"agents/{role}.md", required)
+                    self.assertIn(CODE if step == "code_review" else DOCUMENT, required)
                     # Never a writer: each writer's task of the step writes, and none is the
                     # calibration reader's.
                     writers = self.writers(entry, kind)
                     self.assertTrue(writers)
                     for writer in writers:
-                        task = derive(role=writer, mode="revise")
-                        self.assertEqual(task["write_boundary"], "named_owner_only")
-                        self.assertNotEqual(task["role"], calibration["role"])
+                        self.assertFalse(task_inputs.read_only_task(catalog, entry, writer, "revise"))
+                        self.assertNotEqual(writer, role)
+
+    def test_a_derived_calibration_task_binds_the_claims_its_claimant_never_binds(self):
+        """The one Git-backed derivation of a calibration reader beside its claimant."""
+        commit_project(self.root)
+        claims = write(self.root, ".agentrof/agent-marketplace/.runtime/review-loop/claims.md",
+                       "| id | severity | evidence |\n|---|---|---|\n| F-3 | major | Scope repeats. |\n")
+        policy(self.docs, "init")
+        policy(self.docs, "set", "--switch", "review_loop", "--value", "blocking_delta")
+        policy(self.docs, "approve")
+        entry, role, skills, _kind = CALIBRATION_READERS["code_review"]
+        derive = functools.partial(task_inputs.manifest, entry=entry, project=self.root, skills=skills)
+        calibration = derive(role=role, mode="review", findings=claims)
+        claimant = derive(role=role, mode="review")
+        self.assertEqual(calibration["write_boundary"], "read_only")
+        self.assertEqual(calibration["write_scope"]["allowed_write_area"], [])
+        self.assertFalse(calibration["write_scope"]["writer_authority"])
+        # Fresh: a task of its own that binds the claims record, which the
+        # claiming reader's task never does.
+        self.assertIsNone(claimant["open_findings"])
+        self.assertEqual(calibration["open_findings"], claims)
+        self.assertIn(claims, {record["path"] for record in calibration["project_inputs"]})
+        self.assertNotEqual(calibration["source_hash"], claimant["source_hash"])
+        self.assertEqual(calibration["role"], claimant["role"])
+        self.assertIn(f"agents/{role}.md", calibration["required_reads"])
+        self.assertIn(CODE, calibration["required_reads"])
+        task = derive(role="backend-developer", mode="revise")
+        self.assertEqual(task["write_boundary"], "named_owner_only")
+        self.assertNotEqual(task["role"], calibration["role"])
 
     def test_re_review_task_binds_only_the_findings_the_diff_and_the_context(self):
         docs = "workspace/docs/"
@@ -244,6 +288,7 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                 "design-system/MASTER.md", ["design-system/pages/sign-in.md"],
                 "design-system/pages/billing.md"),
         }
+        commit_project(self.root)
         for _entry, _role, _skills, changed, context, other in steps.values():
             for path in (changed, *context, other):
                 write(self.root, docs + path, f"---\ntype: note\n---\n\n# {Path(path).stem}\n")

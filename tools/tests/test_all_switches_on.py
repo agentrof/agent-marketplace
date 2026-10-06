@@ -148,6 +148,61 @@ def quiet(call, *args) -> tuple[int, str]:
     return code, output.getvalue()
 
 
+def approve_every_switch(docs: Path) -> tuple[dict, dict]:
+    """Approve a Process Policy that sets every switch to its non-default value."""
+    (docs / "maps").mkdir(parents=True)
+    registry = process_policy.load_registry()
+    values = {switch: next(value for value in spec["values"] if value != spec["default"])
+              for switch, spec in registry.items()}
+
+    def policy(*argv: str) -> None:
+        code, output = quiet(process_policy.main, [argv[0], "--docs", str(docs), *argv[1:]])
+        if code:
+            raise AssertionError(output)
+
+    policy("init")
+    for switch, value in values.items():
+        policy("set", "--switch", switch, "--value", value)
+    for parameter, limit in LIMITS.items():
+        policy("set", "--switch", "story_size_budget", "--parameter", parameter, "--value", str(limit))
+    policy("set", "--switch", "root_review_scope", "--parameter", "max_delta_share_percent",
+           "--value", "50")
+    policy("set", "--switch", "test_cost_budget", "--parameter", "serial_rows", "--value", str(SERIAL_ROWS))
+    policy("set", "--switch", "item_review_scale", "--parameter", "changed_lines", "--value", "200")
+    policy("approve")
+    return registry, values
+
+
+class AllSwitchesOnBindingTests(unittest.TestCase):
+    """The binding rule decided in process, on a project that holds only the policy."""
+
+    def test_every_shipped_task_binds_the_references_of_the_switches_its_flows_own(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        project = Path(temporary.name).resolve()
+        approve_every_switch(project / "workspace/docs")
+        catalog = task_inputs.catalog()
+        package = task_inputs.PACKAGE
+        bound = {}
+        for entry, route in sorted(catalog["entries"].items()):
+            chosen, _inputs = task_inputs.switch_choices(
+                project if route["project_state"] else None, route, package)
+            for role in route["roles"] or [None]:
+                required = task_inputs.instruction_reads(
+                    catalog, package, route, role,
+                    task_inputs.task_skills(catalog, entry, role, None, route), chosen)[2]
+                bound[f"{entry}:{role}"] = sorted(
+                    path.removeprefix("skill-content/") for path in required
+                    if "/references/switch-" in path)
+        self.maxDiff = None
+        self.assertEqual(bound, {key: sorted(value) for key, value in EXPECTED.items()})
+        # Every switch reference the package ships reaches at least one task.
+        shipped = {path.relative_to(ROOT / "plugins/software-engineering-team/skill-content")
+                   .as_posix() for path in (ROOT / "plugins/software-engineering-team/skill-content")
+                   .glob("*/references/switch-*.md")}
+        self.assertEqual(shipped, {path for paths in bound.values() for path in paths})
+
+
 class AllSwitchesOnTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -158,23 +213,7 @@ class AllSwitchesOnTests(unittest.TestCase):
         for key, value in (("user.email", "test@example.com"), ("user.name", "Test"),
                            ("core.autocrlf", "false")):
             self.git("config", key, value)
-        (self.docs / "maps").mkdir(parents=True)
-        self.registry = process_policy.load_registry()
-        self.values = {switch: next(value for value in spec["values"] if value != spec["default"])
-                       for switch, spec in self.registry.items()}
-        self.policy("init")
-        for switch, value in self.values.items():
-            self.policy("set", "--switch", switch, "--value", value)
-        for parameter, limit in LIMITS.items():
-            self.policy("set", "--switch", "story_size_budget", "--parameter", parameter,
-                        "--value", str(limit))
-        self.policy("set", "--switch", "root_review_scope", "--parameter",
-                    "max_delta_share_percent", "--value", "50")
-        self.policy("set", "--switch", "test_cost_budget", "--parameter", "serial_rows",
-                    "--value", str(SERIAL_ROWS))
-        self.policy("set", "--switch", "item_review_scale", "--parameter", "changed_lines",
-                    "--value", "200")
-        self.policy("approve")
+        self.registry, self.values = approve_every_switch(self.docs)
         self.commit("Approve a Process Policy with every switch on")
 
     def git(self, *args: str) -> None:
@@ -199,23 +238,13 @@ class AllSwitchesOnTests(unittest.TestCase):
         self.assertEqual(self.policy("value", "--switch", "story_size_budget")["parameters"],
                          LIMITS)
 
-    def test_every_shipped_task_binds_the_references_of_the_switches_its_flows_own(self):
-        bound = {}
-        for entry, route in sorted(task_inputs.catalog()["entries"].items()):
-            for role in route["roles"] or [None]:
-                result = task_inputs.manifest(
-                    entry=entry, role=role, mode="review",
-                    project=self.project if route["project_state"] else None)
-                bound[f"{entry}:{role}"] = sorted(
-                    path.removeprefix("skill-content/") for path in result["required_reads"]
-                    if "/references/switch-" in path)
-        self.maxDiff = None
-        self.assertEqual(bound, {key: sorted(value) for key, value in EXPECTED.items()})
-        # Every switch reference the package ships reaches at least one task.
-        shipped = {path.relative_to(ROOT / "plugins/software-engineering-team/skill-content")
-                   .as_posix() for path in (ROOT / "plugins/software-engineering-team/skill-content")
-                   .glob("*/references/switch-*.md")}
-        self.assertEqual(shipped, {path for paths in bound.values() for path in paths})
+    def test_a_derived_task_manifest_binds_the_references_of_its_flows_switches(self):
+        """The one Git-backed derivation under every switch on."""
+        result = task_inputs.manifest(entry="deliver", role="code-reviewer", mode="review",
+                                      project=self.project)
+        self.assertEqual(sorted(path.removeprefix("skill-content/") for path in result["required_reads"]
+                                if "/references/switch-" in path),
+                         sorted(EXPECTED["deliver:code-reviewer"]))
 
     def test_the_backlog_checks_and_derives_an_epic_review_manifest_with_every_switch_on(self):
         make_approved_backlog(self.docs)

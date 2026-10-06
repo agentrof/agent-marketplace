@@ -62,8 +62,11 @@ its verification sessions stay, named by the removed worktree's path, so no
 copy reads them. Setup and project vault tests may copy a project one
 `setup_project.py apply` left, which holds no absolute path. Every test gets
 independent files, Git objects and a bare remote; the origin is rebound to that
-copy and transient fetch metadata is removed. No seed contains a linked Item
-worktree or an active writer receipt. Construction and isolation have dedicated
+copy and transient fetch metadata is removed. Architecture push tests may copy
+the state a stamped architecture Item leaves: started, stamped and committed in
+its Item worktree, the seed's only linked worktree; each copy repairs both
+worktree links to its own paths, and no copy names the seed. No other seed
+contains a linked Item worktree or an active writer receipt. Construction and isolation have dedicated
 coverage; changed setup functions or environment use fresh preparation. The
 named Windows text-pipe emulator may build a separate seed under its exact
 wrapper and reuse it only within that wrapper's lifetime. Its underlying runner

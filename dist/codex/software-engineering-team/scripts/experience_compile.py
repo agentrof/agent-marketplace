@@ -3953,57 +3953,42 @@ def begin_revision(args) -> int:
     return 0
 
 
-def revise_records(args) -> int:
-    """Advance existing children and their exact reverse-reference closure."""
-    root = root_for(args.root)
-    plan = load_scope_plan(args.scope_plan, args.proposal_hash)
-    problems = verify_scope_inputs(root, plan, require_committed=True)
-    if problems:
-        return print_problems(problems, False)
-    validate_open_application_state(
-        root, plan=plan, proposal_hash=args.proposal_hash,
-        expected_phase="draft",
-    )
-    requested = list(args.record_ref)
+def record_revision_actions(plan: dict, requested: list[str]) -> dict:
+    """Validate requested predecessor refs and return the open update actions."""
     if (not requested or len(requested) != len(set(requested))
             or any(EXACT.fullmatch(ref) is None for ref in requested)):
         raise ValueError("record refs must be unique exact predecessor references")
     if any(action["action"] not in {"update", "reuse"}
            for action in plan["actions"]):
         raise ValueError("record revision requires an update/reuse-only scope")
-    actions = {action["experience"]: action for action in plan["actions"]
-               if action["action"] == "update"}
-    owners = {package.name: package for package in packages(root)}
-    predecessors = {}
-    for name, action in actions.items():
-        package = owners.get(name)
-        if package is None:
-            raise ValueError(f"missing update package {name}")
-        validate_open_revision(
-            package, plan, action, args.proposal_hash, expected_status="draft",
-        )
-        data = fields(package)
-        if list_value(data, "input_bindings") != package_binding_rows(
-                plan, str(action["primary_process_ref"])):
-            raise ValueError(f"{name} open input bindings differ from the scope")
-        history, findings = validate_process_ledger(package, data["revision"])
-        if findings or not history:
-            raise ValueError(f"{name} needs intact predecessor history: {findings}")
-        prior = history[-1]
-        if (prior["package_revision"] != action["expected_package"]["revision"]
-                or prior["source_hash"] != action["expected_package"]["source_hash"]):
-            raise ValueError(f"{name} predecessor differs from the approved scope")
-        predecessors[name] = {row["id"]: row for row in prior["records"]}
+    return {action["experience"]: action for action in plan["actions"]
+            if action["action"] == "update"}
 
+
+def open_update_predecessors(
+    name: str, plan: dict, action: dict, data: dict, read_ledger,
+) -> dict:
+    """Return one open update's approved predecessor records by id."""
+    if list_value(data, "input_bindings") != package_binding_rows(
+            plan, str(action["primary_process_ref"])):
+        raise ValueError(f"{name} open input bindings differ from the scope")
+    history, findings = read_ledger(data["revision"])
+    if findings or not history:
+        raise ValueError(f"{name} needs intact predecessor history: {findings}")
+    prior = history[-1]
+    if (prior["package_revision"] != action["expected_package"]["revision"]
+            or prior["source_hash"] != action["expected_package"]["source_hash"]):
+        raise ValueError(f"{name} predecessor differs from the approved scope")
+    return {row["id"]: row for row in prior["records"]}
+
+
+def record_revision_closure(
+    requested: list[str], actions: dict, predecessors: dict, owner_rows: dict,
+) -> tuple[set, dict, dict]:
+    """Decide the exact reverse-reference closure and its successor refs."""
     current, prior_refs, ref_keys = {}, {}, {}
     retired = []
-    for name, package in owners.items():
-        if fields(package).get("status") == "retired":
-            continue
-        findings = []
-        rows = records(package, findings)
-        if findings:
-            raise ValueError(f"{name} invalid records: {'; '.join(findings)}")
+    for name, rows in owner_rows.items():
         for row in rows:
             if row["record_state"] != "active":
                 retired.append((name, row))
@@ -4070,6 +4055,72 @@ def revise_records(args) -> int:
                     and row.get("supersedes") == old_ref))):
             raise ValueError(f"{name}:{ident} has stale identity or revision")
         replacements[old_ref] = f"{name}:{ident}@r{prior['revision'] + 1}"
+    return selected, replacements, current
+
+
+def revised_record_data(
+    data: dict, prior_revision: int, old_ref: str, replacements: dict,
+) -> dict:
+    """Advance one child record and rewrite its exact references in place."""
+    data["revision"] = prior_revision + 1
+    data["supersedes"] = old_ref
+    for field in REFERENCE_FIELDS:
+        if field not in data:
+            continue
+        updated = []
+        for value in list_value(data, field):
+            ref = exact_reference_value(value)
+            replacement = replacements.get(ref)
+            if replacement is None:
+                updated.append(value)
+            elif value.strip().startswith("[["):
+                target = value.strip()[2:-2].rpartition("|")[0]
+                updated.append(f"[[{target}|{replacement}]]")
+            else:
+                updated.append(replacement)
+        data[field] = updated
+    return data
+
+
+def revise_records(args) -> int:
+    """Advance existing children and their exact reverse-reference closure."""
+    root = root_for(args.root)
+    plan = load_scope_plan(args.scope_plan, args.proposal_hash)
+    problems = verify_scope_inputs(root, plan, require_committed=True)
+    if problems:
+        return print_problems(problems, False)
+    validate_open_application_state(
+        root, plan=plan, proposal_hash=args.proposal_hash,
+        expected_phase="draft",
+    )
+    requested = list(args.record_ref)
+    actions = record_revision_actions(plan, requested)
+    owners = {package.name: package for package in packages(root)}
+    predecessors = {}
+    for name, action in actions.items():
+        package = owners.get(name)
+        if package is None:
+            raise ValueError(f"missing update package {name}")
+        validate_open_revision(
+            package, plan, action, args.proposal_hash, expected_status="draft",
+        )
+        predecessors[name] = open_update_predecessors(
+            name, plan, action, fields(package),
+            lambda revision, package=package: validate_process_ledger(package, revision),
+        )
+
+    owner_rows = {}
+    for name, package in owners.items():
+        if fields(package).get("status") == "retired":
+            continue
+        findings = []
+        rows = records(package, findings)
+        if findings:
+            raise ValueError(f"{name} invalid records: {'; '.join(findings)}")
+        owner_rows[name] = rows
+    selected, replacements, current = record_revision_closure(
+        requested, actions, predecessors, owner_rows,
+    )
 
     pending = []
     for name, ident in sorted(selected):
@@ -4078,23 +4129,7 @@ def revise_records(args) -> int:
         old_ref = f"{name}:{ident}@r{prior['revision']}"
         path = owners[name] / row["path"]
         data, body = fm(path)
-        data["revision"] = prior["revision"] + 1
-        data["supersedes"] = old_ref
-        for field in REFERENCE_FIELDS:
-            if field not in data:
-                continue
-            updated = []
-            for value in list_value(data, field):
-                ref = exact_reference_value(value)
-                replacement = replacements.get(ref)
-                if replacement is None:
-                    updated.append(value)
-                elif value.strip().startswith("[["):
-                    target = value.strip()[2:-2].rpartition("|")[0]
-                    updated.append(f"[[{target}|{replacement}]]")
-                else:
-                    updated.append(replacement)
-            data[field] = updated
+        revised_record_data(data, prior["revision"], old_ref, replacements)
         postimage = render_fm(data, body).encode()
         if path.read_bytes() != postimage:
             pending.append((path, postimage))

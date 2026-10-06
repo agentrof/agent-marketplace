@@ -1,15 +1,16 @@
 """Regression contract for atomic revision of an Experience record closure."""
 
+import copy
 import json
 import io
 import os
+import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import ExitStack, contextmanager, redirect_stderr
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -21,7 +22,408 @@ compiler = fixtures.experience_compile
 application = fixtures.experience_application_check
 
 
+def binding_rows(*spaces):
+    rows = [f"business-analysis|business-analysis/{space}/space|sha256:{'1' * 64}"
+            for space in spaces]
+    rows.append(f"solution-design|solution-design/space|sha256:{'2' * 64}")
+    rows.append(f"design-system|design-system/space|sha256:{'3' * 64}")
+    return rows
+
+
+def process_ref(owner):
+    return f"business-analysis/{owner}/processes/{owner}"
+
+
+def flow_path(number):
+    return f"flows/flow-{number}-flow-set.md"
+
+
+def flow_owner(number):
+    return "checkout" if number <= 23 else "returns"
+
+
+def synthetic_world(*, returns_action="update"):
+    """The record set the full-vault fixture builds, as compiler-read rows.
+
+    Twelve seeds, twenty-one reverse dependents and a cycle through FLW-001.
+    """
+    owner_rows = {"checkout": [], "returns": []}
+    for number in range(1, 34):
+        owner = flow_owner(number)
+        row = {
+            "type": "flow-set", "title": f"Flow {number}", "id": f"FLW-{number:03d}",
+            "revision": 1, "record_state": "active",
+            "derives_from": [process_ref(owner)],
+        }
+        if number == 1:
+            row["flow_refs"] = ["checkout:FLW-023@r1"]
+        elif number > 12:
+            predecessor = 1 if number == 13 else number - 1
+            reference = f"{flow_owner(predecessor)}:FLW-{predecessor:03d}@r1"
+            if number % 2:
+                row["related_to"] = [
+                    f"[[experience-design/experiences/{flow_owner(predecessor)}/"
+                    f"flows/flow-{predecessor}-flow-set|{reference}]]"
+                ]
+            else:
+                row["flow_refs"] = [reference]
+        owner_rows[owner].append({**row, "path": flow_path(number)})
+    plan = {
+        "schema_version": 2, "origin_mode": "manual",
+        "input_bindings": binding_rows("checkout", "returns"),
+        "actions": [
+            {
+                "primary_process_ref": process_ref(owner), "experience": owner,
+                "target_experience": "",
+                "action": "update" if owner == "checkout" else returns_action,
+                "affected_records": [row["id"] for row in owner_rows[owner]],
+                "expected_package": {
+                    "status": "approved", "revision": 1,
+                    "source_hash": "sha256:" + "4" * 64,
+                },
+                "reason": "Revise exact records.",
+            }
+            for owner in ("checkout", "returns")
+        ],
+        "application_action": "update",
+        "expected_application": {
+            "exists": True, "status": "approved", "revision": 1,
+            "artifact_tree_hash": "sha256:" + "5" * 64,
+            "package_set_hash": "sha256:" + "6" * 64,
+            "application_hash": "sha256:" + "7" * 64,
+        },
+    }
+    plan["proposal_hash"] = compiler.proposal_digest(plan)
+    opened = {action["experience"] for action in plan["actions"]
+              if action["action"] == "update"}
+    predecessors = {
+        owner: {row["id"]: {key: value for key, value in row.items()}
+                for row in rows}
+        for owner, rows in owner_rows.items() if owner in opened
+    }
+    return {"plan": plan, "owner_rows": owner_rows, "predecessors": predecessors}
+
+
+def row_for(world, reference):
+    owner, _separator, rest = reference.partition(":")
+    ident = rest.partition("@")[0]
+    return next(row for row in world["owner_rows"][owner] if row["id"] == ident)
+
+
+def decide(world, requested):
+    actions = compiler.record_revision_actions(world["plan"], requested)
+    return compiler.record_revision_closure(
+        requested, actions, world["predecessors"], world["owner_rows"],
+    )
+
+
+class RecordRevisionDecisionTests(unittest.TestCase):
+    """The revise-records rules, decided on the fixture's record set in memory."""
+
+    def assert_refused_unchanged(self, world, requested, message):
+        before = copy.deepcopy(world)
+        with self.assertRaisesRegex(ValueError, message):
+            decide(world, requested)
+        self.assertEqual(world, before)
+
+    def test_twelve_seeds_close_over_thirty_three_records_with_cycle_and_typed_aliases(self):
+        world = synthetic_world()
+        seeds = [f"checkout:FLW-{number:03d}@r1" for number in range(1, 13)]
+        selected, replacements, current = decide(world, seeds)
+        everything = {
+            f"{owner}:{row['id']}@r1": row
+            for owner, rows in world["owner_rows"].items() for row in rows
+        }
+        self.assertEqual(len(selected), 33)
+        self.assertEqual(replacements, {
+            ref: ref.replace("@r1", "@r2") for ref in everything
+        })
+        revised = {}
+        for reference, row in everything.items():
+            data = {key: value for key, value in row.items() if key != "path"}
+            expected = dict(data, revision=2, supersedes=reference)
+            for field in compiler.REFERENCE_FIELDS:
+                if field in expected:
+                    expected[field] = [value.replace("@r1", "@r2") for value in expected[field]]
+            updated = compiler.revised_record_data(
+                copy.deepcopy(data), 1, reference, replacements,
+            )
+            self.assertEqual(updated, expected, reference)
+            revised[reference] = updated
+        for owner, rows in world["owner_rows"].items():
+            for index, row in enumerate(rows):
+                rows[index] = {**revised[f"{owner}:{row['id']}@r1"], "path": row["path"]}
+        again_selected, again, _current = decide(world, seeds)
+        self.assertEqual(again, replacements)
+        unchanged = [
+            reference for reference, row in everything.items()
+            if compiler.revised_record_data(
+                copy.deepcopy(revised[reference]), 1, reference, again,
+            ) != revised[reference]
+        ]
+        self.assertEqual(unchanged, [])
+        self.assertEqual(again_selected, selected)
+
+    def test_malformed_and_duplicate_refs_are_refused(self):
+        for refs in (
+            ["checkout:FLW-001"], ["checkout:FLW-001@r0"],
+            ["checkout:FLW-001@r1", "checkout:FLW-001@r1"],
+        ):
+            with self.subTest(refs=refs):
+                self.assert_refused_unchanged(
+                    synthetic_world(), refs,
+                    "^record refs must be unique exact predecessor references$",
+                )
+
+    def test_unknown_and_stale_refs_are_refused(self):
+        for refs, unknown in (
+            (["checkout:FLW-999@r1"], "checkout:FLW-999@r1"),
+            (["missing:FLW-001@r1"], "missing:FLW-001@r1"),
+            (["checkout:FLW-001@r2"], "checkout:FLW-001@r2"),
+            (["checkout:FLW-001@r1", "returns:FLW-999@r1"], "returns:FLW-999@r1"),
+        ):
+            with self.subTest(refs=refs):
+                self.assert_refused_unchanged(
+                    synthetic_world(), refs,
+                    "^records must name active predecessors in open updates: "
+                    + re.escape(unknown) + "$",
+                )
+
+    def test_wrong_proposal_is_refused(self):
+        plan = synthetic_world()["plan"]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "revision-scope.json"
+            path.write_bytes(compiler.canonical(plan))
+            self.assertEqual(
+                compiler.load_scope_plan(str(path), plan["proposal_hash"]), plan,
+            )
+            with self.assertRaisesRegex(
+                ValueError, "^scope plan hash does not match the approved proposal$",
+            ):
+                compiler.load_scope_plan(str(path), "sha256:" + "0" * 64)
+
+    def test_retired_child_reference_rejects_same_and_cross_package(self):
+        for owner in ("checkout", "returns"):
+            with self.subTest(owner=owner):
+                world = synthetic_world()
+                world["owner_rows"][owner].append({
+                    "type": "flow-set", "title": "Retired flow", "id": "FLW-090",
+                    "revision": 1, "record_state": "retired",
+                    "flow_refs": ["checkout:FLW-002@r1"],
+                    "path": "flows/retired-flow-set.md",
+                })
+                self.assert_refused_unchanged(
+                    world, ["checkout:FLW-002@r1"],
+                    f"^retired dependent {owner}:FLW-090 cannot be revised$",
+                )
+
+    def test_selected_typed_wikilinks_reject_missing_or_mismatched_targets(self):
+        # The alias may name either the revised seed or another unchanged record.
+        for field in compiler.REFERENCE_FIELDS:
+            for target in (
+                "missing/note",
+                "experience-design/experiences/checkout/flows/flow-3-flow-set",
+            ):
+                for alias in ("checkout:FLW-002@r1", "checkout:FLW-001@r1"):
+                    with self.subTest(field=field, target=target, alias=alias):
+                        world = synthetic_world()
+                        row_for(world, "checkout:FLW-002@r1")[field] = [f"[[{target}|{alias}]]"]
+                        self.assert_refused_unchanged(
+                            world, ["checkout:FLW-002@r1"],
+                            "^checkout:FLW-002 typed link target differs from its exact reference$",
+                        )
+
+    def test_bare_exact_references_remain_allowed_in_all_typed_fields(self):
+        for field in compiler.REFERENCE_FIELDS:
+            with self.subTest(field=field):
+                world = synthetic_world()
+                row = row_for(world, "checkout:FLW-002@r1")
+                row[field] = ["checkout:FLW-002@r1"]
+                selected, replacements, _current = decide(world, ["checkout:FLW-002@r1"])
+                self.assertEqual(selected, {("checkout", "FLW-002")})
+                self.assertEqual(
+                    replacements, {"checkout:FLW-002@r1": "checkout:FLW-002@r2"},
+                )
+                data = {key: value for key, value in row.items() if key != "path"}
+                updated = compiler.revised_record_data(
+                    copy.deepcopy(data), 1, "checkout:FLW-002@r1", replacements,
+                )
+                self.assertNotEqual(updated, data)
+                self.assertEqual(updated[field], ["checkout:FLW-002@r2"])
+
+    def test_missing_record_argument_rejects_at_cli_boundary_without_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            errors = io.StringIO()
+            with redirect_stderr(errors), redirect_stdout(io.StringIO()), \
+                    self.assertRaises(SystemExit) as raised:
+                compiler.main([
+                    "revise-records", "--root", str(root),
+                    "--scope-plan", str(root / "revision-scope.json"),
+                    "--proposal-hash", "sha256:" + "0" * 64,
+                ])
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("--record-ref", errors.getvalue())
+            self.assertEqual(list(root.iterdir()), [])
+
+    def predecessors_for(self, world, data, ledger):
+        action = world["plan"]["actions"][0]
+        return compiler.open_update_predecessors(
+            "checkout", world["plan"], action, data, ledger,
+        )
+
+    def approved_history(self, world):
+        return [{
+            "package_revision": 1, "source_hash": "sha256:" + "4" * 64,
+            "records": list(world["predecessors"]["checkout"].values()),
+        }]
+
+    def test_open_update_reads_its_approved_predecessor_records(self):
+        world = synthetic_world()
+        data = {"revision": 2, "input_bindings": compiler.package_binding_rows(
+            world["plan"], process_ref("checkout"),
+        )}
+        reads = []
+
+        def ledger(revision):
+            reads.append(revision)
+            return self.approved_history(world), []
+
+        self.assertEqual(
+            self.predecessors_for(world, data, ledger), world["predecessors"]["checkout"],
+        )
+        self.assertEqual(reads, [2])
+
+    def test_open_input_bindings_drift_rejects_before_reading_history(self):
+        world = synthetic_world()
+        stale = binding_rows("checkout")
+        stale[0] = stale[0].replace("1" * 64, "9" * 64)
+        reads = []
+        with self.assertRaisesRegex(
+            ValueError, "^checkout open input bindings differ from the scope$",
+        ):
+            self.predecessors_for(
+                world, {"revision": 2, "input_bindings": stale},
+                lambda revision: reads.append(revision),
+            )
+        self.assertEqual(reads, [])
+
+    def test_corrupt_predecessor_history_rejects(self):
+        world = synthetic_world()
+        data = {"revision": 2, "input_bindings": compiler.package_binding_rows(
+            world["plan"], process_ref("checkout"),
+        )}
+        finding = "_ledger/records/FLW-001/r1.json is missing or stale"
+        for history, findings in (
+            (self.approved_history(world), [finding]), ([], []),
+        ):
+            with self.subTest(findings=findings):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "^checkout needs intact predecessor history: "
+                    + re.escape(str(findings)) + "$",
+                ):
+                    self.predecessors_for(world, data, lambda _r: (history, findings))
+
+    def test_application_review_phase_rejects(self):
+        plan = synthetic_world()["plan"]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / compiler.GENERATED).mkdir()
+            compiler.write_open_application_state(
+                root, plan, plan["proposal_hash"], phase="in_review",
+            )
+            before = fixtures.ExperienceCompilerTests.tree_snapshot(root)
+            with self.assertRaisesRegex(
+                ValueError,
+                "^application open revision is not bound to the approved scope-plan action$",
+            ):
+                compiler.validate_open_application_state(
+                    root, plan=plan, proposal_hash=plan["proposal_hash"],
+                    expected_phase="draft",
+                )
+            self.assertEqual(fixtures.ExperienceCompilerTests.tree_snapshot(root), before)
+
+    def test_manually_advanced_child_revision_rejects(self):
+        world = synthetic_world()
+        row = row_for(world, "checkout:FLW-001@r1")
+        row.update(revision=3, supersedes="checkout:FLW-001@r1")
+        self.assert_refused_unchanged(
+            world, ["checkout:FLW-001@r1"],
+            "^checkout:FLW-001 has stale identity or revision$",
+        )
+
+    def test_input_drift_rejects_with_findings(self):
+        plan = synthetic_world()["plan"]
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+            compiler.stage_package, "verify", return_value=({}, ["input receipt is stale"]),
+        ) as verify:
+            findings = compiler.verify_scope_inputs(
+                Path(temporary) / "docs", plan, require_committed=True,
+            )
+        self.assertEqual(findings, ["input receipt is stale"] * 4)
+        self.assertEqual(verify.call_count, 4)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(compiler.print_problems(findings, False), 1)
+        self.assertIn("stale", output.getvalue())
+
+    def open_package(self, temporary, plan, *, status, opened):
+        package = Path(temporary) / "experiences/checkout"
+        (package / compiler.GENERATED).mkdir(parents=True)
+        (package / "experience.md").write_text(compiler.render_fm({
+            "experience_id": "checkout", "primary_process_ref": process_ref("checkout"),
+            "origin_mode": "manual", "status": status, "revision": 2,
+        }, "# Checkout\n"), encoding="utf-8")
+        if opened:
+            compiler.write_open_revision(
+                package, plan, plan["actions"][0], plan["proposal_hash"],
+            )
+        return package
+
+    def assert_open_revision_rejected(self, *, status, opened, message):
+        plan = synthetic_world()["plan"]
+        with tempfile.TemporaryDirectory() as temporary:
+            package = self.open_package(temporary, plan, status=status, opened=opened)
+            before = fixtures.ExperienceCompilerTests.tree_snapshot(package)
+            with self.assertRaisesRegex(ValueError, message):
+                compiler.validate_open_revision(
+                    package, plan, plan["actions"][0], plan["proposal_hash"],
+                    expected_status="draft",
+                )
+            self.assertEqual(fixtures.ExperienceCompilerTests.tree_snapshot(package), before)
+
+    def test_open_draft_revision_is_accepted(self):
+        plan = synthetic_world()["plan"]
+        with tempfile.TemporaryDirectory() as temporary:
+            package = self.open_package(temporary, plan, status="draft", opened=True)
+            self.assertIsNone(compiler.validate_open_revision(
+                package, plan, plan["actions"][0], plan["proposal_hash"],
+                expected_status="draft",
+            ))
+
+    def test_review_phase_rejects(self):
+        self.assert_open_revision_rejected(
+            status="in_review", opened=True,
+            message="^checkout lifecycle identity, phase or successor revision drifted after opening$",
+        )
+
+    def test_unopened_update_package_rejects(self):
+        self.assert_open_revision_rejected(
+            status="draft", opened=False,
+            message="^checkout is missing compiler-owned open revision state$",
+        )
+
+    def test_dependent_owner_outside_update_scope_rejects(self):
+        self.assert_refused_unchanged(
+            synthetic_world(returns_action="reuse"), ["checkout:FLW-001@r1"],
+            "^dependent returns:FLW-024 is outside the open update scope$",
+        )
+
+
 class ExperienceRecordRevisionTests(unittest.TestCase):
+    """Full-vault smokes: the success path, one refusal and the write rollback."""
+
     def setUp(self):
         self.helpers = fixtures.ExperienceCompilerTests()
 
@@ -41,8 +443,7 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
         self.assertEqual(code, 0, output + errors)
         return output
 
-    def fixture(self, temporary, *, open_returns=True, returns_action="update",
-                retired_owner=None):
+    def fixture(self, temporary):
         fixture = self.helpers.orphaned_create_scope(
             temporary, publish_application=False,
         )
@@ -84,13 +485,6 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
             compiler.fields(root / "experiences/checkout")["primary_process_ref"],
         ]
         compiler.rewrite(returns, data, body)
-        if retired_owner is not None:
-            retired = root / "experiences" / retired_owner / "flows/retired-flow-set.md"
-            retired.write_text(compiler.render_fm({
-                "type": "flow-set", "title": "Retired flow", "id": "FLW-090",
-                "revision": 1, "record_state": "retired",
-                "flow_refs": ["checkout:FLW-002@r1"],
-            }, "# Retired flow\n\nPreserve the historical reference.\n"), encoding="utf-8")
         for package in compiler.packages(root):
             compiler.render_package_record_navigation(package)
         compiler.render_experience_navigation(root)
@@ -114,16 +508,9 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
                 "--design-ref", fixture["new_receipts"][2]["result_ref"],
             )
             plan = json.loads(output)
-            if returns_action != "update":
-                for action in plan["actions"]:
-                    if action["experience"] == "returns":
-                        action["action"] = returns_action
-                plan["proposal_hash"] = compiler.proposal_digest(plan)
             plan_path = fixture["docs"] / "revision-scope.json"
             plan_path.write_bytes(compiler.canonical(plan))
             for owner in ("checkout", "returns"):
-                if owner == "returns" and (not open_returns or returns_action != "update"):
-                    continue
                 self.successful(
                     "begin-revision", "--experience-root", root / "experiences" / owner,
                     "--scope-plan", plan_path, "--proposal-hash", plan["proposal_hash"],
@@ -131,26 +518,6 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
         compiler.render_experience_navigation(root)
         fixture.update(plan=plan, plan_path=plan_path, paths=paths)
         return fixture
-
-    @contextmanager
-    def variants(self, **options):
-        """One fixture for many variants; ``reset()`` puts back every byte and mode it was built with."""
-        with tempfile.TemporaryDirectory() as temporary, \
-                tempfile.TemporaryDirectory() as pristine:
-            fixture = self.fixture(temporary, **options)
-            shutil.copytree(temporary, pristine, dirs_exist_ok=True, symlinks=True)
-            built = self.helpers.tree_snapshot(Path(temporary))
-
-            def reset():
-                for child in Path(temporary).iterdir():
-                    if child.is_dir() and not child.is_symlink():
-                        shutil.rmtree(child)
-                    else:
-                        child.unlink()
-                shutil.copytree(pristine, temporary, dirs_exist_ok=True, symlinks=True)
-                self.assertEqual(self.helpers.tree_snapshot(Path(temporary)), built)
-
-            yield fixture, reset
 
     def arguments(self, fixture, refs=None):
         args = [
@@ -173,7 +540,7 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
         self.assertTrue(output or errors)
         self.assertEqual(self.helpers.tree_snapshot(fixture["docs"]), before)
 
-    def test_fixture_opens_real_approved_record_ledgers(self):
+    def test_twelve_seeds_revise_thirty_three_with_cycle_and_typed_aliases(self):
         with tempfile.TemporaryDirectory() as temporary:
             fixture = self.fixture(temporary)
             for owner in ("checkout", "returns"):
@@ -184,10 +551,6 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
                 self.assertEqual(compiler.fields(package)["status"], "draft")
                 for row in history[0]["records"]:
                     self.assertIsNotNone(compiler.snapshots(package, row["id"], 1))
-
-    def test_twelve_seeds_revise_thirty_three_with_cycle_and_typed_aliases(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(temporary)
             before = self.helpers.tree_snapshot(fixture["docs"])
             original = {ref: compiler.fm(path) for ref, path in fixture["paths"].items()}
             seeds = [f"checkout:FLW-{number:03d}@r1" for number in range(1, 13)]
@@ -222,115 +585,6 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
             })
             self.assertEqual(self.helpers.tree_snapshot(fixture["docs"]), after)
 
-    def test_malformed_unknown_stale_and_duplicate_refs_reject_without_writes(self):
-        cases = (
-            ["checkout:FLW-001"], ["checkout:FLW-001@r0"],
-            ["checkout:FLW-999@r1"], ["missing:FLW-001@r1"],
-            ["checkout:FLW-001@r2"],
-            ["checkout:FLW-001@r1", "checkout:FLW-001@r1"],
-            ["checkout:FLW-001@r1", "returns:FLW-999@r1"],
-        )
-        with self.variants() as (fixture, reset):
-            for refs in cases:
-                with self.subTest(refs=refs):
-                    self.assert_rejected_unchanged(fixture, refs)
-                reset()
-
-    def test_wrong_proposal_rejects_without_writes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(temporary)
-            fixture["plan"]["proposal_hash"] = "sha256:" + "0" * 64
-            self.assert_rejected_unchanged(fixture)
-
-    def assert_preflight_rejected_unchanged(self, fixture, refs):
-        before = self.helpers.tree_snapshot(fixture["docs"])
-        selected_paths = {path.resolve() for path in fixture["paths"].values()}
-        with mock.patch.object(
-            compiler, "atomic_write_bytes", wraps=compiler.atomic_write_bytes,
-        ) as writes:
-            code, output, errors = self.revise(fixture, refs)
-        record_writes = [
-            call.args[0] for call in writes.call_args_list
-            if Path(call.args[0]).resolve() in selected_paths
-        ]
-        self.assertEqual(record_writes, [], "rejection must precede record writes")
-        self.assertEqual(code, 2, output + errors)
-        self.assertEqual(self.helpers.tree_snapshot(fixture["docs"]), before)
-
-    def test_retired_child_reference_rejects_same_and_cross_package_before_writes(self):
-        for owner in ("checkout", "returns"):
-            with self.subTest(owner=owner), tempfile.TemporaryDirectory() as temporary:
-                fixture = self.fixture(temporary, retired_owner=owner)
-                package = fixture["root"] / "experiences" / owner
-                historical = compiler.snapshots(package, "FLW-090", 1)
-                self.assertEqual(historical["record_state"], "retired")
-                self.assertEqual(historical["flow_refs"], ["checkout:FLW-002@r1"])
-                self.assert_preflight_rejected_unchanged(fixture, ["checkout:FLW-002@r1"])
-
-    def test_selected_typed_wikilinks_reject_missing_or_mismatched_targets_before_writes(self):
-        fields = (
-            "journey_refs", "flow_refs", "screen_refs", "state_refs",
-            "transition_refs", "related_to",
-        )
-        targets = (
-            "missing/note",
-            "experience-design/experiences/checkout/flows/flow-3-flow-set",
-        )
-        # The alias may name either the revised seed or another unchanged record.
-        with self.variants() as (fixture, reset):
-            path = fixture["paths"]["checkout:FLW-002@r1"]
-            for field in fields:
-                for target in targets:
-                    for alias in ("checkout:FLW-002@r1", "checkout:FLW-001@r1"):
-                        with self.subTest(field=field, target=target, alias=alias):
-                            data, body = compiler.fm(path)
-                            data[field] = [f"[[{target}|{alias}]]"]
-                            compiler.rewrite(path, data, body)
-                            self.assert_preflight_rejected_unchanged(
-                                fixture, ["checkout:FLW-002@r1"],
-                            )
-                        reset()
-
-    def test_bare_exact_references_remain_allowed_in_all_typed_fields(self):
-        with self.variants() as (fixture, reset):
-            path = fixture["paths"]["checkout:FLW-002@r1"]
-            for field in (
-                "journey_refs", "flow_refs", "screen_refs", "state_refs",
-                "transition_refs", "related_to",
-            ):
-                with self.subTest(field=field):
-                    data, body = compiler.fm(path)
-                    data[field] = ["checkout:FLW-002@r1"]
-                    compiler.rewrite(path, data, body)
-                    code, output, errors = self.revise(fixture, ["checkout:FLW-002@r1"])
-                    self.assertEqual(code, 0, output + errors)
-                    self.assertEqual(json.loads(output), {
-                        "ok": True, "changed_records": 1,
-                        "record_refs": {"checkout:FLW-002@r1": "checkout:FLW-002@r2"},
-                    })
-                    updated, updated_body = compiler.fm(path)
-                    self.assertEqual(updated[field], ["checkout:FLW-002@r2"])
-                    self.assertEqual(updated_body, body)
-                reset()
-
-    def test_missing_record_argument_rejects_at_cli_boundary_without_writes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(temporary)
-            before = self.helpers.tree_snapshot(fixture["docs"])
-            result = self.helpers.run_cli(*self.arguments(fixture, []))
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("--record-ref", result.stderr)
-            self.assertEqual(self.helpers.tree_snapshot(fixture["docs"]), before)
-
-    def test_open_input_bindings_drift_rejects_without_writes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(temporary)
-            path = fixture["root"] / "experiences/checkout/experience.md"
-            data, body = compiler.fm(path)
-            data["input_bindings"] = fixture["old_plan"]["input_bindings"]
-            compiler.rewrite(path, data, body)
-            self.assert_rejected_unchanged(fixture)
-
     def test_corrupt_predecessor_snapshot_rejects_without_writes(self):
         with tempfile.TemporaryDirectory() as temporary:
             fixture = self.fixture(temporary)
@@ -338,55 +592,6 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
             data = json.loads(path.read_bytes())
             data["title"] = "Tampered title"
             path.write_bytes(compiler.canonical(data))
-            self.assert_rejected_unchanged(fixture)
-
-    def test_application_review_phase_rejects_without_writes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(temporary)
-            compiler.write_open_application_state(
-                fixture["root"], fixture["plan"], fixture["plan"]["proposal_hash"],
-                phase="in_review",
-            )
-            self.assert_rejected_unchanged(fixture)
-
-    def test_manually_advanced_child_revision_rejects_without_writes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(temporary)
-            path = fixture["paths"]["checkout:FLW-001@r1"]
-            data, body = compiler.fm(path)
-            data["revision"] = 3
-            data["supersedes"] = "checkout:FLW-001@r1"
-            compiler.rewrite(path, data, body)
-            self.assert_rejected_unchanged(fixture)
-
-    def test_input_drift_rejects_without_writes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(temporary)
-            before = self.helpers.tree_snapshot(fixture["docs"])
-            with self.upstream(fixture["new_receipts"]), mock.patch.object(
-                compiler.stage_package, "verify", return_value=({}, ["input receipt is stale"]),
-            ):
-                code, output, errors = self.helpers.run_in_process(*self.arguments(fixture))
-            self.assertEqual(code, 1, output + errors)
-            self.assertIn("stale", output + errors)
-            self.assertEqual(self.helpers.tree_snapshot(fixture["docs"]), before)
-
-    def test_review_phase_rejects_without_writes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(temporary)
-            with self.upstream(fixture["new_receipts"]):
-                self.successful(
-                    "enter-review", "--experience-root", fixture["root"] / "experiences/checkout",
-                )
-            self.assert_rejected_unchanged(fixture)
-
-    def test_unopened_update_package_rejects_without_writes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            self.assert_rejected_unchanged(self.fixture(temporary, open_returns=False))
-
-    def test_dependent_owner_outside_update_scope_rejects_without_writes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = self.fixture(temporary, returns_action="reuse")
             self.assert_rejected_unchanged(fixture)
 
     def test_write_failure_after_first_record_restores_entire_tree(self):

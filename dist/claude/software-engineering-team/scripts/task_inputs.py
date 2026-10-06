@@ -627,44 +627,32 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
     return result
 
 
-def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = None,
-             inputs: list[str] | None = None, skills: list[str] | None = None,
-             findings: str | None = None, base: str | None = None, epic: str | None = None,
-             expected_hash: str | None = None, package: Path = PACKAGE,
-             delivery: str | None = None, remote: str = "origin",
-             pass_kind: str | None = None, full_root_reason: str | None = None) -> dict:
-    policy = catalog(package)
-    package = package.resolve()
-    project = project.resolve() if project is not None else None
-    if entry not in policy["entries"] or mode not in policy["modes"]:
-        raise ValueError("unknown entry or task mode")
-    route = policy["entries"][entry]
-    variants = agent_variants(package)
-    if role in variants:
-        raise ValueError(f"{role} is a generated variant of {variants[role]}; derive its task as"
-                         f" {variants[role]}")
-    if role is not None and role not in route["roles"]:
-        raise ValueError("role does not belong to the selected entry")
-    if not route["project_state"] and (project is not None or inputs or findings or base or epic):
-        raise ValueError("external entry uses conversation inputs only; it creates no project manifest")
-    internal = {skill for bound in policy["role_skills"].values() for skill in bound}
-    if set(skills or []) - internal:
-        raise ValueError("selected method skills must be installed internal skills")
-    if not route["project_state"] and skills:
-        raise ValueError("external entry does not select project method skills")
+def task_skills(policy: dict, entry: str, role: str | None, skills: list[str] | None,
+                route: dict) -> set[str]:
+    """Return the skills a task reads: its entry, the selected methods and its role's required ones."""
     selected_skills = {entry, *(skills or [])}
     if role:
         selected_skills.update(policy["required_role_skills"][role])
     if route["project_state"]:
         selected_skills.add("obsidian-vault")
-    if delivery is not None and (project is None or not route["project_state"]):
-        raise ValueError("a Delivery belongs to a project task")
-    try:
-        deliveries = task_deliveries(project, delivery, list(inputs or [])) \
-            if project is not None and route["project_state"] else []
-        chosen, policy_inputs = switch_choices(project, route, package, deliveries, entry, remote)
-    except ValueError as exc:
-        raise ValueError(f"process policy cannot bind switch instructions: {exc}") from exc
+    return selected_skills
+
+
+def read_only_task(policy: dict, entry: str, role: str | None, mode: str) -> bool:
+    """Whether a task of this role and mode writes nothing."""
+    return (role in policy["read_only_roles"]
+            or role in policy["read_only_entry_roles"].get(entry, [])
+            or mode in {"review", "consume"})
+
+
+def instruction_reads(policy: dict, package: Path, route: dict, role: str | None,
+                      selected_skills: set[str], chosen: set) -> tuple[dict, set, set[str], dict, set[str]]:
+    """Return the package instructions a task binds under the chosen switch values.
+
+    The result is the switch registry, the chosen values of the switches the
+    task's flows own, the required reads, the conditional reads and every
+    instruction input whose identity the task binds.
+    """
     registry = registry_switches(package)
     # A task follows only the switches that own one of its entry's flows.
     owned = owned_switches(registry, route)
@@ -720,13 +708,50 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
                                   and path.name != ".DS_Store"
                                   and switch_reference(package, path) is None
                                   and path.relative_to(package).as_posix() not in switch_only)
+    return registry, chosen, required, references, instruction_inputs
+
+
+def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = None,
+             inputs: list[str] | None = None, skills: list[str] | None = None,
+             findings: str | None = None, base: str | None = None, epic: str | None = None,
+             expected_hash: str | None = None, package: Path = PACKAGE,
+             delivery: str | None = None, remote: str = "origin",
+             pass_kind: str | None = None, full_root_reason: str | None = None) -> dict:
+    policy = catalog(package)
+    package = package.resolve()
+    project = project.resolve() if project is not None else None
+    if entry not in policy["entries"] or mode not in policy["modes"]:
+        raise ValueError("unknown entry or task mode")
+    route = policy["entries"][entry]
+    variants = agent_variants(package)
+    if role in variants:
+        raise ValueError(f"{role} is a generated variant of {variants[role]}; derive its task as"
+                         f" {variants[role]}")
+    if role is not None and role not in route["roles"]:
+        raise ValueError("role does not belong to the selected entry")
+    if not route["project_state"] and (project is not None or inputs or findings or base or epic):
+        raise ValueError("external entry uses conversation inputs only; it creates no project manifest")
+    internal = {skill for bound in policy["role_skills"].values() for skill in bound}
+    if set(skills or []) - internal:
+        raise ValueError("selected method skills must be installed internal skills")
+    if not route["project_state"] and skills:
+        raise ValueError("external entry does not select project method skills")
+    selected_skills = task_skills(policy, entry, role, skills, route)
+    if delivery is not None and (project is None or not route["project_state"]):
+        raise ValueError("a Delivery belongs to a project task")
+    try:
+        deliveries = task_deliveries(project, delivery, list(inputs or [])) \
+            if project is not None and route["project_state"] else []
+        chosen, policy_inputs = switch_choices(project, route, package, deliveries, entry, remote)
+    except ValueError as exc:
+        raise ValueError(f"process policy cannot bind switch instructions: {exc}") from exc
+    registry, chosen, required, references, instruction_inputs = instruction_reads(
+        policy, package, route, role, selected_skills, chosen)
     instruction_files = identity(package, instruction_inputs)
     project_files = set(inputs or []) | set(policy_inputs)
     if findings:
         project_files.add(findings)
-    read_only = (role in policy["read_only_roles"]
-                 or role in policy["read_only_entry_roles"].get(entry, [])
-                 or mode in {"review", "consume"})
+    read_only = read_only_task(policy, entry, role, mode)
     documents = None if pass_kind is None else mechanical_pass(
         policy, registry, pass_kind, entry=entry, role=role, mode=mode, route=route,
         read_only=read_only, chosen=chosen, findings=findings, inputs=list(inputs or []),

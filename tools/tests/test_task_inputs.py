@@ -32,6 +32,27 @@ def commit_all(root):
                     "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture"], check=True, capture_output=True)
 
 
+def instruction_paths(project, entry, role, skills=None, catalog=None):
+    """The required reads and hashed instructions of a task, as task_inputs.manifest derives them
+    from the project's Process Policy, without the Git reads of a full manifest."""
+    catalog = catalog or task_inputs.catalog()
+    route = catalog["entries"][entry]
+    chosen, _policy_inputs = task_inputs.switch_choices(project, route, task_inputs.PACKAGE)
+    _registry, _chosen, required, _conditional, hashed = task_inputs.instruction_reads(
+        catalog, task_inputs.PACKAGE, route, role,
+        task_inputs.task_skills(catalog, entry, role, skills, route), chosen)
+    return required, hashed
+
+
+def task_scope(project, entry, role, mode, inputs=(), closure=None, catalog=None):
+    """The write scope task_inputs.manifest derives for a task, without its Git reads."""
+    catalog = catalog or task_inputs.catalog()
+    paths = set(inputs) | ({"workspace/docs/" + path for path in closure["paths"]} if closure else set())
+    return task_inputs.write_scope(project, paths, role, catalog["entries"][entry],
+                                   task_inputs.read_only_task(catalog, entry, role, mode), closure,
+                                   task_inputs.PACKAGE)
+
+
 class TaskInputTests(unittest.TestCase):
     def test_setup_supports_unborn_repository_but_binds_initial_files_and_commit(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -72,30 +93,27 @@ class TaskInputTests(unittest.TestCase):
     def test_ba_write_scope_is_exact_owned_selected_space_and_not_read_dependencies(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
-            self.make_project(root)
             own = self.note(root, "workspace/docs/business-analysis/orders/space.md", "space", "business_analyst")
             other = self.note(root, "workspace/docs/business-analysis/payments/space.md", "space", "business_analyst")
             dependency = self.note(root, "workspace/docs/solution-design/landscape.md", "landscape", "solution_architect")
             generated = self.note(root, "workspace/docs/business-analysis/orders/_generated/catalog.md", "space", "business_analyst")
-            self.commit(root)
-            kwargs = dict(entry="business-analysis", role="business-analyst", mode="repair", project=root,
+            kwargs = dict(entry="business-analysis", role="business-analyst", mode="repair",
                           inputs=[own, dependency, generated])
-            result = task_inputs.manifest(**kwargs)
-            self.assertEqual(result["write_scope"]["allowed_write_area"],
+            result = task_scope(root, **kwargs)
+            self.assertEqual(result["allowed_write_area"],
                              [{"path": own, "coverage": "exact_file", "source": own}])
-            self.assertFalse(result["write_scope"]["writer_authority"])
-            self.assertIn("ba_compile.py", next(row["detail"] for row in result["next_transition_conditions"]
-                                               if row["condition"] == "entry_gate"))
-            unresolved = task_inputs.manifest(**{**kwargs, "inputs": [own, other]})
-            self.assertEqual(unresolved["write_scope"]["status"], "unresolved")
-            self.assertEqual(unresolved["write_scope"]["allowed_write_area"], [])
-            review = task_inputs.manifest(**{**kwargs, "role": "analysis-challenger"})
-            self.assertEqual(review["write_scope"]["allowed_write_area"], [])
+            self.assertFalse(result["writer_authority"])
+            # The manifest's entry_gate transition carries the entry's next_transition.
+            self.assertIn("ba_compile.py", task_inputs.catalog()["entries"]["business-analysis"]["next_transition"])
+            unresolved = task_scope(root, **{**kwargs, "inputs": [own, other]})
+            self.assertEqual(unresolved["status"], "unresolved")
+            self.assertEqual(unresolved["allowed_write_area"], [])
+            review = task_scope(root, **{**kwargs, "role": "analysis-challenger"})
+            self.assertEqual(review["allowed_write_area"], [])
 
     def test_epic_owner_write_area_excludes_dependency_context_and_keeps_po_as_writer(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
-            self.make_project(root)
             rows = [
                 ("backlog/backlog.md", "backlog", "product_owner"),
                 ("backlog/epics/one/epic.md", "epic", "product_owner"),
@@ -106,23 +124,20 @@ class TaskInputTests(unittest.TestCase):
             ]
             for path, kind, owner in rows:
                 self.note(root, "workspace/docs/" + path, kind, owner)
-            self.commit(root)
             closure = {"scope": rows[1][0], "primary_paths": [row[0] for row in rows[:4]],
                        "paths": [row[0] for row in rows], "review": {"path": rows[4][0]},
                        "check": {}}
-            unscoped = task_inputs.manifest(entry="backlog-plan", mode="revise", project=root,
-                                            role="product-owner", inputs=["workspace/docs/" + row[0] for row in rows])
-            self.assertEqual(unscoped["write_scope"]["status"], "unresolved")
-            self.assertEqual(unscoped["write_scope"]["allowed_write_area"], [])
-            kwargs = dict(entry="backlog-plan", mode="revise", project=root, epic="one")
-            with mock.patch("backlog_review_inputs.manifest", return_value=closure):
-                result = task_inputs.manifest(**kwargs, role="product-owner")
-                self.assertEqual([row["path"] for row in result["write_scope"]["allowed_write_area"]],
-                                 sorted("workspace/docs/" + row[0] for row in rows[1:5]))
-                for role in ("business-analyst", "qa-engineer", "backlog-reviewer"):
-                    reader = task_inputs.manifest(**kwargs, role=role)
-                    self.assertEqual(reader["write_scope"]["status"], "read_only")
-                    self.assertEqual(reader["write_scope"]["allowed_write_area"], [])
+            unscoped = task_scope(root, "backlog-plan", "product-owner", "revise",
+                                  inputs=["workspace/docs/" + row[0] for row in rows])
+            self.assertEqual(unscoped["status"], "unresolved")
+            self.assertEqual(unscoped["allowed_write_area"], [])
+            result = task_scope(root, "backlog-plan", "product-owner", "revise", closure=closure)
+            self.assertEqual([row["path"] for row in result["allowed_write_area"]],
+                             sorted("workspace/docs/" + row[0] for row in rows[1:5]))
+            for role in ("business-analyst", "qa-engineer", "backlog-reviewer"):
+                reader = task_scope(root, "backlog-plan", role, "revise", closure=closure)
+                self.assertEqual(reader["status"], "read_only")
+                self.assertEqual(reader["allowed_write_area"], [])
 
     def test_product_owner_scope_covers_a_story_right_after_stub_story(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -179,7 +194,6 @@ class TaskInputTests(unittest.TestCase):
     def test_lane_roles_bind_only_their_lane_scope_while_the_architect_keeps_every_claim(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
-            self.make_project(root)
             lanes = ("implementation_schedule: parallel_lanes_v1\nrole_sequence:\n  - software_architect\n"
                      "  - backend_developer\n  - devops_engineer\n  - code_reviewer\n  - qa_engineer\n"
                      "path_claims:\n  - deploy\n  - src/api\n  - workspace/docs\n"
@@ -187,11 +201,9 @@ class TaskInputTests(unittest.TestCase):
                      "lane_seams:\n")
             item = self.note(root, "workspace/docs/delivery/deliveries/one/items/st-001/item.md",
                              "delivery-item", "backend_developer", lanes)
-            self.commit(root)
-            kwargs = dict(entry="deliver", mode="create", project=root, inputs=[item])
 
             def scope(role):
-                return task_inputs.manifest(role=role, **kwargs)["write_scope"]
+                return task_scope(root, "deliver", role, "create", inputs=[item])
 
             lane_note = [constraint for constraint in scope("backend-developer")["constraints"]
                          if constraint.startswith("parallel lane:")]
@@ -223,15 +235,14 @@ class TaskInputTests(unittest.TestCase):
         execution = "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md"
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
-            self.make_project(root)
             tasks = (("execution-plan", "software-architect", planning),
                      ("deliver", "backend-developer", execution),
                      ("deliver", "code-reviewer", execution),
                      ("deliver", None, execution))
 
             def bound(entry, role):
-                result = task_inputs.manifest(entry=entry, role=role, mode="review", project=root)
-                return set(result["required_reads"]) | {item["path"] for item in result["instructions"]}
+                required, hashed = instruction_paths(root, entry, role)
+                return required | hashed
 
             for entry, role, reference in tasks:
                 with self.subTest(entry=entry, role=role, policy=False):
@@ -418,21 +429,20 @@ class TaskInputTests(unittest.TestCase):
         panels = "skill-content/challenge-review/data/review-panels.json"
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
-            self.make_project(root)
+            catalog = task_inputs.catalog()
             tasks = (("configure", "devops-engineer", ["challenge-review"]),
                      ("configure", "qa-engineer", ["challenge-review"]),
                      ("backlog-plan", "backlog-reviewer", []),
                      ("backlog-plan", "product-owner", ["challenge-review"]))
             for entry, role, skills in tasks:
                 with self.subTest(entry=entry, role=role, policy=False):
-                    result = task_inputs.manifest(entry=entry, role=role, mode="review",
-                                                  project=root, skills=skills)
-                    self.assertIn("skill-content/challenge-review/SKILL.md", result["required_reads"])
+                    required, hashed = instruction_paths(root, entry, role, skills, catalog)
+                    self.assertIn("skill-content/challenge-review/SKILL.md", required)
                     # The lens data is read only by the values that list it.
-                    self.assertNotIn(panels, [item["path"] for item in result["instructions"]])
-                    self.assertNotIn(protocol, [item["path"] for item in result["instructions"]])
-            plain = task_inputs.manifest(entry="configure", role="devops-engineer", mode="review")
-            self.assertNotIn("skill-content/challenge-review/SKILL.md", plain["required_reads"])
+                    self.assertNotIn(panels, hashed)
+                    self.assertNotIn(protocol, hashed)
+            plain, _hashed = instruction_paths(None, "configure", "devops-engineer", None, catalog)
+            self.assertNotIn("skill-content/challenge-review/SKILL.md", plain)
             docs = root / "workspace/docs"
             def policy(*argv):
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -442,11 +452,10 @@ class TaskInputTests(unittest.TestCase):
             policy("approve")
             for entry, role, skills in tasks:
                 with self.subTest(entry=entry, role=role, policy=True):
-                    result = task_inputs.manifest(entry=entry, role=role, mode="review",
-                                                  project=root, skills=skills)
-                    self.assertIn(protocol, result["required_reads"])
-                    self.assertIn(panels, result["required_reads"])
-                    self.assertEqual(result["write_boundary"], "read_only")
+                    required, _hashed = instruction_paths(root, entry, role, skills, catalog)
+                    self.assertIn(protocol, required)
+                    self.assertIn(panels, required)
+                    self.assertTrue(task_inputs.read_only_task(catalog, entry, role, "review"))
 
     def test_process_policy_binds_only_the_chosen_switch_references(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -588,7 +597,6 @@ class TaskInputTests(unittest.TestCase):
                  ("design-system", "design-system-reviewer"): {"review_panels", "review_loop"}}
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
-            self.make_project(root)
             docs = root / "workspace/docs"
 
             def policy(command, *argv):
@@ -601,10 +609,10 @@ class TaskInputTests(unittest.TestCase):
             policy("approve")
             for (entry, role), owned in tasks.items():
                 with self.subTest(entry=entry, role=role):
-                    result = task_inputs.manifest(entry=entry, role=role, mode="review", project=root)
-                    self.assertIn("skill-content/challenge-review/SKILL.md", result["required_reads"])
+                    required, _hashed = instruction_paths(root, entry, role)
+                    self.assertIn("skill-content/challenge-review/SKILL.md", required)
                     self.assertEqual({switch for switch, path in references.items()
-                                      if path in result["required_reads"]}, owned)
+                                      if path in required}, owned)
 
     def test_changed_project_input_invalidates_manifest_without_runtime_writes(self):
         with tempfile.TemporaryDirectory() as raw:

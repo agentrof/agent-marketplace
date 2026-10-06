@@ -152,6 +152,26 @@ validator.
 - Memory tiers and mind-maps. A missing-context problem is a
   step-contract bug; fix the contract, do not add a buffer.
 
+## Unit first
+
+Process starts and file-system work, not Python, dominate this suite's time,
+so every test picks the cheapest level that proves its rule:
+
+- A rule a unit test can prove is proven by a unit test. Call the deciding
+  function in process on synthetic in-memory input or a minimal temporary
+  tree, with no Git and no subprocess. When a script decides inside its Git
+  reads, extract the decision into a pure function the script calls.
+- Each script or verb keeps exactly one real end-to-end smoke per refusal
+  family, so the wiring between its reads and the rule stays tested.
+- Integration tests are kept for what a unit test cannot prove: genuine races,
+  the interplay of several Deliveries, and real Git semantics such as refs,
+  worktrees, index flags, file modes, symlinks and line endings as Git records
+  them.
+- A refusal matrix is parametrized unit cases with `subTest` plus that one
+  smoke. Independent scenarios are separate test methods sharing a helper.
+- Converting a test never weakens it: the same exception type and message are
+  expected, and the converted rule is broken once to see the test fail.
+
 ## Guarding the guard
 
 Every validator check has a deliberately broken fixture:

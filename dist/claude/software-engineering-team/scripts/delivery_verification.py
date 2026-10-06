@@ -1845,6 +1845,46 @@ def open_claims(findings: list[dict], ruled: set[str]) -> list[dict]:
                   key=lambda finding: finding["id"])
 
 
+def check_calibration(root: Path, value: dict, current: dict, loop: str, panel: dict | None, result: dict) -> None:
+    """Refuse a calibration reader's result that register_calibration may not register."""
+    if loop != "blocking_delta" and panel is None:
+        raise RuntimeError("severity calibration runs only at review_loop blocking_delta or"
+                           " code_review_panel beside_official")
+    if result.get("role") != "code_reviewer" or result.get("mode") != CALIBRATION_MODE:
+        raise RuntimeError(f"a calibration result names role code_reviewer and mode {CALIBRATION_MODE}")
+    if result.get("candidate_hash") != current["candidate_hash"] or result.get("session_id") != value["session_id"]:
+        raise RuntimeError("calibration does not bind this candidate and reader session")
+    if value["workers"]["code_reviewer"]["state"] != "running":
+        raise RuntimeError("calibrate the claims before the claiming code review result is registered")
+    if value.get("calibration"):
+        raise RuntimeError("this session's claims are already calibrated; each claim is ruled once")
+    if not isinstance(result.get("report"), str) or not result["report"].strip():
+        raise RuntimeError("calibration requires its independent report")
+    claims = result.get("claims")
+    if (not isinstance(claims, list) or not claims
+            or any(not isinstance(claim, dict) or not isinstance(claim.get("id"), str)
+                   or not isinstance(claim.get("severity"), str) or claim.get("status") != "open"
+                   or not blocking(claim) for claim in claims)
+            or len({claim["id"] for claim in claims}) != len(claims)):
+        raise RuntimeError("calibration claims must list each open critical or major claim once, as returned")
+    ruled = sorted({finding["id"] for finding in value.get("unresolved_findings", [])
+                    if finding["role"] == "code_reviewer" and "calibrated_severity" in finding}
+                   & {claim["id"] for claim in claims})
+    if ruled:
+        raise RuntimeError(f"an earlier calibration already ruled {', '.join(ruled)}")
+    duplicates = None
+    if panel is not None:
+        expected, duplicates = panel_claims(panel, value, loop)
+        if sorted(claims, key=lambda claim: claim["id"]) != expected:
+            raise RuntimeError("calibration claims must be exactly the open critical or major claims to rule,"
+                               " as returned: " + (", ".join(claim["id"] for claim in expected) or "none"))
+    item = item_record(root, current["delivery"], current["story"])
+    problems = calibration_problems(root, current, {"findings": claims, "calibration": result.get("calibration")},
+                                    set(), follow_up_roles(item), duplicates)
+    if problems:
+        raise RuntimeError("severity calibration is incomplete: " + "; ".join(problems))
+
+
 def register_calibration(root: Path, result: dict) -> dict:
     """Register a calibration reader's rulings as a result of their own.
 
@@ -1864,42 +1904,7 @@ def register_calibration(root: Path, result: dict) -> dict:
         current = require_current(root, value, allow_evidence=True)
         loop = review_loop(root, current["delivery"])
         panel = code_review_panel_state(root, value)
-        if loop != "blocking_delta" and panel is None:
-            raise RuntimeError("severity calibration runs only at review_loop blocking_delta or"
-                               " code_review_panel beside_official")
-        if result.get("role") != "code_reviewer" or result.get("mode") != CALIBRATION_MODE:
-            raise RuntimeError(f"a calibration result names role code_reviewer and mode {CALIBRATION_MODE}")
-        if result.get("candidate_hash") != current["candidate_hash"] or result.get("session_id") != value["session_id"]:
-            raise RuntimeError("calibration does not bind this candidate and reader session")
-        if value["workers"]["code_reviewer"]["state"] != "running":
-            raise RuntimeError("calibrate the claims before the claiming code review result is registered")
-        if value.get("calibration"):
-            raise RuntimeError("this session's claims are already calibrated; each claim is ruled once")
-        if not isinstance(result.get("report"), str) or not result["report"].strip():
-            raise RuntimeError("calibration requires its independent report")
-        claims = result.get("claims")
-        if (not isinstance(claims, list) or not claims
-                or any(not isinstance(claim, dict) or not isinstance(claim.get("id"), str)
-                       or not isinstance(claim.get("severity"), str) or claim.get("status") != "open"
-                       or not blocking(claim) for claim in claims)
-                or len({claim["id"] for claim in claims}) != len(claims)):
-            raise RuntimeError("calibration claims must list each open critical or major claim once, as returned")
-        ruled = sorted({finding["id"] for finding in value.get("unresolved_findings", [])
-                        if finding["role"] == "code_reviewer" and "calibrated_severity" in finding}
-                       & {claim["id"] for claim in claims})
-        if ruled:
-            raise RuntimeError(f"an earlier calibration already ruled {', '.join(ruled)}")
-        duplicates = None
-        if panel is not None:
-            expected, duplicates = panel_claims(panel, value, loop)
-            if sorted(claims, key=lambda claim: claim["id"]) != expected:
-                raise RuntimeError("calibration claims must be exactly the open critical or major claims to rule,"
-                                   " as returned: " + (", ".join(claim["id"] for claim in expected) or "none"))
-        item = item_record(root, current["delivery"], current["story"])
-        problems = calibration_problems(root, current, {"findings": claims, "calibration": result.get("calibration")},
-                                        set(), follow_up_roles(item), duplicates)
-        if problems:
-            raise RuntimeError("severity calibration is incomplete: " + "; ".join(problems))
+        check_calibration(root, value, current, loop, panel, result)
         stored = dict(result)
         stored["result_hash"] = digest(result)
         value["calibration"] = {"state": "settled", "result": stored, "completed_at": time.time()}
@@ -2081,6 +2086,71 @@ def settle_result(root: Path, value: dict, result: dict, *, merged: bool = False
     return value
 
 
+def check_panel_result(root: Path, value: dict, current: dict, panel: dict, result: dict) -> str:
+    """Refuse a code review panel result that register_panel_result may not register; return its member key."""
+    if result.get("role") != "code_reviewer":
+        raise RuntimeError("a code review panel result names role code_reviewer")
+    if result.get("candidate_hash") != current["candidate_hash"] or result.get("session_id") != value["session_id"]:
+        raise RuntimeError("result does not bind this candidate and reader session")
+    if value["workers"]["code_reviewer"]["state"] != "running":
+        raise RuntimeError("the code review already settled; freeze a new session to replace it")
+    mode = result.get("mode")
+    if mode != PANEL_LENS_MODE and mode not in policy()["role_modes"]["code_reviewer"]:
+        raise RuntimeError("a code review panel result names mode review_initial or review_repair for the"
+                           " official reviewer, or panel_lens for a lens reader")
+    if result.get("verdict") not in {"passed", "failed"}:
+        raise RuntimeError("a code review panel result's verdict is passed or failed")
+    members = panel["members"]
+    inherited = {finding["id"] for finding in value.get("unresolved_findings", [])
+                 if finding["role"] == "code_reviewer"}
+    if mode == PANEL_LENS_MODE:
+        assignment = next((assignment for assignment in panel["assignments"]
+                           if assignment["lens"] == result.get("lens")), None)
+        if assignment is None:
+            raise RuntimeError("lens must name one assignment of the code review panel: "
+                               + "; ".join(", ".join(item["lens"]) for item in panel["assignments"]))
+        key = assignment["key"]
+        if key in members:
+            raise RuntimeError(f"lens assignment {key} is already registered")
+        if not isinstance(result.get("report"), str) or not result["report"].strip():
+            raise RuntimeError("verification result requires its independent report")
+        findings = result.get("findings", [])
+        check_findings(findings)
+        if result["verdict"] == "passed" and any(blocking(finding) for finding in findings):
+            raise RuntimeError("passing verification cannot retain an open blocking finding")
+        prefix = panel_prefix(panel, assignment)
+        for finding in findings:
+            identifier = finding["id"]
+            if finding["status"] != "open":
+                raise RuntimeError(f"{identifier} must be a new open finding")
+            if not identifier.startswith(prefix):
+                raise RuntimeError(f"{identifier} must start with its assignment's id_prefix {prefix}")
+            if not all(isinstance(finding.get(field), str) and finding[field].strip()
+                       for field in ("file", "description")):
+                raise RuntimeError(f"{identifier} needs its file and description")
+        held = inherited | {finding["id"] for member in members.values()
+                            for finding in member["result"].get("findings", [])}
+    else:
+        if OFFICIAL in members:
+            raise RuntimeError("the official code review result is already registered")
+        check_result(root, value, result)
+        if "calibration" in result:
+            raise RuntimeError("calibration rows come only from the calibration reader's own result,"
+                               " registered with calibrate; the claiming result carries none")
+        if review_loop(root, current["delivery"]) == "blocking_delta":
+            problems = follow_up_problems(result.get("findings", []), follow_up_roles(
+                item_record(root, current["delivery"], current["story"])))
+            if problems:
+                raise RuntimeError("code review follow-ups are incomplete: " + "; ".join(problems))
+        key, findings = OFFICIAL, result.get("findings", [])
+        held = {finding["id"] for member in members.values() for finding in member["result"].get("findings", [])}
+    for finding in findings:
+        if finding["id"] in held:
+            raise RuntimeError(f"{finding['id']} is already held by another result of this pass or an"
+                               " earlier cycle")
+    return key
+
+
 def register_panel_result(root: Path, result: dict) -> dict:
     """Register one result of a code review panel pass at code_review_panel beside_official.
 
@@ -2099,66 +2169,8 @@ def register_panel_result(root: Path, result: dict) -> dict:
         if panel is None:
             raise RuntimeError("panel-result registers a code review panel result only at code_review_panel"
                                " beside_official")
-        if result.get("role") != "code_reviewer":
-            raise RuntimeError("a code review panel result names role code_reviewer")
-        if result.get("candidate_hash") != current["candidate_hash"] or result.get("session_id") != value["session_id"]:
-            raise RuntimeError("result does not bind this candidate and reader session")
-        if value["workers"]["code_reviewer"]["state"] != "running":
-            raise RuntimeError("the code review already settled; freeze a new session to replace it")
-        mode = result.get("mode")
-        if mode != PANEL_LENS_MODE and mode not in policy()["role_modes"]["code_reviewer"]:
-            raise RuntimeError("a code review panel result names mode review_initial or review_repair for the"
-                               " official reviewer, or panel_lens for a lens reader")
-        if result.get("verdict") not in {"passed", "failed"}:
-            raise RuntimeError("a code review panel result's verdict is passed or failed")
+        key = check_panel_result(root, value, current, panel, result)
         members = panel["members"]
-        inherited = {finding["id"] for finding in value.get("unresolved_findings", [])
-                     if finding["role"] == "code_reviewer"}
-        if mode == PANEL_LENS_MODE:
-            assignment = next((assignment for assignment in panel["assignments"]
-                               if assignment["lens"] == result.get("lens")), None)
-            if assignment is None:
-                raise RuntimeError("lens must name one assignment of the code review panel: "
-                                   + "; ".join(", ".join(item["lens"]) for item in panel["assignments"]))
-            key = assignment["key"]
-            if key in members:
-                raise RuntimeError(f"lens assignment {key} is already registered")
-            if not isinstance(result.get("report"), str) or not result["report"].strip():
-                raise RuntimeError("verification result requires its independent report")
-            findings = result.get("findings", [])
-            check_findings(findings)
-            if result["verdict"] == "passed" and any(blocking(finding) for finding in findings):
-                raise RuntimeError("passing verification cannot retain an open blocking finding")
-            prefix = panel_prefix(panel, assignment)
-            for finding in findings:
-                identifier = finding["id"]
-                if finding["status"] != "open":
-                    raise RuntimeError(f"{identifier} must be a new open finding")
-                if not identifier.startswith(prefix):
-                    raise RuntimeError(f"{identifier} must start with its assignment's id_prefix {prefix}")
-                if not all(isinstance(finding.get(field), str) and finding[field].strip()
-                           for field in ("file", "description")):
-                    raise RuntimeError(f"{identifier} needs its file and description")
-            held = inherited | {finding["id"] for member in members.values()
-                                for finding in member["result"].get("findings", [])}
-        else:
-            if OFFICIAL in members:
-                raise RuntimeError("the official code review result is already registered")
-            check_result(root, value, result)
-            if "calibration" in result:
-                raise RuntimeError("calibration rows come only from the calibration reader's own result,"
-                                   " registered with calibrate; the claiming result carries none")
-            if review_loop(root, current["delivery"]) == "blocking_delta":
-                problems = follow_up_problems(result.get("findings", []), follow_up_roles(
-                    item_record(root, current["delivery"], current["story"])))
-                if problems:
-                    raise RuntimeError("code review follow-ups are incomplete: " + "; ".join(problems))
-            key, findings = OFFICIAL, result.get("findings", [])
-            held = {finding["id"] for member in members.values() for finding in member["result"].get("findings", [])}
-        for finding in findings:
-            if finding["id"] in held:
-                raise RuntimeError(f"{finding['id']} is already held by another result of this pass or an"
-                                   " earlier cycle")
         stored = dict(result)
         stored["result_hash"] = digest(result)
         completed = time.time()
@@ -2167,6 +2179,81 @@ def register_panel_result(root: Path, result: dict) -> dict:
             "result": stored, "completed_at": completed, "elapsed_seconds": max(0.0, completed - started)}}}
         write_session(root, value)
         return value
+
+
+def merged_panel_result(root: Path, value: dict, current: dict, panel: dict) -> dict:
+    """The one code review result merge_panel settles, or the refusal of an incomplete panel pass."""
+    worker = value["workers"]["code_reviewer"]
+    if worker["state"] != "running":
+        raise RuntimeError("the code review already settled; freeze a new session to replace it")
+    claims, _targets = panel_claims(panel, value, review_loop(root, current["delivery"]))
+    registered = (value.get("calibration") or {}).get("result")
+    if (claims or registered) and (registered is None or sorted(
+            registered["claims"], key=lambda claim: claim["id"]) != claims):
+        raise RuntimeError("register the calibration reader's result with calibrate for exactly the open"
+                           " critical or major claims to rule, as returned: "
+                           + (", ".join(claim["id"] for claim in claims) or "none"))
+    rows = {row["finding"]: row for row in registered["calibration"]} if registered else {}
+    members = panel["members"]
+    official = members[OFFICIAL]["result"]
+    carried = {finding["id"]: finding for finding in value.get("unresolved_findings", [])
+               if finding["role"] == "code_reviewer" and finding.get("source") == "panel"}
+    findings = [{**finding, "source": "panel", "lens": carried[finding["id"]]["lens"]}
+                if finding["id"] in carried else {**finding, "source": OFFICIAL}
+                for finding in official["findings"]]
+    gating = {source: sorted(finding["id"] for finding in findings if finding["source"] == source
+                             and finding["status"] == "open" and blocking(finding))
+              for source in (OFFICIAL, "panel")}
+    rulings: dict = {"confirmed": [], "minor": [], "invalid": [], DUPLICATE: {}}
+    claims = []
+    for assignment in panel["assignments"]:
+        for finding in members[assignment["key"]]["result"]["findings"]:
+            if not blocking(finding):
+                continue
+            row = rows[finding["id"]]
+            ruling = row["calibrated_severity"].casefold()
+            claim = {"finding": finding["id"], "lens": assignment["lens"], "severity": finding["severity"],
+                     "ruling": ruling if ruling in {DUPLICATE, "invalid", "minor"} else "confirmed",
+                     "file": finding["file"], "description": finding["description"], "reason": row["reason"]}
+            claims.append(claim)
+            if ruling == DUPLICATE:
+                claim["duplicate_of"] = row["duplicate_of"]
+                rulings[DUPLICATE][finding["id"]] = row["duplicate_of"]
+                continue
+            if ruling == "invalid":
+                rulings["invalid"].append(finding["id"])
+                continue
+            entry = {**finding, "source": "panel", "lens": assignment["lens"],
+                     "claimed_severity": finding["severity"], "calibrated_severity": ruling}
+            if ruling == "minor":
+                follow_up = {"owner_role": row.get("owner_role"), "revisit_trigger": row.get("revisit_trigger")}
+                entry.update(severity="minor", **follow_up)
+                claim.update(follow_up)
+                rulings["minor"].append(finding["id"])
+            else:
+                rulings["confirmed"].append(finding["id"])
+            findings.append(entry)
+    official_seconds = members[OFFICIAL]["elapsed_seconds"]
+    combined = max(0.0, time.time() - worker.get("started_at", time.time()))
+    record = {"pass": panel["pass"], "mode": official["mode"],
+              "official_result_hash": official["result_hash"],
+              "lens_result_hashes": {assignment["key"]: members[assignment["key"]]["result"]["result_hash"]
+                                     for assignment in panel["assignments"]},
+              "official_seconds": round(official_seconds, 1),
+              "panel_seconds": round(max(members[assignment["key"]]["elapsed_seconds"]
+                                         for assignment in panel["assignments"]), 1),
+              "combined_seconds": round(combined, 1),
+              "combined_ratio": round(combined / official_seconds, 2) if official_seconds > 0 else None,
+              "official_blocking": gating[OFFICIAL], "carried_panel_blocking": gating["panel"],
+              "confirmed": sorted(rulings["confirmed"]), "minor": sorted(rulings["minor"]),
+              "invalid": sorted(rulings["invalid"]), DUPLICATE: dict(sorted(rulings[DUPLICATE].items())),
+              "claims": sorted(claims, key=lambda claim: claim["finding"])}
+    result = {key: item for key, item in official.items() if key not in {"result_hash", "findings", "verdict"}}
+    result.update(verdict="failed" if official["verdict"] == "failed" or rulings["confirmed"] else "passed",
+                  findings=findings, panel=record)
+    if registered:
+        result.update(calibration=registered["calibration"], calibration_result_hash=registered["result_hash"])
+    return result
 
 
 def merge_panel(root: Path) -> dict:
@@ -2194,76 +2281,7 @@ def merge_panel(root: Path) -> dict:
         panel = code_review_panel_state(root, value)
         if panel is None:
             raise RuntimeError("merge-panel settles a code review only at code_review_panel beside_official")
-        worker = value["workers"]["code_reviewer"]
-        if worker["state"] != "running":
-            raise RuntimeError("the code review already settled; freeze a new session to replace it")
-        claims, _targets = panel_claims(panel, value, review_loop(root, current["delivery"]))
-        registered = (value.get("calibration") or {}).get("result")
-        if (claims or registered) and (registered is None or sorted(
-                registered["claims"], key=lambda claim: claim["id"]) != claims):
-            raise RuntimeError("register the calibration reader's result with calibrate for exactly the open"
-                               " critical or major claims to rule, as returned: "
-                               + (", ".join(claim["id"] for claim in claims) or "none"))
-        rows = {row["finding"]: row for row in registered["calibration"]} if registered else {}
-        members = panel["members"]
-        official = members[OFFICIAL]["result"]
-        carried = {finding["id"]: finding for finding in value.get("unresolved_findings", [])
-                   if finding["role"] == "code_reviewer" and finding.get("source") == "panel"}
-        findings = [{**finding, "source": "panel", "lens": carried[finding["id"]]["lens"]}
-                    if finding["id"] in carried else {**finding, "source": OFFICIAL}
-                    for finding in official["findings"]]
-        gating = {source: sorted(finding["id"] for finding in findings if finding["source"] == source
-                                 and finding["status"] == "open" and blocking(finding))
-                  for source in (OFFICIAL, "panel")}
-        rulings: dict = {"confirmed": [], "minor": [], "invalid": [], DUPLICATE: {}}
-        claims = []
-        for assignment in panel["assignments"]:
-            for finding in members[assignment["key"]]["result"]["findings"]:
-                if not blocking(finding):
-                    continue
-                row = rows[finding["id"]]
-                ruling = row["calibrated_severity"].casefold()
-                claim = {"finding": finding["id"], "lens": assignment["lens"], "severity": finding["severity"],
-                         "ruling": ruling if ruling in {DUPLICATE, "invalid", "minor"} else "confirmed",
-                         "file": finding["file"], "description": finding["description"], "reason": row["reason"]}
-                claims.append(claim)
-                if ruling == DUPLICATE:
-                    claim["duplicate_of"] = row["duplicate_of"]
-                    rulings[DUPLICATE][finding["id"]] = row["duplicate_of"]
-                    continue
-                if ruling == "invalid":
-                    rulings["invalid"].append(finding["id"])
-                    continue
-                entry = {**finding, "source": "panel", "lens": assignment["lens"],
-                         "claimed_severity": finding["severity"], "calibrated_severity": ruling}
-                if ruling == "minor":
-                    follow_up = {"owner_role": row.get("owner_role"), "revisit_trigger": row.get("revisit_trigger")}
-                    entry.update(severity="minor", **follow_up)
-                    claim.update(follow_up)
-                    rulings["minor"].append(finding["id"])
-                else:
-                    rulings["confirmed"].append(finding["id"])
-                findings.append(entry)
-        official_seconds = members[OFFICIAL]["elapsed_seconds"]
-        combined = max(0.0, time.time() - worker.get("started_at", time.time()))
-        record = {"pass": panel["pass"], "mode": official["mode"],
-                  "official_result_hash": official["result_hash"],
-                  "lens_result_hashes": {assignment["key"]: members[assignment["key"]]["result"]["result_hash"]
-                                         for assignment in panel["assignments"]},
-                  "official_seconds": round(official_seconds, 1),
-                  "panel_seconds": round(max(members[assignment["key"]]["elapsed_seconds"]
-                                             for assignment in panel["assignments"]), 1),
-                  "combined_seconds": round(combined, 1),
-                  "combined_ratio": round(combined / official_seconds, 2) if official_seconds > 0 else None,
-                  "official_blocking": gating[OFFICIAL], "carried_panel_blocking": gating["panel"],
-                  "confirmed": sorted(rulings["confirmed"]), "minor": sorted(rulings["minor"]),
-                  "invalid": sorted(rulings["invalid"]), DUPLICATE: dict(sorted(rulings[DUPLICATE].items())),
-                  "claims": sorted(claims, key=lambda claim: claim["finding"])}
-        result = {key: item for key, item in official.items() if key not in {"result_hash", "findings", "verdict"}}
-        result.update(verdict="failed" if official["verdict"] == "failed" or rulings["confirmed"] else "passed",
-                      findings=findings, panel=record)
-        if registered:
-            result.update(calibration=registered["calibration"], calibration_result_hash=registered["result_hash"])
+        result = merged_panel_result(root, value, current, panel)
         return settle_result(root, value, result, merged=True)
 
 

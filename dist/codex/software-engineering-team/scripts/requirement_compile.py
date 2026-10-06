@@ -54,6 +54,7 @@ EXPERIENCE_APPLICATION_RE = re.compile(r"^application@r[1-9][0-9]*$")
 EXPERIENCE_PACKAGE_RE = re.compile(
     r"^(?!application@)[a-z0-9]+(?:-[a-z0-9]+)*@r[1-9][0-9]*$"
 )
+BACKLOG_REVIEW_RE = re.compile(r"^round-([0-9]+)-backlog-review\.md$")
 
 
 def status_tag_name(status: str) -> str:
@@ -601,18 +602,34 @@ def package_findings(docs: Path) -> list[str]:
     return identity_findings(docs)
 
 
+def backlog_review_round(path: Path) -> int:
+    """Return a root backlog review's round number from its filename, or 0."""
+    match = BACKLOG_REVIEW_RE.fullmatch(path.name)
+    return int(match.group(1)) if match else 0
+
+
+def implements_requirement(links: object, identifier: str) -> bool:
+    """Return whether a Story's ``implements`` value links the Requirement."""
+    if not ID_RE.fullmatch(identifier) or not isinstance(links, list):
+        return False
+    needle = f"requirements/req-{int(identifier[4:]):03d}-"
+    return any(isinstance(value, str) and needle in value for value in links)
+
+
 def requirement_incorporated(docs: Path, identifier: str) -> bool:
     """Return the one compiler-owned backlog incorporation predicate.
 
-    A Requirement is incorporated only when an approved root backlog review
-    names a non-empty current Story set for it and each named Story links back
-    to the exact Requirement. Older approved backlogs without the new coverage
+    A Requirement is incorporated only when the latest approved root backlog
+    review names a non-empty current Story set for it and each named Story
+    links back to the exact Requirement. Older approved backlogs without the new coverage
     projection therefore remain historically valid but are not treated as
     newly incorporated by this flow.
     """
     if not ID_RE.fullmatch(identifier):
         return False
-    reviews = sorted((docs / "backlog" / "reviews").glob("round-*-backlog-review.md"))
+    # Text order puts round-10 before round-9; the latest round is the highest number.
+    reviews = sorted((docs / "backlog" / "reviews").glob("round-*-backlog-review.md"),
+                     key=lambda path: (backlog_review_round(path), path.name))
     approved_review = None
     for review in reversed(reviews):
         try:
@@ -626,16 +643,12 @@ def requirement_incorporated(docs: Path, identifier: str) -> bool:
         return False
     story_paths = sorted((docs / "backlog" / "epics").glob("*/stories/*/story.md"))
     linked: list[str] = []
-    needle = f"requirements/req-{int(identifier[4:]):03d}-"
     for story in story_paths:
         try:
             props, _ = split_note(story)
         except (OSError, ValueError):
             continue
-        links = props.get("implements", [])
-        if not isinstance(links, list):
-            continue
-        if any(isinstance(value, str) and needle in value for value in links):
+        if implements_requirement(props.get("implements", []), identifier):
             aliases = props.get("aliases", [])
             if isinstance(aliases, list) and len(aliases) == 1 and isinstance(aliases[0], str):
                 linked.append(aliases[0])

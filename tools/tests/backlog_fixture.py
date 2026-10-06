@@ -35,7 +35,8 @@ def _write_note(path: Path, props: dict, body: str) -> None:
     path.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
 
 
-def _complete_review_body(title: str, sections: list[str]) -> str:
+def _complete_review_body(title: str, sections: list[str],
+                          coverage_rows: tuple[str, ...] = ()) -> str:
     lines = [f"# {title}", ""]
     for section in sections:
         lines.extend([f"## {section}", ""])
@@ -43,6 +44,13 @@ def _complete_review_body(title: str, sections: list[str]) -> str:
             lines.extend([
                 "| criterion_ref | owner_role | reason | revisit_trigger |",
                 "|---|---|---|---|",
+                "",
+            ])
+        elif section == backlog_compile.REQUIREMENT_COVERAGE:
+            lines.extend([
+                "| requirement | story_ids | disposition |",
+                "|---|---|---|",
+                *coverage_rows,
                 "",
             ])
         else:

@@ -98,7 +98,7 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "cae2fad52238af4445b3a3f58b8d3f3091550875ccca594dbbf0928a9f0347d9"
+      "764b3028ec08886a08516ce2a7a415d957ffd5c1f769babb4db08bd167ba3304"
     ,
     "flows/business-analysis.md":
       "aaebfe00ee5e062d23a881e0d0c989563426b2c026dcb07c78d74b0929477e5c"
@@ -155,7 +155,7 @@
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
     ,
     "scripts/backlog_compile.py":
-      "c36aaddc7348400cfebe5a59541babfa688f1b7176a7960dc02805f837be12b6"
+      "d9cd618c95051d92ed99f69e78dac08e9e7853d536ea21cd66a8c7e02b6106a0"
     ,
     "scripts/backlog_input_policy.py":
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
@@ -227,7 +227,7 @@
       "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
     ,
     "scripts/requirement_compile.py":
-      "288489412c3503d53a043d99b35fc46ce539ef6c4a86ae7e3e974761381914f4"
+      "bf9a453919ca20d1001585fdef1d05788852e82312091e5ff01634a878dc53fb"
     ,
     "scripts/requirement_route.py":
       "a6343f84ecec31095e660d4ea8cfde2711d859304c14fd1f0be04ad409f81131"
@@ -539,7 +539,7 @@
       "3e162775f2d478a4e37a0c14974389cefff970ef26e65cf2701605f47856f878"
     ,
     "skill-content/product-planning/SKILL.md":
-      "1602c902dbb7fde9367edf34d41bc8ec3379d2063095b845672a82a6aa1185c4"
+      "de3d260b6829f5b96647915c4a184e261badb369c9c32feac83884c6ac3d1956"
     ,
     "skill-content/product-planning/data/story-size-measures.json":
       "5a1b6d644cecbed97a872c3921a1354bb94277c4f8ae32161181cd9723c36af8"
@@ -560,7 +560,7 @@
       "133710c7ea873588dab8559850ad3ac372dc8d2cd66d98bfe305ed82ad59226e"
     ,
     "skill-content/product-planning/references/structured-records.md":
-      "f94756ed0c1cb85cf1675b9cd41f95793bffb028f684b1d49ee4711131bf53f7"
+      "cc3d2873479cb60412b01c8063f4e0c0eae4f884376f97f4fc3d905ac7b2887d"
     ,
     "skill-content/product-planning/references/switch-story_size_budget-propose_split.md":
       "2518ebe50edf8d0778395117c6147346dad8f543d6380e5f1a50e9292ec75c0f"

@@ -50,10 +50,10 @@ the globally current Experience application and its selected process receipt
 set, then renders `backlog/_generated/input-package-coverage.md`. The view lists
 each bound package with its stage and receipt hash, whether the package
 resolver still finds that receipt strict-current, and how many stories cite the
-package. Requirement
-mode instead records `requirement_ref: REQ-###`; stories carry
-`implements: REQ-###`, and the complete Requirement Stage Results receipt set
-is required before approval.
+package. Requirement mode instead records `requirement_ref: REQ-###`; stories
+carry `implements: REQ-###`, and approval requires the complete Requirement
+Stage Results receipt set and, once a story implements the Requirement, a root
+review `Requirement Coverage` row naming exactly those stories.
 
 By default both modes pin the same four input families in compiler-owned
 `input_bindings`, and the compiler rejects any binding that is no longer
@@ -323,13 +323,13 @@ Only after every epic package and review is green, run
 `backlog-reviewer` with that manifest: the root backlog, every epic, every
 story and every test plan, its declared context, any `unparsed_link_sources`
 and the exact expected `derives_from` and `related_to` sets. Wait for its
-return. Recompute the root
-manifest with `--expected-hash <source_hash>` before accepting its findings;
-a changed input requires a fresh affected review. The Product Owner then
-writes the root review note and any source fixes. The root review covers
-cross-epic overlap, dependency direction, cycles, delivery sequencing, shared
-contracts, deferred criteria, global test coverage, findings and verdict. After
-the root review is authored, run the full `backlog_compile.py check --docs
+return. Recompute the root manifest with `--expected-hash <source_hash>` before
+accepting its findings; a changed input requires a fresh affected review. The
+Product Owner then writes the root review note and any source fixes. The root
+review covers cross-epic overlap, dependency direction, cycles, delivery
+sequencing, shared contracts, deferred criteria, global test coverage,
+Requirement coverage in Requirement mode, findings and verdict. After the root
+review is authored, run the full `backlog_compile.py check --docs
 <workspace>/docs --render --pre-approval --json`, which adds approval's own
 checks, and scoped vault gate. Both must pass before the package can be offered for approval.
 

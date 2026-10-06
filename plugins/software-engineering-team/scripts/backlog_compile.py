@@ -145,6 +145,10 @@ GENERIC_REVIEW_RE = re.compile(
 )
 ACCEPTED_MINOR_FINDINGS = "Accepted Minor Findings"
 ACCEPTED_MINOR_COLUMNS = ("finding", "owner_role", "reason", "revisit_trigger")
+# A Requirement-mode root review names the Stories that cover each Requirement;
+# requirement_compile.requirement_incorporated reads these rows.
+REQUIREMENT_COVERAGE = "Requirement Coverage"
+REQUIREMENT_COVERAGE_COLUMNS = ("requirement", "story_ids", "disposition")
 STORY_SIZE_SWITCH = "story_size_budget"
 STORY_SIZE_VALUE = "propose_split"
 STORY_SIZE_MEASURES_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
@@ -2967,6 +2971,38 @@ def approval_readiness_findings(record: dict) -> list[str]:
     return sorted(set(errors))
 
 
+def requirement_coverage_findings(record: dict) -> list[str]:
+    """Require the row that reports this approval's Requirement as incorporated.
+
+    requirement_compile.requirement_incorporated reads the latest approved root
+    review: the Requirement counts as incorporated only when a row there names
+    every Story that implements it. With no such Story it cannot count, and no
+    row is required.
+    """
+    backlog = record.get("backlog") or {}
+    requirement = str(backlog.get("props", {}).get("requirement_ref", ""))
+    review = latest(record["backlog_reviews"])
+    if backlog.get("planning_mode") != "requirement" or review is None:
+        return []
+    implementing = sorted(story["id"] for story in record["stories"]
+                          if requirement_compile.implements_requirement(story["implements"], requirement))
+    if not implementing:
+        return []
+    path = review["path"]
+    if REQUIREMENT_COVERAGE in headings(review["body"]):
+        rows, errors = structured_table(section(review["body"], REQUIREMENT_COVERAGE),
+                                        REQUIREMENT_COVERAGE_COLUMNS, path, REQUIREMENT_COVERAGE)
+    else:
+        rows, errors = [], [f"{path} is missing required section: {REQUIREMENT_COVERAGE}"]
+    matching = [row for row in rows if row["requirement"] == requirement]
+    if len(matching) > 1:
+        errors.append(f"{path} {REQUIREMENT_COVERAGE} repeats {requirement}")
+    elif not matching or sorted(filter(None, re.split(r"[\s,]+", matching[0]["story_ids"]))) != implementing:
+        errors.append(f"{path} {REQUIREMENT_COVERAGE} needs one {requirement} row whose story_ids"
+                      f" are exactly the Stories that implement it: {', '.join(implementing)}")
+    return errors
+
+
 def approval_stamp_findings(path: Path, docs: Path) -> list[str]:
     props, _body = parse_front_matter(path)
     rel = path.relative_to(docs).as_posix()
@@ -3604,6 +3640,16 @@ def render(record: dict, docs: Path) -> None:
         write_generated(out / "input-package-coverage.md", ("\n".join(rows) + "\n").encode("utf-8"))
 
 
+def backlog_review_sections(planning_mode: str) -> list[str]:
+    """Return the sections a root review round of this planning mode is written with."""
+    sections = list(backlog_contract()["required_backlog_review_sections"])
+    if planning_mode == "requirement":
+        position = (sections.index("Deferred Criteria") + 1
+                    if "Deferred Criteria" in sections else len(sections))
+        sections.insert(position, REQUIREMENT_COVERAGE)
+    return sections
+
+
 def review_body(title: str, sections: list[str]) -> str:
     lines = [f"# {title}", ""]
     for name in sections:
@@ -3612,6 +3658,11 @@ def review_body(title: str, sections: list[str]) -> str:
             lines.extend([
                 "| criterion_ref | owner_role | reason | revisit_trigger |",
                 "|---|---|---|---|",
+            ])
+        elif name == REQUIREMENT_COVERAGE:
+            lines.extend([
+                "| " + " | ".join(REQUIREMENT_COVERAGE_COLUMNS) + " |",
+                "|---|---|---|",
             ])
         else:
             lines.extend([
@@ -3631,6 +3682,13 @@ def revision_review_body(previous: dict, title: str, backlog_title: str, revisio
     deferred = "## Deferred Criteria\n\n" + raw_section(previous["body"], "Deferred Criteria").strip() + "\n\n"
     body = re.sub(r"^## Deferred Criteria\n.*?(?=^## |\Z)", lambda _match: deferred,
                   body, flags=re.MULTILINE | re.DOTALL)
+    # Earlier Requirements stay incorporated only while the latest approved
+    # round keeps their rows. A last section also holds the navigation.
+    coverage = raw_section(previous["body"], REQUIREMENT_COVERAGE).split(NAV_MARKER, 1)[0].strip()
+    if coverage and REQUIREMENT_COVERAGE in headings(body):
+        body = re.sub(rf"^## {REQUIREMENT_COVERAGE}\n.*?(?=^## |\Z)",
+                      lambda _match: f"## {REQUIREMENT_COVERAGE}\n\n{coverage}\n\n",
+                      body, flags=re.MULTILINE | re.DOTALL)
     context = (f"{root_link} is draft revision {revision}; this round has not evaluated its current inputs. "
                f"{previous_link} retains the preceding approval's evidence.\n\n")
     body = body.replace(f"# {title}\n\n", f"# {title}\n\n" + context, 1)
@@ -3748,8 +3806,7 @@ def init(args) -> int:
              "derives_from": [f"[[backlog/backlog|{backlog_title}]]"],
              "tags": ["doc/backlog-review", "status/draft"],
              "aliases": ["BACKLOG-REVIEW-001"], **round_pin(docs)},
-            review_body(review_title,
-                        backlog_contract()["required_backlog_review_sections"])),
+            review_body(review_title, backlog_review_sections(planning_mode))),
     }
     for path, text in files.items():
         if not path.exists():
@@ -4138,6 +4195,8 @@ def approval_preflight(docs: Path, record: dict,
     """
     findings = approval_readiness_findings(record)
     already_approved = (record.get("backlog") or {}).get("props", {}).get("status") == "approved"
+    if not already_approved:
+        findings.extend(requirement_coverage_findings(record))
     preserved, pin = {}, {}
     if not collect_errors and not findings:
         if already_approved:
@@ -4389,7 +4448,8 @@ def begin_revision(args) -> int:
     ] + ["status/draft"]
     # The new round records the Process Policy in force as it is written.
     review_props.update(round_pin(docs))
-    review_body_text = revision_review_body(latest_review, review_title, backlog_title, revision)
+    review_body_text = revision_review_body(latest_review, review_title, backlog_title, revision,
+                                            backlog_review_sections(args.planning_mode))
     review_path = docs / "backlog" / "reviews" / f"round-{next_round}-backlog-review.md"
     # Navigation may touch every package note, home and the map. Snapshot only
     # those owned paths so rollback cannot erase unrelated concurrent work.
@@ -4542,7 +4602,8 @@ def stub_review(docs: Path, slug: str | None = None) -> int:
                      **pin)
         body = revision_review_body(previous, title, str(root_props["title"]),
                                     int(root_props["revision"]),
-                                    backlog_contract()[f"required_{'epic' if epic else 'backlog'}_review_sections"])
+                                    backlog_contract()["required_epic_review_sections"] if epic
+                                    else backlog_review_sections(record["backlog"]["planning_mode"]))
         body = body.rstrip() + "\n\n" + NAV_MARKER + "\n- [[maps/backlog|Backlog map]]\n- " + parent_link + "\n"
         review_path = docs / Path(parent["path"]).parent / "reviews" / f"round-{number}-{kind}.md"
         with review_path.open("xb") as stream:

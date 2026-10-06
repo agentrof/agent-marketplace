@@ -177,6 +177,41 @@ class RequirementCompilerTests(unittest.TestCase):
         self.assertEqual((routed["action"], routed.get("reason")),
                          ("requirement", "Requirement is not committed"))
 
+    def implementing_story(self):
+        story = self.docs / "backlog/epics/access/stories/saml-callback/story.md"
+        story.parent.mkdir(parents=True)
+        story.write_text(
+            "---\ntype: story\ntitle: SAML callback\nstatus: planned\nid: ST-001\nimplements:\n"
+            '  - "[[requirements/req-001-saml-access|REQ-001]]"\naliases:\n  - ST-001\n---\n\n'
+            "# SAML callback\n", encoding="utf-8")
+
+    def root_review(self, number: int, status: str, *rows: str):
+        path = self.docs / f"backlog/reviews/round-{number}-backlog-review.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"---\ntype: backlog-review\nstatus: {status}\nround: {number}\n---\n\n"
+            f"# Backlog review round {number}\n\n## Requirement Coverage\n\n"
+            "| requirement | story_ids | disposition |\n|---|---|---|\n"
+            + "".join(f"{row}\n" for row in rows), encoding="utf-8")
+
+    def test_incorporation_reads_the_highest_approved_round_number(self):
+        requirement_compile.approve_requirement(self.complete_draft())
+        self.implementing_story()
+        # By filename, round-14 sorts before round-9.
+        self.root_review(9, "approved")
+        self.root_review(14, "approved", "| REQ-001 | ST-001 | covered |")
+        self.root_review(15, "draft")
+        self.assertTrue(requirement_compile.requirement_incorporated(self.docs, "REQ-001"))
+        self.assertEqual(requirement_route.route(self.docs, "REQ-001")["actions"], ["inspect", "supersede"])
+
+    def test_a_row_only_in_an_older_approved_round_does_not_incorporate(self):
+        requirement_compile.approve_requirement(self.complete_draft())
+        self.implementing_story()
+        self.root_review(9, "approved", "| REQ-001 | ST-001 | covered |")
+        self.root_review(14, "approved")
+        self.assertFalse(requirement_compile.requirement_incorporated(self.docs, "REQ-001"))
+        self.assertIn("withdraw", requirement_route.route(self.docs, "REQ-001")["actions"])
+
     def test_discard_removes_only_an_uncommitted_draft(self):
         path = self.complete_draft()
         requirement_compile.discard_requirement(path)

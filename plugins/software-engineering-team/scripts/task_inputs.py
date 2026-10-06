@@ -103,6 +103,11 @@ def docs_relative(path) -> str:
     return path.removeprefix(DOCS_PREFIX)
 
 
+def row_path(row) -> str:
+    """A closure row is a note path, or a gap row that names its note under ``path``."""
+    return row.get("path") if isinstance(row, dict) else row
+
+
 def impact_closure(docs: Path, changed, prefix: str = "") -> dict:
     """Return the closure of ``changed`` docs notes with every path under ``prefix``.
 
@@ -112,9 +117,13 @@ def impact_closure(docs: Path, changed, prefix: str = "") -> dict:
     raw = closure_api().closure(docs, sorted({docs_relative(path) for path in changed}))
     if not isinstance(raw, dict) or any(not isinstance(raw.get(key), list) for key in CLOSURE_KEYS):
         raise ValueError(f"impact closure must return the lists {', '.join(CLOSURE_KEYS)}")
-    result = {key: sorted({prefix + docs_relative(path) for path in raw[key]})
+    result = {key: sorted({prefix + docs_relative(row_path(row)) for row in raw[key]})
               for key in ("changed", "closure", "graph_gaps")}
-    result["widened_by"] = sorted({str(reason) for reason in raw["widened_by"]})
+    result["widened_by"] = sorted(
+        ({"path": prefix + docs_relative(row["path"]), "reason": str(row.get("reason")),
+          "citers": sorted({prefix + docs_relative(path) for path in row.get("citers", [])})}
+         if isinstance(row, dict) else {"reason": str(row)} for row in raw["widened_by"]),
+        key=lambda row: json.dumps(row, sort_keys=True))
     proven = {}
     for row in raw["proven_unchanged"]:
         if not isinstance(row, dict) or not isinstance(row.get("approval_hash"), str):

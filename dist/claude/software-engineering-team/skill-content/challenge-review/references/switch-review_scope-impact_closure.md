@@ -36,7 +36,7 @@ writer first; no reader is ever spent on a package its compiler refuses.
 
 ## 3. Navigate, then read
 
-Every role queries the vault with the `impact_closure.py` verbs first,
+Every role queries the vault with the `vault_query.py` verbs first,
 starting from `impact_closure.py views --docs <workspace>/docs` and the views
 it names; when they give too little or look wrong it uses its own methods
 and records that it did. It follows the relations of the notes in its

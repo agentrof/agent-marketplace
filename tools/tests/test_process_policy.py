@@ -1106,7 +1106,7 @@ STEP_BUDGET_TARGETS = {"backlog_revision": 10, "confirmation_rereview": 3,
                        "delivery_and_execution_planning": 15, "reader_closure_unit": 5,
                        "requirement_technical": 10, "story_end_to_end": 180}
 VAULT_FIRST = "Vault first, per constitution section 5"
-VAULT_TIERS = ("`impact_closure.py` verbs first", "machine indexes and generated views",
+VAULT_TIERS = ("`vault_query.py` verbs first", "machine indexes and generated views",
                "typed frontmatter", "relation blocks and wikilinks", "then maps",
                "targeted search only for a gap", "uses its own methods and records that it did")
 
@@ -1155,10 +1155,20 @@ class ReadingSwitchTests(unittest.TestCase):
 
     def test_every_role_navigates_the_vault_first(self):
         constitution = flat_text("plugins/software-engineering-team/constitution.md")
-        for term in ("## 5. Vault first", "`impact_closure.py` verbs first",
+        for term in ("## 5. Vault first", "`vault_query.py` verbs first",
                      "record that you did", "typed frontmatter properties",
                      "then generated maps", "read beyond it when unsure and record each such read"):
             self.assertIn(term, constitution)
+        # The verbs the constitution names are the subcommands of the scripts it names.
+        import re
+        listed = re.search(r"`vault_query.py` verbs first \(([^;)]*);", constitution).group(1)
+        for script, verbs in (("vault_query.py", listed.split(", ")), ("impact_closure.py",
+                                                                        ("heal", "render"))):
+            source = (TEAM / "scripts" / script).read_text(encoding="utf-8")
+            for verb in verbs:
+                with self.subTest(script=script, verb=verb):
+                    self.assertRegex(source, rf'add_parser\("{verb}"|\("{verb}", q_')
+        self.assertIn("`impact_closure.py heal` and `render`", constitution)
         for agent in sorted((TEAM / "agents").glob("*.md")):
             with self.subTest(agent=agent.name):
                 self.assertIn(VAULT_FIRST, agent.read_text(encoding="utf-8"))

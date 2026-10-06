@@ -535,5 +535,37 @@ class VerificationScopeTests(unittest.TestCase):
         self.assertIn("operation/verification-contract.md", stub.calls[0])
 
 
+class RealClosureTests(unittest.TestCase):
+    """task_inputs over the shipped impact_closure module, no stub: its gap
+    rows and widening rows reach the manifest as docs paths under the prefix."""
+
+    def setUp(self):
+        import test_impact_closure as closure_tests
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.docs = Path(temporary.name) / "docs"
+        for rel, text in closure_tests.VAULT.items():
+            (self.docs / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.docs / rel).write_text(text, encoding="utf-8")
+        self.digest = closure_tests.stamp(self.docs / "backlog/story-g.md")
+        self.contract = closure_tests.CONTRACT
+
+    def test_the_real_closure_reaches_the_manifest_with_paths_under_the_prefix(self):
+        prefix = "workspace/docs/"
+        scope = task_inputs.impact_closure(self.docs, [prefix + self.contract + ".md"], prefix)
+        self.assertEqual(scope["changed"], [prefix + self.contract + ".md"])
+        self.assertIn(prefix + "backlog/story-e.md", scope["closure"])
+        self.assertEqual(scope["widened_by"], [{
+            "path": prefix + self.contract + ".md", "reason": "shared_contract",
+            "citers": [prefix + "backlog/story-e.md", prefix + "backlog/story-f.md"]}])
+        self.assertIn(prefix + "backlog/story-g.md", scope["graph_gaps"])
+        story_g = self.docs / "backlog/story-g.md"
+        self.assertEqual(scope["proven_unchanged"], [{
+            "path": prefix + "backlog/story-g.md", "approval_hash": self.digest,
+            "sha256": hashlib.sha256(story_g.read_bytes()).hexdigest()}])
+        self.assertEqual(scope["beyond_closure"], [])
+        self.assertEqual(sorted(task_inputs.vault_views(self.docs)), ["docs", "views"])
+
+
 if __name__ == "__main__":
     unittest.main()

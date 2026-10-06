@@ -3031,6 +3031,60 @@ def validate_evidence(item: dict, review: dict, verification: dict) -> None:
             raise RuntimeError(f"DELIVERY_ITEM_NOT_READY: final {role} verification result is missing")
 
 
+CLOSURE_SWITCH, CLOSURE_VALUE = "review_scope", "impact_closure"
+# The Item notes its closure starts from; every other bound record stays a full read.
+ITEM_RECORD_KEYS = ("story_path", "test_plan_path")
+CONTRACT_KEYS = ("verification_contract_ref", "environment_contract_ref")
+# The bound inputs that grow with the package rather than with the Item.
+PACKAGE_SCOPED = "system-architecture/"
+
+
+def review_scope(root: Path, delivery_id: str) -> str:
+    """The review_scope value the Delivery runs under.
+
+    ``full`` while no registry declares it, and where the policy cannot be
+    read, so a reader whose policy is unreadable reads everything as released.
+    """
+    try:
+        return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, CLOSURE_SWITCH)
+    except (KeyError, ValueError):
+        return "full"
+
+
+def closure_read(root: Path, current: dict) -> tuple[list[str], dict]:
+    """Narrow a reader's full read to the impact closure of the Item change.
+
+    The closure starts from the Item's Story, Test Plan and contracts and every
+    vault note the change touched. An architecture note outside the closure is
+    listed with the hash the candidate already binds instead of being read;
+    the Item's own records, the project root files and every product file the
+    change touched stay full reads.
+    """
+    import task_inputs
+
+    docs = delivery.docs_root(root)
+    prefix = docs.relative_to(root).as_posix() + "/"
+    item = next(path for path in current["inputs"] if path.endswith("/item.md"))
+    props, _ = delivery.split_note(root / item)
+    seeds = {prefix + props[key] for key in ITEM_RECORD_KEYS}
+    seeds |= {prefix + props[key] + ".md" for key in CONTRACT_KEYS if props.get(key)}
+    seeds |= {path for path in current["changed_files"]
+              if path.startswith(prefix) and path.endswith(".md")}
+    try:
+        scope = task_inputs.impact_closure(docs, seeds, prefix)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    reach = set(scope["closure"]) | set(scope["graph_gaps"]) | seeds
+    reads = {path for path in reach if (root / path).is_file()}
+    unread = sorted(path for path in current["inputs"]
+                    if path.startswith(prefix + PACKAGE_SCOPED) and path not in reads)
+    scope["proven_unchanged"] = [row for row in scope["proven_unchanged"] if row["path"] not in reads]
+    scope.update(read="closure", seeds=sorted(seeds),
+                 unread_inputs=[{"path": path, "sha256": current["inputs"][path]} for path in unread])
+    full = (set(current["inputs"]) - set(unread)) | set(current["changed_files"]) | reads
+    return sorted(full), {"scope": scope, "views": task_inputs.vault_views(docs)}
+
+
 def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str) -> dict:
     if role not in ROLES or mode not in policy()["role_modes"][role]:
         raise RuntimeError("unsupported verification role or mode")
@@ -3080,6 +3134,10 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str) -> 
                                        "terminal_evidence": False},
               "execution_note": "Commands run in private clones containing tracked files only. Approved commands must provision dependencies or use a fixed external environment; ignored dependencies are never copied. The clone is not an operating-system sandbox for trusted commands with absolute paths.",
               "next_transition": "Register independent result; owner writes reports only after both readers settle"}
+    if review_scope(root, delivery_id) == CLOSURE_VALUE:
+        result["full_read"], closure = closure_read(root, current)
+        result.update({CLOSURE_SWITCH: CLOSURE_VALUE, "vault_views": closure["views"],
+                       CLOSURE_VALUE: closure["scope"]})
     panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
     if panel is not None:
         # Every reader of the panel pass receives this same manifest and one assignment.

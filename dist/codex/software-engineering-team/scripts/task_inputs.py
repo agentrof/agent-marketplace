@@ -36,6 +36,162 @@ CATALOG_NAME_MAPS = ("role_skills", "required_role_skills", "entries",
 CANONICAL_SUFFIXES = {".md", ".json"}
 OPAQUE_NAMES = {"artifacts", ".obsidian", ".trash"}
 WIKILINK = re.compile(r"\[\[([^\]|#]+)")
+# At this value a reader reads the change's impact closure, not the whole package.
+CLOSURE_SWITCH, CLOSURE_VALUE = "review_scope", "impact_closure"
+CLOSURE_KEYS = ("changed", "closure", "proven_unchanged", "widened_by", "graph_gaps")
+DOCS_PREFIX = "workspace/docs/"
+# At this value a task binds the role's derived rule digest instead of its required reads.
+PACK_SWITCH, PACK_VALUE = "context_pack", "role_digest"
+PACK_CHECK = ("Run context_pack.py check --pack <the bound context_pack> before keeping the"
+              " result; a stale pack refuses it. A case the pack does not cover: read the named"
+              " source in full and record the read and its reason.")
+# context_pack.build derives its sources from this module's manifest; that
+# inner derivation binds no pack.
+_PACK_BUILDS = []
+HUNK = re.compile(rb"^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@", re.M)
+VIEWS_FIRST = ("Consult the vault_views first, follow the typed relations from them to what"
+               " the task needs, and cite the views consulted in the output; never scan a"
+               " folder or a whole package to find a note.")
+CLOSURE_READS = ("Read in full only impact_closure.closure, its graph_gaps and the project"
+                 " inputs; a proven_unchanged note is its hash-bound entry, not a read. Any"
+                 " note or file may still be read beyond the closure: record each such read"
+                 " with its reason in beyond_closure (impact_closure.record_beyond) in the"
+                 " output.")
+DELTA_READS = ("Confirm each bound finding against impact_closure.fixed, the fixed lines of"
+               " the notes the fix changed, and impact_closure.touches, what the fix reaches;"
+               " never re-audit unchanged text. Record any read beyond them with its reason"
+               " in beyond_closure.")
+
+
+def pack_api():
+    """Return the context pack module, which derives the role digest."""
+    try:
+        import context_pack
+    except ImportError as exc:
+        raise ValueError(f"{PACK_SWITCH} {PACK_VALUE} needs scripts/context_pack.py") from exc
+    return context_pack
+
+
+def role_pack(entry: str, role: str | None, mode: str, project: Path | None, package: Path,
+              expected: bool) -> dict:
+    """Build the role digest, and check it when the result is about to be kept."""
+    api = pack_api()
+    _PACK_BUILDS.append(True)
+    try:
+        pack = api.build(entry=entry, role=role, mode=mode, project=project, package=package)
+        if expected:
+            api.check(pack, project=project, package=package)
+    except api.Refused as exc:
+        raise ValueError(f"context pack refused: {exc}") from exc
+    finally:
+        _PACK_BUILDS.pop()
+    return pack
+
+
+def closure_api():
+    """Return the impact closure module, which owns the relation graph."""
+    try:
+        import impact_closure
+    except ImportError as exc:
+        raise ValueError(f"{CLOSURE_SWITCH} {CLOSURE_VALUE} needs scripts/impact_closure.py") from exc
+    return impact_closure
+
+
+def docs_relative(path) -> str:
+    if not isinstance(path, str) or not path:
+        raise ValueError(f"impact closure returned an invalid note path: {path!r}")
+    return path.removeprefix(DOCS_PREFIX)
+
+
+def row_path(row) -> str:
+    """A closure row is a note path, or a gap row that names its note under ``path``."""
+    return row.get("path") if isinstance(row, dict) else row
+
+
+def impact_closure(docs: Path, changed, prefix: str = "") -> dict:
+    """Return the closure of ``changed`` docs notes with every path under ``prefix``.
+
+    Each proven unchanged note also carries the sha256 of its current bytes,
+    so a later write to it stales the manifest that lists it unread.
+    """
+    raw = closure_api().closure(docs, sorted({docs_relative(path) for path in changed}))
+    if not isinstance(raw, dict) or any(not isinstance(raw.get(key), list) for key in CLOSURE_KEYS):
+        raise ValueError(f"impact closure must return the lists {', '.join(CLOSURE_KEYS)}")
+    result = {key: sorted({prefix + docs_relative(row_path(row)) for row in raw[key]})
+              for key in ("changed", "closure", "graph_gaps")}
+    result["widened_by"] = sorted(
+        ({"path": prefix + docs_relative(row["path"]), "reason": str(row.get("reason")),
+          "citers": sorted({prefix + docs_relative(path) for path in row.get("citers", [])})}
+         if isinstance(row, dict) else {"reason": str(row)} for row in raw["widened_by"]),
+        key=lambda row: json.dumps(row, sort_keys=True))
+    proven = {}
+    for row in raw["proven_unchanged"]:
+        if not isinstance(row, dict) or not isinstance(row.get("approval_hash"), str):
+            raise ValueError("impact closure proven_unchanged rows need a path and approval_hash")
+        path = docs_relative(row.get("path"))
+        source = docs / path
+        proven[prefix + path] = {
+            "path": prefix + path, "approval_hash": row["approval_hash"],
+            "sha256": hashlib.sha256(source.read_bytes()).hexdigest() if source.is_file() else None}
+    result["proven_unchanged"] = [proven[path] for path in sorted(proven)]
+    result["beyond_closure"] = []
+    return result
+
+
+def vault_views(docs: Path) -> dict:
+    """Return the relation views every role consults first."""
+    views = closure_api().vault_views(docs)
+    if not isinstance(views, dict):
+        raise ValueError("impact closure vault_views must return a mapping")
+    return views
+
+
+def impact_changes(command: list[str], base: str | None, bound) -> tuple[set[str], str | None]:
+    """Return the canonical notes changed since ``base``, or since HEAD, and the base commit.
+
+    A task given inputs and no base sees only the changes among its inputs.
+    """
+    reference = base or "HEAD"
+    if reference.startswith("-"):
+        raise ValueError("task base must not be a Git option")
+    resolved = subprocess.run([*command, "rev-parse", "--verify", reference + "^{commit}"],
+                              capture_output=True)
+    if resolved.returncode:
+        if base is not None:
+            raise ValueError("task base does not resolve to an exact commit")
+        return set(), None
+    commit = resolved.stdout.decode("ascii").strip()
+    names = (git_bytes(command, "diff", "--no-ext-diff", "--no-textconv", "--name-only",
+                       "--no-renames", "-z", commit, "--")
+             + git_bytes(command, "ls-files", "--others", "--exclude-standard", "-z"))
+    found = {os.fsdecode(raw) for raw in names.split(b"\0") if raw}
+    return ({path for path in found if canonical_source(path) and path.endswith(".md")
+             and (bound is None or path in bound)}, commit)
+
+
+def fixed_lines(project: Path, command: list[str], base: str, paths) -> list[dict]:
+    """Return each changed note with the line ranges its fix wrote, in its current text.
+
+    A range of a pure deletion marks the line the removed text stood before.
+    """
+    rows = []
+    for path in sorted(paths):
+        target = project / path
+        if not target.is_file():
+            rows.append({"path": path, "deleted": True, "lines": []})
+            continue
+        tracked = subprocess.run([*command, "cat-file", "-e", f"{base}:{path}"], capture_output=True)
+        if tracked.returncode:
+            count = len(target.read_bytes().splitlines())
+            rows.append({"path": path, "lines": [[1, max(count, 1)]]})
+            continue
+        diff = git_bytes(command, "diff", "--no-ext-diff", "--no-textconv", "-U0", base, "--", path)
+        ranges = []
+        for match in HUNK.finditer(diff):
+            start, length = int(match.group(1)), int(match.group(2) or b"1")
+            ranges.append([max(start, 1), max(start + length - 1, start, 1)])
+        rows.append({"path": path, "lines": ranges})
+    return rows
 
 
 def digest(value) -> str:
@@ -321,6 +477,48 @@ def mechanical_pass(policy: dict, registry: dict[str, dict], kind: str, *, entry
     if not documents:
         raise ValueError(f"pass kind {kind} needs the {role} document it changes as an --input")
     return documents
+
+
+def closure_reads(project: Path, project_files: set[str], inputs: set[str], base: str | None,
+                  findings: str | None, named: list[str]) -> tuple[set[str], dict]:
+    """Narrow a reader's project reads to the impact closure of the change.
+
+    The change is every canonical note Git sees changed since ``base``, or
+    since HEAD among the task's inputs, plus the notes ``named``. A reader
+    reads the closure, its graph gaps and every input the closure cannot
+    prove unchanged; a proven unchanged input is listed with its hashes
+    instead. Without a change, or before the first commit, it reads all its
+    inputs. A re-check, given findings and the reviewed commit as ``base``,
+    reads only the notes the fix changed, with their fixed lines, and what the
+    fix touches; every other input is unchanged since the reviewed commit.
+    """
+    command = ["git", "--no-replace-objects", "-C", str(project)]
+    for path in named:
+        if not canonical_source(path) or not path.endswith(".md"):
+            raise ValueError(f"--changed must name a workspace/docs note: {path}")
+    seen, commit = impact_changes(command, base, None if base else frozenset(inputs) or None)
+    changed = seen | set(named)
+    if not changed:
+        return project_files, {"read": "full", "reason": "no changed note: the inputs are read in full",
+                               "changed": [], "beyond_closure": []}
+    scope = impact_closure(project / "workspace/docs", changed, DOCS_PREFIX)
+    recheck = findings is not None and base is not None
+    reach = set(scope["closure"]) | set(scope["graph_gaps"]) | changed
+    reads = {path for path in reach if (project / path).is_file()}
+    proven = {row["path"] for row in scope["proven_unchanged"]}
+    unread = {path for path in inputs if canonical_source(path) and path not in reads
+              and (recheck or path in proven)}
+    scope["proven_unchanged"] = [row for row in scope["proven_unchanged"] if row["path"] not in reads]
+    scope["read"] = "closure"
+    if recheck:
+        scope.update(read="delta", base=commit,
+                     fixed=fixed_lines(project, command, commit, sorted(changed)),
+                     touches=sorted(reads - changed))
+        listed = proven | {row["path"] for row in scope["fixed"]}
+        scope["unchanged_since_base"] = [
+            {"path": path, "sha256": hashlib.sha256((project / path).read_bytes()).hexdigest()}
+            for path in sorted(unread - listed)]
+    return (project_files - unread) | reads, scope
 
 
 def switch_reference(package: Path, path: Path) -> tuple[str, str] | None:
@@ -632,7 +830,8 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
              findings: str | None = None, base: str | None = None, epic: str | None = None,
              expected_hash: str | None = None, package: Path = PACKAGE,
              delivery: str | None = None, remote: str = "origin",
-             pass_kind: str | None = None, full_root_reason: str | None = None) -> dict:
+             pass_kind: str | None = None, full_root_reason: str | None = None,
+             changed: list[str] | None = None) -> dict:
     policy = catalog(package)
     package = package.resolve()
     project = project.resolve() if project is not None else None
@@ -669,6 +868,10 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     # A task follows only the switches that own one of its entry's flows.
     owned = owned_switches(registry, route)
     chosen = {pair for pair in chosen if pair[0] in owned}
+    impact = project is not None and (CLOSURE_SWITCH, CLOSURE_VALUE) in chosen
+    digest_pack = (PACK_SWITCH, PACK_VALUE) in chosen and not _PACK_BUILDS
+    if changed and not impact:
+        raise ValueError(f"--changed names the change set of {CLOSURE_SWITCH} {CLOSURE_VALUE}")
     value_data = switch_data(package)
     switch_only = {path for paths in value_data.values() for path in paths}
     required = {"constitution.md", POLICY, "templates/task-input-contract.md"}
@@ -744,6 +947,10 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         raise ValueError("a full root read request belongs to a root review task (--epic with no id)")
     if project is None and project_files:
         raise ValueError("project root is required for project inputs")
+    scoped = None
+    if impact and read_only and not epic:
+        project_files, scoped = closure_reads(project, project_files, set(inputs or []),
+                                              base, findings, changed or [])
     # An exact epic's closure is derived again on every run, so a source that
     # reaches it, an incoming dependency edge included, joins its paths. Like
     # the epic's review manifest, the task binds those and none of the other
@@ -800,6 +1007,18 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
          "detail": "Complete required and applicable conditional reads, role passes, and the output contract."},
         {"condition": "entry_gate", "status": "required", "detail": route["next_transition"]},
     ]
+    pack = None
+    if digest_pack:
+        pack = role_pack(entry, role, mode, project if route["project_state"] else None,
+                         package, expected_hash is not None)
+        transitions.insert(0, {"condition": "context_pack_check", "status": "required",
+                               "detail": PACK_CHECK})
+    if impact:
+        transitions.insert(0, {"condition": "vault_views_first", "status": "required",
+                               "detail": VIEWS_FIRST})
+        if scoped is not None and scoped["read"] != "full":
+            transitions.insert(1, {"condition": "impact_closure_reads", "status": "required",
+                                   "detail": DELTA_READS if scoped["read"] == "delta" else CLOSURE_READS})
     if not read_only and route["project_state"]:
         transitions.extend([
             {"condition": "write_scope", "status": "required" if scope["status"] == "resolved" else "unresolved",
@@ -860,6 +1079,17 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
               "selected_method_skills": sorted(skills or [])}
     if pass_kind is not None:
         result["pass_kind"] = pass_kind
+    if pack is not None:
+        # The digest replaces the required reads; every source stays bound in
+        # instructions and one read away.
+        result["required_reads"] = []
+        result[PACK_SWITCH] = pack
+    if impact:
+        # Readers and writers alike start from the relation views.
+        result[CLOSURE_SWITCH] = CLOSURE_VALUE
+        result["vault_views"] = vault_views(project / "workspace/docs")
+        if scoped is not None:
+            result[CLOSURE_VALUE] = scoped
     if input_scoped:
         result["canonical_source_paths"] = membership
     hashed = result
@@ -894,6 +1124,9 @@ def main(argv=None) -> int:
     parser.add_argument("--full-root-reason",
                         help="a root reader's reason to read the whole package (root_review_scope"
                              " revision_delta)")
+    parser.add_argument("--changed", action="append", default=[],
+                        help="a workspace/docs note the change made (review_scope impact_closure);"
+                             " the closure starts from these and the notes Git sees changed")
     parser.add_argument("--pass-kind",
                         help="a mechanical pass kind that templates/task-input-policy.json declares")
     args = parser.parse_args(argv)
@@ -903,7 +1136,8 @@ def main(argv=None) -> int:
                            inputs=args.input, skills=args.skill, findings=args.findings, base=args.base,
                            epic=args.epic, expected_hash=args.expected_hash,
                            delivery=args.delivery, remote=args.remote,
-                           pass_kind=args.pass_kind, full_root_reason=args.full_root_reason))
+                           pass_kind=args.pass_kind, full_root_reason=args.full_root_reason,
+                           changed=args.changed))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError, KeyError, TypeError) as exc:

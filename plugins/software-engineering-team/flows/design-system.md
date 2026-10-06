@@ -4,7 +4,7 @@ Spawn template: paste `{{constitution}}`, exact BA/Solution receipts, MASTER
 and override paths, review lens and `SELF-CHECK` into every reviewer prompt.
 
 Vault first, in the order the constitution's section 5 sets: every role
-queries the vault with the packaged `impact_closure.py` verbs first, then
+queries the vault with the packaged `vault_query.py` verbs first, then
 follows machine indexes and generated views, typed frontmatter, relation
 blocks and wikilinks, then maps, and runs a targeted search only for a gap;
 when the tools give too little or look wrong it uses its own methods and

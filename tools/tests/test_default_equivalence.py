@@ -238,6 +238,9 @@ SHIPPED_ADDITIONS = {
         72, "#349: the one resolution of each role's tier, model and effort, which"
             " project_config.py and the host project generators import, so every task"
             " binds it with the other package scripts."),
+    "scripts/lane_table.py": (
+        72, "#332: the lane table of switches lane_table and lane_isolation, a package script"
+            " every task binds with the other package scripts; no default-path step runs it."),
     "skill-content/setup/references/windows-long-paths.md": (
         2, "#358: the native Windows core.longpaths choice procedure, a step of the setup"
            " entry, which every setup task binds with the rest of its skill."),

@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch `requirement_fact_check` (`off` | `pre_approval_reader`), off by default (#422): at `pre_approval_reader`, before the approval question of a Requirement whose outcomes name contracts, scripts, files or test ids, one read-only low-tier reader checks those sentences against the files they cite and returns contradictions only, which the coordinator fixes before the owner sees the draft. In one measured project, Backlog Planning found four factual errors in one approved technical Requirement, which then took a second owner approval.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

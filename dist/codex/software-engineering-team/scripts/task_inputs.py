@@ -1211,6 +1211,8 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
               "selected_method_skills": sorted(skills or [])}
     if project_reading is not None:
         result["project_reading"] = project_reading
+        result["context_inventory"] = {"count": len(inventory), "source_hash": digest(inventory)}
+        result["canonical_source_inventory"] = [row for row in inventory if row["path"] in project_files]
     if pass_kind is not None:
         result["pass_kind"] = pass_kind
     if pack is not None:
@@ -1228,7 +1230,10 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         if scoped is not None:
             result[CLOSURE_VALUE] = scoped
     if input_scoped:
-        result["canonical_source_paths"] = membership
+        if project_reading is not None:
+            result["context_membership"] = {"count": len(membership), "source_hash": digest(membership)}
+        else:
+            result["canonical_source_paths"] = membership
     hashed = result
     if input_scoped:
         hashed = {key: value for key, value in result.items() if key != "head"}

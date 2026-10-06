@@ -318,6 +318,10 @@ class ProjectContextTests(unittest.TestCase):
         self.assertEqual(bound["required_reads"], plain["required_reads"])
         self.assertEqual(bound["project_reading"]["plan_hash"], plan["plan_hash"])
         self.assertIn("workspace/docs/backlog/example.md", {r["path"] for r in bound["project_inputs"]})
+        self.assertNotIn("workspace/docs/backlog/unrelated.md",
+                         {r["path"] for r in bound["canonical_source_inventory"]})
+        self.assertGreater(bound["context_inventory"]["count"], len(bound["canonical_source_inventory"]))
+        self.assertNotIn("canonical_source_paths", bound)
         (self.docs / "backlog/example.md").write_text(note("story", "Changed task", extra="id: ST-901"))
         with self.assertRaisesRegex(ValueError, "stale"):
             task_inputs.manifest(**arguments, context_plan=relative)

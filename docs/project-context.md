@@ -17,6 +17,9 @@ executes an environment command or creates approval authority.
 3. Save the JSON in the project's runtime scratch and pass that project-relative
    path to `task_inputs.py --context-plan <path>`. The task validates the plan's
    entry, role, source membership and snapshot and binds its source files.
+   It carries the complete source inventory as a count and digest, exposing
+   detailed inventory rows only for the selected project inputs. Unselected
+   source identities remain bound without returning a whole-vault path list.
 4. `project_context.py --project-root <root> read --plan <path>` reads the
    selected source text in one call. A row retains its table header. Generated
    inverse relations and navigation are not duplicated into authored text.

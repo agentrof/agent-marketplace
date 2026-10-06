@@ -408,14 +408,28 @@ def assignments(groups):
     return shards, owners
 
 
-def matrix_rows(lanes):
-    return [{"lane": name, "os": lane["os"], "python": lane["python"], "shard": index,
+def matrix_rows(lanes, release=None):
+    """One row per shard; a planned Python release, when given, is what every shard sets up."""
+    return [{"lane": name, "os": lane["os"], "python": release or lane["python"], "shard": index,
              "shards": len(lane["shards"])}
             for name, lane in lanes.items() for index in range(len(lane["shards"]))]
 
 
-def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
+def python_release_problem(release, python):
+    """Why *release* is no exact X.Y.Z release of the planned major.minor *python*, or None."""
+    if not isinstance(release, str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", release) is None:
+        return f"planned Python release {release!r} is no exact X.Y.Z release"
+    if not release.startswith(python + "."):
+        return f"planned Python release {release} is no release of the policy's Python {python}"
+    return None
+
+
+def make_plan(root, mode="full", base=None, head="HEAD", timings=None, python_release=None):
     policy = policy_at(root)
+    # One run's shards resolve the policy's major.minor on separate runners, and a
+    # toolcache update during the run can give them different patch releases (#443).
+    if python_release is not None and python_release_problem(python_release, policy["python"]):
+        raise CIError(python_release_problem(python_release, policy["python"]))
     ids, inventory_hash = inventory(root)
     source_sha = git(root, "rev-parse", head + "^{commit}").decode().strip()
     current = git(root, "rev-parse", "HEAD^{commit}").decode().strip()
@@ -445,7 +459,7 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
                        "estimated_shard_seconds": [max(seconds) for seconds in worker_seconds],
                        "estimated_worker_seconds": worker_seconds,
                        "measured_weights": len(set(lane_ids) & set(measured))}
-    rows = matrix_rows(lanes)
+    rows = matrix_rows(lanes, python_release)
     plan = {"schema_version": 1, "source_sha": source_sha,
             "source_tree": git(root, "rev-parse", source_sha + "^{tree}").decode().strip(),
             "policy_hash": digest(policy), "inventory_hash": inventory_hash,
@@ -455,7 +469,9 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
                                   "fallback_reasons": timings.get("fallback_reasons", ["no history supplied"])},
             "has_tests": bool(rows), "python": policy["python"],
             "matrix": {"include": rows or [{"lane": "noop", "os": "ubuntu-latest",
-            "python": policy["python"], "shard": 0, "shards": 0}]}}
+            "python": python_release or policy["python"], "shard": 0, "shards": 0}]}}
+    if python_release is not None:
+        plan["python_release"] = python_release
     plan["plan_hash"] = digest(plan)
     validate_plan(plan, root)
     return plan
@@ -471,6 +487,9 @@ def validate_plan(plan, root=None):
         raise CIError("plan matrix disagrees with selected lanes")
     if any(lane.get("python") != plan.get("python") for lane in plan["lanes"].values()):
         raise CIError("every lane runs the plan's Python version")
+    release = plan.get("python_release")
+    if "python_release" in plan and python_release_problem(release, plan.get("python")):
+        raise CIError(python_release_problem(release, plan.get("python")))
     for name, lane in plan["lanes"].items():
         expected = lane["selected_ids"]
         flattened = [test_id for shard in lane["shards"] for test_id in shard]
@@ -482,7 +501,7 @@ def validate_plan(plan, root=None):
         if not set(expected) <= set(all_selected):
             raise CIError(f"lane contains an unselected test: {name}")
         validate_execution(name, lane)
-    rows = matrix_rows(plan["lanes"])
+    rows = matrix_rows(plan["lanes"], release)
     if rows and sorted(rows, key=lambda row: (row["lane"], row["shard"])) != sorted(plan["matrix"]["include"], key=lambda row: (row["lane"], row["shard"])):
         raise CIError("matrix does not match the lane partitions")
     if root is not None:
@@ -592,13 +611,15 @@ def runtime_identity():
             "git_version": subprocess.check_output(["git", "--version"], text=True, encoding="utf-8").strip()}
 
 
-def validate_runtime(runtime, lane):
+def validate_runtime(runtime, lane, release=None):
     systems = {"ubuntu-latest": "Linux", "macos-latest": "Darwin", "windows-latest": "Windows"}
     if runtime.get("os") != systems[lane["os"]] or ".".join(runtime.get("python_version", "").split(".")[:2]) != lane["python"]:
         raise CIError("runtime does not match the planned operating system and Python version")
     for key in ("python_implementation", "os_release", "machine", "git_version"):
         if not isinstance(runtime.get(key), str) or not runtime[key]:
             raise CIError(f"missing runtime identity: {key}")
+    if release is not None and runtime.get("python_version") != release:
+        raise CIError(f"runtime runs Python {runtime.get('python_version')}, not the planned release {release}")
 
 
 def flatten(suite):
@@ -726,7 +747,7 @@ def run_shard(root, plan, lane_name, shard, report_path, workers=None):
     lane = planned_lane(plan, lane_name, shard)
     groups = worker_groups(lane, shard, workers)
     runtime = runtime_identity()
-    validate_runtime(runtime, lane)
+    validate_runtime(runtime, lane, plan.get("python_release"))
     expected = lane["shards"][shard]
     report = {"schema_version": 1, "plan_hash": plan["plan_hash"], "source_tree": plan["source_tree"],
               "lane": lane_name, "shard": shard, "status": "running", "runtime": runtime, "tests": []}
@@ -895,7 +916,7 @@ def run_worker(root, plan, plan_hash, lane_name, shard, worker, workers, report_
         raise CIError("worker plan differs from its shard's plan")
     lane = planned_lane(plan, lane_name, shard)
     runtime = runtime_identity()
-    validate_runtime(runtime, lane)
+    validate_runtime(runtime, lane, plan.get("python_release"))
     groups = worker_groups(lane, shard, workers)
     if len(groups) != workers or type(worker) is not int or not 0 <= worker < workers:
         raise CIError("unknown worker")
@@ -971,7 +992,7 @@ def verify_reports(plan, reports):
                 or report.get("source_tree") != plan["source_tree"] or report.get("status") != "complete" \
                 or report.get("errors") or report.get("error"):
             raise CIError(f"incomplete or mismatched shard report: {key}")
-        validate_runtime(report.get("runtime", {}), plan["lanes"][key[0]])
+        validate_runtime(report.get("runtime", {}), plan["lanes"][key[0]], plan.get("python_release"))
         tests = report.get("tests", [])
         if not isinstance(tests, list) or any(not isinstance(test, dict) for test in tests):
             raise CIError("invalid shard test accounting shape")
@@ -1043,6 +1064,7 @@ def main(argv=None):
     plan_parser.add_argument("--base")
     plan_parser.add_argument("--head", default="HEAD")
     plan_parser.add_argument("--timings", type=Path)
+    plan_parser.add_argument("--python-release")
     plan_parser.add_argument("--output", type=Path, required=True)
     run_parser = sub.add_parser("run")
     run_parser.add_argument("--plan", type=Path, required=True)
@@ -1072,7 +1094,8 @@ def main(argv=None):
     sys.dont_write_bytecode = True
     try:
         if args.command == "plan":
-            plan = make_plan(ROOT, args.mode, args.base, args.head, read_json(args.timings) if args.timings else None)
+            plan = make_plan(ROOT, args.mode, args.base, args.head, read_json(args.timings) if args.timings else None,
+                             args.python_release)
             write_json(args.output, plan)
             print(json.dumps({"matrix": plan["matrix"], "has_tests": plan["has_tests"], "mode": plan["mode"],
                               "plan_hash": plan["plan_hash"], "selection_reason": plan["selection_reason"]}))

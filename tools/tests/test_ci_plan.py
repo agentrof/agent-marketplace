@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -191,7 +192,7 @@ class CIPlanIntegrationTests(unittest.TestCase):
                 self.assertEqual(self.choose(event_name=event), ("full", ""))
         self.assertEqual(self.queries, [])
 
-    def test_the_plan_job_outputs_the_policy_python_every_later_job_sets_up(self):
+    def test_the_plan_job_outputs_the_exact_python_release_every_later_job_sets_up(self):
         original = ci_plan.run
 
         def run(*arguments):
@@ -210,10 +211,14 @@ class CIPlanIntegrationTests(unittest.TestCase):
             os.environ.pop("GITHUB_STEP_SUMMARY", None)
             self.assertEqual(ci_plan.main(), 0)
         values = dict(line.split("=", 1) for line in outputs.read_text(encoding="utf-8").splitlines())
-        version = ci_tests.policy_at(self.root)["python"]
+        # The release the plan job resolved for the policy's major.minor, never the major.minor alone (#443).
+        release = platform.python_version()
+        self.assertTrue(release.startswith(ci_tests.policy_at(self.root)["python"] + "."))
         self.assertEqual((sorted(values), values["python"], values["has_tests"], values["mode"]),
-                         (["has_tests", "matrix", "mode", "python"], version, "true", "full"))
-        self.assertEqual({row["python"] for row in json.loads(values["matrix"])["include"]}, {version})
+                         (["has_tests", "matrix", "mode", "python"], release, "true", "full"))
+        self.assertEqual({row["python"] for row in json.loads(values["matrix"])["include"]}, {release})
+        plan = json.loads((self.output / "plan" / "ci-plan.json").read_text(encoding="utf-8"))
+        self.assertEqual(plan["python_release"], release)
 
 
 if __name__ == "__main__":

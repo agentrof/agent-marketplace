@@ -6,6 +6,7 @@ import io
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -248,6 +249,48 @@ class CITestPlannerTests(unittest.TestCase):
         for index, report in enumerate(self.reports(plan)):
             ci_tests.write_json(directory / str(index) / "report.json", report)
         self.assertEqual(set(ci_tests.verify_reports(plan, directory)["durations"]["local"]), set(self.ids))
+
+    def test_a_planned_python_release_is_what_every_shard_sets_up_and_runs(self):
+        """A run's shards set up one exact release, so a toolcache update during the run cannot split them (#443)."""
+        version = self.policy["python"]
+        release = platform.python_version()
+        plan = self.plan(python_release=release)
+        self.assertEqual((plan["python"], plan["python_release"]), (version, release))
+        self.assertEqual({lane["python"] for lane in plan["lanes"].values()}, {version})
+        self.assertEqual({row["python"] for row in plan["matrix"]["include"]}, {release})
+        ci_tests.validate_plan(plan, self.root)
+        self.assertEqual(set(ci_tests.verify_reports(plan, self.reports(plan))["durations"]["local"]), set(self.ids))
+        # Without a planned release the plan is as before: every row sets up the policy's major.minor.
+        self.assertNotIn("python_release", self.plan())
+        self.assertEqual({row["python"] for row in self.plan()["matrix"]["include"]}, {version})
+        for planned, message in ((version, "is no exact X.Y.Z release"), ("2.7.18", "is no release of the policy's"),
+                                 (release + "rc1", "is no exact X.Y.Z release")):
+            with self.subTest(planned=planned), self.assertRaisesRegex(ci_tests.CIError, message):
+                self.plan(python_release=planned)
+        for change in ("release", "row"):
+            with self.subTest(change=change):
+                altered = copy.deepcopy(plan)
+                if change == "release":
+                    altered["python_release"] = version + ".999"
+                else:
+                    altered["matrix"]["include"][0]["python"] = version
+                self.rehash(altered)
+                with self.assertRaises(ci_tests.CIError):
+                    ci_tests.validate_plan(altered, self.root)
+
+    def test_a_shard_on_another_patch_release_than_planned_is_refused_by_name(self):
+        release = platform.python_version()
+        plan = self.plan(python_release=release)
+        reports = self.reports(plan)
+        other = release.rsplit(".", 1)[0] + "." + str(int(release.rsplit(".", 1)[1]) + 1)
+        reports[-1]["runtime"]["python_version"] = other
+        with self.assertRaisesRegex(ci_tests.CIError, f"runtime runs Python {re.escape(other)}, not the planned"
+                                                      f" release {re.escape(release)}"):
+            ci_tests.verify_reports(plan, reports)
+        with mock.patch.object(ci_tests, "runtime_identity",
+                               return_value=dict(ci_tests.runtime_identity(), python_version=other)), \
+                self.assertRaisesRegex(ci_tests.CIError, "not the planned release"):
+            ci_tests.run_shard(self.root, plan, "local", 0, self.root / "report.json")
 
     def test_selected_shard_runs_only_its_tests_and_writes_durable_report(self):
         plan = self.plan()

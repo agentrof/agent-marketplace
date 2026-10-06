@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import contextlib
+import io
 import json
 from pathlib import Path
 import sys
@@ -68,6 +70,12 @@ class ProjectContextTests(unittest.TestCase):
         self.assertNotIn("backlog/unrelated.md", json.dumps(plan))
         self.assertFalse(plan["approval_authority"])
 
+    def test_review_purpose_adds_parent_context_without_all_siblings(self):
+        plan = self.plan(purpose="review")
+        paths = {row["path"] for row in plan["must_read"]}
+        self.assertIn("backlog/epic.md", paths)
+        self.assertNotIn("backlog/unrelated.md", paths)
+
     def test_qualified_rule_selects_only_its_row_and_table_header(self):
         data = self.index()
         plan = self.plan(entry="business-analysis", role="business-analyst", refs=["example:BR-ORD-001"])
@@ -78,8 +86,10 @@ class ProjectContextTests(unittest.TestCase):
         result = context_catalog.read_units(self.docs, data["catalog"], [rows[0]["unit_id"]], 10000)
         text = result["units"][0]["text"]
         self.assertIn("| id | statement |", text)
+        self.assertIn("## Rules", text)
         self.assertIn("BR-ORD-001", text)
         self.assertNotIn("BR-ORD-002", text)
+        self.assertNotIn("references", result["units"][0])
 
     def test_duplicate_bare_id_is_not_silently_resolved(self):
         rule = (self.docs / "business-analysis/example/domains/orders/rules/orders-rules.md").read_text()
@@ -109,10 +119,32 @@ class ProjectContextTests(unittest.TestCase):
         self.assertGreater(plan["oversized"]["available_smaller_units"], 0)
         self.assertEqual(plan["coverage"]["remaining_required_units"], 2)
 
+    def test_read_cli_preserves_incomplete_plan_status(self):
+        plan = project_context.resolve_context(self.project, project_context.load_index(self.project),
+            entry="deliver", role="backend-developer", refs=["ST-901"], budget={"max_source_bytes": 1})
+        path = self.project / "plan.json"
+        path.write_text(json.dumps(plan))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = project_context.main(["--project-root", str(self.project), "read", "--plan", str(path)])
+        self.assertEqual(code, 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["status"], "needs_split")
+        self.assertEqual(result["coverage"]["remaining_required_units"], 2)
+
     def test_invalid_or_too_small_budget_is_refused(self):
         for budget in ({"max_files": 0}, {"unknown": 1}, {"max_files": True}, {"max_metadata_bytes": 1}):
             with self.subTest(budget=budget), self.assertRaises(ValueError):
                 self.plan(budget=budget)
+
+    def test_successful_metadata_includes_its_hash_within_budget(self):
+        self.assertEqual(self.plan(budget={"max_metadata_bytes": 8000})["status"], "ready")
+        for limit in (1800, 3000, 8000):
+            try:
+                plan = self.plan(budget={"max_metadata_bytes": limit})
+            except ValueError:
+                continue
+            self.assertLessEqual(len(project_context.encoded(plan)), limit)
 
     def test_unknown_reference_and_wrong_role_are_refused(self):
         with self.assertRaisesRegex(ValueError, "0 matches"):
@@ -173,6 +205,7 @@ class ProjectContextTests(unittest.TestCase):
         first = context_catalog.read_units(self.docs, data, [items[0]["unit_id"]], 1000)
         self.assertIn("First requirement", first["units"][0]["text"])
         self.assertNotIn("Second requirement", first["units"][0]["text"])
+        self.assertIn("## Acceptance", first["units"][0]["text"])
 
     def test_component_ids_and_exact_architecture_revisions(self):
         self.write("solution-design/components/worker/component.md", note("solution-component", "Worker",

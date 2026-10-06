@@ -10,12 +10,20 @@ import subprocess
 import ba_compile
 
 
+def is_project_repository(project: Path) -> bool:
+    result = subprocess.run(["git", "--no-replace-objects", "-C", str(project),
+                             "rev-parse", "--show-toplevel"], capture_output=True)
+    return not result.returncode and Path(result.stdout.decode().strip()).resolve() == project.resolve()
+
+
 def git_source(project: Path, path: str, revision: str) -> bytes:
     if not re.fullmatch(r"[a-f0-9]{40,64}", revision):
         raise ValueError("historical source needs an exact Git commit")
     relative = Path(path)
     if relative.is_absolute() or ".." in relative.parts or "\\" in path:
         raise ValueError("historical source path must stay in the project")
+    if not is_project_repository(project):
+        raise ValueError("historical source requires the selected project's Git root")
     result = subprocess.run(["git", "--no-replace-objects", "-C", str(project),
                              "show", f"{revision}:{path}"], capture_output=True)
     if result.returncode:
@@ -52,6 +60,8 @@ def bound_source(project: Path, path: str, expected: str) -> dict | None:
     current = project / relative
     if current.is_file() and matches(current, current.read_bytes(), expected):
         return {"current": True}
+    if not is_project_repository(project):
+        return None
     log = subprocess.run(["git", "--no-replace-objects", "-C", str(project),
                           "log", "--format=%H", "--", relative], capture_output=True)
     if log.returncode:

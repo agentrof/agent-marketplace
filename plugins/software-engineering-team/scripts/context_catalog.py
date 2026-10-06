@@ -94,6 +94,14 @@ def catalog(vault) -> dict:
         excluded.update(range(nav, len(lines) + 1))
 
         def add(kind: str, label: str, ranges: list[list[int]]) -> str | None:
+            ancestry = []
+            for number, level, heading in parsed.headings:
+                if number >= ranges[-1][0]:
+                    break
+                ancestry = [item for item in ancestry if item[1] < level]
+                ancestry.append((number, level, heading))
+            if kind in {"row", "item", "block"}:
+                ranges = [[number, number] for number, _level, _heading in ancestry] + ranges
             kept = [[a, b] for a, b in ranges if a <= b and
                     not any(number in excluded for number in range(a, b + 1))]
             if not kept:
@@ -103,6 +111,7 @@ def catalog(vault) -> dict:
             units[identity] = {"unit_id": identity, "path": relative, "kind": kind,
                                "label": label, "ranges": kept,
                                "source_hash": document["source_hash"],
+                               "section_path": [heading for _number, _level, heading in ancestry],
                                "content_hash": digest(content.encode("utf-8")),
                                "bytes": len(content.encode("utf-8")),
                                "references": ["[[" + match.group("inner").replace("\\|", "|") + "]]"
@@ -261,7 +270,8 @@ def read_units(root: Path, data: dict, identities: list[str], max_bytes: int) ->
             content = "\n".join("".join(lines[a - 1:b]) for a, b in unit["ranges"])
         if digest(content.encode("utf-8")) != unit["content_hash"]:
             raise ValueError(f"stale unit: {identity}")
-        selected.append({**unit, "text": content})
+        public = {key: value for key, value in unit.items() if key not in {"references", "historical_properties"}}
+        selected.append({**public, "text": content})
     size = sum(unit["bytes"] for unit in selected)
     if size > max_bytes:
         return {"status": "needs_split", "required_bytes": size,

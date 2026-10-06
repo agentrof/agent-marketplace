@@ -173,5 +173,29 @@
     "implement",
     "review",
     "verify"
-  ]
+  ],
+  "purpose_profiles": {
+    "discover": {
+      "required_relations": []
+    },
+    "implement": {
+      "required_relations": [
+        "implements"
+      ]
+    },
+    "review": {
+      "required_relations": [
+        "derives_from",
+        "implements",
+        "verifies",
+        "depends_on"
+      ]
+    },
+    "verify": {
+      "required_relations": [
+        "verifies",
+        "criterion_refs"
+      ]
+    }
+  }
 }

@@ -34,7 +34,7 @@ executes an environment command or creates approval authority.
 
 `templates/project-context-policy.json` declares entry profiles, role
 preferences, required versus optional relation keys, supported purposes,
-source roots and separate limits for initial file count, source bytes and
+source roots, purpose-specific required relationships and separate limits for initial file count, source bytes and
 metadata bytes. It contains no project-specific paths or topic vocabulary.
 The existing task policy validates which roles belong to each entry.
 

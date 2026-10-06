@@ -164,10 +164,10 @@
       "d2cb6bbb61e1e1409e6d65687ee388cad41281f241216d631b31d960ad6ba964"
     ,
     "scripts/context_catalog.py":
-      "091f45a2367c7faf121997a492ada0b4fdb111e588c17e5447db0793f5ab95a1"
+      "9251b4f7e949f136af2c217948d5bf48bbdd5ad31971f0e850ffadc64c7c6b4d"
     ,
     "scripts/context_history.py":
-      "6debb9c2476cf7f6385dca812573f8ae75ce32179733109ce4c5d4d129286353"
+      "64b99a20f72ed2666963f18b64d58218e4da08e452ce9cc1a63e5aef1a7c5985"
     ,
     "scripts/context_pack.py":
       "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
@@ -239,7 +239,7 @@
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
     ,
     "scripts/project_context.py":
-      "c320506c96a0317743dc5e9db2182d9b17dc178b0865cc522ebff28d285e069d"
+      "0bb89324189132ea496c6821129f75abb9a78c852735c26321f8840e6a05b97a"
     ,
     "scripts/project_instructions.py":
       "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
@@ -1013,7 +1013,7 @@
       "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
     ,
     "templates/project-context-policy.json":
-      "826e695ed08a7a872767ae8b0e09f22a66d344723ae9e0bd375cb892b1bf4f78"
+      "9c5c5a6240627769b39550ceef800c2ed8ee9612d93ba31008698442ee6858c6"
     ,
     "templates/project-instruction-surfaces.json":
       "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c"

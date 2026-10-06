@@ -93,6 +93,7 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
         raise ValueError("stale context snapshot; resolve the current sources again")
     profile = policy["entry_profiles"][entry]
     required_keys = set(policy["required_relations"]) | set(profile["required_relations"])
+    required_keys.update(policy["purpose_profiles"][purpose]["required_relations"])
     optional_keys = set(policy["optional_relations"])
     preferred = profile["preferred_types"] + policy["role_profiles"].get(role, [])
     source = data["catalog"]
@@ -237,6 +238,8 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
     if len(encoded(result)) > limits["max_metadata_bytes"]:
         raise ValueError("metadata budget is too small for the request and reading addresses")
     result["plan_hash"] = catalog.digest(encoded(result))
+    if len(encoded(result)) > limits["max_metadata_bytes"]:
+        raise ValueError("metadata budget is too small for the signed reading plan")
     return result
 
 
@@ -312,8 +315,18 @@ def main(argv=None) -> int:
             if len(hits) != 1 or args.offset < 0:
                 raise ValueError("name exactly one source and a non-negative offset")
             identities = index["catalog"]["documents"][hits[0]["path"]]["units"]
-            result = {"units": [index["catalog"]["units"][key] for key in identities[args.offset:args.offset + 20]],
-                      "remaining": max(0, len(identities) - args.offset - 20)}
+            maximum = json.loads(POLICY.read_text(encoding="utf-8"))["budgets"]["max_metadata_bytes"]
+            listed = []
+            for key in identities[args.offset:]:
+                unit = {k: v for k, v in index["catalog"]["units"][key].items()
+                        if k not in {"references", "historical_properties"}}
+                proposed = {"units": listed + [unit], "remaining": len(identities) - args.offset - len(listed) - 1}
+                if len(encoded(proposed)) > maximum:
+                    break
+                listed.append(unit)
+            if not listed and args.offset < len(identities):
+                raise ValueError("one unit's address exceeds the metadata budget")
+            result = {"units": listed, "remaining": max(0, len(identities) - args.offset - len(listed))}
         else:
             plan = json.loads(args.plan.read_text(encoding="utf-8"))
             validate_plan(project, index, plan)
@@ -327,9 +340,14 @@ def main(argv=None) -> int:
                         index["catalog"]["units"][unit["unit_id"]] = unit
                 result = catalog.read_units(project / "workspace/docs", index["catalog"],
                     [row["unit_id"] for row in plan["must_read"]], plan["request"]["budget"]["max_source_bytes"])
+                result.update(plan_status=plan["status"], coverage=plan["coverage"])
+                if "continuation" in plan:
+                    result["continuation"] = plan["continuation"]
+                if not plan["must_read"] and plan["status"] != "ready":
+                    result["status"] = plan["status"]
             else:
                 result = {"status": "current", "plan_hash": plan["plan_hash"]}
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(encoded(result).decode("utf-8"))
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(json.dumps({"status": "refused", "reason": str(exc)}))

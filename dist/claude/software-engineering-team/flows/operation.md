@@ -5,7 +5,7 @@ Solution decision bindings, command-safety lens and `SELF-CHECK` into every
 reviewer prompt. Load the `obsidian-vault` skill before writing vault truth.
 
 Vault first, in the order the constitution's section 5 sets: every role
-queries the vault with the packaged `vault_query.py` verbs first, then
+navigates its bound inputs with the packaged `vault_query.py` verbs first, then
 follows machine indexes and generated views, typed frontmatter, relation
 blocks and wikilinks, then maps, and runs a targeted search only for a gap;
 when the tools give too little or look wrong it uses its own methods and

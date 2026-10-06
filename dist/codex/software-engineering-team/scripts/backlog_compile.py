@@ -4864,6 +4864,31 @@ def light_path_status(record: dict, docs: Path) -> dict:
     return result
 
 
+def light_epic_review_findings(record: dict, docs: Path, status: dict) -> list[str]:
+    """The changed epic's latest review round must be this revision's own:
+    unstamped, approved and verifying every changed story and test plan."""
+    epic = next((item for item in record["epics"] if item["id"] == status.get("epic")), None)
+    review = latest(epic["reviews"]) if epic else None
+    if review is None:
+        return [f"{status.get('epic')} has no epic review round of this light revision;"
+                " run stub-epic --new-review"]
+    props, path = review["props"], review["path"]
+    if props.get("source_hash") or props.get("approved_at_utc"):
+        return [f"{path} is stamped by an earlier revision; the light path needs a fresh epic"
+                " review round of the changed stories (stub-epic --new-review)"]
+    errors = []
+    if props.get("verdict") != "approved":
+        errors.append(f"{path} verdict is not approved")
+    by_id = {story["id"]: story for story in record["stories"]}
+    verified = set(link_targets(docs, props, "verifies", f"{path} verifies", []))
+    missing = [story_id for story_id in status.get("changed", [])
+               if not {by_id[story_id]["path"].removesuffix(".md"),
+                       by_id[story_id]["test_plan"].removesuffix(".md")} <= verified]
+    if missing:
+        errors.append(f"{path} does not verify the changed stories {', '.join(missing)}")
+    return errors
+
+
 def light_root_review_findings(record: dict, docs: Path) -> list[str]:
     """Refuse a light root review the revision has outgrown.
 
@@ -4888,7 +4913,9 @@ def light_root_review_findings(record: dict, docs: Path) -> list[str]:
         return [f"{path} light root review names changed stories {', '.join(recorded) or '(none)'}"
                 f" but the revision changes {', '.join(status['changed'])};"
                 " rerun record-light-root-review"]
-    return []
+    if review["props"].get("source_hash") or review["props"].get("approved_at_utc"):
+        return []  # approved: its epic round was checked and stamped with it
+    return light_epic_review_findings(record, docs, status)
 
 
 def light_path_status_command(args) -> int:
@@ -5009,6 +5036,7 @@ def record_light_root_review(args) -> int:
         for epic in record["epics"]:
             if (latest(epic["reviews"]) or {}).get("props", {}).get("verdict") != "approved":
                 errors.append(f"{epic['id']} latest epic review verdict is not approved")
+        errors.extend(light_epic_review_findings(record, docs, status))
         if errors:
             raise ValueError("; ".join(sorted(set(errors))))
         path = docs / review["path"]

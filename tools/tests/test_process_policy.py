@@ -1170,6 +1170,25 @@ class ReadingSwitchTests(unittest.TestCase):
                      "record that you did", "typed frontmatter properties",
                      "then generated maps", "read beyond it when unsure and record each such read"):
             self.assertIn(term, constitution)
+        # Navigation is the default; reading beyond the bound inputs is only
+        # allowed, and recorded, under review_scope impact_closure.
+        section = constitution[constitution.index("## 5. Vault first"):
+                               constitution.index("## Escape hatch")]
+        self.assertIn("Navigate the inputs your task binds", section)
+        for sentence in section.split(". "):
+            if "read beyond" in sentence:
+                self.assertIn("`review_scope` at `impact_closure`", sentence)
+        for agent in sorted((TEAM / "agents").glob("*.md")):
+            text = " ".join(agent.read_text(encoding="utf-8").split())
+            with self.subTest(agent=agent.name):
+                self.assertNotIn("reads beyond recorded", text)
+                if "read beyond" in text:
+                    self.assertIn("under review_scope impact_closure, record every read beyond",
+                                  text)
+        for flow in sorted((ROOT / FLOWS).glob("*.md")):
+            with self.subTest(flow=flow.name):
+                self.assertIn("every role navigates its bound inputs with",
+                              flat_text(flow.relative_to(ROOT).as_posix()))
         # The verbs the constitution names are the subcommands of the scripts it names.
         import re
         listed = re.search(r"`vault_query.py` verbs first \(([^;)]*);", constitution).group(1)

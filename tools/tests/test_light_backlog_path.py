@@ -214,6 +214,31 @@ class LightBacklogPathTests(unittest.TestCase):
         self.assertIn("no longer takes the light path", findings[0])
         self.assertIn("more than max_changed_stories 3", findings[0])
 
+    def test_a_light_revision_needs_its_own_epic_review_round(self):
+        # A light revision approved, then a next one changes a story with no
+        # new epic round: the earlier, stamped round never saw the change.
+        self.light_revision()
+        code, output = self.call(compiler.record_light_root_review)
+        self.assertEqual(code, 0, output)
+        code, output = self.call(compiler.approve)
+        self.assertEqual(code, 0, output)
+        for args in (["add", "-A"], ["-c", "user.name=Fixture", "-c",
+                     "user.email=fixture@example.invalid", "commit", "-qm", "Light revision"]):
+            subprocess.run(["git", *args], cwd=self.fixture.project, check=True, capture_output=True)
+        self.revise()
+        story = self.docs / "backlog/epics" / EPIC / "stories/st-002/story.md"
+        story.write_text(story.read_text(encoding="utf-8") + "\nA changed line.\n", encoding="utf-8")
+        self.assertTrue(self.status()["eligible"], self.status())
+        code, output = self.call(compiler.record_light_root_review)
+        self.assertEqual(code, 1, output)
+        self.assertIn("stamped by an earlier revision", output)
+        # Approval refuses it too, even when the round was written without the check.
+        with mock.patch.object(compiler, "light_epic_review_findings", return_value=[]):
+            code, output = self.call(compiler.record_light_root_review)
+        self.assertEqual(code, 0, output)
+        code, output = self.call(compiler.approve)
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("stamped by an earlier revision", output)
 
 if __name__ == "__main__":
     unittest.main()

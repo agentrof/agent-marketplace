@@ -5,7 +5,7 @@ Spawn context includes `{{constitution}}`, exact upstream receipts, current
 author-owned `experience-design/artifacts/` tree and a required `SELF-CHECK`.
 
 Vault first, in the order the constitution's section 5 sets: every role
-queries the vault with the packaged `vault_query.py` verbs first, then
+navigates its bound inputs with the packaged `vault_query.py` verbs first, then
 follows machine indexes and generated views, typed frontmatter, relation
 blocks and wikilinks, then maps, and runs a targeted search only for a gap;
 when the tools give too little or look wrong it uses its own methods and

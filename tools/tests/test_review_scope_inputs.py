@@ -517,23 +517,48 @@ class VerificationScopeTests(unittest.TestCase):
             choose(self.root / "workspace/docs", VALUE)
             self.assertEqual(verification.review_scope(self.root, "DLV-001"), VALUE)
 
-    def test_a_reader_reads_the_item_closure_and_lists_other_architecture_by_hash(self):
-        self.prepare()
-        stub = Stub(dependents={"backlog/story.md": ["system-architecture/auth.md"]})
-        with stub.install(), mock.patch.object(verification, "review_scope", return_value=VALUE):
-            for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_final")):
-                with self.subTest(role=role):
-                    value = verification.manifest(self.root, "DLV-001", "AUTH-01", role, mode)
-                    self.assertIn(self.REACHED, value["full_read"])
-                    self.assertNotIn(self.OTHER, value["full_read"])
-                    self.assertIn("src/product.py", value["full_read"])
-                    self.assertIn("workspace/docs/backlog/story.md", value["full_read"])
-                    scope = value[VALUE]
-                    self.assertEqual(scope["unread_inputs"], [{
-                        "path": self.OTHER, "sha256": value["inputs"][self.OTHER]}])
-                    self.assertEqual(scope["beyond_closure"], [])
-                    self.assertEqual(value["vault_views"], VIEWS)
-        self.assertIn("operation/verification-contract.md", stub.calls[0])
+    def stamp_other(self, edit_after_approval: bool) -> None:
+        """Stamp the unreached architecture note with an approval hash of its bytes."""
+        import test_impact_closure as closure_tests
+        path = self.root / self.OTHER
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "status: approved\n", "status: draft\n", 1), encoding="utf-8")
+        closure_tests.stamp(path)
+        if edit_after_approval:
+            path.write_text(path.read_text(encoding="utf-8") + "\nEdited after approval.\n",
+                            encoding="utf-8")
+
+    def closure_manifest(self, edit_after_approval: bool) -> dict:
+        # A note with no typed relation is a graph gap and always read in
+        # full, so the unreached note relates to the reached one.
+        self.note(self.REACHED, {"status": "approved"})
+        self.note(self.OTHER, {"status": "approved",
+                               "related_to": ["[[system-architecture/auth|Auth]]"]})
+        self.stamp_other(edit_after_approval)
+        self.commit()
+        item = self.root / self.item_path
+        props, body = verification.delivery.split_note(item)
+        props["integration_base_commit"] = verification.git(self.root, "rev-parse", "HEAD")
+        self.write(self.item_path, verification.delivery.frontmatter(props, body))
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        self.freeze()
+        with mock.patch.object(verification, "review_scope", return_value=VALUE):
+            return verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer",
+                                         "review_initial")
+
+    def test_an_architecture_note_proven_unchanged_is_listed_by_hash(self):
+        value = self.closure_manifest(edit_after_approval=False)
+        self.assertNotIn(self.OTHER, value["full_read"])
+        self.assertEqual(value[VALUE]["unread_inputs"], [{
+            "path": self.OTHER, "sha256": value["inputs"][self.OTHER]}])
+        self.assertIn("src/product.py", value["full_read"])
+        self.assertIn("workspace/docs/backlog/story.md", value["full_read"])
+
+    def test_an_architecture_note_edited_after_approval_is_read_in_full(self):
+        value = self.closure_manifest(edit_after_approval=True)
+        self.assertIn(self.OTHER, value["full_read"])
+        self.assertEqual(value[VALUE]["unread_inputs"], [])
 
 
 class RealClosureTests(unittest.TestCase):

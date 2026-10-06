@@ -6,7 +6,7 @@ backlog. Its canonical state is Markdown under `workspace/docs/backlog/`.
 Spawn template: paste `{{constitution}}` into every role prompt. Load the
 `obsidian-vault` skill before touching the docs tree; its policy is authoritative.
 
-Vault first, in the order the constitution's section 5 sets: every role queries the vault with the
+Vault first, in the order the constitution's section 5 sets: every role navigates its bound inputs with the
 packaged `vault_query.py` verbs first, then follows machine indexes and generated views, typed
 frontmatter, relation blocks and wikilinks, then maps, and runs a targeted search only for a gap;
 when the tools give too little or look wrong it uses its own methods and records that it did. This

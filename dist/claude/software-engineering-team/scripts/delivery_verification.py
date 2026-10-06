@@ -3288,8 +3288,11 @@ def closure_read(root: Path, current: dict) -> tuple[list[str], dict]:
         raise RuntimeError(str(exc)) from exc
     reach = set(scope["closure"]) | set(scope["graph_gaps"]) | seeds
     reads = {path for path in reach if (root / path).is_file()}
+    # Only a note the closure proves unchanged since its approval stays unread.
+    proven = {row["path"] for row in scope["proven_unchanged"]}
     unread = sorted(path for path in current["inputs"]
-                    if path.startswith(prefix + PACKAGE_SCOPED) and path not in reads)
+                    if path.startswith(prefix + PACKAGE_SCOPED) and path not in reads
+                    and path in proven)
     scope["proven_unchanged"] = [row for row in scope["proven_unchanged"] if row["path"] not in reads]
     scope.update(read="closure", seeds=sorted(seeds),
                  unread_inputs=[{"path": path, "sha256": current["inputs"][path]} for path in unread])

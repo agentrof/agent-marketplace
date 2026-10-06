@@ -4,8 +4,7 @@ The flow turns approved product knowledge into a versioned, project-local
 backlog. Its canonical state is Markdown under `workspace/docs/backlog/`.
 
 Spawn template: paste `{{constitution}}` into every role prompt. Load the
-`obsidian-vault` skill before touching the docs tree; its policy is
-authoritative.
+`obsidian-vault` skill before touching the docs tree; its policy is authoritative.
 
 ## 0. Preconditions
 
@@ -21,8 +20,7 @@ authoritative.
   Requirement Coverage.
 - A feature, defect or technical intake carries the exact approved source,
   issue or decision evidence selected by that impact matrix.
-- The user explicitly starts the backlog entry and reviews each authored
-  package.
+- The user explicitly starts the backlog entry and reviews each authored package.
 - Requirement state, when present, comes only from the tracked documents and
   their checks.
 
@@ -201,7 +199,9 @@ replace this section's epic and root reviewers, as
 findings name, and the compiler commands of this section and section 5, run as
 `skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md` defines.
 Switch `review_loop`: at `blocking_delta`, this section's review loops follow
-`skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+`skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`; switch
+`review_rounds`: at `single_pass`, its reviews run as one reader and one pass, following
+`skill-content/challenge-review/references/switch-review_rounds-single_pass.md`.
 Switch `source_decision_gate`: at `one_gate_when_drafted`, a finding whose fix changes approved
 analysis documents reaches the owner as one gate on the reviewed exact change when its
 recommendation needs no owner input, as

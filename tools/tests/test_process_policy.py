@@ -532,6 +532,7 @@ RELEASED_DEFAULTS = {
     "review_loop": "current",
     "review_manifest_scope": "transitive",
     "review_panels": "single_reader",
+    "review_rounds": "current",
     "review_scope_record": "off",
     "root_review_scope": "full",
     "source_decision_gate": "two_gates",
@@ -735,6 +736,14 @@ SAFETY_RULES = {
             "Credentials or secrets that reach a client artifact or a log stay critical",
             "Neither the claiming reviewer nor the writer changes a severity",
             "QA keeps its own blocking severities",
+        ),
+    },
+    "review_rounds": {
+        f"{SKILLS}/challenge-review/references/switch-review_rounds-single_pass.md": (
+            "The reader's severity stands as returned",
+            "the writer never lowers or raises a returned severity",
+            "a critical finding never enters it",
+            "No further round starts without that decision",
         ),
     },
     "epic_review_cadence": {

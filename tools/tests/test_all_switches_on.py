@@ -43,7 +43,8 @@ ENGINES = "deliver/references/switch-test_engines-partitioned.md"
 BUNDLE = "execution_planning-single_source_bundle.md"
 REVIEW = ("challenge-review/references/switch-mechanical_pass_tier-mechanical.md",
           "challenge-review/references/switch-review_loop-blocking_delta.md",
-          "challenge-review/references/switch-review_panels-lens_panel.md")
+          "challenge-review/references/switch-review_panels-lens_panel.md",
+          "challenge-review/references/switch-review_rounds-single_pass.md")
 PLANNING = ("execution-plan/references/switch-delivery_path-light_when_eligible.md",
             "execution-plan/references/switch-" + BUNDLE,
             "execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md")

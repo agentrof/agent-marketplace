@@ -42,11 +42,16 @@ def declare(path: Path, **fields: object) -> None:
 
 def set_review_loop(docs: Path, value: str) -> None:
     """Approve a Process Policy revision that sets switch review_loop to ``value``."""
+    set_switch(docs, "review_loop", value)
+
+
+def set_switch(docs: Path, switch: str, value: str) -> None:
+    """Approve a Process Policy revision that sets ``switch`` to ``value``."""
     sys.path.insert(0, str(SCRIPTS))
     import process_policy
 
     first = "begin-revision" if process_policy.path_for(docs).exists() else "init"
-    for step in ((first,), ("set", "--switch", "review_loop", "--value", value), ("approve",)):
+    for step in ((first,), ("set", "--switch", switch, "--value", value), ("approve",)):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             code = process_policy.main([step[0], "--docs", str(docs), *step[1:]])
@@ -856,6 +861,31 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
         self.assertEqual(self.errors(), [
             f"{self.PATH} Accepted Minor Findings columns must be: finding,"
             " owner_role, reason, revisit_trigger"])
+
+    def test_single_pass_accepts_the_readers_major_without_calibration(self):
+        # At review_rounds single_pass no calibration reader runs: a major
+        # finding stands as returned and becomes a follow-up, and only a
+        # critical one stays out, whatever the review_loop value.
+        set_review_loop(self.docs, "current")
+        set_switch(self.docs, "review_rounds", "single_pass")
+        major = self.VALID.replace("| OP-2 ", "| OP-1 ")
+        self.record(accepted=(major, self.VALID), calibration=None)
+        self.assertEqual(self.errors(), [])
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+        self.path.write_text(self.draft, encoding="utf-8")
+        critical = tuple(row.replace("| OP-1 | major |", "| OP-1 | critical |") for row in self.RETURNED)
+        self.record(accepted=(major,), returned=critical, calibration=None)
+        self.assertEqual(self.errors(), [
+            f"{self.LABEL} names OP-1, which the review returned as critical;"
+            " only a minor or major finding is accepted"])
+        # The blocking_delta record is unchanged: the same major needs calibration.
+        set_switch(self.docs, "review_rounds", "current")
+        set_review_loop(self.docs, "blocking_delta")
+        self.record(accepted=(major,), calibration=None)
+        self.assertEqual(self.errors(), [
+            f"{self.PATH} returned major finding OP-1 has no Severity Calibration row",
+            f"{self.LABEL} names OP-1, which the review returned as major; only a minor finding is accepted"])
 
     def test_calibration_rows_are_complete_and_rule_returned_claims(self):
         calibration = "operation/verification-contract.md severity calibration 1"

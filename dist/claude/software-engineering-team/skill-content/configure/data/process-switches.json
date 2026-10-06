@@ -198,6 +198,32 @@
         "threshold": "Median review-loop minutes at most 50% of the matching baseline, zero valid critical or major findings found later in the same document and traced to a skipped minor round or a calibration downgrade, the shadow judge confirming every downgrade, and an owner role and revisit trigger on every follow-up, with every shared quality guard holding and the owner's approval."
       }
     },
+    "review_rounds": {
+      "summary": "How many readers and rounds a backlog, Solution Design, Design System or Operation contract review runs, and whether its severities are calibrated: the step's own readers and loop, or one reader, no calibration reader, only a critical finding blocking and at most one re-review of the changed text.",
+      "flows": [
+        "backlog-planning",
+        "design-system",
+        "operation",
+        "solution-design"
+      ],
+      "values": [
+        {
+          "id": "current",
+          "tradeoffs": "Every review runs the readers switch `review_panels` selects and the loop switch `review_loop` selects, the baseline the other value is measured against."
+        },
+        {
+          "id": "single_pass",
+          "tradeoffs": "One reader of the step's reader role, never a lens panel, and no calibration reader, so the reader's severity stands as returned. Only a critical finding starts a writer pass and one re-review, which reads only the open critical findings, the changed text and its dependency context; minor and major findings become follow-ups with an owner role and a revisit trigger, and a critical finding still open after that one re-review goes to the owner's approval gate. A revision's first review reads only its delta. The shortest review loop, while an overrated major is never downgraded and an underrated critical ships as a follow-up, a major that would have changed behavior reaches the approved text, and a delta review can miss a knock-on effect outside the dependency context it is given."
+        }
+      ],
+      "default": "current",
+      "metric": "Per reviewed document against its matching baseline, a `current` run under the same `review_loop` value: review minutes from review start to final verdict, fixes included; readers run; rounds; and major findings accepted as follow-ups, with each one's later outcome.",
+      "promotion": {
+        "unit": "At least 5 reviewed documents across at least 2 flows: a contract revision, an epic or root review, or a Solution or Design System review.",
+        "threshold": "Median review minutes at most 40% of the matching baseline, zero valid critical findings found later in the same document and traced to an accepted major or a skipped round, and an owner role and revisit trigger on every follow-up, with every shared quality guard holding and the owner's approval."
+      },
+      "issue": 436
+    },
     "code_review_panel": {
       "summary": "Whether Delivery code review reads a frozen candidate with the official code reviewer alone, or also with a lens panel beside it whose calibrated blocking findings join the official result.",
       "issue": 347,

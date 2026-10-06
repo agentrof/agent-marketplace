@@ -6,11 +6,11 @@ backlog. Its canonical state is Markdown under `workspace/docs/backlog/`.
 Spawn template: paste `{{constitution}}` into every role prompt. Load the
 `obsidian-vault` skill before touching the docs tree; its policy is authoritative.
 
-Vault first, per constitution section 5: every role navigates its bound inputs: a role with a shell
-queries the packaged `vault_query.py` verbs first, a read-only reader the views its manifest binds,
-then follows machine indexes and generated views, typed frontmatter, relation blocks and wikilinks,
-then maps, and runs a targeted search only for a gap; when the tools give too little or look wrong
-it uses its own methods and records that it did. A role with a shell starts from `home.md`,
+Vault first, per constitution section 5: every role starts from the default `project_reading` plan.
+Batch-read its units, using the frozen context reader for frozen candidates. When context is insufficient, wrong or unavailable, use manual search, reads and relationship discovery
+on the role's initiative or parent direction; record sources and reasons, rebind evidence, preserve gates and return `context_findings` to the parent for user-approved reporting.
+For gaps, use `vault_query.py`, machine indexes and generated views, typed frontmatter, relation blocks and wikilinks, then maps and targeted search.
+Fallback navigation with a shell can use `home.md`,
 `maps/_generated/relation-status.md`, `maps/_generated/cross-subtree-matrix.md` and
 `maps/_generated/stale-relations.md`, `maps/backlog.md`, `backlog_compile.py check --json` (story
 graph, dependency edges, source-to-scenario map), and the epic and root review relation sets. Switch

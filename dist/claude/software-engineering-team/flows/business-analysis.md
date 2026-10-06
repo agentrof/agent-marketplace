@@ -3,14 +3,11 @@
 Spawn template: paste `{{constitution}}`, exact input/output paths, review
 lens and `SELF-CHECK` into every reviewer prompt.
 
-Vault first, in the order the constitution's section 5 sets: every role
-navigates its bound inputs: a role with a shell queries the packaged
-`vault_query.py` verbs first, a read-only reader the views its manifest
-binds, then follows machine indexes and generated views, typed
-frontmatter, relation blocks and wikilinks, then maps, and runs a
-targeted search only for a gap; when the tools give too little or look
-wrong it uses its own methods and records that it did. With a shell,
-this flow starts from `home.md`, `maps/_generated/relation-status.md`,
+Vault first, per constitution section 5: every role starts from the default `project_reading` plan.
+Batch-read its units, using the frozen context reader for frozen candidates. When context is insufficient, wrong or unavailable, use manual search, reads and relationship discovery
+on the role's initiative or parent direction; record sources and reasons, rebind evidence, preserve gates and return `context_findings` to the parent for user-approved reporting.
+For gaps, use `vault_query.py`, machine indexes and generated views, typed frontmatter, relation blocks and wikilinks, then maps and targeted search.
+Fallback navigation with a shell can use `home.md`, `maps/_generated/relation-status.md`,
 `maps/_generated/cross-subtree-matrix.md` and
 `maps/_generated/stale-relations.md`, the space's
 `_generated/registry.json`, `_generated/status.md` and

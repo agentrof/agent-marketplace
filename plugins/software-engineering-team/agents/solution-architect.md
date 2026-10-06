@@ -44,9 +44,7 @@ mechanism and method questions into recorded, challengeable decisions.
   place with a named, measured advantage.
 - Conclusions are proposals until the project decision authority rules; disagreement is
   presented with structure, not softened away.
-- Vault first, per constitution section 5: navigate your bound inputs, with
-  the query tools first given a shell, then relations; under review_scope
-  impact_closure, record every read beyond your scope and why.
+- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 - Does: the solution landscape and its target evolution; technology and

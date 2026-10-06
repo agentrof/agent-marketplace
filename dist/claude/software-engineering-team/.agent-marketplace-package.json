@@ -20,118 +20,118 @@
       "469830d3c28d5f7fdfc97034868e058d282f35d4993759496056f253de4eed46"
     ,
     "agents/analysis-challenger.md":
-      "20d9cf346c47fb8ca1f0526b0347dd64ba3bf7f330e2113c91d141e0dcec772b"
+      "a61b8305406e4f3467918e2ccaa106721cf93ce8623a0c4c78072e24ba880f63"
     ,
     "agents/backend-developer.md":
-      "fc1a78bc190ae7b751ab54225f6a8cf46eeac1e01075b3ea1c5f25acbea99c96"
+      "415a956f1134eac13dee8a85a92e7b02b8ee8e695d4423c4b427df5562ecd2ca"
     ,
     "agents/backlog-reviewer-lens.md":
-      "062c8c208403d6e08fdb0b0d6fd66c022df567371d7fd053d35a3c370b3e6604"
+      "5dc7b488920589d0cc4ebd9cbea90aa0e0a77e47fe72538ca3518ceb3b2b3147"
     ,
     "agents/backlog-reviewer.md":
-      "f1ae6eac440120450a3516fa866faac0d669e42e305c4cddf19cfed5b1beb300"
+      "ad805ea9baa5d88760f9aceb96442ae70986e19b2830d7c2e27fde6e921716aa"
     ,
     "agents/business-analyst.md":
-      "104821fc27f4b533b039b9c682df7d08bf49953ae2699c349202408422580e89"
+      "890184548cbe13c25a39e1d48aa7aa252ca876042a61a327d18be28a7fd52639"
     ,
     "agents/code-reviewer-lens.md":
-      "7286223b55b5f9452b04d5edf88ad740de38679b357d0e144892943c53bbf092"
+      "835efaf29d1a3db7e652d7c3822d95fb7bd35582c3bcccd1e63feb27fe133b37"
     ,
     "agents/code-reviewer.md":
-      "9899fc2342a21cafcb30e47e23fae46d9d3022fde72804bdbbe4a2c601db8969"
+      "3c7bbf784fd66105d1afa6aebc7cc87a6902fbca750b88b751ffe0380f4e2356"
     ,
     "agents/delivery-coordinator.md":
-      "ceedd9d2555254dedf990cd22c0c3fb771d74da27e26918ddb2a8669ee96c79b"
+      "2cf81aef9fa59c126d5adf62b4106436285b53d2a90238e5ea2351e813d60adb"
     ,
     "agents/design-system-reviewer-lens.md":
-      "1f839e87684fe9fd8d5c2c4cc7fde560bc0238234dc32c4d559fa47a0be91d8e"
+      "abf8774b1c8b35b89f9dbf565c6b69885156f028ced35d8047fc09b82d08cf57"
     ,
     "agents/design-system-reviewer.md":
-      "ba6a2c6938c35134516536b931a5c7521228212e54a8fc003e852064a084720b"
+      "9efa4cee1bf54a55a20292fa00181cbce5df5073026e12fc57e3af1f9dc2b11d"
     ,
     "agents/devops-engineer-mechanical.md":
-      "6019d1c5739484515ffad121e138b43573d11ed8e5962f6f5c364f4b033b944b"
+      "e95d341f16f4431d1d2f249b1a9b082a8a0734e7b98cd664d9670953436ac77d"
     ,
     "agents/devops-engineer.md":
-      "e4687c286f0e7556d5601b6dbbc15513f9c9631135f1fd06b2e356c223380e58"
+      "d5a477a28a85d9a67d138a8895570a49557a9bf273183f9a07eb74acfebf2a79"
     ,
     "agents/domain-expert.md":
-      "5c5cb2c54441e4816a94ca3b8f03e5285566884e38954867ce7f7359ae415650"
+      "5989e73b5a66a3068d4c3a56a8872cf8d479583459f0893fc0bc6dc671062c50"
     ,
     "agents/experience-reviewer.md":
-      "904691d94531380cc9ce99c39c9017627bf3b04fa7bdadd49d0f7931486aed8c"
+      "3bd6abe0a719bb65e929808bafc36eecb93b022e839a46a95da0784ee8020605"
     ,
     "agents/frontend-developer.md":
-      "1bb7cfe37ac8860189deb70801f743cb91de6203f57ce32fd8d7150019872359"
+      "3abedca98d22e970134b6f8f81625781c9dd5445ce56db5a0b21ecd642084eac"
     ,
     "agents/product-owner-mechanical.md":
-      "ed966977af14668319fb733f75f5426338e87ba4d449af34ca47904c7f540ac7"
+      "086d1628559107e327b9fb70aeaaa6c97f55c2dfb87024c14b18b3653faf7c99"
     ,
     "agents/product-owner.md":
-      "e434db1a0535617c8215ff802fb49ed460205016be1dd7e3c0f995872b37fdef"
+      "669a98c70d8fa90ac022ace00074f323ec42bfcf6b96e2d0301d2c019f1ad668"
     ,
     "agents/qa-engineer-mechanical.md":
-      "eb905ecca9414a60d4e529a375d333d561c6fb169ded61adeac6443a2048afc6"
+      "f9d09b538863112e85e311b2f117fd94b7fb03fa95c0d734701982a00a18c65a"
     ,
     "agents/qa-engineer.md":
-      "092d9c309efddc02a82708a07b2a49f8a9b58d93e966012e4308de55bcde19c1"
+      "96c2c058d2ac7d9f159d5d126027226fb2a86f6d5dd5145b056f1be6d2566cd5"
     ,
     "agents/software-architect.md":
-      "8a2aa1cd7086bf8865f94d2fab8255404937f5c89458b6b1e3465aea1762a0ea"
+      "e123c982cf654cf1c1312c7f796de82585b8ae28d31861078b41c392c993070e"
     ,
     "agents/solution-architect-mechanical.md":
-      "0e0bdde27b247fd820cf300113287c9d66c572eca1bbfa8bce6392ed493bbe6f"
+      "ab634aa472e5e92e13012e898207eef35d728327b99064daba51912f53238e57"
     ,
     "agents/solution-architect.md":
-      "954eb7f713f3600a35f3e17d28be62462eaf76bc03f23503ccc811b262429731"
+      "d8f7f52aa515fc7018dff1ebbb10304bd752314edd7a244781e911bbcaf62808"
     ,
     "agents/solution-reviewer-lens.md":
-      "96608b9d2d33151b3b011cb44ce7d90d3bdcec109d456bf1a661e325803f926a"
+      "9cedd9decea5ee7eb436cc7136d7670a8af98d033d7ac0dd7ed9345b2ba15d59"
     ,
     "agents/solution-reviewer.md":
-      "ef0298640785f68e4f5cd4d19b6bf1e181b8766f175d54b17c48b39070ab6ec6"
+      "35881f945f168b9267d9187c639e6932d686a3f5f1c462786ea9036a5704ddea"
     ,
     "agents/ux-designer.md":
-      "32c691f4846d49e36b82892d9a174295639cc79dec58a6bd1e0df19a160f9408"
+      "4d392c04a01efa757b47e327dcd42e937a47a60cf69926dfacdf5f5cb1c72c52"
     ,
     "constitution.md":
       "a980d74e7460071f12237b8432d43e819f523374238679c98cec1abb98ed6fd9"
     ,
     "flows/backlog-planning.md":
-      "8afbd641f2eea27d5581e2283d473461c299c82fc3618a150c82db545e7f3cbd"
+      "02a47d592ea15625be69c1fb765aef144d82741c01fa54a2317dd4d0dcf4f5d3"
     ,
     "flows/business-analysis.md":
-      "b7f073ddd6310afb7f0b79d275093c7cedc37fae203607e079a2cb7ce49846e3"
+      "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "718d3306f203fb9a962804ec559d22b0cc46737a43e4233ecd8fc434f2271775"
+      "e5b28daa2b13f7b38d64a7301e1642f69c075f6a97f2e40817db64b314cac3a1"
     ,
     "flows/delivery-governance.md":
-      "768f7ac9186de47649b86143af3bdad04bcef3d330c0d4ac5eb32a62ceb0c1d5"
+      "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
     ,
     "flows/delivery-planning.md":
-      "f63e5cfed12b1a6327d781c46786500878f0ef137f9c4269b11789acf5220782"
+      "04cac62339dc9cabf0a2765ec1007f1c23181a06ee6ab79856b02308af94c4fe"
     ,
     "flows/design-system.md":
-      "09cba0a18f20622c01ee95d117a27e6eb533310d8fb510a150d36d2aba787bbc"
+      "0cdb9c2d79894b9ea10ce3dd19a8c2f0b07e04362f1c9ddd85c8c0653bbcf9e1"
     ,
     "flows/design.md":
-      "0d5e23f73b4ed2ed9731268be215c2ce92fc019039780e5a8312a39e0ffe5134"
+      "fe5af168a850e2d931b241616ac88095c092780acd4b786bec108c88ba5ed36d"
     ,
     "flows/execution-planning.md":
-      "c634edb7b32c00d4c9cc3309f0549fa016e074140cd1e069ddb59b6996142e55"
+      "8c9b273367fd5cb895c109f9ac29a531ad1072c82ee1093fb987a64df464463c"
     ,
     "flows/experience-design.md":
-      "945245bf3ccdb3f478e7586792f1df846919b6881ae363ad5453db1f6b6dac8c"
+      "c964a5acf445e6bed890365402d24888188cd2c4ee21dc5d169cfeea622bb512"
     ,
     "flows/operation.md":
-      "c2d79536f2e2b6f7fd919b3e027210cf7c2b7d43d9643de1f7b5cc0a707473ee"
+      "85e90e3bab409806a2040af842fcc0e02af82075fcebefc680356b7a840c3a47"
     ,
     "flows/requirement.md":
-      "ffbdbb49683ad79e2a1c2a717dbf187ee5348feb10458e095194348f7a7ff201"
+      "7528573f9fa14f3fc724d7a12972ad3b548409d1085a95c2c2e2024b4a46d04c"
     ,
     "flows/solution-design.md":
-      "075f51815fe3274659554618ca0235a10ddcb7700aa3167ce5399cd1a02c03c4"
+      "1dce921d0908235e7b03c0ac926e3177b925b60481cc807df2ef36cc23bd82d8"
     ,
     "hooks/hooks.json":
       "f6056501a31710a1c702f64ae0f5bd38c62240d40224b46844eed13467c31e96"
@@ -380,7 +380,7 @@
       "90a44e428dd7876044effa0773d8e83fc38ba38bf554ff832b7e07eb4b1475e5"
     ,
     "skill-content/challenge-review/references/switch-review_scope-impact_closure.md":
-      "a436bfa8acc91add5cc12fbc1445f44c873631e979e74be480ce70598abfcf52"
+      "bf40d70e23f6a8bb7da093db98a64102199236e2f5b12ab0f033c91f0196204a"
     ,
     "skill-content/challenge-review/references/switch-step_budgets-enforced.md":
       "28536b3bb86df9ed41511c4546a95816fcb3395dc4d9ee1592e3b48943e53d0b"

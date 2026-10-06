@@ -1117,9 +1117,9 @@ STEP_BUDGET_TARGETS = {"backlog_revision": 10, "confirmation_rereview": 3,
                        "delivery_and_execution_planning": 15, "reader_closure_unit": 5,
                        "requirement_technical": 10, "story_end_to_end": 180}
 VAULT_FIRST = "Vault first, per constitution section 5"
-VAULT_TIERS = ("`vault_query.py` verbs first", "machine indexes and generated views",
+VAULT_TIERS = ("`project_reading` plan", "machine indexes and generated views",
                "typed frontmatter", "relation blocks and wikilinks", "then maps",
-               "targeted search only for a gap", "uses its own methods and records that it did")
+               "manual search, reads and relationship discovery", "record sources and reasons")
 
 
 class ReadingSwitchTests(unittest.TestCase):
@@ -1166,60 +1166,47 @@ class ReadingSwitchTests(unittest.TestCase):
 
     def test_every_role_navigates_the_vault_first(self):
         constitution = flat_text("plugins/software-engineering-team/constitution.md")
-        for term in ("## 5. Vault first", "`vault_query.py` verbs first",
-                     "record that you did", "typed frontmatter properties",
-                     "then generated maps", "read beyond it when unsure and record each such read"):
-            self.assertIn(term, constitution)
-        # Navigation is the default; reading beyond the bound inputs is only
-        # allowed, and recorded, under review_scope impact_closure.
         section = constitution[constitution.index("## 5. Vault first"):
                                constitution.index("## Escape hatch")]
-        self.assertIn("Navigate the inputs your task binds", section)
-        self.assertIn("With a shell, query it with the packaged `vault_query.py` verbs first",
-                      section)
-        self.assertIn("without a shell, follow the relations of your bound inputs", section)
-        for sentence in section.split(". "):
-            if "read beyond" in sentence:
-                self.assertIn("`review_scope` at `impact_closure`", sentence)
+        for term in ("`project_reading` plan automatically returned by `task_inputs.py`",
+                     "project_context.py read --plan <task manifest>",
+                     "on your initiative or the parent agent's direction",
+                     "Record the sources and reasons", "preserve every owning-flow gate",
+                     "`context_findings`", "only explicit user approval of the displayed payload"):
+            with self.subTest(rule=term):
+                self.assertIn(term, section)
+        self.assertNotIn("`vault_query.py` verbs first", section)
         for agent in sorted((TEAM / "agents").glob("*.md")):
             text = " ".join(agent.read_text(encoding="utf-8").split())
             with self.subTest(agent=agent.name):
-                self.assertNotIn("reads beyond recorded", text)
-                if "read beyond" in text:
-                    self.assertIn("under review_scope impact_closure, record every read beyond",
-                                  text)
+                self.assertIn(VAULT_FIRST + ": start from `project_reading`", text)
+                self.assertIn("Use manual search, reads and relation discovery", text)
+                self.assertIn("preserve gates and return `context_findings`", text)
+                self.assertNotIn("under review_scope", text)
         for flow in sorted((ROOT / FLOWS).glob("*.md")):
+            text = flat_text(flow.relative_to(ROOT).as_posix())
             with self.subTest(flow=flow.name):
-                text = flat_text(flow.relative_to(ROOT).as_posix())
-                self.assertIn("every role navigates its bound inputs: a role with a shell"
-                              " queries the packaged `vault_query.py` verbs first, a read-only"
-                              " reader the views its manifest binds", text)
-                # A view a reader's manifest may not bind is named for roles with a shell.
-                self.assertNotIn("This flow starts from", text)
-        # The verbs the constitution names are the subcommands of the scripts it names.
-        import re
-        listed = re.search(r"`vault_query.py` verbs first \(([^;)]*);", constitution).group(1)
-        for script, verbs in (("vault_query.py", listed.split(", ")),):
-            source = (TEAM / "scripts" / script).read_text(encoding="utf-8")
-            for verb in verbs:
-                with self.subTest(script=script, verb=verb):
-                    self.assertRegex(source, rf'add_parser\("{verb}"|\("{verb}", q_')
-        self.assertIn("these tools are read-only", constitution)
-        # The vault tools are read-only: no package text tells a role to call
-        # a write verb of impact_closure.py.
+                self.assertIn("every role starts from the default `project_reading` plan", text)
+                self.assertIn("role's initiative or parent direction", text)
+                self.assertIn("Fallback navigation", text)
+                self.assertNotIn("`vault_query.py` verbs first", text)
+                for term in VAULT_TIERS:
+                    self.assertIn(term, text)
+        # Verify that the shared navigation interface actually exposes its verbs.
+        import project_context
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as stopped:
+            project_context.main(["--help"])
+        self.assertEqual(stopped.exception.code, 0)
+        for verb in ("resolve", "read", "expand", "units", "check"):
+            self.assertIn(verb, output.getvalue())
+        # Navigation never instructs a role to mutate the relation graph.
         for path in sorted(TEAM.rglob("*.md")):
             text = " ".join(path.read_text(encoding="utf-8").split())
+            self.assertNotIn("`vault_query.py` verbs first", text, str(path))
             for verb in ("heal", "render"):
                 with self.subTest(path=path.name, verb=verb):
                     self.assertNotIn(f"impact_closure.py {verb}", text)
-        for agent in sorted((TEAM / "agents").glob("*.md")):
-            with self.subTest(agent=agent.name):
-                self.assertIn(VAULT_FIRST, agent.read_text(encoding="utf-8"))
-        for flow in sorted((ROOT / FLOWS).glob("*.md")):
-            text = flat_text(flow.relative_to(ROOT).as_posix())
-            for term in VAULT_TIERS:
-                with self.subTest(flow=flow.name, term=term):
-                    self.assertIn(term, text)
 
     def test_the_structural_check_runs_before_any_reader(self):
         for flow in self.switches["review_scope"]["flows"]:

@@ -20,7 +20,7 @@ dependency context; the root review covers the complete backlog package.
 - Only an open critical or major finding keeps the review at
   `changes_requested`; rate and re-review findings by the Review findings
   section of `skill-content/product-planning/references/structured-records.md`.
-- Vault first, per constitution section 5: navigate bound inputs by relations.
+- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 

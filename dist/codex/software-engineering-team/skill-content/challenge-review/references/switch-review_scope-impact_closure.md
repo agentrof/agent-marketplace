@@ -35,19 +35,22 @@ writer first; no reader is ever spent on a package its compiler refuses.
    unaffected.
 4. `widened_by` names why the closure grew, a shared contract or the process
    policy touched; report it in the progress message.
-5. A first approval reads the whole package, as at `full`.
+5. A first approval, or unavailable approval history, reads the whole package, as at `full`.
 
 ## 3. Navigate, then read
 
-Every role queries the vault with the `vault_query.py` verbs first,
-starting from `impact_closure.py views --docs <workspace>/docs` and the views
-it names; when they give too little or look wrong it uses its own methods
-and records that it did. It follows the relations of the notes in its
-closure in the constitution's tier order and reads those notes. The closure records which
-tier produced each edge; a disagreement between tiers is a graph gap,
-reported as section 5 says. A role never scans folders or re-reads
-a package to find something. An unchanged note's summary proves its approval
-still holds; never infer its content from that summary.
+Every role starts with the default `project_reading` plan in its manifest and
+batch-reads the selected units with the matching context reader. Expand an
+incomplete plan. When context is insufficient or looks wrong, use targeted
+manual search, reads and relation discovery on the role's initiative or parent
+direction, recording the extra sources and reasons. All closure reading
+obligations remain in force.
+
+For unresolved relationships, use `vault_query.py` and
+`impact_closure.py views --docs <workspace>/docs`, following the
+constitution's tier order. The closure records which tier produced each edge;
+a disagreement between tiers is a graph gap, reported as section 5 says.
+A summary never substitutes for required source reading or approval gates.
 
 ## 4. Beyond the closure
 

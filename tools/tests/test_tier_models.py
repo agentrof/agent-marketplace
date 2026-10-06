@@ -25,6 +25,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -288,6 +292,7 @@ class TierMapTests(unittest.TestCase):
         self.assertIn("subagents", hosts["codex"]["refuse"]["ultra"]["reason"])
         self.assertEqual(hosts["claude"]["refuse"], {})
 
+    @integration
     def test_the_builder_refuses_an_invalid_effort_policy(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "marketplace"
@@ -512,6 +517,7 @@ class ResolutionTests(unittest.TestCase):
         self.assertEqual(role_settings.source_text(rows[VARIANT]), "package")
 
 
+@integration
 class ConfigTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -895,6 +901,7 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("codex", text.stdout)
 
 
+@integration
 class ModelChoiceTests(unittest.TestCase):
     """`tiers --model-list` lists each tier's model choices for the configure topic:
     the package model, then the active host's list or the catalog, then `session`."""
@@ -1051,6 +1058,7 @@ class ModelChoiceTests(unittest.TestCase):
                 self.assert_catalog_choices(report, "claude")
 
 
+@integration
 class SetupTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -1108,6 +1116,7 @@ class SetupTests(unittest.TestCase):
                 self.assertIn("/configure models", refused.stdout + refused.stderr)
 
 
+@integration
 @unittest.skipIf(os.name == "nt", "a Windows writer needs an attested cmd payload")
 class VaultHookTests(unittest.TestCase):
     """The package's own vault hook keeps what `project_config.py` writes in a session."""
@@ -1267,6 +1276,7 @@ class ClaudeProjectAgentTests(unittest.TestCase):
         effort = setting["effort"]
         return [f"model: {model}"] + ([f"effort: {effort}"] if effort else [])
 
+    @integration
     def test_setup_renders_every_role_with_the_package_settings(self):
         market = self.market
         result = self.apply()
@@ -1298,6 +1308,7 @@ class ClaudeProjectAgentTests(unittest.TestCase):
         self.assertEqual(again["notice"], "")
         self.assertEqual(self.project.rendered(), files)
 
+    @integration
     def test_tier_models_and_role_tiers_move_only_the_roles_they_touch(self):
         market = self.market
         self.apply()
@@ -1341,6 +1352,7 @@ class ClaudeProjectAgentTests(unittest.TestCase):
         self.apply()
         self.assertEqual(self.project.rendered(), before)
 
+    @integration
     def test_an_invalid_config_writes_nothing(self):
         self.project.write_config(tier_models={"claude": {"high": {"effort": "ultra"}}})
         result = self.project.generator("apply", "--scope", "local")
@@ -1348,6 +1360,7 @@ class ClaudeProjectAgentTests(unittest.TestCase):
         self.assertIn("tier_models.claude.high.effort", result.stdout + result.stderr)
         self.assertFalse(self.project.agents_dir.exists())
 
+    @integration
     def test_stale_managed_files_go_and_foreign_files_stop_the_render(self):
         agents = self.project.agents_dir
         self.apply()
@@ -1387,6 +1400,7 @@ class ClaudeProjectAgentTests(unittest.TestCase):
                     path.write_bytes(original)
                 self.assertEqual(self.project.rendered(), rendered)
 
+    @integration
     def test_a_copy_of_a_rendered_role_that_keeps_the_header_stays(self):
         # A user copies a rendered role into an agent of their own and keeps the
         # generated header: only top-level `<team>-*.md` files are the team's.
@@ -1426,6 +1440,7 @@ class ClaudeProjectAgentTests(unittest.TestCase):
                       refused.stdout + refused.stderr)
         self.assertEqual(nested.read_text(encoding="utf-8"), source)
 
+    @integration
     @unittest.skipIf(os.name == "nt", "symbolic links need privileges on Windows")
     def test_a_linked_agents_directory_is_refused(self):
         elsewhere = self.project.work / "elsewhere"
@@ -1437,6 +1452,7 @@ class ClaudeProjectAgentTests(unittest.TestCase):
         self.assertIn("symbolic link", result.stdout + result.stderr)
         self.assertEqual(list(elsewhere.iterdir()), [])
 
+    @integration
     def test_bodies_resolve_plugin_paths_and_drop_plugin_ignored_fields(self):
         package = self.copy_package()
         agent = package / "agents" / "code-reviewer.md"
@@ -1458,6 +1474,7 @@ class ClaudeProjectAgentTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("${CLAUDE_PLUGIN_DATA}", result.stdout + result.stderr)
 
+    @integration
     def test_scopes_split_the_tracked_contract_from_the_role_agents(self):
         tracked = self.project.generator("apply", "--scope", "tracked", "--seed-user-files")
         self.assertEqual(tracked.returncode, 0, tracked.stdout + tracked.stderr)
@@ -1476,6 +1493,7 @@ class ClaudeProjectAgentTests(unittest.TestCase):
         self.assertEqual(json.loads(inspected.stdout)["current_surfaces"],
                          report["target_surfaces"])
 
+    @integration
     def test_inspect_previews_the_plan_and_the_open_choice_without_writing(self):
         assert_inspect_previews(self, self.project.root, self.project.generator)
 
@@ -1504,6 +1522,7 @@ class ClaudeProjectAgentTests(unittest.TestCase):
         self.assertNotIn("tier map", paragraph)
 
 
+@integration
 class RenderedAgentStampTests(unittest.TestCase):
     """At session start the Claude Code package's `team_guard.py register` reports
     rendered role agents whose stamp is not the installed package's."""
@@ -1653,6 +1672,7 @@ class RenderedAgentStampTests(unittest.TestCase):
         self.assert_quiet(self.register(stdin=""))
 
 
+@integration
 class CodexRoleStampTests(unittest.TestCase):
     """At session start the Codex package's `team_guard.py register` reports role
     files in `.codex/agents/` whose stamp is not the installed package's or the
@@ -1822,6 +1842,7 @@ def codex_settings(text: str) -> list[str]:
     return [line for line in text.splitlines() if line.startswith("model")]
 
 
+@integration
 class CodexProjectAgentTests(unittest.TestCase):
     """Setup renders each role's resolved model and effort into its Codex role file."""
 

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,7 +40,6 @@ class StepTimingTests(unittest.TestCase):
         self.addCleanup(remove_temporary, temporary)
         self.root = Path(temporary.name).resolve() / "project"
         self.root.mkdir()
-        init_repository(self.root)
 
     def run_file(self, run: str = "r1") -> Path:
         return self.root / ".agentrof/agent-marketplace/timing" / f"{run}.jsonl"
@@ -55,7 +55,9 @@ class StepTimingTests(unittest.TestCase):
         self.assertEqual(self.end("author#1", 1, values=OFF), {"ok": True, "recorded": False})
         self.assertFalse((self.root / ".agentrof").exists())
 
+    @integration
     def test_cli_with_no_policy_is_off(self) -> None:
+        init_repository(self.root)
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             code = step_timing.main(["start", "--run", "r1", "--step", "author",
@@ -117,7 +119,8 @@ class StepTimingTests(unittest.TestCase):
         from unittest import mock
         pinned = {"values": ON, "policy": {}, "source": "pinned"}
         current = (OFF, {})
-        with mock.patch.object(process_policy, "delivery_values", return_value=pinned) as read, \
+        with mock.patch.object(step_timing, "project_root", return_value=self.root), \
+                mock.patch.object(process_policy, "delivery_values", return_value=pinned) as read, \
                 mock.patch.object(process_policy, "effective_values", return_value=current):
             self.assertEqual(step_timing.policy_values(self.root, "DLV-001"), ON)
             self.assertEqual(step_timing.policy_values(self.root), OFF)

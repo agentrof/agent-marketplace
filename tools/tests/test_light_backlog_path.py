@@ -12,6 +12,7 @@ import io
 import json
 import subprocess
 import unittest
+from tools.tests.levels import integration
 from types import SimpleNamespace
 from unittest import mock
 
@@ -29,6 +30,7 @@ ITEMS = ["The report page offers one CSV download.",
 ROOT_REVIEW = "backlog/reviews/round-2-backlog-review.md"
 
 
+@integration
 class LightBacklogPathTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.RequirementBindingTests()
@@ -250,6 +252,31 @@ class LightBacklogPathTests(unittest.TestCase):
         code, output = self.call(compiler.record_light_root_review)
         self.assertEqual(code, 1, output)
         self.assertIn("takes the standard path", output)
+
+class LightScopeRuleTests(unittest.TestCase):
+    def test_changed_and_deleted_stories_determine_scope(self):
+        stories = [{"id": "ST-001", "work_kind": "technical", "epic_id": "EP-001"}]
+        previous = {"ST-002": {"id": "ST-002", "work_kind": "defect", "epic_id": "EP-001"}}
+        result = compiler.light_scope_decision(stories, previous, ["ST-001"], ["technical", "defect"], 2)
+        self.assertEqual(result, {"changed": ["ST-001", "ST-002"], "epic": "EP-001",
+                                  "max_changed_stories": 2, "reasons": []})
+        self.assertEqual(stories[0]["id"], "ST-001")
+
+    def test_scope_refusal_matrix(self):
+        def story(key, kind="technical", epic="EP-001"):
+            return {"id": key, "work_kind": kind, "epic_id": epic}
+        cases = [([], [], "the revision changes no story"),
+                 ([story("ST-001"), story("ST-002")], ["ST-001", "ST-002"],
+                  "the revision changes 2 stories, more than max_changed_stories 1"),
+                 ([story("ST-001", "feature")], ["ST-001"],
+                  "ST-001 work_kind is feature, not technical or defect"),
+                 ([story("ST-001"), story("ST-002", epic="EP-002")], ["ST-001", "ST-002"],
+                  "the changed stories span epics EP-001, EP-002")]
+        for stories, changed, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertIn(expected, compiler.light_scope_decision(
+                    stories, {}, changed, ["technical", "defect"], 1)["reasons"])
+
     def test_the_stub_flag_is_documented_only_for_the_light_path(self):
         from pathlib import Path
         text = (Path(compiler.__file__).resolve().parents[1]
@@ -258,6 +285,8 @@ class LightBacklogPathTests(unittest.TestCase):
         paragraph = next(block for block in text.split("\n\n") if "--from-requirement" in block)
         flat = " ".join(paragraph.split())
         self.assertIn("Only when switch `backlog_path` is at `light_when_eligible`", flat)
+
+
 
 if __name__ == "__main__":
     unittest.main()

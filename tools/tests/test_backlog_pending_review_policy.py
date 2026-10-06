@@ -7,6 +7,10 @@ import io
 import json
 from pathlib import Path
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 
 from tools.tests import test_backlog_upstream_transition as fixtures
@@ -15,6 +19,7 @@ compiler = fixtures.compiler
 process_policy = fixtures.process_policy
 
 
+@integration
 class PendingReviewPolicyTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.BacklogUpstreamTransitionTests()

@@ -19,6 +19,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -549,6 +553,7 @@ class SizeExceptionApprovalTests(unittest.TestCase):
         code, output = quiet(backlog_compile.approve, SimpleNamespace(docs=str(self.fx.docs)))
         return code, json.loads(output)
 
+    @integration
     def test_approval_refuses_a_size_exception_check_rejects_before_any_write(self):
         self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 1})
         self.fx.commit()
@@ -643,6 +648,7 @@ class SizeExceptionApprovalTests(unittest.TestCase):
         root.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
         self.fx.add_criteria(2, "- [ ] A second observable result.")
 
+    @integration
     def test_without_a_readable_merge_state_the_budget_measures_the_revision_changes(self):
         self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 1})
         # The recorded PR's merge needs Git, which this project does not have.
@@ -671,6 +677,7 @@ class SizeExceptionApprovalTests(unittest.TestCase):
         self.assertEqual(sorted(size["stories"]), ["ST-002"])
         self.assertEqual(size["skipped_stories"], {"ST-001": "unchanged in this revision while " + finding})
 
+    @integration
     def test_at_the_default_approval_never_reads_the_table(self):
         self.fx.choose()
         self.fx.commit()
@@ -933,6 +940,7 @@ def committed_backlog_with_dod(fixture: Project) -> None:
     fixture.test.assertEqual(quiet(delivery_compile.approve_dod, dod)[0], 0)
 
 
+@integration
 class DeliveryProposalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.fx = Project(self, build=committed_backlog_with_dod)
@@ -974,6 +982,7 @@ def committed_brief(fixture: Project) -> None:
     fixture.commit()
 
 
+@integration
 class TaskBindingTests(unittest.TestCase):
     """Only an approved policy at `propose_split` binds the reference and the
     measures it reads."""

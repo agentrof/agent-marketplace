@@ -14,6 +14,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -103,17 +107,16 @@ class FactOwnershipTests(unittest.TestCase):
 class FactOwnershipValidatorTests(unittest.TestCase):
     """tools/validate.py rejects a fact class without exactly one named owner."""
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.root = Path(cls.temporary.name)
-        fixtures.make_valid_root(cls.root)
-        cls.path = cls.root / "plugins/software-engineering-team" / OWNERSHIP
-        cls.original = cls.path.read_text(encoding="utf-8")
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.addCleanup(self.temporary.cleanup)
+        fixtures.copy("plugins/software-engineering-team", self.root)
+        fixtures.copy("tools/data/models.json", self.root)
+        self.assertEqual(fixtures.validator_findings(self.root, 'fact_ownership', 'fact_ownership_anchors'), [])
+        self.path = self.root / "plugins/software-engineering-team" / OWNERSHIP
+        self.original = self.path.read_text(encoding="utf-8")
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.temporary.cleanup()
 
     def messages(self, mutate, check=validate.check_fact_ownership) -> list[str]:
         data = json.loads(self.original)
@@ -260,6 +263,7 @@ class FactOwnershipValidatorTests(unittest.TestCase):
                             for finding in findings), findings)
 
 
+@integration
 class ExecutionPlanningTaskInputTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -318,6 +322,7 @@ class ExecutionPlanningTaskInputTests(unittest.TestCase):
             self.bound(("configure", "qa-engineer", "revise", ("challenge-review",)))
 
 
+@integration
 class BundleManifestTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

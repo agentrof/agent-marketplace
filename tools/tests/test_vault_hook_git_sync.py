@@ -8,6 +8,10 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
@@ -17,6 +21,7 @@ from tools.tests.git_fixture import init_repository
 import delivery_git
 
 
+@integration
 class VaultHookGitSyncTests(unittest.TestCase):
     def setUp(self):
         self.hook = hook_tests.load_hook()

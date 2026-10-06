@@ -5,6 +5,10 @@ import json
 import subprocess
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
@@ -16,6 +20,7 @@ compiler = fixtures.experience_compile
 application = fixtures.experience_application_check
 
 
+@integration
 class ArtifactRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

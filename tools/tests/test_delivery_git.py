@@ -6,6 +6,7 @@ import contextlib
 import errno
 import io
 import os
+import re
 import sys
 import json
 import pathlib
@@ -16,6 +17,10 @@ import subprocess
 import tempfile
 import time
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 from pathlib import Path, PureWindowsPath
 
@@ -190,7 +195,40 @@ class PullRequestIntentCache(PreStartFixtureCache):
             raise AssertionError("a PR intent seed cannot hold a writer receipt")
 
 
+class StampedItemCache(PreStartFixtureCache):
+    """The state prepare_stamped_architecture_item leaves for the default Item: started, stamped
+    and committed in its Item worktree, the only linked worktree. A copy repairs the two links
+    between that worktree and the copied repository, which name absolute paths."""
+
+    WORKTREE = RUNTIME / "worktrees/dlv-001/items/auth-01"
+
+    def require_seed(self, root: Path) -> None:
+        if (root / ".git").is_file() or (root / ".git" / "commondir").exists():
+            raise AssertionError("fixture seed cannot point to a shared Git directory")
+        result = subprocess.run(["git", "--git-dir", str(root / ".git"), "config", "--get", "core.worktree"],
+                                capture_output=True, check=False)
+        if result.returncode != 1:
+            raise AssertionError("fixture seed cannot override its Git worktree")
+        for object_store in (root / ".git" / "objects", root / "remote.git" / "objects"):
+            if (object_store / "info" / "alternates").exists():
+                raise AssertionError("fixture seed cannot share another object store")
+        if len(list((root / ".git" / "worktrees").iterdir())) != 1 or not (root / self.WORKTREE / ".git").is_file():
+            raise AssertionError("a stamped Item seed holds exactly the Item worktree")
+
+    def copy(self, builder):
+        temporary, root, docs = super().copy(builder)
+        try:
+            subprocess.run(["git", "-C", str(root), "worktree", "repair", str(root / self.WORKTREE)],
+                           check=True, capture_output=True)
+            return temporary, root, docs
+        except BaseException:
+            remove_temporary(temporary)
+            raise
+
+
 _PR_FIXTURE_CACHE = PreStartFixtureCache()
+_STAMPED_ITEM_CACHE = StampedItemCache()
+_STAMPED_ITEM_RESULTS = {}
 _PR_INTENT_CACHE = PullRequestIntentCache()
 _PR_INTENT_RESULTS = {}
 _EXECUTION_FIXTURE_CACHES = {}
@@ -203,6 +241,8 @@ class DeliveryGitTests(unittest.TestCase):
         _PR_FIXTURE_CACHE.close()
         _PR_INTENT_CACHE.close()
         _PR_INTENT_RESULTS.clear()
+        _STAMPED_ITEM_CACHE.close()
+        _STAMPED_ITEM_RESULTS.clear()
         for cache in _EXECUTION_FIXTURE_CACHES.values():
             cache.close()
         _EXECUTION_FIXTURE_CACHES.clear()
@@ -350,6 +390,7 @@ class DeliveryGitTests(unittest.TestCase):
         subprocess.run(["git", "--git-dir", str(remote), "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
         return temporary, project
 
+    @integration
     def test_pre_start_fixture_copies_isolate_files_objects_and_remote_refs(self):
         cache = PreStartFixtureCache()
         self.addCleanup(cache.close)
@@ -383,6 +424,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((second / "README.md").read_text(encoding="utf-8"), "fixture\n")
         self.assertEqual(cache.snapshot(cache.root), cache.fingerprint)
 
+    @integration
     def test_pre_start_fixture_rejects_seed_mutation(self):
         cache = PreStartFixtureCache()
         self.addCleanup(cache.close)
@@ -412,6 +454,7 @@ class DeliveryGitTests(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, message):
                     PreStartFixtureCache.require_pre_start(project)
 
+    @integration
     def test_pr_intent_fixture_copies_hold_the_same_state_and_stay_isolated(self):
         first_temporary, first, _docs, first_tip, first_intent = self.prepare_pr_intent()
         self.addCleanup(remove_temporary, first_temporary)
@@ -433,6 +476,30 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(second / "remote.git", "for-each-ref"), refs[second])
         self.assertEqual((second / "README.md").read_text(encoding="utf-8"), "fixture\n")
         self.assertEqual(_PR_INTENT_CACHE.snapshot(_PR_INTENT_CACHE.root), _PR_INTENT_CACHE.fingerprint)
+
+    @integration
+    def test_stamped_item_fixture_copies_own_their_item_worktree_and_stay_isolated(self):
+        first, first_worktree, first_item, first_active = self.prepare_stamped_architecture_item()
+        second, second_worktree, second_item, second_active = self.prepare_stamped_architecture_item()
+        refs = {project: delivery_git.run_git(project / "remote.git", "for-each-ref")
+                for project in (first, second)}
+        self.assertEqual(refs[first], refs[second])
+        self.assertEqual(first_item.read_bytes(), second_item.read_bytes())
+        for project, worktree in ((first, first_worktree), (second, second_worktree)):
+            self.assertEqual(delivery_git.run_git(project, "remote", "get-url", "origin"),
+                             str(project / "remote.git"))
+            self.assertFalse((project / ".git" / "FETCH_HEAD").exists())
+            self.assertTrue(worktree.resolve().is_relative_to(project.resolve()))
+            self.assertEqual(Path(delivery_git.main_worktree(worktree)).resolve(), project.resolve())
+            self.assertEqual(delivery_git.run_git(worktree, "status", "--porcelain"), "")
+            _STAMPED_ITEM_CACHE.require_seed(project)
+        first_item.write_text(first_item.read_text(encoding="utf-8") + "\nOnly the first copy.\n",
+                              encoding="utf-8")
+        delivery_git.run_git(first_worktree, "commit", "-qam", "Advance the first copy")
+        self.assertEqual(delivery_git.run_git(second_worktree, "status", "--porcelain"), "")
+        self.assertNotIn("Only the first copy.", second_item.read_text(encoding="utf-8"))
+        self.assertEqual(delivery_git.run_git(second / "remote.git", "for-each-ref"), refs[second])
+        self.assertEqual(_STAMPED_ITEM_CACHE.snapshot(_STAMPED_ITEM_CACHE.root), _STAMPED_ITEM_CACHE.fingerprint)
 
     def test_pr_intent_fixture_rejects_item_worktrees_writer_receipts_and_linked_worktrees(self):
         runtime = Path(".agentrof/agent-marketplace/.runtime")
@@ -470,6 +537,7 @@ class DeliveryGitTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "uncached builder called"):
                 self.prepare_pr_intent(use_cache=False)
 
+    @integration
     def test_project_fixture_disables_automatic_git_maintenance(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
@@ -678,6 +746,7 @@ class DeliveryGitTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             delivery_git.short_refs("DLV-001", "AUTH/01")
 
+    @integration
     def test_coordinator_refusals_report_their_finding_codes(self):
         """A coordinator refusal reaches the result envelope under its own code, with its words intact."""
         temporary = tempfile.TemporaryDirectory()
@@ -827,6 +896,7 @@ class DeliveryGitTests(unittest.TestCase):
                             raise RuntimeError("transition failed")
                 self.assertEqual(events, expected)
 
+    @integration
     def test_receipt_lock_is_released_when_its_holder_dies(self):
         """The receipt lock belongs to the process that holds it: once that process is killed,
         the next writer takes the lock with nothing stale to clear (#246). The host's own lock
@@ -905,6 +975,7 @@ class DeliveryGitTests(unittest.TestCase):
                 kept = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual([kept[key] for key in ("intent_oid", "attempt", "state")], [*earlier, state])
 
+    @integration
     def test_source_handoff_intent_is_durable_and_abort_after_intent_is_blocked(self):
         temporary, project = self.make_project()
         try:
@@ -960,6 +1031,7 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-000")["fence"], replacing, v1)])
         return v1
 
+    @integration
     def test_a_protocol_1_fence_points_each_reader_to_upgrade_fence_v1(self):
         """A protocol-1 Fence is neither corrupt nor closed: each reader names its migration (#318)."""
         project, docs = self.two_story_project()
@@ -1003,6 +1075,7 @@ class DeliveryGitTests(unittest.TestCase):
     PROTOCOL_1_REFUSAL = ("DELIVERY_PROTOCOL_UNSUPPORTED",
                           "the Fence is protocol 1; migrate it with upgrade-fence-v1 before new mutations")
 
+    @integration
     def test_delivery_verbs_never_write_a_protocol_2_fence_over_a_protocol_1_one(self):
         """Scope, cancellation, review and PR verbs refuse a protocol-1 Fence before any write (#333)."""
         project, docs = self.two_story_project()
@@ -1035,6 +1108,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual([delivery_git.trailer(message, key) for key in ("Record", "Governance-Hash")],
                          ["project-fence-v2", delivery_git.governed_governance_hash(project)])
 
+    @integration
     def test_item_verbs_never_write_a_protocol_2_fence_over_a_protocol_1_one(self):
         """Pause and reopen refuse a protocol-1 Fence before any write, leaving the writer's state (#333)."""
         project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
@@ -1063,6 +1137,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
         self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
 
+    @integration
     def test_quiescent_v1_fence_upgrades_to_governed_v2(self):
         temporary, project = self.make_project()
         try:
@@ -1075,6 +1150,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_git.trailer(message, "Governance-Hash"), delivery_git.governed_governance_hash(project))
         finally:
             remove_temporary(temporary)
+    @integration
     def test_target_reauthorization_is_fail_closed_without_zero_effect_proof(self):
         # A directory that exists on every host and that no checkout encloses.
         with tempfile.TemporaryDirectory() as outside, \
@@ -1084,6 +1160,7 @@ class DeliveryGitTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 delivery_git.reauthorize_target_update(project)
 
+    @integration
     def test_prepared_target_update_reauthorizes_atomically_after_target_drift(self):
         temporary, project = self.make_project()
         try:
@@ -1112,6 +1189,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_git.finish_source_handoff(project)["mode"], "open")
         finally:
             remove_temporary(temporary)
+    @integration
     def test_direct_target_response_loss_recovers_when_target_equals_candidate(self):
         temporary, project = self.make_project()
         try:
@@ -1185,6 +1263,7 @@ class DeliveryGitTests(unittest.TestCase):
         path, _lock = delivery_git.target_receipt_paths(project, "source_handoff")
         return json.loads(path.read_text(encoding="utf-8"))["state"] if path.exists() else "absent"
 
+    @integration
     def test_direct_target_update_names_the_lease_it_lost(self):
         """A target that moves after the update call was elected is named from the refetched ref."""
         _project, base, _candidate, moved, refusal = self.lose_direct_target_update()
@@ -1192,6 +1271,7 @@ class DeliveryGitTests(unittest.TestCase):
                                    f"refs/heads/main is {moved}, leased as {base}; the target does not contain "
                                    "the update, so its call was released for a fresh attempt or an abort"))
 
+    @integration
     def test_direct_target_update_that_took_no_effect_releases_its_call(self):
         """A target without the candidate proves the push changed nothing, so the call is released for a fresh
         attempt or an abort; a target that holds the candidate proves nothing and keeps the call elected."""
@@ -1224,6 +1304,7 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(self.refused_finding(lambda: verb(project)), ("DELIVERY_TARGET_UPDATE_UNCERTAIN", message))
             self.assertEqual(self.target_update_state(project), "call_started")
 
+    @integration
     def test_authorization_whose_fence_push_may_have_landed_keeps_its_receipt(self):
         """A Fence that holds the authorized candidate, or moved on from it, may carry the intent, so the
         prepared receipt stays and the handoff goes on; a Fence that never took it lets the receipt go."""
@@ -1263,6 +1344,7 @@ class DeliveryGitTests(unittest.TestCase):
                                  "verified")
                 self.assertEqual(delivery_git.finish_source_handoff(project)["target"], candidate)
 
+    @integration
     def test_reauthorization_that_landed_reports_the_refetched_uncertain_result(self):
         """A reauthorization whose Fence and carrier both took their candidates landed; only a pair that
         disagrees afterwards is mixed."""
@@ -1300,6 +1382,7 @@ class DeliveryGitTests(unittest.TestCase):
                                  "verified")
                 self.assertEqual(delivery_git.finish_source_handoff(project)["target"], refs[carrier])
 
+    @integration
     def test_open_and_merge_pr_use_the_exact_reviewed_integration_head(self):
         temporary, project, _docs, product_tip, intent = self.prepare_pr_intent(use_cache=False)
         try:
@@ -1343,6 +1426,7 @@ class DeliveryGitTests(unittest.TestCase):
         })), 0)
         delivery_git.publish_delivery_review(project, "DLV-001")
 
+    @integration
     def test_open_pr_prints_only_its_result_envelope(self):
         """open-pr records the PR in the local Review on both of its paths, creating the PR and
         adopting the one a republished Review already has, and prints only its result envelope."""
@@ -1365,6 +1449,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, record + "^"), "Record"),
                          "pr-adoption-intent-v1")
 
+    @integration
     def test_merge_pr_reports_a_red_check_as_a_required_check_failure(self):
         """The provider's own green-check rule refuses before the merge call, under its finding code."""
         temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
@@ -1407,6 +1492,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((exit_code, envelope["ok"]), (1, False))
         return [(finding["code"], finding["message"]) for finding in envelope["findings"]]
 
+    @integration
     def test_merge_pr_refusals_report_their_finding_codes(self):
         """A PR that cannot close the Delivery is refused under the code that says why, before any merge."""
         temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
@@ -1456,6 +1542,7 @@ class DeliveryGitTests(unittest.TestCase):
         finally:
             remove_temporary(temporary)
 
+    @integration
     def test_verify_merge_reports_a_merge_and_never_merges(self):
         """verify-merge only reports a merge. On an open PR it refuses with
         DELIVERY_MERGE_PROOF_INVALID, makes no provider call that changes the PR and leaves the
@@ -1487,6 +1574,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertIn({"kind": "ref", "target": "merge_commit", "value": merged["merge_commit"]}, verified["observations"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
 
+    @integration
     def test_review_publication_regenerates_the_delivery_projections(self):
         """The published Review is a new note: the Integration's map and relation
         projections are derived from the published tree, never taken from a local
@@ -1507,6 +1595,7 @@ class DeliveryGitTests(unittest.TestCase):
         finally:
             remove_temporary(temporary)
 
+    @integration
     def test_invalidated_review_mirrors_its_status_in_its_tags(self):
         temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
         try:
@@ -1523,6 +1612,7 @@ class DeliveryGitTests(unittest.TestCase):
         finally:
             remove_temporary(temporary)
 
+    @integration
     def test_republished_review_opens_its_pr_again_on_the_same_machine(self):
         """A Review invalidated after open-pr and published again gets a new PR intent. On the
         machine that opened the PR, that intent takes over the earlier verified receipt, which names
@@ -1548,6 +1638,7 @@ class DeliveryGitTests(unittest.TestCase):
                          ["pr-url-recorded-v1", intent["intent"], "17"])
         self.assertEqual(receipt(), [intent["intent"], intent["attempt"], "verified", url])
 
+    @integration
     def test_open_pr_resumes_an_adoption_that_stopped_before_its_record(self):
         """open-pr that stopped after pushing its adoption intent, before the PR record, resumes on
         the next run for the one PR that intent names. A provider that shows another PR is refused
@@ -1594,6 +1685,7 @@ class DeliveryGitTests(unittest.TestCase):
                          ["pr-url-recorded-v1", intent, "17"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", integration), resumed["integration"])
 
+    @integration
     def test_published_review_and_pr_carry_the_authored_delivery_review(self):
         authored = {"Scope Disposition": "AUTH-01 delivered as planned.",
                     "Deviations": "The owner added session expiry on 2026-01-01.",
@@ -1667,6 +1759,7 @@ class DeliveryGitTests(unittest.TestCase):
             docs, backlog_compile.package_paths(record, docs))
         backlog.write_text(backlog_compile.front_matter(backlog_props, backlog_body), encoding="utf-8")
 
+    @integration
     def test_recorded_pr_moves_the_delivery_to_awaiting_merge_in_the_pr_head(self):
         temporary, project, docs, _product_tip, intent = self.prepare_pr_intent()
         self.addCleanup(remove_temporary, temporary)
@@ -1703,6 +1796,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"]), head)
         self.assertEqual((package / "delivery.md").read_bytes(), recorded)
 
+    @integration
     def test_merging_the_pr_head_reports_merged_and_keeps_the_generated_map(self):
         temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
         self.addCleanup(remove_temporary, temporary)
@@ -1720,6 +1814,7 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_compile.render_map(merged / "workspace/docs")
         self.assertEqual(delivery_git.run_git(merged, "status", "--porcelain"), "")
 
+    @integration
     def test_merged_delivery_keeps_its_pinned_baseline_after_a_story_revision(self):
         temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
         self.addCleanup(remove_temporary, temporary)
@@ -1734,6 +1829,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertTrue(any("story_source_hash is stale" in finding for finding in stale), stale)
         self.assertIn("Delivery backlog_package_hash is stale against the approved backlog", stale)
 
+    @integration
     def test_merge_reached_through_a_second_parent_proves_the_delivery_merged(self):
         """A branch that later merges the target, as refresh-target does for the next
         Delivery's Integration, reaches the PR merge only through a second parent."""
@@ -1757,6 +1853,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.revise_selected_story(docs)
         self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], [])
 
+    @integration
     def test_delivery_recorded_while_in_review_is_merged_by_its_pr_merge(self):
         """A PR recorded before the record moved the Delivery to awaiting_merge left
         it in review; a merge of that recorded head closes it all the same."""
@@ -1776,6 +1873,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertIn("Delivery backlog_package_hash is stale against the approved backlog",
                       delivery_compile.delivery_findings(integration, "DLV-001")[1])
 
+    @integration
     def test_reopen_after_the_pr_record_does_not_prove_a_merge(self):
         """reopen-item writes a two-parent control commit whose second parent is the
         recorded PR head. Only the provider's merge of the re-recorded head closes
@@ -1812,6 +1910,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertIn("Delivery backlog_package_hash is stale against the approved backlog",
                       delivery_compile.delivery_findings(view / "workspace/docs", "DLV-001")[1])
 
+    @integration
     def test_merge_state_git_cannot_evaluate_is_reported(self):
         temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
         self.addCleanup(remove_temporary, temporary)
@@ -1855,6 +1954,7 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], reported["errors"])
         self.assertEqual(self.reported_status(merged / "workspace/docs"), "merged")
 
+    @integration
     def test_a_review_record_that_cannot_say_whether_the_pr_was_recorded_is_reported(self):
         """Only the Review record says that a Delivery recorded its PR, so one that exists but cannot be read,
         here after an editor wrote a byte order mark, fails status and check instead of reading as no PR. The
@@ -1902,6 +2002,7 @@ class DeliveryGitTests(unittest.TestCase):
                 breaks()
                 self.assertEqual(self.reported_status(docs), "review")
 
+    @integration
     def test_cancelled_delivery_stays_cancelled_through_its_pr_record_and_merge(self):
         temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
         self.addCleanup(remove_temporary, temporary)
@@ -1942,6 +2043,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(self.reported_status(checkout / "workspace/docs"), "cancelled")
         self.assertEqual(delivery_compile.split_note(checkout / review)[1], cancellation_body)
 
+    @integration
     def test_pr_opened_after_a_cancellation_has_the_cancellation_review_as_its_body(self):
         """A Delivery cancelled after its Review approval, before any PR existed,
         opens its PR with the published cancellation Review, while the local
@@ -1957,6 +2059,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(state["body"], delivery_git.split_remote_note(
             project, cancelled["review"], review, delivery_compile.split_note)[1])
 
+    @integration
     def test_cancelling_after_the_pr_opened_gives_the_pr_the_cancellation_review_as_its_body(self):
         """A Delivery cancelled after its PR was opened replaces that PR's approval body with the
         published cancellation Review, whether open-pr adopts the PR or a new PR intent finds it."""
@@ -1978,6 +2081,7 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertNotEqual(approval, cancellation)
                 self.assertEqual(state["body"], cancellation)
 
+    @integration
     def test_a_pr_that_already_exists_gets_the_review_at_its_intent_as_its_body(self):
         """A Review published again with new text becomes the body of the PR that already exists,
         whether open-pr adopts that PR or a new PR intent finds it, instead of the earlier Review."""
@@ -2002,6 +2106,7 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertIn(deviations, republished)
                 self.assertEqual(state["body"], republished)
 
+    @integration
     def test_delivery_cancelled_before_its_review_reaches_the_target_through_its_pr(self):
         """A Delivery cancelled at its scope reservation never has a local Review. open-pr opens,
         records and finds its PR again, and merge-pr merges it, from the PR record alone; the target
@@ -2032,6 +2137,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((props["pull_request_url"], body), (url, cancellation))
         self.assertEqual(delivery_compile.delivery_findings(checkout / "workspace/docs", "DLV-001")[1], [])
 
+    @integration
     def test_a_cancellation_review_cannot_be_invalidated(self):
         """A cancellation is final. Its Items are cancelled and a second cancellation is refused, so
         after an invalidation of its Review nothing could publish a Review again and the Delivery
@@ -2052,11 +2158,13 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, intent), "Record"),
                          "pr-creation-intent-v1")
 
+    @integration
     def test_a_merged_delivery_refuses_every_change(self):
         """Once the target holds a merge of the recorded PR head, the Delivery is closed: a verb
         that would change it refuses with DELIVERY_POST_MERGE_TRANSITION and moves no ref, while
         open-pr and merge-pr still report the PR and its merge. The merge dropped the Integration
-        and Item refs, so the target history alone answers."""
+        and Item refs, so the target history alone answers. refresh-target proves it end to end;
+        that every other such verb asks first is shown in DeliveryGitDecisionTests."""
         temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
         self.addCleanup(remove_temporary, temporary)
         provider = self.fake_provider_type({})
@@ -2066,19 +2174,9 @@ class DeliveryGitTests(unittest.TestCase):
         refs = [delivery_git.canonical_refs("DLV-001", "AUTH-01")[name] for name in ("fence", "integration", "item")]
         before = delivery_git.remote_ref_oids(project, "origin", refs)
         self.assertEqual([bool(before[ref]) for ref in refs], [True, False, False])
-        for verb, change in (
-            ("invalidate-delivery-review", lambda: delivery_git.invalidate_delivery_review(
-                project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)),
-            ("cancel-delivery", lambda: delivery_git.cancel_delivery(project, "DLV-001", "Withdrawn after the merge")),
-            ("reopen-item", lambda: delivery_git.reopen_item(project, "DLV-001", "AUTH-01")),
-            ("begin-plan-revision", lambda: delivery_git.begin_plan_revision(project, "DLV-001")),
-            ("refresh-target", lambda: delivery_git.refresh_target(project, "DLV-001")),
-        ):
-            with self.subTest(verb=verb):
-                self.assertEqual(self.refused_finding(change), (
-                    "DELIVERY_POST_MERGE_TRANSITION",
-                    "the target has merged the PR of DLV-001, so the Delivery is closed"))
-                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", refs), before)
+        self.assertEqual(self.refused_finding(lambda: delivery_git.refresh_target(project, "DLV-001")), (
+            "DELIVERY_POST_MERGE_TRANSITION", "the target has merged the PR of DLV-001, so the Delivery is closed"))
+        self.assertEqual(delivery_git.remote_ref_oids(project, "origin", refs), before)
         with mock.patch("delivery_provider.GitHubProvider", provider):
             self.assertEqual(delivery_git.open_pr(project, "DLV-001")["pull_request_url"], url)
             self.assertEqual(delivery_git.merge_pr(project, "DLV-001")["merge_commit"], merged["merge_commit"])
@@ -2095,6 +2193,7 @@ class DeliveryGitTests(unittest.TestCase):
             exit_code = delivery_git.main(["verify-merge", "--project-root", str(project), "--delivery", "DLV-001"])
         return exit_code, json.loads(output.getvalue())
 
+    @integration
     def test_merge_leaves_only_the_fence_and_verify_merge_still_proves_it(self):
         """merge-pr deletes the Integration ref and the integrated Item ref once it proves the
         merge and reports both absent, so only the Fence stays. verify-merge then finds the PR
@@ -2116,6 +2215,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual([item for item in verified["observations"] if item["value"] == "absent"], [])
         self.assertEqual(self.coordination_branches(project), ["agentrof/fence"])
 
+    @integration
     def test_verify_merge_drops_the_refs_an_earlier_merge_left(self):
         """A PR that merged while the coordinator still kept a merged Delivery's refs, as every
         release before #286 did, loses its Integration and integrated Item refs to verify-merge."""
@@ -2159,6 +2259,7 @@ class DeliveryGitTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(view), "push", "-q", "origin", "HEAD:refs/heads/" + branch], check=True)
         subprocess.run(["git", "-C", str(project), "worktree", "remove", "--force", str(view)], check=True)
 
+    @integration
     def test_a_published_review_that_cannot_say_whether_the_pr_was_recorded_refuses_a_change(self):
         """The provider merged the recorded PR head while the Delivery kept its refs, and a commit made by hand
         on the Integration branch then broke the published Review. The commit that records the PR URL in the
@@ -2197,6 +2298,7 @@ class DeliveryGitTests(unittest.TestCase):
                     tip = delivery_git.remote_oid(project, "origin", refs[1])
                     delivery_git.atomic_push(project, "origin", [(refs[1], tip, record)])
 
+    @integration
     def test_a_host_that_lacks_the_pr_record_refuses_a_change_to_the_merged_delivery(self):
         """Another host recorded the PR and the provider merged it while the Delivery kept its refs. A host
         that has not fetched since lacks the published Review at the Integration tip, so it fetches the
@@ -2218,6 +2320,7 @@ class DeliveryGitTests(unittest.TestCase):
             "DELIVERY_POST_MERGE_TRANSITION", "the target has merged the PR of DLV-001, so the Delivery is closed"))
         self.assertEqual(delivery_git.remote_ref_oids(project, "origin", refs), before)
 
+    @integration
     def test_a_published_cancellation_refuses_a_second_cancellation(self):
         """cancel-delivery judges a Delivery by its published status: the local delivery.md keeps
         its scope status after a cancellation, and a Delivery without Item refs has no cancelled
@@ -2239,6 +2342,7 @@ class DeliveryGitTests(unittest.TestCase):
                 f"the published Delivery is cancelled and a cancellation is final, so {verb} cannot continue it; "
                 "its cancellation Review reaches the target through its PR")
 
+    @integration
     def test_a_cancelled_delivery_is_not_published_or_claimed_again(self):
         """A checkout whose delivery.md never learned of the cancellation cannot undo it: publication
         from it or from a second checkout and a claim refuse, and the cancellation keeps its PR route."""
@@ -2260,6 +2364,7 @@ class DeliveryGitTests(unittest.TestCase):
         intent = delivery_git.prepare_pr_creation(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
 
+    @integration
     def test_a_cancelled_delivery_is_not_refreshed_off_its_pr_route(self):
         """A target refresh would put a commit on top of the cancellation Review, which the PR intent
         and the PR need at the Integration tip, so it refuses whether or not the target moved."""
@@ -2281,6 +2386,7 @@ class DeliveryGitTests(unittest.TestCase):
         intent = delivery_git.prepare_pr_creation(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
 
+    @integration
     def test_a_delivery_cancelled_at_its_scope_is_not_revised_again(self):
         """revise-unclaimed-scope reads the published status too: the local delivery.md still says scope_approved."""
         temporary, project, _docs = self.reserve_scope()
@@ -2291,6 +2397,7 @@ class DeliveryGitTests(unittest.TestCase):
                          self.cancelled_refusal("revise-unclaimed-scope"))
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
 
+    @integration
     def test_a_cancelled_delivery_takes_no_plan_revision_or_upgrade(self):
         """A barrier or an upgrade target merge would put its record on top of the cancellation Review,
         which the PR intent and the PR need at the Integration tip, so begin-plan-revision,
@@ -2327,6 +2434,7 @@ class DeliveryGitTests(unittest.TestCase):
         intent = delivery_git.prepare_pr_creation(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
 
+    @integration
     def test_a_cancellation_waits_until_the_open_plan_revision_ends(self):
         """A cancellation cannot release the plan revision's Fence barrier, and carrying it would keep the
         project Fence barred after the cancellation merged, while finishing the revision afterwards would
@@ -2354,6 +2462,7 @@ class DeliveryGitTests(unittest.TestCase):
         intent = delivery_git.prepare_pr_creation(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
 
+    @integration
     def test_a_barrier_a_cancellation_carried_is_released_on_the_fence_alone(self):
         """Before cancel-delivery refused a barrier, a cancellation could carry a plan revision's barrier.
         finish-plan-revision and abort-plan-revision then wrote their release record on top of the
@@ -2403,6 +2512,7 @@ class DeliveryGitTests(unittest.TestCase):
         return (f"| {identifier} | queued | Which session store does the Item reuse? | The current store; a new"
                 f" store | The current store | {status} | {answer} | {blocks} | {wait} |")
 
+    @integration
     def test_a_pending_question_holds_the_items_it_blocks_and_the_review(self):
         """Only the owner's answer closes a queued question. start-item and reopen-item refuse an Item a
         pending User Decisions row blocks, while claim-items claims it, since a claim starts no work, and
@@ -2451,6 +2561,7 @@ class DeliveryGitTests(unittest.TestCase):
             project, delivery_git.publish_delivery_review(project, "DLV-001")["integration"]), "Record"),
             "delivery-review-published-v1")
 
+    @integration
     def test_a_pending_question_holds_only_the_item_it_blocks_from_starting(self):
         """claim-items claims every Item in one push, so a pending row that blocked one Item refused the
         claims of all of them and no Item could start. A claim starts no work: claim-items claims every
@@ -2492,6 +2603,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
         self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-02"))
 
+    @integration
     def test_record_pr_remote_checks_the_local_mirror_and_the_adoption_intent(self):
         """record-pr-remote refuses a URL that an existing local Review does not mirror, as it did
         before the PR record became the only source of the URL, and a PR other than the one an
@@ -2548,6 +2660,7 @@ class DeliveryGitTests(unittest.TestCase):
         )
         self.assertNotEqual(digest, executed_hash)
 
+    @integration
     @windows_text_pipes()
     def test_active_delivery_cancellation_releases_slot_and_publishes_terminal_item(self):
         # The published map is read back through the runner's text pipes, whose ANSI
@@ -2639,6 +2752,7 @@ class DeliveryGitTests(unittest.TestCase):
         return {path: delivery_git.run_git(project, "show", f"{commit}:{path}")
                 for path in (raw.decode("utf-8") for raw in listing.split(b"\0") if raw)}
 
+    @integration
     def test_cancellation_reverts_integrated_item_paths_outside_ascii(self):
         """The revert takes the Item merge's paths from a NUL-separated listing. A quoted name
         matched no tree entry, so the revert kept what the cancelled Item added or changed (#276)."""
@@ -2659,34 +2773,48 @@ class DeliveryGitTests(unittest.TestCase):
         for commit in (cancelled["reverts"][0], cancelled["review"]):
             self.assertEqual(self.product_files(project, commit), {changed: "kayıt = 'önce'"})
 
-    def test_cancellation_reverts_every_integration_of_a_reopened_item(self):
-        """A reopened Item is active on its ref but its integration stays on the Integration, and a
-        second integration merges only what changed since. Each integration is reverted."""
-        for integrations, reopened_last in ((1, True), (2, True), (2, False)):
-            with self.subTest(integrations=integrations, reopened_last=reopened_last):
-                project, _docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
-                delivery_git.publish_execution_plan(project, "DLV-001")
-                delivery_git.claim_items(project, "DLV-001")
-                worktree = delivery_git.start_item(project, "DLV-001", "AUTH-01")["worktree"]
-                for version in range(1, integrations + 1):
-                    if version > 1:
-                        worktree = delivery_git.reopen_item(project, "DLV-001", "AUTH-01")["worktree"]
-                    self.commit_item_product_change(worktree, f"def authenticate():\n    return {version}\n")
-                    self.assertEqual(self.approve_item_evidence(worktree), 0)
-                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
-                    integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
-                if reopened_last:
-                    self.assertEqual(delivery_git.reopen_item(project, "DLV-001", "AUTH-01")["status"], "active")
-                self.assertEqual(self.product_files(project, integrated["integration"]),
-                                 {"src/auth.py": f"def authenticate():\n    return {integrations}"})
-                cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
-                self.assertEqual(len(cancelled["reverts"]), integrations)
-                self.assertEqual(self.product_files(project, cancelled["review"]), {})
-                record = (directory / "items/auth-01/item.md").relative_to(project).as_posix()
-                props = delivery_git.split_remote_note(project, cancelled["review"], record, delivery_compile.split_note)[0]
-                self.assertEqual((props["status"], props["cancellation_disposition"]), ("cancelled", "integrated_reverted"))
-                self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
+    def cancel_reopened_item(self, integrations: int, reopened_last: bool) -> None:
+        """Integrate AUTH-01 *integrations* times, reopening it before each later integration and once
+        more after the last when *reopened_last*, then cancel: each integration is reverted."""
+        project, _docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        worktree = delivery_git.start_item(project, "DLV-001", "AUTH-01")["worktree"]
+        for version in range(1, integrations + 1):
+            if version > 1:
+                worktree = delivery_git.reopen_item(project, "DLV-001", "AUTH-01")["worktree"]
+            self.commit_item_product_change(worktree, f"def authenticate():\n    return {version}\n")
+            self.assertEqual(self.approve_item_evidence(worktree), 0)
+            delivery_git.push_item(project, "DLV-001", "AUTH-01")
+            integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        if reopened_last:
+            self.assertEqual(delivery_git.reopen_item(project, "DLV-001", "AUTH-01")["status"], "active")
+        self.assertEqual(self.product_files(project, integrated["integration"]),
+                         {"src/auth.py": f"def authenticate():\n    return {integrations}"})
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        self.assertEqual(len(cancelled["reverts"]), integrations)
+        self.assertEqual(self.product_files(project, cancelled["review"]), {})
+        record = (directory / "items/auth-01/item.md").relative_to(project).as_posix()
+        props = delivery_git.split_remote_note(project, cancelled["review"], record, delivery_compile.split_note)[0]
+        self.assertEqual((props["status"], props["cancellation_disposition"]), ("cancelled", "integrated_reverted"))
+        self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
 
+    @integration
+    def test_cancellation_reverts_the_integration_of_an_item_reopened_after_it(self):
+        """A reopened Item is active on its ref but its integration stays on the Integration and is reverted."""
+        self.cancel_reopened_item(1, True)
+
+    @integration
+    def test_cancellation_reverts_both_integrations_of_an_item_reopened_after_the_second(self):
+        """A second integration merges only what changed since the first; each is reverted."""
+        self.cancel_reopened_item(2, True)
+
+    @integration
+    def test_cancellation_reverts_both_integrations_of_a_reopened_item_integrated_again(self):
+        """An Item reopened once and integrated again has two integrations, and each is reverted."""
+        self.cancel_reopened_item(2, False)
+
+    @integration
     def test_cancellation_reverts_an_item_rename_to_its_old_path(self):
         """Git diff detects renames by default and then lists only the new path, so the revert
         removed src/login.py, restored nothing, and left neither name in the Integration (#277)."""
@@ -2702,6 +2830,7 @@ class DeliveryGitTests(unittest.TestCase):
         for commit in (cancelled["reverts"][0], cancelled["review"]):
             self.assertEqual(self.product_files(project, commit), {"src/auth.py": original})
 
+    @integration
     def test_cancellation_removes_an_item_addition_the_main_worktree_holds_untracked(self):
         """update-index --remove keeps a path whose file the working tree holds and stages that
         file, so the revert published the main worktree's untracked copy of a path the cancelled
@@ -2725,6 +2854,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(project, "status", "--porcelain", "--", "src/session.py"),
                          "?? src/session.py")
 
+    @integration
     def test_cancellation_review_links_stay_posix_on_a_host_with_backslash_separators(self):
         """The cancellation Review links its Delivery with forward slashes on every host (#228)."""
         temporary, project = self.make_project()
@@ -2752,6 +2882,7 @@ class DeliveryGitTests(unittest.TestCase):
         # derives_from and the Navigation section
         self.assertEqual(review.count("[[delivery/deliveries/dlv-001-auth/delivery|DLV-001]]"), 2, review)
 
+    @integration
     def test_ref_free_reservation_pushes_fence_and_integration_atomically(self):
         with temporary_directory() as temporary:
             project = Path(temporary)
@@ -2807,6 +2938,7 @@ class DeliveryGitTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 delivery_git.reserve_delivery(project, "DLV-001")
 
+    @integration
     def test_reservation_names_the_lease_a_concurrent_reservation_took(self):
         """A Fence another host opens after the absence check is named from the refetched refs."""
         temporary, project = self.make_project()
@@ -2863,6 +2995,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_compile.init_delivery(init), 0)
         self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": delivery})), 0)
 
+    @integration
     def test_the_next_delivery_reserves_on_a_child_of_the_fence_a_merged_one_left(self):
         """A merged Delivery drops its refs and leaves the idle project Fence, which the next
         reservation takes over: a Fence child with a new Epoch and the target tip as its Target,
@@ -2923,39 +3056,31 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.publish_execution_plan(project, "DLV-002")
         self.assertEqual(delivery_git.claim_items(project, "DLV-002")["claims"], ["AUTH-02"])
 
-    def test_reservation_refuses_a_fence_it_cannot_take_over(self):
-        """A reservation takes over only an idle open Fence that carries the approved Governance
-        while no other Delivery or Slot holds it, and never while its own Integration ref exists.
-        Each other state refuses with its reason before any ref moves (#315)."""
+    @integration
+    def test_reservation_refuses_a_busy_ungoverned_or_held_fence(self):
+        """A merged Delivery leaves an idle Fence. A reservation still refuses it, before any ref
+        moves, while the remote Fence is busy, carries another Governance, or another Delivery's
+        Integration ref or a Slot ref holds it, naming that ref as the remote lists it (#315).
+        Every other Fence state is decided in DeliveryGitDecisionTests."""
         project, docs = self.two_story_project()
-        for delivery, slug, story in (("DLV-001", "auth", "AUTH-01"), ("DLV-002", "session", "AUTH-02")):
+        for delivery, slug, story in (("DLV-001", "auth", "AUTH-01"), ("DLV-008", "session", "AUTH-02")):
             self.scope_delivery(docs, delivery, slug, story)
         first = delivery_git.reserve_delivery(project, "DLV-001")
-        refs = delivery_git.canonical_refs("DLV-002")
+        refs = delivery_git.canonical_refs("DLV-008")
         other = delivery_git.canonical_refs("DLV-001")["integration"]
         # A merged Delivery drops its Integration ref and leaves the idle Fence.
         delivery_git.atomic_push(project, "origin", [(other, first["integration"], "")])
         _ref, idle, values = delivery_git._fence_context(project, "origin")
-        target, intent = first["target"], "sha256:" + "1" * 64
-        busy = "reservation requires an idle open Fence, not one with "
-        carrier = {"Target-Update-Attempt": delivery_git.epoch_token(), "Target-Repository": "upstream",
-                   "Target-Carrier-Kind": "direct_target", "Target-Carrier-Ref": "refs/heads/main",
-                   "Target-Carrier-Object": "direct", "Target-Carrier-Head": target, "Target-Carrier-Base": target}
         for fence, held, finding in (
-            ({"Mode": "governance"}, {}, ("DELIVERY_REF_COLLISION", busy + "Mode governance")),
-            ({"Barrier-Kind": "plan-revision", "Barrier-Epoch": delivery_git.epoch_token()}, {},
-             ("DELIVERY_REF_COLLISION", busy + "Barrier-Kind plan-revision")),
-            ({"Source-Intent": intent}, {}, ("DELIVERY_REF_COLLISION", busy + "Source-Intent " + intent)),
-            ({"Target-Update-Intent": intent, **carrier}, {},
-             ("DELIVERY_REF_COLLISION", busy + "Target-Update-Intent " + intent)),
-            ({}, {other: first["integration"]},
-             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/deliveries/dlv-001")),
-            ({}, {"refs/heads/agentrof/slots/001": target},
-             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/slots/001")),
+            ({"Mode": "governance"}, {}, ("DELIVERY_REF_COLLISION",
+                                          "reservation requires an idle open Fence, not one with Mode governance")),
             ({"Governance-Hash": "sha256:" + "2" * 64}, {},
              ("DELIVERY_FENCE_GOVERNANCE", "the Fence does not carry the approved Governance; "
                                            "apply it with apply-governance before reserving")),
-            ({}, {refs["integration"]: target}, ("DELIVERY_REF_COLLISION", "reservation requires an absent Integration ref")),
+            ({}, {other: first["integration"]},
+             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/deliveries/dlv-001")),
+            ({}, {"refs/heads/agentrof/slots/001": first["target"]},
+             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/slots/001")),
         ):
             with self.subTest(finding=finding[1]):
                 held = dict(held)
@@ -2966,12 +3091,13 @@ class DeliveryGitTests(unittest.TestCase):
                 delivery_git.atomic_push(project, "origin", [(ref, resting[ref], oid) for ref, oid in held.items()])
                 try:
                     before = delivery_git.run_git(project, "ls-remote", "origin")
-                    self.assertEqual(self.refused_finding(lambda: delivery_git.reserve_delivery(project, "DLV-002")),
+                    self.assertEqual(self.refused_finding(lambda: delivery_git.reserve_delivery(project, "DLV-008")),
                                      finding)
                     self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
                 finally:
                     delivery_git.atomic_push(project, "origin", [(ref, oid, resting[ref]) for ref, oid in held.items()])
 
+    @integration
     def test_item_start_names_apply_governance_after_a_governance_revision(self):
         """An approved Governance the Fence does not carry yet refuses activation with its remedy, and a
         reopen activates an Item too, so it reads the limit only from the Governance the Fence carries (#317)."""
@@ -3004,6 +3130,7 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
                 self.assertFalse(delivery_git.worktree_paths(project, "DLV-001", "AUTH-01")["item"].exists())
 
+    @integration
     def test_candidate_map_excludes_unpublished_local_governance(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
@@ -3033,6 +3160,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((project / ".git/index").read_bytes(), index)
         self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), head)
 
+    @integration
     def test_integration_publication_projects_the_direct_map_render(self):
         """The Integration carries the map its own tree renders, ending with one newline."""
         temporary, project = self.make_project()
@@ -3064,6 +3192,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertIn("|DLV-001]]", published)
         self.assertTrue(published.endswith("\n") and not published.endswith("\n\n"), published[-60:])
 
+    @integration
     def test_publications_render_exact_candidate_without_local_sibling_or_dirty_note(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
@@ -3158,6 +3287,14 @@ class DeliveryGitTests(unittest.TestCase):
 
     def prepare_execution_with_draft_reserved_contracts(self, runtime=True, path_claim="src/auth.py", architecture=False, legacy_operation_receipts=False,
                                                         extra_path_claims=(), *, use_cache=True):
+        temporary, project, docs, directory, item, reserved = self.execution_fixture(
+            runtime, path_claim, architecture, legacy_operation_receipts, extra_path_claims, use_cache=use_cache)
+        self.addCleanup(remove_temporary, temporary)
+        return project, docs, directory, item, reserved
+
+    def execution_fixture(self, runtime=True, path_claim="src/auth.py", architecture=False, legacy_operation_receipts=False,
+                          extra_path_claims=(), *, use_cache=True):
+        """The execution fixture and the temporary directory its caller removes."""
         key = (runtime, path_claim, architecture, legacy_operation_receipts, tuple(extra_path_claims))
         caches = receipts = None
         if use_cache and self.fixture_cache_context_unchanged():
@@ -3180,8 +3317,7 @@ class DeliveryGitTests(unittest.TestCase):
             reserved = json.loads(receipts[key])
         else:
             temporary, project, docs, directory, item, reserved = self.build_execution_fixture(*key)
-        self.addCleanup(remove_temporary, temporary)
-        return project, docs, directory, item, reserved
+        return temporary, project, docs, directory, item, reserved
 
     def build_execution_fixture(self, runtime=True, path_claim="src/auth.py", architecture=False, legacy_operation_receipts=False,
                                 extra_path_claims=()):
@@ -3269,36 +3405,61 @@ class DeliveryGitTests(unittest.TestCase):
             raise
 
     def prepare_stamped_architecture_item(self, before_publish=None, extra_path_claims=()):
-        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
-            runtime=False, architecture=True, extra_path_claims=extra_path_claims)
-        if before_publish is not None:
-            before_publish(project)
-        delivery_git.publish_execution_plan(project, "DLV-001")
-        delivery_git.claim_items(project, "DLV-001")
-        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
-        worktree = Path(active["worktree"])
-        item = worktree / directory.relative_to(project) / "items/auth-01/item.md"
-        # Text mode folds native CRLF from checkout or render, so the body check holds on every OS.
-        original = item.read_text(encoding="utf-8")
-        before, before_body = delivery_compile.split_note(item)
-        active_docs = worktree / "workspace/docs"
-        self.assertEqual(architecture_compile.init_root(active_docs, "AUTH-01"), 0)
-        self.assertEqual(architecture_compile.init_component(active_docs, "api", "AUTH-01"), 0)
-        self.assertEqual(architecture_compile.stub(active_docs, "interface", "api", "IFC-001", "auth", "AUTH-01"), 0)
-        self.assertEqual(architecture_compile.stamp_item(active_docs, "AUTH-01"), 0)
-        props, body = delivery_compile.split_note(item)
-        self.assertEqual(props["item_plan_hash"], before["item_plan_hash"])
-        self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
-        self.assertEqual(body, before_body)
-        self.assertEqual(item.read_text(encoding="utf-8").split("\n---\n", 1)[1], original.split("\n---\n", 1)[1])
-        self.assertEqual({key: value for key, value in props.items() if key not in {"source_hash", "architecture_delta_hash"}},
-                         {key: value for key, value in before.items() if key not in {"source_hash", "architecture_delta_hash"}})
-        (worktree / "src").mkdir()
-        (worktree / "src/auth.py").write_text("def authenticate():\n    return 'approved'\n", encoding="utf-8")
-        delivery_git.run_git(worktree, "add", "workspace/docs", "src")
-        delivery_git.run_git(worktree, "commit", "-qm", "Implement authentication with sealed Architecture")
-        return project, worktree, item, active
+        """The stamped architecture Item: a copy of the per-process seed for the default Item in an
+        unchanged fixture context, else built here."""
+        if before_publish is None and not extra_path_claims and self.fixture_cache_context_unchanged():
+            def builder():
+                temporary, project, _docs, active = self.build_stamped_architecture_item()
+                _STAMPED_ITEM_RESULTS["default"] = json.dumps(
+                    {**active, "worktree": Path(active["worktree"]).relative_to(project.resolve()).as_posix()})
+                return temporary, project, project / "workspace/docs"
 
+            temporary, project, _docs = _STAMPED_ITEM_CACHE.copy(builder)
+            active = json.loads(_STAMPED_ITEM_RESULTS["default"])
+            active["worktree"] = str(project.resolve() / active["worktree"])
+        else:
+            temporary, project, _docs, active = self.build_stamped_architecture_item(before_publish, extra_path_claims)
+        self.addCleanup(remove_temporary, temporary)
+        worktree = Path(active["worktree"])
+        directory = delivery_compile.find_delivery(project / "workspace/docs", "DLV-001")
+        return project, worktree, worktree / directory.relative_to(project) / "items/auth-01/item.md", active
+
+    def build_stamped_architecture_item(self, before_publish=None, extra_path_claims=()):
+        temporary, project, docs, directory, _item, _reserved = self.execution_fixture(
+            runtime=False, architecture=True, extra_path_claims=extra_path_claims)
+        try:
+            if before_publish is not None:
+                before_publish(project)
+            delivery_git.publish_execution_plan(project, "DLV-001")
+            delivery_git.claim_items(project, "DLV-001")
+            active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+            worktree = Path(active["worktree"])
+            item = worktree / directory.relative_to(project) / "items/auth-01/item.md"
+            # Text mode folds native CRLF from checkout or render, so the body check holds on every OS.
+            original = item.read_text(encoding="utf-8")
+            before, before_body = delivery_compile.split_note(item)
+            active_docs = worktree / "workspace/docs"
+            self.assertEqual(architecture_compile.init_root(active_docs, "AUTH-01"), 0)
+            self.assertEqual(architecture_compile.init_component(active_docs, "api", "AUTH-01"), 0)
+            self.assertEqual(architecture_compile.stub(active_docs, "interface", "api", "IFC-001", "auth", "AUTH-01"), 0)
+            self.assertEqual(architecture_compile.stamp_item(active_docs, "AUTH-01"), 0)
+            props, body = delivery_compile.split_note(item)
+            self.assertEqual(props["item_plan_hash"], before["item_plan_hash"])
+            self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
+            self.assertEqual(body, before_body)
+            self.assertEqual(item.read_text(encoding="utf-8").split("\n---\n", 1)[1], original.split("\n---\n", 1)[1])
+            self.assertEqual({key: value for key, value in props.items() if key not in {"source_hash", "architecture_delta_hash"}},
+                             {key: value for key, value in before.items() if key not in {"source_hash", "architecture_delta_hash"}})
+            (worktree / "src").mkdir()
+            (worktree / "src/auth.py").write_text("def authenticate():\n    return 'approved'\n", encoding="utf-8")
+            delivery_git.run_git(worktree, "add", "workspace/docs", "src")
+            delivery_git.run_git(worktree, "commit", "-qm", "Implement authentication with sealed Architecture")
+            return temporary, project, docs, active
+        except BaseException:
+            remove_temporary(temporary)
+            raise
+
+    @integration
     @windows_text_pipes()
     def test_architecture_stamp_authored_evidence_push_and_integration(self):
         # Under the runner's text pipes the activated Item record must keep the LF the
@@ -3331,6 +3492,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
         self.assertFalse(worktree.exists())
 
+    @integration
     def test_evidence_recorded_in_one_shell_is_approved_pushed_and_integrated_from_another(self):
         """Run evidence binds the variables a command uses, not the reader's shell (#356): the coordinator
         approves, pushes and integrates from its own shell what QA recorded in another."""
@@ -3360,6 +3522,7 @@ class DeliveryGitTests(unittest.TestCase):
                                                       delivery_compile.split_note)
         self.assertEqual(props["status"], "integrated")
 
+    @integration
     def test_integration_merges_item_deletions_and_republished_evidence_drafts(self):
         integration_ref = "refs/heads/agentrof/deliveries/dlv-001"
 
@@ -3413,43 +3576,29 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(props["status"], "integrated")
         self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
 
-    def test_architecture_push_rejects_control_and_receipt_tampering(self):
+    @integration
+    def test_architecture_push_rejects_tampering_only_git_can_show(self):
+        """The control tampering whose evidence is a Git tree entry: a file mode, a symlink, an opaque
+        file name, a new Item directory and a deleted evidence record. The other mutations are decided
+        on parsed notes in DeliveryGitDecisionTests."""
         project, worktree, item, active = self.prepare_stamped_architecture_item()
         clean = delivery_git.run_git(worktree, "rev-parse", "HEAD")
         baseline = delivery_git.run_git(project, "ls-remote", "origin")
         package = item.parents[2]
-        def mutate_note(path, key=None, value=None):
-            props, body = delivery_compile.split_note(path)
-            if key:
-                props[key] = value
-            else:
-                body += "\nUnapproved change.\n"
-            props["source_hash"] = delivery_compile.content_hash(props, body)
-            path.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+        beyond = "product/test commits changed authored Item controls beyond its Architecture stamp"
+        controls = "product/test commits may not edit Delivery control files"
         mutations = {
-            "body": lambda: mutate_note(item),
-            "status": lambda: mutate_note(item, "status", "paused"),
-            "owner": lambda: mutate_note(item, "owner_role", "frontend_developer"),
-            "path_claim": lambda: mutate_note(item, "path_claims", ["src/other.py"]),
-            "item_plan": lambda: mutate_note(item, "item_plan_hash", "sha256:" + "0" * 64),
-            "story_pin": lambda: mutate_note(item, "story_source_hash", "sha256:" + "0" * 64),
-            "operation_pin": lambda: mutate_note(item, "verification_contract_hash", "sha256:" + "0" * 64),
-            "scope": lambda: mutate_note(package / "delivery.md"),
-            "plan": lambda: mutate_note(package / "execution-plan.md"),
-            "committed_evidence": lambda: mutate_note(item.parent / "code-review.md"),
-            "new_item": lambda: (package / "items/extra").mkdir(),
-            "deleted_evidence": lambda: (item.parent / "verification.md").unlink(),
-            "non_markdown": lambda: (package / "extra\ncontrol.json").write_text("{}"),
+            "new_item": (lambda: (package / "items/extra").mkdir(), controls),
+            "deleted_evidence": (lambda: (item.parent / "verification.md").unlink(), controls),
+            "non_markdown": (lambda: (package / "extra\ncontrol.json").write_text("{}"), controls),
             # Native Windows files carry no executable bit, so the index records the
             # mode there; a POSIX checkout records it from the file as well.
-            "mode": lambda: (item.chmod(0o755), delivery_git.run_git(
-                worktree, "update-index", "--chmod=+x", item.relative_to(worktree).as_posix())),
-            "symlink": lambda: (item.unlink(), self.symlink_or_skip(item, "code-review.md")),
-            "missing_hash": lambda: mutate_note(item, "architecture_delta_hash", "none"),
-            "wrong_hash": lambda: mutate_note(item, "architecture_delta_hash", "sha256:" + "0" * 64),
-            "source_hash": lambda: item.write_text(item.read_text().replace("source_hash: sha256:", "source_hash: broken:")),
+            "mode": (lambda: (item.chmod(0o755), delivery_git.run_git(
+                worktree, "update-index", "--chmod=+x", item.relative_to(worktree).as_posix())), beyond),
+            "symlink": (lambda: (item.unlink(), self.symlink_or_skip(item, "code-review.md")),
+                        "Item publication requires a regular control file"),
         }
-        for label, mutation in mutations.items():
+        for label, (mutation, refusal) in mutations.items():
             with self.subTest(label=label):
                 if label == "non_markdown" and os.name == "nt":
                     self.skipTest("POSIX opaque filename contract: native Windows refuses a newline in a file name")
@@ -3462,12 +3611,13 @@ class DeliveryGitTests(unittest.TestCase):
                 delivery_git.run_git(worktree, "commit", "-qm", "Tamper with control")
                 # Independent report writers can produce receipts, but publication
                 # must still reject changes to the authoritative Item controls.
-                if label not in {"status", "deleted_evidence", "symlink"}:
+                if label not in {"deleted_evidence", "symlink"}:
                     self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, "^" + re.escape(refusal) + "$"):
                     delivery_git.push_item(project, "DLV-001", "AUTH-01")
                 self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
 
+    @integration
     def test_evidence_authoring_rejects_product_index_drift_and_unsafe_reports(self):
         import os
         project, worktree, item, active = self.prepare_stamped_architecture_item()
@@ -3535,41 +3685,25 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual({name: (item.parent / name).read_bytes() for name in before_reports}, before_reports)
                 delivery_git.run_git(worktree, "update-index", "--no-" + flag, relative)
 
-    def test_architecture_push_rejects_unsealed_stale_and_outside_claim_delta(self):
+    @integration
+    def test_architecture_push_reads_the_committed_delta_and_refuses_a_symlinked_record(self):
+        """push-item checks the Architecture delta of the committed tip: a record changed after its
+        seal is refused there. A symlinked record is refused by evidence approval, which reads the
+        tree as Git stores it. The other delta refusals are decided on a tree in
+        DeliveryGitDecisionTests."""
         project, worktree, item, active = self.prepare_stamped_architecture_item()
         clean = delivery_git.run_git(worktree, "rev-parse", "HEAD")
         baseline = delivery_git.run_git(project, "ls-remote", "origin")
         architecture = worktree / "workspace/docs/system-architecture"
-        delta_path = architecture / "_ledger/item-deltas/AUTH-01.json"
         record = architecture / "components/api/interfaces/auth/interface.md"
-        for label in ("missing_delta", "stale_record", "missing_seal", "unsealed_forgery", "unclaimed_component", "unclaimed_kind", "symlink_record"):
+        for label in ("stale_record", "symlink_record"):
             with self.subTest(label=label):
                 delivery_git.run_git(worktree, "reset", "--hard", clean)
                 delivery_git.run_git(worktree, "clean", "-fd")
-                if label == "missing_delta":
-                    delta_path.unlink()
-                elif label == "missing_seal":
-                    (architecture / "_ledger/records/IFC-001/r1.json").unlink()
-                elif label == "symlink_record":
+                if label == "symlink_record":
                     record.unlink(); self.symlink_or_skip(record, "../../../component.md")
-                elif label == "stale_record":
-                    record.write_text(record.read_text() + "\nChanged after seal.\n")
                 else:
-                    if label == "unclaimed_component":
-                        self.assertEqual(architecture_compile.init_component(worktree / "workspace/docs", "other", "AUTH-01"), 0)
-                        architecture_compile.seal_record(architecture, architecture / "components/other/component.md", "AUTH-01")
-                    elif label == "unclaimed_kind":
-                        self.assertEqual(architecture_compile.stub(worktree / "workspace/docs", "runtime", "api", "RUN-001", "runtime", "AUTH-01"), 0)
-                        architecture_compile.seal_record(architecture, architecture / "components/api/runtime/runtime/runtime.md", "AUTH-01")
-                    else:
-                        record.write_text(record.read_text().replace("revision_state: sealed", "revision_state: draft"))
-                    delta = architecture_compile.item_delta(architecture, "AUTH-01")
-                    digest = architecture_compile.item_delta_hash(delta)
-                    delta_path.write_text(json.dumps({**delta, "architecture_delta_hash": digest}))
-                    props, body = delivery_compile.split_note(item)
-                    props["architecture_delta_hash"] = digest
-                    props["source_hash"] = delivery_compile.content_hash(props, body)
-                    item.write_text(delivery_compile.frontmatter(props, body))
+                    record.write_text(record.read_text() + "\nChanged after seal.\n")
                 delivery_git.run_git(worktree, "add", "workspace/docs")
                 delivery_git.run_git(worktree, "commit", "-qm", "Tamper with Architecture receipt")
                 if label == "symlink_record":
@@ -3579,7 +3713,8 @@ class DeliveryGitTests(unittest.TestCase):
                     self.assertEqual({name: (item.parent / name).read_bytes() for name in before_reports}, before_reports)
                 else:
                     self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
-                    with self.assertRaisesRegex(RuntimeError, "[Aa]rchitecture"):
+                    with self.assertRaisesRegex(RuntimeError, "^Item Architecture binding is invalid: "
+                                                              "architecture Item delta is stale$"):
                         delivery_git.push_item(project, "DLV-001", "AUTH-01")
                 self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
 
@@ -3623,6 +3758,7 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.run_git(worktree, "commit", "-qm", "Take the republished Integration")
         return delivery_git.run_git(worktree, "rev-parse", "HEAD")
 
+    @integration
     def test_push_accepts_an_item_converged_on_its_republished_integration(self):
         """A target refresh leaves an Item that carries work to its writer. The
         writer takes the Integration, its republished plan and the Item's new base;
@@ -3644,6 +3780,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertIn("Republished for the revised plan.", body)
         self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
 
+    @integration
     def test_push_item_refuses_before_any_ref_moves_when_its_candidate_would_change_the_worktree(self):
         """push-item republishes the Item record with LF and moves the Item worktree to that
         candidate after the push. A converged record committed with CRLF, as a text-mode write on
@@ -3679,7 +3816,11 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(str(refused.exception), "DELIVERY_WORKTREE_UNSAFE: the Item candidate does not contain the "
                                                  "current worktree bytes of " + relative["item"])
 
+    @integration
     def test_push_refuses_what_a_converged_item_does_not_carry(self):
+        """A base the Item has not taken from the Integration's own line, or kept, is known only to Git, and one
+        field the converged record does not carry checks the converged comparison end to end. The other
+        converged refusals are decided on parsed notes in DeliveryGitDecisionTests."""
         project, worktree, item, active = self.prepare_stamped_architecture_item()
         clean = delivery_git.run_git(worktree, "rev-parse", "HEAD")
         integration, relative = self.republish_integration_plan(project, worktree, item)
@@ -3700,8 +3841,6 @@ class DeliveryGitTests(unittest.TestCase):
         variants = {
             "plan_beyond_integration": (lambda: edit_note(worktree / relative["plan"]), "may not edit Delivery control"),
             "item_field_beyond_integration": (lambda: edit_note(item, "owner_role", "frontend_developer"), beyond),
-            "item_body_beyond_integration": (lambda: edit_note(item), beyond),
-            "lifecycle": (lambda: edit_note(item, "status", "paused"), beyond),
             "base_not_taken": (None, base_rule),
             "base_off_integration": (None, base_rule),
             "base_kept": (None, "may not edit Delivery control"),
@@ -3721,8 +3860,7 @@ class DeliveryGitTests(unittest.TestCase):
                 else:
                     self.converge_on_integration(worktree, item, integration, relative)
                     tamper()
-                if label != "lifecycle":
-                    self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+                self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
                 with self.assertRaisesRegex(RuntimeError, refusal):
                     delivery_git.push_item(project, "DLV-001", "AUTH-01")
                 self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
@@ -3750,6 +3888,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(finished["target"], candidate)
         return candidate, finished["fence"]
 
+    @integration
     def test_governance_handoff_refreshes_each_integration_and_preserves_published_contracts(self):
         project, docs, directory, _item, reserved = self.prepare_execution_with_draft_reserved_contracts()
         first = delivery_git.publish_execution_plan(project, "DLV-001")
@@ -3822,6 +3961,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertFalse(again["changed"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
 
+    @integration
     def test_target_refresh_rejects_conflicting_authored_delivery_content(self):
         project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         published = delivery_git.publish_execution_plan(project, "DLV-001")
@@ -3838,6 +3978,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
 
+    @integration
     @windows_text_pipes()
     def test_refresh_preserves_approved_control_content_and_path_set(self):
         # The runner's text pipes must leave the Integration's projection-only change
@@ -3880,6 +4021,7 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
                 self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
 
+    @integration
     def test_projection_merge_rejects_structural_conflicts_at_owned_generated_paths(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
@@ -3901,6 +4043,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(project, "rev-parse", "HEAD"), head)
         self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), head)
 
+    @integration
     def test_projection_merge_resolves_only_owned_inverse_blocks(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
@@ -3961,6 +4104,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((project / ".git/index").read_bytes(), index)
         self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), head)
 
+    @integration
     def test_target_refresh_reissues_an_untouched_claim_against_the_new_integration(self):
         """A claim carrying no work must not strand its Item behind the target."""
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
@@ -3982,6 +4126,7 @@ class DeliveryGitTests(unittest.TestCase):
         started = delivery_git.start_item(project, "DLV-001", "AUTH-01")
         self.assertTrue(Path(started["worktree"]).is_dir())
 
+    @integration
     def test_target_refresh_recovers_a_claim_stranded_by_an_earlier_refresh(self):
         """Convergence must not depend on the target having moved this time."""
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
@@ -4008,6 +4153,7 @@ class DeliveryGitTests(unittest.TestCase):
         settled = delivery_git.refresh_target(project, "DLV-001")
         self.assertFalse(settled["changed"])
 
+    @integration
     def test_activation_carries_the_currently_published_plan_into_the_item(self):
         project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -4043,6 +4189,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(published["revision"], 2)
         self.assertEqual(published["source_hash"], revised["source_hash"])
 
+    @integration
     def test_stale_paused_item_cannot_activate_after_integration_refresh(self):
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -4061,6 +4208,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
         self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
 
+    @integration
     def test_stale_active_item_takeover_preserves_existing_slot_and_receipt(self):
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -4108,6 +4256,7 @@ class DeliveryGitTests(unittest.TestCase):
         active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
         return project, Path(active["worktree"]), active
 
+    @integration
     def test_lane_status_and_takeover_report_each_lanes_uncommitted_work(self):
         """After a host loss each lane's work exists only uncommitted in the Item worktree: status reports
         it per lane, and takeover refuses to discard it and names the choice (rv-accept-ideas-25)."""
@@ -4168,6 +4317,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertNotEqual(taken["writer_epoch"], active["writer_epoch"])
         self.assertFalse((Path(taken["worktree"]) / "src/api/handler.py").exists())
 
+    @integration
     def test_takeover_never_names_a_discard_that_drops_committed_item_work(self):
         """Item commits stay local until push-item, so a repair round can leave the Item worktree ahead of
         the remote Item tip. The lane-work refusal named `reset --hard <tip>`, which deleted that committed
@@ -4205,6 +4355,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertFalse((worktree / "deploy/run.sh").exists())
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), remote_before)
 
+    @integration
     def test_target_refresh_rejects_changed_descendant_of_claimed_directory(self):
         project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False, "src")
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -4220,6 +4371,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), claimed["integration"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
 
+    @integration
     def test_target_refresh_rejects_a_changed_claimed_path_outside_ascii(self):
         """A Git listing without -z quotes a name outside ASCII, and the quoted name overlaps no
         claim, so the refresh merged a target change to a claimed path unseen (#276)."""
@@ -4238,6 +4390,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), claimed["integration"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
 
+    @integration
     def test_target_refresh_rejects_a_target_rename_of_a_claimed_path(self):
         """Git diff detects renames by default and then lists only the new path, so a target that
         moved a claimed src/auth.py to src/login.py refreshed without the refusal (#277)."""
@@ -4253,6 +4406,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), claimed["integration"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
 
+    @integration
     def test_target_refresh_accepts_planned_story_generated_only_changes(self):
         project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         published = delivery_git.publish_execution_plan(project, "DLV-001")
@@ -4269,6 +4423,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertTrue(delivery_git.is_ancestor(project, target, refreshed["integration"]))
         self.assertEqual(delivery_git.run_git(project, "show", refreshed["integration"] + ":" + relative) + "\n", published_story)
 
+    @integration
     def test_target_refresh_rejects_changed_pinned_source_and_operation_receipts(self):
         for kind in ("story", "operation", "dod", "missing_dod"):
             with self.subTest(kind=kind):
@@ -4288,6 +4443,8 @@ class DeliveryGitTests(unittest.TestCase):
                     delivery_git.refresh_target(project, "DLV-001")
                 if kind != "missing_dod":
                     self.assertIn("changed a pinned source or Operation receipt", str(failure.exception))
+                else:
+                    self.assertIn("workspace/docs/delivery/definition-of-done.md", str(failure.exception))
                 refs = delivery_git.canonical_refs("DLV-001")
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
@@ -4303,6 +4460,7 @@ class DeliveryGitTests(unittest.TestCase):
                 code = process_policy.main([argv[0], "--docs", str(docs), *argv[1:]])
             self.assertEqual(code, 0, output.getvalue())
 
+    @integration
     def test_target_refresh_treats_a_changed_process_policy_as_a_pinned_input(self):
         """refresh-target merged a target policy that the Integration's Delivery does not pin, and
         only the next check reported the drift. While the pin is enforced the policy is a pinned
@@ -4358,6 +4516,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(project, "show", f"{refreshed['integration']}:{policy}") + "\n",
                          process_policy.path_for(docs).read_text(encoding="utf-8"))
 
+    @integration
     def test_reservation_carries_the_process_policy_its_scope_pinned(self):
         """An Item worktree reads the switch values from its own tree, so reservation carries the
         policy scope approval pinned onto the Integration, as publication carries a pinned Operation
@@ -4390,6 +4549,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.published_plan_blobs(project, reserved["integration"], [relative]),
                          {relative: policy.read_text(encoding="utf-8")})
 
+    @integration
     def test_reservation_carries_the_pinned_policy_revision_not_a_later_value_equal_one(self):
         """The package checks compare the pin by value, so they pass a later policy revision that
         sets every Delivery switch the same way, and reservation carried that revision onto the
@@ -4431,6 +4591,7 @@ class DeliveryGitTests(unittest.TestCase):
                                                       r"\(sha256:[0-9a-f]{64}\), which is neither"):
                 delivery_git.carried_policy_blobs(project, directory, docs)
 
+    @integration
     def test_publication_carries_the_pinned_policy_revision_not_a_later_value_equal_one(self):
         """Publication carries the revision the execution approval pinned, so the Item worktree reads
         that revision as its current policy even after the owner approved a later one that sets every
@@ -4456,6 +4617,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_compile.delivery_switch_value(worktree / "workspace/docs", "DLV-001",
                                                                 "review_panels"), "lens_panel")
 
+    @integration
     def test_an_item_worktree_holds_the_process_policy_its_delivery_pinned(self):
         """A policy pinned by execution approval reaches the Integration with the plan, so the Item
         worktree holds the pinned bytes, reads the switch values from them, and a code reviewer's
@@ -4483,6 +4645,7 @@ class DeliveryGitTests(unittest.TestCase):
         reviewer = delivery_verification.read_session(worktree)["workers"]["code_reviewer"]
         self.assertEqual((reviewer["state"], reviewer["result"]["verdict"]), ("settled", "passed"))
 
+    @integration
     def test_target_refresh_preserves_legacy_operation_pins_after_relation_rendering(self):
         project, docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
             runtime=True, legacy_operation_receipts=True)
@@ -4524,6 +4687,7 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_git.refresh_target(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), refs_before)
 
+    @integration
     def test_stale_integrated_item_reopens_on_the_refreshed_integration(self):
         project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -4574,6 +4738,7 @@ class DeliveryGitTests(unittest.TestCase):
             "def authenticate():\n    return 'v2'\n",
         )
 
+    @integration
     def test_fence_writers_carry_an_active_plan_revision_barrier(self):
         project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         fence_ref = delivery_git.canonical_refs("DLV-001")["fence"]
@@ -4597,6 +4762,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.trailer(released, "Barrier-Kind"), "none")
         self.assertEqual(delivery_git.trailer(released, "Barrier-Epoch"), "none")
 
+    @integration
     def test_sealed_item_reopens_after_reapproval_names_it_for_rebinding(self):
         project, docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -4651,6 +4817,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(current["verification_contract_hash"], second)
         self.assertEqual(current["item_plan_hash"], rebound["item_plan_hash"])
 
+    @integration
     def test_activation_target_race_quiesces_before_writer_receipt_or_worktree(self):
         for action in ("start", "resume", "reopen", "takeover"):
             with self.subTest(action=action):
@@ -4708,6 +4875,7 @@ class DeliveryGitTests(unittest.TestCase):
         with mock.patch.object(delivery_git, "atomic_push", side_effect=race):
             return self.refused_finding(verb)
 
+    @integration
     def test_rejected_activation_drops_its_pending_receipt_so_a_retry_starts(self):
         """The activation is atomic, so an unchanged Item ref proves it changed no ref, whatever the Slot holds."""
         for label, taken in (("lost Fence lease", False), ("Slot taken by a concurrent start", True)):
@@ -4730,6 +4898,7 @@ class DeliveryGitTests(unittest.TestCase):
                 started = delivery_git.start_item(project, "DLV-001", "AUTH-01")
                 self.assertEqual((started["slot"], started["receipt"]["state"]), ("001", "verified"))
 
+    @integration
     def test_rejected_reopen_and_takeover_leave_the_writer_state_as_it_was(self):
         """Neither changed a ref, so the pending receipt goes; takeover gives back the receipt and worktree it replaced."""
         for action in ("reopen", "takeover"):
@@ -4784,6 +4953,7 @@ class DeliveryGitTests(unittest.TestCase):
         with mock.patch.object(subprocess, "run", side_effect=landed_without_response):
             yield lost
 
+    @integration
     def test_activation_that_landed_despite_a_lost_response_promotes_its_receipt(self):
         """The Item and Slot hold the candidate, so the activation took effect: the host keeps a verified
         receipt, and a takeover can then give it a worktree."""
@@ -4813,6 +4983,7 @@ class DeliveryGitTests(unittest.TestCase):
                 taken = delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
                 self.assertEqual(taken["receipt"]["state"], "verified")
 
+    @integration
     def test_merge_candidate_preserves_disjoint_additions_and_rejects_conflicts(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
@@ -4840,6 +5011,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((project / ".git/index").read_bytes(), index)
         self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), base)
 
+    @integration
     def test_target_refresh_rejects_ambiguous_merge_bases_before_ref_updates(self):
         project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         published = delivery_git.publish_execution_plan(project, "DLV-001")
@@ -4857,6 +5029,7 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_git.refresh_target(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
 
+    @integration
     def test_governance_refresh_keeps_integration_on_exact_fence_lease_failure(self):
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         published = delivery_git.publish_execution_plan(project, "DLV-001")
@@ -4885,6 +5058,7 @@ class DeliveryGitTests(unittest.TestCase):
             names = delivery_git.run_git(project, "ls-tree", "-r", "-z", "--name-only", commit).split("\0")
             self.assertEqual([name for name in names if "\\" in name], [], commit)
 
+    @integration
     def test_coordinator_hands_git_posix_paths_on_a_host_with_backslash_separators(self):
         """Every path the coordinator hands Git, or compares with what Git
         returns, uses forward slashes on every host (#236)."""
@@ -4929,6 +5103,7 @@ class DeliveryGitTests(unittest.TestCase):
         item_tip = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"])
         self.assert_git_paths_are_posix(arguments, project, [cancelled["review"], item_tip])
 
+    @integration
     def test_package_commit_check_hands_git_posix_paths_on_a_host_with_backslash_separators(self):
         """The commit check behind the stage receipts a Delivery reads names its
         package to Git with forward slashes on every host (#236)."""
@@ -4959,6 +5134,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertIn(package.relative_to(project).as_posix(), arguments)
         self.assert_git_paths_are_posix(arguments, project, ["HEAD"])
 
+    @integration
     def test_execution_publication_includes_only_exact_bound_operation_contracts(self):
         for runtime in (True, False):
             with self.subTest(runtime=runtime):
@@ -5020,6 +5196,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(errors, [])
         return receipt
 
+    @integration
     def test_execution_publication_refuses_an_approved_operation_revision_no_item_pins(self):
         """A non-runtime Item pins no Environment Contract, so publication cannot carry its approved revision (#320)."""
         contract = "workspace/docs/operation/environment-contract.md"
@@ -5052,6 +5229,7 @@ class DeliveryGitTests(unittest.TestCase):
                     "live service environment"))
                 self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
 
+    @integration
     def test_an_unpinned_operation_revision_reaches_the_delivery_through_the_target(self):
         """The refusal's first route: record the revision on the target, refresh, then publish."""
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
@@ -5069,6 +5247,7 @@ class DeliveryGitTests(unittest.TestCase):
         carried = delivery_git.published_plan_blobs(project, published["integration"], [contract])[contract]
         self.assertEqual(operation_compile.check_contract(docs, "environment", carried), (receipt, []))
 
+    @integration
     def test_a_bundle_records_its_unpinned_revision_on_the_target_before_publication(self):
         """At single_source_bundle the plan's own step carries a revision no Item pins (#324, #321)."""
         temporary, project = self.make_project()
@@ -5135,6 +5314,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(operation_compile.check_contract(docs, "environment", carried), (receipt, []))
 
+    @integration
     def test_execution_publication_reports_an_operation_contract_it_cannot_carry(self):
         """A differing local copy that is not approved and current is left out and named, not refused."""
         contract = "workspace/docs/operation/environment-contract.md"
@@ -5186,8 +5366,11 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(errors, [])
         return receipt
 
+    @integration
     def test_a_checkout_holding_an_earlier_approval_cannot_publish_over_a_revised_plan(self):
-        """An earlier approval, or one re-approved from it, never replaces the plan that revised it (#322)."""
+        """An earlier approval never replaces the plan that revised it (#322); that a re-approved one
+        does not either, and that the refusal holds after the revision ends, is decided on the parsed
+        plans in DeliveryGitDecisionTests."""
         project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
         refs = delivery_git.canonical_refs("DLV-001")
@@ -5209,15 +5392,11 @@ class DeliveryGitTests(unittest.TestCase):
                     f"revision 2, which this checkout's approval of execution plan {plan_hash} does not supersede; "
                     + self.SUPERSEDED_REMEDY)
 
-        for moment in ("inside the plan revision", "after the plan revision"):
-            with self.subTest(moment=moment):
-                if moment == "after the plan revision":
-                    delivery_git.finish_plan_revision(project, "DLV-001")
-                delivery_git.run_git(second, "fetch", "-q", "origin")
-                before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
-                self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")),
-                                 refused(earlier))
-                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
+        delivery_git.run_git(second, "fetch", "-q", "origin")
+        before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
+        self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")),
+                         refused(earlier))
+        self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
 
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -5231,14 +5410,12 @@ class DeliveryGitTests(unittest.TestCase):
         earlier_approval = delivery_compile.split_note(second_plan)[0]["source_hash"]
         self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(second_docs), "delivery": "DLV-001"})), 0)
         self.assertEqual(delivery_compile.split_note(second_plan)[0]["superseded_plan_approvals"], [earlier_approval])
-        reapproved = delivery_compile.split_note(second_delivery)[0]["plan_hash"]
-        before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
-        self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")),
-                         refused(reapproved))
-        self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
 
+    @integration
     def test_a_checkout_holding_an_earlier_contract_cannot_publish_it_under_a_sealed_plan(self):
-        """A sealed Item keeps its bindings and so the plan hash, which cannot show the older contract (#322)."""
+        """A sealed Item keeps its bindings and so the plan hash, which cannot show the older contract (#322).
+        A checkout holding revision 1 is refused end to end; one holding a different revision 2 is decided on
+        the parsed contracts in DeliveryGitDecisionTests."""
         project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
         refs = delivery_git.canonical_refs("DLV-001")
@@ -5268,18 +5445,14 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.run_git(second, "fetch", "-q", "origin")
         self.assertEqual(delivery_compile.split_note(second_docs / directory.relative_to(docs) / "delivery.md")[0]["plan_hash"],
                          plan_hash)
-        for local in ("revision 1", "another revision 2"):
-            with self.subTest(local=local):
-                if local == "another revision 2":
-                    self.revise_verification_contract(second_docs, "Revision 2 as the second host approved it.")
-                replacement = "its approved revision 1" if local == "revision 1" else "a different approved revision 2"
-                before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
-                self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")), (
-                    "DELIVERY_PLAN_SUPERSEDED",
-                    f"the Integration holds execution plan {plan_hash} and the Verification Contract approved at "
-                    f"revision 2, which this checkout would replace with {replacement}; " + self.SUPERSEDED_REMEDY))
-                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
+        before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
+        self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")), (
+            "DELIVERY_PLAN_SUPERSEDED",
+            f"the Integration holds execution plan {plan_hash} and the Verification Contract approved at "
+            "revision 2, which this checkout would replace with its approved revision 1; " + self.SUPERSEDED_REMEDY))
+        self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
 
+    @integration
     def test_publication_takes_a_first_an_identical_and_a_superseding_approval(self):
         """Only an approval that revises the Integration's, directly or through unpublished ones, replaces it."""
         project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
@@ -5314,6 +5487,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((carried["source_hash"], carried["superseded_plan_approvals"]),
                          (again["source_hash"], again["superseded_plan_approvals"]))
 
+    @integration
     def test_republication_keeps_the_records_of_an_item_the_integration_sealed(self):
         """Publication never puts a sealed Item's record or evidence back to a checkout's earlier copy."""
         project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
@@ -5353,6 +5527,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((carried[records[1]], carried[records[2]]), (sealed[records[1]], sealed[records[2]]))
         self.assertEqual(statuses(project, revised["integration"]), ["integrated", "approved", "passed"])
 
+    @integration
     def test_republication_never_takes_a_reviewed_delivery_back_to_its_plan(self):
         """A checkout that still holds the approved plan cannot publish it over the published Review,
         the PR intent or the PR record: that would move the Integration tip off them and put its
@@ -5390,6 +5565,7 @@ class DeliveryGitTests(unittest.TestCase):
                     self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
             self.assertEqual(delivery_git.merge_pr(project, "DLV-001")["status"], "merged")
 
+    @integration
     def test_execution_publication_keeps_a_terminal_item_on_its_verified_revision(self):
         """A closed Item's binding names history, not a stale current receipt."""
         project, _docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts()
@@ -5415,11 +5591,29 @@ class DeliveryGitTests(unittest.TestCase):
                 delivery_git.publish_execution_plan(project, "DLV-001")
             push.assert_not_called()
 
+    @integration
     def test_execution_publication_rejects_invalid_operation_bindings_before_ref_changes(self):
-        project, docs, _directory, item, reserved = self.prepare_execution_with_draft_reserved_contracts()
+        """publish-execution-plan refuses an Item whose Operation binding is invalid before any push.
+        Publication refuses on the package findings it reads first, so each other invalid binding and
+        contract is decided by those findings on the same package, without the publication's ref reads."""
+        project, docs, directory, item, reserved = self.prepare_execution_with_draft_reserved_contracts()
         original = item.read_bytes()
         props, body = delivery_compile.split_note(item)
         refs = delivery_git.canonical_refs("DLV-001")
+
+        def refused(pattern, published=False):
+            if not published:
+                found, findings = delivery_compile.delivery_findings(docs, "DLV-001")
+                self.assertEqual(found, directory)
+                self.assertRegex("; ".join(findings), pattern)
+                return
+            with mock.patch.object(delivery_git, "atomic_push") as push:
+                with self.assertRaisesRegex(RuntimeError, "^Delivery package is not portable: .*" + pattern):
+                    delivery_git.publish_execution_plan(project, "DLV-001")
+                push.assert_not_called()
+            self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), reserved["integration"])
+            self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), reserved["fence"])
+
         for field, value in (("verification_contract_ref", "../../README"),
                              ("verification_contract_hash", "sha256:" + "0" * 64),
                              ("verification_contract_ref", None),
@@ -5431,12 +5625,7 @@ class DeliveryGitTests(unittest.TestCase):
                 else:
                     invalid[field] = value
                 delivery_compile.atomic_text(item, delivery_compile.frontmatter(invalid, body))
-                with mock.patch.object(delivery_git, "atomic_push") as push:
-                    with self.assertRaisesRegex(RuntimeError, "binding is stale or missing"):
-                        delivery_git.publish_execution_plan(project, "DLV-001")
-                    push.assert_not_called()
-                self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), reserved["integration"])
-                self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), reserved["fence"])
+                refused("binding is stale or missing", published=value == "../../README")
         item.write_bytes(original)
         contract = operation_compile.contract_path(docs, "verification")
         saved_contract = contract.read_bytes()
@@ -5446,14 +5635,10 @@ class DeliveryGitTests(unittest.TestCase):
                     contract.unlink()
                 else:
                     contract.write_bytes(saved_contract + b"\nChanged approved contract.\n")
-                with mock.patch.object(delivery_git, "atomic_push") as push:
-                    with self.assertRaisesRegex(RuntimeError, "approved current verification contract"):
-                        delivery_git.publish_execution_plan(project, "DLV-001")
-                    push.assert_not_called()
+                refused("approved current verification contract")
                 contract.write_bytes(saved_contract)
-                self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), reserved["integration"])
-                self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), reserved["fence"])
 
+    @integration
     def test_execution_publication_validates_staged_contract_after_local_check(self):
         project, docs, _directory, _item, reserved = self.prepare_execution_with_draft_reserved_contracts()
         contract = operation_compile.contract_path(docs, "verification")
@@ -5475,6 +5660,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), reserved["integration"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), reserved["fence"])
 
+    @integration
     def test_execution_publication_rejects_candidate_solution_drift_with_current_local_receipts(self):
         project, docs, _directory, item, reserved = self.prepare_execution_with_draft_reserved_contracts()
         decision = "workspace/docs/solution-design/decisions/fixture-api.md"
@@ -5490,6 +5676,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), drifted)
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), reserved["fence"])
 
+    @integration
     def test_execution_publication_claim_and_start_use_global_slot(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
@@ -5648,6 +5835,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-01", "AUTH-02"])
         return project
 
+    @integration
     def test_start_item_waits_until_the_items_it_executes_after_are_integrated(self):
         """An Item starts only once each Item its plan orders it after is integrated."""
         project = self.claim_ordered_items()
@@ -5719,6 +5907,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
         self.assertIsNone(delivery_git.read_writer_receipt(checkout, "DLV-002", "AUTH-02"))
 
+    @integration
     def test_start_item_waits_until_its_integration_holds_the_integrated_waits_for_story(self):
         """A waits_for Story is met once its Delivery merged into the target and this Delivery refreshed onto it."""
         project = self.claim_waiting_deliveries()
@@ -5754,6 +5943,7 @@ class DeliveryGitTests(unittest.TestCase):
         started = delivery_git.start_item(project, "DLV-002", "AUTH-02")
         self.assertEqual((started["story"], started["slot"]), ("AUTH-02", "001"))
 
+    @integration
     def test_start_item_refuses_a_waits_for_story_no_delivery_is_delivering(self):
         """A Story no Delivery claimed, or one its Delivery cancelled, names a backlog revision as the way out."""
         project = self.claim_waiting_deliveries(claim_dependency=False)
@@ -5784,6 +5974,7 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_git.open_pr(project, "DLV-001")
             return delivery_git.merge_pr(project, "DLV-001")
 
+    @integration
     def test_a_waits_for_story_whose_delivery_merged_is_met_from_its_package(self):
         """DLV-001 merged and dropped the Item ref of AUTH-01, so its package answers for AUTH-02
         of DLV-002: on its way while only the target holds the merge, met once DLV-002 refreshed
@@ -5812,9 +6003,9 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.atomic_push(project, "origin", [("refs/heads/main", target, advanced)])
         return advanced
 
-    def reserve_overlapping_delivery(self, project: Path, plan: bool = True) -> None:
+    def reserve_overlapping_delivery(self, project: Path, plan: bool = True) -> str:
         """Reserve DLV-003 for AUTH-01, the Story of DLV-001, on the current target, and publish its
-        plan unless *plan* is false."""
+        plan unless *plan* is false. Returns its id."""
         docs = project / "workspace" / "docs"
         init = type("Args", (), {"docs": str(docs), "id": "DLV-003", "slug": "again", "goal": "Deliver AUTH-01 again",
                                  "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
@@ -5829,23 +6020,26 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_projections=True)
         delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-003")["integration"], "", reservation)])
         if not plan:
-            return
+            return init.id
         self.author_execution_topology(docs, "DLV-003")
         self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": "DLV-003"})), 0)
         delivery_git.publish_execution_plan(project, "DLV-003")
+        return init.id
 
+    @integration
     def test_claim_refuses_a_story_a_merged_delivery_delivered(self):
         """A merged Delivery keeps no Item ref, so claim-items finds AUTH-01 integrated in the
         merged package of DLV-001 and refuses it to a later Delivery instead of claiming it again (#286)."""
         project = self.claim_waiting_deliveries()
         self.merge_waited_for_delivery(project)
-        self.reserve_overlapping_delivery(project)
-        delivery_git.refresh_target(project, "DLV-003")
+        later = self.reserve_overlapping_delivery(project)
+        delivery_git.refresh_target(project, later)
         before = delivery_git.run_git(project, "ls-remote", "origin")
-        self.assertEqual(self.refused_finding(lambda: delivery_git.claim_items(project, "DLV-003")),
+        self.assertEqual(self.refused_finding(lambda: delivery_git.claim_items(project, later)),
                          ("DELIVERY_CLAIM_CONFLICT", "story is already delivered by DLV-001: AUTH-01"))
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
 
+    @integration
     def test_refresh_leaves_another_deliverys_claim_of_the_same_story_alone(self):
         """DLV-003 holds AUTH-01, which DLV-001 claimed. Its refresh of a converged Integration used
         to re-issue that claim under DLV-003 and take the Story over; it now leaves the claim to
@@ -5863,6 +6057,7 @@ class DeliveryGitTests(unittest.TestCase):
                          ("DELIVERY_CLAIM_CONFLICT", "story is already claimed by DLV-001: AUTH-01"))
         self.assertEqual(delivery_git.remote_oid(project, "origin", claim_ref), claimed)
 
+    @integration
     def test_refresh_after_a_target_advance_passes_over_another_deliverys_claim(self):
         """After a target advance, the refresh of DLV-003 used to read its own package from the
         Item tip of DLV-001 and fail with a raw Git error. Only DLV-003's own claims guard its
@@ -5875,6 +6070,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertTrue(delivery_git.refresh_target(project, "DLV-003")["changed"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", claim_ref), claimed)
 
+    @integration
     def test_scope_revision_stays_open_beside_another_deliverys_claim(self):
         """DLV-003 claimed nothing, so revising its scope, the way to hand AUTH-01 back to DLV-001,
         used to be refused as a revision after an Item claim (#288)."""
@@ -5884,6 +6080,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, revised["integration"]), "Record"),
                          "delivery-scope-revised-v1")
 
+    @integration
     def test_cancellation_passes_over_another_deliverys_claim(self):
         """Cancelling DLV-003 used to read its package from the Item tip of DLV-001 and fail with a
         raw Git error. AUTH-01 is now a Story DLV-003 never started, and DLV-001 keeps its claim (#288)."""
@@ -5895,6 +6092,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(cancelled["status"], "cancelled")
         self.assertEqual(delivery_git.remote_oid(project, "origin", claim_ref), claimed)
 
+    @integration
     def test_worktree_file_holds_its_blob_as_git_stores_it(self):
         """A worktree file holds a committed blob when Git would store it as that blob. A checkout
         that converted line endings still holds it; the same bytes with the conversion off, a
@@ -5931,6 +6129,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.symlink_or_skip(note, "twin.md")
             self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
 
+    @integration
     def test_worktree_file_holds_a_crlf_blob_that_git_add_keeps(self):
         """Under core.autocrlf=true a blob committed with CRLF checks out unchanged, and git add
         keeps the file as it is because its blob already holds CRLF, where the clean filter alone
@@ -5964,6 +6163,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
             self.assertNotEqual(stored(), oid)
 
+    @integration
     def test_delivery_path_readers_keep_a_name_that_holds_a_carriage_return(self):
         """A text-mode pipe turns a carriage return into a newline, so the pending-path and
         index-flag readers reported an untracked macOS "Icon\\r" as "Icon\\n". They read Git's
@@ -5988,6 +6188,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(str(hidden.exception), "DELIVERY_WORKTREE_UNSAFE: Item index flags hide tracked paths "
                                                     "from verification: " + json.dumps([tracked]))
 
+    @integration
     def test_cancellation_revert_restores_a_path_that_starts_with_a_colon(self):
         """revert_merge_candidate looks each changed path up with git ls-tree, where a leading ":"
         starts pathspec magic: ":x.py" named "x.py", the lookup found nothing, and the revert
@@ -6014,6 +6215,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_git.git_paths(root, "ls-tree", "-z", "--name-only", reverted), [":x.py"])
             self.assertEqual(delivery_git.run_git(root, "cat-file", "blob", reverted + "::x.py"), "X = 'before'")
 
+    @integration
     @windows_text_pipes()
     def test_push_item_publishes_an_item_whose_checkout_converted_line_endings(self):
         """Git for Windows converts line endings on checkout by default (core.autocrlf=true), so
@@ -6030,6 +6232,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
         self.assertEqual(delivery_git.push_item(project, "DLV-001", "AUTH-01")["product_tip"], product)
 
+    @integration
     def test_delivery_blobs_and_commit_messages_keep_their_bytes_through_windows_text_pipes(self):
         """Delivery hands Git every blob and commit message as exact UTF-8 bytes. Through a
         text-mode pipe native Windows would store CRLF for each newline and refuse a character
@@ -6060,6 +6263,7 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(raw("cat-file", "commit", commit).split(b"\n\n", 1)[1],
                                  (subject + "\n\nAgentrof-Record: fixture-v1\n").encode("utf-8"))
 
+    @integration
     def test_stamp_check_compares_an_item_record_committed_with_crlf_byte_for_byte(self):
         """The stamp check keeps every other Item byte. A record whose lines end with CRLF, as a
         text-mode write on native Windows commits it under setup's workspace/docs/** -text rule,
@@ -6091,6 +6295,7 @@ class DeliveryGitTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, refusal):
                         check()
 
+    @integration
     def test_delivery_reads_git_output_as_utf8_through_windows_text_pipes(self):
         """Git prints paths and blobs in UTF-8. A text-mode pipe without an encoding reads
         them in the ANSI code page on native Windows, which turned the em dash of a Delivery
@@ -6116,6 +6321,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual((props["title"], body), ("Oturum açma, güvenlik", "Şifre ve ğ, ı, ö harfleri."))
             self.assertEqual(pending, {"notes/şifre.md"})
 
+    @integration
     def test_fixture_command_pipes_preserve_text_aliases_and_host_version_probes(self):
         import platform
         aliases = ({"text": True}, {"universal_newlines": True}, {"encoding": "utf-8"},
@@ -6212,21 +6418,19 @@ class DeliveryGitTests(unittest.TestCase):
                     unsafe.append(f"{name}:{call.lineno}")
         self.assertEqual(unsafe, [])
 
+    @integration
     def test_push_item_refuses_product_paths_outside_the_item_path_claims(self):
-        """A claim covers its path and every path below it. The vault keeps its own rules,
-        and what the Item's integration base carries is not the Item's change."""
+        """The committed paths reach the claim rule as Git names them: a deletion is a change, and a
+        name with a carriage return is refused as it is; what the Item's integration base carries is
+        not the Item's change. The claim rule itself is decided on path sets in DeliveryGitDecisionTests."""
         project, worktree, item, active = self.prepare_stamped_architecture_item()
         clean = delivery_git.run_git(worktree, "rev-parse", "HEAD")
         baseline = delivery_git.run_git(project, "ls-remote", "origin")
 
         def write(relative):
-            path = worktree / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("unclaimed\n", encoding="utf-8")
+            (worktree / relative).write_text("unclaimed\n", encoding="utf-8")
 
         for label, change, outside in (
-            ("added", lambda: write("src/session.py"), "src/session.py"),
-            ("beside the claim", lambda: write("src/auth.py.orig"), "src/auth.py.orig"),
             ("deleted", lambda: (worktree / "README.md").unlink(), "README.md"),
             # A text-mode pipe read this name back with a newline for its carriage return (#279).
             ("carriage return", lambda: write("src/Icon\r.txt"), "src/Icon\r.txt"),
@@ -6282,6 +6486,7 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.run_git(root, "push", "-q", "origin", "main")
         return root, remote, oids
 
+    @integration
     def test_refused_atomic_push_names_the_lease_it_lost(self):
         """The refetched refs, never Git's translated words, name the lease that no longer holds."""
         root, _remote, (first, second, third) = self.lease_remote()
@@ -6310,6 +6515,7 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertIn(moved, message)
                 self.assertEqual(delivery_git.run_git(root, "ls-remote", "origin"), before)
 
+    @integration
     def test_atomic_push_that_may_have_landed_is_uncertain(self):
         """A leased ref that holds the pushed candidate, or moved on from a history that holds it, shows
         the push may have landed before its response was lost, never a lease that changed no ref."""
@@ -6340,6 +6546,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(finding, ("DELIVERY_TRANSACTION_UNCERTAIN",
                                    uncertain + f"{fence} is {moved[0]}, whose history holds the pushed {third}"))
 
+    @integration
     def test_remote_without_atomic_push_support_is_named_and_other_refusals_keep_their_words(self):
         root, remote, (first, second, _third) = self.lease_remote()
         fence = delivery_git.canonical_refs("DLV-001")["fence"]
@@ -6357,6 +6564,397 @@ class DeliveryGitTests(unittest.TestCase):
         code, _message = self.refused_finding(lambda: delivery_git.atomic_push(root, "origin", [(fence, first, second)]))
         self.assertEqual(code, "DELIVERY_INPUT_INVALID")
         self.assertEqual(delivery_git.run_git(root, "ls-remote", "origin"), before)
+
+
+DECISION_PACKAGE = "workspace/docs/delivery/deliveries/dlv-001-auth"
+DECISION_ITEM = DECISION_PACKAGE + "/items/auth-01/item.md"
+DECISION_BODY = "# Implementation work for AUTH-01\n\n## Delivery Scope\n\nDLV-001\n"
+DECISION_ITEM_PROPS = {
+    "type": "delivery-item", "title": "Implementation work for AUTH-01", "status": "active",
+    "story_id": "AUTH-01", "story_source_hash": "sha256:" + "1" * 64, "owner_role": "backend_developer",
+    "path_claims": ["src/auth.py"], "architecture_impact": "required", "architecture_components": ["api"],
+    "architecture_record_kinds": ["system-architecture", "architecture-component", "interface-contract"],
+    "tags": ["doc/delivery-item", "status/active"], "verification_contract_ref": "operation/verification-contract",
+    "verification_contract_hash": "sha256:" + "2" * 64, "item_plan_hash": "sha256:" + "3" * 64,
+    "integration_base_commit": "a" * 40,
+}
+DECISION_STAMP = "sha256:" + "5" * 64
+DECISION_RECORDS = {
+    "architecture.md": {"type": "system-architecture", "title": "System Architecture", "status": "draft",
+                        "record_id": "HUB-ROOT", "tags": ["doc/system-architecture", "status/draft"]},
+    "components/api/component.md": {"type": "architecture-component", "title": "api", "record_id": "HUB-api",
+                                    "component_ref": "api", "derives_from": ["solution-component:api"],
+                                    "tags": ["doc/architecture-component"]},
+    "components/api/interfaces/auth/interface.md": {"type": "interface-contract", "title": "auth", "record_id": "IFC-001",
+                                                    "tags": ["doc/interface-contract"], "component_ref": "api"},
+}
+
+
+class DeliveryGitDecisionTests(unittest.TestCase):
+    """The refusal rules of delivery_git, decided in process on parsed notes, path sets and trees.
+
+    Each rule keeps one real Git case in DeliveryGitTests that proves the wiring
+    between the Git reads and the rule."""
+
+    def refused_finding(self, refusal) -> tuple[str, str]:
+        """The code and message a coordinator refusal reaches the result envelope with."""
+        with self.assertRaises(RuntimeError) as refused:
+            refusal()
+        finding = delivery_result.from_raw("refusal", {"ok": False, "errors": [str(refused.exception)]})["findings"][0]
+        return finding["code"], finding["message"]
+
+    @staticmethod
+    def item_note(mode: str = "100644", body: str = DECISION_BODY, stamp: str | None = DECISION_STAMP, **changes):
+        """An Item control note as push-item parses it from a tree, its source_hash current."""
+        props = {**DECISION_ITEM_PROPS, "source_hash": "", **({"architecture_delta_hash": stamp} if stamp else {})}
+        props.update(changes)
+        props["source_hash"] = delivery_compile.content_hash(props, body)
+        return delivery_git.parse_item_control(mode, delivery_compile.frontmatter(props, body))
+
+    def sealed_architecture(self) -> tuple[Path, str]:
+        """A System Architecture tree whose sealed records AUTH-01 introduced, and its delta hash."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name) / "system-architecture"
+        for relative, props in DECISION_RECORDS.items():
+            self.write_record(root, relative, props)
+        return root, self.restamp(root)
+
+    @staticmethod
+    def write_record(root: Path, relative: str, props: dict) -> None:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(architecture_compile.frontmatter(
+            {**props, "revision": 1, "record_state": "active", "revision_state": "draft", "introduced_by": ["AUTH-01"]},
+            f"# {props['title']}\n"), encoding="utf-8")
+        architecture_compile.seal_record(root, path, "AUTH-01")
+
+    @staticmethod
+    def restamp(root: Path) -> str:
+        """Record the current AUTH-01 delta as stamp-item does and return its hash."""
+        delta = architecture_compile.item_delta(root, "AUTH-01")
+        digest = architecture_compile.item_delta_hash(delta)
+        path = root / "_ledger/item-deltas/AUTH-01.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**delta, "architecture_delta_hash": digest}), encoding="utf-8")
+        return digest
+
+    def test_item_publication_refuses_control_tampering_beyond_the_architecture_stamp(self):
+        """push-item permits the Item record to change only by its Architecture stamp: every other
+        field, its body, its mode and a stale source_hash are refused, as is any other Delivery
+        control path. A missing or wrong stamp passes this check and meets the Architecture binding."""
+        before, after = self.item_note(stamp=None), self.item_note()
+        self.assertIsNone(delivery_git.require_item_controls(before, after))
+        beyond = "product/test commits changed authored Item controls beyond its Architecture stamp"
+        zero = "sha256:" + "0" * 64
+        mode, text, _props, _body = after
+        for label, tampered, refusal in (
+            ("body", self.item_note(body=DECISION_BODY + "\nUnapproved change.\n"), beyond),
+            ("status", self.item_note(status="paused"), beyond),
+            ("owner", self.item_note(owner_role="frontend_developer"), beyond),
+            ("path_claim", self.item_note(path_claims=["src/other.py"]), beyond),
+            ("item_plan", self.item_note(item_plan_hash=zero), beyond),
+            ("story_pin", self.item_note(story_source_hash=zero), beyond),
+            ("operation_pin", self.item_note(verification_contract_hash=zero), beyond),
+            ("mode", self.item_note(mode="100755"), beyond),
+            ("source_hash", delivery_git.parse_item_control(
+                mode, text.replace("source_hash: sha256:", "source_hash: broken:")),
+             "Item Architecture stamp source_hash is stale"),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(RuntimeError, "^" + re.escape(refusal) + "$"):
+                    delivery_git.require_item_controls(before, tampered)
+        root, _digest = self.sealed_architecture()
+        for label, stamp, refusal in (
+            ("missing_hash", "none", "architecture-impact Item lacks architecture_delta_hash"),
+            ("wrong_hash", zero, "architecture_delta_hash is stale"),
+        ):
+            with self.subTest(label=label):
+                stamped = self.item_note(stamp=stamp)
+                self.assertIsNone(delivery_git.require_item_controls(before, stamped))
+                with self.assertRaisesRegex(RuntimeError, "^" + re.escape(refusal) + "$"):
+                    expected = delivery_git.item_architecture_delta_hash(stamped[2])
+                    delivery_git.require_architecture_delta(root, stamped[2], "AUTH-01", expected)
+
+        def uncarried(path):
+            raise AssertionError("an unconverged Item carries no Integration path")
+
+        delivery_git.require_carried_control_paths([DECISION_ITEM], DECISION_ITEM, uncarried)
+        for label, path in (("scope", "delivery.md"), ("plan", "execution-plan.md"),
+                            ("committed_evidence", "items/auth-01/code-review.md")):
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(RuntimeError, "^product/test commits may not edit Delivery control files$"):
+                    delivery_git.require_carried_control_paths(
+                        [f"{DECISION_PACKAGE}/{path}", DECISION_ITEM], DECISION_ITEM, lambda _path: False)
+
+    def test_item_publication_refuses_what_a_converged_item_record_does_not_carry(self):
+        """A converged Item record holds the plan-owned fields and body of the Integration commit it
+        took and keeps its own lifecycle and stamp; a control path it changed must be that commit's."""
+        republished = DECISION_BODY + "\n\nRepublished for the revised plan.\n"
+        previous = self.item_note(stamp=None)
+        published = self.item_note(stamp=None, body=republished, integration_base_commit="b" * 40)
+        converged = self.item_note(body=republished, integration_base_commit="c" * 40)
+        self.assertIsNone(delivery_git.require_item_controls(previous, converged, published))
+        beyond = "product/test commits changed authored Item controls beyond its Architecture stamp and its converged Integration"
+        for label, tampered in (
+            ("item_field_beyond_integration", self.item_note(body=republished, integration_base_commit="c" * 40,
+                                                             owner_role="frontend_developer")),
+            ("item_body_beyond_integration", self.item_note(body=republished + "\nUnapproved change.\n",
+                                                            integration_base_commit="c" * 40)),
+            ("lifecycle", self.item_note(body=republished, integration_base_commit="c" * 40, status="paused")),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(RuntimeError, "^" + re.escape(beyond) + "$"):
+                    delivery_git.require_item_controls(previous, tampered, published)
+        plan, scope = f"{DECISION_PACKAGE}/execution-plan.md", f"{DECISION_PACKAGE}/delivery.md"
+        delivery_git.require_carried_control_paths([plan, scope, DECISION_ITEM], DECISION_ITEM, lambda _path: True)
+        with self.assertRaisesRegex(RuntimeError, "^product/test commits may not edit Delivery control files$"):
+            delivery_git.require_carried_control_paths([plan, scope, DECISION_ITEM], DECISION_ITEM,
+                                                       lambda path: path != plan)
+
+    def test_architecture_delta_refuses_unsealed_stale_and_unclaimed_records(self):
+        """The committed Architecture tree must hold the stamped delta, its records sealed in the
+        ledger and inside the Item's claimed components and record kinds."""
+        props = {key: DECISION_ITEM_PROPS[key] for key in
+                 ("architecture_impact", "architecture_components", "architecture_record_kinds")}
+        root, digest = self.sealed_architecture()
+        self.assertIsNone(delivery_git.require_architecture_delta(root, props, "AUTH-01", digest))
+        record = "components/api/interfaces/auth/interface.md"
+        invalid = "Item Architecture binding is invalid: "
+        exceeds = "Item Architecture delta is unsealed or exceeds approved claims"
+        cases = {
+            "missing_delta": (lambda root: (root / "_ledger/item-deltas/AUTH-01.json").unlink(),
+                              lambda root: invalid + "[Errno 2] No such file or directory: "
+                                                     f"'{root / '_ledger/item-deltas/AUTH-01.json'}'"),
+            "stale_record": (lambda root: (root / record).write_text(
+                (root / record).read_text(encoding="utf-8") + "\nChanged after seal.\n", encoding="utf-8"),
+                lambda root: invalid + "architecture Item delta is stale"),
+            "missing_seal": (lambda root: (root / "_ledger/records/IFC-001/r1.json").unlink(),
+                             lambda root: "Item Architecture sealed records are invalid: "
+                                          f"{record} sealed revision lacks an immutable ledger snapshot"),
+            "unsealed_forgery": (lambda root: (root / record).write_text((root / record).read_text(
+                encoding="utf-8").replace("revision_state: sealed", "revision_state: draft"), encoding="utf-8"),
+                lambda root: exceeds),
+            "unclaimed_component": (lambda root: self.write_record(root, "components/other/component.md", {
+                "type": "architecture-component", "title": "other", "record_id": "HUB-other", "component_ref": "other",
+                "derives_from": ["solution-component:other"], "tags": ["doc/architecture-component"]}),
+                lambda root: exceeds),
+            "unclaimed_kind": (lambda root: self.write_record(root, "components/api/runtime/runtime/runtime.md", {
+                "type": "runtime-view", "title": "runtime", "record_id": "RUN-001", "tags": ["doc/runtime-view"],
+                "component_ref": "api"}),
+                lambda root: exceeds),
+        }
+        for label, (tamper, refusal) in cases.items():
+            with self.subTest(label=label):
+                root, digest = self.sealed_architecture()
+                tamper(root)
+                if label in {"unsealed_forgery", "unclaimed_component", "unclaimed_kind"}:
+                    digest = self.restamp(root)
+                with self.assertRaisesRegex(RuntimeError, "^" + re.escape(refusal(root)) + "$"):
+                    delivery_git.require_architecture_delta(root, props, "AUTH-01", digest)
+
+    def test_item_product_paths_must_lie_within_the_item_path_claims(self):
+        """A claim covers its exact path and every path below it, and nothing beside it."""
+        delivery_git.require_paths_within_claims({"src/auth.py"}, ["src/auth.py"])
+        delivery_git.require_paths_within_claims({"src/auth/login.py", "src/auth"}, ["src/auth"])
+        for label, changed, outside in (
+            ("added", {"src/session.py"}, "src/session.py"),
+            ("beside the claim", {"src/auth.py.orig", "src/auth.py"}, "src/auth.py.orig"),
+            ("deleted", {"README.md"}, "README.md"),
+            ("several", {"src/z.py", "docs/a.md", "src/auth.py"}, "docs/a.md, src/z.py"),
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(self.refused_finding(lambda: delivery_git.require_paths_within_claims(
+                    changed, ["src/auth.py"])), ("DELIVERY_PATH_CLAIM_EXCEEDED",
+                                                 "the Item's product change lies outside its path claims: " + outside))
+
+    def test_every_verb_that_would_change_a_merged_delivery_refuses_before_any_git_process(self):
+        """A merged Delivery is closed: each verb that would change it asks first and refuses with
+        DELIVERY_POST_MERGE_TRANSITION before it starts a Git process."""
+        self.assertIsNone(delivery_git.require_unmerged("DLV-001", False))
+        closed = ("DELIVERY_POST_MERGE_TRANSITION", "the target has merged the PR of DLV-001, so the Delivery is closed")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.require_unmerged("DLV-001", True)), closed)
+        root = Path(tempfile.gettempdir()) / "merged-delivery-never-read"
+        asked = []
+
+        def merged(checked_root, delivery_id, remote="origin"):
+            asked.append((checked_root, delivery_id, remote))
+            delivery_git.require_unmerged(delivery_id, True)
+
+        no_process = AssertionError("a merged Delivery started a process")
+        with mock.patch.object(delivery_git, "main_worktree", side_effect=lambda _path: root), \
+                mock.patch.object(delivery_git, "refuse_merged_delivery", side_effect=merged), \
+                mock.patch.object(subprocess, "run", side_effect=no_process), \
+                mock.patch.object(subprocess, "Popen", side_effect=no_process):
+            for verb, change in (
+                ("invalidate-delivery-review", lambda: delivery_git.invalidate_delivery_review(
+                    root, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)),
+                ("cancel-delivery", lambda: delivery_git.cancel_delivery(root, "DLV-001", "Withdrawn after the merge")),
+                ("reopen-item", lambda: delivery_git.reopen_item(root, "DLV-001", "AUTH-01")),
+                ("begin-plan-revision", lambda: delivery_git.begin_plan_revision(root, "DLV-001")),
+                ("refresh-target", lambda: delivery_git.refresh_target(root, "DLV-001")),
+            ):
+                with self.subTest(verb=verb):
+                    asked.clear()
+                    self.assertEqual(self.refused_finding(change), closed)
+                    self.assertEqual(asked, [(root, "DLV-001", "origin")])
+
+    def test_a_published_review_that_cannot_say_whether_the_pr_was_recorded_is_unknown(self):
+        """Only a published Review with pull_request_url records the PR; while the published Delivery
+        awaits its merge, a missing Review or one without that URL leaves the merge state unknown."""
+        ref = delivery_git.canonical_refs("DLV-001")["integration"]
+        review = DECISION_PACKAGE + "/delivery-review.md"
+        url = "https://github.com/agentrof/example/pull/17"
+        self.assertTrue(delivery_git.review_records_pr(ref, review, {"pull_request_url": url}, "awaiting_merge"))
+        for recorded, status in (({"status": "approved"}, "review"), (None, "execution_approved"), ({}, None)):
+            self.assertFalse(delivery_git.review_records_pr(ref, review, recorded, status))
+        reached = ", but a Delivery reaches awaiting_merge only with its PR recorded there"
+        for name, recorded, finding in (
+                ("without its URL", {"status": "approved", "reviewed_commit": "a" * 40}, "records no pull_request_url"),
+                ("deleted", None, "is missing")):
+            with self.subTest(review=name):
+                self.assertEqual(self.refused_finding(lambda: delivery_git.review_records_pr(
+                    ref, review, recorded, "awaiting_merge")), (
+                    "DELIVERY_COORDINATION_CORRUPT", "Delivery merge state cannot be evaluated: "
+                    f"{review} on agentrof/deliveries/dlv-001 {finding}{reached}"))
+
+    def test_claim_refuses_a_story_another_delivery_holds_or_a_merged_delivery_delivered(self):
+        """A merged Delivery keeps no Item ref, so the Story it delivered is refused from its merged
+        package; an Item ref names the Delivery that holds the claim (#286, #288)."""
+        self.assertIsNone(delivery_git.require_claimable("AUTH-01", "", "", {"AUTH-02": "DLV-001"}))
+        for label, claimed, holder, delivered, message in (
+            ("delivered", "", "", {"AUTH-01": "DLV-001"}, "story is already delivered by DLV-001: AUTH-01"),
+            ("claimed", "a" * 40, "DLV-001", {}, "story is already claimed by DLV-001: AUTH-01"),
+            ("claimed without a holder", "a" * 40, "", {}, "story is already claimed by another Delivery: AUTH-01"),
+            ("claimed and delivered", "a" * 40, "DLV-008", {"AUTH-01": "DLV-001"},
+             "story is already claimed by DLV-008: AUTH-01"),
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(self.refused_finding(lambda: delivery_git.require_claimable(
+                    "AUTH-01", claimed, holder, delivered)), ("DELIVERY_CLAIM_CONFLICT", message))
+
+    def test_reservation_takes_over_only_an_idle_fence_no_other_ref_holds(self):
+        """A reservation takes over only an idle open Fence that carries the approved Governance while
+        no other Delivery or Slot holds it; each other state refuses with its reason (#315)."""
+        governance, intent = "sha256:" + "4" * 64, "sha256:" + "1" * 64
+        idle = {"Mode": "open", "Barrier-Kind": "none", "Source-Intent": "none", "Target-Update-Intent": "none",
+                "Governance-Hash": governance}
+        self.assertIsNone(delivery_git.require_fence_takeover(idle, lambda: "", lambda: governance))
+
+        def unlisted():
+            raise AssertionError("a busy Fence is refused before the remote is listed")
+
+        busy = "reservation requires an idle open Fence, not one with "
+        for fence, listed, finding in (
+            ({"Mode": "governance"}, unlisted, ("DELIVERY_REF_COLLISION", busy + "Mode governance")),
+            ({"Barrier-Kind": "plan-revision", "Barrier-Epoch": "e" * 22}, unlisted,
+             ("DELIVERY_REF_COLLISION", busy + "Barrier-Kind plan-revision")),
+            ({"Source-Intent": intent}, unlisted, ("DELIVERY_REF_COLLISION", busy + "Source-Intent " + intent)),
+            ({"Target-Update-Intent": intent}, unlisted,
+             ("DELIVERY_REF_COLLISION", busy + "Target-Update-Intent " + intent)),
+            ({}, lambda: "a" * 40 + "\trefs/heads/agentrof/deliveries/dlv-001",
+             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/deliveries/dlv-001")),
+            ({}, lambda: "a" * 40 + "\trefs/heads/agentrof/slots/001",
+             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/slots/001")),
+            ({"Governance-Hash": "sha256:" + "2" * 64}, lambda: "",
+             ("DELIVERY_FENCE_GOVERNANCE", "the Fence does not carry the approved Governance; "
+                                           "apply it with apply-governance before reserving")),
+        ):
+            with self.subTest(finding=finding[1]):
+                self.assertEqual(self.refused_finding(lambda: delivery_git.require_fence_takeover(
+                    {**idle, **fence}, listed, lambda: governance)), finding)
+
+    def test_a_cancelled_delivery_refuses_every_verb_that_would_continue_it(self):
+        """A cancellation is final: nothing publishes, claims, refreshes, revises, bars or upgrades
+        the Delivery its Integration records as cancelled, whatever the checkout's delivery.md says.
+        The status is read from delivery.md at the Integration commit; each verb's call is proven
+        end to end by the real cancelled-Delivery tests."""
+        for status in ("execution_approved", "scope_approved", None):
+            self.assertIsNone(delivery_git.require_not_cancelled(status, "claim-items"))
+        root = Path(tempfile.gettempdir()) / "cancelled-delivery-never-read"
+        directory = root / DECISION_PACKAGE
+        read = []
+
+        def published(checked_root, oid, path, split):
+            read.append((checked_root, oid, path))
+            return {"status": "cancelled"}, ""
+
+        with mock.patch.object(delivery_git, "split_remote_note", side_effect=published):
+            for verb in ("publish-execution-plan", "claim-items", "refresh-target", "begin-plan-revision",
+                         "quiesce-upgrade", "upgrade-target-merge", "revise-unclaimed-scope"):
+                with self.subTest(verb=verb):
+                    read.clear()
+                    self.assertEqual(self.refused_finding(
+                        lambda: delivery_git.refuse_cancelled_delivery(root, directory, "a" * 40, verb)), (
+                        "DELIVERY_CANCELLATION_INVALID",
+                        f"the published Delivery is cancelled and a cancellation is final, so {verb} cannot continue it; "
+                        "its cancellation Review reaches the target through its PR"))
+                    self.assertEqual(read, [(root, "a" * 40, DECISION_PACKAGE + "/delivery.md")])
+
+    def test_target_refresh_refuses_a_changed_pinned_input(self):
+        """A target copy of a pinned Story, Definition of Done or Operation contract must keep its
+        approved status and the pinned hash, both recorded and recomputed from its content."""
+        pinned = "sha256:" + "6" * 64
+        for kind, path, status in (
+            ("story", "workspace/docs/backlog/epics/delivery-fixture/stories/auth-01/story.md", "planned"),
+            ("operation", "workspace/docs/operation/verification-contract.md", "approved"),
+            ("dod", "workspace/docs/delivery/definition-of-done.md", "approved"),
+        ):
+            self.assertIsNone(delivery_git.require_pinned_input(
+                path, {"status": status, "source_hash": pinned}, pinned, pinned, status))
+            for change, props, digest in (
+                ("content", {"status": status, "source_hash": pinned}, "sha256:" + "7" * 64),
+                ("status", {"status": "draft", "source_hash": pinned}, pinned),
+                ("recorded hash", {"status": status, "source_hash": "sha256:" + "7" * 64}, pinned),
+            ):
+                with self.subTest(kind=kind, change=change):
+                    self.assertEqual(self.refused_finding(lambda: delivery_git.require_pinned_input(
+                        path, props, digest, pinned, status)), (
+                        "DELIVERY_TARGET_SOURCE_VIOLATION",
+                        "target changed a pinned source or Operation receipt: " + path))
+
+    def test_publication_refuses_an_approval_or_contract_the_integration_moved_past(self):
+        """A checkout's earlier approval, or one re-approved from it, never replaces the plan that
+        revised it, and a pinned contract gives way only to the same approval or a later revision (#322)."""
+        contract = "workspace/docs/operation/verification-contract.md"
+        kinds = {contract: "verification", "workspace/docs/operation/environment-contract.md": "environment"}
+        published = {"plan_hash": "sha256:" + "2" * 64, "source_hash": "sha256:" + "b" * 64}
+        held = {contract: {"status": "approved", "revision": 2, "source_hash": "sha256:" + "c" * 64}}
+        same = {contract: dict(held[contract])}
+        remedy = DeliveryGitTests.SUPERSEDED_REMEDY
+        holds = f"the Integration holds execution plan {published['plan_hash']} and the Verification Contract approved at revision 2"
+        for label, local, contracts, local_contracts in (
+            ("same plan", {"plan_hash": published["plan_hash"]}, held, same),
+            ("superseding approval", {"plan_hash": "sha256:" + "3" * 64,
+                                      "superseded_plan_approvals": [published["source_hash"]]}, held, same),
+            ("later revision", {"plan_hash": published["plan_hash"]}, held,
+             {contract: {"status": "approved", "revision": 3, "source_hash": "sha256:" + "d" * 64}}),
+            ("first publication", {"plan_hash": "sha256:" + "1" * 64}, {contract: None}, {}),
+        ):
+            with self.subTest(accepted=label):
+                self.assertIsNone(delivery_git.require_unsuperseded_approval(
+                    kinds, None if label == "first publication" else published, local, contracts, local_contracts.get))
+        for label, local, local_contracts, message in (
+            ("earlier approval", {"plan_hash": "sha256:" + "1" * 64, "superseded_plan_approvals": []}, {},
+             f"{holds}, which this checkout's approval of execution plan sha256:{'1' * 64} does not supersede; {remedy}"),
+            ("re-approved earlier approval", {"plan_hash": "sha256:" + "4" * 64,
+                                              "superseded_plan_approvals": ["sha256:" + "a" * 64]}, {},
+             f"{holds}, which this checkout's approval of execution plan sha256:{'4' * 64} does not supersede; {remedy}"),
+            ("revision 1", {"plan_hash": published["plan_hash"]},
+             {contract: {"status": "approved", "revision": 1, "source_hash": "sha256:" + "e" * 64}},
+             f"{holds}, which this checkout would replace with its approved revision 1; {remedy}"),
+            ("another revision 2", {"plan_hash": published["plan_hash"]},
+             {contract: {"status": "approved", "revision": 2, "source_hash": "sha256:" + "f" * 64}},
+             f"{holds}, which this checkout would replace with a different approved revision 2; {remedy}"),
+        ):
+            with self.subTest(refused=label):
+                self.assertEqual(self.refused_finding(lambda: delivery_git.require_unsuperseded_approval(
+                    kinds, published, local, held, local_contracts.get)), ("DELIVERY_PLAN_SUPERSEDED", message))
+        self.assertEqual(self.refused_finding(lambda: delivery_git.require_unsuperseded_approval(
+            kinds, published, {"plan_hash": "sha256:" + "1" * 64}, {contract: None}, {}.get)), (
+            "DELIVERY_PLAN_SUPERSEDED",
+            f"the Integration holds execution plan {published['plan_hash']} and no Verification Contract, which this "
+            f"checkout's approval of execution plan sha256:{'1' * 64} does not supersede; {remedy}"))
 
 
 # Changing an environment or any setup callable cannot silently reuse a seed
@@ -6379,7 +6977,8 @@ _PR_FIXTURE_BINDINGS.extend([
 _PR_FIXTURE_METHODS = {name: getattr(DeliveryGitTests, name) for name in (
     "build_pre_start_fixture", "make_project", "reserve_scope", "author_execution_topology",
     "approve_verification_contract", "approve_governance",
-    "build_execution_fixture", "prepare_execution_with_draft_reserved_contracts",
+    "build_execution_fixture", "prepare_execution_with_draft_reserved_contracts", "execution_fixture",
+    "build_stamped_architecture_item",
 )}
 # The PR intent seed also runs the Item's evidence, push, integration and Review steps.
 _PR_INTENT_BINDINGS = [

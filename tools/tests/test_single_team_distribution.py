@@ -5,11 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -23,14 +28,49 @@ import fixtures  # noqa: E402
 import git_fixture  # noqa: E402
 
 
-class SingleTeamDistributionTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
-        fixtures.make_valid_root(self.root)
+_SHARED_ROOTS: dict[str, Path] = {}
+_SHARED_DIRECTORIES: list[tempfile.TemporaryDirectory] = []
 
-    def tearDown(self) -> None:
-        self.temporary.cleanup()
+
+def tearDownModule() -> None:
+    for temporary in _SHARED_DIRECTORIES:
+        temporary.cleanup()
+    _SHARED_DIRECTORIES.clear()
+    _SHARED_ROOTS.clear()
+
+
+def copy_root(source: Path, target: Path, *, with_dist: bool = True) -> Path:
+    """An independent copy of a built root, modes kept; without dist/ it is sources only."""
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        return {"dist"} if not with_dist and Path(directory) == source else set()
+
+    shutil.copytree(source, target, symlinks=True, ignore=ignore)
+    return target
+
+
+def shared_root(variant: str = "pristine") -> Path:
+    """A built marketplace root made once per process. Tests only read it;
+    a test that changes a root works on its own ``copy_root``."""
+    if variant not in _SHARED_ROOTS:
+        temporary = tempfile.TemporaryDirectory()
+        _SHARED_DIRECTORIES.append(temporary)
+        root = Path(temporary.name) / "marketplace"
+        if variant == "pristine":
+            fixtures.make_valid_root(root)
+        else:
+            copy_root(shared_root(), root, with_dist=False)
+            SHARED_VARIANTS[variant](root)
+            build_distributions.replace_generated(root, root / "dist")
+        _SHARED_ROOTS[variant] = root
+    return _SHARED_ROOTS[variant]
+
+
+@integration
+class SingleTeamDistributionTests(unittest.TestCase):
+    """Contracts read from the shared build, which no test here changes."""
+
+    def setUp(self) -> None:
+        self.root = shared_root()
 
     def test_session_marker_publishes_exact_writer_invocation_binding(self):
         repository = TESTS_DIR.parents[1]
@@ -206,6 +246,92 @@ class SingleTeamDistributionTests(unittest.TestCase):
             build_distributions.build(self.root, second)
             self.assertEqual(build_distributions.compare_dirs(first, second), [])
 
+    def test_snapshot_paths_use_case_sensitive_posix_order(self):
+        paths = build_distributions.snapshot_files(self.root, "plugins")
+        relative = [path.relative_to(self.root).as_posix() for path in paths]
+        self.assertEqual(relative, sorted(relative))
+        self.assertNotEqual(relative, sorted(relative, key=str.casefold))
+
+    def test_canonical_source_rejects_symlinked_surface_roots(self):
+        for surface_name in ("plugins", "platforms"):
+            with self.subTest(surface=surface_name), tempfile.TemporaryDirectory() as tmp:
+                root = copy_root(self.root, Path(tmp) / "repository", with_dist=False)
+                surface = root / surface_name
+                moved = root / "assets" / f"moved-{surface_name}"
+                moved.parent.mkdir()
+                surface.rename(moved)
+                try:
+                    surface.symlink_to(moved, target_is_directory=True)
+                except OSError as exc:
+                    self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
+                with self.assertRaisesRegex(ValueError, "real directory"):
+                    build_distributions.validate_canonical(root)
+
+    def test_issue_reporting_is_external_and_has_no_project_artifacts(self):
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host):
+                package = self.root / "dist" / host / fixtures.PLUGIN
+                wrapper = (
+                    package / "skills/issue-report/SKILL.md"
+                ).read_text(encoding="utf-8")
+                setup_wrapper = (
+                    package / "skills/setup/SKILL.md"
+                ).read_text(encoding="utf-8")
+                canonical = (
+                    package / "skill-content/issue-report/SKILL.md"
+                ).read_text(encoding="utf-8")
+                self.assertIn("project_scope: external", canonical)
+                self.assertNotIn("workspace config", wrapper)
+                self.assertIn("workspace config", setup_wrapper)
+                self.assertTrue((package / "scripts/file_issue.py").is_file())
+
+    def test_fixture_copy_ignores_python_runtime_caches(self):
+        with tempfile.TemporaryDirectory() as source_dir, \
+                tempfile.TemporaryDirectory() as target_dir:
+            source_root = Path(source_dir)
+            plugin_root = source_root / "plugins" / fixtures.PLUGIN
+            script = plugin_root / "scripts" / "runner.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("print('fixture')\n", encoding="utf-8")
+            cache = script.parent / "__pycache__"
+            cache.mkdir()
+            (cache / "runner.cpython-39.pyc").write_bytes(b"cache")
+
+            with mock.patch.object(fixtures, "REAL_REPOSITORY", source_root):
+                fixtures.copy(f"plugins/{fixtures.PLUGIN}", Path(target_dir))
+
+            copied = Path(target_dir) / "plugins" / fixtures.PLUGIN
+            self.assertTrue((copied / "scripts/runner.py").is_file())
+            self.assertFalse((copied / "scripts/__pycache__").exists())
+
+    def test_agent_metadata_is_projected_for_each_host(self):
+        canonical = self.root / "plugins" / fixtures.PLUGIN / "agents"
+        for source in canonical.glob("*.md"):
+            name = source.stem
+            claude = (
+                self.root / "dist/claude" / fixtures.PLUGIN / "agents" / source.name
+            ).read_text(encoding="utf-8")
+            codex = (
+                self.root / "dist/codex" / fixtures.PLUGIN / "agents" / source.name
+            ).read_text(encoding="utf-8")
+            self.assertIn(f"name: {name}", claude)
+            self.assertIn(f"name: {name}", codex)
+            self.assertIn("model:", claude)
+            self.assertNotIn("reasoning:", claude)
+            self.assertNotIn("reasoning:", codex)
+
+
+@integration
+class CopiedDistributionTests(unittest.TestCase):
+    """Contracts that change a built root, each on its own copy of the shared build."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = copy_root(shared_root(), Path(self.temporary.name) / "marketplace")
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
     def git(self, *args: str) -> str:
         return subprocess.run(
             ["git", *args], cwd=self.root, check=True,
@@ -227,6 +353,8 @@ class SingleTeamDistributionTests(unittest.TestCase):
         # A merge queue merges each queued pull request onto the ones ahead of
         # it without rebuilding dist/ (#311): committed packages of changes to
         # different files must merge into the rebuild of the merged sources.
+        # One real merge of a change beside an added file; the provenance merge
+        # of the other neighbour pairs is a case of the documented conflicts test.
         git_fixture.init_repository(self.root, initial_branch="main")
         self.git("config", "user.name", "Distribution Test")
         self.git("config", "user.email", "distribution@example.test")
@@ -238,8 +366,8 @@ class SingleTeamDistributionTests(unittest.TestCase):
         inventory = sorted(json.loads(
             (package / build_distributions.PROVENANCE).read_text(encoding="utf-8")
         )["files"])
-        first, second, added = next(
-            (left, right, left[:-len(".py")] + "_queued.py")
+        first, added = next(
+            (left, left[:-len(".py")] + "_queued.py")
             for left, right in zip(inventory, inventory[1:])
             if left.startswith("scripts/") and left.endswith(".py")
             and left < left[:-len(".py")] + "_queued.py" < right
@@ -249,91 +377,18 @@ class SingleTeamDistributionTests(unittest.TestCase):
                 for name in (left, right)
             )
         )
-        for left, right in ((first, second), (first, added), (second, added)):
-            with self.subTest(left=left, right=right):
-                queued = self.commit_source_change(base, right)
-                self.commit_source_change(base, left)
-                merged = subprocess.run(
-                    ["git", "merge", "--no-ff", "-q", "-m", "queued merge", queued],
-                    cwd=self.root, capture_output=True, text=True, check=False,
-                )
-                if merged.returncode:
-                    self.git("merge", "--abort")
-                self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
-                self.assertEqual(
-                    build_distributions.check(self.root, self.root / "dist"), [],
-                )
-
-    def test_documented_provenance_conflicts_are_the_ones_git_reports(self):
-        # #311: the provenance serialization and its four descriptions must
-        # name every case in which two queued PRs conflict in dist/.
-        base = {name: "0" * 64 for name in "abcdef"}
-
-        def put(name: str, digest: str):
-            return lambda files: {**files, name: digest * 64}
-
-        def drop(name: str):
-            return lambda files: {key: value for key, value in files.items() if key != name}
-
-        cases = (
-            ("change neighbours", put("b", "1"), put("c", "2"), False),
-            ("removal beside a change", drop("c"), put("b", "2"), False),
-            ("removal before a change", drop("c"), put("d", "2"), False),
-            ("removals one entry apart", drop("b"), drop("d"), False),
-            ("last removed, earlier change", drop("f"), put("d", "2"), False),
-            ("adds at different positions", put("bb", "1"), put("cc", "2"), False),
-            ("add after the last, earlier change", put("g", "1"), put("e", "2"), False),
-            ("change one file twice", put("c", "1"), put("c", "2"), True),
-            ("adds at one sort position", put("bb", "1"), put("bc", "2"), True),
-            ("add after a changed last entry", put("g", "1"), put("f", "2"), True),
-            ("removal next to a removal", drop("b"), drop("c"), True),
-            ("removal next to an add before it", drop("c"), put("bb", "2"), True),
-            ("removal next to an add after it", drop("c"), put("cc", "2"), True),
-            ("last removed, entry before changed", drop("f"), put("e", "2"), True),
+        queued = self.commit_source_change(base, added)
+        self.commit_source_change(base, first)
+        merged = subprocess.run(
+            ["git", "merge", "--no-ff", "-q", "-m", "queued merge", queued],
+            cwd=self.root, capture_output=True, text=True, check=False,
         )
-
-        def provenance(files: dict) -> str:
-            return build_distributions.render_provenance({"component": "t", "files": files,
-                                                          "schema_version": 4})
-
-        with git_fixture.temporary_directory() as temporary:
-            for index, (name, left, right, conflicts) in enumerate(cases):
-                root = Path(temporary) / str(index)
-                git_fixture.init_repository(root, initial_branch="main")
-
-                def git(*args: str) -> subprocess.CompletedProcess:
-                    return subprocess.run(
-                        ["git", "-c", "user.name=Fixture", "-c", "user.email=f@example.invalid",
-                         "-c", "commit.gpgsign=false", *args],
-                        cwd=root, capture_output=True, text=True, check=False)
-
-                path = root / build_distributions.PROVENANCE
-                for branch, files in (("main", base), ("left", left(base)), ("right", right(base))):
-                    if branch != "main":
-                        git("checkout", "-q", "-b", branch, "main")
-                    path.write_text(provenance(files), encoding="utf-8")
-                    git("add", "--all")
-                    self.assertEqual(git("commit", "-qm", branch).returncode, 0, name)
-                merged = git("merge", "-q", "--no-edit", "left")
-                with self.subTest(case=name):
-                    self.assertEqual(bool(merged.returncode), conflicts, merged.stdout)
-                    if not conflicts:
-                        self.assertEqual(path.read_text(encoding="utf-8"),
-                                         provenance(right(left(base))))
-        documents = {
-            "render_provenance": build_distributions.render_provenance.__doc__,
-            **{relative: (fixtures.REAL_REPOSITORY / relative).read_text(encoding="utf-8")
-               for relative in ("docs/maintainer-operations-protocol.md",
-                                "docs/upgrade-protocol.md")},
-        }
-        for where, text in documents.items():
-            text = " ".join(text.split())
-            with self.subTest(document=where):
-                for conflict in ("adds at one sort position", "an add after a changed last entry",
-                                 "a removal next to another removal or an add",
-                                 "a removal of the last entry beside a change to the entry"
-                                 " before it"):
-                    self.assertIn(conflict, text)
+        if merged.returncode:
+            self.git("merge", "--abort")
+        self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
+        self.assertEqual(
+            build_distributions.check(self.root, self.root / "dist"), [],
+        )
 
     def test_snapshot_normalizes_checkout_only_eol_drift(self):
         # Exercise the snapshot normalizer independently of the repository's
@@ -405,38 +460,6 @@ class SingleTeamDistributionTests(unittest.TestCase):
                 )
         self.assertEqual(before_staging, after_staging)
 
-    def test_snapshot_paths_use_case_sensitive_posix_order(self):
-        paths = build_distributions.snapshot_files(self.root, "plugins")
-        relative = [path.relative_to(self.root).as_posix() for path in paths]
-        self.assertEqual(relative, sorted(relative))
-        self.assertNotEqual(relative, sorted(relative, key=str.casefold))
-
-    def test_snapshot_framing_separates_binary_file_boundaries(self):
-        with tempfile.TemporaryDirectory() as other_dir:
-            other = Path(other_dir) / "repository"
-            fixtures.make_valid_root(other)
-            first_relative = Path(
-                f"plugins/{fixtures.PLUGIN}/skill-content/zz-collision-a.bin"
-            )
-            second_relative = Path(
-                f"plugins/{fixtures.PLUGIN}/skill-content/zz-collision-b.bin"
-            )
-            first_payload = (
-                b"prefix\0" + second_relative.as_posix().encode("utf-8")
-                + b"\0suffix"
-            )
-            first_path = self.root / first_relative
-            second_first_path = other / first_relative
-            second_path = other / second_relative
-            first_path.write_bytes(first_payload)
-            second_first_path.write_bytes(b"prefix")
-            second_path.write_bytes(b"suffix")
-
-            self.assertNotEqual(
-                build_distributions.marketplace_snapshot(self.root)["build_id"],
-                build_distributions.marketplace_snapshot(other)["build_id"],
-            )
-
     def test_binary_payload_survives_autocrlf_checkout_and_build(self):
         relative = Path(
             "skill-content/ui-ux-design/data/binary-contract.pdf"
@@ -469,55 +492,6 @@ class SingleTeamDistributionTests(unittest.TestCase):
                 packaged = output / host / fixtures.PLUGIN / relative
                 self.assertEqual(packaged.read_bytes(), payload)
 
-    def test_snapshot_and_provenance_bind_the_package_mode_contract(self):
-        relative = "scripts/backlog_compile.py"
-        source = self.root / "plugins" / fixtures.PLUGIN / relative
-        original_mode = source.stat().st_mode
-        if not original_mode & 0o111:
-            self.skipTest("fixture filesystem has no executable mode")
-        before = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        baseline = json.loads((
-            self.root / "dist" / "claude" / fixtures.PLUGIN
-            / build_distributions.PROVENANCE
-        ).read_text(encoding="utf-8"))
-        self.assertIn(relative, baseline["executables"])
-
-        source.chmod(original_mode & ~stat.S_IXUSR)
-        checkout_mode_only = build_distributions.marketplace_snapshot(
-            self.root
-        )["build_id"]
-        self.assertEqual(before, checkout_mode_only)
-        mode_contract = self.root / "package-modes.json"
-        mode_contract.write_bytes((json.dumps({
-            "schema_version": 1,
-            "packages": {fixtures.PLUGIN: {"executables": []}},
-        }, indent=2) + "\n").encode("utf-8"))
-        after = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.assertNotEqual(before, after)
-        with tempfile.TemporaryDirectory() as output_dir:
-            output = Path(output_dir) / "dist"
-            build_distributions.build(self.root, output)
-            changed = json.loads((
-                output / "claude" / fixtures.PLUGIN
-                / build_distributions.PROVENANCE
-            ).read_text(encoding="utf-8"))
-        self.assertNotIn(relative, changed["executables"])
-
-    def test_distribution_check_binds_executable_modes(self):
-        source = (
-            self.root / "dist" / "claude" / fixtures.PLUGIN
-            / "scripts/backlog_compile.py"
-        )
-        original_mode = source.stat().st_mode
-        if not original_mode & 0o111:
-            self.skipTest("fixture filesystem has no executable mode")
-        source.chmod(original_mode & ~stat.S_IXUSR)
-        problems = build_distributions.check(self.root, self.root / "dist")
-        self.assertTrue(
-            any("out of sync executable mode" in problem for problem in problems),
-            problems,
-        )
-
     def test_distribution_check_reads_bytes_not_shallow_metadata(self):
         target = (
             self.root / "dist" / "claude" / fixtures.PLUGIN
@@ -532,21 +506,6 @@ class SingleTeamDistributionTests(unittest.TestCase):
         problems = build_distributions.check(self.root, self.root / "dist")
         self.assertTrue(
             any(str(target) in problem and "out of sync" in problem
-                for problem in problems),
-            problems,
-        )
-
-    def test_distribution_check_rejects_python_runtime_cache(self):
-        target = (
-            self.root / "dist" / "claude" / fixtures.PLUGIN
-            / "__pycache__" / "payload.cpython-39.pyc"
-        )
-        target.parent.mkdir()
-        target.write_bytes(b"unattested runtime cache")
-
-        problems = build_distributions.check(self.root, self.root / "dist")
-        self.assertTrue(
-            any(str(target.parent) in problem and "stale" in problem
                 for problem in problems),
             problems,
         )
@@ -600,85 +559,205 @@ class SingleTeamDistributionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symbolic link"):
             build_distributions.validate_canonical(self.root)
 
-    def test_canonical_source_rejects_symlinked_surface_roots(self):
-        for surface_name in ("plugins", "platforms"):
-            with self.subTest(surface=surface_name), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp) / "repository"
-                fixtures.make_valid_root(root)
-                surface = root / surface_name
-                moved = root / "assets" / f"moved-{surface_name}"
-                moved.parent.mkdir()
-                surface.rename(moved)
-                try:
-                    surface.symlink_to(moved, target_is_directory=True)
-                except OSError as exc:
-                    self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
-                with self.assertRaisesRegex(ValueError, "real directory"):
-                    build_distributions.validate_canonical(root)
+
+class DistributionRuleTests(unittest.TestCase):
+    """Builder rules proven by calling the deciding function on minimal input."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.base = Path(self.temporary.name)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def generated_pair(self) -> tuple[Path, Path]:
+        """Two equal generated trees: the expected rebuild and the committed one."""
+        trees = []
+        for name in ("expected", "actual"):
+            package = self.base / name / "claude" / fixtures.PLUGIN
+            (package / "scripts").mkdir(parents=True)
+            (package / "constitution.md").write_bytes(b"# Constitution\n")
+            script = package / "scripts" / "backlog_compile.py"
+            script.write_bytes(b"print('compile')\n")
+            script.chmod(0o755)
+            trees.append(self.base / name)
+        self.assertEqual(build_distributions.compare_dirs(*trees), [])
+        return trees[0], trees[1]
+
+    def test_distribution_check_binds_executable_modes(self):
+        expected, actual = self.generated_pair()
+        source = actual / "claude" / fixtures.PLUGIN / "scripts/backlog_compile.py"
+        original_mode = source.stat().st_mode
+        if not original_mode & 0o111:
+            self.skipTest("fixture filesystem has no executable mode")
+        source.chmod(original_mode & ~stat.S_IXUSR)
+        problems = build_distributions.compare_dirs(expected, actual)
+        self.assertTrue(
+            any("out of sync executable mode" in problem for problem in problems),
+            problems,
+        )
+
+    def test_distribution_check_rejects_python_runtime_cache(self):
+        expected, actual = self.generated_pair()
+        target = (
+            actual / "claude" / fixtures.PLUGIN
+            / "__pycache__" / "payload.cpython-39.pyc"
+        )
+        target.parent.mkdir()
+        target.write_bytes(b"unattested runtime cache")
+
+        problems = build_distributions.compare_dirs(expected, actual)
+        self.assertTrue(
+            any(str(target.parent) in problem and "stale" in problem
+                for problem in problems),
+            problems,
+        )
+
+    def snapshot_root(self, name: str, files: dict[str, bytes]) -> Path:
+        """A root holding only the surfaces ``marketplace_snapshot`` hashes."""
+        root = self.base / name
+        for relative, content in {
+            "package-modes.json": b"{}\n", "product.json": b"{}\n",
+            "versions.json": b"{}\n", **files,
+        }.items():
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_bytes(content)
+        (root / "platforms").mkdir(exist_ok=True)
+        return root
+
+    def test_snapshot_framing_separates_binary_file_boundaries(self):
+        first_relative = Path(
+            f"plugins/{fixtures.PLUGIN}/skill-content/zz-collision-a.bin"
+        )
+        second_relative = Path(
+            f"plugins/{fixtures.PLUGIN}/skill-content/zz-collision-b.bin"
+        )
+        first_payload = (
+            b"prefix\0" + second_relative.as_posix().encode("utf-8")
+            + b"\0suffix"
+        )
+        first = self.snapshot_root("repository", {first_relative.as_posix(): first_payload})
+        other = self.snapshot_root("other", {
+            first_relative.as_posix(): b"prefix", second_relative.as_posix(): b"suffix",
+        })
+
+        self.assertNotEqual(
+            build_distributions.marketplace_snapshot(first)["build_id"],
+            build_distributions.marketplace_snapshot(other)["build_id"],
+        )
+
+    @integration
+    def test_snapshot_and_provenance_bind_the_package_mode_contract(self):
+        relative = "scripts/backlog_compile.py"
+        root = copy_root(shared_root(), self.base / "marketplace", with_dist=False)
+        source = root / "plugins" / fixtures.PLUGIN / relative
+        original_mode = source.stat().st_mode
+        if not original_mode & 0o111:
+            self.skipTest("fixture filesystem has no executable mode")
+        before = build_distributions.marketplace_snapshot(root)["build_id"]
+        baseline = json.loads((
+            shared_root() / "dist" / "claude" / fixtures.PLUGIN
+            / build_distributions.PROVENANCE
+        ).read_text(encoding="utf-8"))
+        self.assertIn(relative, baseline["executables"])
+
+        source.chmod(original_mode & ~stat.S_IXUSR)
+        checkout_mode_only = build_distributions.marketplace_snapshot(
+            root
+        )["build_id"]
+        self.assertEqual(before, checkout_mode_only)
+        mode_contract = root / "package-modes.json"
+        mode_contract.write_bytes((json.dumps({
+            "schema_version": 1,
+            "packages": {fixtures.PLUGIN: {"executables": []}},
+        }, indent=2) + "\n").encode("utf-8"))
+        after = build_distributions.marketplace_snapshot(root)["build_id"]
+        self.assertNotEqual(before, after)
+        # A package's provenance lists exactly the executables this contract loads.
+        changed = build_distributions.load_package_executables(root, fixtures.PLUGIN)
+        self.assertNotIn(relative, changed)
 
     def test_python_runtime_caches_never_enter_distributions(self):
-        cache = self.root / "plugins" / fixtures.PLUGIN / "scripts/__pycache__"
+        source = self.base / "plugins" / fixtures.PLUGIN
+        (source / "scripts").mkdir(parents=True)
+        (source / "scripts" / "probe.py").write_bytes(b"print('probe')\n")
+        cache = source / "scripts/__pycache__"
         cache.mkdir(exist_ok=True)
         (cache / "probe.cpython-39.pyc").write_bytes(b"cache")
-        output = self.root / "cache-build"
-        build_distributions.build(self.root, output)
+        (source / "scripts" / "probe.pyc").write_bytes(b"cache")
+        output = self.base / "cache-build"
+        build_distributions.copy_canonical(source, output)
+        self.assertTrue((output / "scripts" / "probe.py").is_file())
         self.assertEqual(list(output.rglob("__pycache__")), [])
         self.assertEqual(list(output.rglob("*.pyc")), [])
 
-    def test_issue_reporting_is_external_and_has_no_project_artifacts(self):
-        for host in build_distributions.HOSTS:
-            with self.subTest(host=host):
-                package = self.root / "dist" / host / fixtures.PLUGIN
-                wrapper = (
-                    package / "skills/issue-report/SKILL.md"
-                ).read_text(encoding="utf-8")
-                setup_wrapper = (
-                    package / "skills/setup/SKILL.md"
-                ).read_text(encoding="utf-8")
-                canonical = (
-                    package / "skill-content/issue-report/SKILL.md"
-                ).read_text(encoding="utf-8")
-                self.assertIn("project_scope: external", canonical)
-                self.assertNotIn("workspace config", wrapper)
-                self.assertIn("workspace config", setup_wrapper)
-                self.assertTrue((package / "scripts/file_issue.py").is_file())
+    @integration
+    def test_documented_provenance_conflicts_are_the_ones_git_reports(self):
+        # #311: the provenance serialization and its four descriptions must
+        # name every case in which two queued PRs conflict in dist/.
+        base = {name: "0" * 64 for name in "abcdef"}
 
-    def test_fixture_copy_ignores_python_runtime_caches(self):
-        with tempfile.TemporaryDirectory() as source_dir, \
-                tempfile.TemporaryDirectory() as target_dir:
-            source_root = Path(source_dir)
-            plugin_root = source_root / "plugins" / fixtures.PLUGIN
-            script = plugin_root / "scripts" / "runner.py"
-            script.parent.mkdir(parents=True)
-            script.write_text("print('fixture')\n", encoding="utf-8")
-            cache = script.parent / "__pycache__"
-            cache.mkdir()
-            (cache / "runner.cpython-39.pyc").write_bytes(b"cache")
+        def put(name: str, digest: str):
+            return lambda files: {**files, name: digest * 64}
 
-            with mock.patch.object(fixtures, "REAL_REPOSITORY", source_root):
-                fixtures.copy(f"plugins/{fixtures.PLUGIN}", Path(target_dir))
+        def drop(name: str):
+            return lambda files: {key: value for key, value in files.items() if key != name}
 
-            copied = Path(target_dir) / "plugins" / fixtures.PLUGIN
-            self.assertTrue((copied / "scripts/runner.py").is_file())
-            self.assertFalse((copied / "scripts/__pycache__").exists())
+        cases = (
+            ("change neighbours", put("b", "1"), put("c", "2"), False),
+            ("change beside an add after it", put("b", "1"), put("bb", "2"), False),
+            ("change beside an add before it", put("c", "1"), put("bb", "2"), False),
+            ("removal beside a change", drop("c"), put("b", "2"), False),
+            ("removal before a change", drop("c"), put("d", "2"), False),
+            ("removals one entry apart", drop("b"), drop("d"), False),
+            ("last removed, earlier change", drop("f"), put("d", "2"), False),
+            ("adds at different positions", put("bb", "1"), put("cc", "2"), False),
+            ("add after the last, earlier change", put("g", "1"), put("e", "2"), False),
+            ("change one file twice", put("c", "1"), put("c", "2"), True),
+            ("adds at one sort position", put("bb", "1"), put("bc", "2"), True),
+            ("add after a changed last entry", put("g", "1"), put("f", "2"), True),
+            ("removal next to a removal", drop("b"), drop("c"), True),
+            ("removal next to an add before it", drop("c"), put("bb", "2"), True),
+            ("removal next to an add after it", drop("c"), put("cc", "2"), True),
+            ("last removed, entry before changed", drop("f"), put("e", "2"), True),
+        )
 
-    def test_agent_metadata_is_projected_for_each_host(self):
-        canonical = self.root / "plugins" / fixtures.PLUGIN / "agents"
-        for source in canonical.glob("*.md"):
-            name = source.stem
-            claude = (
-                self.root / "dist/claude" / fixtures.PLUGIN / "agents" / source.name
-            ).read_text(encoding="utf-8")
-            codex = (
-                self.root / "dist/codex" / fixtures.PLUGIN / "agents" / source.name
-            ).read_text(encoding="utf-8")
-            self.assertIn(f"name: {name}", claude)
-            self.assertIn(f"name: {name}", codex)
-            self.assertIn("model:", claude)
-            self.assertNotIn("reasoning:", claude)
-            self.assertNotIn("reasoning:", codex)
+        def provenance(files: dict) -> str:
+            return build_distributions.render_provenance({"component": "t", "files": files,
+                                                          "schema_version": 4})
 
-
+        # git merge-file runs the three-way text merge a branch merge runs on
+        # the one provenance file both branches change.
+        for index, (name, left, right, conflicts) in enumerate(cases):
+            current, ancestor, other = (self.base / f"{index}-{side}" for side in
+                                        ("right", "base", "left"))
+            current.write_text(provenance(right(base)), encoding="utf-8")
+            ancestor.write_text(provenance(base), encoding="utf-8")
+            other.write_text(provenance(left(base)), encoding="utf-8")
+            merged = subprocess.run(
+                ["git", "merge-file", "-q", str(current), str(ancestor), str(other)],
+                capture_output=True, text=True, check=False)
+            with self.subTest(case=name):
+                self.assertGreaterEqual(merged.returncode, 0, merged.stderr)
+                self.assertLess(merged.returncode, 128, merged.stderr)
+                self.assertEqual(bool(merged.returncode), conflicts, merged.stdout)
+                if not conflicts:
+                    self.assertEqual(current.read_text(encoding="utf-8"),
+                                     provenance(right(left(base))))
+        documents = {
+            "render_provenance": build_distributions.render_provenance.__doc__,
+            **{relative: (fixtures.REAL_REPOSITORY / relative).read_text(encoding="utf-8")
+               for relative in ("docs/maintainer-operations-protocol.md",
+                                "docs/upgrade-protocol.md")},
+        }
+        for where, text in documents.items():
+            text = " ".join(text.split())
+            with self.subTest(document=where):
+                for conflict in ("adds at one sort position", "an add after a changed last entry",
+                                 "a removal next to another removal or an add",
+                                 "a removal of the last entry beside a change to the entry"
+                                 " before it"):
+                    self.assertIn(conflict, text)
 
 
 def shipped_models(host: str) -> dict:
@@ -758,14 +837,37 @@ def role_settings(text: str) -> list[str]:
     return [line for line in text.splitlines() if line.startswith("model")]
 
 
+def codex_fast_model() -> str:
+    """The Codex catalog model the high tier moves to in the codex_high_fast build."""
+    return catalog_model("codex", besides=(AUTO_MODELS["codex"]["high"][0],), effort="max")
+
+
+def edit_json(path: Path, mutate) -> None:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    mutate(data)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+# Shared builds of one source change each, read by several tests.
+SHARED_VARIANTS = {
+    "codex_high_fast": lambda root: edit_json(
+        build_distributions.execution_profile_path(root, "codex"),
+        lambda table: table["profiles"]["auto"].update(
+            high={"model": codex_fast_model(), "effort": "max"})),
+    "no_mechanical_switch": lambda root: edit_json(
+        root / "plugins" / fixtures.PLUGIN / REGISTRY,
+        lambda data: data["switches"].pop("mechanical_pass_tier")),
+}
+
+
+@integration
 class ExecutionProfileTests(unittest.TestCase):
     """Per-host catalogs pin each class; profile tables map tiers to a class
     and effort; inherit omits the model and keeps the effort."""
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name) / "marketplace"
-        fixtures.make_valid_root(self.root)
+        self.root = shared_root()
         self.tables = {
             host: build_distributions.execution_profile_path(self.root, host).read_bytes()
             for host in build_distributions.HOSTS
@@ -774,8 +876,6 @@ class ExecutionProfileTests(unittest.TestCase):
             host: build_distributions.model_catalog_path(self.root, host).read_bytes()
             for host in build_distributions.HOSTS
         }
-        self.project = Path(self.temporary.name) / "project"
-        git_fixture.init_repository(self.project, initial_branch="main")
         # No codex on PATH: apply keeps the pins it cannot check against the
         # CLI's catalog; tools/tests/test_model_fallback.py runs that check.
         self.no_codex = Path(self.temporary.name) / "no-codex"
@@ -783,6 +883,35 @@ class ExecutionProfileTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    @property
+    def project(self) -> Path:
+        project = Path(self.temporary.name) / "project"
+        if not project.exists():
+            git_fixture.init_repository(project, initial_branch="main")
+        return project
+
+    def use_copy(self, *, with_dist: bool = False) -> None:
+        """Point the test at its own copy of the shared root, which it may change."""
+        self.root = copy_root(shared_root(), Path(self.temporary.name) / "marketplace",
+                              with_dist=with_dist)
+
+    def render_agents(self, host: str) -> Path:
+        """The agents directory a build of this root renders for ``host``, rendered alone."""
+        adapter = build_distributions.load_adapters(self.root)[host]
+        target = Path(self.temporary.name) / f"rendered-{host}"
+        shutil.rmtree(target, ignore_errors=True)
+        build_distributions.generate_agents(
+            self.root / "plugins" / fixtures.PLUGIN, target, adapter,
+            build_distributions.load_execution_profile(self.root, adapter))
+        return target / "agents"
+
+    def load_tables(self) -> None:
+        """Load and check every table a build reads before it writes its output."""
+        adapters = build_distributions.load_adapters(self.root)
+        for adapter in adapters.values():
+            build_distributions.load_execution_profile(self.root, adapter)
+        build_distributions.require_host_cli_versions(self.root, adapters)
 
     def tiers(self) -> dict[str, str]:
         agents = self.root / "plugins" / fixtures.PLUGIN / "agents"
@@ -794,7 +923,11 @@ class ExecutionProfileTests(unittest.TestCase):
     def registry(self) -> Path:
         return self.root / "plugins" / fixtures.PLUGIN / REGISTRY
 
+    def assert_own_root(self) -> None:
+        self.assertNotIn(self.root, _SHARED_ROOTS.values(), "change a copy, not a shared build")
+
     def edit_variants(self, mutate) -> None:
+        self.assert_own_root()
         data = json.loads(self.registry().read_text(encoding="utf-8"))
         mutate(data["switches"]["review_panels"]["agent_variants"]["lens_panel"], data)
         self.registry().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -806,6 +939,7 @@ class ExecutionProfileTests(unittest.TestCase):
                 **{variant: VARIANT_TIER for variant in MECHANICAL_VARIANTS}}
 
     def edit_table(self, host: str, mutate) -> None:
+        self.assert_own_root()
         path = build_distributions.execution_profile_path(self.root, host)
         table = json.loads(self.tables[host])
         mutate(table)
@@ -817,17 +951,18 @@ class ExecutionProfileTests(unittest.TestCase):
         ))
 
     def edit_catalog(self, host: str, mutate) -> None:
+        self.assert_own_root()
         path = build_distributions.model_catalog_path(self.root, host)
         catalog = json.loads(self.catalogs[host])
         mutate(catalog)
         path.write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
 
-    def dist_agent(self, host: str, name: str) -> Path:
-        return self.root / "dist" / host / fixtures.PLUGIN / "agents" / f"{name}.md"
+    def dist_agent(self, host: str, name: str, root: Path | None = None) -> Path:
+        return (root or self.root) / "dist" / host / fixtures.PLUGIN / "agents" / f"{name}.md"
 
-    def codex(self, *args: str) -> subprocess.CompletedProcess:
+    def codex(self, *args: str, root: Path | None = None) -> subprocess.CompletedProcess:
         script = (
-            self.root / "dist/codex" / fixtures.PLUGIN
+            (root or self.root) / "dist/codex" / fixtures.PLUGIN
             / "scripts/generate_codex_project.py"
         )
         return subprocess.run(
@@ -839,8 +974,8 @@ class ExecutionProfileTests(unittest.TestCase):
                      PYTHONDONTWRITEBYTECODE="1", PATH=str(self.no_codex)),
         )
 
-    def codex_json(self, *args: str) -> dict:
-        result = self.codex(*args)
+    def codex_json(self, *args: str, root: Path | None = None) -> dict:
+        result = self.codex(*args, root=root)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return json.loads(result.stdout)
 
@@ -887,13 +1022,14 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertTrue(challenger[7].startswith("developer_instructions = "))
 
     def test_claude_frontmatter_writes_effort_only_when_the_table_sets_one(self):
+        self.use_copy()
         strong = catalog_model("claude", besides=(AUTO_MODELS["claude"]["high"][0],), effort="xhigh")
         self.set_tier("claude", "high", {"model": strong, "effort": "xhigh"})
-        build_distributions.replace_generated(self.root, self.root / "dist")
+        agents = self.render_agents("claude")
         tiers = self.rendered_tiers()
         for name, tier in tiers.items():
             with self.subTest(agent=name):
-                lines = frontmatter_lines(self.dist_agent("claude", name))
+                lines = frontmatter_lines(agents / f"{name}.md")
                 if tier == "high":
                     self.assertEqual(lines[2:4], [f"model: {strong}", "effort: xhigh"])
                     self.assertTrue(lines[4].startswith("output_contract:"))
@@ -904,9 +1040,8 @@ class ExecutionProfileTests(unittest.TestCase):
                     )
 
     def test_codex_role_files_carry_the_tier_model_and_effort(self):
-        fast = catalog_model("codex", besides=(AUTO_MODELS["codex"]["high"][0],), effort="max")
-        self.set_tier("codex", "high", {"model": fast, "effort": "max"})
-        build_distributions.replace_generated(self.root, self.root / "dist")
+        self.root = shared_root("codex_high_fast")
+        fast = codex_fast_model()
         self.assertEqual(
             frontmatter_lines(self.dist_agent("codex", "code-reviewer"))[2:4],
             [f"model: {fast}", "model_reasoning_effort: max"],
@@ -923,6 +1058,10 @@ class ExecutionProfileTests(unittest.TestCase):
 
     def test_a_model_bump_moves_every_tier_that_names_the_model(self):
         # A bump renames the catalog entry and every tier that names it.
+        self.use_copy()
+        committed = shared_root() / "dist" / "claude" / fixtures.PLUGIN / "agents"
+        self.assertEqual(build_distributions.compare_dirs(committed, self.render_agents("claude")),
+                         [])
         pinned = AUTO_MODELS["claude"][VARIANT_TIER][0]
         family, version = build_distributions.load_adapters(self.root)["claude"].module.model_version(
             pinned)
@@ -937,14 +1076,14 @@ class ExecutionProfileTests(unittest.TestCase):
             for setting in table["profiles"]["auto"].values()
             if setting.get("model") == pinned])
         self.assertNotEqual(build_distributions.marketplace_snapshot(self.root)["build_id"], before)
+        agents = self.render_agents("claude")
         self.assertTrue(any("out of sync" in problem for problem in
-                            build_distributions.check(self.root, self.root / "dist")))
-        build_distributions.replace_generated(self.root, self.root / "dist")
+                            build_distributions.compare_dirs(committed, agents)))
         on_bumped = {tier for tier, (model, _effort) in AUTO_MODELS["claude"].items()
                      if model == pinned}
         for name, tier in self.rendered_tiers().items():
             with self.subTest(agent=name):
-                model = frontmatter_lines(self.dist_agent("claude", name))[2]
+                model = frontmatter_lines(agents / f"{name}.md")[2]
                 if tier in on_bumped:
                     self.assertEqual(model, f"model: {bumped}")
                 else:
@@ -952,9 +1091,8 @@ class ExecutionProfileTests(unittest.TestCase):
                     self.assertNotEqual(model, f"model: {bumped}")
 
     def test_single_reviewers_keep_their_tier_beside_their_lens_variants(self):
-        fast = catalog_model("codex", besides=(AUTO_MODELS["codex"]["high"][0],), effort="max")
-        self.set_tier("codex", "high", {"model": fast, "effort": "max"})
-        build_distributions.replace_generated(self.root, self.root / "dist")
+        self.root = shared_root("codex_high_fast")
+        fast = codex_fast_model()
         # No canonical agent runs on the variants' tier by default.
         self.assertEqual({name for name, tier in self.tiers().items() if tier == VARIANT_TIER}, set())
         for variant, agent in sorted({**LENS_VARIANTS, **CODE_REVIEW_LENS_VARIANTS}.items()):
@@ -990,6 +1128,7 @@ class ExecutionProfileTests(unittest.TestCase):
                     self.assertIn('sandbox_mode = "read-only"', files[variant])
 
     def test_builder_refuses_agent_variants_it_cannot_render(self):
+        self.use_copy(with_dist=True)
         source = self.root / "plugins" / fixtures.PLUGIN
         tiers = set(json.loads((self.root / "tools/data/models.json").read_text(
             encoding="utf-8"))["reasoning_levels"])
@@ -1019,6 +1158,7 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertEqual(build_distributions.agent_variants(source, tiers), [])
 
     def test_lens_tier_panel_data_and_variants_are_build_inputs(self):
+        self.use_copy()
         before = build_distributions.marketplace_snapshot(self.root)["build_id"]
         self.set_tier("claude", VARIANT_TIER, {
             "model": catalog_model("claude", besides=(AUTO_MODELS["claude"][VARIANT_TIER][0],),
@@ -1076,25 +1216,23 @@ class ExecutionProfileTests(unittest.TestCase):
                                                 if line.startswith("developer_instructions")])
 
     def test_base_agents_and_role_files_do_not_depend_on_the_mechanical_switch(self):
-        def agents() -> dict:
+        def agents(root: Path) -> dict:
             return {host: {path.name: path.read_bytes() for path in sorted(
-                (self.root / "dist" / host / fixtures.PLUGIN / "agents").glob("*.md"))}
+                (root / "dist" / host / fixtures.PLUGIN / "agents").glob("*.md"))}
                 for host in build_distributions.HOSTS}
 
         self.codex_json("apply", "--scope", "local")
-        with_switch, role_files = agents(), self.role_files()
-        data = json.loads(self.registry().read_text(encoding="utf-8"))
-        del data["switches"]["mechanical_pass_tier"]
-        self.registry().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        build_distributions.replace_generated(self.root, self.root / "dist")
-        without = agents()
+        with_switch, role_files = agents(self.root), self.role_files()
+        # The same sources built without the mechanical_pass_tier switch.
+        without_root = shared_root("no_mechanical_switch")
+        without = agents(without_root)
         for host in build_distributions.HOSTS:
             with self.subTest(host=host):
                 self.assertEqual(set(with_switch[host]) - set(without[host]),
                                  {f"{variant}.md" for variant in MECHANICAL_VARIANTS})
                 self.assertEqual({name: with_switch[host][name] for name in without[host]},
                                  without[host])
-        self.codex_json("apply", "--scope", "local")
+        self.codex_json("apply", "--scope", "local", root=without_root)
         after = self.role_files()
         self.assertEqual({name: text for name, text in role_files.items()
                           if name not in MECHANICAL_VARIANTS},
@@ -1140,6 +1278,7 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertEqual(self.role_files(), auto_files)
 
     def test_profile_selection_fails_closed(self):
+        self.use_copy(with_dist=True)
         tracked = self.codex(
             "check", "--scope", "tracked", "--execution-profile", "inherit",
         )
@@ -1185,6 +1324,7 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
 
     def test_tables_are_build_inputs_and_invalid_tables_fail_the_build(self):
+        self.use_copy()
         before = build_distributions.marketplace_snapshot(self.root)["build_id"]
         self.set_tier("claude", "medium", {
             "model": catalog_model("claude", besides=(AUTO_MODELS["claude"]["medium"][0],),
@@ -1192,9 +1332,10 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertNotEqual(
             build_distributions.marketplace_snapshot(self.root)["build_id"], before,
         )
+        # The shared build's dist/ is what this copy's unchanged sources build.
         self.assertTrue(any(
             "out of sync" in problem
-            for problem in build_distributions.check(self.root, self.root / "dist")
+            for problem in build_distributions.check(self.root, shared_root() / "dist")
         ))
 
         def tier(name: str, setting: dict):
@@ -1290,10 +1431,14 @@ class ExecutionProfileTests(unittest.TestCase):
                 restore()
                 edit(host, mutate)
                 with self.assertRaisesRegex(ValueError, message):
-                    build_distributions.build(
-                        self.root, Path(self.temporary.name) / f"out-{index}",
-                    )
-                self.assertFalse((Path(self.temporary.name) / f"out-{index}").exists())
+                    self.load_tables()
+                if index == 0:
+                    # One real build: it refuses before it writes any output.
+                    with self.assertRaisesRegex(ValueError, message):
+                        build_distributions.build(
+                            self.root, Path(self.temporary.name) / f"out-{index}",
+                        )
+                    self.assertFalse((Path(self.temporary.name) / f"out-{index}").exists())
 
         pins = self.root / build_distributions.HOST_CLI_VERSIONS_RELPATH
         pinned = pins.read_bytes()
@@ -1308,7 +1453,7 @@ class ExecutionProfileTests(unittest.TestCase):
                 pins.write_bytes(pinned)
                 path.unlink()
                 with self.assertRaisesRegex(ValueError, message):
-                    build_distributions.build(self.root, Path(self.temporary.name) / "missing")
+                    self.load_tables()
         pins.write_bytes(pinned)
         # One patch below each host's highest catalog minimum.
         below = {}
@@ -1316,13 +1461,17 @@ class ExecutionProfileTests(unittest.TestCase):
             major, minor, patch = max(tuple(int(part) for part in entry["min_cli_version"].split("."))
                                       for entry in shipped_models(host).values())
             below[key] = f"{major}.{minor}.{patch - 1}" if patch else f"{major}.{minor - 1}.999"
-        for key, version in below.items():
+        for index, (key, version) in enumerate(below.items()):
             with self.subTest(pin=key):
                 restore()
                 pins.write_text(json.dumps({**json.loads(pinned), key: version}), encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, f"{key} {version} is below"):
-                    build_distributions.build(self.root, Path(self.temporary.name) / key)
-                self.assertFalse((Path(self.temporary.name) / key).exists())
+                    self.load_tables()
+                if index == 0:
+                    # One real build: the pin check also precedes any output.
+                    with self.assertRaisesRegex(ValueError, f"{key} {version} is below"):
+                        build_distributions.build(self.root, Path(self.temporary.name) / key)
+                    self.assertFalse((Path(self.temporary.name) / key).exists())
         pins.write_bytes(pinned)
 
     def test_model_and_effort_lines_are_the_named_exception_to_default_equivalence(self):

@@ -7,6 +7,10 @@ import os
 import subprocess
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +32,7 @@ class EarlierClock(datetime):
         return datetime(2025, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
 
 
+@integration
 class BacklogApprovalPreservationTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

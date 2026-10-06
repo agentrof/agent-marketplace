@@ -9,6 +9,10 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -249,6 +253,7 @@ def leveled_backlog_with_dod(fixture: cost.CostProject) -> None:
         size.committed_backlog_with_dod(fixture)
 
 
+@integration
 class DeliveryProposalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.fx = cost.CostProject(self, build=leveled_backlog_with_dod)
@@ -274,6 +279,7 @@ class DeliveryProposalTests(unittest.TestCase):
         self.assertEqual(sorted(self.propose("declared")), sorted(released))
 
 
+@integration
 class TaskBindingTests(unittest.TestCase):
     """The reference binds to every task of Backlog Planning at `declared`, and to no other."""
 

@@ -8,6 +8,10 @@ import json
 from pathlib import Path
 import subprocess
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 
 from tools.tests import test_backlog_revision_atomicity as fixtures
@@ -50,6 +54,7 @@ def approve_with_evidence(case: unittest.TestCase, evidence: str) -> None:
     case.commit("Approved evidence boundary")
 
 
+@integration
 class BacklogUpstreamTransitionTests(unittest.TestCase):
     files = fixtures.BacklogRevisionAtomicityTests.files
     run_revision = fixtures.BacklogRevisionAtomicityTests.run_revision
@@ -420,6 +425,7 @@ class BacklogUpstreamTransitionTests(unittest.TestCase):
         self.assertEqual(compiler.review_loop_record(self.docs, new_body, str(self.review), new_props), [])
 
 
+@integration
 class SupersededArchitectureEvidenceTests(unittest.TestCase):
     """A System Architecture decision superseded after the approval keeps an unchanged
     Story's evidence, as a Solution Design one does; a revised Story needs current evidence."""

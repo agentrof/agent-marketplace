@@ -15,6 +15,10 @@ import sys
 import tempfile
 import time
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -166,6 +170,7 @@ class Project:
         self.test.assertIn(fragment, err)
 
 
+@integration
 class GrantTermsTests(unittest.TestCase):
     """A host without the user-prompt hook: `on` reads its own options."""
 
@@ -268,6 +273,7 @@ class GrantTermsTests(unittest.TestCase):
         self.assertEqual(self.p.grant()["expires_at"], stamp(NOW + timedelta(hours=3)))
 
 
+@integration
 class ArmingTests(unittest.TestCase):
     """A host whose package declares the user-prompt hook: only the typed command arms."""
 
@@ -352,6 +358,7 @@ class ArmingTests(unittest.TestCase):
                 self.assertEqual(record["host"], "fixture")
 
 
+@integration
 class LifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.p = Project(self)
@@ -559,6 +566,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertFalse((linked / ".agentrof").exists())
 
 
+@integration
 class BrokenGrantTests(unittest.TestCase):
     """A grant file nothing can read is moved aside, so the next grant can start."""
 
@@ -631,6 +639,7 @@ def system_zone(name: str):
         time.tzset()
 
 
+@integration
 @unittest.skipIf(os.name == "nt", "time.tzset sets the system zone only on POSIX hosts")
 class ClockTests(unittest.TestCase):
     """--until reads the system zone across a daylight-saving change, from when the user typed it."""
@@ -663,6 +672,7 @@ class ClockTests(unittest.TestCase):
         self.p.assert_refused(f"is above the {POLICY['max_duration_hours']} h maximum", "on")
 
 
+@integration
 class FailClosedTests(unittest.TestCase):
     """A package that cannot show its arming hook, or a grant it could not have armed, grants nothing."""
 
@@ -726,6 +736,7 @@ class FailClosedTests(unittest.TestCase):
                 self.assertIn(fragment, err)
 
 
+@integration
 class SessionBindingTests(unittest.TestCase):
     """A grant governs only the session and host whose user typed it."""
 
@@ -814,6 +825,7 @@ class SessionBindingTests(unittest.TestCase):
         self.assertFalse((self.p.state / "arming.json").exists())
 
 
+@integration
 class GoalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.p = Project(self)
@@ -1035,6 +1047,7 @@ class DistributionTests(unittest.TestCase):
                               if "hook pre-question" in group["hooks"][0]["command"]]
                     self.assertEqual([group["matcher"] for group in guards], [question])
 
+    @integration
     def test_an_agent_side_on_without_arming_is_refused_on_each_arming_host(self):
         for host in HOST_HOOKS:
             with self.subTest(host=host), self.project() as root:
@@ -1050,6 +1063,7 @@ class DistributionTests(unittest.TestCase):
                 self.assertEqual((status["arming"], status["question_guard"]),
                                  ("user_prompt_hook", "hook"))
 
+    @integration
     def test_a_copied_package_mints_no_grant_the_installed_package_honours(self):
         for host in HOST_HOOKS:
             with self.subTest(host=host), self.project() as root, \
@@ -1076,6 +1090,7 @@ class DistributionTests(unittest.TestCase):
                 result = self.run_hook(host, "pre-question", question, root)
                 self.assertEqual((result.returncode, result.stdout), (0, ""))
 
+    @integration
     def test_a_claude_grant_never_governs_a_codex_session(self):
         with self.project() as root:
             self.run_hook("claude", "user-prompt", expansion(root, "on --for 2h",
@@ -1101,6 +1116,7 @@ class DistributionTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn("bound to a claude session", result.stdout + result.stderr)
 
+    @integration
     def test_the_codex_default_prompt_of_the_entry_arms_a_grant(self):
         def default_prompt(entry: str) -> str:
             metadata = self.package("codex") / "skills" / entry / "agents/openai.yaml"
@@ -1118,6 +1134,7 @@ class DistributionTests(unittest.TestCase):
             arming = json.loads((root / RUNTIME / "arming.json").read_text(encoding="utf-8"))
             self.assertEqual(arming["arguments"], "on --for 9h")
 
+    @integration
     def test_the_typed_entry_command_arms_a_grant_on_each_host(self):
         typed = {"claude": lambda root: expansion(root, "on --for 2h --deny merge"),
                  "codex": lambda root: prompt(root, f"${NAME} on --for 2h --deny merge")}
@@ -1133,6 +1150,7 @@ class DistributionTests(unittest.TestCase):
                                  (host, "user_prompt_hook", "on --for 2h --deny merge"))
                 self.assertNotIn("merge", grant["classes"])
 
+    @integration
     def test_every_other_prompt_passes_without_output(self):
         for host in HOST_HOOKS:
             with self.subTest(host=host), self.project() as root:
@@ -1144,6 +1162,7 @@ class DistributionTests(unittest.TestCase):
                     self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
                 self.assertFalse((root / ".agentrof").exists())
 
+    @integration
     def test_the_question_hook_denies_only_while_a_grant_is_active(self):
         for host in HOST_HOOKS:
             with self.subTest(host=host), self.project() as root:
@@ -1189,6 +1208,7 @@ class DistributionTests(unittest.TestCase):
                     result = self.run_hook(host, "pre-question", payload, root)
                     self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
 
+    @integration
     def test_hooks_outside_a_git_checkout_allow_and_stay_silent(self):
         with tempfile.TemporaryDirectory() as raw:
             outside = Path(raw).resolve()

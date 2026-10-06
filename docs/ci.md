@@ -39,6 +39,19 @@ IDs: missing, duplicate, failed, cancelled or mismatched results fail
 validation. Explicit platform skips remain visible; mandatory native Windows
 regressions cannot skip.
 
+A worker, in CI or local validation, holds every test not marked
+`@integration` to its own process and its own temporary directory. Each such
+test gets a fresh directory inside the worker's as `tempfile`'s default, and a
+process-wide audit hook watches every thread while it runs:
+starting a process (subprocess, multiprocessing, `os.system`, fork, spawn,
+exec) or writing outside that directory (any open for writing, SQLite files,
+directory, link, rename, remove, mode, time and FIFO calls, through a
+directory descriptor too) raises, is recorded and fails the test even when
+the test catches the error, and so does a thread the test leaves running.
+The innermost runner decides, so a runner under test keeps its own watch.
+Class and module fixtures run outside it, and `make test` runs unittest
+without it.
+
 A worker, in CI or local validation, runs its tests with tripwire `claude`
 and `codex` binaries in place of the host binaries a session names:
 `CLAUDE_CODE_EXECPATH`, `CODEX_CLI_PATH`, `CODEX_VERSION` and `CODEX_HOME`
@@ -62,8 +75,11 @@ its verification sessions stay, named by the removed worktree's path, so no
 copy reads them. Setup and project vault tests may copy a project one
 `setup_project.py apply` left, which holds no absolute path. Every test gets
 independent files, Git objects and a bare remote; the origin is rebound to that
-copy and transient fetch metadata is removed. No seed contains a linked Item
-worktree or an active writer receipt. Construction and isolation have dedicated
+copy and transient fetch metadata is removed. Architecture push tests may copy
+the state a stamped architecture Item leaves: started, stamped and committed in
+its Item worktree, the seed's only linked worktree; each copy repairs both
+worktree links to its own paths, and no copy names the seed. No other seed
+contains a linked Item worktree or an active writer receipt. Construction and isolation have dedicated
 coverage; changed setup functions or environment use fresh preparation. The
 named Windows text-pipe emulator may build a separate seed under its exact
 wrapper and reuse it only within that wrapper's lifetime. Its underlying runner
@@ -117,9 +133,12 @@ make verify-local
 
 The direct interfaces are `python3 tools/ci_local.py check --staged --target
 origin/main` and `python3 tools/ci_local.py verify --staged --target origin/main`.
-`check --fresh` ignores saved test results. `ci-local-policy.json` sets
-`test_selection`. At `changed` the gate runs the change's own tests, most
-specific first, while pull request CI runs every test on Linux:
+`check --fresh` ignores saved test results. The gate runs unit tests only:
+a test marked `@integration` (`tools/tests/levels.py`), alone or through its
+class, starts a process or writes outside its own temporary directory, and
+only pull request CI runs it. `ci-local-policy.json`
+sets `test_selection`. At `changed` the gate runs the change's own unit tests,
+most specific first, while pull request CI runs every test on Linux:
 1. the changed test methods of each changed test module, or the whole module
    when code outside its test methods changed (blank lines aside);
 2. the test methods whose source names a changed non-Python input (by file
@@ -134,11 +153,11 @@ Generated `dist/` copies select nothing of their own; the distribution sync
 check and their canonical sources cover them. `budget_estimated_seconds` bounds
 the selection by the full-suite lane's per-test estimates, in that order: a
 test that would pass the budget is left to pull request CI, and the selection
-reason counts those tests. 120 estimated seconds run in about 35 seconds with
+reason counts those tests and the integration tests left to CI. A change whose
+own tests are all integration tests runs only the static checks locally. 120 estimated seconds run in about 35 seconds with
 four workers on a recent Mac, static checks included, which run beside the
 test workers. At `impact` the gate selects as `ci_tests.py plan --mode impact` does.
-`check --full` runs every test, for a change whose host-specific behavior CI
-cannot cover; `verify` then checks that full receipt. On macOS, `direct_tools`
+`check --full` runs every unit test; `verify` then checks that full receipt. On macOS, `direct_tools`
 names the tools whose `/usr/bin` entry is an `xcrun` trampoline, which resolves
 the developer directory on every call; workers call the tool it resolves to,
 which in measured runs cut a Git call from about 9 ms to 3 ms. When a worker
@@ -198,7 +217,9 @@ bytes and the filtered configuration are compared instead.
 Results expire after at most 24 hours; reuse does not extend that deadline.
 The latest failed, interrupted, changed or corrupt attempt invalidates prior
 success. The source is rechecked after statics and workers. Missing, duplicate,
-partial or failed worker reports and skipped mandatory native regressions fail.
+partial or failed worker reports fail, and so does a skipped mandatory native
+regression the gate selected; the Windows lane's mandatory regressions are
+integration tests, so only its CI shards run them.
 `verify` checks this identity immediately before commit. A process-scoped OS lock
 prevents simultaneous validators in one checkout and releases on process exit.
 
@@ -302,3 +323,7 @@ release from the merge to the immutable Release, and the pull request that
 carries the release commit by its slowest shard, runner queue time included.
 Timing targets are acceptance goals, not grounds to omit a failed or slow
 gate.
+
+Local unit workers also reject process starts during test-module loading and class/module fixtures, including attempts a fixture catches. Shared fixture seeds must be built in process and remain read-only; each unit test mutates only its own temporary copy.
+
+Descriptor-relative `os.open` writes retain their directory argument in thread-local audit context; an unknown descriptor or an uncaptured relative native open is refused. Nested loaders and class/module fixtures inherit an active ancestor test's filesystem boundary until their own test starts. Caught outside-write refusals remain attached to that active test.

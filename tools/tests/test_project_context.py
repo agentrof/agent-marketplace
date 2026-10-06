@@ -11,6 +11,7 @@ import sys
 import tempfile
 import subprocess
 import unittest
+from tools.tests.levels import integration
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -296,6 +297,7 @@ class ProjectContextTests(unittest.TestCase):
         self.assertEqual(plan["status"], "needs_resolution")
         self.assertGreater(plan["unresolved_required_count"], 0)
 
+    @integration
     def test_task_binds_plan_and_preserves_instruction_selection(self):
         init_repository(self.project)
         (self.project / "workspace/config.json").write_text(json.dumps({
@@ -326,6 +328,7 @@ class ProjectContextTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stale"):
             task_inputs.manifest(**arguments, context_plan=relative)
 
+    @integration
     def test_pinned_contract_uses_the_matching_historical_bytes(self):
         import operation_compile
         import context_history
@@ -409,6 +412,7 @@ class ProjectContextTests(unittest.TestCase):
         self.assertIn("If the signature is invalid", text)
         self.assertNotIn("Accept valid requests", text)
 
+    @integration
     def test_default_task_handoff_resolves_and_remains_fresh_after_unrelated_edit(self):
         init_repository(self.project)
         subprocess.run(["git", "-C", str(self.project), "add", "-A"], check=True, capture_output=True)

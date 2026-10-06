@@ -13,6 +13,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -81,17 +85,16 @@ def choose(docs: Path, value: str) -> None:
 class OwnerDecisionClassValidatorTests(unittest.TestCase):
     """tools/validate.py rejects an empty or duplicate at-once class."""
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.root = Path(cls.temporary.name)
-        fixtures.make_valid_root(cls.root)
-        cls.path = cls.root / "plugins/software-engineering-team" / CLASSES
-        cls.original = cls.path.read_text(encoding="utf-8")
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.addCleanup(self.temporary.cleanup)
+        fixtures.copy("plugins/software-engineering-team", self.root)
+        fixtures.copy("tools/data/models.json", self.root)
+        self.assertEqual(fixtures.validator_findings(self.root, 'owner_decision_classes'), [])
+        self.path = self.root / "plugins/software-engineering-team" / CLASSES
+        self.original = self.path.read_text(encoding="utf-8")
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.temporary.cleanup()
 
     def messages(self, mutate) -> list[str]:
         data = json.loads(self.original)
@@ -138,6 +141,17 @@ class OwnerGatesReferenceTests(unittest.TestCase):
                 self.assertNotIn("owner_gates", read(relative))
 
 
+def bound_instructions(project: Path, entry: str, role: str | None, catalog: dict) -> set[str]:
+    """The required reads and hashed instructions a task binds, as task_inputs.manifest derives
+    them from the project's Process Policy, without the Git reads of a full manifest."""
+    route = catalog["entries"][entry]
+    chosen, _policy_inputs = task_inputs.switch_choices(project, route, task_inputs.PACKAGE)
+    _registry, _chosen, required, _conditional, hashed = task_inputs.instruction_reads(
+        catalog, task_inputs.PACKAGE, route, role,
+        task_inputs.task_skills(catalog, entry, role, None, route), chosen)
+    return required | hashed
+
+
 class OwnerGatesTaskInputTests(unittest.TestCase):
     # (entry, role): whether the task binds the gate instructions at two_fixed_gates.
     # Every role of every entry that runs one of the switch's owning flows binds
@@ -158,32 +172,43 @@ class OwnerGatesTaskInputTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        init_repository(self.root)
-        (self.root / "brief.md").write_text("Accepted intent.\n", encoding="utf-8")
-        for args in (("add", "-A"), ("commit", "-qm", "Fixture")):
-            subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Fixture", "-c",
-                            "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
-                            *args], check=True, capture_output=True)
         self.docs = self.root / "workspace" / "docs"
 
-    def bound(self, entry: str, role: str) -> set[str]:
-        result = task_inputs.manifest(entry=entry, role=role, mode="review", project=self.root)
-        paths = set(result["required_reads"]) | {item["path"] for item in result["instructions"]}
-        return paths & {REFERENCE, CLASSES}
+    def bound(self, entry: str, role: str, catalog: dict) -> set[str]:
+        return bound_instructions(self.root, entry, role, catalog) & {REFERENCE, CLASSES}
 
     def test_every_owning_flow_task_binds_the_gates_and_only_at_two_fixed_gates(self):
         self.assertEqual({entry for entry, _role in self.OWNING},
                          {"configure", "deliver", "delivery-plan", "execution-plan"})
         self.assertEqual(len(self.OWNING), 16)
+        catalog = task_inputs.catalog()
         for state in ("no policy", "per_step", "two_fixed_gates"):
             if state != "no policy":
                 choose(self.docs, state)
             for (entry, role), binds in self.TASKS.items():
                 with self.subTest(state=state, entry=entry, role=role):
                     wanted = {REFERENCE, CLASSES} if binds and state == "two_fixed_gates" else set()
-                    self.assertEqual(self.bound(entry, role), wanted)
+                    self.assertEqual(self.bound(entry, role, catalog), wanted)
+
+    @integration
+    def test_a_derived_task_manifest_binds_the_gates_from_the_committed_project(self):
+        """The one Git-backed derivation: manifest reads the same policy through the project root."""
+        init_repository(self.root)
+        (self.root / "brief.md").write_text("Accepted intent.\n", encoding="utf-8")
+        for args in (("add", "-A"), ("commit", "-qm", "Fixture")):
+            subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Fixture", "-c",
+                            "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                            *args], check=True, capture_output=True)
+        choose(self.docs, "two_fixed_gates")
+        for (entry, role), wanted in ((("deliver", "delivery-coordinator"), {REFERENCE, CLASSES}),
+                                      (("setup", "delivery-coordinator"), set())):
+            with self.subTest(entry=entry, role=role):
+                result = task_inputs.manifest(entry=entry, role=role, mode="review", project=self.root)
+                paths = set(result["required_reads"]) | {item["path"] for item in result["instructions"]}
+                self.assertEqual(paths & {REFERENCE, CLASSES}, wanted)
 
 
+@integration
 class DecisionLogTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

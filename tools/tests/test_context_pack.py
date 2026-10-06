@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -136,6 +137,13 @@ class ContextPackTests(unittest.TestCase):
         pack = context_pack.build(entry="backlog-plan", role="product-owner", mode="revise")
         self.assertTrue(context_pack.check(pack)["ok"])
 
+    def test_an_empty_pack_is_refused(self) -> None:
+        with mock.patch.object(context_pack, "extract", return_value=([], [])):
+            with self.assertRaises(context_pack.Refused) as caught:
+                context_pack.build(entry="backlog-plan", role="backlog-reviewer", mode="review")
+        self.assertEqual(caught.exception.code, "CONTEXT_PACK_EMPTY")
+
+
 
 class StalePackTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -197,6 +205,7 @@ class StalePackTests(unittest.TestCase):
         self.assertEqual(result["code"], "CONTEXT_PACK_STALE")
 
 
+@integration
 class ProjectSwitchTests(unittest.TestCase):
     """A real project whose approved Process Policy sets context_pack; nothing mocked."""
 
@@ -282,11 +291,6 @@ class ProjectSwitchTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             task_inputs.manifest(**task, expected_hash=result["source_hash"])
 
-    def test_an_empty_pack_is_refused(self) -> None:
-        with mock.patch.object(context_pack, "extract", return_value=([], [])):
-            with self.assertRaises(context_pack.Refused) as caught:
-                context_pack.build(entry="backlog-plan", role="backlog-reviewer", mode="review")
-        self.assertEqual(caught.exception.code, "CONTEXT_PACK_EMPTY")
 
     def test_out_never_writes_a_vault_or_project_file(self) -> None:
         self.policy("role_digest")

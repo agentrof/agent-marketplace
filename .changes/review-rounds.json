@@ -1,6 +1,0 @@
-{
-  "summary": "Process switch `review_rounds` (`current` | `single_pass`), at its default today's behaviour: at `single_pass`, a backlog, Solution Design, Design System or Operation contract review runs one reader, never a lens panel, with no calibration reader; only a critical finding starts a writer pass and one re-review of the changed text, and minor and major findings become follow-ups, as the new switch reference `challenge-review/references/switch-review_rounds-single_pass.md` defines. `backlog_compile.py` and `operation_compile.py` then require no `Severity Calibration` row and accept a major finding in `Accepted Minor Findings`. In one measured project each contract revision ran a writer, two lens readers and a calibration reader per round, and the review loop took hours per contract.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

@@ -5,6 +5,10 @@ from __future__ import annotations
 import contextlib
 import io
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 
 from tools.tests import backlog_fixture
 from tools.tests import test_backlog_pending_review_policy as pending
@@ -13,6 +17,7 @@ compiler = pending.compiler
 process_policy = pending.process_policy
 
 
+@integration
 class PreApprovalCheckTests(unittest.TestCase):
     def setUp(self):
         self.base = pending.PendingReviewPolicyTests()

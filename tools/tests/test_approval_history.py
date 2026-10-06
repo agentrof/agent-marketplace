@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
@@ -13,6 +14,7 @@ import task_inputs  # noqa: E402
 from tools.tests.git_fixture import init_repository  # noqa: E402
 
 
+@integration
 class ApprovalHistoryTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -65,11 +67,36 @@ class ApprovalHistoryTests(unittest.TestCase):
         self.assertEqual(scope["read"], "full")
         self.assertIn("no proven approval", scope["reason"])
 
+
+class ApprovalRuleTests(unittest.TestCase):
     def test_every_document_workflow_has_an_anchor_policy(self):
         policy = json.loads((task_inputs.PACKAGE / task_inputs.POLICY).read_text())
         self.assertTrue({"requirement", "business_analysis", "solution_design", "design_system",
                          "experience_design", "backlog", "delivery", "operation"}
                         <= set(policy["approval_anchors"]))
+
+    def test_only_approved_changed_receipts_are_events(self):
+        anchor = {"field": "status", "value": "approved"}
+        approved = {"status": "approved", "revision": 1, "source_hash": "same"}
+        self.assertTrue(task_inputs.approval_event(approved, {}, anchor))
+        self.assertFalse(task_inputs.approval_event(approved, dict(approved, title="old"), anchor))
+        for field in ("revision", "source_hash", "package_hash", "approved_at_utc",
+                      "package_approved_at_utc", "approval_revision", "scope_hash", "plan_hash"):
+            with self.subTest(field=field):
+                self.assertTrue(task_inputs.approval_event(dict(approved, **{field: "new"}), approved, anchor))
+        self.assertFalse(task_inputs.approval_event(dict(approved, status="draft"), approved, anchor))
+        wildcard = {"field": "scope_hash", "value": "*"}
+        self.assertFalse(task_inputs.approval_event({"scope_hash": ""}, {}, wildcard))
+        self.assertTrue(task_inputs.approval_event({"scope_hash": "receipt"}, {}, wildcard))
+
+    def test_missing_history_preserves_all_inputs_without_git(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = {"workspace/docs/backlog/story.md"}
+            actual, scope = task_inputs.closure_reads(Path(raw), paths, paths, None, None, [])
+            self.assertEqual(actual, paths)
+            self.assertEqual(scope["read"], "full")
+            self.assertEqual(scope["reason"], "no proven approval baseline")
+
 
 
 if __name__ == "__main__":

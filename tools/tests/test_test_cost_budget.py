@@ -10,6 +10,10 @@ import json
 import re
 import sys
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -177,6 +181,7 @@ def flagged_backlog_with_dod(fixture: CostProject) -> None:
         size.committed_backlog_with_dod(fixture)
 
 
+@integration
 class DeliveryProposalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.fx = CostProject(self, build=flagged_backlog_with_dod)
@@ -201,6 +206,7 @@ class DeliveryProposalTests(unittest.TestCase):
         self.assertEqual(sorted(first), sorted(second))
 
 
+@integration
 class TaskBindingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.fx = CostProject(self, build=size.committed_brief)

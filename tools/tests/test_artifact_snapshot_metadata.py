@@ -7,6 +7,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 
 
@@ -163,6 +167,7 @@ class ArtifactSnapshotMetadataTests(unittest.TestCase):
         self.assertFalse(application.is_os_metadata_path(".ds_store"))
         self.assertFalse(application.is_os_metadata_path(".gitignore"))
 
+    @integration
     def test_committed_new_receipt_ignores_metadata_without_ignoring_authored_files(self):
         receipt = self.approve()
         init_repository(self.project)
@@ -187,6 +192,7 @@ class ArtifactSnapshotMetadataTests(unittest.TestCase):
             self.assertTrue(any("canonical relative path" in problem for problem in findings))
 
 
+@integration
 class CommittedArtifactPathsTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -301,6 +307,7 @@ class CommittedArtifactPathsTests(unittest.TestCase):
         self.assertFalse(stage_package.paths_are_committed([path]))
 
 
+@integration
 class PackageCommitMetadataTests(unittest.TestCase):
     setUp = CommittedArtifactPathsTests.setUp
     git = CommittedArtifactPathsTests.git

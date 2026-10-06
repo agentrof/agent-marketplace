@@ -22,6 +22,10 @@ import tempfile
 import threading
 import time
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -164,6 +168,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(envelope["findings"][0]["code"], CODE)
 
 
+@integration
 class BindingTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -214,6 +219,7 @@ class BindingTests(unittest.TestCase):
                 self.assertEqual(self.bound(entry, role), entry == "deliver")
 
 
+@integration
 class CandidateTests(unittest.TestCase):
     """One project whose DLV-002 Item ST-005 changes a path that DLV-001's merged ST-001 claimed."""
 

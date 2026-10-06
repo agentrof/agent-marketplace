@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -119,18 +120,26 @@ def findings(docs: Path) -> list[dict]:
     return [json.loads(line) for line in out.splitlines() if line.startswith("{")]
 
 
-def make_valid_vault(project: Path) -> Path:
-    init_repository(project)
-    result = subprocess.run(
-        [sys.executable, str(SCRIPTS / "setup_project.py"), "--project-root", str(project)],
-        cwd=ROOT, capture_output=True, text=True, check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+def make_valid_vault(project: Path, *, real_setup: bool = False) -> Path:
     docs = project / "workspace" / "docs"
+    if real_setup:
+        init_repository(project)
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS / "setup_project.py"), "--project-root", str(project)],
+            cwd=ROOT, capture_output=True, text=True, check=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+    else:
+        import setup_project
+        payload, _policy_path, policy = setup_project.package_surfaces()
+        for source, target in setup_project.payload_sources(policy, payload, docs):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
     for rel, text in SUBTREE.items():
         write(docs / rel, text)
     append(docs / "home.md", "\n- [[maps/solution-design|Solution Design]]\n")
     code, out = run_vault_check("render-decisions", "--vault", str(docs))
+    assert code == 0, out
+    code, out = run_vault_check("render-relations", "--vault", str(docs))
     assert code == 0, out
     return docs
 
@@ -241,6 +250,13 @@ VAULT_BUILDERS = {
 # A note without an inbound link cannot be reached from home either, so every
 # orphans finding comes with a moc_coverage finding for the same note.
 COMPANIONS = {"orphans": {"moc_coverage"}}
+
+
+@integration
+class SetupVaultSmokeTests(unittest.TestCase):
+    def test_real_setup_produces_a_valid_vault(self):
+        with tempfile.TemporaryDirectory() as raw:
+            self.assertEqual(findings(make_valid_vault(Path(raw) / "project", real_setup=True)), [])
 
 
 class VaultBuilderTests(unittest.TestCase):

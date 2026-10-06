@@ -12,6 +12,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +52,7 @@ SCREEN = ("---\ntype: experience-screen\nid: SCR-001\nrevision: 1\n---\n\n# Lead
           "Shows each lead with its score, ordered as {cites} defines.\n")
 
 
+@integration
 class SourceImpactTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()

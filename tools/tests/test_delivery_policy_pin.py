@@ -16,6 +16,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -51,6 +55,7 @@ def quiet(call, *args) -> tuple[int, str]:
     return code, output.getvalue()
 
 
+@integration
 class DeliveryPolicyPinTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()

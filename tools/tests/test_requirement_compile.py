@@ -9,6 +9,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 from pathlib import Path
 
@@ -103,6 +107,7 @@ class RequirementCompilerTests(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         self.assertIn("approved source_hash is stale", requirement_compile.requirement_findings(path))
 
+    @integration
     def test_route_never_fuzzy_resumes_free_text(self):
         path = self.complete_draft()
         requirement_compile.approve_requirement(path)
@@ -112,6 +117,7 @@ class RequirementCompilerTests(unittest.TestCase):
         self.assertEqual(exact["mode"], "exact")
         self.assertEqual(exact["requirement_id"], "REQ-001")
 
+    @integration
     def test_route_exposes_state_valid_actions(self):
         path = self.complete_draft()
         draft = requirement_route.route(self.docs, "REQ-001")
@@ -127,6 +133,7 @@ class RequirementCompilerTests(unittest.TestCase):
         terminal = requirement_route.route(self.docs, "REQ-001")
         self.assertEqual(terminal["actions"], ["inspect"])
 
+    @integration
     def test_exact_route_reports_why_it_routes_back(self):
         path = self.complete_draft()
         requirement_compile.approve_requirement(path)
@@ -143,6 +150,7 @@ class RequirementCompilerTests(unittest.TestCase):
         self.assertEqual(routed["action"], "repair")
         self.assertEqual(routed["reason"], repair["reason"])
 
+    @integration
     def test_route_tolerates_only_the_rendered_relation_projection(self):
         path = self.complete_draft()
         props, body = requirement_compile.split_note(path)
@@ -194,6 +202,7 @@ class RequirementCompilerTests(unittest.TestCase):
             "| requirement | story_ids | disposition |\n|---|---|---|\n"
             + "".join(f"{row}\n" for row in rows), encoding="utf-8")
 
+    @integration
     def test_incorporation_reads_the_highest_approved_round_number(self):
         requirement_compile.approve_requirement(self.complete_draft())
         self.implementing_story()
@@ -204,6 +213,7 @@ class RequirementCompilerTests(unittest.TestCase):
         self.assertTrue(requirement_compile.requirement_incorporated(self.docs, "REQ-001"))
         self.assertEqual(requirement_route.route(self.docs, "REQ-001")["actions"], ["inspect", "supersede"])
 
+    @integration
     def test_a_row_only_in_an_older_approved_round_does_not_incorporate(self):
         requirement_compile.approve_requirement(self.complete_draft())
         self.implementing_story()
@@ -212,6 +222,7 @@ class RequirementCompilerTests(unittest.TestCase):
         self.assertFalse(requirement_compile.requirement_incorporated(self.docs, "REQ-001"))
         self.assertIn("withdraw", requirement_route.route(self.docs, "REQ-001")["actions"])
 
+    @integration
     def test_discard_removes_only_an_uncommitted_draft(self):
         path = self.complete_draft()
         requirement_compile.discard_requirement(path)

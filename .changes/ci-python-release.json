@@ -1,4 +1,0 @@
-{
-  "summary": "CI sets up one exact Python release on every shard of a run: the plan job records the release it resolved for the policy's major.minor, and every later job and shard sets up that release, so a toolcache update during a run no longer fails the check with a runtime that changed between shards.",
-  "components": {}
-}

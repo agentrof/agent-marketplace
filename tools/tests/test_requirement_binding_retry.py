@@ -7,6 +7,10 @@ import json
 import os
 import subprocess
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 
 from tools.tests import test_requirement_compile as requirement_tests
@@ -17,6 +21,7 @@ requirement = requirement_tests.requirement_compile
 stage_package = requirement.stage_package
 
 
+@integration
 class RequirementBindingRetryTests(unittest.TestCase):
     def setUp(self):
         self.fixture = requirement_tests.RequirementCompilerTests()

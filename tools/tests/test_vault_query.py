@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -110,6 +111,7 @@ class VaultQueryTest(unittest.TestCase):
         written = {p.parent for p in (self.project / ".agentrof").rglob("*") if p.is_file()}
         self.assertEqual(written, {self.cache.parent, self.cache.with_name("index-notes")})
 
+    @integration
     def test_parallel_queries_rebuild_without_a_race(self) -> None:
         for number in range(150):
             (self.docs / f"backlog/n{number}.md").write_text(
@@ -257,6 +259,7 @@ class VaultQueryTest(unittest.TestCase):
         path.write_text(VAULT["backlog/story-u.md"], encoding="utf-8")
         self.assertFalse(self.run_query("hash", "backlog/story-u.md")["stamped"])
 
+    @integration
     def test_changed_since_git_ref(self) -> None:
         init_repository(self.project)
         git = ["git", "-C", str(self.project), "-c", "user.name=t", "-c", "user.email=t@t"]
@@ -268,6 +271,7 @@ class VaultQueryTest(unittest.TestCase):
         self.assertEqual(result["changed"], ["backlog/new.md", "backlog/story-b.md"])
         self.assertIn("vault_query:", self.run_query("changed-since", "nope", code=1)["stderr"])
 
+    @integration
     def test_changed_since_refuses_a_git_option_as_its_ref(self) -> None:
         init_repository(self.project)
         git = ["git", "-C", str(self.project), "-c", "user.name=t", "-c", "user.email=t@t"]

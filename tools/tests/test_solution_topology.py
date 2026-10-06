@@ -1,5 +1,9 @@
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -14,6 +18,7 @@ from tools.tests.git_fixture import init_repository, temporary_directory
 
 
 class SolutionTopologyTests(unittest.TestCase):
+    @integration
     def test_inverse_relation_projection_does_not_dirty_stage_receipt(self):
         with temporary_directory() as raw:
             root = Path(raw) / "project"

@@ -4887,11 +4887,24 @@ def light_path_status(record: dict, docs: Path) -> dict:
                            f" not {' or '.join(kinds)}")
     if int(props.get("revision", 1) or 1) < 2:
         reasons.append("the backlog has no earlier approved revision")
-    by_id = {story["id"]: story for story in record["stories"]}
+    scope = light_scope_decision(record["stories"], approved_stories(record, docs),
+                                 changed_story_ids(record, docs), kinds, limit)
+    reasons.extend(scope.pop("reasons"))
+    result = {"backlog_path": value, "eligible": not reasons, **scope}
+    if reasons:
+        result["reasons"] = reasons
+    return result
+
+
+def light_scope_decision(stories: list[dict], previous: dict[str, dict],
+                         changed_ids: list[str], kinds: list[str], limit: int) -> dict:
+    """Evaluate changed and deleted story scope independently of Git and approvals."""
+    reasons = []
+    by_id = {story["id"]: story for story in stories}
     # A story the last approval held and the revision removed is a change too.
-    deleted = {story_id: story for story_id, story in approved_stories(record, docs).items()
+    deleted = {story_id: story for story_id, story in previous.items()
                if story_id not in by_id}
-    changed = sorted({*changed_story_ids(record, docs), *deleted})
+    changed = sorted({*changed_ids, *deleted})
     by_id.update(deleted)
     if not changed:
         reasons.append("the revision changes no story")
@@ -4905,12 +4918,8 @@ def light_path_status(record: dict, docs: Path) -> dict:
     epics = sorted({by_id[story_id]["epic_id"] for story_id in changed})
     if len(epics) > 1:
         reasons.append("the changed stories span epics " + ", ".join(epics))
-    result = {"backlog_path": value, "eligible": not reasons, "changed": changed,
-              "epic": epics[0] if len(epics) == 1 else None,
-              "max_changed_stories": limit}
-    if reasons:
-        result["reasons"] = reasons
-    return result
+    return {"changed": changed, "epic": epics[0] if len(epics) == 1 else None,
+            "max_changed_stories": limit, "reasons": reasons}
 
 
 def light_epic_review_findings(record: dict, docs: Path, status: dict) -> list[str]:

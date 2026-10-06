@@ -1,6 +1,0 @@
-{
-  "summary": "When the vault hook puts back a grant that a shell command outside the packaged autopilot.py created or widened, it now also puts back the arming record that the same command consumed. The runtime state then returns exactly to what the command found, and a sanctioned `on` can still complete the user's typed entry within the arming lifetime.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

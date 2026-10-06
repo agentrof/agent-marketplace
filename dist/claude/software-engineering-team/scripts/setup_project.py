@@ -273,10 +273,15 @@ def managed_block(workspace: str) -> str:
 
 def proposed_managed_file(root: Path, name: str, start: str, end: str,
                           block: str) -> tuple[str, str]:
-    """Replace only the marked block; the project's own lines stay as written."""
     path = root / name
     assert_not_symlinked(root, path, name)
     current = path.read_text(encoding="utf-8") if path.is_file() else ""
+    return current, merged_managed_text(current, name, start, end, block)
+
+
+def merged_managed_text(current: str, name: str, start: str, end: str,
+                        block: str) -> str:
+    """Replace only the marked block; the project's own lines stay as written."""
     start_count, end_count = current.count(start), current.count(end)
     if start_count > 1 or end_count > 1 or start_count != end_count:
         raise SetupError(
@@ -289,7 +294,20 @@ def proposed_managed_file(root: Path, name: str, start: str, end: str,
     else:
         prefix = current.rstrip()
         updated = (prefix + "\n\n" if prefix else "") + block + "\n"
-    return current, updated
+    return updated
+
+
+def managed_block_operations(surface: str, name: str, exists: bool,
+                             current: str, target: str) -> list[dict]:
+    if current == target:
+        return []
+    return [{
+        "action": "create" if not exists else "update",
+        "surface": surface, "path": name,
+        "ownership": "tracked_managed_block",
+        "before_hash": bytes_hash(current.encode("utf-8")),
+        "after_hash": bytes_hash(target.encode("utf-8")),
+    }]
 
 
 def proposed_gitignore(root: Path, workspace: str) -> tuple[str, str]:
@@ -944,28 +962,17 @@ def build_plan(args) -> dict:
         })
 
     current_ignore, target_ignore = proposed_gitignore(root, workspace)
-    if current_ignore != target_ignore:
-        operations.append({
-            "action": "create" if not (root / ".gitignore").exists() else "update",
-            "surface": "gitignore", "path": ".gitignore",
-            "ownership": "tracked_managed_block",
-            "before_hash": bytes_hash(current_ignore.encode("utf-8")),
-            "after_hash": bytes_hash(target_ignore.encode("utf-8")),
-        })
+    operations.extend(managed_block_operations(
+        "gitignore", ".gitignore", (root / ".gitignore").exists(),
+        current_ignore, target_ignore,
+    ))
     current_attributes, target_attributes = proposed_gitattributes(
         root, workspace
     )
-    if current_attributes != target_attributes:
-        operations.append({
-            "action": (
-                "create" if not (root / ".gitattributes").exists()
-                else "update"
-            ),
-            "surface": "gitattributes", "path": ".gitattributes",
-            "ownership": "tracked_managed_block",
-            "before_hash": bytes_hash(current_attributes.encode("utf-8")),
-            "after_hash": bytes_hash(target_attributes.encode("utf-8")),
-        })
+    operations.extend(managed_block_operations(
+        "gitattributes", ".gitattributes", (root / ".gitattributes").exists(),
+        current_attributes, target_attributes,
+    ))
 
     gate_path = root / ".github" / "agentrof" / "vault-gate.pyz"
     assert_not_symlinked(root, gate_path, "portable gate")

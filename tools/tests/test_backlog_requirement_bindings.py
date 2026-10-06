@@ -5,6 +5,10 @@ import io
 import subprocess
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -172,6 +176,7 @@ class RequirementBindingTests(unittest.TestCase):
         self.assertNotIn(missing, approved)
         self.assertIn(missing, draft)
 
+    @integration
     def test_begin_revision_writes_the_complete_binding_set(self):
         with contextlib.redirect_stdout(io.StringIO()):
             backlog_fixture.make_approved_backlog(self.docs)

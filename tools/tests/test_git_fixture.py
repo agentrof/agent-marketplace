@@ -11,6 +11,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -53,6 +57,7 @@ class GitFixtureTests(unittest.TestCase):
     def git(self, root: Path, *args: str) -> None:
         subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
 
+    @integration
     def test_fixture_repository_never_starts_automatic_maintenance(self):
         with git_fixture.temporary_directory() as raw:
             for guarded in (True, False):

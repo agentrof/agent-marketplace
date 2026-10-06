@@ -14,6 +14,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -536,6 +540,7 @@ class ModelDriftTests(unittest.TestCase):
         self.assertIn("the owner's decision above comes before any pull request", out)
         self.assertIn("No pin moves to another model, so no A/B is due.", out)
 
+    @integration
     def test_the_command_line_entry_runs(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / "tools" / "model_drift.py"), "--root", str(self.root),

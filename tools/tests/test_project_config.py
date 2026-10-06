@@ -7,6 +7,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 
 from tools.tests.git_fixture import init_repository
@@ -35,6 +39,7 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return project / "workspace" / "config.json"
 
+    @integration
     def test_fresh_setup_writes_only_the_closed_schema(self):
         with tempfile.TemporaryDirectory() as temporary:
             config = self.setup_config(Path(temporary))
@@ -45,6 +50,7 @@ class ProjectConfigTests(unittest.TestCase):
             checked = self.run_script(CONFIG, "check", "--config", str(config))
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
 
+    @integration
     def test_only_language_fields_have_a_config_writer(self):
         with tempfile.TemporaryDirectory() as temporary:
             config = self.setup_config(Path(temporary))
@@ -64,6 +70,7 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertNotEqual(retired.returncode, 0)
             self.assertIn("invalid choice", retired.stderr)
 
+    @integration
     def test_check_rejects_retired_and_unknown_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
             config = self.setup_config(Path(temporary))
@@ -76,6 +83,7 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertIn("unknown or retired field: scale", checked.stdout)
             self.assertIn("unknown or retired field: unknown", checked.stdout)
 
+    @integration
     def test_setup_migrates_v1_config_without_touching_authored_titles(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -135,6 +143,7 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertEqual(rerun.returncode, 0, rerun.stdout + rerun.stderr)
             self.assertEqual(json.loads(rerun.stdout)["operations"], [])
 
+    @integration
     def test_future_schema_is_never_downgraded(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -149,6 +158,7 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("future schema_version", result.stderr)
 
+    @integration
     def test_setup_moves_a_recognized_legacy_environment_contract_transactionally(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

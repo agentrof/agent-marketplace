@@ -11,6 +11,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -60,6 +64,7 @@ class CalculationExamplesTests(unittest.TestCase):
             with self.subTest(flow=flow):
                 self.assertIn(REFERENCE, flat(TEAM / "flows" / f"{flow}.md"))
 
+    @integration
     def test_only_required_binds_the_reference_to_every_owning_task(self):
         bound = {}
         for value in ("off", "required"):

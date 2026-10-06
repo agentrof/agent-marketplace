@@ -1,6 +1,0 @@
-{
-  "summary": "New `context_pack.py` and `step_timing.py`, used only at the non-default values of process switches `context_pack` (`role_digest`) and `step_timing` (`recorded`, with budgets from `step_budgets`), so every default output and bound instruction is unchanged. `context_pack.py build` derives, per entry, role and mode, a deterministic digest of the rule units of the task's required reads (obligations, refusals, switch instructions and package commands), with every source and conditional read bound by sha256; a rule that names only another role of the entry is listed by id, and `check` refuses a pack whose sources changed or that a fresh build would not reproduce. `step_timing.py` records each flow step and role spawn (reading, writing, review, re-review, waiting) in a durable run file under `.agentrof/agent-marketplace/timing/`, reports a span that ends over its budget at once with its phase breakdown, largest contributor and lever, lists open spans already past budget, and writes a per-step report against the budgets. In one measured project, a one-story planning revision spent most of its writer time reading the full flow and rule set, and 31 of 68 minutes went to readers re-reading unchanged notes.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

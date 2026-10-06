@@ -11,6 +11,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -18,6 +22,16 @@ from tools import ci_tests
 from tools.tests import git_fixture
 
 
+HOST_PROCESS_FIXTURE_HEADER = """import os, pathlib, subprocess, tempfile, unittest
+def integration(target):
+    target._test_level = "integration"
+    return target
+@integration
+class Tests(unittest.TestCase):
+"""
+
+
+@integration
 class CITestPlannerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -358,7 +372,7 @@ class CITestPlannerTests(unittest.TestCase):
                   "            env = dict(os.environ, CLAUDE_CODE_EXECPATH=str(fake))\n"
                   "            subprocess.run([env['CLAUDE_CODE_EXECPATH'], '--version'], env=env,"
                   " capture_output=True, check=True)\n")
-        header = "import os, pathlib, subprocess, tempfile, unittest\nclass Tests(unittest.TestCase):\n"
+        header = HOST_PROCESS_FIXTURE_HEADER
         teardown = ("    @classmethod\n    def tearDownClass(cls):\n"
                     "        subprocess.run([os.environ['CLAUDE_CODE_EXECPATH'], '--version'],"
                     " capture_output=True)\n")
@@ -530,7 +544,8 @@ class CITestPlannerTests(unittest.TestCase):
                 "    (RECORDS / name).write_text(json.dumps({'pid': os.getpid(), 'temp': tempfile.gettempdir(),\n"
                 "        'environment': [os.environ.get(key) for key in ('TMPDIR', 'TMP', 'TEMP')],\n"
                 "        'claude': os.environ.get('CLAUDE_CODE_EXECPATH')}), encoding='utf-8')\n"
-                "class Tests(unittest.TestCase):\n")
+                "def integration(case):\n    return case\n"
+                "@integration\nclass Tests(unittest.TestCase):\n")
         for name in names:
             text += f"    def test_{name}(self):\n        record({name!r})\n"
             text += "".join(f"        {line}\n" for line in bodies.get(name, []))
@@ -577,6 +592,29 @@ class CITestPlannerTests(unittest.TestCase):
             tripwires.add(value["claude"])
         self.assertEqual((len(temps), len(tripwires)), (3, 3))
         self.assertFalse(any(Path(temp).exists() for temp in temps))
+
+    def test_a_single_process_shard_holds_an_unmarked_test_to_the_unit_boundary(self):
+        self.test_file.write_text(
+            "import subprocess, unittest\n"
+            "def integration(case):\n    return case\n"
+            "class Tests(unittest.TestCase):\n"
+            "    def test_unit(self):\n"
+            "        subprocess.run(['git', '--version'], capture_output=True)\n"
+            "    @integration\n"
+            "    def test_marked(self):\n"
+            "        subprocess.run(['git', '--version'], capture_output=True, check=True)\n", encoding="utf-8")
+        self.ids = sorted(f"{self.module}.Tests.test_{name}" for name in ("marked", "unit"))
+        self.policy["lanes"]["local"].update(shards=1, workers=1)
+        self.save_policy()
+        plan = self.plan()
+        self.assertEqual(ci_tests.worker_groups(plan["lanes"]["local"], 0, 1), [self.ids])
+        path = self.root / "report.json"
+        with mock.patch("sys.stdout", io.StringIO()), mock.patch("sys.stderr", io.StringIO()):
+            self.assertEqual(ci_tests.run_shard(self.root, plan, "local", 0, path, workers=1), 1)
+        rows = {row["id"].rsplit(".", 1)[-1]: row for row in ci_tests.read_json(path)["tests"]}
+        self.assertEqual((rows["test_marked"]["outcome"], rows["test_unit"]["outcome"]), ("success", "failure"))
+        self.assertIn("unit test started a process: git; keep it in process or mark it @integration",
+                      rows["test_unit"]["detail"])
 
     def test_a_failed_or_crashed_worker_fails_the_shard(self):
         for case in ("failure", "crash"):
@@ -797,6 +835,316 @@ class CITestPlannerTests(unittest.TestCase):
                              {"seed_build": 3.5, "seed_copy": .2, "seed_validate": .1})
         qualified.phase_totals.assert_called_once_with()
         flat.phase_totals.assert_called_once_with()
+
+
+
+class TestLevelTests(unittest.TestCase):
+    PROBE = ci_tests.ROOT / "tools/tests/unit-boundary-probe"
+
+    def test_integration_marks_a_test_or_every_test_of_its_class(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "tools/tests").mkdir(parents=True)
+            (root / "tools/tests/test_marked.py").write_text(
+                "import unittest\nfrom tools.tests import levels\nfrom tools.tests.levels import integration\n"
+                "class Mixed(unittest.TestCase):\n    @integration\n    def test_git(self): pass\n"
+                "    def test_rule(self): pass\n"
+                "@integration\nclass Whole(unittest.TestCase):\n    def test_a(self): pass\n"
+                "    def helper(self): pass\n"
+                "class Qualified(unittest.TestCase):\n    @levels.integration\n    @unittest.skip('x')\n"
+                "    def test_b(self): pass\n", encoding="utf-8")
+            module = "tools.tests.test_marked."
+            self.assertEqual(ci_tests.integration_ids(root),
+                             {module + "Mixed.test_git", module + "Whole.test_a", module + "Qualified.test_b"})
+
+    def remove_probe(self):
+        if self.PROBE.is_dir():
+            self.PROBE.rmdir()
+        elif self.PROBE.exists() or self.PROBE.is_symlink():
+            self.PROBE.unlink()
+
+    def run_under_boundary(self, cases, marked=()):
+        """Run *cases* as one TestCase through the worker's guarded runner; each test's report row."""
+        if self.PROBE.exists() or self.PROBE.is_symlink():
+            self.remove_probe()
+        self.addCleanup(lambda: self.remove_probe() if self.PROBE.exists() or self.PROBE.is_symlink() else None)
+        suite_class = type("BoundaryCases", (unittest.TestCase,), dict(cases))
+        prefix = f"{suite_class.__module__}.{suite_class.__qualname__}."
+        unaudited = tuple(getattr(os, name, None) for name in ci_tests.UnitBoundary.UNAUDITED)
+        with tempfile.TemporaryDirectory() as raw, mock.patch("sys.stderr", io.StringIO()):
+            report = {"tests": []}
+            self.outside_temporary = Path(raw) / "beside-the-test"
+            ci_tests.run_guarded(lambda: unittest.TestLoader().loadTestsFromTestCase(suite_class), report,
+                                 Path(raw) / "report.json", {prefix + name for name in marked})
+            self.assertFalse(self.outside_temporary.exists(), "a guarded test wrote beside its own directory")
+        # The runner puts every replaced call back once the suite ends.
+        self.assertEqual(tuple(getattr(os, name, None) for name in ci_tests.UnitBoundary.UNAUDITED), unaudited)
+        written = self.PROBE.exists() or self.PROBE.is_symlink()
+        if written:
+            self.remove_probe()
+        self.assertFalse(written, "a guarded test wrote outside its temporary directory")
+        return {row["id"][len(prefix):]: row for row in report["tests"]}
+
+    def test_host_process_fixture_is_explicitly_integration(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "tools/tests/test_host_fixture.py"
+            source.parent.mkdir(parents=True)
+            source.write_text(HOST_PROCESS_FIXTURE_HEADER +
+                "    def test_alpha(self): pass\n    def test_beta(self): pass\n")
+            self.assertEqual(ci_tests.integration_ids(root), {
+                "tools.tests.test_host_fixture.Tests.test_alpha",
+                "tools.tests.test_host_fixture.Tests.test_beta"})
+
+    def test_local_unit_fixture_cannot_hide_a_process_start(self):
+        def load():
+            try:
+                subprocess.run([sys.executable, "-c", "pass"], check=True)
+            except ci_tests.UnitBoundaryError:
+                pass
+            return unittest.TestSuite()
+        with tempfile.TemporaryDirectory() as raw, \
+                self.assertRaisesRegex(ci_tests.UnitBoundaryError, "unit fixture.*started a process"):
+            ci_tests.run_guarded(load, {"tests": []}, Path(raw) / "report.json", set(), unit_only=True)
+
+    @unittest.skipIf(os.name == "nt", "directory descriptors require POSIX")
+    def test_open_validates_the_directory_descriptor_and_restores_argument_context(self):
+        with tempfile.TemporaryDirectory() as raw:
+            outside = Path(raw)
+            descriptor = os.open(outside, os.O_RDONLY)
+            self.addCleanup(os.close, descriptor)
+
+            def outside_write(_case):
+                cwd = os.getcwd()
+                try:
+                    os.chdir(tempfile.gettempdir())
+                    try:
+                        stream = os.open("escaped", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
+                    except ci_tests.UnitBoundaryError:
+                        pass
+                    else:
+                        os.close(stream)
+                    Path("owned-after-refusal").write_text("inside")
+                    self.assertEqual(Path("owned-after-refusal").read_text(), "inside")
+                finally:
+                    os.chdir(cwd)
+
+            def inside_write(_case):
+                with tempfile.TemporaryDirectory() as own:
+                    owned = os.open(own, os.O_RDONLY)
+                    try:
+                        stream = os.open("kept", os.O_WRONLY | os.O_CREAT, dir_fd=owned)
+                        os.close(stream)
+                    finally:
+                        os.close(owned)
+                    self.assertTrue((Path(own) / "kept").exists())
+
+            def unknown_descriptor(_case):
+                cwd = os.getcwd()
+                try:
+                    os.chdir(tempfile.gettempdir())
+                    with mock.patch.object(ci_tests.UnitBoundary, "directory_of", return_value=None):
+                        stream = os.open("unknown", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
+                        os.close(stream)
+                finally:
+                    os.chdir(cwd)
+
+            def cached_native_open(_case):
+                native = next(function for function in os.supports_dir_fd if function.__name__ == "open")
+                cwd = os.getcwd()
+                try:
+                    os.chdir(tempfile.gettempdir())
+                    stream = native("cached", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
+                    os.close(stream)
+                finally:
+                    os.chdir(cwd)
+
+            rows = self.run_under_boundary({"test_outside": outside_write, "test_inside": inside_write,
+                                           "test_unknown": unknown_descriptor, "test_cached": cached_native_open})
+            self.assertEqual({key: row["outcome"] for key, row in rows.items()}, {
+                "test_inside": "success", "test_outside": "failure", "test_unknown": "failure",
+                "test_cached": "failure"})
+            self.assertIn("wrote outside", rows["test_outside"]["detail"])
+            self.assertIn("unknown directory descriptor", rows["test_unknown"]["detail"])
+            self.assertFalse((outside / "escaped").exists())
+            self.assertFalse((outside / "unknown").exists())
+            self.assertFalse((outside / "cached").exists())
+
+    def test_nested_loaders_and_fixtures_keep_the_active_outer_write_boundary(self):
+        def nested(kind, outside):
+            def case(_test):
+                parent = Path(tempfile.gettempdir())
+                target = self.outside_temporary if outside else parent / (kind + "-owned")
+
+                def write():
+                    try:
+                        target.write_text("fixture")
+                    except ci_tests.UnitBoundaryError:
+                        pass
+
+                def load():
+                    if kind == "loader":
+                        write()
+                        return unittest.TestSuite()
+                    fixture = type("NestedFixture", (unittest.TestCase,), {
+                        "setUpClass": classmethod(lambda _cls: write()),
+                        "test_noop": lambda _case: None})
+                    return unittest.TestLoader().loadTestsFromTestCase(fixture)
+
+                result, _calls = ci_tests.run_guarded(load, {"tests": []}, parent / (kind + ".json"),
+                                                     set(), unit_only=True)
+                self.assertTrue(result.wasSuccessful())
+                self.assertEqual(target.exists(), not outside)
+            return case
+
+        rows = self.run_under_boundary({"test_" + kind + ("_outside" if outside else "_inside"):
+                                       nested(kind, outside)
+                                       for kind in ("loader", "fixture") for outside in (False, True)})
+        for key, row in rows.items():
+            self.assertEqual(row["outcome"], "failure" if key.endswith("outside") else "success", key)
+            if key.endswith("outside"):
+                self.assertIn("wrote outside", row["detail"])
+
+    def test_link_cleanup_is_allowed_but_writing_its_target_is_refused(self):
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "outside-inner-unit"
+            target.write_text("unchanged")
+            def cleanup(_test):
+                with tempfile.TemporaryDirectory() as own:
+                    link = Path(own) / "link"
+                    try:
+                        link.symlink_to(target)
+                    except OSError:
+                        _test.skipTest("symlinks unavailable")
+                    link.rename(Path(own) / "renamed")
+                    (Path(own) / "renamed").unlink()
+            def write(_test):
+                with tempfile.TemporaryDirectory() as own:
+                    link = Path(own) / "link"
+                    try:
+                        link.symlink_to(target)
+                    except OSError:
+                        _test.skipTest("symlinks unavailable")
+                    link.write_text("escaped")
+            rows = self.run_under_boundary({"test_cleanup": cleanup, "test_write": write})
+            self.assertIn(rows["test_cleanup"]["outcome"], {"success", "skipped"})
+            self.assertIn(rows["test_write"]["outcome"], {"failure", "skipped"})
+            self.assertEqual(target.read_text(), "unchanged")
+
+    def test_threads_remain_guarded_while_the_runner_joins_them(self):
+        import threading
+        released = threading.Event()
+        join = threading.Thread.join
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "outside-inner-unit"
+            def worker():
+                released.wait()
+                try:
+                    target.write_text("escaped")
+                except ci_tests.UnitBoundaryError:
+                    pass
+            def case(_test):
+                threading.Thread(target=worker, name="finishing-unit").start()
+            def release_and_join(thread, *args, **kwargs):
+                released.set()
+                return join(thread, *args, **kwargs)
+            with mock.patch.object(threading.Thread, "join", release_and_join):
+                rows = self.run_under_boundary({"test_finishing": case})
+            self.assertEqual(rows["test_finishing"]["outcome"], "failure")
+            self.assertIn("wrote outside", rows["test_finishing"]["detail"])
+            self.assertFalse(target.exists())
+
+    def test_a_unit_test_that_starts_a_process_or_writes_outside_its_temporary_directory_fails(self):
+        import multiprocessing
+        import sqlite3
+        import threading
+        probe = self.PROBE
+        released = threading.Event()
+        self.addCleanup(released.set)
+
+        def writes_inside(_case):
+            with tempfile.TemporaryDirectory() as raw:
+                path = Path(raw) / "kept.txt"
+                path.write_text("inside\n", encoding="utf-8")
+                os.replace(path, Path(raw) / "moved.txt")
+                os.mkdir(Path(raw) / "folder")
+                sqlite3.connect(Path(raw) / "kept.db").close()
+                sqlite3.connect(":memory:").close()
+                descriptor = os.open(raw, os.O_RDONLY)
+                try:
+                    os.mkdir("by-descriptor", dir_fd=descriptor)
+                finally:
+                    os.close(descriptor)
+
+        def catches_its_write(_case):
+            try:
+                probe.write_text("outside\n", encoding="utf-8")
+            except AssertionError:
+                pass
+
+        def by_descriptor(_case):
+            descriptor = os.open(probe.parent, os.O_RDONLY)
+            try:
+                os.mkdir(probe.name, dir_fd=descriptor)
+            finally:
+                os.close(descriptor)
+
+        def in_a_thread(_case):
+            thread = threading.Thread(target=lambda: subprocess.run(["git", "--version"], capture_output=True))
+            thread.start()
+            thread.join()
+
+        def multiprocessing_spawn(_case):
+            process = multiprocessing.get_context("spawn").Process(target=os.getpid)
+            process.start()
+            process.join()
+
+        cases = {
+            "test_starts_git": lambda _case: subprocess.run(["git", "--version"], capture_output=True),
+            "test_starts_a_shell": lambda _case: os.system("true"),
+            "test_starts_through_multiprocessing": multiprocessing_spawn,
+            "test_starts_in_a_thread": in_a_thread,
+            "test_leaves_a_thread_running": lambda _case: threading.Thread(target=released.wait, name="lingering",
+                                                                           daemon=True).start(),
+            "test_writes_outside": lambda _case: open(probe, "w", encoding="utf-8").close(),
+            "test_catches_its_write": catches_its_write,
+            "test_writes_through_file_io": lambda _case: io.FileIO(probe, "w").close(),
+            "test_connects_a_database_outside": lambda _case: sqlite3.connect(probe).close(),
+            "test_makes_a_directory_outside": lambda _case: os.mkdir(probe),
+            "test_makes_a_directory_by_descriptor": by_descriptor,
+            "test_opens_outside_for_writing": lambda _case: os.close(os.open(probe, os.O_WRONLY | os.O_CREAT)),
+            "test_writes_beside_its_own_directory": lambda _case: self.outside_temporary.write_text("x"),
+            "test_writes_inside": writes_inside,
+            "test_reads_the_repository": lambda _case: (ci_tests.ROOT / "README.md").read_bytes(),
+        }
+        if hasattr(os, "mkfifo"):
+            cases["test_makes_a_fifo_outside"] = lambda _case: os.mkfifo(probe)
+        if hasattr(os, "spawnv"):
+            cases["test_spawns"] = lambda _case: os.spawnv(os.P_WAIT, sys.executable, [sys.executable, "-c", "0"])
+        rows = self.run_under_boundary(cases)
+        released.set()
+        passing = {"test_writes_inside", "test_reads_the_repository"}
+        self.assertEqual({name: row["outcome"] for name, row in rows.items()},
+                         {name: "success" if name in passing else "failure" for name in cases})
+        self.assertIn("unit test started a process: git", rows["test_starts_git"]["detail"])
+        self.assertIn("unit test started a process: git", rows["test_starts_in_a_thread"]["detail"])
+        self.assertIn("unit test started a process", rows["test_starts_through_multiprocessing"]["detail"])
+        self.assertIn("unit test left a thread running: lingering", rows["test_leaves_a_thread_running"]["detail"])
+        written = "unit test wrote outside its temporary directory: "
+        target = os.path.normcase(os.path.realpath(probe))
+        for name in ("test_writes_outside", "test_catches_its_write", "test_writes_through_file_io",
+                     "test_connects_a_database_outside", "test_makes_a_directory_outside",
+                     "test_makes_a_directory_by_descriptor", "test_opens_outside_for_writing",
+                     *(["test_makes_a_fifo_outside"] if "test_makes_a_fifo_outside" in cases else [])):
+            self.assertIn(written + target, rows[name]["detail"], name)
+        self.assertIn(written, rows["test_writes_beside_its_own_directory"]["detail"])
+        self.assertIn("mark it @integration", rows["test_catches_its_write"]["detail"])
+
+    @integration
+    def test_a_marked_integration_test_may_start_a_process(self):
+        start = lambda _case: subprocess.run([sys.executable, "-c", "pass"], check=True)
+        rows = self.run_under_boundary({"test_marked": start, "test_unmarked": start}, marked=("test_marked",))
+        self.assertEqual((rows["test_marked"]["outcome"], rows["test_unmarked"]["outcome"]), ("success", "failure"))
 
 
 if __name__ == "__main__":

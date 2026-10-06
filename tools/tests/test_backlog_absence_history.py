@@ -3,6 +3,10 @@
 import contextlib
 import io
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from types import SimpleNamespace
 
 from tools.tests import backlog_fixture
@@ -11,6 +15,7 @@ from tools.tests import test_backlog_absent_inputs as strict_fixture
 compiler = strict_fixture.compiler
 
 
+@integration
 class BacklogAbsenceHistoryTests(unittest.TestCase):
     setUp = strict_fixture.AbsentInputTests.setUp
     requirement = strict_fixture.AbsentInputTests.requirement

@@ -21,6 +21,7 @@ import sys
 import tempfile
 import types
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -131,6 +132,7 @@ def commit(root: Path) -> None:
 NOTES = {name: f"workspace/docs/package/{name}.md" for name in ("a", "b", "c", "d")}
 
 
+@integration
 class TaskInputScopeTests(unittest.TestCase):
     """A reader given notes a, b, c of one package; d depends on a."""
 
@@ -302,6 +304,7 @@ class TaskInputScopeTests(unittest.TestCase):
                 task_inputs.manifest(**self.reader)
 
 
+@integration
 class BacklogScopeTests(unittest.TestCase):
     """The four-story revision-2 backlog of the root review scope tests."""
 
@@ -424,6 +427,7 @@ class BacklogScopeTests(unittest.TestCase):
         self.assertEqual(stub.calls, [])
 
 
+@integration
 class VerificationScopeTests(unittest.TestCase):
     """The verification fixture with two architecture notes, one the story reaches."""
 
@@ -546,6 +550,7 @@ class RealClosureTests(unittest.TestCase):
         self.assertEqual(sorted(task_inputs.vault_views(self.docs)), ["docs", "views"])
 
 
+@integration
 class ChangeInventoryTests(unittest.TestCase):
     """A changed canonical input of any canonical suffix is a change, so a
     reader reads it rather than listing it unchanged."""
@@ -568,6 +573,7 @@ class ChangeInventoryTests(unittest.TestCase):
         self.assertTrue(commit)
 
 
+@integration
 class GitChangeScopeTests(unittest.TestCase):
     """A real Git project: the backlog reader's closure starts from every vault
     file changed since the last approved backlog, never only from lost stamps."""
@@ -669,6 +675,7 @@ class GitChangeScopeTests(unittest.TestCase):
         self.assertIn(self.ACCEPTANCE, scope["changed"])
         self.assertEqual(set(rows.values()), {"full"})
 
+@integration
 class ConcurrentLevelsTests(unittest.TestCase):
     """At review_levels concurrent_when_independent the root manifest does not
     bind the epic round the concurrent epic level is still writing."""

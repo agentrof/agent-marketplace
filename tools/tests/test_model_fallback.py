@@ -16,11 +16,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -210,8 +215,12 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         self.assertNotIn("`git status` over that scope reads as it did before", authoring)
 
     def test_the_validator_requires_the_hook(self):
-        self.assertEqual(fixtures.validator_findings(self.root, "single_team_contract"), [])
-        hooks = self.root / "platforms/claude" / fixtures.PLUGIN / "overlay/hooks/hooks.json"
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name) / "copy"
+        shutil.copytree(self.root, root)
+        self.assertEqual(fixtures.validator_findings(root, "single_team_contract"), [])
+        hooks = root / "platforms/claude" / fixtures.PLUGIN / "overlay/hooks/hooks.json"
         original = hooks.read_bytes()
         data = json.loads(original)
         for event in ("PostToolUse", "PostToolUseFailure"):
@@ -219,13 +228,14 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                                     if group.get("matcher") != "Agent"]
         hooks.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         try:
-            findings = fixtures.validator_findings(self.root, "single_team_contract")
+            findings = fixtures.validator_findings(root, "single_team_contract")
         finally:
             hooks.write_bytes(original)
         self.assertTrue(any(finding.check == "single_team_contract"
                             and "Claude hooks lack 'model_fallback.py'" in finding.message
                             for finding in findings), findings)
 
+    @integration
     def test_an_unavailable_pinned_model_asks_for_one_respawn_on_the_session_model(self):
         role = f"{PREFIX}code-reviewer"
         provider = f"us.anthropic.{self.opus}-v1:0"
@@ -260,6 +270,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                     self.assertIn(fragment, context)
                 self.assertNotIn("\n", output["systemMessage"])
 
+    @integration
     def test_the_pin_is_each_role_s_own(self):
         lens = f"{PREFIX}code-reviewer-lens"
         output = self.response(failure(lens, NOT_FOUND.format(model=self.sonnet)))
@@ -267,6 +278,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         # A not-found error that names another model is not the pin's.
         self.assertIsNone(self.response(failure(lens, NOT_FOUND.format(model=self.opus))))
 
+    @integration
     def test_other_failures_and_other_calls_stay_silent(self):
         role = f"{PREFIX}code-reviewer"
         for name, payload in (
@@ -310,6 +322,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(self.response(text))
 
+    @integration
     def test_a_payload_is_read_as_utf8_under_any_locale(self):
         # Claude Code writes the payload as UTF-8; a prompt in Turkish must not
         # silence the hook where Python's stdin encoding is ASCII.
@@ -325,6 +338,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(self.opus, json.loads(result.stdout)["systemMessage"])
 
+    @integration
     def test_a_model_the_user_chose_never_triggers_it_and_a_respawn_never_loops(self):
         role = f"{PREFIX}code-reviewer"
         error = NOT_FOUND.format(model=self.opus)
@@ -344,6 +358,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                 self.assertIsNotNone(self.response(failure(role, error),
                                                    CLAUDE_CODE_SUBAGENT_MODEL_FORCE=value))
 
+    @integration
     def test_a_role_that_started_on_another_model_is_reported_and_kept(self):
         role = f"{PREFIX}product-owner"
         for name, payload in (("foreground", completed(role, self.sonnet)),
@@ -363,6 +378,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                                  "Keep this run and do not spawn the role again"):
                     self.assertIn(fragment, context)
 
+    @integration
     def test_a_role_on_its_pin_or_an_unknown_provider_form_stays_silent(self):
         role = f"{PREFIX}product-owner"
         for resolved in (self.opus, f"{self.opus}[1m]", f"us.anthropic.{self.opus}-v1:0",
@@ -376,6 +392,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         self.assertIsNone(self.response(payload))
 
 
+@integration
 class ChangedNothingTests(unittest.TestCase):
     """A failed writer changed nothing only when its task manifest still holds."""
 
@@ -447,6 +464,7 @@ RENDERED = f"{fixtures.PLUGIN}-"
 OWNER = f"# Generated by Agent Marketplace {fixtures.PLUGIN}; do not edit by hand."
 
 
+@integration
 class RenderedRoleFallbackTests(unittest.TestCase):
     """A role setup rendered into the project, `<plugin>-<role>`, falls back like the
     plugin's own role, on the pin of its rendered file or else of the tier map."""
@@ -569,6 +587,7 @@ def codex_catalog(*slugs: str, efforts: tuple = ("low", "medium", "high", "xhigh
 FAKE_CODEX_VERSION = "0.159.2-test"
 
 
+@integration
 class CodexModelCheckTests(unittest.TestCase):
     """Apply judges each model a role is pinned to against Codex's own model list."""
 
@@ -932,6 +951,7 @@ def claude_rows(*models: str, efforts: list = CLAUDE_EFFORTS) -> list:
              "supportsEffort": True, "supportedEffortLevels": list(efforts)} for model in models]
 
 
+@integration
 class ClaudeModelCheckTests(unittest.TestCase):
     """Apply judges each model a rendered role runs against Claude Code's own list."""
 

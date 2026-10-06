@@ -25,6 +25,11 @@ import time
 import unittest
 from pathlib import Path
 
+# CLI execution and imported runner tests must share one process-wide guard.
+if __name__ in {"__main__", "ci_tests"}:
+    sys.modules.setdefault("tools.ci_tests", sys.modules[__name__])
+sys.modules.setdefault("ci_tests", sys.modules[__name__])
+
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = "tools/data/ci-test-policy.json"
 SUCCESS_OUTCOMES = {"success", "skipped", "expected_failure"}
@@ -119,17 +124,226 @@ def host_calls_text(calls):
             " (fixtures.isolated_hosts): " + "; ".join(calls))
 
 
-def run_guarded(load, report, report_path):
+def integration_marked(node):
+    return any((isinstance(mark, ast.Name) and mark.id == "integration")
+               or (isinstance(mark, ast.Attribute) and mark.attr == "integration") for mark in node.decorator_list)
+
+
+def integration_ids(root):
+    """The tests marked ``@integration``; a marked class marks each of its tests."""
+    marked = set()
+    for path in sorted((root / "tools/tests").glob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        module = "tools.tests." + path.stem
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                whole = integration_marked(node)
+                marked.update(f"{module}.{node.name}.{item.name}" for item in node.body
+                              if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                              and item.name.startswith("test") and (whole or integration_marked(item)))
+    return marked
+
+
+class UnitBoundaryError(AssertionError):
+    pass
+
+
+_BOUNDARIES = []
+_AUDITING = threading.local()
+_OPEN_ARGUMENTS = threading.local()
+_AUDIT_HOOKED = []
+
+
+def _audit(event, args):
+    if not _BOUNDARIES or getattr(_AUDITING, "active", False):
+        return
+    boundary = _BOUNDARIES[-1]
+    fixture_process = event in boundary.PROCESS_EVENTS and any(item.unit_only for item in _BOUNDARIES)
+    if boundary.test is None and not fixture_process:
+        boundary = next((item for item in reversed(_BOUNDARIES) if item.test is not None), boundary)
+    if boundary.test is None and not (any(item.unit_only for item in _BOUNDARIES) and event in boundary.PROCESS_EVENTS):
+        return
+    _AUDITING.active = True
+    try:
+        boundary.audit(event, args)
+    finally:
+        _AUDITING.active = False
+
+
+class UnitBoundary:
+    """Holds each unit test to its own process and its own temporary directory.
+
+    A process-wide audit hook watches every thread while a test that is not
+    marked ``@integration`` runs: starting a process or writing outside the
+    directory the test gets as its temporary directory raises, is recorded,
+    and fails the test even when the test catches the error; so does a thread
+    the test leaves running. Class and module fixtures run outside the watch.
+    The innermost active test decides; nested loading and fixtures retain an
+    active ancestor's write boundary.
+    """
+
+    WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+    PROCESS_EVENTS = {"subprocess.Popen", "_posixsubprocess.fork_exec", "os.system", "os.exec", "os.spawn",
+                      "os.posix_spawn", "os.fork", "os.forkpty", "os.startfile", "_winapi.CreateProcess",
+                      "pty.spawn"}
+    # Event: ((path position, directory descriptor position or None), ...).
+    PATH_EVENTS = {"os.mkdir": ((0, 2),), "os.remove": ((0, 1),), "os.rmdir": ((0, 1),),
+                   "os.rename": ((0, 2), (1, 3)), "os.symlink": ((1, 2),), "os.link": ((1, 3),),
+                   "os.chmod": ((0, 2),), "os.chown": ((0, 3),), "os.chflags": ((0, None),),
+                   "os.lchflags": ((0, None),), "os.utime": ((0, 3),), "os.truncate": ((0, None),),
+                   "os.setxattr": ((0, None),), "os.removexattr": ((0, None),),
+                   "os.mkfifo": ((0, 2),), "os.mknod": ((0, 3),)}
+    # Calls with a missing audit event or arguments needed to resolve a path.
+    UNAUDITED = ("mkfifo", "mknod", "open")
+
+    def __init__(self, unit_only=False):
+        self.unit_only = unit_only
+        self.fixture_crossed = []
+        self.test = None
+        self.crossed = []
+        self.directory = None
+        self.saved = []
+        self.threads = set()
+
+    def __enter__(self):
+        if not _AUDIT_HOOKED:
+            sys.addaudithook(_audit)
+            _AUDIT_HOOKED.append(True)
+        for name in self.UNAUDITED:
+            original = getattr(os, name, None)
+            if original is not None:
+                self.saved.append((name, original))
+                setattr(os, name, self.unaudited(name, original))
+        self.base = tempfile.gettempdir()
+        _BOUNDARIES.append(self)
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+        _BOUNDARIES.remove(self)
+        for name, original in reversed(self.saved):
+            setattr(os, name, original)
+        self.saved.clear()
+
+    def unaudited(self, name, original):
+        if name == "open":
+            def call(path, flags, mode=0o777, *, dir_fd=None):
+                previous = getattr(_OPEN_ARGUMENTS, "call", None)
+                _OPEN_ARGUMENTS.call = (dir_fd,)
+                try:
+                    return original(path, flags, mode, dir_fd=dir_fd)
+                finally:
+                    _OPEN_ARGUMENTS.call = previous
+            return call
+        def call(path, *args, dir_fd=None, **options):
+            _audit("os." + name, (path, None, dir_fd) if name == "mkfifo" else (path, None, None, dir_fd))
+            return original(path, *args, dir_fd=dir_fd, **options)
+        return call
+
+    def watch(self, test_id):
+        self.directory = tempfile.mkdtemp(prefix="unit-", dir=self.base)
+        self.roots = tuple({os.path.normcase(os.path.realpath(path)) for path in (self.directory, os.devnull)})
+        # A unit test starts no process, so tempfile's default is its whole temporary directory.
+        self.saved_tempdir = tempfile.tempdir
+        tempfile.tempdir = self.directory
+        self.threads = set(threading.enumerate())
+        self.crossed = []
+        self.test = test_id
+
+    def release(self):
+        if self.test is None:
+            return []
+        deadline = time.monotonic() + 1
+        for thread in [thread for thread in threading.enumerate() if thread not in self.threads]:
+            thread.join(max(0.0, deadline - time.monotonic()))
+            if thread.is_alive():
+                self.crossed.append("left a thread running: " + thread.name)
+        self.test = None
+        tempfile.tempdir = self.saved_tempdir
+        crossed, self.crossed = self.crossed, []
+        return crossed
+
+    def cross(self, what):
+        (self.fixture_crossed if self.test is None else self.crossed).append(what)
+        raise UnitBoundaryError(f"unit test {what}; keep it in process or mark it @integration")
+
+    @staticmethod
+    def directory_of(descriptor):
+        """The directory an open descriptor names, or None when it cannot be told."""
+        try:
+            return os.readlink(f"/proc/self/fd/{descriptor}")
+        except OSError:
+            pass
+        try:
+            import fcntl
+            return os.fsdecode(fcntl.fcntl(descriptor, fcntl.F_GETPATH, bytes(1024)).split(b"\0", 1)[0])
+        except (ImportError, AttributeError, OSError):
+            return None
+
+    def check_path(self, path, descriptor=None, *, entry=False):
+        if isinstance(path, int) or path is None:
+            return
+        base = os.getcwd()
+        written = os.fsdecode(os.fspath(path))
+        if not os.path.isabs(written) and descriptor is not None and descriptor >= 0:
+            base = self.directory_of(descriptor)
+            if base is None:
+                self.cross(f"wrote through an unknown directory descriptor: {os.fsdecode(os.fspath(path))}")
+        joined = os.path.join(base, written)
+        resolved = (os.path.join(os.path.realpath(os.path.dirname(joined)), os.path.basename(joined))
+                    if entry else os.path.realpath(joined))
+        full = os.path.normcase(resolved)
+        if not any(full == root or full.startswith(root.rstrip(os.sep) + os.sep) for root in self.roots):
+            self.cross("wrote outside its temporary directory: " + full)
+
+    def audit(self, event, args):
+        if event in self.PROCESS_EVENTS:
+            self.cross("started a process: " + self.command(event, args))
+        elif event == "open":
+            path, _mode, flags = args
+            if flags is not None and flags & self.WRITE_FLAGS:
+                arguments = getattr(_OPEN_ARGUMENTS, "call", None)
+                if (_mode is None and arguments is None and not isinstance(path, int)
+                        and not os.path.isabs(os.fsdecode(os.fspath(path)))):
+                    self.cross("relative descriptor open has no directory argument context")
+                self.check_path(path, arguments[0] if arguments else None)
+        elif event == "sqlite3.connect":
+            database = args[0]
+            if isinstance(database, (str, bytes, os.PathLike)) and os.fsdecode(os.fspath(database)) not in ("", ":memory:"):
+                self.check_path(os.fsdecode(os.fspath(database)).removeprefix("file:").split("?", 1)[0])
+        elif event in self.PATH_EVENTS:
+            for position, descriptor in self.PATH_EVENTS[event]:
+                if position < len(args):
+                    fd = args[descriptor] if descriptor is not None and descriptor < len(args) else None
+                    self.check_path(args[position], fd if isinstance(fd, int) else None,
+                                    entry=event in {"os.mkdir", "os.remove", "os.rmdir", "os.rename", "os.symlink", "os.link"})
+
+    @staticmethod
+    def command(event, args):
+        if event == "subprocess.Popen":
+            target = args[0] if args[0] is not None else args[1]
+            if isinstance(target, (list, tuple)):
+                target = target[0] if target else "?"
+            return os.fsdecode(target).split(" ", 1)[0] if isinstance(target, (str, bytes, os.PathLike)) else "?"
+        return event
+
+
+def run_guarded(load, report, report_path, integration, *, unit_only=False):
     """Load and run a suite with tripwire host binaries in the environment.
 
-    Return the result and the host calls that no test was running for, which
-    a class or module fixture made after the last test.
+    *integration* is the set of tests marked ``@integration``; every other
+    test runs inside a unit boundary. Return the result and the host calls
+    that no test was running for, which a class or module fixture made after
+    the last test.
     """
-    with host_tripwire() as tripwire:
+    with host_tripwire() as tripwire, contextlib.ExitStack() as stack:
+        boundary = stack.enter_context(UnitBoundary(unit_only=unit_only))
         suite = load()
         result = unittest.TextTestRunner(verbosity=2, resultclass=lambda *args, **kwargs:
             TimedResult(*args, report=report, report_path=report_path, tripwire=tripwire,
-                        **kwargs)).run(suite)
+                        boundary=boundary, integration=integration, **kwargs)).run(suite)
+        if boundary.fixture_crossed:
+            raise UnitBoundaryError("unit fixture " + "; ".join(boundary.fixture_crossed))
         return result, tripwire.reached()
 
 
@@ -663,6 +877,8 @@ class TimedResult(unittest.TextTestResult):
         self.report = kwargs.pop("report")
         self.report_path = kwargs.pop("report_path")
         self.tripwire = kwargs.pop("tripwire", None)
+        self.boundary = kwargs.pop("boundary", None)
+        self.integration = kwargs.pop("integration", set())
         super().__init__(*args, **kwargs)
         self.starts = {}
         self.outcomes = {}
@@ -675,8 +891,17 @@ class TimedResult(unittest.TextTestResult):
         self.fixture_starts[test.id()] = fixture_totals()
         self.outcomes[test.id()] = "success"
         super().startTest(test)
+        if self.boundary is not None and test.id() not in self.integration:
+            self.boundary.watch(test.id())
 
     def stopTest(self, test):
+        crossed = self.boundary.release() if self.boundary is not None else []
+        if crossed and self.outcomes[test.id()] in SUCCESS_OUTCOMES:
+            try:
+                raise UnitBoundaryError("the unit test " + "; ".join(crossed)
+                                        + "; keep it in process or mark it @integration")
+            except UnitBoundaryError:
+                self.addFailure(test, sys.exc_info())
         # Calls from a class or module setup count for the test that follows it.
         reached = self.tripwire.reached() if self.tripwire is not None else []
         if reached:
@@ -757,7 +982,7 @@ def run_shard(root, plan, lane_name, shard, report_path, workers=None):
         if len(groups) == 1:
             ids, _hash = inventory(root)
             result, unattributed = run_guarded(lambda: load_selected(root, expected, ids),
-                                               report, report_path)
+                                               report, report_path, integration_ids(root))
             passed = result.wasSuccessful()
             problems = ["a class or module fixture " + host_calls_text(unattributed)] if unattributed else []
             report["workers"] = [{"worker": 0, "tests": len(report["tests"]),
@@ -930,7 +1155,8 @@ def run_worker(root, plan, plan_hash, lane_name, shard, worker, workers, report_
         ids, identity = inventory(root)
         if identity != plan["inventory_hash"]:
             raise CIError("test inventory changed after planning")
-        result, unattributed = run_guarded(lambda: load_selected(root, expected, ids), report, report_path)
+        result, unattributed = run_guarded(lambda: load_selected(root, expected, ids), report, report_path,
+                                           integration_ids(root))
         complete = sorted(test["id"] for test in report["tests"]) == sorted(expected)
         report["status"] = "complete" if result.wasSuccessful() and complete and not unattributed else "failed"
         if unattributed:

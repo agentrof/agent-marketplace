@@ -9,6 +9,10 @@ import json
 from pathlib import Path
 import sys
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins" / "software-engineering-team" / "scripts"))
@@ -43,6 +47,7 @@ def leveled(identifier: str, target: str, level: str | None) -> str:
     return text if level is None else text.replace("- source_refs:", f"- level: {level}\n- source_refs:")
 
 
+@integration
 class BindingTests(unittest.TestCase):
     setUp = base.BindingTests.setUp
     bound = base.BindingTests.bound
@@ -61,6 +66,7 @@ class BindingTests(unittest.TestCase):
                 self.assertEqual(self.bound(entry, role, REFERENCE), entry == "deliver")
 
 
+@integration
 class AssertionMapTests(unittest.TestCase):
     """The pre-handoff fixture's DLV-002 Item ST-005, whose candidate also moves the merged ST-001's live
     scenario to unit level and rewrites its test."""

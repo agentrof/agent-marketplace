@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -23,6 +29,54 @@ from git_fixture import init_repository  # noqa: E402
 # The checks that read tools/data/models.json, directly or through the declared tiers.
 MODEL_CONFIG_READERS = ("model_config_shape", "frontmatter_shape", "execution_profiles",
                         "process_switches")
+
+PLUGIN_ROOT = "plugins/software-engineering-team"
+PANELS = f"{PLUGIN_ROOT}/skill-content/challenge-review/data/review-panels.json"
+SWITCHES = f"{PLUGIN_ROOT}/skill-content/configure/data/process-switches.json"
+MEASURES_RELPATH = "skill-content/product-planning/data/story-size-measures.json"
+MEASURES = f"{PLUGIN_ROOT}/{MEASURES_RELPATH}"
+MODEL_CONFIG = "tools/data/models.json"
+HOST_CLI_PINS = "tools/data/host-cli-versions.json"
+VERIFICATION_POLICY = f"{PLUGIN_ROOT}/skill-content/deliver/data/delivery-verification-policy.json"
+
+# The repository paths a check reads. A mutation test copies only these, runs
+# only its check, and first sees the copy clean, so no finding comes from a
+# file the copy left out.
+DELIVERY_READS = (f"{PLUGIN_ROOT}/skill-content/deliver/data", SWITCHES)
+VAULT_POLICY_READS = (f"{PLUGIN_ROOT}/skill-content/obsidian-vault/data",
+                      f"{PLUGIN_ROOT}/skill-content/business-analysis/data",
+                      f"{PLUGIN_ROOT}/templates/vault")
+PROFILE_READS = ("product.json", "platforms", MODEL_CONFIG)
+HOST_CLI_READS = ("product.json", "platforms", HOST_CLI_PINS)
+PACKAGE_READS = (PLUGIN_ROOT, MODEL_CONFIG)
+INSTRUCTION_READS = (PLUGIN_ROOT, "platforms")
+MEASURE_READS = (f"{PLUGIN_ROOT}/skill-content/product-planning/data",
+                 f"{PLUGIN_ROOT}/scripts/backlog_compile.py")
+
+_VALID_ROOT: list = []
+
+
+def partial_root(root: Path, reads) -> Path:
+    """``root`` holding only the ``reads`` paths of the repository."""
+    for relative in reads:
+        fixtures.copy(relative, root)
+    return root
+
+
+def valid_root(root: Path) -> Path:
+    """A copy at ``root`` of the full valid fixture, built once per process,
+    for a claim about the whole validator run."""
+    if not _VALID_ROOT:
+        _VALID_ROOT.append(tempfile.TemporaryDirectory())
+        fixtures.make_valid_root(Path(_VALID_ROOT[0].name) / "valid")
+    shutil.copytree(Path(_VALID_ROOT[0].name) / "valid", root, symlinks=True)
+    return root
+
+
+def tearDownModule() -> None:
+    for temporary in _VALID_ROOT:
+        temporary.cleanup()
+    _VALID_ROOT.clear()
 
 
 def catalog_models(host: str) -> dict:
@@ -54,9 +108,29 @@ class ValidatorContractTests(unittest.TestCase):
         fixtures.make_valid_root(root)
         return root
 
+    def partial(self, reads) -> Path:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        return partial_root(Path(temporary.name), reads)
+
+    def whole(self) -> Path:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        return valid_root(Path(temporary.name) / "root")
+
+    def assert_silent(self, root: Path, *checks: str) -> None:
+        self.assertEqual(fixtures.validator_findings(root, *checks), [])
+
     def assert_reported(self, root: Path, check: str) -> None:
         self.assertTrue(fixtures.validator_findings(root, check), f"{check} reported nothing")
 
+    @staticmethod
+    def write_json(path: Path, mutate) -> None:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        mutate(value)
+        path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+    @integration
     def test_valid_single_team_fixture_is_clean_and_deterministic(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
@@ -66,144 +140,105 @@ class ValidatorContractTests(unittest.TestCase):
             self.assertEqual(first, second)
 
     def test_skill_project_scope_is_closed_and_external_is_entry_only(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            path = (
-                root / "plugins/software-engineering-team/skill-content/"
-                "issue-report/SKILL.md"
-            )
-            text = path.read_text(encoding="utf-8").replace(
-                "project_scope: external", "project_scope: remote"
-            )
-            path.write_text(text, encoding="utf-8")
-            self.assert_reported(root, "frontmatter_shape")
-
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            path = (
-                root / "plugins/software-engineering-team/skill-content/"
-                "issue-report/SKILL.md"
-            )
-            text = path.read_text(encoding="utf-8").replace(
-                "exposure: entry", "exposure: internal"
-            )
-            path.write_text(text, encoding="utf-8")
-            self.assert_reported(root, "frontmatter_shape")
+        for old, new in (("project_scope: external", "project_scope: remote"),
+                         ("exposure: entry", "exposure: internal")):
+            with self.subTest(change=new):
+                root = self.partial(PACKAGE_READS)
+                self.assert_silent(root, "frontmatter_shape")
+                path = root / PLUGIN_ROOT / "skill-content/issue-report/SKILL.md"
+                text = path.read_text(encoding="utf-8").replace(old, new)
+                path.write_text(text, encoding="utf-8")
+                self.assert_reported(root, "frontmatter_shape")
 
     def test_graph_palette_identity_query_and_rgb_are_validated(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            path = (
-                root / "plugins/software-engineering-team/skill-content/"
-                "obsidian-vault/data/vault-policy.json"
-            )
-            policy = json.loads(path.read_text(encoding="utf-8"))
+        root = self.partial(VAULT_POLICY_READS)
+        self.assert_silent(root, "vault_policy_shape")
+
+        def recolor(policy: dict) -> None:
             story = next(
                 group for group in policy["graph_color_groups"]
                 if group["id"] == "story"
             )
             story["query"] = "tag:#doc/wrong"
             story["rgb"] = -1
-            path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
-            self.assert_reported(root, "vault_policy_shape")
+
+        self.write_json(
+            root / PLUGIN_ROOT / "skill-content/obsidian-vault/data/vault-policy.json", recolor)
+        self.assert_reported(root, "vault_policy_shape")
 
     def test_lazy_fragment_property_drift_is_validated(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            path = (
-                root / "plugins/software-engineering-team/skill-content/"
-                "obsidian-vault/data/vault-policy.json"
-            )
-            policy = json.loads(path.read_text(encoding="utf-8"))
-            del policy["property_types"]["package_status"]
-            path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
-            findings = fixtures.validator_findings(root, "vault_policy_shape")
-            self.assertTrue(any(
-                finding.check == "vault_policy_shape"
-                and "lazy_fragments['business_analysis']"
-                in finding.message
-                and "package_status" in finding.message
-                for finding in findings
-            ))
+        root = self.partial(VAULT_POLICY_READS)
+        self.write_json(
+            root / PLUGIN_ROOT / "skill-content/obsidian-vault/data/vault-policy.json",
+            lambda policy: policy["property_types"].pop("package_status"))
+        findings = fixtures.validator_findings(root, "vault_policy_shape")
+        self.assertTrue(any(
+            finding.check == "vault_policy_shape"
+            and "lazy_fragments['business_analysis']"
+            in finding.message
+            and "package_status" in finding.message
+            for finding in findings
+        ))
 
     def test_vault_policy_and_types_seed_property_maps_cannot_drift(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            path = (
-                root / "plugins/software-engineering-team/templates/vault/"
-                ".obsidian/types.json"
-            )
-            types = json.loads(path.read_text(encoding="utf-8"))
-            types["types"]["owner_role"] = "number"
-            path.write_text(json.dumps(types, indent=2) + "\n", encoding="utf-8")
-            findings = fixtures.validator_findings(root, "vault_policy_shape")
-            self.assertTrue(any(
-                finding.check == "vault_policy_shape"
-                and "types.json property map" in finding.message
-                for finding in findings
-            ))
+        root = self.partial(VAULT_POLICY_READS)
+        self.write_json(root / PLUGIN_ROOT / "templates/vault/.obsidian/types.json",
+                        lambda types: types["types"].update(owner_role="number"))
+        findings = fixtures.validator_findings(root, "vault_policy_shape")
+        self.assertTrue(any(
+            finding.check == "vault_policy_shape"
+            and "types.json property map" in finding.message
+            for finding in findings
+        ))
 
     def test_optional_story_classifications_declare_values_and_text_properties(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            path = (
-                root / "plugins/software-engineering-team/skill-content/"
-                "obsidian-vault/data/vault-policy.json"
-            )
-            original = path.read_text(encoding="utf-8")
+        root = self.partial(VAULT_POLICY_READS)
+        path = root / PLUGIN_ROOT / "skill-content/obsidian-vault/data/vault-policy.json"
+        original = path.read_text(encoding="utf-8")
 
-            def messages(mutate) -> list[str]:
-                policy = json.loads(original)
-                mutate(policy)
-                path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
-                found: list = []
-                validate.CHECKS["vault_policy_shape"](validate.build_tree(root), found)
-                return [finding.message for finding in found]
+        def messages(mutate) -> list[str]:
+            policy = json.loads(original)
+            mutate(policy)
+            path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
+            found: list = []
+            validate.CHECKS["vault_policy_shape"](validate.build_tree(root), found)
+            return [finding.message for finding in found]
 
-            def impact(policy: dict) -> dict:
-                return policy["backlog_contract"]["optional_story_classifications"]["operation_impact"]
+        def impact(policy: dict) -> dict:
+            return policy["backlog_contract"]["optional_story_classifications"]["operation_impact"]
 
-            self.assertEqual(messages(lambda policy: None), [])
-            shape = ("optional story classification 'operation_impact' must declare distinct"
-                     " snake_case values and a reason property other than itself")
-            for case, (mutate, message) in enumerate((
-                (lambda policy: impact(policy).update(values=[]), shape),
-                (lambda policy: impact(policy).update(values=["required", "required"]), shape),
-                (lambda policy: impact(policy).update(reason="operation_impact"), shape),
-                (lambda policy: impact(policy).pop("reason"), shape),
-                (lambda policy: impact(policy).update(reason="operation_rationale"),
-                 "optional story classification 'operation_impact' names property"
-                 " 'operation_rationale', which property_types does not type 'text'"),
-                (lambda policy: policy["property_types"].update(operation_impact="multitext"),
-                 "optional story classification 'operation_impact' names property"
-                 " 'operation_impact', which property_types does not type 'text'"),
-            )):
-                with self.subTest(case=case):
-                    self.assertIn(message, messages(mutate))
+        self.assertEqual(messages(lambda policy: None), [])
+        shape = ("optional story classification 'operation_impact' must declare distinct"
+                 " snake_case values and a reason property other than itself")
+        for case, (mutate, message) in enumerate((
+            (lambda policy: impact(policy).update(values=[]), shape),
+            (lambda policy: impact(policy).update(values=["required", "required"]), shape),
+            (lambda policy: impact(policy).update(reason="operation_impact"), shape),
+            (lambda policy: impact(policy).pop("reason"), shape),
+            (lambda policy: impact(policy).update(reason="operation_rationale"),
+             "optional story classification 'operation_impact' names property"
+             " 'operation_rationale', which property_types does not type 'text'"),
+            (lambda policy: policy["property_types"].update(operation_impact="multitext"),
+             "optional story classification 'operation_impact' names property"
+             " 'operation_impact', which property_types does not type 'text'"),
+        )):
+            with self.subTest(case=case):
+                self.assertIn(message, messages(mutate))
 
     def test_delivery_contract_set_and_merge_policy_are_validated(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            data = (
-                root / "plugins/software-engineering-team/skill-content/"
-                "deliver/data"
-            )
-            receipt = data / "delivery-receipt-contract.json"
-            receipt.unlink()
-            self.assert_reported(root, "delivery_contract_shape")
-
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            protocol_path = (
-                root / "plugins/software-engineering-team/skill-content/"
-                "deliver/data/delivery-protocol-1.json"
-            )
-            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
-            protocol["merge_policy"] = "provider default"
-            protocol_path.write_text(
-                json.dumps(protocol, indent=2) + "\n", encoding="utf-8"
-            )
-            self.assert_reported(root, "delivery_contract_shape")
+        data = f"{PLUGIN_ROOT}/skill-content/deliver/data"
+        for name, mutate in (
+                ("delivery-receipt-contract.json", None),
+                ("delivery-protocol-1.json",
+                 lambda protocol: protocol.update(merge_policy="provider default"))):
+            with self.subTest(contract=name, missing=mutate is None):
+                root = self.partial(DELIVERY_READS)
+                self.assert_silent(root, "delivery_contract_shape")
+                if mutate is None:
+                    (root / data / name).unlink()
+                else:
+                    self.write_json(root / data / name, mutate)
+                self.assert_reported(root, "delivery_contract_shape")
 
     def test_execution_profile_tables_are_validated(self):
         # build_distributions owns the table and catalog rules, and
@@ -228,42 +263,41 @@ class ValidatorContractTests(unittest.TestCase):
             ("platforms/claude/model-catalog.json", None, "execution_profiles",
              {"platforms/claude/model-catalog.json"}),
         )
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            for relative, mutate, check, named in cases:
-                path = root / relative
-                original = path.read_bytes()
-                with self.subTest(path=relative, check=check, missing=mutate is None):
-                    if mutate is None:
-                        path.unlink()
-                    else:
-                        value = json.loads(original)
-                        mutate(value)
-                        path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-                    try:
-                        findings = fixtures.validator_findings(root, check)
-                    finally:
-                        path.write_bytes(original)
-                    self.assertLessEqual(named, {finding.path for finding in findings})
+        root = self.partial(PROFILE_READS)
+        self.assert_silent(root, "execution_profiles", "model_config_shape")
+        for relative, mutate, check, named in cases:
+            path = root / relative
+            original = path.read_bytes()
+            with self.subTest(path=relative, check=check, missing=mutate is None):
+                if mutate is None:
+                    path.unlink()
+                else:
+                    value = json.loads(original)
+                    mutate(value)
+                    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+                try:
+                    findings = fixtures.validator_findings(root, check)
+                finally:
+                    path.write_bytes(original)
+                self.assertLessEqual(named, {finding.path for finding in findings})
 
     def test_a_model_catalog_keys_its_models_by_model_id(self):
         # The owner's decision of 1 Oct 2026 on #349: model IDs are the only
         # names, so a catalog's model keys are the host's IDs, not snake_case
         # field names; every other key stays snake_case.
         model = sorted(catalog_models("codex"))[0]
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            self.assertEqual(fixtures.validator_findings(root, "json_hygiene"), [])
-            path = root / "platforms/codex/model-catalog.json"
-            value = json.loads(path.read_text(encoding="utf-8"))
-            value["models"][model]["Family"] = value["models"][model].pop("family")
-            path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-            self.assertIn(("platforms/codex/model-catalog.json", "json_hygiene"),
-                          {(finding.path, finding.check)
-                           for finding in fixtures.validator_findings(root, "json_hygiene")})
+        root = self.partial(("platforms",))
+        self.assertEqual(fixtures.validator_findings(root, "json_hygiene"), [])
+        path = root / "platforms/codex/model-catalog.json"
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["models"][model]["Family"] = value["models"][model].pop("family")
+        path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+        self.assertIn(("platforms/codex/model-catalog.json", "json_hygiene"),
+                      {(finding.path, finding.check)
+                       for finding in fixtures.validator_findings(root, "json_hygiene")})
 
     def test_ci_host_cli_versions_meet_every_catalog_model_minimum(self):
-        pins = "tools/data/host-cli-versions.json"
+        pins = HOST_CLI_PINS
         pinned = json.loads((fixtures.REAL_REPOSITORY / pins).read_text(encoding="utf-8"))
         keys = {"claude": "claude_code", "codex": "codex"}
         # Each host's floor: the highest minimum of its catalog, and the models that set it.
@@ -273,19 +307,18 @@ class ValidatorContractTests(unittest.TestCase):
             floor = max(minimums.values(), key=release)
             floors[host] = (floor, sorted(model for model, minimum in minimums.items()
                                           if minimum == floor))
+        self.assertEqual(fixtures.validator_findings(self.partial(HOST_CLI_READS),
+                                                     "host_cli_versions"), [])
 
         def run(relative: str, mutate) -> set:
-            with tempfile.TemporaryDirectory() as temporary:
-                root = self.fixture(temporary)
-                path = root / relative
-                if mutate is None:
-                    path.unlink()
-                else:
-                    value = json.loads(path.read_text(encoding="utf-8"))
-                    mutate(value)
-                    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-                return {(finding.path, finding.message)
-                        for finding in fixtures.validator_findings(root, "host_cli_versions")}
+            root = self.partial(HOST_CLI_READS)
+            path = root / relative
+            if mutate is None:
+                path.unlink()
+            else:
+                self.write_json(path, mutate)
+            return {(finding.path, finding.message)
+                    for finding in fixtures.validator_findings(root, "host_cli_versions")}
 
         below = {host: just_below(floor) for host, (floor, _models) in floors.items()}
         found = run(pins, lambda value: value.update({keys[host]: version
@@ -311,6 +344,7 @@ class ValidatorContractTests(unittest.TestCase):
         self.assertEqual(run(pins, lambda value: value.update(codex=just_above(floors["codex"][0]))),
                          set())
 
+    @integration
     def test_malformed_model_config_is_a_finding_not_a_crash(self):
         missing = "model config is missing or not valid JSON"
         shape = "reasoning_levels must be a non-empty kebab-case list"
@@ -327,34 +361,36 @@ class ValidatorContractTests(unittest.TestCase):
             "levels absent": (b'{"schema_version": 1}', shape),
         }
         # Two whole runs prove a malformed file stops no later check; every case
-        # runs the checks that read the config.
+        # runs the checks that read the config, on the files they read.
         whole_runs = {"missing file", "levels objects"}
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            # An unrelated defect proves the run still reaches every later check.
-            (root / "plugins/software-engineering-team/cache.sqlite").write_bytes(b"fixture")
-            path = root / "tools/data/models.json"
-            for case, (content, message) in cases.items():
-                with self.subTest(case=case):
-                    if content is None:
-                        path.unlink()
-                    else:
-                        path.write_bytes(content)
-                    if case in whole_runs:
-                        findings = validate.run(root)
-                        self.assertIn("packaged_state_files",
-                                      {finding.check for finding in findings})
-                    else:
-                        findings = fixtures.validator_findings(root, *MODEL_CONFIG_READERS)
-                    self.assertTrue(any(
-                        finding.path == "tools/data/models.json"
-                        and finding.check == "model_config_shape"
-                        and message in finding.message
-                        for finding in findings), findings)
-                    # The agent tiers fall back to the builder's tiers instead of
-                    # being judged against a malformed list.
-                    self.assertEqual([finding for finding in findings
-                                      if finding.check == "frontmatter_shape"], [])
+        for case, (content, message) in cases.items():
+            with self.subTest(case=case):
+                if case in whole_runs:
+                    root = self.whole()
+                    # An unrelated defect proves the run still reaches every later check.
+                    (root / PLUGIN_ROOT / "cache.sqlite").write_bytes(b"fixture")
+                else:
+                    root = self.partial(PACKAGE_READS + PROFILE_READS)
+                path = root / MODEL_CONFIG
+                if content is None:
+                    path.unlink()
+                else:
+                    path.write_bytes(content)
+                if case in whole_runs:
+                    findings = validate.run(root)
+                    self.assertIn("packaged_state_files",
+                                  {finding.check for finding in findings})
+                else:
+                    findings = fixtures.validator_findings(root, *MODEL_CONFIG_READERS)
+                self.assertTrue(any(
+                    finding.path == "tools/data/models.json"
+                    and finding.check == "model_config_shape"
+                    and message in finding.message
+                    for finding in findings), findings)
+                # The agent tiers fall back to the builder's tiers instead of
+                # being judged against a malformed list.
+                self.assertEqual([finding for finding in findings
+                                  if finding.check == "frontmatter_shape"], [])
 
     def test_delivery_verification_policy_rejects_diagnostic_seal_and_weakened_scope(self):
         for mutate in (
@@ -362,9 +398,10 @@ class ValidatorContractTests(unittest.TestCase):
                 lambda value: value["mutation_scope"].update(unknown_file_policy="skip"),
                 lambda value: value.update(raw_evidence_max_age_seconds=86401),
                 lambda value: value.update(undeclared_field=True)):
-            with self.subTest(mutate=mutate), tempfile.TemporaryDirectory() as temporary:
-                root = self.fixture(temporary)
-                path = root / "plugins/software-engineering-team/skill-content/deliver/data/delivery-verification-policy.json"
+            with self.subTest(mutate=mutate):
+                root = self.partial(DELIVERY_READS)
+                self.assert_silent(root, "delivery_contract_shape")
+                path = root / VERIFICATION_POLICY
                 value = json.loads(path.read_text())
                 mutate(value)
                 path.write_text(json.dumps(value))
@@ -384,17 +421,18 @@ class ValidatorContractTests(unittest.TestCase):
                 (lambda value: value.update(wait_bound_seconds=240.0), wait_bound),
                 (lambda value: value.update(wait_bound_seconds="240"), wait_bound),
                 (lambda value: value.pop("wait_bound_seconds"), field_set)):
-            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as temporary:
-                root = self.fixture(temporary)
-                path = root / "plugins/software-engineering-team/skill-content/deliver/data/delivery-verification-policy.json"
+            with self.subTest(problem=problem):
+                root = self.partial(DELIVERY_READS)
+                path = root / VERIFICATION_POLICY
                 value = json.loads(path.read_text())
                 mutate(value)
                 path.write_text(json.dumps(value))
                 self.assertTrue(any(finding.check == "delivery_contract_shape" and problem in finding.message
-                                    for finding in validate.run(root)))
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            self.assertFalse(any(finding.check == "delivery_contract_shape" for finding in validate.run(root)))
+                                    for finding in fixtures.validator_findings(
+                                        root, "delivery_contract_shape")))
+        root = self.partial(DELIVERY_READS)
+        self.assertFalse(any(finding.check == "delivery_contract_shape"
+                             for finding in fixtures.validator_findings(root, "delivery_contract_shape")))
 
     def test_item_implementation_schedules_follow_the_switch_registry(self):
         """An Item records an implementation_schedule switch value, and one without reads as today's order."""
@@ -407,12 +445,10 @@ class ValidatorContractTests(unittest.TestCase):
                     missing_implementation_schedule="parallel_lanes_v1")),
                 (registry, lambda value: value["switches"]["implementation_schedule"]["values"].append(
                     {"id": "parallel_lanes_v2", "tradeoffs": "Unmeasured."}))):
-            with self.subTest(path=relative), tempfile.TemporaryDirectory() as temporary:
-                root = self.fixture(temporary)
-                path = root / relative
-                value = json.loads(path.read_text(encoding="utf-8"))
-                mutate(value)
-                path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+            with self.subTest(path=relative):
+                root = self.partial(DELIVERY_READS)
+                self.assert_silent(root, "delivery_contract_shape")
+                self.write_json(root / relative, mutate)
                 self.assertTrue(any(
                     finding.check == "delivery_contract_shape"
                     and "implementation schedules" in finding.message
@@ -426,50 +462,45 @@ class ValidatorContractTests(unittest.TestCase):
                    "platforms/codex/software-engineering-team/host-contract.md",
                    "platforms/claude/_team/overlay/templates/project-instructions/host.md",
                    "platforms/codex/_team/overlay/templates/project-instructions/host.md")
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            self.assertEqual(fixtures.validator_findings(root, "finding_code_references"), [])
-            for relative in sources:
-                with self.subTest(source=relative):
-                    path = root / relative
-                    original = path.read_text(encoding="utf-8")
-                    lines = original.splitlines()
-                    path.write_text("\n".join([*lines, "", "Freeze refuses with `DELIVERY_PRE_HANDOFF_ABSENT`,"
-                                               " never with `DELIVERY_PRE_HANDOFF_MISSING` alone."]) + "\n",
-                                    encoding="utf-8")
-                    try:
-                        findings = fixtures.validator_findings(root, "finding_code_references")
-                    finally:
-                        path.write_text(original, encoding="utf-8")
-                    self.assertEqual([(finding.path, finding.line) for finding in findings],
-                                     [(relative, len(lines) + 2)])
-                    self.assertIn("DELIVERY_PRE_HANDOFF_ABSENT", findings[0].message)
-                    self.assertNotIn("DELIVERY_PRE_HANDOFF_MISSING", findings[0].message)
+        root = self.partial(INSTRUCTION_READS)
+        self.assertEqual(fixtures.validator_findings(root, "finding_code_references"), [])
+        for relative in sources:
+            with self.subTest(source=relative):
+                path = root / relative
+                original = path.read_text(encoding="utf-8")
+                lines = original.splitlines()
+                path.write_text("\n".join([*lines, "", "Freeze refuses with `DELIVERY_PRE_HANDOFF_ABSENT`,"
+                                           " never with `DELIVERY_PRE_HANDOFF_MISSING` alone."]) + "\n",
+                                encoding="utf-8")
+                try:
+                    findings = fixtures.validator_findings(root, "finding_code_references")
+                finally:
+                    path.write_text(original, encoding="utf-8")
+                self.assertEqual([(finding.path, finding.line) for finding in findings],
+                                 [(relative, len(lines) + 2)])
+                self.assertIn("DELIVERY_PRE_HANDOFF_ABSENT", findings[0].message)
+                self.assertNotIn("DELIVERY_PRE_HANDOFF_MISSING", findings[0].message)
 
     def test_a_host_that_drops_the_shared_user_context_is_a_finding_not_a_crash(self):
         """Each host fragment renders the one shared user context list on one line."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            for relative, entry, named in (
-                    ("platforms/codex/_team/overlay/templates/project-instructions/host.md",
-                     "- `{{user_context}}`\n", "{{user_context}}"),
-                    ("platforms/shared/_team/overlay/templates/project-instructions/"
-                     "user-context.json", '"{{user_companion}}",', "{{user_companion}}")):
-                with self.subTest(source=relative):
-                    path = root / relative
-                    original = path.read_text(encoding="utf-8")
-                    self.assertIn(entry, original)
-                    path.write_text(original.replace(entry, ""), encoding="utf-8")
-                    try:
-                        findings = fixtures.validator_findings(root, "project_instruction_contract")
-                    finally:
-                        path.write_text(original, encoding="utf-8")
-                    self.assertEqual(len(findings), 1)
-                    self.assertIn(named, findings[0].message)
-
-
-PLUGIN_ROOT = "plugins/software-engineering-team"
-PANELS = f"{PLUGIN_ROOT}/skill-content/challenge-review/data/review-panels.json"
+        # The check compares the sources with the built dist/, so it reads the whole fixture.
+        root = self.whole()
+        for relative, entry, named in (
+                ("platforms/codex/_team/overlay/templates/project-instructions/host.md",
+                 "- `{{user_context}}`\n", "{{user_context}}"),
+                ("platforms/shared/_team/overlay/templates/project-instructions/"
+                 "user-context.json", '"{{user_companion}}",', "{{user_companion}}")):
+            with self.subTest(source=relative):
+                path = root / relative
+                original = path.read_text(encoding="utf-8")
+                self.assertIn(entry, original)
+                path.write_text(original.replace(entry, ""), encoding="utf-8")
+                try:
+                    findings = fixtures.validator_findings(root, "project_instruction_contract")
+                finally:
+                    path.write_text(original, encoding="utf-8")
+                self.assertEqual(len(findings), 1)
+                self.assertIn(named, findings[0].message)
 
 
 class ReviewPanelValidatorTests(unittest.TestCase):
@@ -477,13 +508,15 @@ class ReviewPanelValidatorTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
-        fixtures.make_valid_root(self.root)
+        self.addCleanup(self.temporary.cleanup)
+        self.root = partial_root(Path(self.temporary.name) / "partial", PACKAGE_READS)
         self.panels = self.root / PANELS
         self.original = self.panels.read_bytes()
 
-    def tearDown(self) -> None:
-        self.temporary.cleanup()
+    def use_whole_root(self) -> None:
+        """Move the test onto the full fixture, for a claim about the whole validator run."""
+        self.root = valid_root(Path(self.temporary.name) / "whole")
+        self.panels = self.root / PANELS
 
     def panel_messages(self) -> list[str]:
         return [finding.message for finding in fixtures.validator_findings(self.root, "review_panels")]
@@ -668,7 +701,10 @@ class ReviewPanelValidatorTests(unittest.TestCase):
         self.panels.unlink()
         self.assert_rejected("review panels are referenced but their lens data is missing")
 
+    @integration
     def test_new_lens_regrouping_and_step_are_data_plus_anchor(self):
+        self.use_whole_root()
+
         def extend(steps):
             steps["design_system"]["lenses"].append({
                 "id": "content-and-voice",
@@ -693,7 +729,6 @@ class ReviewPanelValidatorTests(unittest.TestCase):
         self.assertEqual(validate.run(self.root), [])
 
 
-SWITCHES = f"{PLUGIN_ROOT}/skill-content/configure/data/process-switches.json"
 FIXTURE_SWITCH = {
     "summary": "How the fixture step runs.",
     "flows": ["operation"],
@@ -713,15 +748,19 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
-        fixtures.make_valid_root(self.root)
+        self.addCleanup(self.temporary.cleanup)
+        self.bind(partial_root(Path(self.temporary.name) / "partial", PACKAGE_READS))
+
+    def bind(self, root: Path) -> None:
+        self.root = root
         self.registry = self.root / SWITCHES
         self.original = self.registry.read_bytes()
         self.flow = self.root / PLUGIN_ROOT / "flows/operation.md"
         self.flow_text = self.flow.read_text(encoding="utf-8")
 
-    def tearDown(self) -> None:
-        self.temporary.cleanup()
+    def use_whole_root(self) -> None:
+        """Move the test onto the full fixture, for a claim about the whole validator run."""
+        self.bind(valid_root(Path(self.temporary.name) / "whole"))
 
     def messages(self) -> list[str]:
         return [finding.message
@@ -739,8 +778,10 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         messages = self.messages()
         self.assertTrue(any(fragment in message for message in messages), messages)
 
+    @integration
     def test_shipped_registry_and_an_anchored_switch_are_clean(self):
         self.assertEqual(self.messages(), [])
+        self.use_whole_root()
         self.declare(fixture_mode=FIXTURE_SWITCH)
         self.anchor()
         self.assertEqual(validate.run(self.root), [])
@@ -848,7 +889,9 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.registry.unlink()
         self.assert_rejected("process switches are named but the switch registry is missing")
 
+    @integration
     def test_switch_references_are_bound_by_the_policy_never_linked(self):
+        self.use_whole_root()
         reference = "skill-content/challenge-review/references/switch-fixture_mode-fast.md"
         path = self.root / PLUGIN_ROOT / reference
         self.declare(fixture_mode=FIXTURE_SWITCH)
@@ -945,22 +988,16 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.assert_rejected("value data needs a switch reference of that value to bind it")
 
 
-MEASURES_RELPATH = "skill-content/product-planning/data/story-size-measures.json"
-MEASURES = f"{PLUGIN_ROOT}/{MEASURES_RELPATH}"
-
-
 class StorySizeMeasureValidatorTests(unittest.TestCase):
     """Every story size measure names a derivation the backlog compiler has."""
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
-        fixtures.make_valid_root(self.root)
+        self.addCleanup(self.temporary.cleanup)
+        self.root = partial_root(Path(self.temporary.name), MEASURE_READS)
         self.path = self.root / MEASURES
         self.original = json.loads(self.path.read_text(encoding="utf-8"))
-
-    def tearDown(self) -> None:
-        self.temporary.cleanup()
+        self.assertEqual(self.messages(), [])
 
     def messages(self) -> list[str]:
         return [finding.message
@@ -1073,13 +1110,47 @@ def edit_json(root: Path, relative: str, mutate) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
-def tree_digest(root: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(root.rglob("*")):
-        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
-        if path.is_file():
-            digest.update(hashlib.sha256(path.read_bytes()).digest())
-    return digest.hexdigest()
+class TreeGuard:
+    """The paths and file contents under a root, compared after each builder.
+
+    A file whose size, modification time and status-change time are unchanged
+    since the last comparison is not read again; every other file is compared
+    by content. A write always advances the status-change time, which no
+    caller can set back.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.signatures = self.scan()
+        self.contents = {relative: self.content(relative)
+                         for relative, signature in self.signatures.items() if signature}
+
+    def scan(self) -> dict:
+        found = {}
+        for directory, folders, files in os.walk(self.root):
+            base = Path(directory).relative_to(self.root)
+            for name in folders:
+                found[(base / name).as_posix()] = None
+            for name in files:
+                status = os.stat(os.path.join(directory, name))
+                found[(base / name).as_posix()] = (
+                    status.st_size, status.st_mtime_ns, status.st_ctime_ns, status.st_ino)
+        return found
+
+    def content(self, relative: str) -> str:
+        return hashlib.sha256((self.root / relative).read_bytes()).hexdigest()
+
+    def changed(self) -> list[str]:
+        """The paths added, removed or rewritten with other bytes since the start."""
+        current = self.scan()
+        changed = sorted(set(current) ^ set(self.signatures))
+        for relative, signature in current.items():
+            if signature and relative in self.signatures and signature != self.signatures[relative]:
+                if self.content(relative) != self.contents[relative]:
+                    changed.append(relative)
+                else:
+                    self.signatures[relative] = signature
+        return changed
 
 
 VALIDATOR_BUILDERS = {
@@ -1212,6 +1283,7 @@ class HomePathCheckTests(unittest.TestCase):
         match = validate.HOME_PATH_RE.search(text)
         return match and validate.home_path_user(match)
 
+    @integration
     def test_every_file_git_would_commit_is_read_and_an_ignored_one_is_not(self):
         # Generated, memory and top-level files are public once committed.
         read = ("plugins/team/skill-content/topic/SKILL.md", "platforms/claude/adapter.json",
@@ -1254,6 +1326,7 @@ class HomePathCheckTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(self.user(text))
 
+    @integration
     def test_the_folder_form_a_claude_code_project_encodes_is_a_home_path_too(self):
         for text in ("~/.claude/projects/-Users-fixture-Projects-app/run.jsonl",
                      "/tmp/claude-501/-home-fixture-work-app/notes.md",
@@ -1293,6 +1366,7 @@ class HomePathCheckTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(self.user(text))
 
+    @integration
     def test_a_system_or_service_home_names_no_person_and_passes(self):
         homes = {"runner": "Actions checks out into /home/runner/work/app/app.",
                  "node": "WORKDIR /home/node/app",
@@ -1312,6 +1386,7 @@ class HomePathCheckTests(unittest.TestCase):
                 self.assertEqual(self.user(text), name)
                 self.assertEqual(self.findings(root), [("plugins/team/skill-content/ci/SKILL.md", 2)])
 
+    @integration
     def test_a_declared_fake_home_passes_only_in_its_own_file_and_for_its_user(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1327,6 +1402,7 @@ class HomePathCheckTests(unittest.TestCase):
                 self.assertEqual(self.findings(root), [("tools/tests/test_other.py", 1),
                                                        ("tools/tests/test_sample.py", 1)])
 
+    @integration
     def test_the_repository_holds_only_its_declared_fake_homes(self):
         root = TESTS.parents[1]
         self.assertEqual(self.findings(root), [])
@@ -1405,8 +1481,7 @@ class ValidatorBuilderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.temporary = tempfile.TemporaryDirectory()
-        cls.root = Path(cls.temporary.name) / "valid"
-        fixtures.make_valid_root(cls.root)
+        cls.root = valid_root(Path(cls.temporary.name) / "valid")
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -1426,8 +1501,9 @@ class ValidatorBuilderTests(unittest.TestCase):
                 self.assertFalse("tools/tests/fixtures/" in text,
                                  f"{name} names a fixtures folder that does not exist")
 
+    @integration
     def test_each_builder_fires_its_check(self):
-        pristine = tree_digest(self.root)
+        pristine = TreeGuard(self.root)
         for check, builder in sorted(VALIDATOR_BUILDERS.items()):
             with self.subTest(check=check):
                 silent: list = []
@@ -1439,7 +1515,7 @@ class ValidatorBuilderTests(unittest.TestCase):
                     validate.CHECKS[check](validate.build_tree(self.root), found)
                 finally:
                     restore()
-                self.assertEqual(tree_digest(self.root), pristine,
+                self.assertEqual(pristine.changed(), [],
                                  f"the {check} builder changed a file outside the helpers")
                 self.assertTrue([finding for finding in found if finding.check == check],
                                 f"{check} reported nothing on its broken fixture")

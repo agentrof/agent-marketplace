@@ -4,6 +4,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -28,17 +32,20 @@ class BacklogCompilerTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(COMPILER), *map(str, args)],
                               cwd=ROOT, text=True, capture_output=True, check=False)
 
+    @integration
     def test_new_backlog_requires_an_explicit_mode(self):
         with tempfile.TemporaryDirectory() as raw:
             result = self.run_cli("init", "--docs", Path(raw) / "docs")
             self.assertNotEqual(result.returncode, 0)
 
+    @integration
     def test_manual_mode_requires_all_four_input_refs(self):
         with tempfile.TemporaryDirectory() as raw:
             result = self.run_cli("init", "--docs", Path(raw) / "docs", "--planning-mode", "manual",
                                   "--input-ref", "[[business-analysis/a/space|A]]")
             self.assertNotEqual(result.returncode, 0)
 
+    @integration
     def test_requirement_mode_requires_requirement_ref(self):
         with tempfile.TemporaryDirectory() as raw:
             result = self.run_cli("init", "--docs", Path(raw) / "docs", "--planning-mode", "requirement")
@@ -767,6 +774,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
                 errors = self.findings(evidence=evidence)
                 self.assertTrue(any(expected in error for error in errors), errors)
 
+    @integration
     def test_compiler_approved_landscape_without_note_status_is_accepted_readonly(self):
         self.approved_solution()
         props, _ = backlog_compile.parse_front_matter(self.landscape)
@@ -779,12 +787,14 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
                  for path in self.docs.rglob("*") if path.is_file()}
         self.assertEqual(after, before)
 
+    @integration
     def test_draft_package_cannot_be_approved_by_note_status(self):
         self.approved_solution(status="approved")
         landscape_check.rewrite_frontmatter(self.landscape, {"package_status": "draft"})
         self.commit_solution()
         self.assert_rejected_by_both_consumers()
 
+    @integration
     def test_missing_or_invalid_receipt_cannot_be_approved_by_note_status(self):
         self.approved_solution(status="approved")
         original = self.landscape.read_text(encoding="utf-8")
@@ -798,6 +808,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
                 self.commit_solution()
                 self.assert_rejected_by_both_consumers()
 
+    @integration
     def test_changed_package_child_invalidates_landscape_reference(self):
         self.approved_solution(status="approved")
         child = self.tree / "decisions/service-decision.md"
@@ -805,6 +816,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
         self.commit_solution()
         self.assert_rejected_by_both_consumers()
 
+    @integration
     def test_matching_hash_does_not_override_failed_solution_compiler(self):
         self.approved_solution(status="approved")
         landscape_check.rewrite_frontmatter(
@@ -814,6 +826,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
         self.commit_solution()
         self.assert_rejected_by_both_consumers()
 
+    @integration
     def test_canonical_landscape_requires_landscape_type(self):
         self.approved_solution(status="approved")
         landscape_check.rewrite_frontmatter(self.landscape, {"type": "decision"})
@@ -822,6 +835,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
         self.commit_solution()
         self.assert_rejected_by_both_consumers("must have type: landscape")
 
+    @integration
     def test_malformed_topology_version_returns_a_finding(self):
         self.approved_solution(status="approved")
         for value in ("invalid", "true", "false", "[]", "", "3.5", "{}"):
@@ -829,6 +843,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
                 landscape_check.rewrite_frontmatter(self.landscape, {"topology_contract_version": value})
                 self.assert_rejected_by_both_consumers("topology_contract_version must be an integer")
 
+    @integration
     def test_landscape_still_cannot_cross_allowed_subtree(self):
         self.approved_solution()
         self.assertTrue(any("wrong vault subtree" in error
@@ -861,12 +876,14 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
             }, "backlog/backlog.md")
         return errors
 
+    @integration
     def test_manual_handoff_rejects_uncommitted_solution(self):
         self.approved_solution(commit=False)
         props, _ = backlog_compile.parse_front_matter(self.landscape)
         errors = self.manual_binding_findings(props["package_hash"])
         self.assertIn("backlog/backlog.md input binding: solution-design/landscape has uncommitted package changes", errors)
 
+    @integration
     def test_manual_handoff_rejects_a_stale_bound_receipt(self):
         self.approved_solution()
         errors = self.manual_binding_findings("sha256:" + "0" * 64)
@@ -894,6 +911,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
         self.assertNotEqual(old, new)
         return old, new
 
+    @integration
     def test_historical_binding_resolves_to_the_earlier_approved_receipt(self):
         self.approved_solution()
         old, new = self.revise_solution()
@@ -910,6 +928,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertTrue(current["current"])
 
+    @integration
     def test_historical_binding_still_rejects_a_hash_that_was_never_approved(self):
         self.approved_solution()
         self.revise_solution()
@@ -919,6 +938,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
                 require_committed=True, allow_historical=True)
             self.assertIn("solution-design/landscape package hash is stale or does not match expected hash", errors)
 
+    @integration
     def test_ci_checkout_can_resolve_an_earlier_approved_receipt(self):
         self.approved_solution()
         old, _new = self.revise_solution()
@@ -943,6 +963,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
                 self.assertEqual(errors, [])
                 self.assertEqual(receipt["verification_profile"], "historical")
 
+    @integration
     def test_strict_binding_rejects_the_earlier_receipt_after_a_revision(self):
         self.approved_solution()
         old, _new = self.revise_solution()
@@ -950,6 +971,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
             "backlog/backlog.md input binding: solution-design/landscape package hash is stale or does not match expected hash",
             self.manual_binding_findings(old))
 
+    @integration
     def test_legacy_note_approval_behavior_is_unchanged(self):
         self.write_note("solution-design/landscape.md", {
             "type": "landscape", "status": "approved", "package_status": "approved",
@@ -966,6 +988,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
         self.assertFalse(self.findings())
         self.assertFalse(self.findings(evidence=True))
 
+    @integration
     def test_current_but_uncommitted_modern_solution_is_rejected(self):
         self.approved_solution(commit=False)
         for evidence in (False, True):
@@ -973,6 +996,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
                 self.assertTrue(any("uncommitted package changes" in error
                                     for error in self.findings(evidence=evidence)))
 
+    @integration
     def test_manual_handoff_rejects_legacy_readonly_solution(self):
         self.write_note("solution-design/landscape.md", {
             "type": "landscape", "package_status": "approved", "topology_contract_version": 2,

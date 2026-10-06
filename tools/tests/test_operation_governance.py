@@ -11,6 +11,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 
 
@@ -71,6 +75,7 @@ def operation_findings(docs: Path) -> list[tuple[str, str]]:
             if finding.path.startswith("operation/")]
 
 
+@integration
 class OperationGovernanceTests(unittest.TestCase):
     def invoke(self, script: Path, *args: str):
         return subprocess.run([sys.executable, str(script), *args], cwd=ROOT,
@@ -722,6 +727,7 @@ def record_section(title: str, header: str, rows: tuple[str, ...] | list[str]) -
     return "\n".join([f"## {title}", "", header, separator, *rows, "", ""])
 
 
+@integration
 class AcceptedMinorFindingsTests(unittest.TestCase):
     """Switch `review_loop` at `blocking_delta` keeps an Operation review's record in
     the contract: the findings the review returned, the calibration rulings and

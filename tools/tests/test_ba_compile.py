@@ -17,6 +17,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -863,6 +867,7 @@ class EnterReviewTests(unittest.TestCase):
         self.assertEqual(code, 2, out + err)
         self.assertEqual((external / "erp" / self.relative).read_bytes(), before)
 
+    @integration
     @unittest.skipUnless(sys.platform == "win32", "native Windows directory junction")
     def test_windows_junction_space_ancestor_is_rejected(self):
         self.draft()
@@ -881,6 +886,7 @@ class EnterReviewTests(unittest.TestCase):
         finally:
             business_analysis.rmdir()
 
+    @integration
     def test_full_review_lifecycle_in_canonical_and_both_distributions(self):
         assert_distributions_ship_the_compiler(self)
         relative = "domains/inventory/decisions/batch-sizing-decision.md"
@@ -908,6 +914,7 @@ class EnterReviewTests(unittest.TestCase):
                 result = compiler.classify_package(space, vault_root=docs)
                 self.assertEqual(result["profile"], "strict-current")
 
+    @integration
     def test_tag_list_comments_preserve_bytes_in_every_distribution(self):
         assert_distributions_ship_the_compiler(self)
         relative = "domains/inventory/decisions/batch-sizing-decision.md"
@@ -1279,6 +1286,7 @@ class PackageLifecycleTests(unittest.TestCase):
         self.assertNotIn("approved_at:", root)
         self.assertNotIn("package_hash:", root)
 
+    @integration
     def test_v2_decision_only_gate_failure_is_legacy_readonly_everywhere(self):
         target = self.prepare_v2_decision_legacy("in_review")
         classification = ba.classify_package(self.space, SCHEMA, self.docs)
@@ -1365,6 +1373,7 @@ class PackageLifecycleTests(unittest.TestCase):
         self.assertEqual(ba.classify_package(self.space, SCHEMA, self.docs)["profile"],
                          "strict-current")
 
+    @integration
     def test_decision_in_review_is_vault_legal_but_blocks_ba_package_closure(self):
         target = self.add_approved_decision()
         text = ba.draft_document_text(target.read_text(encoding="utf-8"))

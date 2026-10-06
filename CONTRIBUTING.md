@@ -27,15 +27,14 @@ make check-local
 make verify-local
 ```
 
-`check-local` always runs static gates and the change's own tests from the
-full branch base-to-staged-candidate diff, with four isolated workers by
+`check-local` always runs static gates and the change's own unit tests from
+the full branch base-to-staged-candidate diff, with four isolated workers by
 default: the changed test methods, the tests that name a changed input or a
 changed function, and the modules that import a changed test helper, within a
-budget of about 40 seconds.
-Pull request CI runs every test on Linux and each system's own tests on macOS
-and Windows, so the local gate never runs the whole suite on its own;
-`python3 tools/ci_local.py check --staged --full` runs every test on request,
-for a change whose host-specific behavior CI cannot cover. After committing and
+budget of about 40 seconds. Integration tests never run locally.
+Pull request CI runs every test, integration tests included, on Linux and each
+system's own tests on macOS and Windows; `python3 tools/ci_local.py check
+--staged --full` runs every unit test on request. After committing and
 before pushing, run `make check-pr`, the confidentiality and release-impact
 scan of the committed branch. Partial staging and worktree/index mismatches are rejected. Identical successful local results can be reused for
 at most 24 hours; a changed or failed candidate invalidates them. Verify the
@@ -152,6 +151,33 @@ validator.
 - Memory tiers and mind-maps. A missing-context problem is a
   step-contract bug; fix the contract, do not add a buffer.
 
+## Unit first
+
+Process starts and file-system work, not Python, dominate this suite's time,
+so every test picks the cheapest level that proves its rule:
+
+- A rule a unit test can prove is proven by a unit test. Call the deciding
+  function in process on synthetic in-memory input or a minimal temporary
+  tree, with no Git and no subprocess. When a script decides inside its Git
+  reads, extract the decision into a pure function the script calls.
+- Each script or verb keeps exactly one real end-to-end smoke per refusal
+  family, so the wiring between its reads and the rule stays tested.
+- Integration tests are kept for what a unit test cannot prove: genuine races,
+  the interplay of several Deliveries, and real Git semantics such as refs,
+  worktrees, index flags, file modes, symlinks and line endings as Git records
+  them.
+- A refusal matrix is parametrized unit cases with `subTest` plus that one
+  smoke. Independent scenarios are separate test methods sharing a helper.
+- Converting a test never weakens it: the same exception type and message are
+  expected, and the converted rule is broken once to see the test fail.
+- Mark every test that starts Git or any other process, or writes outside
+  its own temporary directory, with `@integration` from
+  `tools/tests/levels.py`, on the method or on its class. The local gate runs
+  only unit tests, fast and as many of the change's own as fit; pull request
+  CI runs unit and integration tests. CI and local workers fail an unmarked
+  test that starts a process, writes outside its own temporary directory or
+  leaves a thread running, so the split stays true.
+
 ## Guarding the guard
 
 Every validator check has a deliberately broken fixture:
@@ -161,3 +187,5 @@ the valid fixture repository so that its check reports it. A meta-test keeps
 the two in lockstep, so adding a check without a builder turns the suite red.
 If your PR changes validation behavior, it must change the builders in the
 same commit.
+
+Local unit workers also reject process starts during test-module loading and class/module fixtures, including attempts a fixture catches. Shared fixture seeds must be built in process and remain read-only; each unit test mutates only its own temporary copy.

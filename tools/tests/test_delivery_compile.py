@@ -11,6 +11,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -44,6 +48,7 @@ GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com
 _COMPILER_FIXTURE_CACHE = RepositorySeedCache()
 
 
+@integration
 class DeliveryCompilerTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
@@ -1934,6 +1939,7 @@ class DeliveryCompilerTests(unittest.TestCase):
             delivery_compile.execution_phases({"role_sequence": roles, "implementation_schedule": "fast"})
 
 
+@integration
 class ScopeHandoffBindingTests(unittest.TestCase):
     """The proposal and scope approval, the handoff, refuse non-current upstream bindings."""
 

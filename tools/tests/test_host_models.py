@@ -21,6 +21,10 @@ import sys
 import tempfile
 import time
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -128,6 +132,7 @@ def workspace(case: unittest.TestCase) -> tuple:
     return base, base / "empty"
 
 
+@integration
 @unittest.skipIf(os.name != "posix", "the fake host binaries are POSIX shell scripts")
 class ClaudeListingTests(unittest.TestCase):
     """The `initialize` reply of the binary that runs the session is the list."""
@@ -310,6 +315,7 @@ class ClaudeListingTests(unittest.TestCase):
             self.assertEqual(claude_models.verdict("claude-opus-5-5", listing), "unverified")
 
 
+@integration
 @unittest.skipIf(os.name != "posix", "the fake host binaries are POSIX shell scripts")
 class CodexListingTests(unittest.TestCase):
     """The binary's version picks its cached account catalog or `debug models`."""
@@ -647,6 +653,7 @@ class AncestorTests(unittest.TestCase):
             self.assertEqual(host_listing.proc_entry(50, root), (1, ""))
             self.assertIsNone(host_listing.proc_entry(7, root))
 
+    @integration
     @unittest.skipIf(os.name != "posix", "the walk reads /proc or ps")
     def test_the_live_walk_starts_at_the_parent_process(self):
         code = ("import json, sys; sys.path.insert(0, sys.argv[1]); import host_listing;"
@@ -727,6 +734,7 @@ class HostContractTests(unittest.TestCase):
         self.assertNotIn("when a `codex` executable is on PATH", codex)
 
 
+@integration
 @unittest.skipIf(os.name != "posix", "the fake host binaries are POSIX shell scripts")
 class PackagingTests(unittest.TestCase):
     """Every host package ships its own host_models.py beside the shared core."""

@@ -12,6 +12,10 @@ import sys
 import tempfile
 import types
 import unittest
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 
 
@@ -59,6 +63,7 @@ class SetupProjectTests(unittest.TestCase):
             _APPLIED.apply_to(Path(temporary), _APPLIED_CONTEXT)
             yield Path(temporary)
 
+    @integration
     def test_bootstrap_is_project_local_and_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -147,6 +152,7 @@ class SetupProjectTests(unittest.TestCase):
             ):
                 self.assertNotIn(retired_identity, serialized)
 
+    @integration
     def test_preflight_allows_an_unconfigured_git_project(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -157,6 +163,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(json.loads(result.stdout)["ok"])
 
+    @integration
     def test_refresh_inspect_check_apply_converges_and_preserves_project_data(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -314,6 +321,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(json.loads(second.stdout)["operations"], [])
 
+    @integration
     def test_inspect_surfaces_forbidden_runtime_state_before_apply(self):
         with self.applied_project() as project:
             forbidden = (
@@ -331,6 +339,7 @@ class SetupProjectTests(unittest.TestCase):
                 "project.sqlite" in blocker for blocker in payload["blockers"]
             ))
 
+    @integration
     def test_setup_accepts_process_local_experience_prototype_files(self):
         with self.applied_project() as project:
             preview = (
@@ -346,6 +355,7 @@ class SetupProjectTests(unittest.TestCase):
             )
             self.assertEqual(inspected.returncode, 0, inspected.stdout)
 
+    @integration
     def test_setup_refuses_nested_legacy_experience_registry(self):
         with self.applied_project() as project:
             registry = (
@@ -371,6 +381,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(checked.returncode, 1, checked.stdout)
             self.assertIn("_generated/artifact-registry.json", checked.stdout)
 
+    @integration
     def test_setup_refuses_symlink_anywhere_in_experience_subtree(self):
         with self.applied_project() as project:
             external = project / "external-experience"
@@ -404,6 +415,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertIn("Experience subtree symlink", checked.stdout)
             self.assertTrue((external / "sentinel.md").is_file())
 
+    @integration
     def test_setup_and_check_refuse_hardlinks_in_experience_subtree(self):
         with self.applied_project() as project:
             ledger = (
@@ -436,6 +448,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(checked.returncode, 1, checked.stdout)
             self.assertIn("hard-link alias", checked.stdout)
 
+    @integration
     def test_refresh_rolls_back_every_managed_write_on_closing_failure(self):
         with self.applied_project() as project:
             config_path = project / "workspace/config.json"
@@ -471,6 +484,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(config_path.read_bytes(), config_before)
             self.assertEqual(graph_path.read_bytes(), graph_before)
 
+    @integration
     def test_rollback_preserves_concurrent_authored_markdown(self):
         with self.applied_project() as project:
             graph_path = project / "workspace/docs/.obsidian/graph.json"
@@ -509,6 +523,7 @@ class SetupProjectTests(unittest.TestCase):
                 "# Concurrent user-authored note\n",
             )
 
+    @integration
     def test_rollback_preserves_concurrent_edit_to_unchanged_managed_note(self):
         with self.applied_project() as project:
             graph_path = project / "workspace/docs/.obsidian/graph.json"
@@ -552,6 +567,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(home.read_text(encoding="utf-8"), concurrent_home)
             self.assertEqual(graph_path.read_bytes(), graph_before)
 
+    @integration
     def test_rollback_reports_concurrent_edit_to_written_target(self):
         with self.applied_project() as project:
             graph_path = (
@@ -599,6 +615,7 @@ class SetupProjectTests(unittest.TestCase):
                 1.25,
             )
 
+    @integration
     def test_pre_replace_recheck_preserves_racing_target_edit(self):
         with self.applied_project() as project:
             graph_path = (
@@ -651,6 +668,7 @@ class SetupProjectTests(unittest.TestCase):
                 1.5,
             )
 
+    @integration
     def test_noncanonical_managed_workspace_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -666,6 +684,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("non-canonical managed workspace", result.stderr)
 
+    @integration
     def test_setup_check_admits_disposable_tool_databases_in_runtime(self):
         """Scratch is where the required cadence writes its tool output."""
         with self.applied_project() as project:
@@ -693,6 +712,7 @@ class SetupProjectTests(unittest.TestCase):
                                     for item in json.loads(rejected.stdout)["findings"]), reserved)
                 condemned.unlink()
 
+    @integration
     def test_setup_check_rejects_state_next_to_the_runtime_directory(self):
         with self.applied_project() as project:
             residue = project / ".agentrof/agent-marketplace/backlog.json"
@@ -704,6 +724,7 @@ class SetupProjectTests(unittest.TestCase):
             findings = json.loads(checked.stdout)["findings"]
             self.assertTrue(any("only .runtime" in item for item in findings))
 
+    @integration
     def test_setup_check_names_tracked_local_files_outside_ascii_exactly(self):
         """The tracked local and plugin file findings name each file from a
         NUL-separated listing; without -z Git quotes a name outside ASCII
@@ -729,6 +750,7 @@ class SetupProjectTests(unittest.TestCase):
                 "package-projected local Obsidian plugin files are tracked: "
                 + plugin, findings)
 
+    @integration
     def test_local_obsidian_plugin_projection_is_recreated_but_not_clone_truth(self):
         with self.applied_project() as project:
             obsidian = project / "workspace/docs/.obsidian"
@@ -826,6 +848,7 @@ class SetupProjectTests(unittest.TestCase):
                 {},
             )
 
+    @integration
     def test_runtime_symlink_is_rejected_without_following_it(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary) / "project"
@@ -841,6 +864,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertIn("runtime path is symlinked", result.stderr)
             self.assertFalse((target / "agent-marketplace").exists())
 
+    @integration
     def test_concurrent_identical_setup_converges(self):
         """Two applies that find the setup guard taken run one after the other and both converge (#388).
 
@@ -895,6 +919,7 @@ class SetupProjectTests(unittest.TestCase):
             )
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
 
+    @integration
     def test_apply_refuses_after_three_seconds_while_the_setup_guard_is_held(self):
         """Setup keeps its own bounded wait (#388): an apply that finds the guard
         taken polls it for 3 seconds of monotonic time, then refuses with
@@ -934,51 +959,58 @@ class SetupProjectTests(unittest.TestCase):
             cwd=project, capture_output=True, check=True,
         ).stdout
 
-    def test_setup_adds_the_gitattributes_block_once_and_keeps_project_lines(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fresh = Path(temporary) / "fresh"
-            fresh.mkdir()
-            init_repository(fresh)
-            inspected = self.run_script(
-                SETUP, "inspect", "--project-root", str(fresh), "--json"
-            )
-            self.assertEqual(
-                inspected.returncode, 0, inspected.stdout + inspected.stderr
-            )
-            planned = {
-                item["path"]: item
-                for item in json.loads(inspected.stdout)["operations"]
-            }
-            self.assertIn(".gitattributes", planned)
-            self.assertEqual(planned[".gitattributes"]["action"], "create")
-            self.assertEqual(
-                planned[".gitattributes"]["ownership"], "tracked_managed_block"
-            )
-            self.assertFalse((fresh / ".gitattributes").exists())
-            applied = self.run_script(
-                SETUP, "apply", "--project-root", str(fresh), "--json"
-            )
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            self.assertEqual(
-                (fresh / ".gitattributes").read_bytes(),
-                ATTRIBUTES_BLOCK.encode("utf-8"),
-            )
+    @staticmethod
+    def merged_attributes(current):
+        return setup_module.merged_managed_text(
+            current, ".gitattributes", setup_module.setup_check.ATTRIBUTES_START,
+            setup_module.setup_check.ATTRIBUTES_END,
+            setup_module.setup_check.managed_attributes_block("workspace"),
+        )
 
+    def test_setup_plans_the_gitattributes_block_as_a_created_managed_block(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            current, target = setup_module.proposed_gitattributes(
+                Path(temporary), "workspace",
+            )
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+        self.assertEqual((current, target), ("", ATTRIBUTES_BLOCK))
+        [operation] = setup_module.managed_block_operations(
+            "gitattributes", ".gitattributes", False, current, target,
+        )
+        self.assertEqual(operation["path"], ".gitattributes")
+        self.assertEqual(operation["action"], "create")
+        self.assertEqual(operation["ownership"], "tracked_managed_block")
+
+    def test_setup_adds_the_gitattributes_block_once_after_project_lines(self):
+        before = "* text=auto\n*.png binary\n"
+        self.assertEqual(
+            self.merged_attributes(before), before + "\n" + ATTRIBUTES_BLOCK,
+        )
+
+    def test_setup_replaces_a_stale_gitattributes_block_in_place(self):
+        before, after = "* text=auto\n*.png binary\n", "*.sh text eol=lf\n"
+        stale = ATTRIBUTES_BLOCK.replace("** -text", "** text")
+        self.assertEqual(
+            self.merged_attributes(before + stale + after),
+            before + ATTRIBUTES_BLOCK + after,
+        )
+
+    def test_setup_leaves_a_converged_gitattributes_file_unchanged(self):
+        converged = "* text=auto\n*.png binary\n" + ATTRIBUTES_BLOCK + "*.sh text eol=lf\n"
+        self.assertEqual(self.merged_attributes(converged), converged)
+        self.assertEqual(setup_module.managed_block_operations(
+            "gitattributes", ".gitattributes", True, converged,
+            self.merged_attributes(converged),
+        ), [])
+
+    @integration
+    def test_a_failed_apply_puts_back_a_stale_gitattributes_block(self):
+        with tempfile.TemporaryDirectory() as temporary:
             owned = Path(temporary) / "owned"
             owned.mkdir()
             init_repository(owned)
             attributes = owned / ".gitattributes"
             before, after = "* text=auto\n*.png binary\n", "*.sh text eol=lf\n"
-            attributes.write_bytes(before.encode("utf-8"))
-            applied = self.run_script(
-                SETUP, "apply", "--project-root", str(owned), "--json"
-            )
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            self.assertEqual(
-                attributes.read_bytes(),
-                (before + "\n" + ATTRIBUTES_BLOCK).encode("utf-8"),
-            )
-
             stale = ATTRIBUTES_BLOCK.replace("** -text", "** text")
             attributes.write_bytes((before + stale + after).encode("utf-8"))
             original = attributes.read_bytes()
@@ -996,19 +1028,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertTrue(result["rolled_back"])
             self.assertEqual(attributes.read_bytes(), original)
 
-            applied = self.run_script(
-                SETUP, "apply", "--project-root", str(owned), "--json"
-            )
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            converged = (before + ATTRIBUTES_BLOCK + after).encode("utf-8")
-            self.assertEqual(attributes.read_bytes(), converged)
-            repeated = self.run_script(
-                SETUP, "apply", "--project-root", str(owned), "--json"
-            )
-            self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
-            self.assertEqual(json.loads(repeated.stdout)["applied_operations"], [])
-            self.assertEqual(attributes.read_bytes(), converged)
-
+    @integration
     def test_setup_check_reports_a_missing_stale_or_overridden_gitattributes_rule(self):
         with self.applied_project() as project:
             attributes = project / ".gitattributes"
@@ -1048,6 +1068,7 @@ class SetupProjectTests(unittest.TestCase):
             )
             self.assertEqual(checked.returncode, 0, checked.stdout)
 
+    @integration
     def test_managed_rule_checks_governed_markdown_out_byte_identical_under_autocrlf(self):
         with temporary_directory() as temporary:
             project = Path(temporary)
@@ -1092,6 +1113,7 @@ class SetupProjectTests(unittest.TestCase):
                 self.git(project, "status", "--porcelain", "--", relative), b""
             )
 
+    @integration
     @unittest.skipIf(os.name == "nt", "POSIX file mode contract")
     def test_setup_gives_new_files_the_umask_mode_and_keeps_existing_modes(self):
         previous = os.umask(0o022)
@@ -1139,6 +1161,7 @@ class SetupProjectTests(unittest.TestCase):
         finally:
             os.umask(previous)
 
+    @integration
     @unittest.skipIf(os.name == "nt", "native Windows keeps no POSIX mode")
     def test_refresh_gives_files_older_writers_left_owner_only_their_read_access_back(self):
         """Writers before v0.4.0 left files at 0600 and writers since keep an existing mode,
@@ -1179,6 +1202,7 @@ class SetupProjectTests(unittest.TestCase):
         finally:
             os.umask(previous)
 
+    @integration
     @unittest.skipIf(os.name == "nt", "native Windows keeps no POSIX mode")
     def test_mode_repair_leaves_untracked_executable_and_outside_files(self):
         """Only tracked non-executable files in setup's scope at exactly 0600 are repaired. They
@@ -1212,6 +1236,7 @@ class SetupProjectTests(unittest.TestCase):
             os.umask(previous)
 
 
+@integration
 class WindowsLongPathsChoiceTests(unittest.TestCase):
     """Item and Integration worktrees share the project repository's local Git config, and Git
     for Windows leaves out of a checkout that still exits 0 every tracked file whose path reaches

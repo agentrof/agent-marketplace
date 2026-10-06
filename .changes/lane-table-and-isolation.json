@@ -1,0 +1,6 @@
+{
+  "summary": "Two process switches for parallel lanes, both off by default. Process switch `lane_table` (`off` | `recorded`): at `recorded`, the new `scripts/lane_table.py` records each lane's start and finish under the project-local runtime directory, lists the lanes a restarted session still has to launch, resume or retry, and refuses to start a lane already finished. Process switch `lane_isolation` (`shared_checkout` | `scratch_clone`): at `scratch_clone`, each parallel fix lane works in its own scratch clone, `lane_table.py start` refuses a lane working directory inside the main checkout, and `lane_table.py check` refuses when the main checkout's branch changed since the run began.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

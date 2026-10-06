@@ -289,6 +289,41 @@ over the engines, longest first, and merges them into one record whose exit
 code is 0 only when every partition passed intact, as
 `deliver/references/switch-test_engines-partitioned.md` defines.
 
+What an Item's fixed chain costs is set by three process switches. Process
+switch `item_qa_tier`: at `full_per_item`, the default, every Item's QA gate
+runs the full acceptance command; at `change_tier_per_item`, where the
+Verification Contract declares a change-level and an integration tier, the
+Item's gate runs the change-level tier and the Delivery runs the integration
+tier once before its pull request, as
+`qa-verification/references/switch-item_qa_tier-change_tier_per_item.md`
+defines. Process switch `item_review_scale`: at `fixed`, the default, every Item
+gets the reader set `code_review_panel` selects; at `by_change_size`, the
+official code reviewer reads alone an Item whose change is within the owner's
+size limits, as `code-review/references/switch-item_review_scale-by_change_size.md`
+defines. Process switch `item_cost_report`: at `off`, the default, the Delivery
+Review carries no per-Item cost; at `per_step` it adds each Item's fixed cost
+step by step, as `deliver/references/switch-item_cost_report-per_step.md`
+defines.
+
+How a coordinator keeps parallel lanes apart and remembers them is set by two
+process switches. Process switch `lane_table`: at `off`, the default, lanes
+live in the coordinator's context; at `recorded`, `scripts/lane_table.py`
+records each lane's start and finish under the project-local runtime directory
+and lists the lanes a restarted session still has to launch, as
+`deliver/references/switch-lane_table-recorded.md` defines. Process switch
+`lane_isolation`: at `shared_checkout`, the default, a fix lane may work in the
+main checkout; at `scratch_clone`, each parallel fix lane works in its own
+scratch clone and no delegated lane switches the main checkout's branch, as
+`deliver/references/switch-lane_isolation-scratch_clone.md` defines.
+
+Whether a technical Requirement is fact-checked before its approval is process
+switch `requirement_fact_check`. At `off`, the default, only the compiler checks
+it. At `pre_approval_reader`, one read-only low-tier reader checks its outcome
+sentences against the files they cite and returns contradictions only, which
+the coordinator fixes before the owner sees the draft, as
+`requirement/references/switch-requirement_fact_check-pre_approval_reader.md`
+defines.
+
 Backlog planning measures story size as process switch `story_size_budget`
 selects. At `off`, the default, nothing is measured or shown. At
 `propose_split`, `backlog_compile.py check --json` reports each story's

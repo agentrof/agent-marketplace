@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "measures": {
+    "changed_lines": {
+      "summary": "Lines added plus lines removed in the Item's frozen change against its base, as git diff --numstat counts them; a binary file counts nothing here.",
+      "derivation": "numstat_added_plus_removed"
+    },
+    "changed_files": {
+      "summary": "Paths the Item's frozen change adds, modifies, renames or deletes against its base.",
+      "derivation": "name_status_paths"
+    }
+  }
+}

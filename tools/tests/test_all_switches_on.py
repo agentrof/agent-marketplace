@@ -62,6 +62,11 @@ LEVELS = "product-planning/references/switch-test_levels-declared.md"
 # The switch references each shipped task binds, by entry and role. A task
 # binds a reference of a switch that owns one of its entry's flows, from a
 # skill it selects or, for owner_gates, from any skill.
+# The fixed-cost and lane switches of delivery-execution, in the deliver skill.
+ITEM_COST = "deliver/references/switch-item_cost_report-per_step.md"
+LANE_TABLE = "deliver/references/switch-lane_table-recorded.md"
+LANE_ISOLATION = "deliver/references/switch-lane_isolation-scratch_clone.md"
+DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE)
 EXPECTED = {
     **{f"{entry}:{role}": [] for entry, role in (
         ("business-analysis", "analysis-challenger"), ("business-analysis", "business-analyst"),
@@ -120,6 +125,17 @@ WAVE_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system
                 "execution-plan", "solution-design")
 EXPECTED = {key: sorted([*value, WAVES]) if key.split(":")[0] in WAVE_ENTRIES else value
             for key, value in EXPECTED.items()}
+# Every deliver task binds the deliver skill's fixed-cost and lane references;
+# QA and the code reviewer also bind their own skill's fixed-cost reference, and
+# the Requirement entry binds its fact-check reference.
+OWN_SKILL = {"deliver:qa-engineer": ["qa-verification/references/switch-item_qa_tier-change_tier_per_item.md"],
+             "deliver:code-reviewer": ["code-review/references/switch-item_review_scale-by_change_size.md"],
+             "requirement:business-analyst": [
+                 "requirement/references/switch-requirement_fact_check-pre_approval_reader.md"]}
+EXPECTED = {key: sorted([*value, *(DELIVER if key.startswith("deliver:") else ()),
+                         *OWN_SKILL.get(key, ())])
+            if key.startswith("deliver:") or key in OWN_SKILL else value
+            for key, value in EXPECTED.items()}
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")
 
@@ -155,6 +171,8 @@ class AllSwitchesOnTests(unittest.TestCase):
                     "max_delta_share_percent", "--value", "50")
         self.policy("set", "--switch", "test_cost_budget", "--parameter", "serial_rows",
                     "--value", str(SERIAL_ROWS))
+        self.policy("set", "--switch", "item_review_scale", "--parameter", "changed_lines",
+                    "--value", "200")
         self.policy("approve")
         self.commit("Approve a Process Policy with every switch on")
 

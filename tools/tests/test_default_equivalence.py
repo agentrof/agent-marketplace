@@ -247,6 +247,12 @@ SHIPPED_ADDITIONS = {
     "scripts/vault_query.py": (
         72, "#441: the cached vault query CLI, a package script every task binds with the"
             " other package scripts; no default-path step runs it."),
+    "scripts/context_pack.py": (
+        72, "#441: the role digest of switch context_pack, a package script every task binds"
+            " with the other package scripts; no default-path step runs it."),
+    "scripts/step_timing.py": (
+        72, "#441: the per-step timing recorder of switch step_timing, a package script every"
+            " task binds with the other package scripts; no default-path step runs it."),
     "skill-content/setup/references/windows-long-paths.md": (
         2, "#358: the native Windows core.longpaths choice procedure, a step of the setup"
            " entry, which every setup task binds with the rest of its skill."),

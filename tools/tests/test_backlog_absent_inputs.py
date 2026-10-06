@@ -4,7 +4,10 @@ import contextlib
 import io
 import subprocess
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from types import SimpleNamespace
 
 from tools.tests.git_fixture import init_repository

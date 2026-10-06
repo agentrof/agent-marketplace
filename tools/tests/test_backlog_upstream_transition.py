@@ -8,7 +8,10 @@ import json
 from pathlib import Path
 import subprocess
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 
 from tools.tests import test_backlog_revision_atomicity as fixtures

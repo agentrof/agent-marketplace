@@ -7,7 +7,10 @@ import json
 import os
 import subprocess
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 
 from tools.tests import test_requirement_compile as requirement_tests

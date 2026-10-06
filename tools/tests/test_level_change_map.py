@@ -9,7 +9,10 @@ import json
 from pathlib import Path
 import sys
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins" / "software-engineering-team" / "scripts"))

@@ -18,7 +18,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]

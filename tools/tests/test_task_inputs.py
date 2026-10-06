@@ -11,7 +11,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -92,6 +95,7 @@ class TaskInputTests(unittest.TestCase):
         path.write_text(f"---\ntype: {kind}\nowner_role: {owner}\n{extra}---\n\n# Selected source\n", encoding="utf-8")
         return relative
 
+    @integration
     def test_ba_write_scope_is_exact_owned_selected_space_and_not_read_dependencies(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()

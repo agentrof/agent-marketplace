@@ -6,7 +6,10 @@ import json
 import subprocess
 import tempfile
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 import sys
 from unittest.mock import patch

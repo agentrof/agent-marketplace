@@ -17,7 +17,10 @@ import subprocess
 import tempfile
 import time
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 from pathlib import Path, PureWindowsPath
 

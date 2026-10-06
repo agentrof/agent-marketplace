@@ -14,7 +14,10 @@ import sys
 import tempfile
 import time
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from unittest import mock
 
 from tools import ci_local, ci_tests
@@ -211,8 +214,14 @@ class LocalValidationTests(unittest.TestCase):
 
     @integration
     def test_real_workers_have_distinct_temporary_directories_and_account_for_all_tests(self):
+        # The Git call runs in the class fixture: a worker holds each unit test to its own process.
         self.test_path.write_text('import os, subprocess, tempfile, unittest\nfrom pathlib import Path\n'
             'class Example(unittest.TestCase):\n'
+            '    @classmethod\n'
+            '    def setUpClass(cls):\n'
+            '        with tempfile.TemporaryDirectory() as raw:\n'
+            '            cls.inside_git = subprocess.run(["git", "-C", raw, "rev-parse", "--show-toplevel"],\n'
+            '                                            capture_output=True)\n'
             '    def check_temporary(self, expected_worker):\n'
             '        temporary_root = Path(tempfile.gettempdir()).resolve()\n'
             '        checkout = Path.cwd().resolve()\n'
@@ -220,9 +229,7 @@ class LocalValidationTests(unittest.TestCase):
             '        self.assertEqual(temporary_root.name, expected_worker)\n'
             '        self.assertEqual(tempfile.gettempdir(), os.environ["TEMP"])\n'
             '        self.assertEqual(os.environ["TMPDIR"], os.environ["TMP"])\n'
-            '        with tempfile.TemporaryDirectory() as raw:\n'
-            '            result = subprocess.run(["git", "-C", raw, "rev-parse", "--show-toplevel"], capture_output=True)\n'
-            '            self.assertNotEqual(result.returncode, 0, result.stdout)\n'
+            '        self.assertNotEqual(self.inside_git.returncode, 0, self.inside_git.stdout)\n'
             '    def test_one(self): self.check_temporary("0")\n'
             '    def test_two(self): self.check_temporary("1")\n')
         self.git('add', '--all')
@@ -336,9 +343,12 @@ class LocalValidationTests(unittest.TestCase):
 
     @integration
     def test_worker_cannot_populate_shared_read_only_cache(self):
+        # The write runs in the class fixture, outside the unit boundary each test runs inside.
         self.test_path.write_text('import os, pathlib, unittest\nclass Example(unittest.TestCase):\n'
-            '    def test_one(self):\n'
+            '    @classmethod\n'
+            '    def setUpClass(cls):\n'
             '        (pathlib.Path(os.environ["PYTHONPYCACHEPREFIX"]) / "unexpected.pyc").write_bytes(b"changed")\n'
+            '    def test_one(self): pass\n'
             '    def test_two(self): pass\n')
         self.git('add', '--all')
         with self.assertRaisesRegex(ci_tests.CIError, 'read-only stdlib cache changed'):

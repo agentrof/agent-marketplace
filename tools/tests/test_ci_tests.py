@@ -11,7 +11,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -532,7 +535,8 @@ class CITestPlannerTests(unittest.TestCase):
                 "    (RECORDS / name).write_text(json.dumps({'pid': os.getpid(), 'temp': tempfile.gettempdir(),\n"
                 "        'environment': [os.environ.get(key) for key in ('TMPDIR', 'TMP', 'TEMP')],\n"
                 "        'claude': os.environ.get('CLAUDE_CODE_EXECPATH')}), encoding='utf-8')\n"
-                "class Tests(unittest.TestCase):\n")
+                "def integration(case):\n    return case\n"
+                "@integration\nclass Tests(unittest.TestCase):\n")
         for name in names:
             text += f"    def test_{name}(self):\n        record({name!r})\n"
             text += "".join(f"        {line}\n" for line in bodies.get(name, []))

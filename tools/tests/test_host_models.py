@@ -21,7 +21,10 @@ import sys
 import tempfile
 import time
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock

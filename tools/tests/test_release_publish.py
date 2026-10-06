@@ -7,7 +7,10 @@ import io
 import subprocess
 import sys
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Optional, Sequence

@@ -4,7 +4,10 @@ import contextlib
 import io
 import subprocess
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 
 from tools.tests import backlog_fixture
 from tools.tests import test_backlog_requirement_bindings as requirement_fixture

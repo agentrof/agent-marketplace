@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 import sys
 from unittest import mock

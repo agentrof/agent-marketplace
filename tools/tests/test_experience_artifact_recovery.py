@@ -5,7 +5,10 @@ import json
 import subprocess
 import tempfile
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock

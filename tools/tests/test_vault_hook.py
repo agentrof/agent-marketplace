@@ -12,7 +12,10 @@ import sys
 import tempfile
 import time
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 import uuid
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -1423,6 +1426,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             finally:
                 self.hook.cleanup_guard_state(primary, recovery)
 
+    @integration
     def test_recovery_restore_never_follows_replaced_experience_root(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -3367,6 +3371,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(after.returncode, 2)
             self.assertEqual(config.stat().st_mode & 0o777, 0o640)
 
+    @integration
     @unittest.skipUnless(os.name == "nt", "native Windows junction contract")
     def test_dangling_windows_junction_is_removed_before_restore(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3421,6 +3426,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertFalse(self.hook.path_is_alias(artifact_root))
             self.assertFalse(artifact_root.exists())
 
+    @integration
     @unittest.skipUnless(os.name == "nt", "native Windows READONLY contract")
     def test_windows_readonly_files_are_cleared_before_recovery(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3461,6 +3467,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(generated.read_text(encoding="utf-8"), "before\n")
             self.assertFalse(unexpected.exists())
 
+    @integration
     @unittest.skipUnless(os.name == "nt", "native Windows READONLY contract")
     def test_windows_readonly_parent_file_is_replaced_during_recovery(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3669,6 +3676,7 @@ class VaultHookShellContractTests(unittest.TestCase):
                 finally:
                     recovery.unlink(missing_ok=True)
 
+    @integration
     def test_only_a_plain_absence_counts_as_a_removed_project(self):
         removed = self.hook.project_root_removed
         with tempfile.TemporaryDirectory() as temporary:

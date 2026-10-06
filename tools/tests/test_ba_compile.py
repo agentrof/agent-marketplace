@@ -17,7 +17,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -864,6 +867,7 @@ class EnterReviewTests(unittest.TestCase):
         self.assertEqual(code, 2, out + err)
         self.assertEqual((external / "erp" / self.relative).read_bytes(), before)
 
+    @integration
     @unittest.skipUnless(sys.platform == "win32", "native Windows directory junction")
     def test_windows_junction_space_ancestor_is_rejected(self):
         self.draft()

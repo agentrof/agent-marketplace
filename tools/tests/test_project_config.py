@@ -7,7 +7,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from pathlib import Path
 
 from tools.tests.git_fixture import init_repository

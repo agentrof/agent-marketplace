@@ -1,6 +1,9 @@
 import tempfile
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path

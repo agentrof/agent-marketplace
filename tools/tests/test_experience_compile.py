@@ -6,7 +6,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1994,6 +1997,7 @@ class ExperienceCompilerTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(map_path.stat().st_mode), map_mode)
             self.assertEqual(stat.S_IMODE(home.stat().st_mode), home_mode)
 
+    @integration
     def test_root_and_child_directory_aliases_are_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw)
@@ -2044,6 +2048,7 @@ class ExperienceCompilerTests(unittest.TestCase):
             finally:
                 remove_alias(child)
 
+    @integration
     def test_missing_navigation_map_never_uses_an_aliased_parent(self):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw)
@@ -2317,6 +2322,7 @@ class ExperienceCompilerTests(unittest.TestCase):
 
             self.assertFalse(backup.exists())
 
+    @integration
     def test_transaction_rollback_never_follows_a_replaced_docs_parent(self):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw)
@@ -2362,6 +2368,7 @@ class ExperienceCompilerTests(unittest.TestCase):
                     docs.unlink()
                 moved_docs.rename(docs)
 
+    @integration
     def test_transaction_runtime_never_follows_a_project_local_alias(self):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw)

@@ -5,7 +5,10 @@ from __future__ import annotations
 import contextlib
 import io
 import unittest
-from tools.tests.levels import integration
+try:
+    from tools.tests.levels import integration
+except ModuleNotFoundError:  # run as a script from tools/tests
+    from levels import integration
 
 from tools.tests import backlog_fixture
 from tools.tests import test_backlog_pending_review_policy as pending

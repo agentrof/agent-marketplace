@@ -1,6 +1,7 @@
 """Isolation and observable entry-point behavior for in-process rule tests."""
 
 import os
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -39,6 +40,33 @@ class PythonEntryTests(unittest.TestCase):
             with self.subTest(expression=expression):
                 result = python_entry.run([self.script(f"raise SystemExit({expression})\n")])
                 self.assertEqual((result.returncode, result.stderr), expected)
+
+    def test_captured_crlf_and_cr_are_normalized_like_subprocess_text_mode(self):
+        entry = self.script(
+            "import sys\n"
+            "sys.stdout.buffer.write(b'first\\r\\nsecond\\rthird\\n')\n"
+            "sys.stderr.buffer.write(b'error\\r\\nretry\\r')\n"
+            "sys.stdout.reconfigure(newline='\\r\\n')\n"
+            "sys.stderr.reconfigure(newline='\\r\\n')\n"
+            "print('Windows output')\n"
+            "print('Windows error', file=sys.stderr)\n")
+        result = python_entry.run([entry])
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, "first\nsecond\nthird\nWindows output\n",
+                          "error\nretry\nWindows error\n"))
+
+    def test_native_lanes_register_each_entry_case_explicitly(self):
+        from tools import ci_tests
+        root = Path(__file__).resolve().parents[2]
+        ids = set(ci_tests.inventory(root)[0])
+        policy = json.loads((root / "tools/data/ci-test-policy.json").read_text(encoding="utf-8"))
+        for group in ("platform", "macos", "windows"):
+            with self.subTest(group=group):
+                self.assertEqual(set(policy["groups"][group]["tests"]) - ids, set())
+        entry_cases = {name for name in ids
+                       if name.startswith("tools.tests.test_python_entry.PythonEntryTests.")}
+        self.assertTrue(entry_cases)
+        self.assertTrue(entry_cases <= set(policy["groups"]["platform"]["tests"]))
 
     def test_state_and_imports_are_restored_even_when_the_entry_raises(self):
         old = (sys.argv, sys.path, sys.stdin, sys.stdout, sys.stderr, sys.version_info,

@@ -375,7 +375,12 @@
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_metadata_symlink_never_receives_a_safety_exemption",
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_restore_replays_the_approved_target_and_publishes_its_postimage",
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_shell_composition_and_untrusted_executables_receive_no_grant",
-        "tools.tests.test_python_entry.*"
+        "tools.tests.test_python_entry.PythonEntryTests.test_binary_streams_argv_environment_cwd_and_exit_code",
+        "tools.tests.test_python_entry.PythonEntryTests.test_captured_crlf_and_cr_are_normalized_like_subprocess_text_mode",
+        "tools.tests.test_python_entry.PythonEntryTests.test_exit_none_and_text_match_interpreter_semantics",
+        "tools.tests.test_python_entry.PythonEntryTests.test_native_lanes_register_each_entry_case_explicitly",
+        "tools.tests.test_python_entry.PythonEntryTests.test_script_cannot_evade_the_unit_process_boundary",
+        "tools.tests.test_python_entry.PythonEntryTests.test_state_and_imports_are_restored_even_when_the_entry_raises"
       ]
     },
     "macos": {
@@ -394,8 +399,7 @@
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_has_an_exact_attested_delta",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_preserves_real_codex_draft",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_python_cmd_preserves_attested_codex_result",
-        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_safe_os_metadata_is_preserved_without_entering_the_committed_postimage",
-        "tools.tests.test_python_entry.*"
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_safe_os_metadata_is_preserved_without_entering_the_committed_postimage"
       ],
       "depends_on": [
         "platform"
@@ -506,8 +510,7 @@
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_windows_readonly_files_are_cleared_before_recovery",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_windows_readonly_parent_file_is_replaced_during_recovery",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_workspace_symlink_swap_restores_local_protected_state",
-        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_writer_consumers_accept_only_the_required_no_bytecode_flag",
-        "tools.tests.test_python_entry.*"
+        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_writer_consumers_accept_only_the_required_no_bytecode_flag"
       ],
       "depends_on": [
         "platform"

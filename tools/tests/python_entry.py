@@ -75,7 +75,9 @@ def run(argv, *, cwd=None, env=None, input="", version=None):
                 print(error.code, file=sys.stderr)
         for stream in streams:
             stream.flush()
-        stdout, stderr = (stream.buffer.getvalue().decode("utf-8") for stream in streams[1:])
+        # Match subprocess.run(text=True), including native Windows output.
+        stdout, stderr = (stream.buffer.getvalue().decode("utf-8")
+                          .replace("\r\n", "\n").replace("\r", "\n") for stream in streams[1:])
         return subprocess.CompletedProcess(args, code, stdout, stderr)
     finally:
         sys.argv, sys.path = saved_argv, saved_path

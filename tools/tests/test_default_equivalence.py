@@ -287,6 +287,16 @@ EXPECTED_DIFFERENCES = {
             "sha256:7d63be2c3e3a97e2836ee9e2ed8611b9ba5e4f94793b9b7a78258b8b4b267e55",
             "#306: the generated registry repeats the package hash."),
     },
+    "manifests": {
+        **{(f"{task}:without_switch_files",): (value,
+            "#431: a task given explicit inputs binds them and the notes they cite by"
+            " content, the rest of the canonical inventory by path only, and leaves head"
+            " out of its source_hash.")
+           for task, value in (
+               ("implementer", "sha256:74257defd6b53fb1c4ec8bb0b2c6b38c87ed24120a3f8ee30d2f2bf9ce401a0f"),
+               ("reader", "sha256:79d34a40334c6c91b622bf9524e711435dca084c65c72c1c42e508ea06ce3e72"),
+               ("writer", "sha256:47c813101635f4320c30375a2016555e158ffed347bd874f71260928fa29ad50"))},
+    },
     "shipped": {
         ("additions",): ({path: count for path, (count, _reason) in SHIPPED_ADDITIONS.items()},
                          "The files SHIPPED_ADDITIONS lists, each with its issue."),

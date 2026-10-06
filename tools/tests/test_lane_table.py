@@ -129,8 +129,9 @@ class FixedCostSwitchBindingTests(unittest.TestCase):
 
                 commit()
                 self.assertFalse(bound())
-                for argv in (["init"], ["set", "--switch", switch, "--value", value]):
-                    self.assertEqual(call(process_policy, [argv[0], "--docs", str(docs), *argv[1:]])[0], 0)
+                self.assertEqual(call(process_policy, ["init", "--docs", str(docs)])[0], 0)
+                self.assertEqual(call(process_policy, [
+                    "set", "--docs", str(docs), "--switch", switch, "--value", value])[0], 0)
                 if parameter:
                     self.assertEqual(call(process_policy, [
                         "set", "--docs", str(docs), "--switch", switch, "--parameter", parameter[0],

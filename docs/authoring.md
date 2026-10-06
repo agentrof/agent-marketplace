@@ -155,6 +155,26 @@ Responsibilities, Acceptance, Dependencies and Delivery Notes. Criterion and
 rule links are vault-absolute links to stable headings. Delivery execution
 consumes an approved backlog without rewriting source.
 
+### Package schema repairs
+
+At process switch `backlog_schema_migration` `receipt_only`, the packaged
+backlog compiler can plan and apply the closed `test-plan-level-v1` repair.
+Owner approval names the exact receipt hash. The receipt binds an ancestor's
+complete committed approval, package versions and every canonical note's
+before/after byte and source hashes. Only unambiguous scenario level splits
+and compiler hash stamps change; review documents, product revisions and
+approval timestamps remain exact. The default retains reviewed revisions.
+
+Receipts live under `backlog/artifacts/schema-migrations/` and are tracked
+compatibility evidence. Every Delivery source check that accepts a migrated
+pin replays the receipt from the committed predecessor and proves the complete
+current postimage. It preserves the execution plan and gate A; every other
+source and Operation binding stays strict. Any non-schema edit uses the
+normal revision. Apply serializes with project maintenance, compares each
+replacement and permits an interrupted exact before/after mixture to resume
+with the same source commit and owner-approved hash. Setup never applies it
+automatically.
+
 ## Host and runtime contract
 
 Claude Code and Codex install the same standalone team through their native

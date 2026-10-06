@@ -1,0 +1,6 @@
+{
+  "summary": "Add opt-in, owner-approved Test Plan level schema receipts with deterministic replay and compatibility for already approved Delivery source pins.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

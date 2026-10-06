@@ -5371,6 +5371,15 @@ def main(argv=None) -> int:
     command = sub.add_parser("approve")
     command.add_argument("--docs", default=None)
     command.set_defaults(func=approve)
+    for name in ("plan-schema-migration", "apply-schema-migration"):
+        command = sub.add_parser(name, help="plan or owner-approve a deterministic schema receipt")
+        command.add_argument("--docs", default=None)
+        command.add_argument("--source-commit", default="HEAD")
+        command.add_argument("--from-version", required=True)
+        if name == "apply-schema-migration":
+            command.add_argument("--approve-receipt", required=True)
+        import backlog_migration
+        command.set_defaults(func=backlog_migration.command)
     command = sub.add_parser("begin-revision")
     command.add_argument("--docs", default=None)
     command.add_argument("--delivery-snapshot")

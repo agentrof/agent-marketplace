@@ -93,6 +93,13 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     reads them, and a review note or an Operation contract also records the
     findings its review returned, so no finding that stays critical or major
     enters `Accepted Minor Findings`.
+    At process switch `backlog_schema_migration` `receipt_only`, a closed
+    package schema repair preserves the approved revision and review bytes,
+    changes only scenario field lines and compiler hashes, and records the
+    owner's exact receipt approval. A Delivery may retain its old backlog and
+    Test Plan pins only when deterministic receipt replay proves the complete
+    current postimage from a committed, hash-verified predecessor; execution
+    approval and every other binding remain unchanged.
 15. File names are stable slugs; membership is path-derived. A story does not
     duplicate its epic relationship in front matter.
 16. Authored titles are direct, natural phrases in the configured output

@@ -1,10 +1,8 @@
 # Backlog Planning Flow
 
-The flow turns approved product knowledge into a versioned, project-local
-backlog. Its canonical state is Markdown under `workspace/docs/backlog/`.
+The flow turns approved product knowledge into a versioned Markdown backlog under `workspace/docs/backlog/`.
 
-Spawn template: paste `{{constitution}}` into every role prompt. Load the
-`obsidian-vault` skill before touching the docs tree; its policy is authoritative.
+Spawn template: paste `{{constitution}}` into every role prompt; load `obsidian-vault` before touching docs, whose policy governs them.
 
 Vault first, per constitution section 5: every role starts from the default `project_reading` plan.
 Batch-read its units, using the frozen context reader for frozen candidates. When context is insufficient, wrong or unavailable, use manual search, reads and relationship discovery
@@ -42,8 +40,10 @@ may finish well under it, and only an exceeded maximum is reported, never blocki
 - A feature, defect or technical intake carries the exact approved source,
   issue or decision evidence selected by that impact matrix.
 - The user explicitly starts the backlog entry and reviews each authored package.
-- Requirement state, when present, comes only from the tracked documents and
-  their checks.
+- Requirement state comes only from tracked documents and their checks.
+
+Switch `backlog_schema_migration`: at `receipt_only`, a package field-shape repair follows
+`skill-content/backlog-plan/references/switch-backlog_schema_migration-receipt_only.md`.
 
 ## 1. Materialize the backlog tree
 

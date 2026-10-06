@@ -274,16 +274,26 @@ def validate_plan(project: Path, index: dict, plan: dict, *, policy: dict | None
         raise ValueError("context plan was modified or no longer matches its sources")
 
 
-def load_index(project: Path) -> dict:
+def load_index(project: Path, *, no_cache: bool = False) -> dict:
     import vault_query
     docs = project / "workspace/docs"
-    data, _status = vault_query.refresh(docs, vault_query.default_cache(docs), verify=True, persist=False)
+    cache = vault_query.default_cache(docs)
+    if no_cache:
+        data, _status = vault_query.refresh(docs, cache, verify=True, persist=False)
+    else:
+        try:
+            data, _status = vault_query.locked_refresh(docs, cache, verify=True)
+        except OSError as exc:
+            if exc.errno not in vault_query.READ_ONLY_ERRORS:
+                raise
+            data, _status = vault_query.refresh(docs, cache, verify=True, persist=False)
     return data
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", type=Path, required=True)
+    parser.add_argument("--no-cache", action="store_true", help="read sources and build in memory without filesystem writes")
     sub = parser.add_subparsers(dest="command", required=True)
     resolve = sub.add_parser("resolve")
     resolve.add_argument("--entry", required=True)
@@ -304,7 +314,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         project = args.project_root.resolve()
-        index = load_index(project)
+        index = load_index(project, no_cache=args.no_cache)
         if args.command == "resolve":
             budget = {key: getattr(args, key) for key in
                       ("max_files", "max_source_bytes", "max_metadata_bytes") if getattr(args, key) is not None}

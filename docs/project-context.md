@@ -88,6 +88,10 @@ every required source and seeded cross-unit defect before any speed improvement
 is accepted. Model time is reported separately from resolver time.
 
 The implementation uses Python's standard library and the existing JSON index.
+The first writable query prepares that index in runtime scratch; later queries
+reuse its parsed records while checking source hashes. `--no-cache` builds in
+memory without filesystem writes, and read-only filesystems use the same
+fallback automatically.
 Canonical code is shared by Claude Code and Codex; distributions are generated.
 Path and encoding tests run in the normal Linux suite, and the existing native
 Windows and macOS lanes cover their filesystem and lifecycle behavior. No new

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import subprocess
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
@@ -242,6 +243,17 @@ class ProjectContextTests(unittest.TestCase):
     def test_external_source_cannot_escape_its_project(self):
         with self.assertRaises(ValueError):
             self.plan(refs=["workspace/memory/../../outside.md"])
+
+    def test_loader_reuses_the_existing_index_without_reparsing(self):
+        first = project_context.load_index(self.project)
+        self.assertTrue((self.project / vault_query.RUNTIME / "index.json").is_file())
+        with mock.patch.object(impact_closure, "load_vault_reusing", side_effect=AssertionError("reparsed")):
+            second = project_context.load_index(self.project)
+        self.assertEqual(first, second)
+
+    def test_no_cache_mode_creates_no_runtime_files(self):
+        project_context.load_index(self.project, no_cache=True)
+        self.assertFalse((self.project / ".agentrof").exists())
 
     def test_external_link_cannot_read_another_source_root(self):
         memory = self.project / "workspace/memory"

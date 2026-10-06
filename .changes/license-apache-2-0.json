@@ -1,6 +1,7 @@
 {
   "summary": "Relicense from MIT to the Apache License 2.0 for future versions, with a NOTICE file and a trademark policy (TRADEMARKS.md). Plugin and marketplace manifests now declare `Apache-2.0`. Releases published before this change remain available under the MIT License.",
   "components": {
-    "software-engineering-team": "minor"
+    "software-engineering-team": "minor",
+    "agent-marketplace": "minor"
   }
 }

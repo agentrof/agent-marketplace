@@ -49,6 +49,17 @@ closure; bare `--epic` retains the full root package. Other stage compilers'
 approved receipts, selected scope and named project input files remain the
 authority. A manifest never decides applicability or creates an approval.
 
+An explicit `--context-plan <project-relative JSON>` binds the output of
+`project_context.py resolve` to the task's exact entry, role and source snapshot.
+Its `project_reading` field gives the initial source units and any continuation;
+use `project_context.py read` for their text, `units` for smaller source units and
+`expand` with a reason for further context. A `needs_split` result is incomplete
+reading, never permission to drop required material. The plan guides the order
+and granularity of project reading; it does not remove the role's scope or any
+review obligation. Required project inputs outside its units still require the
+reading their owning flow specifies. Skill selection and instruction reads do
+not change. Every source identity and the plan itself are rechecked at handoff.
+
 The manifest lists full required reads, conditional references with their
 original read conditions, source identities, write boundaries and the output
 contract. Read every required file completely. Read each conditional reference

@@ -184,7 +184,9 @@ class Edges:
         self.tiers: dict = {}
 
     def add(self, source: str, target: str, key: str, tier: str) -> None:
-        if (source in self.vault.notes and target in self.vault.notes
+        machine_record = (target in self.vault.index and target.endswith(".json")
+                          and bool({"_generated", "_ledger"} & set(Path(target).parts)))
+        if (source in self.vault.notes and (target in self.vault.notes or machine_record)
                 and source != target):
             self.tiers.setdefault((source, target, key), set()).add(tier)
 
@@ -238,12 +240,30 @@ def reference_owners(vault) -> dict:
         ident = note.fm.get("id")
         if isinstance(ident, str) and ident.strip():
             owners.setdefault(ident.strip(), note.rel)
+        component = note.fm.get("component_id")
+        if isinstance(component, str) and component:
+            owners.setdefault(component, note.rel)
+        record = note.fm.get("record_id")
+        revision = note.fm.get("revision")
+        if record and revision:
+            exact = (f"ARC:{record}@r{revision}" if str(record).startswith("CON-") else
+                     f"ARC:{note.fm.get('component_ref') or 'ROOT'}:{record}@r{revision}")
+            owners.setdefault(exact, note.rel)
+    import context_catalog
+    receipts = {"documents": {}, "units": {}, "aliases": {}}
+    context_catalog.add_receipts(vault.root, receipts)
+    for reference, units in receipts["aliases"].items():
+        if len(units) == 1:
+            owners.setdefault(reference, receipts["units"][units[0]]["path"])
     return owners
 
 
 def resolve_reference(vault, value: str, owners: dict) -> str | None:
     """The note a front-matter value names, by wikilink, path, id or alias."""
     text = value.strip()
+    binding = text.split("|")
+    if len(binding) == 3 and binding[2].startswith("sha256:") and not text.startswith("[["):
+        return resolve_reference(vault, binding[1], owners)
     if text.startswith("[[") and text.endswith("]]"):
         return vault_check.resolve_wikilink(vault, split_wikilink(text[2:-2])[0], False)
     if not text or "\n" in text or len(text) > 300:
@@ -257,8 +277,9 @@ def resolve_reference(vault, value: str, owners: dict) -> str | None:
 
 def looks_like_reference(key: str, value: str, relation: bool) -> bool:
     text = value.strip()
+    binding = text.split("|")
     return (relation or bool(REF_KEY.search(key)) or text.startswith("[[")
-            or bool(ID_VALUE.match(text)))
+            or bool(ID_VALUE.match(text)) or (len(binding) == 3 and binding[2].startswith("sha256:")))
 
 
 def frontmatter_tier(vault, edges: Edges, keys) -> list:
@@ -276,7 +297,7 @@ def frontmatter_tier(vault, edges: Edges, keys) -> list:
                 continue
             for value in frontmatter_values(note.fm[key]):
                 target = resolve_reference(vault, value, owners)
-                if target in vault.notes and target != note.rel:
+                if target in vault.index and target != note.rel:
                     edges.add(note.rel, target, key, "frontmatter")
                 elif target is None and looks_like_reference(key, value, key in keys):
                     unresolved.append({"path": note.rel, "reason": "unresolved_relation",
@@ -597,8 +618,12 @@ def snapshot(vault, policy: dict | None = None, proofs: dict | None = None) -> d
     policy = closure_policy(vault.policy, policy)
     edges, gaps, present = graph(vault, policy)
     authored = vault_check.authored(vault)
+    nodes = {note.rel: note_type(note) for note in authored}
+    for _source, target, _key in edges.tiers:
+        if target not in vault.notes and target.endswith(".json"):
+            nodes[target] = "compiler-record"
     return {
-        "notes": {note.rel: note_type(note) for note in authored},
+        "notes": nodes,
         "citers": citers(vault, edges),
         "edges": edges.tiers,
         "gaps": gaps,

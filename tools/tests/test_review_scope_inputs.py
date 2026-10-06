@@ -140,6 +140,11 @@ class TaskInputScopeTests(unittest.TestCase):
         base = Path(temporary.name).resolve()
         self.package, self.project = base / "package", base / "project"
         build_task_package(self.package, switch_files=False)
+        policy_path = self.package / task_inputs.POLICY
+        task_policy = json.loads(policy_path.read_text())
+        task_policy["approval_anchors"] = {"fixture": [{
+            "path": NOTES["a"], "field": "type", "value": "note"}]}
+        policy_path.write_text(json.dumps(task_policy), encoding="utf-8")
         registry = json.loads(json.dumps(FIXTURE_SWITCHES))
         registry["switches"][SWITCH] = switch_spec(["fixture-flow"])
         (self.package / process_policy.REGISTRY).write_text(json.dumps(registry, indent=2) + "\n",
@@ -188,6 +193,8 @@ class TaskInputScopeTests(unittest.TestCase):
 
     def test_a_reader_reads_the_closure_and_lists_proven_notes_by_hash(self):
         choose(self.docs, VALUE, self.package)
+        commit(self.project)
+        self.reader["base"] = git(self.project, "rev-parse", "HEAD")
         self.edit("a")
         result = task_inputs.manifest(**self.reader)
         self.assertEqual(self.stub.calls, [["package/a.md"]])
@@ -225,6 +232,7 @@ class TaskInputScopeTests(unittest.TestCase):
     def test_without_a_change_the_reader_reads_every_input(self):
         choose(self.docs, VALUE, self.package)
         commit(self.project)
+        self.reader["base"] = git(self.project, "rev-parse", "HEAD")
         result = task_inputs.manifest(**self.reader)
         self.assertEqual(result[VALUE]["read"], "full")
         self.assertTrue({NOTES["a"], NOTES["b"], NOTES["c"]} <= set(self.read_paths(result)))
@@ -520,7 +528,9 @@ class RealClosureTests(unittest.TestCase):
         self.assertEqual(scope["widened_by"], [{
             "path": prefix + self.contract + ".md", "reason": "shared_contract",
             "citers": [prefix + "backlog/story-e.md", prefix + "backlog/story-f.md"]}])
-        self.assertIn(prefix + "backlog/story-g.md", scope["graph_gaps"])
+        self.assertNotIn(prefix + "backlog/story-g.md", scope["graph_gaps"])
+        selected_gap = task_inputs.impact_closure(self.docs, ["backlog/story-g.md"], prefix)
+        self.assertIn(prefix + "backlog/story-g.md", selected_gap["graph_gaps"])
         story_g = self.docs / "backlog/story-g.md"
         self.assertEqual(scope["proven_unchanged"], [{
             "path": prefix + "backlog/story-g.md", "approval_hash": self.digest,
@@ -617,6 +627,16 @@ class GitChangeScopeTests(unittest.TestCase):
         self.assertEqual(scope["read"], "closure")
         self.assertIn("workspace/docs/" + self.ACCEPTANCE, scope["changed"])
         self.assertTrue(scope["approved_base"])
+
+    def test_root_revision_delta_keeps_stories_reached_from_an_upstream_edit(self):
+        acceptance = self.docs / self.ACCEPTANCE
+        acceptance.write_text(acceptance.read_text(encoding="utf-8").replace(
+            "An account can be registered.", "An account can be registered once verified."),
+            encoding="utf-8")
+        self.commit("Upstream changes after approval")
+        record, _errors = backlog.collect(self.docs)
+        delta = inputs.revision_delta(record, self.docs, 100, None)
+        self.assertEqual(delta["changed"], ["ST-001", "ST-002", "ST-003", "ST-004"])
 
     def test_a_committed_change_still_starts_the_closure(self):
         acceptance = self.docs / self.ACCEPTANCE

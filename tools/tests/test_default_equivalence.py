@@ -220,6 +220,15 @@ SHIPPED_GOLDEN = {
 # task hashes every package script and every file of the skills it selects,
 # because a tool or data file it can run shapes its result.
 SHIPPED_ADDITIONS = {
+    "scripts/context_history.py": (
+        72, "#441: exact bound document history is resolved by package code"
+    ),
+    "scripts/context_catalog.py": (
+        72, "#441: source-addressed project records are bound as package code"
+    ),
+    "scripts/project_context.py": (
+        72, "#441: explicit project reading plans are bound as package code"
+    ),
     "scripts/process_policy.py": (
         72, "#332: the Process Policy lifecycle compiler. task_inputs.py and the backlog"
             " and Delivery compilers resolve every switch through it, the default path"

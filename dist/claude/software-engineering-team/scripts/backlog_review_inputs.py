@@ -827,6 +827,14 @@ def revision_delta(record: dict, docs: Path, limit: int | None,
     """
     stories = record["stories"]
     changed = changed_stories(record, docs)
+    vault, deleted = vault_changes(docs)
+    if vault:
+        import task_inputs
+        affected = task_inputs.impact_closure(docs, sorted(vault), deleted=deleted)
+        reached = set(affected["closure"]) | set(affected["graph_gaps"])
+        changed = sorted(set(changed) | {
+            story["id"] for story in stories
+            if {story["path"], story["test_plan"]} & reached})
     adjacency = story_adjacency(record)
     neighbours = sorted({other for identity in changed for other in adjacency[identity]}
                         - set(changed))

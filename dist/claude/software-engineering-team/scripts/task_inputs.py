@@ -133,6 +133,10 @@ def impact_closure(docs: Path, changed, prefix: str = "", deleted: dict | None =
     if not isinstance(raw, dict) or any(not isinstance(raw.get(key), list) for key in CLOSURE_KEYS):
         raise ValueError(f"impact closure must return the lists {', '.join(CLOSURE_KEYS)}")
     raw = dict(raw, changed=[*raw["changed"], *missing])
+    members = set(raw["closure"]) | set(raw["changed"])
+    raw["graph_gaps"] = [row for row in raw["graph_gaps"] if not isinstance(row, dict)
+                         or row.get("reason") not in {"no_typed_relations", "text_only_relation"}
+                         or any(row.get(key) in members for key in ("path", "source", "target"))]
     result = {key: sorted({prefix + docs_relative(row_path(row)) for row in raw[key]})
               for key in ("changed", "closure", "graph_gaps")}
     result["widened_by"] = sorted(
@@ -162,33 +166,71 @@ def vault_views(docs: Path) -> dict:
     return views
 
 
-def approval_base(project: Path, scope_kind: str | None, package: Path = PACKAGE) -> str | None:
-    """The commit of the package's last approved revision, from the anchors the
-    task input policy declares for its scope kind: the newest commit in which
-    every anchor note reads approved. None without an anchor or Git history."""
+def approval_base(project: Path, scope_kind: str | None, package: Path = PACKAGE,
+                  inputs=()) -> str | None:
+    """Oldest required approval event, scoped to the selected packages.
+
+    A later navigation/render commit retaining the same receipt is not a new
+    approval. Missing history never authorizes a narrower read.
+    """
     try:
         policy = json.loads(regular(package, POLICY).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    anchors = (policy.get("approval_anchors") or {}).get(scope_kind or "", [])
+    definitions = (policy.get("approval_anchors") or {}).get((scope_kind or "").replace("-", "_"), [])
+    selected = [PurePosixPath(path) for path in inputs]
+    anchors = []
+    for definition in definitions:
+        pattern = definition["path"]
+        if pattern.startswith("/") or ".." in PurePosixPath(pattern).parts:
+            raise ValueError("approval anchors must stay inside the project")
+        for path in sorted(project.glob(pattern)):
+            relative = PurePosixPath(path.relative_to(project).as_posix())
+            scope = definition.get("scope")
+            if scope and selected:
+                if scope == "file" and relative not in selected:
+                    continue
+                if scope == "package" and not any(relative.parent == p.parent or
+                        relative.parent in p.parents for p in selected):
+                    continue
+            regular(project, relative.as_posix())
+            anchors.append(dict(definition, path=relative.as_posix()))
     if not anchors:
         return None
     command = ["git", "--no-replace-objects", "-C", str(project)]
-    log = subprocess.run([*command, "log", "--format=%H", "--",
-                          *[anchor["path"] for anchor in anchors]], capture_output=True)
-    if log.returncode:
+    receipts = ("revision", "source_hash", "package_hash", "approved_at_utc",
+                "package_approved_at_utc", "approval_revision", "scope_hash", "plan_hash")
+
+    def properties(commit, path):
+        shown = subprocess.run([*command, "show", f"{commit}:{path}"], capture_output=True)
+        return {} if shown.returncode else frontmatter_props(shown.stdout.decode("utf-8", "replace"))
+
+    candidates = []
+    for anchor in anchors:
+        log = subprocess.run([*command, "log", "--first-parent", "--format=%H", "--",
+                              anchor["path"]], capture_output=True)
+        if log.returncode:
+            return None
+        found = None
+        for commit in log.stdout.decode("ascii").split():
+            props = properties(commit, anchor["path"])
+            value = props.get(anchor["field"])
+            approved = bool(value) if anchor["value"] == "*" else str(value) == anchor["value"]
+            if not approved:
+                continue
+            previous = properties(commit + "^", anchor["path"])
+            fields = (anchor["field"], *receipts)
+            if any(props.get(key) != previous.get(key) for key in fields):
+                found = commit
+                break
+        if found is None:
+            return None
+        candidates.append(found)
+    history = subprocess.run([*command, "rev-list", "--first-parent", "HEAD"], capture_output=True)
+    if history.returncode:
         return None
-    for commit in log.stdout.decode("ascii").split():
-        def approved(anchor: dict) -> bool:
-            shown = subprocess.run([*command, "show", f"{commit}:{anchor['path']}"],
-                                   capture_output=True)
-            if shown.returncode:
-                return False
-            props = frontmatter_props(shown.stdout.decode("utf-8", "replace"))
-            return str(props.get(anchor["field"], "")) == str(anchor["value"])
-        if all(approved(anchor) for anchor in anchors):
-            return commit
-    return None
+    positions = {sha: pos for pos, sha in enumerate(history.stdout.decode("ascii").split())}
+    return max(candidates, key=lambda sha: positions.get(sha, -1))
 
 
 def frontmatter_props(text: str) -> dict:
@@ -562,6 +604,9 @@ def closure_reads(project: Path, project_files: set[str], inputs: set[str], base
     for path in named:
         if ".." in path.split("/") or not canonical_source(path) or not path.endswith(".md"):
             raise ValueError(f"--changed must name a workspace/docs note: {path}")
+    if approved is None and base is None:
+        return project_files, {"read": "full", "reason": "no proven approval baseline",
+                               "changed": [], "beyond_closure": []}
     if base is None and approved is not None:
         # Every vault file changed since the package's last approved revision
         # starts the closure, never only the notes that lost a stamp.
@@ -905,7 +950,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
              expected_hash: str | None = None, package: Path = PACKAGE,
              delivery: str | None = None, remote: str = "origin",
              pass_kind: str | None = None, full_root_reason: str | None = None,
-             changed: list[str] | None = None) -> dict:
+             changed: list[str] | None = None, context_plan: str | None = None) -> dict:
     policy = catalog(package)
     package = package.resolve()
     project = project.resolve() if project is not None else None
@@ -999,6 +1044,18 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
                                   and path.relative_to(package).as_posix() not in switch_only)
     instruction_files = identity(package, instruction_inputs)
     project_files = set(inputs or []) | set(policy_inputs)
+    project_reading = None
+    if context_plan:
+        if project is None or not route["project_state"]:
+            raise ValueError("a context plan requires a project task")
+        import project_context
+        project_reading = json.loads(regular(project, context_plan).read_text(encoding="utf-8"))
+        if (project_reading["request"]["entry"], project_reading["request"]["role"]) != (entry, role):
+            raise ValueError("context plan belongs to a different entry or role")
+        project_context.validate_plan(project, project_context.load_index(project), project_reading)
+        project_files.add(context_plan)
+        project_files.update(row["path"] if row.get("source_root") == "project" else
+                             "workspace/docs/" + row["path"] for row in project_reading["must_read"])
     if findings:
         project_files.add(findings)
     read_only = (role in policy["read_only_roles"]
@@ -1025,7 +1082,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     if impact and read_only and not epic:
         project_files, scoped = closure_reads(
             project, project_files, set(inputs or []), base, findings, changed or [],
-            approval_base(project, route.get("scope_kind"), package))
+            approval_base(project, route.get("scope_kind"), package, inputs or []))
     # An exact epic's closure is derived again on every run, so a source that
     # reaches it, an incoming dependency edge included, joins its paths. Like
     # the epic's review manifest, the task binds those and none of the other
@@ -1152,6 +1209,8 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
               "output_contract": policy["output_contract"], "approval_authority": False,
               "available_method_skills": policy["role_skills"].get(role, []),
               "selected_method_skills": sorted(skills or [])}
+    if project_reading is not None:
+        result["project_reading"] = project_reading
     if pass_kind is not None:
         result["pass_kind"] = pass_kind
     if pack is not None:
@@ -1207,6 +1266,7 @@ def main(argv=None) -> int:
                              " the closure starts from these and the notes Git sees changed")
     parser.add_argument("--pass-kind",
                         help="a mechanical pass kind that templates/task-input-policy.json declares")
+    parser.add_argument("--context-plan", help="project-relative path to a source-bound project reading plan")
     args = parser.parse_args(argv)
     try:
         result = ({"ok": True, "entries": sorted(catalog()["entries"])} if args.check_catalog else
@@ -1215,7 +1275,7 @@ def main(argv=None) -> int:
                            epic=args.epic, expected_hash=args.expected_hash,
                            delivery=args.delivery, remote=args.remote,
                            pass_kind=args.pass_kind, full_root_reason=args.full_root_reason,
-                           changed=args.changed))
+                           changed=args.changed, context_plan=args.context_plan))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError, KeyError, TypeError) as exc:

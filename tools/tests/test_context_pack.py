@@ -214,14 +214,14 @@ class ProjectSwitchTests(unittest.TestCase):
 
     def policy(self, value: str | None) -> None:
         import process_policy
-        argvs = [["init"]]
+        commands = [("init", [])]
         if value is not None:
-            argvs.append(["set", "--switch", "context_pack", "--value", value])
-        argvs.append(["approve"])
-        for argv in argvs:
+            commands.append(("set", ["--switch", "context_pack", "--value", value]))
+        commands.append(("approve", []))
+        for command, arguments in commands:
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                code = process_policy.main([argv[0], "--docs", str(self.docs), *argv[1:]])
+                code = process_policy.main([command, "--docs", str(self.docs), *arguments])
             self.assertEqual(code, 0, output.getvalue())
         subprocess.run(["git", "-C", str(self.project), "add", "."], check=True)
         subprocess.run(["git", "-C", str(self.project), "-c", "user.name=t", "-c",

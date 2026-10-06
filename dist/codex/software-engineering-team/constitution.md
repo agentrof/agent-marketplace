@@ -38,12 +38,12 @@ Define success criteria. Loop until verified.
 
 ## 5. Vault first
 
+- Once the entry has selected its scope, a role with a shell can prepare a bounded project reading plan with `project_context.py --project-root <root> resolve --entry <entry> --role <role> --ref <bound reference>`; the orchestrator can pass it to a reader through `task_inputs.py --context-plan`. Follow its source addresses, use `read` to batch the selected text and `expand` with a reason for further context. A `needs_split` plan still has required reading. It changes neither skill selection nor the review scope. The plan is a navigation aid, never an approval or evidence that an unread source was reviewed.
 - Navigate the inputs your task binds through the vault. With a shell, query it with the packaged `vault_query.py` verbs first (closure, related, who-cites, path, find, hash, changed-since, gaps, search; these tools are read-only and report each relation gap with a suggested fix); without a shell, follow the relations of your bound inputs and the views your manifest binds; if either gives too little or looks wrong, use your own methods within those inputs and record that you did. Navigate by relations, never by scanning folders (under switch `review_scope` at `impact_closure`, never by re-reading whole packages either), in tier order, falling back only where a tier is missing or inconsistent: compiler-generated indexes and views (JSON registries, relation-status and cross-subtree views, approval and source hashes), then typed frontmatter properties, then relation blocks and wikilinks, then generated maps, and only then a targeted search for identifiers.
 - At the default your task's bound inputs are your read; evidence outside them needs an expanded input set, as your flow says. Under switch `review_scope` at `impact_closure`, a scope you are given (manifest, closure, summary, digest) bounds the default read, never your look: read beyond it when unsure and record each such read with its reason in your output.
 - A missing, wrong, stale or tier-disagreeing relation is a finding with both notes, the text that shows it and its type; only a writer repairs it, through the owning compiler.
 
 ## Escape hatch
-
 These rules bias caution over speed; for trivial work use judgment.
 
 ## House style

@@ -45,10 +45,11 @@ import atomic_file
 import file_lock
 import impact_closure
 import vault_check
+import context_catalog
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 RUNTIME = Path(".agentrof") / "agent-marketplace" / ".runtime" / "vault-index"
-BUILDER_FILES = ("impact_closure.py", "vault_check.py", "vault_query.py", "ba_compile.py")
+BUILDER_FILES = ("impact_closure.py", "vault_check.py", "vault_query.py", "ba_compile.py", "context_catalog.py", "context_history.py", "project_context.py")
 
 
 READ_ONLY_ERRORS = {errno.EACCES, errno.EPERM, errno.EROFS}
@@ -261,6 +262,7 @@ def refresh(docs: Path, cache: Path, verify: bool = False,
 
     data = {
         "schema_version": SCHEMA_VERSION,
+        "catalog": context_catalog.catalog(vault),
         "builder": builder,
         "docs": str(docs),
         "tiers": snap["tiers"],
@@ -275,6 +277,10 @@ def refresh(docs: Path, cache: Path, verify: bool = False,
         "gaps": snap["gaps"],
         "files": dict(sorted(current.items())),
     }
+    for relative, kind in snap["notes"].items():
+        if relative not in data["notes"]:
+            data["notes"][relative] = {"id": "", "title": relative, "type": kind,
+                                       "aliases": [], "authored": True}
     if persist:
         atomic_file.replace_text(cache, json.dumps(data, indent=1, ensure_ascii=False) + "\n")
     status["ms"] = round((time.perf_counter() - started) * 1000, 1)
@@ -304,6 +310,12 @@ class Index:
     def find(self, ref: str) -> list:
         wanted = ref.strip().lower()
         notes = self.data["notes"]
+        records = context_catalog.resolve(self.data.get("catalog", {"units": {}, "aliases": {}}), ref)
+        if records:
+            return [{"path": row["path"], "id": ref, "title": row["label"],
+                     "type": self.data["catalog"]["documents"][row["path"]]["type"],
+                     "unit_kind": row["kind"], "aliases": [ref], "unit_id": row["unit_id"]}
+                    for row in records]
         exact = [rel for rel, n in notes.items()
                  if wanted in {n["id"].lower(), n["title"].lower(),
                                *(a.lower() for a in n["aliases"])}]

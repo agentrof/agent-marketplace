@@ -471,7 +471,83 @@
   },
   "approval_anchors": {
     "backlog": [
-      {"path": "workspace/docs/backlog/backlog.md", "field": "status", "value": "approved"}
+      {
+        "path": "workspace/docs/backlog/backlog.md",
+        "field": "status",
+        "value": "approved"
+      }
+    ],
+    "requirement": [
+      {
+        "path": "workspace/docs/requirements/*.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "file"
+      }
+    ],
+    "business_analysis": [
+      {
+        "path": "workspace/docs/business-analysis/*/space.md",
+        "field": "package_status",
+        "value": "approved",
+        "scope": "package"
+      }
+    ],
+    "solution_design": [
+      {
+        "path": "workspace/docs/solution-design/landscape.md",
+        "field": "package_status",
+        "value": "approved"
+      }
+    ],
+    "design_system": [
+      {
+        "path": "workspace/docs/design-system/MASTER.md",
+        "field": "status",
+        "value": "approved"
+      }
+    ],
+    "experience_design": [
+      {
+        "path": "workspace/docs/experience-design/experiences/*/experience.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "package"
+      }
+    ],
+    "delivery": [
+      {
+        "path": "workspace/docs/delivery/deliveries/*/delivery.md",
+        "field": "scope_hash",
+        "value": "*",
+        "scope": "package"
+      }
+    ],
+    "operation": [
+      {
+        "path": "workspace/docs/operation/environment-contract.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "file"
+      },
+      {
+        "path": "workspace/docs/operation/verification-contract.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "file"
+      },
+      {
+        "path": "workspace/docs/delivery/governance.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "file"
+      },
+      {
+        "path": "workspace/docs/delivery/process-policy.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "file"
+      }
     ]
   }
 }

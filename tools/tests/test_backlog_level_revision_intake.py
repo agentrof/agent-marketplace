@@ -43,9 +43,11 @@ class BacklogLevelRevisionIntakeTests(unittest.TestCase):
         with self.fixture.upstreams(), mock.patch.object(compiler, "validate_experience_ref"):
             _record, errors = compiler.collect(self.docs)
         self.assertTrue(any("level must be one of" in error for error in errors))
+        approval_output = io.StringIO()
         with self.fixture.upstreams(), mock.patch.object(compiler, "validate_experience_ref"), \
-                contextlib.redirect_stdout(io.StringIO()):
+                contextlib.redirect_stdout(approval_output):
             self.assertEqual(compiler.approve(self.args), 1)
+        self.assertIn("level must be one of", approval_output.getvalue())
 
     def test_changed_legacy_predecessor_still_refuses_without_writes(self):
         self.plan.write_bytes(self.plan.read_bytes() + b"\nUnapproved change.\n")

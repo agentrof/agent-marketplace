@@ -35,7 +35,8 @@ writer first; no reader is ever spent on a package its compiler refuses.
    unaffected.
 4. `widened_by` names why the closure grew, a shared contract or the process
    policy touched; report it in the progress message.
-5. A first approval, or unavailable approval history, reads the whole package, as at `full`.
+5. A first approval reads the whole package, as at `full`. Unavailable approval
+   history also requires full reading.
 
 ## 3. Navigate, then read
 
@@ -50,6 +51,7 @@ For unresolved relationships, use `vault_query.py` and
 `impact_closure.py views --docs <workspace>/docs`, following the
 constitution's tier order. The closure records which tier produced each edge;
 a disagreement between tiers is a graph gap, reported as section 5 says.
+An unchanged note may appear as a summary; never infer its content from that summary.
 A summary never substitutes for required source reading or approval gates.
 
 ## 4. Beyond the closure

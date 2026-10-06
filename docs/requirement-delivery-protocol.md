@@ -236,8 +236,9 @@ until a plan revision, whose approval pins the policy anew, so it reads only
 the switches that flow owns: `code_review_panel`, `context_pack`,
 `execution_planning`, `implementation_schedule`, `item_cost_report`,
 `item_qa_tier`, `item_review_scale`, `lane_isolation`, `lane_table`,
-`own_target_reuse`, `owner_gates`, `pre_handoff_regression`, `qa_gate_order`,
-`review_loop`, `review_scope`, `step_budgets`, `step_timing`, `test_engines`
+`level_change_map`, `own_target_reuse`, `owner_gates`,
+`pre_handoff_regression`, `qa_gate_order`, `review_loop`, `review_scope`,
+`step_budgets`, `step_timing`, `test_engines`
 and `test_group_report`. A switch no
 Delivery flow owns, such as
 `mechanical_pass_tier`, is no part of the pin: inside a Delivery it is read
@@ -567,6 +568,24 @@ identity binds the plan, the partition command and the declared environment,
 not the schedule. Evidence approval refuses a record that lacks a declared
 partition, holds one twice, holds a failed or not intact one or ran another
 command.
+
+Process switch `level_change_map` decides whether a converted scenario's
+assertions are checked. At `off`, the default, they are not. At
+`assertion_map`, a scenario is converted by an Item when it is
+automation-required, the file of its automation target is one the Item
+changes, and its Test Plan `level` differs from the newest revision an
+integrated Item of its story recorded as `test_plan_source_hash`. The writer
+records, in the assertion map of the Item's verification runtime, each such
+scenario's Then and the assertion lines that prove it at the integration base
+and in the candidate, each with a kind from
+`skill-content/deliver/data/assertion-kinds.json` and its expected value.
+`assertion-map` prints the converted scenarios, the check and a template. The
+candidate binds the map's hash and check, and `freeze` refuses a converted
+scenario without an entry, an entry for another scenario, a `then` other than
+the Test Plan's Then, a side without an assertion and an assertion line its
+file does not hold on its side. A complete entry whose after assertions are all
+of a weak kind while a before one was not, or that drops an expected value, is
+flagged in every reader's manifest, and the code reviewer reads those pairs.
 
 Process switch `execution_planning` decides how the facts a plan needs are
 written and reviewed. At `per_document`, the default, each Operation contract

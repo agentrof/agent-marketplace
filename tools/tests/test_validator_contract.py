@@ -1175,6 +1175,9 @@ VALIDATOR_BUILDERS = {
     "owner_decision_classes": lambda root: edit_json(
         root, f"{PLUGIN_ROOT}/skill-content/deliver/data/owner-decision-classes.json",
         lambda value: value["classes"].append(dict(value["classes"][0]))),
+    "assertion_kinds": lambda root: edit_json(
+        root, f"{PLUGIN_ROOT}/skill-content/deliver/data/assertion-kinds.json",
+        lambda value: [spec.update(weak=False) for spec in value["kinds"].values()]),
     "autopilot_policy": lambda root: edit_json(
         root, f"{PLUGIN_ROOT}/skill-content/autopilot/data/autopilot-policy.json",
         lambda value: value["goal_kinds"].append(dict(value["goal_kinds"][0]))),

@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import platform
 import subprocess
 import sys
 
@@ -46,7 +47,7 @@ def main() -> int:
     run(sys.executable, "tools/ci_evidence.py", "timings", "--output", str(timings))
     command = [sys.executable, "tools/ci_tests.py", "plan", "--mode", mode,
                "--head", head, "--output", str(directory / "ci-plan.json"),
-               "--timings", str(timings)]
+               "--timings", str(timings), "--python-release", platform.python_version()]
     if base:
         command += ["--base", base]
     subprocess.run(command, cwd=ROOT, check=True)
@@ -54,7 +55,7 @@ def main() -> int:
     with args.github_output.open("a", encoding="utf-8") as output:
         output.write("matrix=" + json.dumps(plan["matrix"], separators=(",", ":")) + "\n")
         output.write("has_tests=" + str(plan["has_tests"]).lower() + "\n")
-        output.write("python=" + plan["python"] + "\n")
+        output.write("python=" + plan["python_release"] + "\n")
         output.write("mode=" + plan["mode"] + "\n")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:

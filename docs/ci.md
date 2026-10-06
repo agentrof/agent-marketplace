@@ -18,8 +18,12 @@ that a macOS gate worker calls) and the Windows group (path separators,
 junctions, long paths, CRLF checkouts, locks, text pipes and Git for Windows).
 A test that repeats platform-neutral logic runs on Linux only. Running every
 test on macOS was measured and left out: the macOS runners took pull request CI
-from 2 min 32 s to 6 to 7.5 minutes. The plan job sets up the version itself and every
-other validation job takes it from the plan's output; a test pins that literal,
+from 2 min 32 s to 6 to 7.5 minutes. The plan job sets up the policy's
+major.minor itself, records the exact release it resolved as the plan's
+`python_release`, and every other validation job sets up that release from the
+plan's output, so a toolcache update during a run cannot give two shards of one
+lane different patch releases; each shard and the aggregate refuse a runtime
+on any other release. A test pins the major.minor literal,
 the release workflows' versions, the host lifecycle policy and the plugin's
 runtime floor to the policy. `tools/ci_tests.py` inventories individual
 unittest cases without running them, selects their scope and balances them by

@@ -104,7 +104,7 @@
       "9de8900de0de0e633cfb1353418f8d1221bc63e3e62f9d9c5c8b1f6d65ec967d"
     ,
     "flows/delivery-execution.md":
-      "befded50ca99c17f74c64eb5ed2a68ea5855f864d9cc9499785bc7a54b4116a0"
+      "f58ad92c653f956906b447117e4e5693575e0873340ca44644a50b9c3e0a826a"
     ,
     "flows/delivery-governance.md":
       "ee605acfc5520c9c1c377e3f1291297d9553e154a28122590262185201bcddc3"
@@ -182,7 +182,7 @@
       "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
     ,
     "scripts/delivery_verification.py":
-      "3b5b9bc3386ab21b1f9c0c5b6af25c4c2deddffcdfcab38aa33b1ac9eb71a328"
+      "ee55daca2b7f142eae0c8b3b481916199b4ec1025ebe2d64c06e71dcce0369a6"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -413,7 +413,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "be891486ab3e968546705ad5c4c0cc29b688a9e1088552ba407b7d7a7e7acf06"
+      "d345eaa38075ff710d849142fa23b98bd680635725be07d894d6106a995cea0c"
     ,
     "skill-content/configure/data/step-budgets.json":
       "c63c5e90e1726b573c681f28008aa627575600f2d81dc8f8c0851b768e1b04fc"
@@ -422,7 +422,7 @@
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "665037b6dde72238bc5ea79e8f1ae5797d674f1cd07787539bda7e6d6519233a"
+      "62fb477f374146db4a02e2a9c4ef454bcf71c881bf39035c92ec2bdff2f9e23d"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -432,6 +432,9 @@
     ,
     "skill-content/deliver/SKILL.md":
       "a19dc712bd6e286adcabf5d67a7640cabe652a2f971da5a092b719d7a5a726bd"
+    ,
+    "skill-content/deliver/data/assertion-kinds.json":
+      "363444381c22a9a1453172f615690be2cacb2bac7c6cb90fde0ab11dc12eac53"
     ,
     "skill-content/deliver/data/delivery-control-record-contract.json":
       "035df8a2dd36543054ebf7138a94cb5a0f4bd75e7138dbd69852ea32985b430c"
@@ -468,6 +471,9 @@
     ,
     "skill-content/deliver/references/switch-lane_table-recorded.md":
       "8e61c8b52ec05569e66745c87aad15b3692561c233d41bc67e5e514f9fda3821"
+    ,
+    "skill-content/deliver/references/switch-level_change_map-assertion_map.md":
+      "35de974de8307022aa984d97140214342336abde13ea0cd3d48ce04a63306b78"
     ,
     "skill-content/deliver/references/switch-own_target_reuse-spot_run.md":
       "04cbf0a3cee8377d9a9ffe783b7372f7dda9ca5dac1fe5b853ffe65b01b900f0"

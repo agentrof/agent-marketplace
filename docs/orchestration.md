@@ -345,6 +345,18 @@ evidence approval refuses a final test run with a group that did not pass, as
 `deliver/references/switch-test_group_report-refuse_missing_groups.md`
 defines.
 
+Whether a converted scenario keeps its assertions is process switch
+`level_change_map`. At `off`, the default, an Item rewrites the test of a
+scenario whose Test Plan level changed on trust, and coverage counts by
+scenario id. At `assertion_map`, for each scenario whose automation target the
+Item changes and whose level differs from the revision its story integrated,
+the writer records the assertion lines that prove its Then at the integration
+base and in the candidate; `freeze` refuses a missing entry, a changed Then, an
+empty side and a line its file does not hold, and flags a pair whose after
+assertions only count or check existence, or that drops an expected value, for
+the code reviewer, as
+`deliver/references/switch-level_change_map-assertion_map.md` defines.
+
 How QA's final test run uses the test environment is process switch
 `test_engines`. At `single`, the default, it runs the approved test command
 once under the Item's environment lock. At `partitioned`, where the

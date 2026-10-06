@@ -45,11 +45,11 @@ parameter the table leaves unset. A switch that only reports, such as
    `delivery-execution` flow owns: `code_review_panel`, `context_pack`,
    `execution_planning`, `implementation_schedule`, `item_cost_report`,
    `item_qa_tier`, `item_review_scale`, `lane_isolation`, `lane_table`,
-   `own_target_reuse`, `owner_gates`, `pre_handoff_regression`,
-   `qa_gate_order`, `review_loop`, `review_scope`, `step_budgets`,
-   `step_timing`, `test_engines` and `test_group_report`. A switch no
-   Delivery flow owns is read from the current
-   policy and stops no Delivery.
+   `level_change_map`, `own_target_reuse`, `owner_gates`,
+   `pre_handoff_regression`, `qa_gate_order`, `review_loop`, `review_scope`,
+   `step_budgets`, `step_timing`, `test_engines` and `test_group_report`.
+   A switch no Delivery flow owns is read from the current policy and stops
+   no Delivery.
    Such a Delivery runs under the values it pinned, so after the new
    revision is approved its checks refuse it until its execution plan is
    revised and approved again, which pins the new revision. Name that path in

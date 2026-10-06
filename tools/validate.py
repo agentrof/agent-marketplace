@@ -3540,6 +3540,46 @@ def check_owner_decision_classes(tree: Tree, findings: list[Finding]) -> None:
                 "declare each at-once class once with an id and a description"))
 
 
+ASSERTION_KINDS_RELPATH = "skill-content/deliver/data/assertion-kinds.json"
+
+
+def assertion_kind_problems(data: object) -> list[str]:
+    """Return the problems of the assertion kinds an assertion map entry names."""
+    if not isinstance(data, dict) or set(data) != {"schema_version", "kinds"} or data.get("schema_version") != 1 \
+            or not isinstance(data["kinds"], dict):
+        return ["data must hold exactly schema_version 1 and kinds"]
+    problems: list[str] = []
+    for identifier, spec in data["kinds"].items():
+        if not REVIEW_STEP_ID_RE.match(identifier):
+            problems.append(f"kind {identifier!r} must be lowercase snake_case")
+        if not isinstance(spec, dict) or set(spec) != {"weak", "summary"} \
+                or not isinstance(spec.get("weak"), bool) or not _nonblank(spec.get("summary")):
+            problems.append(f"kind {identifier!r} must hold exactly weak, true or false, and a summary")
+    weak = {spec.get("weak") for spec in data["kinds"].values() if isinstance(spec, dict)}
+    if weak != {True, False}:
+        problems.append("kinds must declare at least one weak and one other kind, or no pair can be flagged")
+    return problems
+
+
+def check_assertion_kinds(tree: Tree, findings: list[Finding]) -> None:
+    """The kinds of an assertion map entry, and which of them only count or check existence, are validated data."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / ASSERTION_KINDS_RELPATH
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "assertion_kinds",
+                f"assertion kinds are not valid unique-key JSON: {exc}", "declare every kind once"))
+            continue
+        for problem in assertion_kind_problems(data):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "assertion_kinds", problem,
+                "declare each kind once with weak and a summary"))
+
+
 AUTOPILOT_POLICY_RELPATH = "skill-content/autopilot/data/autopilot-policy.json"
 AUTOPILOT_SCRIPT_RELPATH = "skill-content/autopilot/scripts/autopilot.py"
 AUTOPILOT_NUMBERS = ("default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
@@ -3688,6 +3728,7 @@ DELIVERY_CONTRACT_ROOT = Path(
     "plugins/software-engineering-team/skill-content/deliver/data"
 )
 DELIVERY_CONTRACT_FILES = {
+    "assertion-kinds.json",
     "delivery-control-record-contract.json",
     "delivery-document-contract.json",
     "delivery-verification-policy.json",
@@ -3953,6 +3994,7 @@ CHECKS = {
     "fact_ownership": check_fact_ownership,
     "fact_ownership_anchors": check_fact_ownership_anchors,
     "owner_decision_classes": check_owner_decision_classes,
+    "assertion_kinds": check_assertion_kinds,
     "autopilot_policy": check_autopilot_policy,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,

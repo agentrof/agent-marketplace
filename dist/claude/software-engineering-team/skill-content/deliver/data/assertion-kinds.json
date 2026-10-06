@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kinds": {
+    "value": {
+      "weak": false,
+      "summary": "Compares the observed outcome with an expected value: an equality, a match or a membership of a named element."
+    },
+    "error": {
+      "weak": false,
+      "summary": "Expects a named refusal, error code or exception type from the rule."
+    },
+    "count": {
+      "weak": true,
+      "summary": "Compares only how many results there are, not which ones or what they hold."
+    },
+    "existence": {
+      "weak": true,
+      "summary": "Checks only that a result, a field or a call exists or is not empty."
+    }
+  }
+}

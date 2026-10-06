@@ -104,7 +104,7 @@
       "aaebfe00ee5e062d23a881e0d0c989563426b2c026dcb07c78d74b0929477e5c"
     ,
     "flows/delivery-execution.md":
-      "f12560b18e9103ecee42d9051812a0e2ca5109326d1a5dda523a47106512004a"
+      "d24adac6bf0e46d3645584b779b7265592684b4ddb156acf923b4d3681afe67c"
     ,
     "flows/delivery-governance.md":
       "ef2fa67262e0f500ba49b80d2865af6038638327745b989303acfaf1b1446fb7"
@@ -179,7 +179,7 @@
       "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
     ,
     "scripts/delivery_verification.py":
-      "55f93cbcb2e9dc7387a4372f8ae22efe5fdd2010b2c369c76d7103601711f5d8"
+      "a00366a3346d676afea32380aed7cae95774c99b795e8736eddc8e642889aff6"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -374,13 +374,13 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "d05b62c02a90610c4ea7afa8e4b68c0d5750e87798d0c9adb4943aaaaa383330"
+      "9da94c956dc744b0ed93779714c334b08034699e3aaa2c59b26e5d475146cafd"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "e645b5c67560209d727027f7f8754f8c6e0569252c6f6e3f617adca42bc0a29c"
+      "2a58ea77c3e6e282eef0f3d1416242a0a7d0bc244ec49b3536b99df15baee31e"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -390,6 +390,9 @@
     ,
     "skill-content/deliver/SKILL.md":
       "a19dc712bd6e286adcabf5d67a7640cabe652a2f971da5a092b719d7a5a726bd"
+    ,
+    "skill-content/deliver/data/assertion-kinds.json":
+      "363444381c22a9a1453172f615690be2cacb2bac7c6cb90fde0ab11dc12eac53"
     ,
     "skill-content/deliver/data/delivery-control-record-contract.json":
       "035df8a2dd36543054ebf7138a94cb5a0f4bd75e7138dbd69852ea32985b430c"
@@ -426,6 +429,9 @@
     ,
     "skill-content/deliver/references/switch-lane_table-recorded.md":
       "8e61c8b52ec05569e66745c87aad15b3692561c233d41bc67e5e514f9fda3821"
+    ,
+    "skill-content/deliver/references/switch-level_change_map-assertion_map.md":
+      "35de974de8307022aa984d97140214342336abde13ea0cd3d48ce04a63306b78"
     ,
     "skill-content/deliver/references/switch-own_target_reuse-spot_run.md":
       "04cbf0a3cee8377d9a9ffe783b7372f7dda9ca5dac1fe5b853ffe65b01b900f0"

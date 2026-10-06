@@ -32,6 +32,7 @@ import backlog_review_inputs as inputs  # noqa: E402
 import delivery_verification as verification  # noqa: E402
 import process_policy  # noqa: E402
 import task_inputs  # noqa: E402
+from git_fixture import init_repository  # noqa: E402
 import test_backlog_review_speed as speed  # noqa: E402
 import test_delivery_verification as verification_tests  # noqa: E402
 from test_default_equivalence import (FIXTURE_SWITCHES, build_task_package,  # noqa: E402
@@ -575,7 +576,7 @@ class ChangeInventoryTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         project = Path(temporary.name)
-        subprocess.run(["git", "init", "-q", str(project)], check=True)
+        init_repository(project)
         docs = project / "workspace/docs/solution-design/_generated"
         docs.mkdir(parents=True)
         (docs / "topology.json").write_text("{}\n", encoding="utf-8")

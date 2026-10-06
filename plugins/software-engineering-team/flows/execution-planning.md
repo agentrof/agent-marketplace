@@ -2,6 +2,39 @@
 
 Spawn template: paste `{{constitution}}` into every role prompt.
 
+Vault first, in the order the constitution's section 5 sets: every role
+queries the vault with the packaged `impact_closure.py` verbs first, then
+follows machine indexes and generated views, typed frontmatter, relation
+blocks and wikilinks, then maps, and runs a targeted search only for a gap;
+when the tools give too little or look wrong it uses its own methods and
+records that it did. This flow starts from `home.md`,
+`maps/_generated/relation-status.md`,
+`maps/_generated/cross-subtree-matrix.md` and
+`maps/_generated/stale-relations.md`, `maps/delivery.md` and each Item's
+`path_claims`, `contract_claims`, `waits_for` and `dependency_bindings`.
+Switch `context_pack`: at `role_digest`, a spawned role receives its pack from
+`context_pack.py build --entry <entry> --role <role> --mode <mode>
+--project-root <root>` instead of the full required reads; it reads a named
+source in full only when the pack does not cover a case, and records that read
+and why, as
+`skill-content/challenge-review/references/switch-context_pack-role_digest.md`
+defines.
+Switch `step_timing`: at `recorded`, the coordinator runs `step_timing.py
+start --run <run> --step <step> [--budget <id>]` before each step and
+`step_timing.py end --run <run> --span <span>` after it, and records each role
+spawn with `--kind spawn --parent <step span> --role <role> --phase
+reading|writing|review|re_review|waiting`. An end that returns overrun is
+reported to the owner at once with its breakdown, largest contributor and
+lever. The run ends with `step_timing.py report --run <run> --write`, as
+`skill-content/challenge-review/references/switch-step_timing-recorded.md`
+defines.
+Switch `step_budgets`: at `enforced`, each budgeted step is compared with its
+maximum, the owner's parameter or the package target in
+`skill-content/configure/data/step-budgets.json`; a step may finish well under
+it, and only an exceeded maximum is reported, never blocking, as
+`skill-content/challenge-review/references/switch-step_budgets-enforced.md`
+defines.
+
 `/execution-plan DLV-###` consumes one scope-approved Delivery. The compiler
 stores topology on Item records and renders the Execution Plan as an exact
 aggregate. It validates dependencies, cycles, path and contract claims, role
@@ -86,6 +119,27 @@ Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck
 wave starts at once, after every finished worker is closed, as
 `skill-content/challenge-review/references/switch-reader_waves-all_at_once.md`
 and the host contract define.
+Switch `review_scope`: at `impact_closure`, `delivery_compile.py check-plan`
+runs before any reader is spawned and readers read the changed Items' closure
+over their claims and bindings; `task_inputs.py` derives each reader's inputs
+with `--changed <note>` and `--base <approved commit>`, and a re-check given
+`--findings` derives only the fix delta; every role reads the change's impact
+closure, each approved, unchanged note outside it only as its hash-bound
+summary, reads beyond it when unsure and records why, a writer heals a missing
+relation with `impact_closure.py heal` and recomputes the closure, and a
+confirmation re-review reads only the fix's delta, as
+`skill-content/challenge-review/references/switch-review_scope-impact_closure.md`
+defines.
+Switch `review_fanout`: at `per_unit`, a review of more than one changed Item
+or revised contract spawns one reader per unit in one message and then one
+aggregator for the cross-unit checks no compiler enforces, as
+`skill-content/challenge-review/references/switch-review_fanout-per_unit.md`
+defines.
+Switch `review_levels`: at `concurrent_when_independent`, the bundle's
+contract reviews start beside its Item topology review when neither cites the
+other's open findings, and approval still waits for every level, as
+`skill-content/challenge-review/references/switch-review_levels-concurrent_when_independent.md`
+defines.
 
 Approval, and every re-approval, also refuses until a committed workflow will
 run on the Delivery PR, because the final merge needs a green provider check.

@@ -26,6 +26,8 @@ proposals the owner can confirm or reject, never as settled facts.
   a short separate list, one line each, never woven into the answers.
 - Contradict the analysis when the profile's experience disagrees with
   it; deference is not expertise.
+- Vault first, per constitution section 5: query tools first, then relations
+  to targeted reads; record every read beyond the tools or your scope and why.
 
 ## Boundaries
 - Does: read the scoped inputs fully, answer the named questions from

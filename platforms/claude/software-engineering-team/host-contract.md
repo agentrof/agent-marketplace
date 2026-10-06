@@ -97,6 +97,22 @@
   finished Claude Code subagent holds no thread, so there is nothing to close
   first. Every wave's progress message names the wave size and how many of
   its readers run at once.
+- Under switch `review_scope` at `impact_closure`, run the owning
+  compiler's structural check the flow names before spawning any reader, so
+  no reader is spent on a package the compiler refuses, and give each reader
+  its impact closure in full and every approved, unchanged note outside it as
+  its hash-bound summary.
+- Under switch `review_fanout` at `per_unit`, spawn one reader per changed
+  unit of a review in one message, wait for all of them, then spawn the one
+  aggregator with their findings and the compilers' cross-unit facts, and
+  wait for it before triage.
+- Under switch `review_levels` at `concurrent_when_independent`, spawn the
+  readers of every review level the flow declares independent in one
+  message, then wait for all of them before triage; approval still waits for
+  every level.
+- Under switch `context_pack` at `role_digest`, give each spawned role the
+  pack `context_pack.py build` returns for its entry, role and mode in place
+  of the full required reads.
 - Claude Code's prompt cache keeps a role's context for five minutes from the
   start of the model call that last used it, and a model call after a longer
   pause writes the whole context into the cache again, at more than ten times

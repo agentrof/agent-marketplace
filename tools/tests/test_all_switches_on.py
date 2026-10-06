@@ -137,6 +137,24 @@ EXPECTED = {key: sorted([*value, *(DELIVER if key.startswith("deliver:") else ()
                          *OWN_SKILL.get(key, ())])
             if key.startswith("deliver:") or key in OWN_SKILL else value
             for key, value in EXPECTED.items()}
+# The reading switches of #441 bind their references, all in challenge-review,
+# to every task of the entries whose flows own them: review_scope,
+# context_pack, step_timing and step_budgets own every flow.
+READING = "challenge-review/references/switch-"
+EVERY_FLOW = tuple(READING + name for name in (
+    "context_pack-role_digest.md", "review_scope-impact_closure.md",
+    "step_budgets-enforced.md", "step_timing-recorded.md"))
+FANOUT_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system",
+                  "execution-plan", "experience-design", "solution-design")
+LEVEL_ENTRIES = ("backlog-plan", "configure", "execution-plan")
+FLOWLESS_ENTRIES = ("issue-report", "organize-docs", "setup")
+EXPECTED = {key: sorted([
+    *value,
+    *(EVERY_FLOW if key.split(":")[0] not in FLOWLESS_ENTRIES else ()),
+    *((READING + "review_fanout-per_unit.md",) if key.split(":")[0] in FANOUT_ENTRIES else ()),
+    *((READING + "review_levels-concurrent_when_independent.md",)
+      if key.split(":")[0] in LEVEL_ENTRIES else ())])
+    for key, value in EXPECTED.items()}
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")
 

@@ -22,6 +22,8 @@ coherent, traceable and usable. Do not author a solution.
 - The prototype's folders, file names, tools, framework, markup, CSS, scripts,
   dependencies and behavior are author choices. Recommend practices when useful
   but do not recast them as compiler requirements.
+- Vault first, per constitution section 5: query tools first, then relations
+  to targeted reads; record every read beyond the tools or your scope and why.
 
 ## Boundaries
 

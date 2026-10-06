@@ -33,6 +33,8 @@ contract specify, in the smallest correct change, proven by tests.
   cleanup item.
 - Writes are idempotent and retry-safe; shutdown is graceful.
 - Every behavior ships with a check that proves it works.
+- Vault first, per constitution section 5: query tools first, then relations
+  to targeted reads; record every read beyond the tools or your scope and why.
 
 ## Boundaries
 - Does: server-side implementation, data access, migrations, seed data,

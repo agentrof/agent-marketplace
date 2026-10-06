@@ -299,6 +299,28 @@
         "threshold": "No single test runs longer than a quarter of QA's final gate in those Deliveries, and the gate's median wall clock is at most that of Deliveries planned at off for a similar suite, with every shared quality guard holding and the owner's approval. A promotion keeps off as the default, since only a value the owner chooses takes parameters, and ships package_limits for flag_serial_rows."
       }
     },
+    "test_levels": {
+      "summary": "Whether backlog planning has each automation-required Test Plan scenario declare its level, unit, fixture or live, so QA proves a decision rule in-process and keeps live scenarios for engine or operating-system behaviour, and the backlog reviewer questions every live scenario.",
+      "issue": 433,
+      "flows": ["backlog-planning"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "No planning step asks at what level a scenario has to run, so a Test Plan tends to prove every acceptance criterion through its most expensive path, a live scenario, even when the assertion is a pure decision; test_cost_budget does not catch it, since a live table under its limit is never listed and sharding a flagged table keeps every row live, and the compiler still validates level where a scenario states it. Today's behaviour and the baseline the declaration is measured against: in one measured project, a final gate ran 166 live cases in 227 minutes, about 82 seconds per case, and a later story's Test Plan asked for 41 scenarios, most of them live, plus one table scenario with 171 live cluster setups, although about 40 in-process unit tests that ran in about a second already proved the decision rules behind most of them."
+        },
+        {
+          "id": "declared",
+          "tradeoffs": "Every automation-required scenario states its level, and a fixture or live one also states what has to be real for its assertion to mean something. QA proves a decision rule at unit level over every combination of its inputs, adds one fixture scenario per entry point and decision family, and keeps live for engine or operating-system behaviour; backlog_compile.py check --json and the review manifests list each scenario that states no level or no reason, the test_cost_budget serial-rows list names each flagged scenario's level, and the backlog reviewer asks of every live scenario whether its assertion is a decision. Advisory only: it never fails a check or blocks a review, and only a stated level outside the three values fails check, as at every value. QA states two more optional fields per scenario, a declared level can go stale as the code moves, and a decision proven at unit level rests on the one fixture scenario per entry point to show that the real entry point consults the rule."
+        }
+      ],
+      "default": "off",
+      "metric": "Per backlog revision run with declared: the scenarios listed without a level or a reason, the live scenarios moved to a cheaper level and the ones kept live with a reason; per Delivery: the live cases and the wall clock of QA's final gate, compared with Deliveries of stories planned at off.",
+      "promotion": {
+        "unit": "At least 3 backlog revisions run with declared and 3 Deliveries that contain stories planned under it.",
+        "threshold": "The live share of the automated cases in those Deliveries' final gates and the gate's median wall clock are lower than in Deliveries planned at off for a similar suite, no acceptance criterion loses its proving scenario, and no defect found after a passing gate sits in a decision that a unit scenario proved in place of a live one, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "pre_handoff_regression": {
       "summary": "Whether an Item's candidate goes to Code Review and QA after its implementation's own tests, or only once the automated suites of the earlier stories its change touches, with its own Test Plan targets, pass on that exact candidate.",
       "issue": 351,

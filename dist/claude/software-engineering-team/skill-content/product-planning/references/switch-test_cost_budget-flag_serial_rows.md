@@ -43,10 +43,10 @@ parameter. `backlog_compile.py check --json` then adds
 `test_cost`, which lists under `serial_row_scenarios` each
 automation-required scenario whose `rows` exceed the limit while its
 `row_split` is `serial` or absent, with its story, automation target, rows and
-split. A scenario at or below the limit, or one whose rows are `sharded` or
-`grouped`, is not listed. The epic and root review manifests carry the same
-list for the stories they read, and `delivery_compile.py init` for the
-selected stories.
+split, and its `level` while `test_levels` is `declared`. A scenario at or
+below the limit, or one whose rows are `sharded` or `grouped`, is not listed.
+The epic and root review manifests carry the same list for the stories they
+read, and `delivery_compile.py init` for the selected stories.
 
 The flag is advisory: it never fails a check, never blocks a review or an
 approval and never rewrites a scenario.

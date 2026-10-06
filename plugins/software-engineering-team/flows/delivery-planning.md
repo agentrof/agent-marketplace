@@ -41,8 +41,9 @@ the proposal shows read-only, as
 defines.
 
 Switch `test_cost_budget`: at `flag_serial_rows`, `init` also prints the
-selected Stories' scenarios over the serial-row limit as `test_cost`, which the
-proposal shows read-only, as
+selected Stories' scenarios over the serial-row limit as `test_cost`, each
+naming its `level` while `test_levels` is `declared`, which the proposal shows
+read-only, as
 `skill-content/product-planning/references/switch-test_cost_budget-flag_serial_rows.md`
 defines.
 

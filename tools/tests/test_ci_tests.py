@@ -22,6 +22,15 @@ from tools import ci_tests
 from tools.tests import git_fixture
 
 
+HOST_PROCESS_FIXTURE_HEADER = """import os, pathlib, subprocess, tempfile, unittest
+def integration(target):
+    target._test_level = "integration"
+    return target
+@integration
+class Tests(unittest.TestCase):
+"""
+
+
 @integration
 class CITestPlannerTests(unittest.TestCase):
     def setUp(self):
@@ -363,7 +372,7 @@ class CITestPlannerTests(unittest.TestCase):
                   "            env = dict(os.environ, CLAUDE_CODE_EXECPATH=str(fake))\n"
                   "            subprocess.run([env['CLAUDE_CODE_EXECPATH'], '--version'], env=env,"
                   " capture_output=True, check=True)\n")
-        header = "import os, pathlib, subprocess, tempfile, unittest\nclass Tests(unittest.TestCase):\n"
+        header = HOST_PROCESS_FIXTURE_HEADER
         teardown = ("    @classmethod\n    def tearDownClass(cls):\n"
                     "        subprocess.run([os.environ['CLAUDE_CODE_EXECPATH'], '--version'],"
                     " capture_output=True)\n")
@@ -875,6 +884,17 @@ class TestLevelTests(unittest.TestCase):
             self.remove_probe()
         self.assertFalse(written, "a guarded test wrote outside its temporary directory")
         return {row["id"][len(prefix):]: row for row in report["tests"]}
+
+    def test_host_process_fixture_is_explicitly_integration(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "tools/tests/test_host_fixture.py"
+            source.parent.mkdir(parents=True)
+            source.write_text(HOST_PROCESS_FIXTURE_HEADER +
+                "    def test_alpha(self): pass\n    def test_beta(self): pass\n")
+            self.assertEqual(ci_tests.integration_ids(root), {
+                "tools.tests.test_host_fixture.Tests.test_alpha",
+                "tools.tests.test_host_fixture.Tests.test_beta"})
 
     def test_local_unit_fixture_cannot_hide_a_process_start(self):
         def load():

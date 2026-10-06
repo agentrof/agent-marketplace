@@ -24,6 +24,51 @@ from tools import ci_local, ci_tests
 from tools.tests import git_fixture
 
 
+WORKER_TEMP_FIXTURE = """import os, tempfile, unittest
+from pathlib import Path
+class Example(unittest.TestCase):
+    def check_temporary(self, expected_worker):
+        temporary_root = Path(tempfile.gettempdir()).resolve()
+        checkout = Path.cwd().resolve()
+        self.assertNotIn(checkout, (temporary_root, *temporary_root.parents))
+        self.assertEqual(temporary_root.parent.name, expected_worker)
+        self.assertTrue(temporary_root.name.startswith("unit-"), temporary_root)
+        self.assertEqual(temporary_root.parent, Path(os.environ["TEMP"]).resolve())
+        self.assertEqual(os.environ["TMPDIR"], os.environ["TMP"])
+        self.assertFalse(any((parent / ".git").exists()
+                             for parent in (temporary_root, *temporary_root.parents)),
+                         "unit temporary directory has a Git ancestor")
+    def test_one(self): self.check_temporary("0")
+    def test_two(self): self.check_temporary("1")
+"""
+
+
+class WorkerTempFixtureTests(unittest.TestCase):
+    def probe(self, *, git_ancestor=False):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name).resolve()
+        root = base / "0" / "unit-fixture"
+        root.mkdir(parents=True)
+        if git_ancestor:
+            (base / ".git").mkdir()
+        namespace = {"__name__": "unit_worker_fixture"}
+        exec(WORKER_TEMP_FIXTURE, namespace)
+        case = namespace["Example"]("test_one")
+        with mock.patch.object(tempfile, "gettempdir", return_value=str(root)), \
+                mock.patch.object(Path, "cwd", return_value=base / "checkout"), \
+                mock.patch.dict(os.environ, {"TEMP": str(root.parent), "TMPDIR": str(root.parent),
+                                             "TMP": str(root.parent)}):
+            case.check_temporary("0")
+
+    def test_worker_fixture_checks_its_owned_temporary_directory_without_processes(self):
+        self.probe()
+
+    def test_worker_fixture_rejects_a_git_ancestor_without_processes(self):
+        with self.assertRaisesRegex(AssertionError, "Git ancestor"):
+            self.probe(git_ancestor=True)
+
+
 class LocalValidationTests(unittest.TestCase):
     def setUp(self):
         processors = mock.patch.object(ci_local.os, 'cpu_count', return_value=2)
@@ -214,26 +259,9 @@ class LocalValidationTests(unittest.TestCase):
 
     @integration
     def test_real_workers_have_distinct_temporary_directories_and_account_for_all_tests(self):
-        # The Git call runs in the class fixture: a worker holds each unit test to its own process
-        # and gives it its own temporary directory inside the worker's.
-        self.test_path.write_text('import os, subprocess, tempfile, unittest\nfrom pathlib import Path\n'
-            'class Example(unittest.TestCase):\n'
-            '    @classmethod\n'
-            '    def setUpClass(cls):\n'
-            '        with tempfile.TemporaryDirectory() as raw:\n'
-            '            cls.inside_git = subprocess.run(["git", "-C", raw, "rev-parse", "--show-toplevel"],\n'
-            '                                            capture_output=True)\n'
-            '    def check_temporary(self, expected_worker):\n'
-            '        temporary_root = Path(tempfile.gettempdir()).resolve()\n'
-            '        checkout = Path.cwd().resolve()\n'
-            '        self.assertNotIn(checkout, (temporary_root, *temporary_root.parents))\n'
-            '        self.assertEqual(temporary_root.parent.name, expected_worker)\n'
-            '        self.assertTrue(temporary_root.name.startswith("unit-"), temporary_root)\n'
-            '        self.assertEqual(temporary_root.parent, Path(os.environ["TEMP"]).resolve())\n'
-            '        self.assertEqual(os.environ["TMPDIR"], os.environ["TMP"])\n'
-            '        self.assertNotEqual(self.inside_git.returncode, 0, self.inside_git.stdout)\n'
-            '    def test_one(self): self.check_temporary("0")\n'
-            '    def test_two(self): self.check_temporary("1")\n')
+        # The worker's unit fixture checks its layout in process; Git startup
+        # is forbidden throughout a local unit worker, including class fixtures.
+        self.test_path.write_text(WORKER_TEMP_FIXTURE)
         self.git('add', '--all')
         receipt = self.run_check()
         self.assertEqual(receipt['status'], 'complete')

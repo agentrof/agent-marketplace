@@ -14,6 +14,7 @@ except ModuleNotFoundError:  # run as a script from tools/tests
 from pathlib import Path
 
 from tools.tests.git_fixture import init_repository
+from tools.tests import python_entry
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +29,8 @@ CANONICAL_KEYS = {
 
 class ProjectConfigTests(unittest.TestCase):
     def run_script(self, script: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        if script == CONFIG:
+            return python_entry.run([script, *args], cwd=ROOT)
         return subprocess.run(
             [sys.executable, str(script), *args], cwd=ROOT,
             capture_output=True, text=True, check=False,
@@ -38,6 +41,14 @@ class ProjectConfigTests(unittest.TestCase):
         result = self.run_script(SETUP, "--project-root", str(project))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return project / "workspace" / "config.json"
+
+    def unit_config(self, project):
+        config = project / "workspace/config.json"
+        config.parent.mkdir()
+        config.write_text(json.dumps({"schema_version": 2, "team_id": "software-engineering-team",
+                                      "output_language": "English", "terminology_language": "English"}),
+                          encoding="utf-8")
+        return config
 
     @integration
     def test_fresh_setup_writes_only_the_closed_schema(self):
@@ -50,10 +61,9 @@ class ProjectConfigTests(unittest.TestCase):
             checked = self.run_script(CONFIG, "check", "--config", str(config))
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
 
-    @integration
     def test_only_language_fields_have_a_config_writer(self):
         with tempfile.TemporaryDirectory() as temporary:
-            config = self.setup_config(Path(temporary))
+            config = self.unit_config(Path(temporary))
             written = self.run_script(
                 CONFIG, "set", "--config", str(config), "--field",
                 "output_language", "--value", "Turkish",
@@ -70,10 +80,9 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertNotEqual(retired.returncode, 0)
             self.assertIn("invalid choice", retired.stderr)
 
-    @integration
     def test_check_rejects_retired_and_unknown_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
-            config = self.setup_config(Path(temporary))
+            config = self.unit_config(Path(temporary))
             value = json.loads(config.read_text(encoding="utf-8"))
             value["scale"] = "small"
             value["unknown"] = True

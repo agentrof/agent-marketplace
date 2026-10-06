@@ -30,6 +30,7 @@ if str(SCRIPTS) not in sys.path:
 import vault_check as vault_payload
 import delivery_git
 import setup_project as setup_module
+import setup_check as check_module
 import stage_package
 from tools.tests import backlog_fixture, fixture_cache
 from tools.tests.git_fixture import init_repository, temporary_directory
@@ -1432,6 +1433,98 @@ class WindowsLongPathsChoiceTests(unittest.TestCase):
 # A changed environment, working directory or subprocess binding builds a fresh project.
 _APPLIED_CONTEXT = fixture_cache.context_snapshot((subprocess, fixture_cache))
 
+
+
+class SetupInputRulesTests(unittest.TestCase):
+    """Preflight inputs independent of the real apply, Git and rollback smokes."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.docs = self.root / "workspace/docs"
+        self.docs.mkdir(parents=True)
+        self.config = self.root / "workspace/config.json"
+        self.args = argparse.Namespace(output_language="English", terminology_language="English")
+
+    def test_fresh_config_uses_only_the_closed_schema(self):
+        value, changed = setup_module.desired_config(self.args, self.config)
+        self.assertEqual(value, {"schema_version": 2, "team_id": "software-engineering-team",
+                                 "output_language": "English", "terminology_language": "English"})
+        self.assertEqual(changed, sorted(value))
+        self.assertFalse(self.config.exists())
+
+    def test_migration_keeps_languages_and_removes_retired_fields_without_writing(self):
+        self.config.write_text(json.dumps({"schema_version": 1, "team_id": "software-engineering-team",
+                                          "output_language": "Turkish", "terminology_language": "English",
+                                          "scale": "large"}), encoding="utf-8")
+        before = self.config.read_bytes()
+        value, changed = setup_module.desired_config(self.args, self.config)
+        self.assertEqual(value["schema_version"], 2)
+        self.assertEqual(value["output_language"], "Turkish")
+        self.assertNotIn("scale", value)
+        self.assertIn("scale", changed)
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_foreign_owner_and_future_schema_refuse_without_rewriting(self):
+        for value, error in (({"team_id": "other-team"}, "owned by other-team"),
+                             ({"team_id": "software-engineering-team", "schema_version": 99},
+                              "future schema_version")):
+            with self.subTest(value=value):
+                self.config.write_text(json.dumps(value), encoding="utf-8")
+                before = self.config.read_bytes()
+                with self.assertRaisesRegex(setup_module.SetupError, error):
+                    setup_module.desired_config(self.args, self.config)
+                self.assertEqual(self.config.read_bytes(), before)
+
+    def test_alternate_workspace_ownership_is_shared_with_check_preflight(self):
+        alternate = self.root / "alternate"
+        alternate.mkdir()
+        (alternate / "config.json").write_text('{"team_id":"software-engineering-team"}', encoding="utf-8")
+        self.assertEqual(setup_module.alternate_workspaces(self.root), ["alternate"])
+        self.assertEqual(check_module.preflight(self.root, "workspace"),
+                         ["non-canonical managed workspace: alternate"])
+
+    def test_prototype_files_pass_both_topology_rules_but_legacy_registry_does_not(self):
+        process = self.docs / "experience-design/experiences/checkout"
+        preview = process / "artifacts/preview.html"
+        preview.parent.mkdir(parents=True)
+        preview.write_text("<!doctype html>", encoding="utf-8")
+        self.assertEqual(setup_module.legacy_topology_blockers(self.docs), [])
+        self.assertEqual(check_module.legacy_experience_findings(self.docs), [])
+        registry = process / "_generated/artifact-registry.json"
+        registry.parent.mkdir()
+        registry.write_text("{}", encoding="utf-8")
+        for findings in (setup_module.legacy_topology_blockers(self.docs),
+                         check_module.legacy_experience_findings(self.docs)):
+            self.assertTrue(any("legacy Experience artifact index" in item and
+                                "_generated/artifact-registry.json" in item for item in findings))
+        self.assertEqual(preview.read_text(encoding="utf-8"), "<!doctype html>")
+
+    def test_disposable_databases_pass_but_canonical_runtime_state_refuses(self):
+        runtime = self.root / ".agentrof/agent-marketplace/.runtime"
+        runtime.mkdir(parents=True)
+        for relative in ("tools/grype-db/6/vulnerability.db", "verification/mutation/api/mutants.sqlite",
+                         "verification/mutation/api/baseline.sqlite3"):
+            path = runtime / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"scratch")
+        self.assertEqual(check_module.runtime_findings(self.root), [])
+        for reserved in ("project.db", "backlog.sqlite", "backlog.json"):
+            path = runtime / reserved
+            path.write_bytes(b"durable truth in the wrong place")
+            self.assertEqual(check_module.runtime_findings(self.root),
+                             ["canonical state is forbidden in runtime: "
+                              + path.relative_to(self.root).as_posix()])
+            path.unlink()
+
+    def test_state_outside_runtime_is_rejected(self):
+        owned = self.root / ".agentrof/agent-marketplace"
+        (owned / ".runtime").mkdir(parents=True)
+        (owned / "backlog.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(check_module.runtime_findings(self.root),
+                         ["only .runtime may exist in the owned local tree: "
+                          ".agentrof/agent-marketplace/backlog.json"])
 
 if __name__ == "__main__":
     unittest.main()

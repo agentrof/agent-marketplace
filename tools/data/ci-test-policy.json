@@ -211,7 +211,8 @@
         "tools.tests.test_reader_waves.*",
         "tools.tests.test_calculation_examples.*",
         "tools.tests.test_project_context.*",
-        "tools.tests.test_approval_history.*"
+        "tools.tests.test_approval_history.*",
+        "tools.tests.test_python_entry.*"
       ]
     },
     "documentation": {
@@ -238,7 +239,8 @@
         "tools.tests.test_package_refresh.*",
         "tools.tests.test_setup_project.*",
         "tools.tests.test_smoke_plugin_installs.*",
-        "tools.tests.test_ci_*.*"
+        "tools.tests.test_ci_*.*",
+        "tools.tests.test_python_entry.*"
       ],
       "depends_on": [
         "contracts"
@@ -372,7 +374,8 @@
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_git_capture_locks_before_reading_the_tree_or_authority",
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_metadata_symlink_never_receives_a_safety_exemption",
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_restore_replays_the_approved_target_and_publishes_its_postimage",
-        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_shell_composition_and_untrusted_executables_receive_no_grant"
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_shell_composition_and_untrusted_executables_receive_no_grant",
+        "tools.tests.test_python_entry.*"
       ]
     },
     "macos": {
@@ -391,7 +394,8 @@
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_has_an_exact_attested_delta",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_preserves_real_codex_draft",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_python_cmd_preserves_attested_codex_result",
-        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_safe_os_metadata_is_preserved_without_entering_the_committed_postimage"
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_safe_os_metadata_is_preserved_without_entering_the_committed_postimage",
+        "tools.tests.test_python_entry.*"
       ],
       "depends_on": [
         "platform"
@@ -502,7 +506,8 @@
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_windows_readonly_files_are_cleared_before_recovery",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_windows_readonly_parent_file_is_replaced_during_recovery",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_workspace_symlink_swap_restores_local_protected_state",
-        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_writer_consumers_accept_only_the_required_no_bytecode_flag"
+        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_writer_consumers_accept_only_the_required_no_bytecode_flag",
+        "tools.tests.test_python_entry.*"
       ],
       "depends_on": [
         "platform"
@@ -618,6 +623,7 @@
     "tools.tests.test_project_context",
     "tools.tests.test_project_instructions",
     "tools.tests.test_project_vault_contract",
+    "tools.tests.test_python_entry",
     "tools.tests.test_reader_waves",
     "tools.tests.test_release",
     "tools.tests.test_release_publish",

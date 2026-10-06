@@ -115,7 +115,24 @@ class Project:
         self.test = test
         stack = contextlib.ExitStack()
         test.addCleanup(stack.close)
-        self.root = make_project(Path(stack.enter_context(temporary_directory())))
+        root = Path(stack.enter_context(temporary_directory())).resolve()
+        real = getattr(getattr(type(test), test._testMethodName), "_test_level", None) == "integration"
+        if real:
+            self.root = make_project(root)
+        else:
+            self.root = root
+            (root / ".git").mkdir()
+            # Only Git transport is supplied. main_worktree and all grant rules run unchanged.
+            def git_output(project, *args):
+                if Path(project).resolve() != root:
+                    raise AssertionError("unexpected fixture checkout")
+                if args == ("rev-parse", "--git-common-dir"):
+                    return ".git"
+                if args == ("worktree", "list", "--porcelain"):
+                    return f"worktree {root}\nHEAD {'0' * 40}\nbranch refs/heads/main\n"
+                raise AssertionError("unexpected Git operation: " + " ".join(args))
+            import delivery_git
+            stack.enter_context(mock.patch.object(delivery_git, "run_git", side_effect=git_output))
         hooks = Path(stack.enter_context(tempfile.TemporaryDirectory())) / "hooks.json"
         if armed:
             hooks.write_text(json.dumps(ARMED_HOOKS), encoding="utf-8")
@@ -170,7 +187,6 @@ class Project:
         self.test.assertIn(fragment, err)
 
 
-@integration
 class GrantTermsTests(unittest.TestCase):
     """A host without the user-prompt hook: `on` reads its own options."""
 
@@ -273,7 +289,6 @@ class GrantTermsTests(unittest.TestCase):
         self.assertEqual(self.p.grant()["expires_at"], stamp(NOW + timedelta(hours=3)))
 
 
-@integration
 class ArmingTests(unittest.TestCase):
     """A host whose package declares the user-prompt hook: only the typed command arms."""
 
@@ -358,7 +373,6 @@ class ArmingTests(unittest.TestCase):
                 self.assertEqual(record["host"], "fixture")
 
 
-@integration
 class LifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.p = Project(self)
@@ -538,6 +552,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual([entry["question"] for entry in report["entries"]],
                          ["Merge PR 41 at 01:00?", "Merge PR 42 at 03:00?"])
 
+    @integration
     def test_runtime_state_is_private_ignored_and_changes_no_tracked_file(self):
         self.assertEqual(git(self.p.root, "status", "--porcelain", "--ignored"), "")
         self.p.run_verb("on")
@@ -554,6 +569,7 @@ class LifecycleTests(unittest.TestCase):
             for path in self.p.state.iterdir():
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
 
+    @integration
     def test_the_grant_lives_in_the_main_worktree_for_every_linked_worktree(self):
         linked = self.p.root.parent / f"{self.p.root.name}-item"
         git(self.p.root, "worktree", "add", "-q", "--detach", str(linked))
@@ -566,7 +582,6 @@ class LifecycleTests(unittest.TestCase):
         self.assertFalse((linked / ".agentrof").exists())
 
 
-@integration
 class BrokenGrantTests(unittest.TestCase):
     """A grant file nothing can read is moved aside, so the next grant can start."""
 
@@ -672,7 +687,6 @@ class ClockTests(unittest.TestCase):
         self.p.assert_refused(f"is above the {POLICY['max_duration_hours']} h maximum", "on")
 
 
-@integration
 class FailClosedTests(unittest.TestCase):
     """A package that cannot show its arming hook, or a grant it could not have armed, grants nothing."""
 
@@ -736,7 +750,6 @@ class FailClosedTests(unittest.TestCase):
                 self.assertIn(fragment, err)
 
 
-@integration
 class SessionBindingTests(unittest.TestCase):
     """A grant governs only the session and host whose user typed it."""
 
@@ -825,7 +838,6 @@ class SessionBindingTests(unittest.TestCase):
         self.assertFalse((self.p.state / "arming.json").exists())
 
 
-@integration
 class GoalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.p = Project(self)
@@ -857,6 +869,7 @@ class GoalTests(unittest.TestCase):
                       f" {stamp(NOW + timedelta(hours=2))}", out)
         self.assertNotIn("compiler agreed: None", out)
 
+    @integration
     def test_a_merged_delivery_is_read_through_the_compiler_merge_derivation(self):
         self.p.delivery("awaiting_merge")
         self.p.run_verb("on", "--goal", "delivery:DLV-001")
@@ -867,6 +880,7 @@ class GoalTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(self.p.grant()["completion"]["goal_state"], "merged")
 
+    @integration
     def test_a_delivery_whose_merge_state_cannot_be_read_has_no_goal_state(self):
         """A Delivery Review record that cannot be read, here after an editor wrote a byte order mark, leaves
         the merge state unknown: a running grant shows the goal unknown with the reason instead of the tracked

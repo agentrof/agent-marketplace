@@ -1,0 +1,4 @@
+{
+  "summary": "Run compiler, configuration and hook rule matrices in process locally while preserving full remote integration coverage.",
+  "components": {}
+}

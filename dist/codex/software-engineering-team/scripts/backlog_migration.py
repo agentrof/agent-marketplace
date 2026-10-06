@@ -167,6 +167,14 @@ def verify_inventory(docs: Path, before: dict[str, bytes], after: dict[str, byte
 def replay_receipt(docs: Path, receipt: dict) -> dict:
     if not isinstance(receipt, dict) or receipt.get("migration") != MIGRATION:
         raise ValueError("unknown migration receipt")
+    strings = ("source_commit", "from_version", "to_version", "owner_approval",
+               "before_package_hash", "after_package_hash")
+    if (type(receipt.get("schema_version")) is not int or receipt["schema_version"] != 1
+            or any(not isinstance(receipt.get(key), str) for key in strings)
+            or not isinstance(receipt.get("files"), list)):
+        raise ValueError("migration receipt has invalid field types")
+    if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", receipt["source_commit"]) is None:
+        raise ValueError("migration receipt must name one full commit object id")
     oid, sources = approved_sources(docs, receipt["source_commit"])
     expected, outputs = migration_plan(sources, oid, receipt["from_version"], receipt["to_version"])
     if receipt != expected:

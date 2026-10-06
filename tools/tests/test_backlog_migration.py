@@ -120,7 +120,9 @@ class BacklogMigrationTests(unittest.TestCase):
             self.assertEqual(migration.replay_receipt(self.docs, self.receipt), self.receipt)
             for key, value in (("owner_approval", "sha256:" + "0" * 64), ("migration", "unknown"),
                                ("after_package_hash", "sha256:" + "1" * 64),
-                               ("unexpected", "data"), ("from_version", "2026.9.1")):
+                               ("unexpected", "data"), ("from_version", "2026.9.1"),
+                               ("from_version", None), ("source_commit", []),
+                               ("source_commit", "HEAD"), ("files", {}), ("schema_version", True)):
                 with self.subTest(key=key), self.assertRaises(ValueError):
                     migration.replay_receipt(self.docs, {**self.receipt, key: value})
             (self.docs / PLAN).write_bytes(self.after[PLAN] + b"Unapproved content.\n")
@@ -275,9 +277,11 @@ class BacklogMigrationSmokeTests(unittest.TestCase):
         reviews = {path: path.read_bytes() for path in (docs / "backlog").rglob("*review.md")}
         import process_policy
         with contextlib.redirect_stdout(io.StringIO()):
-            for words in (("init",), ("set", "--switch", migration.SWITCH, "--value", "receipt_only"),
-                          ("approve",)):
-                self.assertEqual(process_policy.main([words[0], "--docs", str(docs), *words[1:]]), 0)
+            policy_args = SimpleNamespace(docs=str(docs), title=None)
+            self.assertEqual(process_policy.init(policy_args), 0)
+            self.assertEqual(process_policy.main(["set", "--docs", str(docs), "--switch", migration.SWITCH,
+                                                  "--value", "receipt_only"]), 0)
+            self.assertEqual(process_policy.approve(policy_args), 0)
         args = SimpleNamespace(docs=str(docs), command="plan-schema-migration", source_commit="HEAD",
                                from_version="2026.10.1")
         with contextlib.redirect_stdout(io.StringIO()) as output:

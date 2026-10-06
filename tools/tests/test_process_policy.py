@@ -513,6 +513,7 @@ HOSTS = {host: f"platforms/{host}/software-engineering-team/host-contract.md"
 SWITCH_REFERENCE = re.compile(r"switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md")
 # The value each switch ships at: a flip changes every project that chose nothing.
 RELEASED_DEFAULTS = {
+    "backlog_schema_migration": "reviewed_revision",
     "backlog_path": "standard",
     "calculation_examples": "off",
     "code_review_panel": "single_reader",
@@ -560,6 +561,15 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "backlog_schema_migration": {
+        f"{SKILLS}/backlog-plan/references/switch-backlog_schema_migration-receipt_only.md": (
+            "source must be an ancestor of HEAD",
+            "After approval of its `owner_approval` hash",
+            "No writer or reader pass and no new root review is needed",
+            "Story, Operation, DoD, policy, topology and all other pins remain strict",
+            "A content edit after migration invalidates that binding",
+        ),
+    },
     "review_scope": {
         f"{SKILLS}/challenge-review/references/switch-review_scope-impact_closure.md": (
             "The closure scopes the default read; it never caps it",

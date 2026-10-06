@@ -1052,7 +1052,7 @@
       "metric": "Per migration: elapsed time, reader passes, rejected non-schema changes and Delivery execution reapprovals compared with a reviewed revision.",
       "promotion": {
         "unit": "At least 3 Deliveries consuming migrated backlog approvals.",
-        "threshold": "Zero changed product decisions or lost approval evidence, zero extra execution approvals, and median migration time at most 40% of a reviewed revision, with every shared quality guard holding and owner approval."
+        "threshold": "Zero changed product decisions or lost approval evidence, zero extra execution approvals, and median migration time at most 40% of a reviewed revision, with every shared quality guard holding and the owner's approval."
       }
     }
   }

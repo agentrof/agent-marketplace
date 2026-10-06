@@ -233,11 +233,11 @@ them to another value, one with every switch at its default included, agrees
 with the pin. A `scope_approved` Delivery reads every switch a Delivery flow
 owns. An `execution_approved` one runs only its `delivery-execution` flow
 until a plan revision, whose approval pins the policy anew, so it reads only
-the switches that flow owns: `code_review_panel`, `execution_planning`,
-`implementation_schedule`, `item_cost_report`, `item_qa_tier`,
-`item_review_scale`, `lane_isolation`, `lane_table`, `own_target_reuse`,
-`owner_gates`,
-`pre_handoff_regression`, `qa_gate_order`, `review_loop`, `test_engines`
+the switches that flow owns: `code_review_panel`, `context_pack`,
+`execution_planning`, `implementation_schedule`, `item_cost_report`,
+`item_qa_tier`, `item_review_scale`, `lane_isolation`, `lane_table`,
+`own_target_reuse`, `owner_gates`, `pre_handoff_regression`, `qa_gate_order`,
+`review_loop`, `review_scope`, `step_budgets`, `step_timing`, `test_engines`
 and `test_group_report`. A switch no
 Delivery flow owns, such as
 `mechanical_pass_tier`, is no part of the pin: inside a Delivery it is read

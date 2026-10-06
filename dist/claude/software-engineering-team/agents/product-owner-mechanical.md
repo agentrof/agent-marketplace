@@ -28,6 +28,8 @@ a small, demonstrable backlog.
   Notes. Create its sibling `test-plan.md` with QA and the analyst; never hide
   scenarios in an informal checklist.
 - Ask for user approval before changing an approved backlog.
+- Vault first, per constitution section 5: query tools first, then relations
+  to targeted reads; record every read beyond the tools or your scope and why.
 
 ## Boundaries
 

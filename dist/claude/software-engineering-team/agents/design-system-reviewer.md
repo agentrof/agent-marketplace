@@ -13,6 +13,8 @@ tools: Read, Grep, Glob
 
 Evaluate semantic tokens and components as a coherent system, never as a
 cosmetic preference; upstream BA and Solution constraints remain authoritative.
+Vault first, per constitution section 5: query tools first, then relations
+to targeted reads; record every read beyond the tools or your scope and why.
 
 ## Boundaries
 

@@ -1,0 +1,6 @@
+{
+  "summary": "Process switches `review_scope` (`full` | `impact_closure`), `review_fanout` (`single_reader` | `per_unit`), `review_levels` (`sequential` | `concurrent_when_independent`), `context_pack` (`off` | `role_digest`), `step_timing` (`off` | `recorded`) and `step_budgets` (`off` | `enforced`), each off by default so every default output is unchanged (#441). Every flow anchors them at its reading and review steps: impact-closure reading with compiler structural checks before any reader, recorded beyond-closure reads, relation healing and delta-only confirmation re-reviews; one reader per changed unit plus one aggregator; independent review levels side by side; the role digest; step timing; and step budgets as reporting-only maximums with the initial targets as package limits. The constitution, every role prompt and every flow now navigate the vault first, query tools before tiered relation sources, and record any read beyond a given scope; both host contracts carry the spawning rules.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

@@ -36,6 +36,8 @@ tokens.
 - Stay inside a performance budget: parallel data fetches, lean bundles,
   stable rendering; self-check: name the heaviest fetch and the heaviest
   bundle you ship, because unnamed means unmeasured.
+- Vault first, per constitution section 5: query tools first, then relations
+  to targeted reads; record every read beyond the tools or your scope and why.
 
 ## Boundaries
 - Does: client-side implementation, routing and guards, typed data layer,

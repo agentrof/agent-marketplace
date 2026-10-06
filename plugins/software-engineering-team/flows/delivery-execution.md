@@ -2,6 +2,39 @@
 
 Spawn template: paste `{{constitution}}` into every role prompt.
 
+Vault first, in the order the constitution's section 5 sets: every role
+queries the vault with the packaged `impact_closure.py` verbs first, then
+follows machine indexes and generated views, typed frontmatter, relation
+blocks and wikilinks, then maps, and runs a targeted search only for a gap;
+when the tools give too little or look wrong it uses its own methods and
+records that it did. This flow starts from `home.md`,
+`maps/_generated/relation-status.md`,
+`maps/_generated/cross-subtree-matrix.md` and
+`maps/_generated/stale-relations.md`, `maps/delivery.md` and the Item's story,
+Test Plan and pinned contract relations.
+Switch `context_pack`: at `role_digest`, a spawned role receives its pack from
+`context_pack.py build --entry <entry> --role <role> --mode <mode>
+--project-root <root>` instead of the full required reads; it reads a named
+source in full only when the pack does not cover a case, and records that read
+and why, as
+`skill-content/challenge-review/references/switch-context_pack-role_digest.md`
+defines.
+Switch `step_timing`: at `recorded`, the coordinator runs `step_timing.py
+start --run <run> --step <step> [--budget <id>]` before each step and
+`step_timing.py end --run <run> --span <span>` after it, and records each role
+spawn with `--kind spawn --parent <step span> --role <role> --phase
+reading|writing|review|re_review|waiting`. An end that returns overrun is
+reported to the owner at once with its breakdown, largest contributor and
+lever. The run ends with `step_timing.py report --run <run> --write`, as
+`skill-content/challenge-review/references/switch-step_timing-recorded.md`
+defines.
+Switch `step_budgets`: at `enforced`, each budgeted step is compared with its
+maximum, the owner's parameter or the package target in
+`skill-content/configure/data/step-budgets.json`; a step may finish well under
+it, and only an exceeded maximum is reported, never blocking, as
+`skill-content/challenge-review/references/switch-step_budgets-enforced.md`
+defines.
+
 `/deliver DLV-###` resumes from tracked Delivery files and verified remote
 evidence. It starts or resumes one Item only when its exact plan, target,
 predecessor, Fence and global slot checks pass. Each Item its
@@ -88,6 +121,17 @@ defines.
 Switch `item_review_scale`: at `by_change_size`, the official code reviewer
 reads alone an Item whose frozen change is within the owner's size limits, as
 `skill-content/code-review/references/switch-item_review_scale-by_change_size.md`
+defines.
+Switch `review_scope`: at `impact_closure`, the frozen candidate stays the
+structural check before any reader and the code reviewer reads the changed
+files, the Item's story, Test Plan and pinned contracts and the files those
+relations name; code review and QA read the closure the
+`delivery_verification.py` manifest derives; every role reads the change's
+impact closure, each approved, unchanged note outside it only as its
+hash-bound summary, reads beyond it when unsure and records why, a writer
+heals a missing relation with `impact_closure.py heal` and recomputes the
+closure, and a confirmation re-review reads only the fix's delta, as
+`skill-content/challenge-review/references/switch-review_scope-impact_closure.md`
 defines.
 
 A role that waits inside its turn waits at most the Delivery verification

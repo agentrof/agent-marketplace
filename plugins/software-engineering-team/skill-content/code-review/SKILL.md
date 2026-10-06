@@ -88,6 +88,10 @@ checklists per pass live in the passes reference.
 3. **Security:** authentication and authorization, input validation, data
    protection, common vulnerability classes.
 
+## Verification
+
+DO follow the [verification bounds](references/passes.md#verification). Read when planning verification in any review cycle.
+
 ## Architecture-Implicating Findings
 
 Some findings do not belong in the fix loop. When a finding implicates the

@@ -61,6 +61,21 @@ Security findings do not belong in public issues, pull requests or commit
 messages. Use the repository's [private vulnerability reporting form](https://github.com/agentrof/agent-marketplace/security/advisories/new)
 and follow [SECURITY.md](SECURITY.md).
 
+## Review and fix agents
+
+For package PR reviews and fixes, use `make check-local` and
+`make verify-local`. Beyond those targets, run at most the single test named
+in a finding. Run a full test module, `make check`, or a `--full` local gate
+only to reproduce a CI failure already reported on the exact PR head; name
+that failure and the reproduction command in the review evidence. Pull
+request CI owns the full suite and required platform and host checks.
+
+Fix agents stage the complete candidate before the local targets. Reviewers
+stay read-only: use the owner's exact staged candidate and its local evidence;
+if that candidate is unavailable, report the missing evidence without staging
+or changing files. Verify remote checks against the exact PR head before
+claiming readiness.
+
 ## Component model
 
 - Agents are platform-independent roles: short constitutions with fixed

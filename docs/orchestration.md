@@ -388,7 +388,11 @@ Neither host requires another plugin.
 `task_inputs.py` derives the delegated task's full read list, conditional
 references, source identities, role boundary and repair obligations from the
 canonical task-input policy and the owning compiler's selected project inputs.
-The entry checks its source hash again before persisting results. The manifest
+The entry checks its source hash again before persisting results. A task given
+explicit inputs, outside an exact epic and a code review base, binds those
+inputs and the notes they cite by content and the rest of the canonical source
+inventory by path only, without `head`: a new or removed source still makes it
+stale, while a commit or a write to an unrelated note does not. The manifest
 is disposable stdout, not project state or approval authority; required full
 reads remain mandatory. External issue reporting never creates a project
 manifest. Catalog validation requires every role, skill and flow to be mapped.

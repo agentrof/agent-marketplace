@@ -290,6 +290,37 @@ class TaskInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stale"):
                 task_inputs.manifest(**kwargs, expected_hash=result["source_hash"])
 
+    def test_an_input_task_binds_its_inputs_and_cited_notes_and_only_membership_of_the_rest(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            docs = root / "workspace/docs"
+            (docs / "operation").mkdir(parents=True)
+            (docs / "operation/cited.md").write_text("Cited", encoding="utf-8")
+            (docs / "operation/unrelated.md").write_text("Unrelated", encoding="utf-8")
+            (root / "brief.md").write_text("Reads [[operation/cited|Cited]].\n", encoding="utf-8")
+            self.commit(root)
+            kwargs = dict(entry="business-analysis", role="business-analyst", mode="review",
+                          project=root, inputs=["brief.md"])
+            result = task_inputs.manifest(**kwargs)
+            self.assertIn("workspace/docs/operation/unrelated.md", result["canonical_source_paths"])
+            self.assertEqual({record["path"] for record in result["canonical_source_inventory"]},
+                             {"workspace/docs/operation/cited.md"})
+            # Another writer's note and a commit leave the task fresh.
+            (docs / "operation/unrelated.md").write_text("Changed elsewhere", encoding="utf-8")
+            self.assertEqual(task_inputs.manifest(**kwargs, expected_hash=result["source_hash"])["source_hash"],
+                             result["source_hash"])
+            self.commit(root)
+            task_inputs.manifest(**kwargs, expected_hash=result["source_hash"])
+            # A cited note and a new source still invalidate it.
+            (docs / "operation/cited.md").write_text("Cited, changed", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "stale"):
+                task_inputs.manifest(**kwargs, expected_hash=result["source_hash"])
+            result = task_inputs.manifest(**kwargs)
+            (docs / "operation/new.md").write_text("New", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "stale"):
+                task_inputs.manifest(**kwargs, expected_hash=result["source_hash"])
+
     def test_base_inventory_includes_dirty_and_untracked_product_sources(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()

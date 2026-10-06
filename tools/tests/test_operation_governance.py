@@ -327,6 +327,46 @@ class OperationGovernanceTests(unittest.TestCase):
             self.assertIn("no repository workflow", error)
             self.assertFalse(output.exists())
 
+    def test_verification_approval_projects_the_paired_environment_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace" / "docs"
+            ref = self.approved_solution(docs)
+            for kind in ("environment", "verification"):
+                initialized = self.invoke(OPERATION, "init", "--docs", str(docs), "--kind", kind,
+                                          "--constrained-by", ref)
+                self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+            environment = docs / "operation" / "environment-contract.md"
+            verification = docs / "operation" / "verification-contract.md"
+            declare(environment, env_command="./tools/env")
+            declare(verification, test_command="make test")
+            env_approved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "environment")
+            self.assertEqual(env_approved.returncode, 0, env_approved.stdout + env_approved.stderr)
+            env_hash = json.loads(env_approved.stdout)["source_hash"]
+            approved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "verification")
+            self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+            text = verification.read_text(encoding="utf-8")
+            self.assertIn("paired_environment_revision: 1\n", text)
+            self.assertIn(f"paired_environment_source_hash: {env_hash}\n", text)
+            self.assertEqual([message for _path, message in operation_findings(docs)
+                              if "paired_environment" in message], [])
+            checked = json.loads(self.invoke(OPERATION, "check", "--docs", str(docs), "--kind", "verification").stdout)
+            self.assertTrue(checked["ok"])
+            self.assertEqual(checked["receipt"]["paired_environment"],
+                             {"revision": 1, "source_hash": env_hash, "current": True})
+            # A later Environment Contract approval shows as advisory drift and
+            # the next Verification revision drops the stamp until it is approved.
+            self.invoke(OPERATION, "begin-revision", "--docs", str(docs), "--kind", "environment")
+            reapproved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "environment")
+            self.assertEqual(reapproved.returncode, 0, reapproved.stdout + reapproved.stderr)
+            checked = json.loads(self.invoke(OPERATION, "check", "--docs", str(docs), "--kind", "verification").stdout)
+            self.assertTrue(checked["ok"])
+            self.assertFalse(checked["receipt"]["paired_environment"]["current"])
+            self.invoke(OPERATION, "begin-revision", "--docs", str(docs), "--kind", "verification")
+            self.assertNotIn("paired_environment", verification.read_text(encoding="utf-8"))
+            approved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "verification")
+            self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+            self.assertIn("paired_environment_revision: 2\n", verification.read_text(encoding="utf-8"))
+
     def test_environment_and_governance_require_lifecycle_revisions(self):
         with tempfile.TemporaryDirectory() as temporary:
             docs = Path(temporary) / "workspace" / "docs"

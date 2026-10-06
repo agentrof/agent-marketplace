@@ -431,9 +431,33 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
             errors.append("approved contract source_hash is stale")
         if not isinstance(props.get("approved_at_utc"), str):
             errors.append("approved contract needs compiler-owned approved_at_utc")
-    return {"path": str(path), "kind": kind, "status": props.get("status"),
-            "revision": props.get("revision"), "source_hash": digest,
-            "current": not errors and props.get("status") == "approved"}, errors
+    value = {"path": str(path), "kind": kind, "status": props.get("status"),
+             "revision": props.get("revision"), "source_hash": digest,
+             "current": not errors and props.get("status") == "approved"}
+    if kind == "verification" and "paired_environment_source_hash" in props:
+        # Advisory: an Environment Contract approved after this receipt was
+        # stamped shows as drift until the next Verification Contract approval.
+        environment = paired_environment(docs)
+        value["paired_environment"] = {
+            "revision": props.get("paired_environment_revision"),
+            "source_hash": props.get("paired_environment_source_hash"),
+            "current": environment is not None
+            and environment == (props.get("paired_environment_revision"), props.get("paired_environment_source_hash")),
+        }
+    return value, errors
+
+
+PAIRED_FIELDS = ("paired_environment_revision", "paired_environment_source_hash")
+
+
+def paired_environment(docs: Path) -> tuple[int, str] | None:
+    """The revision and approved source_hash of the current Environment Contract, if any."""
+    if not contract_path(docs, "environment").is_file():
+        return None
+    environment, errors = check_contract(docs, "environment")
+    if errors or not environment.get("current"):
+        return None
+    return environment["revision"], environment["source_hash"]
 
 
 def initial_props(kind: str, refs: list[str]) -> dict:
@@ -489,6 +513,8 @@ def revise(args) -> int:
     props["revision"] = int(props.get("revision", 0)) + 1
     props.pop("approved_at_utc", None)
     props.pop("source_hash", None)
+    for field in PAIRED_FIELDS:
+        props.pop(field, None)
     props["tags"] = [f"doc/{TYPE_FOR[args.kind]}", "status/draft"]
     path.write_bytes(render(props, body).encode("utf-8"))
     print(json.dumps({"kind": args.kind, "path": str(path), "status": "draft", "revision": props["revision"]}, sort_keys=True))
@@ -512,6 +538,14 @@ def approval_text(docs: Path, kind: str) -> str:
     props["status"] = "approved"
     props["tags"] = [f"doc/{TYPE_FOR[kind]}", "status/approved"]
     props["approved_at_utc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if kind == "verification":
+        # The paired Environment Contract receipt is compiler-projected from the
+        # approved current Environment Contract, never authored by a writer.
+        for field in PAIRED_FIELDS:
+            props.pop(field, None)
+        paired = paired_environment(docs)
+        if paired is not None:
+            props.update(zip(PAIRED_FIELDS, paired))
     props["source_hash"] = source_hash(props, body)
     return render(props, body)
 

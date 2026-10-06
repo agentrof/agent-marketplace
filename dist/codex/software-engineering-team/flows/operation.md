@@ -47,6 +47,11 @@ Requirement stage and it does not alter product-stage package hashes.
    defines.
 4. Approve with `operation_compile.py approve --kind <kind>`. Return the exact
    contract receipt. Do not run a downstream product stage automatically.
+   A Verification Contract approval stamps `paired_environment_revision` and
+   `paired_environment_source_hash` from the approved current Environment
+   Contract; writers never author that receipt, so the two writers can work
+   side by side. Approve the Environment Contract first; `check --kind
+   verification` reports a later Environment approval as advisory drift.
    Switch `owner_gates`: at `two_fixed_gates`, a revision that a Delivery's
    execution plan needs is approved in that Delivery's gate A, as
    `skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`

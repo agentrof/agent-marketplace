@@ -144,6 +144,8 @@
     "dependency_audit_rationale": "text",
     "pull_request_check_source": "text",
     "pull_request_check_provider": "text",
+    "paired_environment_revision": "number",
+    "paired_environment_source_hash": "text",
     "env_command": "text",
     "env_workdir": "text",
     "scenarios": "multitext",

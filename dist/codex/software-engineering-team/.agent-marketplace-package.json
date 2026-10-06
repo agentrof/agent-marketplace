@@ -104,7 +104,7 @@
       "aaebfe00ee5e062d23a881e0d0c989563426b2c026dcb07c78d74b0929477e5c"
     ,
     "flows/delivery-execution.md":
-      "18602ae7323024ac27bfb946f90f142aff5c4840df01e4dd3520fe45a3dc10f7"
+      "f12560b18e9103ecee42d9051812a0e2ca5109326d1a5dda523a47106512004a"
     ,
     "flows/delivery-governance.md":
       "ef2fa67262e0f500ba49b80d2865af6038638327745b989303acfaf1b1446fb7"
@@ -128,7 +128,7 @@
       "4cc9775649de3b6098fd4313d8a9c939a339b29613ebc3b62759d5ac24373d95"
     ,
     "flows/requirement.md":
-      "70ab7a50fdbb25e8f2d86497bba7a20d38e81f1747b1b034274167ae0e26a31b"
+      "011e1f7b5ad57c5a9745784b4cf55294f6f5a095bbef5d70186ae71c8f8b230b"
     ,
     "flows/solution-design.md":
       "26c4ebac809161bfcefc7d3dd6eb188321c67bb96ec87d0d340250be8a3d79d3"
@@ -210,6 +210,9 @@
     ,
     "scripts/landscape_check.py":
       "afd0b167c4f8b2d685ed4e4041a66178a706cece248d19dcb566814e0f534c43"
+    ,
+    "scripts/lane_table.py":
+      "76813fe8472a76223f3127f8862d0fe592e7efb7934ed6a900c4f977bdd84808"
     ,
     "scripts/marketplace_paths.py":
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
@@ -340,6 +343,9 @@
     "skill-content/code-review/SKILL.md":
       "a79a33bd4f7bb0b306a96ceed29dda63f5dbaa16ee076c75a0dc7e7a7be3809f"
     ,
+    "skill-content/code-review/data/change-size-measures.json":
+      "17ea0436e1415053881944c49f9d645918b4d889c92fe837636e871082e8b7e3"
+    ,
     "skill-content/code-review/data/code-review-panel.json":
       "32735dceafa375129973ead0d3232d54b790cdfd2b83b49f7a22f8c09011a367"
     ,
@@ -355,6 +361,9 @@
     "skill-content/code-review/references/switch-code_review_panel-beside_official.md":
       "be3be367917f0e6e42272262cc89899774976272325de244e229a4b9db2f99fa"
     ,
+    "skill-content/code-review/references/switch-item_review_scale-by_change_size.md":
+      "60e30321f786976ae5682a3f4d1551babfba4dd87ed7b981e44a5331fe018721"
+    ,
     "skill-content/code-review/references/switch-review_loop-blocking_delta.md":
       "46d14cd4fd6f991b766a5562161651dad84b8b9afd133e8c8a5e508408b925fe"
     ,
@@ -362,13 +371,13 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "cace6809fdb6d0040e5c448d1bc3b2072fcc8880a3d4890538f1f4ee521b87e9"
+      "3a0eead78a07bfa329525c093b0b12a5bb329fc92e589c210969bf03de0b2781"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "ca318646f6f2575d8f2f443ecf3d0f95ccf58c20153aa790f1ae2db1f6baaed1"
+      "e645b5c67560209d727027f7f8754f8c6e0569252c6f6e3f617adca42bc0a29c"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -405,6 +414,15 @@
     ,
     "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md":
       "ba72b5918302dbaf9d63f88c9854e0d7edfb329bb59e196935ddc54b35080691"
+    ,
+    "skill-content/deliver/references/switch-item_cost_report-per_step.md":
+      "672c1048caeb63e8f8b96bcaeb3146641f49e885cedcaa0b5881b6f11068bc13"
+    ,
+    "skill-content/deliver/references/switch-lane_isolation-scratch_clone.md":
+      "db64f976c6ffca3029637bb1a4f10082ba48bee4d09cdf3328a6f49879db4e52"
+    ,
+    "skill-content/deliver/references/switch-lane_table-recorded.md":
+      "8e61c8b52ec05569e66745c87aad15b3692561c233d41bc67e5e514f9fda3821"
     ,
     "skill-content/deliver/references/switch-own_target_reuse-spot_run.md":
       "04cbf0a3cee8377d9a9ffe783b7372f7dda9ca5dac1fe5b853ffe65b01b900f0"
@@ -598,6 +616,9 @@
     "skill-content/qa-verification/references/runtime-protocol.md":
       "7ddf13911059f2676d23cb1ae8a0e33e69f0f3cd7e2f2a9c3a7f4149761194d3"
     ,
+    "skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md":
+      "549947c59c6a87988af1fc6a646414d85177c1f68c8249a05d9522bd99f47b74"
+    ,
     "skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md":
       "77ec83ef7c481c79826ca6627c6b45a7cdb7450144ed8b67f28e5443bbb5073f"
     ,
@@ -636,6 +657,9 @@
     ,
     "skill-content/requirement/SKILL.md":
       "bcbc588c7690c4bd789d28c4cae0e9768e2a26c17f415d8dc99610c9ba7a4e0f"
+    ,
+    "skill-content/requirement/references/switch-requirement_fact_check-pre_approval_reader.md":
+      "532c07a576429aaafdfbf5e89e910bad32dbfbbcb371c415a794dfabdee0a0f5"
     ,
     "skill-content/requirements-analysis/SKILL.md":
       "67dca388f5ffb7212ba7d1ae5f3e2adaa9e211e2b082f28036a4066472e12452"

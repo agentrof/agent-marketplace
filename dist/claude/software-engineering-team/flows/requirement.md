@@ -18,6 +18,11 @@ workflow mode is created.
    Evidence/Constraints and the four-row Stage Impact matrix.
 3. Require Requirement approval before expensive stage work. The compiler
    owns the UTC approval stamp, semantic source hash and status tag.
+   Switch `requirement_fact_check`: at `pre_approval_reader`, a read-only
+   reader checks a technical Requirement's outcomes against the files they
+   cite before its approval question, as
+   `skill-content/requirement/references/switch-requirement_fact_check-pre_approval_reader.md`
+   defines.
 4. Run only `required` stages in dependency order. `reuse` resolves to an
    approved current package; `not_applicable` has no evidence refs and keeps a
    concrete rationale. Every stage entry checks the same prerequisites. Each

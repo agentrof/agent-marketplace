@@ -3843,6 +3843,12 @@ def autopilot_violation(before: object, writer_allowed: bool) -> str:
             continue
         error = restore_autopilot_file(directory / name, old)
         restored.append(name if error is None else f"{name} (restore failed: {error})")
+    # A grant put back above was made by consuming the arming record, so put that back too:
+    # the state is then what the command found, and a sanctioned `on` can still complete it.
+    if any(entry.startswith("grant.json") for entry in restored) \
+            and before["files"]["arming.json"] is not None and after["arming.json"] is None:
+        error = restore_autopilot_file(directory / "arming.json", before["files"]["arming.json"])
+        restored.append("arming.json" if error is None else f"arming.json (restore failed: {error})")
     if not restored:
         return ""
     return ("Bash changed autopilot runtime state outside the packaged autopilot.py; "

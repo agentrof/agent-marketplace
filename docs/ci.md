@@ -41,8 +41,8 @@ regressions cannot skip.
 
 A worker, in CI or local validation, holds every test not marked
 `@integration` to its own process and its own temporary directory. Each such
-test gets a fresh directory as `TMPDIR`, `TMP`, `TEMP` and `tempfile`'s
-default, and a process-wide audit hook watches every thread while it runs:
+test gets a fresh directory inside the worker's as `tempfile`'s default, and a
+process-wide audit hook watches every thread while it runs:
 starting a process (subprocess, multiprocessing, `os.system`, fork, spawn,
 exec) or writing outside that directory (any open for writing, SQLite files,
 directory, link, rename, remove, mode, time and FIFO calls, through a

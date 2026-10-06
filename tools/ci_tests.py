@@ -191,7 +191,6 @@ class UnitBoundary:
         self.crossed = []
         self.directory = None
         self.saved = []
-        self.restore = []
         self.threads = set()
 
     def __enter__(self):
@@ -223,9 +222,8 @@ class UnitBoundary:
     def watch(self, test_id):
         self.directory = tempfile.mkdtemp(prefix="unit-", dir=self.base)
         self.roots = tuple({os.path.normcase(os.path.realpath(path)) for path in (self.directory, os.devnull)})
-        self.restore = [(name, os.environ.get(name)) for name in ("TMPDIR", "TMP", "TEMP")]
+        # A unit test starts no process, so tempfile's default is its whole temporary directory.
         self.saved_tempdir = tempfile.tempdir
-        os.environ.update(TMPDIR=self.directory, TMP=self.directory, TEMP=self.directory)
         tempfile.tempdir = self.directory
         self.threads = set(threading.enumerate())
         self.crossed = []
@@ -236,11 +234,6 @@ class UnitBoundary:
             return []
         self.test = None
         tempfile.tempdir = self.saved_tempdir
-        for name, value in self.restore:
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
         deadline = time.monotonic() + 1
         for thread in [thread for thread in threading.enumerate() if thread not in self.threads]:
             thread.join(max(0.0, deadline - time.monotonic()))

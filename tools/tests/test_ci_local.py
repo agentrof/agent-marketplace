@@ -229,7 +229,7 @@ class LocalValidationTests(unittest.TestCase):
             '        self.assertNotIn(checkout, (temporary_root, *temporary_root.parents))\n'
             '        self.assertEqual(temporary_root.parent.name, expected_worker)\n'
             '        self.assertTrue(temporary_root.name.startswith("unit-"), temporary_root)\n'
-            '        self.assertEqual(tempfile.gettempdir(), os.environ["TEMP"])\n'
+            '        self.assertEqual(temporary_root.parent, Path(os.environ["TEMP"]).resolve())\n'
             '        self.assertEqual(os.environ["TMPDIR"], os.environ["TMP"])\n'
             '        self.assertNotEqual(self.inside_git.returncode, 0, self.inside_git.stdout)\n'
             '    def test_one(self): self.check_temporary("0")\n'

@@ -4427,6 +4427,11 @@ def begin_revision(args) -> int:
     docs = docs_root(args.docs)
     record, errors = collect(docs, historical_inputs=True, prior_universe=True)
     errors.extend(approval_findings(record, docs))
+    # Only revision intake may defer new level grammar on a committed,
+    # hash-verified predecessor. Ordinary checks and approval stay strict.
+    level_repairs = [error for error in errors
+                     if error.endswith(" level must be one of " + ", ".join(LEVELS))]
+    errors = [error for error in errors if error not in level_repairs]
     if errors:
         print(json.dumps({"ok": False, "errors": sorted(set(errors))}, indent=2,
                          ensure_ascii=False, sort_keys=True))
@@ -4559,6 +4564,7 @@ def begin_revision(args) -> int:
         backlog_path.write_bytes(front_matter(root_props, root_body).encode("utf-8"))
         review_path.write_bytes(front_matter(review_props, review_body_text).encode("utf-8"))
         refreshed, render_errors = collect(docs, review_inputs=True, revision_inputs=True)
+        render_errors = [error for error in render_errors if error not in level_repairs]
         render_errors.extend(review_coverage_findings(refreshed, docs))
         if render_errors:
             raise RuntimeError("; ".join(sorted(set(render_errors))))
@@ -4591,6 +4597,8 @@ def begin_revision(args) -> int:
         "cancelled_story_ids": sorted(set(snapshot.get("cancelled_story_ids", []))),
         "backlog": str(backlog_path), "review": str(review_path),
     }
+    if level_repairs:
+        result["level_repairs_required"] = sorted(set(level_repairs))
     if refreshed.get("transition_findings"):
         result["transition_findings"] = refreshed["transition_findings"]
     print(json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True))

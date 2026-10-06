@@ -187,3 +187,5 @@ the valid fixture repository so that its check reports it. A meta-test keeps
 the two in lockstep, so adding a check without a builder turns the suite red.
 If your PR changes validation behavior, it must change the builders in the
 same commit.
+
+Local unit workers also reject process starts during test-module loading and class/module fixtures, including attempts a fixture catches. Shared fixture seeds must be built in process and remain read-only; each unit test mutates only its own temporary copy.

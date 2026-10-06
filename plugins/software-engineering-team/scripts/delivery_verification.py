@@ -3238,6 +3238,40 @@ def inspect_candidate(root: Path, relative: str, *, base: bool = False) -> dict:
             "encoding": encoding, "content": content}
 
 
+def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
+                    refs: list[str] | None = None) -> dict:
+    """Batch source units from the frozen Git candidate, never live text."""
+    import context_catalog
+    import project_context
+    current = require_current(root, read_session(root), allow_evidence=True)
+    if payload.get("candidate_hash") != current["candidate_hash"]:
+        raise RuntimeError("context manifest belongs to another verification candidate")
+    plan = payload["project_reading"]
+    if "request" not in plan:
+        raise RuntimeError("resolve context or use frozen inspect reads before continuing")
+    index = project_context.load_index(root, no_cache=True)
+    project_context.validate_plan(root, index, plan)
+    if reason is not None:
+        return {"candidate_hash": current["candidate_hash"], "product_commit": current["product_commit"],
+                "project_reading": project_context.expand_context(root, index, plan, reason=reason, refs=refs)}
+    units = {}
+    for row in plan["must_read"]:
+        if row.get("source_root") == "project":
+            raise RuntimeError("external context requires an explicit frozen inspect read")
+        unit = dict(index["catalog"]["units"].get(row["unit_id"], row))
+        unit.setdefault("git_revision", current["product_commit"])
+        units[unit["unit_id"]] = unit
+    result = context_catalog.read_units(root / "workspace/docs", {"units": units},
+        list(units), plan["request"]["budget"]["max_source_bytes"])
+    result.update(candidate_hash=current["candidate_hash"], plan_status=plan["status"],
+                  coverage=plan["coverage"])
+    if "continuation" in plan:
+        result["continuation"] = plan["continuation"]
+    if not units and plan["status"] != "ready":
+        result["status"] = plan["status"]
+    return result
+
+
 def candidate_diff(root: Path, paths: list[str]) -> dict:
     value = read_session(root)
     current = require_current(root, value, allow_evidence=True)
@@ -3259,6 +3293,68 @@ def validate_evidence(item: dict, review: dict, verification: dict) -> None:
         if (record.get("verification_mode") not in policy()["final_modes"][role]
                 or not str(record.get("verification_result_hash", "")).startswith("sha256:")):
             raise RuntimeError(f"DELIVERY_ITEM_NOT_READY: final {role} verification result is missing")
+
+
+CLOSURE_SWITCH, CLOSURE_VALUE = "review_scope", "impact_closure"
+# The Item notes its closure starts from; every other bound record stays a full read.
+ITEM_RECORD_KEYS = ("story_path", "test_plan_path")
+CONTRACT_KEYS = ("verification_contract_ref", "environment_contract_ref")
+# The bound inputs that grow with the package rather than with the Item.
+PACKAGE_SCOPED = "system-architecture/"
+
+
+def review_scope(root: Path, delivery_id: str) -> str:
+    """The review_scope value the Delivery runs under.
+
+    ``full`` while no registry declares it, and where the policy cannot be
+    read, so a reader whose policy is unreadable reads everything as released.
+    """
+    try:
+        return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, CLOSURE_SWITCH)
+    except (KeyError, ValueError):
+        return "full"
+
+
+def closure_read(root: Path, current: dict) -> tuple[list[str], dict]:
+    """Narrow a reader's full read to the impact closure of the Item change.
+
+    The closure starts from the Item's Story, Test Plan and contracts and every
+    vault note the change touched. An architecture note outside the closure is
+    listed with the hash the candidate already binds instead of being read;
+    the Item's own records, the project root files and every product file the
+    change touched stay full reads.
+    """
+    import task_inputs
+
+    docs = delivery.docs_root(root)
+    prefix = docs.relative_to(root).as_posix() + "/"
+    item = next(path for path in current["inputs"] if path.endswith("/item.md"))
+    props, _ = delivery.split_note(root / item)
+    seeds = {prefix + props[key] for key in ITEM_RECORD_KEYS}
+    seeds |= {prefix + props[key] + ".md" for key in CONTRACT_KEYS if props.get(key)}
+    # Every vault file the Item changed since its integration base starts the
+    # closure, notes and data alike; a deleted note seeds it with what it named.
+    changed_vault = {path for path in current["changed_files"]
+                     if path.startswith(prefix) and task_inputs.canonical_source(path)}
+    seeds |= changed_vault
+    deleted = task_inputs.deleted_texts(root, current.get("integration_base_commit"),
+                                        changed_vault)
+    try:
+        scope = task_inputs.impact_closure(docs, seeds, prefix, deleted)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+    reach = set(scope["closure"]) | set(scope["graph_gaps"]) | seeds
+    reads = {path for path in reach if (root / path).is_file()}
+    # Only a note the closure proves unchanged since its approval stays unread.
+    proven = {row["path"] for row in scope["proven_unchanged"]}
+    unread = sorted(path for path in current["inputs"]
+                    if path.startswith(prefix + PACKAGE_SCOPED) and path not in reads
+                    and path in proven)
+    scope["proven_unchanged"] = [row for row in scope["proven_unchanged"] if row["path"] not in reads]
+    scope.update(read="closure", seeds=sorted(seeds),
+                 unread_inputs=[{"path": path, "sha256": current["inputs"][path]} for path in unread])
+    full = (set(current["inputs"]) - set(unread)) | set(current["changed_files"]) | reads
+    return sorted(full), {"scope": scope, "views": task_inputs.vault_views(docs)}
 
 
 def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str) -> dict:
@@ -3310,6 +3406,21 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str) -> 
                                        "terminal_evidence": False},
               "execution_note": "Commands run in private clones containing tracked files only. Approved commands must provision dependencies or use a fixed external environment; ignored dependencies are never copied. The clone is not an operating-system sandbox for trusted commands with absolute paths.",
               "next_transition": "Register independent result; owner writes reports only after both readers settle"}
+    if review_scope(root, delivery_id) == CLOSURE_VALUE:
+        result["full_read"], closure = closure_read(root, current)
+        result.update({CLOSURE_SWITCH: CLOSURE_VALUE, "vault_views": closure["views"],
+                       CLOSURE_VALUE: closure["scope"]})
+    import project_context
+    seeds = {path for path in current["inputs"] if path.endswith("/item.md")}
+    result["project_reading"] = project_context.task_context(root, entry="deliver",
+        role=role.replace("_", "-"), mode="review", paths=seeds, no_cache=True)
+    result["read_interface"]["context"] = "inspect-context --plan <saved verification manifest>"
+    result["read_interface"]["expand_context"] = "expand-context --plan <saved context manifest> --reason <reason> [--ref <reference>]"
+    result["context_guidance"] = ("Start with project_reading and batch-read with inspect-context; "
+        "full_read and all verification gates remain mandatory. Expand incomplete plans. "
+        "If context is insufficient, use frozen inspect/diff on your initiative or parent direction "
+        "and report context_findings with sources, impact, recovery and proposed fix to the parent. "
+        "Only the parent offers an anonymous issue through issue-report after exact-payload user approval.")
     panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
     if panel is not None:
         # Every reader of the panel pass receives this same manifest and one assignment.
@@ -3401,6 +3512,12 @@ def main(argv=None) -> int:
     inspect.add_argument("--base", action="store_true")
     diff = subs.add_parser("diff")
     diff.add_argument("--path", action="append", default=[])
+    for verb in ("inspect-context", "expand-context"):
+        context = subs.add_parser(verb)
+        context.add_argument("--plan", required=True)
+        if verb == "expand-context":
+            context.add_argument("--reason", required=True)
+            context.add_argument("--ref", action="append")
     subs.add_parser("resume-qa")
     status = subs.add_parser("status")
     status.add_argument("--summary", action="store_true")
@@ -3413,6 +3530,11 @@ def main(argv=None) -> int:
     try:
         if args.command == "freeze":
             value = freeze(root, args.delivery, args.story, fresh=args.fresh)
+        elif args.command == "inspect-context":
+            value = inspect_context(root, json.loads(Path(args.plan).read_text(encoding="utf-8")))
+        elif args.command == "expand-context":
+            value = inspect_context(root, json.loads(Path(args.plan).read_text(encoding="utf-8")),
+                                    reason=args.reason, refs=args.ref)
         elif args.command == "result":
             value = register_result(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "calibrate":

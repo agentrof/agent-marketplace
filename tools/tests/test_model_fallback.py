@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import os
 import subprocess
 import sys
@@ -214,8 +215,12 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         self.assertNotIn("`git status` over that scope reads as it did before", authoring)
 
     def test_the_validator_requires_the_hook(self):
-        self.assertEqual(fixtures.validator_findings(self.root, "single_team_contract"), [])
-        hooks = self.root / "platforms/claude" / fixtures.PLUGIN / "overlay/hooks/hooks.json"
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name) / "copy"
+        shutil.copytree(self.root, root)
+        self.assertEqual(fixtures.validator_findings(root, "single_team_contract"), [])
+        hooks = root / "platforms/claude" / fixtures.PLUGIN / "overlay/hooks/hooks.json"
         original = hooks.read_bytes()
         data = json.loads(original)
         for event in ("PostToolUse", "PostToolUseFailure"):
@@ -223,7 +228,7 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                                     if group.get("matcher") != "Agent"]
         hooks.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         try:
-            findings = fixtures.validator_findings(self.root, "single_team_contract")
+            findings = fixtures.validator_findings(root, "single_team_contract")
         finally:
             hooks.write_bytes(original)
         self.assertTrue(any(finding.check == "single_team_contract"

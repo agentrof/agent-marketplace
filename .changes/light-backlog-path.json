@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch `backlog_path` (`standard` | `light_when_eligible`), off by default so every default output is unchanged (#441). At `light_when_eligible`, a backlog revision of a technical or defect Requirement that changes at most a few technical or defect stories in one epic is reviewed by one reader of its story delta, and `backlog_compile.py record-light-root-review` writes the root review round from the compiler's structural checks; `light-path-status` reports eligibility and approval refuses a light root review the revision has outgrown. `backlog_compile.py stub-story --from-requirement` writes the story and test plan from the approved Requirement's acceptance items, work kind and evidence links.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

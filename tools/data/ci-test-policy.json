@@ -188,6 +188,11 @@
         "tools.tests.test_test_cost_budget.*",
         "tools.tests.test_test_levels.*",
         "tools.tests.test_lane_table.*",
+        "tools.tests.test_context_pack.*",
+        "tools.tests.test_step_timing.*",
+        "tools.tests.test_impact_closure.*",
+        "tools.tests.test_vault_query.*",
+        "tools.tests.test_review_scope_inputs.*",
         "tools.tests.test_review_loop.*",
         "tools.tests.test_code_review_panel.*",
         "tools.tests.test_execution_planning.*",
@@ -204,7 +209,9 @@
         "tools.tests.test_ci_*.*",
         "tools.tests.test_runtime_floor.*",
         "tools.tests.test_reader_waves.*",
-        "tools.tests.test_calculation_examples.*"
+        "tools.tests.test_calculation_examples.*",
+        "tools.tests.test_project_context.*",
+        "tools.tests.test_approval_history.*"
       ]
     },
     "documentation": {
@@ -279,7 +286,8 @@
         "tools.tests.test_backlog_revision_atomicity.*",
         "tools.tests.test_backlog_pending_review_policy.*",
         "tools.tests.test_backlog_pre_approval.*",
-        "tools.tests.test_backlog_upstream_transition.*"
+        "tools.tests.test_backlog_upstream_transition.*",
+        "tools.tests.test_light_backlog_path.*"
       ],
       "depends_on": [
         "delivery"
@@ -542,6 +550,7 @@
   "known_test_modules": [
     "tools.tests.test_adapter_registry",
     "tools.tests.test_all_switches_on",
+    "tools.tests.test_approval_history",
     "tools.tests.test_architecture_compile",
     "tools.tests.test_artifact_snapshot_metadata",
     "tools.tests.test_atomic_file",
@@ -569,6 +578,7 @@
     "tools.tests.test_ci_plan",
     "tools.tests.test_ci_tests",
     "tools.tests.test_code_review_panel",
+    "tools.tests.test_context_pack",
     "tools.tests.test_counts",
     "tools.tests.test_default_equivalence",
     "tools.tests.test_delivery_compile",
@@ -587,9 +597,11 @@
     "tools.tests.test_frontmatter_round_trip",
     "tools.tests.test_git_fixture",
     "tools.tests.test_host_models",
+    "tools.tests.test_impact_closure",
     "tools.tests.test_issue_report",
     "tools.tests.test_lane_table",
     "tools.tests.test_level_change_map",
+    "tools.tests.test_light_backlog_path",
     "tools.tests.test_living_experience_flow",
     "tools.tests.test_maintainer_protocol",
     "tools.tests.test_mechanical_pass_tier",
@@ -603,6 +615,7 @@
     "tools.tests.test_pre_handoff_regression",
     "tools.tests.test_process_policy",
     "tools.tests.test_project_config",
+    "tools.tests.test_project_context",
     "tools.tests.test_project_instructions",
     "tools.tests.test_project_vault_contract",
     "tools.tests.test_reader_waves",
@@ -616,6 +629,7 @@
     "tools.tests.test_review_loop",
     "tools.tests.test_review_manifest_scope",
     "tools.tests.test_review_panels",
+    "tools.tests.test_review_scope_inputs",
     "tools.tests.test_runtime_floor",
     "tools.tests.test_runtime_scripts",
     "tools.tests.test_scaffold",
@@ -627,6 +641,7 @@
     "tools.tests.test_solution_topology",
     "tools.tests.test_source_decision_gate",
     "tools.tests.test_source_impact",
+    "tools.tests.test_step_timing",
     "tools.tests.test_story_size_budget",
     "tools.tests.test_task_inputs",
     "tools.tests.test_test_cost_budget",
@@ -639,6 +654,7 @@
     "tools.tests.test_vault_gate",
     "tools.tests.test_vault_hook",
     "tools.tests.test_vault_hook_git_sync",
+    "tools.tests.test_vault_query",
     "tools.tests.test_writer_line_endings"
   ],
   "impact_groups": [

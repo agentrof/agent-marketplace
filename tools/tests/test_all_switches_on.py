@@ -31,6 +31,7 @@ import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
 import operation_compile  # noqa: E402
 import process_policy  # noqa: E402
+import step_timing  # noqa: E402
 import task_inputs  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 from git_fixture import init_repository, remove_temporary  # noqa: E402
@@ -55,6 +56,7 @@ PLANNING = ("execution-plan/references/switch-delivery_path-light_when_eligible.
 BOUNDED = "backlog-plan/references/switch-review_manifest_scope-bounded.md"
 # The backlog-plan switch references every backlog-plan task binds.
 BACKLOG = (BOUNDED,
+           "backlog-plan/references/switch-backlog_path-light_when_eligible.md",
            "backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md",
            "backlog-plan/references/switch-review_scope_record-both_scopes.md",
            "backlog-plan/references/switch-remediation_writers-per_epic.md",
@@ -141,6 +143,24 @@ EXPECTED = {key: sorted([*value, *(DELIVER if key.startswith("deliver:") else ()
                          *OWN_SKILL.get(key, ())])
             if key.startswith("deliver:") or key in OWN_SKILL else value
             for key, value in EXPECTED.items()}
+# The reading switches of #441 bind their references, all in challenge-review,
+# to every task of the entries whose flows own them: review_scope,
+# context_pack, step_timing and step_budgets own every flow.
+READING = "challenge-review/references/switch-"
+EVERY_FLOW = tuple(READING + name for name in (
+    "context_pack-role_digest.md", "review_scope-impact_closure.md",
+    "step_budgets-enforced.md", "step_timing-recorded.md"))
+FANOUT_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system",
+                  "execution-plan", "experience-design", "solution-design")
+LEVEL_ENTRIES = ("backlog-plan", "configure", "execution-plan")
+FLOWLESS_ENTRIES = ("issue-report", "organize-docs", "setup")
+EXPECTED = {key: sorted([
+    *value,
+    *(EVERY_FLOW if key.split(":")[0] not in FLOWLESS_ENTRIES else ()),
+    *((READING + "review_fanout-per_unit.md",) if key.split(":")[0] in FANOUT_ENTRIES else ()),
+    *((READING + "review_levels-concurrent_when_independent.md",)
+      if key.split(":")[0] in LEVEL_ENTRIES else ())])
+    for key, value in EXPECTED.items()}
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")
 
@@ -250,6 +270,67 @@ class AllSwitchesOnTests(unittest.TestCase):
         self.assertEqual(sorted(path.removeprefix("skill-content/") for path in result["required_reads"]
                                 if "/references/switch-" in path),
                          sorted(EXPECTED["deliver:code-reviewer"]))
+
+    def test_every_shipped_task_binds_the_references_of_the_switches_its_flows_own(self):
+        bound = {}
+        for entry, route in sorted(task_inputs.catalog()["entries"].items()):
+            for role in route["roles"] or [None]:
+                result = task_inputs.manifest(
+                    entry=entry, role=role, mode="review",
+                    project=self.project if route["project_state"] else None)
+                # Under context_pack role_digest the pack's sources replace the
+                # required reads of every entry with a flow.
+                pack = result.get("context_pack")
+                self.assertEqual(pack is None, entry in FLOWLESS_ENTRIES, entry)
+                reads = ([source["path"] for source in pack["sources"]] if pack
+                         else result["required_reads"])
+                if pack:
+                    # Beside the digest only the constitution, the role and the
+                    # switch references stay full reads.
+                    self.assertIn("constitution.md", result["required_reads"])
+                    self.assertTrue(all(task_inputs.pack_full_read(path, role)
+                                        for path in result["required_reads"]))
+                    self.assertTrue(pack["rules"])
+                bound[f"{entry}:{role}"] = sorted(
+                    path.removeprefix("skill-content/") for path in reads
+                    if "/references/switch-" in path)
+        self.maxDiff = None
+        self.assertEqual(bound, {key: sorted(value) for key, value in EXPECTED.items()})
+        # Every switch reference the package ships reaches at least one task.
+        shipped = {path.relative_to(ROOT / "plugins/software-engineering-team/skill-content")
+                   .as_posix() for path in (ROOT / "plugins/software-engineering-team/skill-content")
+                   .glob("*/references/switch-*.md")}
+        self.assertEqual(shipped, {path for paths in bound.values() for path in paths})
+
+
+    def test_the_reading_and_timing_modules_run_with_every_switch_on(self):
+        # step_timing reads the shipped budget ids, at their package limits,
+        # from step_budgets at enforced.
+        values = process_policy.effective_values(self.docs)[0]
+        budgets = step_timing.budgets(values)
+        shipped = json.loads((ROOT / "plugins/software-engineering-team/skill-content/configure"
+                              "/data/step-budgets.json").read_text(encoding="utf-8"))["budgets"]
+        self.assertEqual(sorted(budgets), sorted(shipped))
+        self.assertEqual(budgets["story_end_to_end"], 180)
+        begun = step_timing.start(self.project, values, run="all-on", step="story",
+                                  budget="story_end_to_end", at="2026-01-01T00:00:00Z")
+        self.assertEqual(begun["budget_minutes"], 180)
+        ended = step_timing.end(self.project, values, run="all-on", span=begun["span"],
+                                at="2026-01-01T03:01:00Z")
+        self.assertEqual(ended["overrun"]["budget"], "story_end_to_end")
+        # A reader's task binds the impact closure of its change from the
+        # shipped impact_closure module and its role digest from context_pack.
+        make_approved_backlog(self.docs)
+        self.commit("Approve the backlog")
+        story = sorted((self.docs / "backlog").rglob("story.md"))[0]
+        story.write_text(story.read_text(encoding="utf-8") + "\nA changed line.\n", encoding="utf-8")
+        changed = story.relative_to(self.project).as_posix()
+        result = task_inputs.manifest(entry="backlog-plan", role="backlog-reviewer", mode="review",
+                                      project=self.project, changed=[changed])
+        self.assertEqual(result["review_scope"], "impact_closure")
+        self.assertIn(changed, result["impact_closure"]["changed"])
+        self.assertTrue(result["vault_views"]["views"])
+        self.assertTrue(result["context_pack"]["rules"])
 
     def test_the_backlog_checks_and_derives_an_epic_review_manifest_with_every_switch_on(self):
         make_approved_backlog(self.docs)

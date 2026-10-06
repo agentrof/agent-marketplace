@@ -565,7 +565,7 @@ def run_worker(root, plan, shard, path):
         if identity != plan["inventory_hash"]:
             raise tests.CIError("test inventory changed")
         result, unattributed = tests.run_guarded(
-            lambda: tests.load_selected(root, plan["shards"][shard], ids), report, path, tests.integration_ids(root))
+            lambda: tests.load_selected(root, plan["shards"][shard], ids), report, path, tests.integration_ids(root), unit_only=True)
         report["status"] = "complete" if result.wasSuccessful() and not unattributed else "failed"
         if unattributed:
             report["error"] = "a class or module fixture " + tests.host_calls_text(unattributed)

@@ -732,6 +732,7 @@ class LocalValidationTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('git') == '/usr/bin/git'
                          and shutil.which('xcrun'), 'needs the macOS git trampoline')
+    @integration
     def test_the_direct_git_keeps_its_templates_and_helpers(self):
         local = ci_tests.read_json(self.root / ci_local.POLICY_PATH)
         local['direct_tools'] = ['git']

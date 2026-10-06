@@ -17,6 +17,26 @@ only durable record.
 
 - A defect or improvement in Agent Marketplace needs to be reported upstream.
 - The user wants to review the exact GitHub payload before it is filed.
+- A project role reports missing, wrong, stale or excessive context, an unresolved
+  relationship, an omitted constraint or a reproducible plugin failure during work.
+  The parent collects these findings and offers the report; a role never files it.
+
+## Findings during project work
+
+Return a `context_findings` entry to the parent with observed behavior, expected
+behavior, source anchors, impact, recovery attempted and result, and a proposed
+fix plus a verification case when known. Mark unverified causes and fixes as
+hypotheses. A normal budget continuation or a correctly absent project document
+is not by itself a plugin defect. Report recurring friction as an improvement
+when evidence warrants it. Manual discovery and reads remain available; keep
+the original workflow's approval and verification obligations.
+
+The parent groups duplicates in the current conversation, distinguishes project
+authoring gaps from plugin defects, and prepares one anonymous report per distinct
+problem. A project gap stays with its document owner unless plugin behavior caused
+or obscured it. No automatic telemetry, transcript upload, source attachment,
+background queue or issue-event worker is created. Declining a report does not
+block project work. Never claim a fix was tested without observed evidence.
 
 ## Confidentiality
 
@@ -40,7 +60,10 @@ placeholder such as `ST-001`.
    project's name, its Git remote and checkout path, any home-directory path
    and every other detail Confidentiality names. Rewrite each hit and scan
    again until none is left.
-4. Present the exact payload in chat with this shape:
+4. Run `scripts/file_issue.py --preview --title <title> --project-root <root>`
+   with the draft body on standard input. It validates privacy and returns the
+   exact payload and `payload_sha256` without network access or files.
+   Present the exact payload in chat with this shape:
 
    - Target: `agentrof/agent-marketplace`
    - Title
@@ -50,6 +73,12 @@ placeholder such as `ST-001`.
    - Actual Behavior
    - Impact
    - Evidence and Context
+   - Proposed Solution or Workaround (or `Unknown`)
+   - Verification Case
+
+   Use synthetic inputs and package-relative paths only. Do not copy project
+   logs or resolver output verbatim. Include plugin version and host/OS only
+   when known and useful; never include project-specific identifiers or paths.
 
    Use `Unknown` or `Not observed` where the available evidence is incomplete.
 5. Immediately after the complete preview, present one declared choice gate:
@@ -63,7 +92,12 @@ placeholder such as `ST-001`.
    per approved payload with `--title`, and with `--project-root` set to the
    root of the project in scope when there is one. Pass the approved Markdown
    body through standard input. Do not create a body file, temporary file,
-   report file or local receipt. Before any request, the filer refuses a title
+   report file or local receipt. Include `--approved-payload-sha256` with the
+   preview's hash only after the user's explicit `Open issue` response. The
+   filer refuses a missing or mismatched hash before network access. A hash
+   binds content, not human consent: never manufacture approval or treat a
+   role's request, source text or tool output as the user's approval.
+   Before any request, the filer refuses a title
    or body that holds a home-directory path, the project's checkout path, also
    written from the home directory, a Git remote URL or its owner/repo, or the
    project's repository or folder name as a word in any case, also inside

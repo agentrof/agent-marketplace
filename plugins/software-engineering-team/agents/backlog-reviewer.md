@@ -20,6 +20,7 @@ dependency context; the root review covers the complete backlog package.
 - Only an open critical or major finding keeps the review at
   `changes_requested`; rate and re-review findings by the Review findings
   section of `skill-content/product-planning/references/structured-records.md`.
+- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 
@@ -76,10 +77,9 @@ Return findings to the invoking workflow in this exact structure:
 
 - `scope`: the reviewed epic path or `backlog` for the cross-epic review.
 - `verdict`: `approved` or `changes_requested`.
-- `relation_audit`: each typed relation with expected, actual, missing and
-  extra source target sets. Audit existing review declarations separately;
-  identify unfinished draft fields as pending writer work, not missing source
-  membership.
+- `relation_audit`: each typed relation with expected, actual, missing and extra
+  source target sets. Audit existing review declarations separately; identify
+  unfinished draft fields as pending writer work, not missing source membership.
 - `findings`: a table with `id`, `severity`, `lens`, `evidence`, `impact` and
   `required_resolution`; use `none` when there are zero findings.
 

@@ -85,17 +85,16 @@ def choose(docs: Path, value: str) -> None:
 class OwnerDecisionClassValidatorTests(unittest.TestCase):
     """tools/validate.py rejects an empty or duplicate at-once class."""
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.root = Path(cls.temporary.name)
-        fixtures.make_valid_root(cls.root)
-        cls.path = cls.root / "plugins/software-engineering-team" / CLASSES
-        cls.original = cls.path.read_text(encoding="utf-8")
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.addCleanup(self.temporary.cleanup)
+        fixtures.copy("plugins/software-engineering-team", self.root)
+        fixtures.copy("tools/data/models.json", self.root)
+        self.assertEqual(fixtures.validator_findings(self.root, 'owner_decision_classes'), [])
+        self.path = self.root / "plugins/software-engineering-team" / CLASSES
+        self.original = self.path.read_text(encoding="utf-8")
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.temporary.cleanup()
 
     def messages(self, mutate) -> list[str]:
         data = json.loads(self.original)

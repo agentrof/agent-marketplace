@@ -7,6 +7,7 @@ import datetime
 import hashlib
 import io
 import json
+import shutil
 import os
 import stat
 import subprocess
@@ -1176,25 +1177,29 @@ class ReleaseCommitRuleTests(unittest.TestCase):
         self.assertEqual(environment["GIT_NO_REPLACE_OBJECTS"], "1")
 
     def test_release_records_the_build_identity_of_its_sources(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name) / "copy"
+        shutil.copytree(self.root, root)
         # Packages carry no shared build identity (#311); the release metadata
         # records it and release verification recomputes it.
-        path = self.root / release.STABLE_METADATA
+        path = root / release.STABLE_METADATA
         self.addCleanup(path.write_bytes, path.read_bytes())
         metadata = release.read_json(path)
         self.assertEqual(sorted(metadata), sorted(release.METADATA_KEYS))
         self.assertEqual(
             metadata["build_id"],
-            build_distributions.marketplace_snapshot(self.root)["build_id"],
+            build_distributions.marketplace_snapshot(root)["build_id"],
         )
-        self.assertEqual(release.verify_release(self.root), metadata)
+        self.assertEqual(release.verify_release(root), metadata)
         release.write_json(path, dict(metadata, build_id="snapshot." + "0" * 64))
         with self.assertRaisesRegex(release.ReleaseError, "build identity"):
-            release.verify_release(self.root)
+            release.verify_release(root)
         release.write_json(path, dict(
             metadata, schema_version=1, stable_base="a" * 40, main_source="b" * 40,
         ))
         with self.assertRaisesRegex(release.ReleaseError, "schema_version 2"):
-            release.verify_release(self.root)
+            release.verify_release(root)
 
 
 class ReleaseMonthRuleTests(unittest.TestCase):

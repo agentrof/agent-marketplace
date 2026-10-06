@@ -323,3 +323,5 @@ release from the merge to the immutable Release, and the pull request that
 carries the release commit by its slowest shard, runner queue time included.
 Timing targets are acceptance goals, not grounds to omit a failed or slow
 gate.
+
+Local unit workers also reject process starts during test-module loading and class/module fixtures, including attempts a fixture catches. Shared fixture seeds must be built in process and remain read-only; each unit test mutates only its own temporary copy.

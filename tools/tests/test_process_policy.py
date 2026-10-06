@@ -513,8 +513,10 @@ HOSTS = {host: f"platforms/{host}/software-engineering-team/host-contract.md"
 SWITCH_REFERENCE = re.compile(r"switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md")
 # The value each switch ships at: a flip changes every project that chose nothing.
 RELEASED_DEFAULTS = {
+    "backlog_path": "standard",
     "calculation_examples": "off",
     "code_review_panel": "single_reader",
+    "context_pack": "off",
     "delivery_path": "standard",
     "dependent_rebind_gate": "separate",
     "epic_review_cadence": "wait_per_panel",
@@ -536,13 +538,18 @@ RELEASED_DEFAULTS = {
     "remediation_bookkeeping": "writer",
     "remediation_writers": "single_writer",
     "review_loop": "current",
+    "review_fanout": "single_reader",
+    "review_levels": "sequential",
     "review_manifest_scope": "transitive",
     "review_panels": "single_reader",
     "review_rounds": "current",
+    "review_scope": "full",
     "requirement_fact_check": "off",
     "review_scope_record": "off",
     "root_review_scope": "full",
     "source_decision_gate": "two_gates",
+    "step_budgets": "off",
+    "step_timing": "off",
     "story_size_budget": "off",
     "test_cost_budget": "off",
     "test_engines": "single",
@@ -553,6 +560,62 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "review_scope": {
+        f"{SKILLS}/challenge-review/references/switch-review_scope-impact_closure.md": (
+            "The closure scopes the default read; it never caps it",
+            "no reader is ever spent on a package its compiler refuses",
+            "A note in `graph_gaps` is read in full",
+            "A first approval reads the whole package",
+            "never infer its content from that summary",
+            "A read-only reader never writes the vault",
+            "never a silent edit",
+            "refresh every review whose manifest hash changed before its verdict counts",
+        ),
+        **{path: ("run the owning compiler's structural check the flow names before",)
+           for path in HOSTS.values()},
+    },
+    "review_fanout": {
+        f"{SKILLS}/challenge-review/references/switch-review_fanout-per_unit.md": (
+            "a role never starts or closes another agent",
+            "A review of one changed unit keeps one reader",
+            "It never re-checks a fact a compiler already refuses",
+            "Every returned severity stands; no reader gets another reader's reply",
+        ),
+        HOSTS["claude"]: ("spawn one reader per changed unit of a review in one message",),
+        HOSTS["codex"]: ("start one reader per changed unit of a review before waiting on any of them",),
+    },
+    "review_levels": {
+        f"{SKILLS}/challenge-review/references/switch-review_levels-concurrent_when_independent.md": (
+            "consumes no verdict or open finding of the earlier level",
+            "Every other level stays sequential",
+            "Approval still waits for every level",
+            "A blocking fix re-runs every level whose manifest hash it changes",
+        ),
+        **{path: ("approval still waits for every level",) for path in HOSTS.values()},
+    },
+    "context_pack": {
+        f"{SKILLS}/challenge-review/references/switch-context_pack-role_digest.md": (
+            "The pack is derived from the bound sources, never authored",
+            "A pack whose source hashes do not match the bound sources is stale",
+            "the pack never narrows what a role may read",
+            "apply in full whatever the pack holds",
+        ),
+    },
+    "step_timing": {
+        f"{SKILLS}/challenge-review/references/switch-step_timing-recorded.md": (
+            "a role never times another agent",
+            "is reported to the owner at once",
+            "never an estimate",
+            "never delete or rewrite a row without the owner's approval",
+        ),
+    },
+    "step_budgets": {
+        f"{SKILLS}/challenge-review/references/switch-step_budgets-enforced.md": (
+            "A budget is a maximum, never an expectation",
+            "Enforcement is reporting only",
+            "a review is never cut to stay under one",
+        ),
+    },
     "calculation_examples": {
         f"{SKILLS}/requirements-analysis/references/switch-calculation_examples-required.md": (
             "A gap the owner must close is an open question, not a guessed formula",
@@ -870,6 +933,14 @@ SAFETY_RULES = {
             "Never delete or rewrite a row without the owner's approval",
         ),
     },
+    "backlog_path": {
+        f"{SKILLS}/backlog-plan/references/switch-backlog_path-light_when_eligible.md": (
+            "a critical or major finding blocks as on the standard path",
+            "backlog approval still checks the whole backlog",
+            "Approval re-checks the eligibility",
+            "A revision that is not eligible takes the standard path",
+        ),
+    },
     "root_review_scope": {
         f"{SKILLS}/backlog-plan/references/switch-root_review_scope-revision_delta.md": (
             "The root review stays the backlog's cross-story gate",
@@ -1030,6 +1101,123 @@ class ProcessSwitchContractTests(unittest.TestCase):
                 self.assertEqual(positions, sorted(positions))
 
 
+# The review and reading switches of #441: each owning flow anchors its
+# non-default value and names the reference that defines it.
+READING_SWITCHES = {
+    "review_scope": ("impact_closure", "switch-review_scope-impact_closure.md"),
+    "review_fanout": ("per_unit", "switch-review_fanout-per_unit.md"),
+    "review_levels": ("concurrent_when_independent",
+                      "switch-review_levels-concurrent_when_independent.md"),
+    "context_pack": ("role_digest", "switch-context_pack-role_digest.md"),
+    "step_timing": ("recorded", "switch-step_timing-recorded.md"),
+    "step_budgets": ("enforced", "switch-step_budgets-enforced.md"),
+}
+# Initial targets in minutes, maximums that only report.
+STEP_BUDGET_TARGETS = {"backlog_revision": 10, "confirmation_rereview": 3,
+                       "delivery_and_execution_planning": 15, "reader_closure_unit": 5,
+                       "requirement_technical": 10, "story_end_to_end": 180}
+VAULT_FIRST = "Vault first, per constitution section 5"
+VAULT_TIERS = ("`project_reading` plan", "machine indexes and generated views",
+               "typed frontmatter", "relation blocks and wikilinks", "then maps",
+               "manual search, reads and relationship discovery", "record sources and reasons")
+
+
+class ReadingSwitchTests(unittest.TestCase):
+    """Impact-closure reading, per-unit readers, concurrent levels, the role
+    digest and step timing ship off, and their flow text resolves (#441)."""
+
+    def setUp(self) -> None:
+        self.switches = json.loads((TEAM / process_policy.REGISTRY).read_text(
+            encoding="utf-8"))["switches"]
+
+    def test_each_switch_has_two_values_and_ships_today_s_behaviour(self):
+        for name, (value, _reference) in READING_SWITCHES.items():
+            spec = self.switches[name]
+            with self.subTest(switch=name):
+                self.assertEqual([item["id"] for item in spec["values"]],
+                                 [RELEASED_DEFAULTS[name], value])
+                self.assertEqual(spec["default"], RELEASED_DEFAULTS[name])
+                self.assertEqual(spec["issue"], 441)
+                self.assertEqual(spec["reference_scope"], "owning_flows")
+        flows = sorted(path.stem for path in (ROOT / FLOWS).glob("*.md"))
+        for name in ("review_scope", "context_pack", "step_timing", "step_budgets"):
+            self.assertEqual(sorted(self.switches[name]["flows"]), flows, name)
+
+    def test_every_owning_flow_anchors_the_value_and_names_its_reference(self):
+        for name, (value, reference) in READING_SWITCHES.items():
+            path = f"skill-content/challenge-review/references/{reference}"
+            self.assertTrue((TEAM / path).is_file(), path)
+            for flow in self.switches[name]["flows"]:
+                text = flat_text(f"{FLOWS}/{flow}.md")
+                with self.subTest(switch=name, flow=flow):
+                    self.assertIn(f"Switch `{name}`: at `{value}`", text)
+                    self.assertIn(path, text)
+
+    def test_step_budgets_are_reporting_maximums_with_the_targets(self):
+        spec = self.switches["step_budgets"]["parameters"]
+        declared = json.loads((TEAM / spec["declared_by"]["path"]).read_text(
+            encoding="utf-8"))[spec["declared_by"]["key"]]
+        self.assertEqual(spec["package_limits"], STEP_BUDGET_TARGETS)
+        self.assertEqual(sorted(declared), sorted(STEP_BUDGET_TARGETS))
+        for budget, item in declared.items():
+            with self.subTest(budget=budget):
+                self.assertTrue(item["summary"].startswith("Maximum minutes"))
+        self.assertIn("never an expectation", self.switches["step_budgets"]["summary"])
+
+    def test_every_role_navigates_the_vault_first(self):
+        constitution = flat_text("plugins/software-engineering-team/constitution.md")
+        section = constitution[constitution.index("## 5. Vault first"):
+                               constitution.index("## Escape hatch")]
+        for term in ("`project_reading` plan automatically returned by `task_inputs.py`",
+                     "project_context.py read --plan <task manifest>",
+                     "on your initiative or the parent agent's direction",
+                     "Record the sources and reasons", "preserve every owning-flow gate",
+                     "`context_findings`", "only explicit user approval of the displayed payload"):
+            with self.subTest(rule=term):
+                self.assertIn(term, section)
+        self.assertNotIn("`vault_query.py` verbs first", section)
+        for agent in sorted((TEAM / "agents").glob("*.md")):
+            text = " ".join(agent.read_text(encoding="utf-8").split())
+            with self.subTest(agent=agent.name):
+                self.assertIn(VAULT_FIRST + ": start from `project_reading`", text)
+                self.assertIn("Use manual search, reads and relation discovery", text)
+                self.assertIn("preserve gates and return `context_findings`", text)
+                self.assertNotIn("under review_scope", text)
+        for flow in sorted((ROOT / FLOWS).glob("*.md")):
+            text = flat_text(flow.relative_to(ROOT).as_posix())
+            with self.subTest(flow=flow.name):
+                self.assertIn("every role starts from the default `project_reading` plan", text)
+                self.assertIn("role's initiative or parent direction", text)
+                self.assertIn("Fallback navigation", text)
+                self.assertNotIn("`vault_query.py` verbs first", text)
+                for term in VAULT_TIERS:
+                    self.assertIn(term, text)
+        # Verify that the shared navigation interface actually exposes its verbs.
+        import project_context
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as stopped:
+            project_context.main(["--help"])
+        self.assertEqual(stopped.exception.code, 0)
+        for verb in ("resolve", "read", "expand", "units", "check"):
+            self.assertIn(verb, output.getvalue())
+        # Navigation never instructs a role to mutate the relation graph.
+        for path in sorted(TEAM.rglob("*.md")):
+            text = " ".join(path.read_text(encoding="utf-8").split())
+            self.assertNotIn("`vault_query.py` verbs first", text, str(path))
+            for verb in ("heal", "render"):
+                with self.subTest(path=path.name, verb=verb):
+                    self.assertNotIn(f"impact_closure.py {verb}", text)
+
+    def test_the_structural_check_runs_before_any_reader(self):
+        for flow in self.switches["review_scope"]["flows"]:
+            text = flat_text(f"{FLOWS}/{flow}.md")
+            anchor = text[text.index("Switch `review_scope`: at `impact_closure`"):]
+            with self.subTest(flow=flow):
+                self.assertRegex(anchor[:400], r"before any (reader|reviewer|reading role)"
+                                 r"|stays the structural check before any reader"
+                                 r"|a refinement reads only")
+
+
 class MeasuredBaselineTests(unittest.TestCase):
     """The registry ships to every user, so a baseline measured in a project is
     retold anonymously and never names that project's Deliveries or stories (#357)."""
@@ -1049,13 +1237,15 @@ class MeasuredBaselineTests(unittest.TestCase):
                 cited.append(name)
                 with self.subTest(switch=name):
                     self.assertTrue(evidence.startswith(" in one measured project"), evidence)
-        self.assertEqual(cited, ["calculation_examples", "code_review_panel", "delivery_path",
+        self.assertEqual(cited, ["backlog_path", "calculation_examples", "code_review_panel", "context_pack",
+                                 "delivery_path",
                                  "dependent_rebind_gate", "epic_review_cadence",
                                  "execution_planning", "item_qa_tier", "level_change_map", "own_target_reuse",
                                  "owner_gates",
                                  "pre_handoff_regression", "qa_gate_order", "reader_waves",
                                  "rebind_review_scope", "remediation_bookkeeping",
-                                 "remediation_writers", "requirement_fact_check", "review_scope_record",
+                                 "remediation_writers", "requirement_fact_check", "review_scope",
+                                 "review_scope_record",
                                  "root_review_scope",
                                  "source_decision_gate", "test_cost_budget", "test_engines",
                                  "test_group_report", "test_levels"])

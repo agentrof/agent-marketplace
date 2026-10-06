@@ -344,6 +344,7 @@ class RemediationWritersTests(unittest.TestCase):
         self.assertEqual(reader["write_scope"]["status"], "read_only")
 
 
+@integration
 class RootReviewScopeTests(unittest.TestCase):
     """An approved four-story backlog reopened as revision 2."""
 
@@ -358,6 +359,12 @@ class RootReviewScopeTests(unittest.TestCase):
             "schema_version": 2, "team_id": "software-engineering-team",
             "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
         make_approved_backlog(self.docs, "ST-001", "ST-002", "ST-003", "ST-004")
+        project = self.docs.parents[1]
+        init_repository(project)
+        for args in (("add", "-A"), ("-c", "user.name=Fixture", "-c",
+                     "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                     "commit", "-qm", "Approved fixture")):
+            subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
         self.reopen(2)
 
     def reopen(self, revision: int) -> None:

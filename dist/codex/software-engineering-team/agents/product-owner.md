@@ -28,6 +28,7 @@ a small, demonstrable backlog.
   Notes. Create its sibling `test-plan.md` with QA and the analyst; never hide
   scenarios in an informal checklist.
 - Ask for user approval before changing an approved backlog.
+- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 

@@ -876,6 +876,66 @@ class TestLevelTests(unittest.TestCase):
         self.assertFalse(written, "a guarded test wrote outside its temporary directory")
         return {row["id"][len(prefix):]: row for row in report["tests"]}
 
+    def test_local_unit_fixture_cannot_hide_a_process_start(self):
+        def load():
+            try:
+                subprocess.run([sys.executable, "-c", "pass"], check=True)
+            except ci_tests.UnitBoundaryError:
+                pass
+            return unittest.TestSuite()
+        with tempfile.TemporaryDirectory() as raw, \
+                self.assertRaisesRegex(ci_tests.UnitBoundaryError, "unit fixture.*started a process"):
+            ci_tests.run_guarded(load, {"tests": []}, Path(raw) / "report.json", set(), unit_only=True)
+
+    def test_link_cleanup_is_allowed_but_writing_its_target_is_refused(self):
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "outside-inner-unit"
+            target.write_text("unchanged")
+            def cleanup(_test):
+                with tempfile.TemporaryDirectory() as own:
+                    link = Path(own) / "link"
+                    try:
+                        link.symlink_to(target)
+                    except OSError:
+                        _test.skipTest("symlinks unavailable")
+                    link.rename(Path(own) / "renamed")
+                    (Path(own) / "renamed").unlink()
+            def write(_test):
+                with tempfile.TemporaryDirectory() as own:
+                    link = Path(own) / "link"
+                    try:
+                        link.symlink_to(target)
+                    except OSError:
+                        _test.skipTest("symlinks unavailable")
+                    link.write_text("escaped")
+            rows = self.run_under_boundary({"test_cleanup": cleanup, "test_write": write})
+            self.assertIn(rows["test_cleanup"]["outcome"], {"success", "skipped"})
+            self.assertIn(rows["test_write"]["outcome"], {"failure", "skipped"})
+            self.assertEqual(target.read_text(), "unchanged")
+
+    def test_threads_remain_guarded_while_the_runner_joins_them(self):
+        import threading
+        released = threading.Event()
+        join = threading.Thread.join
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "outside-inner-unit"
+            def worker():
+                released.wait()
+                try:
+                    target.write_text("escaped")
+                except ci_tests.UnitBoundaryError:
+                    pass
+            def case(_test):
+                threading.Thread(target=worker, name="finishing-unit").start()
+            def release_and_join(thread, *args, **kwargs):
+                released.set()
+                return join(thread, *args, **kwargs)
+            with mock.patch.object(threading.Thread, "join", release_and_join):
+                rows = self.run_under_boundary({"test_finishing": case})
+            self.assertEqual(rows["test_finishing"]["outcome"], "failure")
+            self.assertIn("wrote outside", rows["test_finishing"]["detail"])
+            self.assertFalse(target.exists())
+
     def test_a_unit_test_that_starts_a_process_or_writes_outside_its_temporary_directory_fails(self):
         import multiprocessing
         import sqlite3

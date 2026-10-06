@@ -83,6 +83,22 @@
   Every wave's progress message names the wave size and how many of its
   readers run at once. A closed writer's next pass starts fresh from its task
   manifest and the returned findings.
+- Under switch `review_scope` at `impact_closure`, run the owning
+  compiler's structural check the flow names before starting any reader, so
+  no reader is spent on a package the compiler refuses, and give each reader
+  its impact closure in full and every approved, unchanged note outside it as
+  its hash-bound summary.
+- Under switch `review_fanout` at `per_unit`, start one reader per changed
+  unit of a review before waiting on any of them, wait for all of them, then
+  start the one aggregator with their findings and the compilers' cross-unit
+  facts, and wait for it before triage.
+- Under switch `review_levels` at `concurrent_when_independent`, start the
+  readers of every review level the flow declares independent before waiting
+  on any of them, then wait for all of them before triage; approval still
+  waits for every level.
+- Under switch `context_pack` at `role_digest`, give each started role the
+  pack `context_pack.py build` returns for its entry, role and mode in place
+  of the full required reads.
 - Depending on the model, the provider's prompt cache can drop a role's
   context five minutes after the model call that last used it, and a model
   call after that pays the full price for the whole context again. So a role

@@ -256,6 +256,31 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertFalse(raw["candidate_intact"])
         self.assertFalse(verification.run_check(self.root, "diagnostic_test", selection_file=selector)["reused"])
 
+    def test_frozen_manifest_defaults_to_resolver_and_batches_exact_candidate_text(self):
+        self.freeze()
+        for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_final")):
+            manifest = verification.manifest(self.root, "DLV-001", "AUTH-01", role, mode)
+            self.assertIn("request", manifest["project_reading"], manifest["project_reading"])
+            batch = verification.inspect_context(self.root, manifest)
+            self.assertEqual(batch["candidate_hash"], manifest["candidate_hash"])
+            self.assertTrue(batch["units"])
+            for unit in batch["units"]:
+                self.assertEqual(unit["git_revision"], manifest["product_commit"])
+                self.assertIn("Reviewed independently.", unit["text"])
+            self.assertFalse((self.root / ".agentrof/agent-marketplace/.runtime/vault-index").exists())
+            expanded = verification.inspect_context(self.root, manifest, reason="Inspect completion criteria",
+                refs=["delivery/definition-of-done.md"])
+            extra = verification.inspect_context(self.root, expanded)
+            self.assertEqual(extra["candidate_hash"], manifest["candidate_hash"])
+            self.assertEqual([u["path"] for u in extra["units"]], ["delivery/definition-of-done.md"])
+            altered = copy.deepcopy(manifest)
+            altered["project_reading"]["must_read"][0]["ranges"] = [[1, 1]]
+            with self.assertRaisesRegex(ValueError, "modified"):
+                verification.inspect_context(self.root, altered)
+            altered["candidate_hash"] = "sha256:" + "0" * 64
+            with self.assertRaisesRegex(RuntimeError, "another verification candidate"):
+                verification.inspect_context(self.root, altered)
+
     def test_manifest_exposes_diagnostic_input_and_complete_final_result_fields(self):
         self.prepare_diagnostic()
         diagnostic = verification.manifest(self.root, "DLV-001", "AUTH-01", "qa_engineer", "qa_diagnostic")

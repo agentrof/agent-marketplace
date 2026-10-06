@@ -328,7 +328,9 @@ class TaskInputTests(unittest.TestCase):
             kwargs = dict(entry="business-analysis", role="business-analyst", mode="review",
                           project=root, inputs=["brief.md"])
             result = task_inputs.manifest(**kwargs)
-            self.assertIn("workspace/docs/operation/unrelated.md", result["canonical_source_paths"])
+            self.assertEqual(result["context_membership"], {"count": 2, "source_hash":
+                             task_inputs.digest(task_inputs.source_paths(root))})
+            self.assertNotIn("canonical_source_paths", result)
             self.assertEqual({record["path"] for record in result["canonical_source_inventory"]},
                              {"workspace/docs/operation/cited.md"})
             # Another writer's note and a commit leave the task fresh.
@@ -761,8 +763,10 @@ class EpicTaskScopeTests(unittest.TestCase):
             with self.subTest(scope=name):
                 with self.assertRaisesRegex(ValueError, "stale"):
                     self.task(**kwargs, expected_hash=previous[name]["source_hash"])
-                self.assertIn("workspace/docs/solution-design/aside.md", {
-                    record["path"] for record in self.task(**kwargs)["canonical_source_inventory"]})
+                current = self.task(**kwargs)
+                self.assertEqual(current["context_inventory"], {
+                    "count": len(task_inputs.source_inventory(self.root)),
+                    "source_hash": task_inputs.digest(task_inputs.source_inventory(self.root))})
 
     def test_another_epics_partial_edit_leaves_an_epic_task_fresh(self):
         tasks = {role: self.task(role, mode) for role, mode in self.ROLES}

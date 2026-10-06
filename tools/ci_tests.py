@@ -25,6 +25,11 @@ import time
 import unittest
 from pathlib import Path
 
+# CLI execution and imported runner tests must share one process-wide guard.
+if __name__ in {"__main__", "ci_tests"}:
+    sys.modules.setdefault("tools.ci_tests", sys.modules[__name__])
+sys.modules.setdefault("ci_tests", sys.modules[__name__])
+
 ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = "tools/data/ci-test-policy.json"
 SUCCESS_OUTCOMES = {"success", "skipped", "expected_failure"}
@@ -152,7 +157,7 @@ def _audit(event, args):
     if not _BOUNDARIES or getattr(_AUDITING, "active", False):
         return
     boundary = _BOUNDARIES[-1]
-    if boundary.test is None:
+    if boundary.test is None and not (any(item.unit_only for item in _BOUNDARIES) and event in boundary.PROCESS_EVENTS):
         return
     _AUDITING.active = True
     try:
@@ -186,7 +191,9 @@ class UnitBoundary:
     # Calls that raise no audit event of their own.
     UNAUDITED = ("mkfifo", "mknod")
 
-    def __init__(self):
+    def __init__(self, unit_only=False):
+        self.unit_only = unit_only
+        self.fixture_crossed = []
         self.test = None
         self.crossed = []
         self.directory = None
@@ -232,18 +239,18 @@ class UnitBoundary:
     def release(self):
         if self.test is None:
             return []
-        self.test = None
-        tempfile.tempdir = self.saved_tempdir
         deadline = time.monotonic() + 1
         for thread in [thread for thread in threading.enumerate() if thread not in self.threads]:
             thread.join(max(0.0, deadline - time.monotonic()))
             if thread.is_alive():
                 self.crossed.append("left a thread running: " + thread.name)
+        self.test = None
+        tempfile.tempdir = self.saved_tempdir
         crossed, self.crossed = self.crossed, []
         return crossed
 
     def cross(self, what):
-        self.crossed.append(what)
+        (self.fixture_crossed if self.test is None else self.crossed).append(what)
         raise UnitBoundaryError(f"unit test {what}; keep it in process or mark it @integration")
 
     @staticmethod
@@ -259,7 +266,7 @@ class UnitBoundary:
         except (ImportError, AttributeError, OSError):
             return None
 
-    def check_path(self, path, descriptor=None):
+    def check_path(self, path, descriptor=None, *, entry=False):
         if isinstance(path, int) or path is None:
             return
         base = os.getcwd()
@@ -267,7 +274,10 @@ class UnitBoundary:
             base = self.directory_of(descriptor)
             if base is None:
                 self.cross(f"wrote through an unknown directory descriptor: {os.fsdecode(os.fspath(path))}")
-        full = os.path.normcase(os.path.realpath(os.path.join(base, os.fsdecode(os.fspath(path)))))
+        joined = os.path.join(base, os.fsdecode(os.fspath(path)))
+        resolved = (os.path.join(os.path.realpath(os.path.dirname(joined)), os.path.basename(joined))
+                    if entry else os.path.realpath(joined))
+        full = os.path.normcase(resolved)
         if not any(full == root or full.startswith(root.rstrip(os.sep) + os.sep) for root in self.roots):
             self.cross("wrote outside its temporary directory: " + full)
 
@@ -286,7 +296,8 @@ class UnitBoundary:
             for position, descriptor in self.PATH_EVENTS[event]:
                 if position < len(args):
                     fd = args[descriptor] if descriptor is not None and descriptor < len(args) else None
-                    self.check_path(args[position], fd if isinstance(fd, int) else None)
+                    self.check_path(args[position], fd if isinstance(fd, int) else None,
+                                    entry=event in {"os.mkdir", "os.remove", "os.rmdir", "os.rename", "os.symlink", "os.link"})
 
     @staticmethod
     def command(event, args):
@@ -298,7 +309,7 @@ class UnitBoundary:
         return event
 
 
-def run_guarded(load, report, report_path, integration):
+def run_guarded(load, report, report_path, integration, *, unit_only=False):
     """Load and run a suite with tripwire host binaries in the environment.
 
     *integration* is the set of tests marked ``@integration``; every other
@@ -307,11 +318,13 @@ def run_guarded(load, report, report_path, integration):
     the last test.
     """
     with host_tripwire() as tripwire, contextlib.ExitStack() as stack:
-        boundary = stack.enter_context(UnitBoundary())
+        boundary = stack.enter_context(UnitBoundary(unit_only=unit_only))
         suite = load()
         result = unittest.TextTestRunner(verbosity=2, resultclass=lambda *args, **kwargs:
             TimedResult(*args, report=report, report_path=report_path, tripwire=tripwire,
                         boundary=boundary, integration=integration, **kwargs)).run(suite)
+        if boundary.fixture_crossed:
+            raise UnitBoundaryError("unit fixture " + "; ".join(boundary.fixture_crossed))
         return result, tripwire.reached()
 
 

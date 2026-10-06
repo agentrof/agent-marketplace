@@ -224,6 +224,15 @@ SHIPPED_GOLDEN = {
 # task hashes every package script and every file of the skills it selects,
 # because a tool or data file it can run shapes its result.
 SHIPPED_ADDITIONS = {
+    "scripts/context_history.py": (
+        72, "#441: exact bound document history is resolved by package code"
+    ),
+    "scripts/context_catalog.py": (
+        72, "#441: source-addressed project records are bound as package code"
+    ),
+    "scripts/project_context.py": (
+        72, "#441: explicit project reading plans are bound as package code"
+    ),
     "scripts/process_policy.py": (
         72, "#332: the Process Policy lifecycle compiler. task_inputs.py and the backlog"
             " and Delivery compilers resolve every switch through it, the default path"
@@ -245,6 +254,18 @@ SHIPPED_ADDITIONS = {
     "scripts/lane_table.py": (
         72, "#332: the lane table of switches lane_table and lane_isolation, a package script"
             " every task binds with the other package scripts; no default-path step runs it."),
+    "scripts/impact_closure.py": (
+        72, "#441: the impact closure over the vault's relation tiers, a package script"
+            " every task binds with the other package scripts; no default-path step runs it."),
+    "scripts/vault_query.py": (
+        72, "#441: the cached vault query CLI, a package script every task binds with the"
+            " other package scripts; no default-path step runs it."),
+    "scripts/context_pack.py": (
+        72, "#441: the role digest of switch context_pack, a package script every task binds"
+            " with the other package scripts; no default-path step runs it."),
+    "scripts/step_timing.py": (
+        72, "#441: the per-step timing recorder of switch step_timing, a package script every"
+            " task binds with the other package scripts; no default-path step runs it."),
     "skill-content/setup/references/windows-long-paths.md": (
         2, "#358: the native Windows core.longpaths choice procedure, a step of the setup"
            " entry, which every setup task binds with the rest of its skill."),
@@ -271,6 +292,16 @@ EXPECTED_DIFFERENCES = {
             " so another epic's writer leaves the review fresh."),
     },
     "backlog_tasks": {
+        **{(task, "task"): (value,
+            "#441: owner-approved default resolver handoffs add bounded reading plans,"
+            " compact source identities and context feedback without changing compiler scope.")
+           for task, value in (
+               ("epic_reader", "sha256:34979cfac9e94ca6826660bcbf84fada8e7db67c2c7bb6d6e61548661d3fcec2"),
+               ("epic_writer", "sha256:65634decc387b9815cf31f58592644bef174798a85490e198d683161494728f5"),
+               ("root_writer", "sha256:9f65422d207ebafe5af270be0b627835597d9d6e1f726b07b6ae496014bcc67d"))},
+        ("root_writer", "canonical_source_inventory"): (
+            "sha256:fc872b8a0d8b0d8a291de9e297da9a9a1c54e7f4b112553123796ec9e5a568dd",
+            "#441: unselected inventory stays hash-bound as count/digest rather than a path dump."),
         **{(task, "canonical_source_inventory"): (
             "sha256:feac275c39338cdf361de164a4cedc2b771b33d7c6032ff3099f3f3d570dbcdc",
             "#341: an exact epic's task lists only the canonical sources its closure reads,"
@@ -296,13 +327,13 @@ EXPECTED_DIFFERENCES = {
     },
     "manifests": {
         **{(f"{task}:without_switch_files",): (value,
-            "#431: a task given explicit inputs binds them and the notes they cite by"
-            " content, the rest of the canonical inventory by path only, and leaves head"
-            " out of its source_hash.")
+            "#431 and #441: scoped identities preserve their existing boundaries;"
+            " every project task additionally receives a resolver plan or explicit recovery state.")
            for task, value in (
-               ("implementer", "sha256:74257defd6b53fb1c4ec8bb0b2c6b38c87ed24120a3f8ee30d2f2bf9ce401a0f"),
-               ("reader", "sha256:79d34a40334c6c91b622bf9524e711435dca084c65c72c1c42e508ea06ce3e72"),
-               ("writer", "sha256:47c813101635f4320c30375a2016555e158ffed347bd874f71260928fa29ad50"))},
+               ("entry", "sha256:3acc966052a5d53a21b6ef394d1de89eb3a996f58a513293d0f61108121fc52e"),
+               ("implementer", "sha256:c2ea9447cfd7d80a8d5d21f2ce5a86af9578aa02ac1b8719ad89dcf337d5f92e"),
+               ("reader", "sha256:3ab4de0d2b5a8ebd2f09eb200a65184d7108f63d1594fac242d06481bb99a580"),
+               ("writer", "sha256:98d2ef075ab3e4c193acf816c87d5fe6258a80428c3f413ccf5087ebad3829f6"))},
     },
     "shipped": {
         ("additions",): ({path: count for path, (count, _reason) in SHIPPED_ADDITIONS.items()},
@@ -826,6 +857,12 @@ def _backlog_task_harness(root: Path, raw_output: bool = False) -> dict:
             task = task_inputs.manifest(entry="backlog-plan", role=role, mode=mode,
                                         project=project, epic=epic)
             closure = task["backlog_scope"]
+            # Like the manifest's instruction hash, these fingerprints contain
+            # the package reader's bytes. Seal all actual reading content below.
+            reading = task.get("project_reading", {})
+            reading.pop("snapshot_id", None)
+            reading.pop("plan_hash", None)
+            reading.get("continuation", {}).pop("snapshot_id", None)
             outputs[name] = {
                 "task": seal({key: value for key, value in task.items() if key not in {
                     "instructions", "source_hash", "canonical_source_inventory", "backlog_scope"}}),

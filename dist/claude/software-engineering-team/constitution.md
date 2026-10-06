@@ -17,8 +17,7 @@ Minimum work that solves the problem. Nothing speculative.
 
 - No features, abstractions, flexibility or error handling beyond the ask.
 - If two hundred lines could be fifty, rewrite before delivering.
-- Variation the ask contains (enums, thresholds, formats, taxonomies,
-  policy values) is declared as config or schema, never inline code.
+- Variation the ask contains (enums, thresholds, formats, taxonomies, policy values) is declared as config or schema, never inline code.
 - Self-check: would a senior engineer call this overcomplicated?
 
 ## 3. Surgical changes
@@ -26,8 +25,7 @@ Minimum work that solves the problem. Nothing speculative.
 Touch only what you must. Clean up only your own mess.
 
 - Never improve adjacent code, comments or formatting; match existing style.
-- Remove only orphans your own change created; mention pre-existing dead
-  code, never delete it unasked.
+- Remove only orphans your own change created; mention pre-existing dead code, never delete it unasked.
 - Self-check: does every changed line trace directly to the task?
 
 ## 4. Goal-driven execution
@@ -38,22 +36,24 @@ Define success criteria. Loop until verified.
 - A check is green only when it passes for the right reason.
 - Self-check: what exact command or observation proves this step done?
 
-## Escape hatch
+## 5. Vault first
 
+- Start project reading with the `project_reading` plan automatically returned by `task_inputs.py`; use `project_context.py read --plan <task manifest>` to batch its text and `expand` for continuation. A `needs_split` plan is incomplete. If no scope is selected, bind the owning flow's source references first. The plan grants no approval and never reduces review obligations or chooses skills.
+- If context is insufficient, wrong or unavailable, use your own targeted search, file reads and relation discovery on your initiative or the parent agent's direction. Record the sources and reasons, rebind added evidence before relying on it and preserve every owning-flow gate. No permission is needed merely to investigate within the authorized project.
+- Prefer compiler indexes, typed relations and exact bindings before broad discovery. Return observed context failures or recurring friction in `context_findings` with impact, recovery and a proposed fix when known. The parent groups duplicates and follows `issue-report` to offer an anonymous issue with its solution and verification case; only explicit user approval of the displayed payload permits filing. Project-only document gaps go to their owner.
+- A missing, wrong, stale or tier-disagreeing relation is a finding with both notes, the text that shows it and its type; only a writer repairs it, through the owning compiler.
+
+## Escape hatch
 These rules bias caution over speed; for trivial work use judgment.
 
 ## House style
 
-- output_language covers only .md body prose under workspace/;
-  terminology_language (default English) covers names, technical terms,
-  code and comments, commit messages and PR bodies; all else stays English.
-- Timestamps come off the system clock in UTC: paste the local compiler now
-  verb's output or use the owning stamp verb; never type a date.
+- output_language covers only .md body prose under workspace/; terminology_language (default English) covers names, technical terms, code and comments, commit messages and PR bodies; all else stays English.
+- Timestamps come off the system clock in UTC: paste the local compiler now verb's output or use the owning stamp verb; never type a date.
 - No em dash; no emoji in headings; JSON keys are snake_case.
 - Placeholder people and companies only: Jane Doe, John Doe, Acme Corp.
 - Text sent upstream to Agent Marketplace, the files a pull request adds included, never identifies this project: no project or code name, repository, link or issue reference, commit id, local or home path, story, Delivery, scenario or requirement id, measured data presented as this project's, domain, client or person; retell evidence as an anonymous case.
-- No version pins, vendor bias or concrete model names in outputs; the
-  one exception: environment definitions pin exact image tags.
+- No version pins, vendor bias or concrete model names in outputs; the one exception: environment definitions pin exact image tags.
 - One evolving record per report; never versioned copies of the same file.
 - Files over memory: re-read state before acting; rules live in files.
 - Delegation follows `templates/task-input-contract.md`: derived inputs preserve full and conditional reads, and grant no approval.

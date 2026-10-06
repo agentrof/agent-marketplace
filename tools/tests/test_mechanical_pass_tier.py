@@ -119,15 +119,14 @@ class ValidatorTests(unittest.TestCase):
     """The validator refuses a mechanical variant on a reader, a missing
     variant declaration and a host table that omits or mis-maps the tier."""
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.root = Path(cls.temporary.name) / "valid"
-        fixtures.make_valid_root(cls.root)
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name) / "valid"
+        self.addCleanup(self.temporary.cleanup)
+        fixtures.copy("plugins/software-engineering-team", self.root)
+        fixtures.copy("tools/data/models.json", self.root)
+        self.assertEqual(fixtures.validator_findings(self.root, 'process_switches', 'switch_variant_references'), [])
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.temporary.cleanup()
 
     def edit_json(self, relative: str, mutate, check: str) -> list:
         path = self.root / relative

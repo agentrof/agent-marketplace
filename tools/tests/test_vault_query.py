@@ -27,7 +27,7 @@ from tools.tests.test_impact_closure import REQ, VAULT, note, stamp  # noqa: E40
 class VaultQueryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        self.project = Path(self.tmp.name)
+        self.project = Path(self.tmp.name).resolve()
         self.docs = self.project / "workspace" / "docs"
         for rel, text in VAULT.items():
             path = self.docs / rel
@@ -53,6 +53,62 @@ class VaultQueryTest(unittest.TestCase):
     @property
     def cache(self) -> Path:
         return self.project / ".agentrof/agent-marketplace/.runtime/vault-index/index.json"
+
+    def vault_bytes(self) -> dict:
+        return {p.relative_to(self.project).as_posix(): p.read_bytes()
+                for p in self.project.rglob("*") if p.is_file()
+                and ".agentrof" not in p.relative_to(self.project).parts}
+
+    def test_the_cache_location_cannot_be_redirected(self) -> None:
+        before = self.vault_bytes()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            vault_query.main(["--docs", str(self.docs), "--cache",
+                              str(self.docs / "backlog/story-b.md"), "gaps"])
+        self.run_query("gaps")
+        self.assertEqual(self.vault_bytes(), before)
+
+    def test_docs_outside_workspace_docs_is_refused_and_writes_nothing(self) -> None:
+        before = self.vault_bytes()
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = vault_query.main(["--docs", str(self.docs / "backlog"), "gaps"])
+        self.assertEqual(code, 2)
+        self.assertIn("workspace/docs", err.getvalue())
+        self.assertFalse((self.docs / "backlog/.agentrof").exists())
+        self.assertFalse((self.docs / ".agentrof").exists())
+        self.assertEqual(self.vault_bytes(), before)
+
+    def test_a_cache_folder_linked_into_the_vault_is_refused(self) -> None:
+        folder = self.project / ".agentrof/agent-marketplace/.runtime"
+        folder.mkdir(parents=True)
+        (folder / "vault-index").symlink_to(self.docs / "backlog", target_is_directory=True)
+        before = self.vault_bytes()
+        self.assertIn("outside the runtime scratch", self.run_query("gaps", code=2)["stderr"])
+        self.assertEqual(self.vault_bytes(), before)
+
+    def test_the_sweep_removes_only_its_own_shards(self) -> None:
+        self.run_query("gaps")
+        shards = self.cache.with_name("index-notes")
+        foreign = {name: b"keep\n" for name in ("minutes.md", "notes.json", "ABC.json",
+                                                   "0" * 63 + ".json")}
+        for name, data in foreign.items():
+            (shards / name).write_bytes(data)
+        stale = shards / ("f" * 64 + ".json")
+        stale.write_text("{}", encoding="utf-8")
+        (self.docs / "backlog/story-b.md").write_text(note("story", "Story B3"), encoding="utf-8")
+        self.run_query("gaps")
+        self.assertFalse(stale.exists())
+        for name, data in foreign.items():
+            self.assertEqual((shards / name).read_bytes(), data, name)
+
+    def test_queries_write_nothing_outside_the_index_folder(self) -> None:
+        before = self.vault_bytes()
+        for argv in (("gaps",), ("closure", "--changed", f"{REQ}.md"), ("find", "Story B"),
+                     ("search", "Orders"), ("hash", f"{REQ}.md")):
+            self.run_query(*argv)
+        self.assertEqual(self.vault_bytes(), before)
+        written = {p.parent for p in (self.project / ".agentrof").rglob("*") if p.is_file()}
+        self.assertEqual(written, {self.cache.parent, self.cache.with_name("index-notes")})
 
     def test_index_is_json_under_the_project_runtime_scratch(self) -> None:
         result = self.run_query("gaps")

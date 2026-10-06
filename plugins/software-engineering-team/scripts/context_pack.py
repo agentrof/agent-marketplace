@@ -260,6 +260,19 @@ def check(pack: dict, *, project: Path | None = None, package: Path = PACKAGE) -
             "rules": len(pack["rules"])}
 
 
+def pack_target(out: Path) -> Path:
+    """A pack is written only as a .json file inside a project's context-packs
+    folder, resolved; never a vault note or any other project file."""
+    resolved = Path(out).absolute().resolve()
+    parts, width = resolved.parts, len(RUNTIME.parts)
+    starts = [i for i in range(len(parts) - width) if parts[i:i + width] == RUNTIME.parts]
+    if resolved.suffix != ".json" or not starts or any(
+            parts[i:i + 2] == ("workspace", "docs") for i in range(starts[0])):
+        raise Refused("CONTEXT_PACK_OUT", f"a pack is written only under {RUNTIME.as_posix()}/,"
+                      f" never to {out}")
+    return resolved
+
+
 def default_out(project: Path, pack: dict) -> Path:
     role = pack["role"] or "entry"
     return project / RUNTIME / pack["entry"] / f"{role}-{pack['mode']}.json"
@@ -287,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
                          project=args.project_root.resolve() if args.project_root else None)
             out = args.out or (default_out(args.project_root.resolve(), pack)
                                if args.project_root else None)
+            if out is not None:
+                out = pack_target(out)
             if out is None:
                 print(json.dumps(pack, indent=2, sort_keys=True))
                 return 0

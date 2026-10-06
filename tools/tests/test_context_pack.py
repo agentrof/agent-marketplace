@@ -220,6 +220,22 @@ class ProjectSwitchTests(unittest.TestCase):
             code, checked = call(["check", "--pack", str(path), "--project-root", str(self.project)])
             self.assertEqual(code, 0, checked)
 
+    def test_out_never_writes_a_vault_or_project_file(self) -> None:
+        note = self.project / "workspace/docs/backlog/story.md"
+        note.parent.mkdir(parents=True)
+        note.write_text("# Story\n", encoding="utf-8")
+        inside = self.project / "workspace/docs/.agentrof/agent-marketplace/.runtime/context-packs/x.json"
+        with mock.patch.object(context_pack, "project_value", return_value="role_digest"):
+            for out in (note, self.project / "README.md", self.project / "pack.json", inside):
+                with self.subTest(out=out.name):
+                    code, result = call(["build", "--entry", "backlog-plan", "--role",
+                                         "product-owner", "--project-root", str(self.project),
+                                         "--out", str(out)])
+                    self.assertEqual((code, result["code"]), (1, "CONTEXT_PACK_OUT"), result)
+        self.assertEqual(note.read_text(encoding="utf-8"), "# Story\n")
+        self.assertEqual((self.project / "README.md").read_text(encoding="utf-8"), "x\n")
+        self.assertFalse((self.project / "pack.json").exists())
+        self.assertFalse(inside.exists())
 
 if __name__ == "__main__":
     unittest.main()

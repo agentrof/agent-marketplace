@@ -19,9 +19,11 @@ Verbs (all print JSON):
   gaps [--reason R]           graph gaps (missing, unresolved, disagreeing)
   search <terms>              text search over the notes: ids and line anchors
 
-Common options: --docs D (required), --cache FILE (default: the runtime
-scratch path), --verify (hash every file instead of trusting an unchanged
-size and mtime). No embeddings, no database; stdlib only.
+Common options: --docs D (required, the project's ``workspace/docs``),
+--verify (hash every file instead of trusting an unchanged size and mtime).
+The cache location is fixed and never configurable: the tool writes only
+inside that ``vault-index`` folder and never a vault or other project file.
+No embeddings, no database; stdlib only.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ import argparse
 import hashlib
 import os
 import json
+import re
 import subprocess
 import sys
 import time
@@ -45,11 +48,26 @@ RUNTIME = Path(".agentrof") / "agent-marketplace" / ".runtime" / "vault-index"
 BUILDER_FILES = ("impact_closure.py", "vault_check.py", "vault_query.py", "ba_compile.py")
 
 
+SHARD_NAME = re.compile(r"^[0-9a-f]{64}\.json$")
+
+
 def default_cache(docs: Path) -> Path:
-    docs = docs.absolute()
-    project = (docs.parents[1] if docs.name == "docs" and docs.parent.name == "workspace"
-               else docs.parent)
-    return project / RUNTIME / "index.json"
+    """The one cache file: ``<project>/.agentrof/.../vault-index/index.json``.
+
+    ``docs`` must be a project's ``workspace/docs`` directory, so the cache
+    folder sits outside the vault; a folder that resolves elsewhere, through a
+    link or otherwise, is refused.
+    """
+    docs = Path(docs).resolve()
+    if docs.name != "docs" or docs.parent.name != "workspace":
+        raise ValueError(f"--docs must be a project's workspace/docs directory, not {docs}")
+    project = docs.parents[1]
+    folder = project / RUNTIME
+    resolved = folder.resolve()
+    if resolved != folder or resolved.is_relative_to(docs) or not resolved.is_relative_to(
+            (project / ".agentrof").resolve()):
+        raise ValueError(f"the vault index folder resolves outside the runtime scratch: {resolved}")
+    return folder / "index.json"
 
 
 def builder_hash() -> str:
@@ -198,7 +216,9 @@ def refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
             atomic_file.replace_text(shard, json.dumps(note_to_json(note), ensure_ascii=False))
     live = {f"{entry['sha']}.json" for rel, entry in current.items() if rel in vault.notes}
     for shard in shards.iterdir():
-        if shard.name not in live:
+        # Only the index's own shards are ever removed.
+        if SHARD_NAME.match(shard.name) and shard.is_file() and not shard.is_symlink() \
+                and shard.name not in live:
             shard.unlink()
     data = {
         "schema_version": SCHEMA_VERSION,
@@ -384,7 +404,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--docs", type=Path, required=True)
-    parser.add_argument("--cache", type=Path, default=None)
     parser.add_argument("--verify", action="store_true",
                         help="hash every file, ignoring the size and mtime fast path")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -414,7 +433,11 @@ def main(argv: list[str] | None = None) -> int:
     if not args.docs.is_dir():
         print(f"vault_query: docs directory not found: {args.docs}", file=sys.stderr)
         return 2
-    cache = args.cache or default_cache(args.docs)
+    try:
+        cache = default_cache(args.docs)
+    except ValueError as exc:
+        print(f"vault_query: {exc}", file=sys.stderr)
+        return 2
     data, status = refresh(args.docs, cache, args.verify)
     try:
         result = args.func(Index(data), args)

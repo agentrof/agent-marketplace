@@ -241,6 +241,12 @@ SHIPPED_ADDITIONS = {
     "scripts/lane_table.py": (
         72, "#332: the lane table of switches lane_table and lane_isolation, a package script"
             " every task binds with the other package scripts; no default-path step runs it."),
+    "scripts/impact_closure.py": (
+        72, "#441: the impact closure over the vault's relation tiers, a package script"
+            " every task binds with the other package scripts; no default-path step runs it."),
+    "scripts/vault_query.py": (
+        72, "#441: the cached vault query CLI, a package script every task binds with the"
+            " other package scripts; no default-path step runs it."),
     "skill-content/setup/references/windows-long-paths.md": (
         2, "#358: the native Windows core.longpaths choice procedure, a step of the setup"
            " entry, which every setup task binds with the rest of its skill."),

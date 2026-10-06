@@ -428,6 +428,18 @@ serial with a recorded reason. The flag is advisory, as
 `product-planning/references/switch-test_cost_budget-flag_serial_rows.md`
 defines.
 
+A package Test Plan field-shape repair uses process switch
+`backlog_schema_migration`. At `reviewed_revision`, the default, it takes the
+normal backlog revision and review rounds. At `receipt_only`, the coordinator
+plans the closed schema transformation from a committed hash-verified approval
+and obtains owner approval of the exact migration receipt. Only scenario
+field lines and compiler hashes change; review bytes, revision numbers and
+approval timestamps stay exact. An already approved Delivery retains gate A
+and its execution plan only while deterministic receipt replay proves its old
+backlog and Test Plan pins against the complete current postimage. Every other
+binding stays strict. The instructions live in
+`backlog-plan/references/switch-backlog_schema_migration-receipt_only.md`.
+
 At what level a Test Plan scenario has to run is process switch `test_levels`.
 A scenario may state `level`, `unit`, `fixture` or `live`, which
 `backlog_compile.py check` validates at every value, and a `level_reason` for

@@ -161,6 +161,9 @@ EXPECTED = {key: sorted([
     *((READING + "review_levels-concurrent_when_independent.md",)
       if key.split(":")[0] in LEVEL_ENTRIES else ())])
     for key, value in EXPECTED.items()}
+MIGRATION = "backlog-plan/references/switch-backlog_schema_migration-receipt_only.md"
+EXPECTED = {key: sorted([*value, MIGRATION]) if key.startswith("backlog-plan:") else value
+            for key, value in EXPECTED.items()}
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")
 

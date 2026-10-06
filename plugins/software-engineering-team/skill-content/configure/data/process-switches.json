@@ -1031,6 +1031,29 @@
         "unit": "At least 3 Items run with assertion_map that convert scenarios to another level.",
         "threshold": "No weakened or vacuous expectation found after the code review of a converted scenario that the check did not flag, and a median wall clock from the conversion to the first passing full test run under 30 minutes, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "backlog_schema_migration": {
+      "summary": "Whether a package schema repair uses the reviewed backlog revision or an owner-approved deterministic migration receipt.",
+      "issue": 450,
+      "flows": [
+        "backlog-planning"
+      ],
+      "values": [
+        {
+          "id": "reviewed_revision",
+          "tradeoffs": "Keep the existing writer, review rounds and owner approval for every approved Test Plan change."
+        },
+        {
+          "id": "receipt_only",
+          "tradeoffs": "Replay only the packaged level-field split from a hash-verified committed approval, keep all other authored bytes and review rounds, and approve the exact receipt. A bound Delivery verifies that receipt without reopening execution approval; ambiguous legacy text or any other content change still needs a reviewed revision."
+        }
+      ],
+      "default": "reviewed_revision",
+      "metric": "Per migration: elapsed time, reader passes, rejected non-schema changes and Delivery execution reapprovals compared with a reviewed revision.",
+      "promotion": {
+        "unit": "At least 3 Deliveries consuming migrated backlog approvals.",
+        "threshold": "Zero changed product decisions or lost approval evidence, zero extra execution approvals, and median migration time at most 40% of a reviewed revision, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

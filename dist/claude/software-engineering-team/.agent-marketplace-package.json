@@ -98,7 +98,7 @@
       "a980d74e7460071f12237b8432d43e819f523374238679c98cec1abb98ed6fd9"
     ,
     "flows/backlog-planning.md":
-      "02a47d592ea15625be69c1fb765aef144d82741c01fa54a2317dd4d0dcf4f5d3"
+      "430314fb940473fcfc32bc34c2fe0f64c1cc9e231fb6120ed50a7ba9b4ebf27c"
     ,
     "flows/business-analysis.md":
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
@@ -155,10 +155,13 @@
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
     ,
     "scripts/backlog_compile.py":
-      "a7ba921ee55c47730adf2305a2c971e757f80ff078725102fda5dc3ca1a8bf56"
+      "688a38d046ba37f79860c411d31720847ee2000ac2fc64b7869d92ef63327a7d"
     ,
     "scripts/backlog_input_policy.py":
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
+    ,
+    "scripts/backlog_migration.py":
+      "ec1e6b0f5b4b3c5942e8af73c2998bc9122de4399733bdfa30fd78863794fadc"
     ,
     "scripts/backlog_review_inputs.py":
       "184a0b11e57d6f5ab407ea40c22690edc425ed2992e2978f26ec0e974d326da0"
@@ -173,7 +176,7 @@
       "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
     ,
     "scripts/delivery_compile.py":
-      "f8047c8dc5851665d2452caad9ba24ee61b15a046eb95ac35ddfa83b689eca76"
+      "6d0cbef39a03a7915abc4253cbb32156e17da6bbd971ec0939fef493c9c582f6"
     ,
     "scripts/delivery_git.py":
       "df96f4d390d5be344ad430fd90d93ee47d2cf28b058e27b63ef281a25e4052b8"
@@ -313,6 +316,9 @@
     "skill-content/backlog-plan/references/switch-backlog_path-light_when_eligible.md":
       "510c26008702271b82dcc99989236cf195cb46b6d1c9a25d59a553c4bfc4d279"
     ,
+    "skill-content/backlog-plan/references/switch-backlog_schema_migration-receipt_only.md":
+      "ee85661290a83f87dd02091cfd8449245d2249a641566f25fe4fdace9bb4e0f6"
+    ,
     "skill-content/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md":
       "4126c93245f53e049273a3fdb3394c6bc74158d1ba6c8f6a6c991dabd089bca5"
     ,
@@ -422,7 +428,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "e7e5ae0cd2057fd837487429fa1f4a1272175cda226efb460f36a63e32011080"
+      "b7ced240c89e9c2a230d9c2cd4f668babfc4ab00f135b6efe328112b4492cf2d"
     ,
     "skill-content/configure/data/step-budgets.json":
       "c63c5e90e1726b573c681f28008aa627575600f2d81dc8f8c0851b768e1b04fc"

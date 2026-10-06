@@ -635,8 +635,16 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
 
     if delivery_props.get("backlog_path") != backlog_snapshot["backlog_path"]:
         errors.append("Delivery backlog_path does not identify the canonical backlog")
+    migration_pins = {}
     if delivery_props.get("backlog_package_hash") != backlog_snapshot["backlog_package_hash"]:
-        errors.append("Delivery backlog_package_hash is stale against the approved backlog")
+        import backlog_migration
+        try:
+            migration_pins = backlog_migration.compatible_pins(
+                docs, delivery_props.get("backlog_package_hash"), backlog_snapshot["backlog_package_hash"])
+        except (OSError, ValueError, KeyError, RuntimeError) as exc:
+            errors.append(f"Delivery schema migration receipt is invalid: {exc}")
+        if not migration_pins:
+            errors.append("Delivery backlog_package_hash is stale against the approved backlog")
     for key in DOD_SOURCE_FIELDS:
         if delivery_props.get(key) != dod[key]:
             errors.append(f"Delivery {key} is stale against the approved Definition of Done")
@@ -653,7 +661,10 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
         story_id = str(item_props["story_id"])
         source = sources[story_id]
         for key in SOURCE_ITEM_FIELDS:
-            if item_props.get(key) != source[key]:
+            recorded, current = item_props.get(key), source[key]
+            migrated = (key == "test_plan_source_hash"
+                        and migration_pins.get(source["test_plan_path"]) == (recorded, current))
+            if recorded != current and not migrated:
                 errors.append(f"{item_path} {key} is stale against approved Story {story_id}")
         expected_source = [link(source["story_path"].removesuffix(".md"), story_id)]
         if item_props.get("derives_from") != expected_source:

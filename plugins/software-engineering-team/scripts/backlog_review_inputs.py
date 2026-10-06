@@ -759,22 +759,22 @@ def changed_stories(record: dict, docs: Path) -> list[str]:
                   or backlog.approval_stamp_findings(docs / story["test_plan"], docs))
 
 
-def vault_changes(docs: Path) -> tuple[set[str], dict[str, str]]:
+def vault_changes(docs: Path) -> tuple[set[str] | None, dict[str, str]]:
     """Every vault file changed since the backlog's last approved revision, as
     docs paths, with the earlier bytes of each deleted note.
 
     The change starts the closure whatever it touched: an upstream criterion,
-    a contract or a story. Without Git history only stamps show a change.
+    a contract or a story. None means the approval boundary cannot be proven.
     """
     import task_inputs
 
     docs = Path(docs).resolve()
     if docs.name != "docs" or docs.parent.name != "workspace":
-        return set(), {}
+        return None, {}
     project = docs.parents[1]
     approved = task_inputs.approval_base(project, "backlog")
     if approved is None:
-        return set(), {}
+        return None, {}
     command = ["git", "--no-replace-objects", "-C", str(project)]
     seen, commit = task_inputs.impact_changes(command, approved, None)
     prefix = task_inputs.DOCS_PREFIX
@@ -800,6 +800,8 @@ def impact_scope(record: dict, docs: Path) -> dict:
     stamped = {path for identity in changed_stories(record, docs)
                for path in (by_id[identity]["path"], by_id[identity]["test_plan"])}
     vault, deleted = vault_changes(docs)
+    if vault is None:
+        return {"read": "full", "reason": "approval history is unavailable", "beyond_closure": []}
     changed = sorted(stamped | vault)
     try:
         scope = task_inputs.impact_closure(docs, changed, deleted=deleted)
@@ -845,6 +847,8 @@ def revision_delta(record: dict, docs: Path, limit: int | None,
     revision = int(record["backlog"]["props"].get("revision", 1) or 1)
     if revision < 2:
         result.update(read="full", reason="first backlog revision")
+    elif vault is None:
+        result.update(read="full", reason="approval history is unavailable")
     elif limit is None:
         result.update(read="full", reason=f"no {DELTA_LIMIT} parameter is set")
     elif 100 * share > limit * len(stories):

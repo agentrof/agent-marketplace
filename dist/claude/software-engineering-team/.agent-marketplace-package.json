@@ -95,7 +95,7 @@
       "32c691f4846d49e36b82892d9a174295639cc79dec58a6bd1e0df19a160f9408"
     ,
     "constitution.md":
-      "46abe672d9bb542853e1999ccb03e7ce13cff5c413e7909b0acf4907d1cf2f6e"
+      "a980d74e7460071f12237b8432d43e819f523374238679c98cec1abb98ed6fd9"
     ,
     "flows/backlog-planning.md":
       "8afbd641f2eea27d5581e2283d473461c299c82fc3618a150c82db545e7f3cbd"
@@ -104,7 +104,7 @@
       "b7f073ddd6310afb7f0b79d275093c7cedc37fae203607e079a2cb7ce49846e3"
     ,
     "flows/delivery-execution.md":
-      "176f9d20e6e067d2cead53519fe7fb9857fbb8143ef43d46740faa599e3226ad"
+      "718d3306f203fb9a962804ec559d22b0cc46737a43e4233ecd8fc434f2271775"
     ,
     "flows/delivery-governance.md":
       "768f7ac9186de47649b86143af3bdad04bcef3d330c0d4ac5eb32a62ceb0c1d5"
@@ -161,10 +161,10 @@
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
     ,
     "scripts/backlog_review_inputs.py":
-      "d2cb6bbb61e1e1409e6d65687ee388cad41281f241216d631b31d960ad6ba964"
+      "184a0b11e57d6f5ab407ea40c22690edc425ed2992e2978f26ec0e974d326da0"
     ,
     "scripts/context_catalog.py":
-      "9251b4f7e949f136af2c217948d5bf48bbdd5ad31971f0e850ffadc64c7c6b4d"
+      "fab223f65ff08b39c1e0504134f3434acf9d802bcc79dc79b98c25d5f8573d86"
     ,
     "scripts/context_history.py":
       "64b99a20f72ed2666963f18b64d58218e4da08e452ce9cc1a63e5aef1a7c5985"
@@ -188,7 +188,7 @@
       "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
     ,
     "scripts/delivery_verification.py":
-      "7d0f3ce98f969a73427534c65a261d252afbdc8f9bba180daa4cece013804b42"
+      "803752d70c5b16cf423e5fe64d9591339719818837d55162fabf0a54e4347bf6"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -200,7 +200,7 @@
       "740be0fb72c33ec6ced53e3b906b4a9a96b17d80fa5d7e1f220572b9a1938c62"
     ,
     "scripts/file_issue.py":
-      "8b6a0acd3852f96fcc3c38049355c3b8a1d50bbaeac097bc7441d4083e8b0846"
+      "99bb5ce4c91560911d0155f8ac34cc75ca05943bb0b2de3b41c5e035d6e1d28b"
     ,
     "scripts/file_lock.py":
       "d7588927231905320708a1ea2e7fc9251dffdf6a66f4a49ff24a3f353b1cc066"
@@ -242,7 +242,7 @@
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
     ,
     "scripts/project_context.py":
-      "e90db74d7784bb0ba3ca03fac0db0c45cb556f81ba566b537896d407fd92fc80"
+      "1d0acc231d86d3f8e6aac219eb0681e57e7fafac333cfb15508369c32f7e247f"
     ,
     "scripts/project_instructions.py":
       "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
@@ -272,7 +272,7 @@
       "b7f2cad266008812a38779f0b2208596e5d5fddf8fd9a47354706406f03ca655"
     ,
     "scripts/task_inputs.py":
-      "279bb7e198aabdfa2f4778b428cb7faf51df4dc2e1109870e2a0107dd6bfa6f5"
+      "8df2f1fef1384044fc08c8f5648c829b83a83671a8945763415c8f0e64fdedd7"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -284,10 +284,10 @@
       "3eb237e04bbd4e142e6edc14ed50d925378e4c3cc2b0c5c4278f49d4edf7f39e"
     ,
     "scripts/vault_hook.py":
-      "d51c4eadc9a3ef93112816dcd5573afbe608a83b52ba6813659af8343737d08c"
+      "d4d70dde91135ed199d0954e3e383a117f22d6503bb807a04e4e14654641ef22"
     ,
     "scripts/vault_query.py":
-      "c9a05f64d60d9150744f1ea4ff2d5d29730745b089482843419d17ea40576644"
+      "b05240ad14e5867d6202480e3b1e2f1067b577f27dc5736c5c69a8783697117a"
     ,
     "skill-content/autopilot/SKILL.md":
       "cc422eb06937e9e1a6312aaba10a922a5aedc6d0ddb0c461face9288ddcffb25"
@@ -563,7 +563,7 @@
       "0372714a2c8ad14219fa871377b4f9080313a1a3887f59f66f3434d9a96a102c"
     ,
     "skill-content/issue-report/SKILL.md":
-      "936be52cacf430dcf4d5c03881aae8d7355cdd109046efc18bcefc6210cd561b"
+      "053421143e9eaa980d17057b48e38a11cf529480f6901714de0b11cf2f6214a2"
     ,
     "skill-content/nosql-database-design/SKILL.md":
       "ef96e517e938a477d77f63c7b9f8a59d5e52ad92c6d308bf83f581367c7e5d37"
@@ -1013,7 +1013,7 @@
       "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
     ,
     "templates/project-context-policy.json":
-      "9c5c5a6240627769b39550ceef800c2ed8ee9612d93ba31008698442ee6858c6"
+      "b94a0c6a4a0bc030c146f68890c47fe0f495aaf594335b952fb460682943c5ce"
     ,
     "templates/project-instruction-surfaces.json":
       "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c"
@@ -1031,10 +1031,10 @@
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
     ,
     "templates/task-input-contract.md":
-      "981696d19bfaf0547e4f821a101fb65de8fbe08d18f130d005b89ca192b88566"
+      "e56171457778781606fd83951406b8e8e8bd974f448c6005063fc3997af31ff5"
     ,
     "templates/task-input-policy.json":
-      "1793cca53ab7abcf63f7a0a100d32dff0baaa0db2a30548b3482e780d1a1daab"
+      "a388f65395aa5d8b62c12b82fc2635e8efd37fac9cb28718293874af330fff69"
     ,
     "templates/tier-map.json":
       "7520a0d1c1627d0d8c16c6b540ca3090bd889ffcdfe891bbc7e5081f04bf6c9f"

@@ -343,7 +343,8 @@
   "barrier": "Wait for all readers to finish or confirm cancellation before the named owner writes canonical sources.",
   "output_contract": {
     "findings": "Stable IDs, severity, source anchor, impact, repair and verification condition.",
-    "self_check": "Required inputs, mode, ownership and output elements present or missing."
+    "self_check": "Required inputs, mode, ownership and output elements present or missing.",
+    "context_findings": "Observed missing, wrong, stale or excessive context and recurring retrieval friction; expected behavior, source anchors, impact, recovery/result, proposed fix and verification case when known. Return to the parent; no direct filing. Parent uses issue-report with anonymous content and explicit user approval, or routes project-only gaps to the document owner."
   },
   "required_role_skills": {
     "analysis_challenger": [

@@ -7,31 +7,58 @@ executes an environment command or creates approval authority.
 
 ## Workflow
 
-1. Resolve the entry's scope normally. Supply its exact record references to
-   `project_context.py --project-root <root> resolve --entry <entry> --role <role>
-   --ref <reference>`, repeating `--ref` for the selected inputs.
-2. Inspect `must_read`, `coverage` and `optional_groups`. The initial plan
-   includes the selected sources and their required outgoing constraints, not
-   every descendant of a parent epic or every incoming citation. The separate
-   impact closure continues to judge the affected review scope.
-3. Save the JSON in the project's runtime scratch and pass that project-relative
-   path to `task_inputs.py --context-plan <path>`. The task validates the plan's
-   entry, role, source membership and snapshot and binds its source files.
-   It carries the complete source inventory as a count and digest, exposing
-   detailed inventory rows only for the selected project inputs. Unselected
-   source identities remain bound without returning a whole-vault path list.
-4. `project_context.py --project-root <root> read --plan <path>` reads the
-   selected source text in one call. A row retains its table header. Generated
-   inverse relations and navigation are not duplicated into authored text.
-5. A `needs_split` plan has required work left. `units --ref <source>` lists
-   smaller source units in pages. `expand --plan <path> --reason <reason>` takes
-   the next page; repeated `--ref` adds explicitly requested context. A single
-   oversized unit requires selecting its smaller units or explicitly raising
-   the budget. No required unit is silently truncated or dropped.
-6. Recheck with `check --plan <path>` before handoff. A changed source, removed
-   source, new reference identity, changed graph or changed policy invalidates
-   the plan. A new reader still receives the source content it needs; a hash is
-   not evidence that the reader knows or reviewed that content.
+1. The entry selects scope through its existing compiler and derives the normal
+   `task_inputs.py` manifest. Every project manifest automatically includes
+   `project_reading`, resolved from those selected sources using entry, role and
+   mode. No extra flag is needed. A task with no selected document sources gets
+   `needs_scope`, not an invented whole-vault read set.
+2. Read `project_reading.must_read` using `project_context.py --project-root
+   <root> read --plan <saved task manifest>`. The command accepts either the
+   complete manifest or a standalone resolver plan. It returns the selected
+   source text in one call, including table headers and governing parent items.
+3. A `needs_split` plan has required work left. `units --ref <source>` lists
+   smaller source units; `expand --plan <path> --reason <reason>` takes the next
+   page. Oversized units require smaller units or an explicit larger budget.
+   `needs_resolution` requires investigating the reported relationship gaps.
+4. A role may use manual search, file reads and relationship discovery whenever
+   the plan is insufficient, incorrect or unavailable, on its own initiative
+   or the parent agent's direction. Record extra sources and reasons and rebind
+   evidence before relying on it. Preserve all owning-flow read, verification
+   and approval obligations. An unavailable resolver is an explicit recovery
+   state, never proof of complete reading.
+5. Recheck with `check --plan <path>` before handoff. Standalone plans bind the
+   vault snapshot. Automatic task plans bind the resolved selection, including
+   required units beyond the first page; unrelated edits do not stale disjoint
+   tasks. Re-resolution still detects changed edges, ambiguity and deleted
+   sources. Hashes never prove that a reader has read the content.
+6. An explicit `--context-plan <project-relative JSON>` can bind a custom plan
+   instead of the automatic one. This does not change skill selection or scope.
+
+Frozen Delivery verification manifests also include `project_reading`. Their
+`delivery_verification.py inspect-context --plan <manifest>` command validates
+the candidate and plan, then batch-reads exact Git blobs. `expand-context`
+continues the plan under the same candidate binding and accepts reasoned
+additional references. Ordinary resolver
+`read` refuses frozen manifests. `inspect` and `diff` remain available for
+manual recovery, and `full_read` and verification gates remain mandatory.
+
+## Context feedback
+
+Every role returns observed context failures or recurring retrieval friction in
+`context_findings`: expected and actual behavior, source anchors, impact,
+recovery attempted and its result, and a proposed fix and verification case
+when known. Normal continuation and a correctly reported absent document are
+not automatically defects. The parent groups duplicates and routes project-only
+authoring gaps to their owner. For plugin defects or improvements it follows
+`issue-report`: anonymize the case, preview the exact issue with its proposed
+solution, obtain explicit user approval, then file only that payload.
+
+`file_issue.py --preview` performs the privacy checks and prints a payload hash
+without network access. Filing requires `--approved-payload-sha256` matching
+the displayed title/body and fixed target. The hash binds content; the human
+choice gate supplies consent. Changed text requires a new preview and approval.
+No transcript upload, automatic telemetry, local issue queue or background
+worker is introduced. Declining reporting never blocks normal project work.
 
 ## Policy and source types
 
@@ -46,8 +73,8 @@ BA records, scenarios, current component/architecture identities, stable block
 IDs and exact architecture or Experience ledger receipts. Ambiguous bare IDs
 are refused; callers qualify them or use an exact path. Section addresses are
 internal selectors tied to a source hash, not new heading wikilinks in the vault.
-Historical receipts retain their exact revision and are never replaced by a
-current document. Hash-pinned Operation, Requirement and Backlog sources are
+Immutable ledger receipts take precedence over current Markdown aliases and
+retain their exact revision even if the current document still declares it. Hash-pinned Operation, Requirement and Backlog sources are
 resolved from Git history when the current source differs, with the owning
 compiler's semantic digest recomputed before use. Resolving a receipt is not proof that an owning compiler
 accepts it for a new handoff; those gates still run.
@@ -99,5 +126,5 @@ Canonical code is shared by Claude Code and Codex; distributions are generated.
 Path and encoding tests run in the normal Linux suite, and the existing native
 Windows and macOS lanes cover their filesystem and lifecycle behavior. No new
 service, database migration, release, or consumer configuration migration is
-required. The reading-plan CLI is explicit opt-in; removing its invocation
-restores the existing input flow.
+required. Resolver-first reading is the default for project tasks. Manual
+recovery remains available, while existing review and approval gates stay in force.

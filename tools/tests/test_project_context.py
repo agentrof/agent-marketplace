@@ -357,6 +357,76 @@ class ProjectContextTests(unittest.TestCase):
         result = context_catalog.read_units(self.docs, data, [historic["unit_id"]], 10000)
         self.assertIn("Earlier approved behavior", result["units"][0]["text"])
 
+    def test_malformed_source_returns_explicit_manual_recovery(self):
+        self.write("backlog/example.md", "---\ninvalid frontmatter\n---\nBroken source")
+        result = project_context.task_context(self.project, entry="deliver", role="backend-developer",
+            mode="consume", paths={"workspace/docs/backlog/example.md"})
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["must_read"], [])
+        self.assertIn("manual", result["next_action"])
+
+    def test_redirected_vault_never_reads_or_caches_another_project(self):
+        with tempfile.TemporaryDirectory() as raw:
+            other = Path(raw).resolve()
+            (other / "workspace/docs").mkdir(parents=True)
+            for directory in ("workspace", "workspace/docs"):
+                root = other / ("a" if directory == "workspace" else "b")
+                link = root / directory
+                link.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    link.symlink_to(self.project / directory, target_is_directory=True)
+                except OSError:
+                    self.skipTest("directory symlinks unavailable")
+                for no_cache in (False, True):
+                    with self.assertRaisesRegex(ValueError, "selected project"):
+                        project_context.load_index(root, no_cache=no_cache)
+                self.assertFalse((self.project / vault_query.RUNTIME).exists())
+
+    def test_exact_receipt_wins_over_modified_current_alias(self):
+        original = note("decision", "Decision", body="Only use the approved mode.",
+            extra="record_id: ADR-901\nrevision: 1\nrevision_state: sealed")
+        self.write("system-architecture/decisions/example.md", original.replace(
+            "Only use the approved mode.", "Use the altered mode."))
+        self.write("system-architecture/_ledger/records/ADR-901/r1.json", json.dumps({
+            "exact_ref": "ARC:ROOT:ADR-901@r1", "content": original, "revision": 1}))
+        plan = self.plan(refs=["ARC:ROOT:ADR-901@r1"])
+        result = context_catalog.read_units(self.docs, self.index()["catalog"],
+            [u["unit_id"] for u in plan["must_read"]], 10000)
+        self.assertEqual(plan["status"], "ready")
+        self.assertIn("Only use the approved mode.", result["units"][0]["text"])
+        self.assertNotIn("Use the altered mode.", result["units"][0]["text"])
+
+    def test_nested_item_preserves_parent_condition_and_its_citation(self):
+        self.write("backlog/nested.md", note("story", "Nested", body=
+            "## Acceptance\n\n- If the signature is invalid, follow [[operation/verification-contract|Verification]]:\n"
+            "  - Reject before storing.\n- Accept valid requests."))
+        data = self.index()["catalog"]
+        child = next(u for u in data["units"].values() if u["kind"] == "item" and
+                     u["label"] == "- Reject before storing.")
+        plan = self.plan(refs=[child["unit_id"]])
+        self.assertIn("operation/verification-contract.md", {u["path"] for u in plan["must_read"]})
+        text = context_catalog.read_units(self.docs, data, [child["unit_id"]], 10000)["units"][0]["text"]
+        self.assertIn("If the signature is invalid", text)
+        self.assertNotIn("Accept valid requests", text)
+
+    def test_default_task_handoff_resolves_and_remains_fresh_after_unrelated_edit(self):
+        init_repository(self.project)
+        subprocess.run(["git", "-C", str(self.project), "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.project), "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                        "commit", "-qm", "Fixture"], check=True, capture_output=True)
+        for entry, role in (("deliver", "backend-developer"), ("business-analysis", "business-analyst"),
+                            ("solution-design", "solution-architect"), ("experience-design", "ux-designer"),
+                            ("backlog-plan", "product-owner"), ("execution-plan", "delivery-coordinator")):
+            args = dict(project=self.project, entry=entry, role=role, mode="consume",
+                        inputs=["workspace/docs/backlog/example.md"])
+            manifest = task_inputs.manifest(**args)
+            self.assertIn("request", manifest["project_reading"], manifest["project_reading"])
+            self.assertIn("project_context_first", {c["condition"] for c in manifest["next_transition_conditions"]})
+            self.write("backlog/unrelated.md", note("story", "Changed unrelated", body=entry))
+            task_inputs.manifest(**args, expected_hash=manifest["source_hash"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

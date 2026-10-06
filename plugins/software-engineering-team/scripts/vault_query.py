@@ -56,6 +56,16 @@ READ_ONLY_ERRORS = {errno.EACCES, errno.EPERM, errno.EROFS}
 SHARD_NAME = re.compile(r"^[0-9a-f]{64}\.json$")
 
 
+def project_docs(project: Path) -> Path:
+    """Bind the vault to the selected root before following any directory link."""
+    project = Path(project).resolve()
+    for relative in ("workspace", "workspace/docs"):
+        path = project / relative
+        if path.resolve() != path:
+            raise ValueError("workspace/docs must stay inside the selected project without directory links")
+    return project / "workspace/docs"
+
+
 def default_cache(docs: Path) -> Path:
     """The one cache file: ``<project>/.agentrof/.../vault-index/index.json``.
 
@@ -63,9 +73,10 @@ def default_cache(docs: Path) -> Path:
     folder sits outside the vault; a folder that resolves elsewhere, through a
     link or otherwise, is refused.
     """
-    docs = Path(docs).resolve()
+    docs = Path(docs).absolute()
     if docs.name != "docs" or docs.parent.name != "workspace":
         raise ValueError(f"--docs must be a project's workspace/docs directory, not {docs}")
+    docs = project_docs(docs.parents[1])
     project = docs.parents[1]
     folder = project / RUNTIME
     resolved = folder.resolve()

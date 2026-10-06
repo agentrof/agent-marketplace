@@ -64,7 +64,8 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
                     purpose: str = "discover", budget: dict | None = None,
                     offset: int = 0, expected_snapshot: str | None = None,
                     reason: str | None = None, policy: dict | None = None,
-                    seen_units: list[str] | None = None) -> dict:
+                    seen_units: list[str] | None = None,
+                    snapshot_scope: str = "vault") -> dict:
     policy = policy or json.loads(POLICY.read_text(encoding="utf-8"))
     policy = copy.deepcopy(policy)
     for group in ("entry_profiles", "role_profiles"):
@@ -73,10 +74,12 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
         raise ValueError("entry or purpose is not declared by the context policy")
     tasks = json.loads((POLICY.parent / "task-input-policy.json").read_text(encoding="utf-8"))
     route = tasks["entries"].get(entry.replace("-", "_"), {})
-    if role not in route.get("roles", []):
+    if role is not None and role not in route.get("roles", []):
         raise ValueError("role does not belong to this entry")
-    if not role or not refs or offset < 0:
+    if not refs or offset < 0:
         raise ValueError("role, references and a non-negative offset are required")
+    if snapshot_scope not in {"vault", "selection"}:
+        raise ValueError("unknown snapshot scope")
     if offset and (not expected_snapshot or not reason or not reason.strip()):
         raise ValueError("continuation requires its snapshot and a reason")
     limits = dict(policy["budgets"])
@@ -89,7 +92,7 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
     data = dict(index, catalog={key: dict(value) for key, value in index["catalog"].items()})
     external_sources(project, data["catalog"], refs, policy)
     version = snapshot(data, policy)
-    if expected_snapshot is not None and version != expected_snapshot:
+    if snapshot_scope == "vault" and expected_snapshot is not None and version != expected_snapshot:
         raise ValueError("stale context snapshot; resolve the current sources again")
     profile = policy["entry_profiles"][entry]
     required_keys = set(policy["required_relations"]) | set(profile["required_relations"])
@@ -121,7 +124,7 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
     while pending:
         current = pending.popleft()
         path = current["path"]
-        if current["kind"] in {"row", "scenario"}:
+        if current["kind"] in {"row", "scenario", "item", "block"}:
             for reference in current.get("references", []):
                 targets = catalog.resolve(source, reference)
                 if len(targets) == 1:
@@ -189,6 +192,13 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
         return (0 if any(r.startswith("requested reference:") for r in reasons.get(unit["unit_id"], [])) else 1,
                 preferred.index(kind) if kind in preferred else len(preferred), unit["path"], unit["unit_id"])
     all_required = sorted(required.values(), key=order)
+    if snapshot_scope == "selection":
+        # Re-resolving detects new ambiguity and changed edges. Unrelated edits
+        # must not stale concurrently running tasks with disjoint input sets.
+        version = catalog.digest(encoded({"builder": data.get("builder"), "policy": policy,
+            "required": all_required, "optional": sorted(optional), "unresolved": unresolved}))
+        if expected_snapshot is not None and version != expected_snapshot:
+            raise ValueError("stale context snapshot; resolve the current sources again")
     seen = set(seen_units or [])
     if seen - set(source["units"]):
         raise ValueError("previously returned unit no longer exists")
@@ -215,7 +225,7 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
         source_bytes += unit["bytes"]
     remaining = len(ordered) - offset - len(picked)
     request = {"entry": entry, "role": role, "refs": refs, "purpose": purpose, "budget": limits,
-               "seen_units": sorted(seen)}
+               "seen_units": sorted(seen), "snapshot_scope": snapshot_scope}
     result = {"schema_version": 1, "snapshot_id": version, "request": request,
         "offset": offset, "status": "needs_resolution" if unresolved else "needs_split" if remaining else "ready",
         "approval_authority": False, "must_read": picked,
@@ -276,7 +286,7 @@ def validate_plan(project: Path, index: dict, plan: dict, *, policy: dict | None
 
 def load_index(project: Path, *, no_cache: bool = False) -> dict:
     import vault_query
-    docs = project / "workspace/docs"
+    docs = vault_query.project_docs(project)
     cache = vault_query.default_cache(docs)
     if no_cache:
         data, _status = vault_query.refresh(docs, cache, verify=True, persist=False)
@@ -288,6 +298,28 @@ def load_index(project: Path, *, no_cache: bool = False) -> dict:
                 raise
             data, _status = vault_query.refresh(docs, cache, verify=True, persist=False)
     return data
+
+
+def task_context(project: Path, *, entry: str, role: str | None, mode: str,
+                 paths: set[str], no_cache: bool = False) -> dict:
+    """Resolve a task's already-selected sources; never infer a larger scope."""
+    import vault_query
+    vault_query.project_docs(project)  # A fallback cannot authorize a foreign vault.
+    policy = json.loads(POLICY.read_text(encoding="utf-8"))
+    roots = [value["root"] + "/" for value in policy["external_sources"].values()]
+    refs = sorted(path for path in paths if
+        (path.startswith("workspace/docs/") and path.endswith(".md")
+         and not set(Path(path).parts) & {"_generated", "_ledger", "artifacts", "maps", ".obsidian"}
+         and path != "workspace/docs/home.md") or any(path.startswith(root) for root in roots))
+    if not refs:
+        return {"status": "needs_scope", "must_read": [],
+                "next_action": "Select source references with the owning flow or compiler, then resolve; use manual discovery if needed."}
+    try:
+        return resolve_context(project, load_index(project, no_cache=no_cache), entry=entry, role=role, refs=refs,
+            purpose=policy["task_purposes"][mode], snapshot_scope="selection")
+    except (ValueError, OSError, UnicodeError) as exc:
+        return {"status": "unavailable", "must_read": [], "reason": str(exc)[:500],
+                "next_action": "Use targeted manual reads within the project, preserve required scope and report the context finding."}
 
 
 def main(argv=None) -> int:
@@ -338,7 +370,12 @@ def main(argv=None) -> int:
                 raise ValueError("one unit's address exceeds the metadata budget")
             result = {"units": listed, "remaining": max(0, len(identities) - args.offset - len(listed))}
         else:
-            plan = json.loads(args.plan.read_text(encoding="utf-8"))
+            payload = json.loads(args.plan.read_text(encoding="utf-8"))
+            if args.command == "read" and "candidate_hash" in payload and "product_commit" in payload:
+                raise ValueError("use delivery_verification.py inspect-context for a frozen candidate manifest")
+            plan = payload.get("project_reading", payload)
+            if "request" not in plan:
+                raise ValueError("task has no resolved plan; follow its next_action before reading")
             validate_plan(project, index, plan)
             if args.command == "expand":
                 result = expand_context(project, index, plan, reason=args.reason, refs=args.refs)

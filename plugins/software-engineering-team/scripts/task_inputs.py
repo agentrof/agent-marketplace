@@ -49,9 +49,9 @@ PACK_CHECK = ("Run context_pack.py check --pack <the bound context_pack> before 
 # inner derivation binds no pack.
 _PACK_BUILDS = []
 HUNK = re.compile(rb"^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@", re.M)
-VIEWS_FIRST = ("Consult the vault_views first, follow the typed relations from them to what"
-               " the task needs, and cite the views consulted in the output; never scan a"
-               " folder or a whole package to find a note.")
+VIEWS_FIRST = ("Start with project_reading, then consult vault_views and typed relations as needed. "
+               "If the context is insufficient or unavailable, use targeted manual discovery "
+               "and report the extra sources and reasons; preserve the owning review scope.")
 CLOSURE_READS = ("Read in full only impact_closure.closure, its graph_gaps and the project"
                  " inputs; a proven_unchanged note is its hash-bound entry, not a read. Any"
                  " note or file may still be read beyond the closure: record each such read"
@@ -334,6 +334,8 @@ def canonical_source(relative: str) -> bool:
 def outside(relative: str, bound: frozenset[str] | None) -> bool:
     """Whether a task bound to ``bound`` leaves this path out: a canonical
     source it does not read. Without a bound set every path stays in."""
+    if relative.startswith(".agentrof/agent-marketplace/.runtime/vault-index/"):
+        return True  # Disposable navigation bytes never identify project work.
     return bound is not None and relative not in bound and canonical_source(relative)
 
 
@@ -1083,6 +1085,11 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         project_files, scoped = closure_reads(
             project, project_files, set(inputs or []), base, findings, changed or [],
             approval_base(project, route.get("scope_kind"), package, inputs or []))
+    if project is not None and route["project_state"] and project_reading is None:
+        import project_context
+        seeds = set(inputs or []) or set(project_files)
+        project_reading = project_context.task_context(project, entry=entry, role=role,
+                                                       mode=mode, paths=seeds)
     # An exact epic's closure is derived again on every run, so a source that
     # reaches it, an incoming dependency edge included, joins its paths. Like
     # the epic's review manifest, the task binds those and none of the other
@@ -1139,6 +1146,11 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
          "detail": "Complete required and applicable conditional reads, role passes, and the output contract."},
         {"condition": "entry_gate", "status": "required", "detail": route["next_transition"]},
     ]
+    if project_reading is not None:
+        transitions.insert(0, {"condition": "project_context_first", "status": "required",
+            "detail": "Start with project_reading and batch-read its units with project_context.py read --plan <task manifest>. "
+                      "Expand incomplete plans; if context is insufficient, wrong or unavailable, use manual discovery/read "
+                      "on your initiative or parent direction and report sources and reasons. Preserve every owning-flow read obligation."})
     pack = None
     if digest_pack:
         pack = role_pack(entry, role, mode, project if route["project_state"] else None,
@@ -1212,7 +1224,8 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     if project_reading is not None:
         result["project_reading"] = project_reading
         result["context_inventory"] = {"count": len(inventory), "source_hash": digest(inventory)}
-        result["canonical_source_inventory"] = [row for row in inventory if row["path"] in project_files]
+        result["canonical_source_inventory"] = [row for row in inventory
+                                                if row["path"] in project_files | set(read_set or [])]
     if pass_kind is not None:
         result["pass_kind"] = pass_kind
     if pack is not None:

@@ -197,5 +197,12 @@
         "criterion_refs"
       ]
     }
+  },
+  "task_purposes": {
+    "create": "discover",
+    "revise": "implement",
+    "consume": "implement",
+    "review": "review",
+    "repair": "implement"
   }
 }

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -307,9 +308,17 @@ def identifying_fragments(field: str, text: str, fragments: list[tuple[str, str]
     return found
 
 
+def payload_hash(title: str, body: str) -> str:
+    payload = json.dumps({"repository": MARKETPLACE_REPO, "title": title.strip(),
+                          "body": body.strip()}, sort_keys=True, ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--title", required=True)
+    parser.add_argument("--preview", action="store_true", help="validate and print the exact payload without network access")
+    parser.add_argument("--approved-payload-sha256", help="hash of the exact preview the user explicitly approved")
     parser.add_argument(
         "--project-root",
         help="the project the report comes from; the current directory by default",
@@ -344,6 +353,15 @@ def main(argv: list[str] | None = None) -> int:
             " and approve the payload again.",
             file=sys.stderr,
         )
+        return 2
+    expected = payload_hash(title, body)
+    if args.preview:
+        print(json.dumps({"repository": MARKETPLACE_REPO, "title": title, "body": body,
+                          "payload_sha256": expected}, ensure_ascii=False))
+        return 0
+    if args.approved_payload_sha256 != expected:
+        print("file_issue: Not opened: preview and obtain explicit user approval of this exact payload; "
+              "the approved payload hash is missing or does not match", file=sys.stderr)
         return 2
     try:
         url = create_issue(title, body)

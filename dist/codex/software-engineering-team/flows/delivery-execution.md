@@ -84,6 +84,14 @@ DLV-### --story <story>` before invoking the two readers. The resulting
 candidate and session identities bind all source and instruction inputs.
 Generate each role's `manifest` with `--role code_reviewer|qa_engineer` and
 `--mode review_initial|review_repair|qa_diagnostic|qa_final`.
+Every verification manifest includes the default `project_reading` plan. Start
+with `inspect-context --plan <saved verification manifest>` to batch-read its
+units from the frozen Git candidate. Preserve all `full_read` obligations and
+verification gates. Use `expand-context --plan <manifest> --reason <reason>`
+for continuation; `--ref` adds a reference. If context is insufficient or wrong, use frozen `inspect`
+and `diff` on the reader's initiative or parent direction, and return
+`context_findings` with recovery and proposed fix when known. The parent offers
+an anonymous issue through `issue-report` only with exact-payload user approval.
 While readers are active, use the same CLI's `inspect --path <file>` and
 `diff [--path <file>]` to read the frozen Git candidate. `inspect --base`
 selects its exact integration base. These interfaces permit source inspection

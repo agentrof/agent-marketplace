@@ -1,5 +1,5 @@
 {
-  "summary": "Add explicit source-addressed project reading plans with qualified record lookup, constraint-aware selection, bounded continuation and snapshot checks. Complete workflow approval anchors and include upstream changes in root review deltas. Preserve existing skill routing and approval authority.",
+  "summary": "Make bounded project context resolution the default task handoff, preserve manual discovery, exact revision receipts, nested conditions and full review fallback without approval history. Confine caches to the selected project and offer anonymous context feedback through an exact-payload user-approved issue protocol.",
   "components": {
     "software-engineering-team": "minor"
   }

@@ -47,8 +47,27 @@ class IssueReportTests(unittest.TestCase):
         error = io.StringIO()
         with mock.patch("sys.stdin", io.StringIO(body)), \
                 redirect_stdout(output), redirect_stderr(error):
-            code = self.issue.main(["--title", title])
+            code = self.issue.main(["--title", title, "--approved-payload-sha256", self.issue.payload_hash(title, body)])
         return code, output.getvalue(), error.getvalue()
+
+    def test_preview_and_exact_approval_bind_content_before_any_network(self):
+        title, body = "Context misses a constraint", "## Proposed Solution\nPreserve typed constraints."
+        def invoke(*args):
+            out = io.StringIO()
+            with mock.patch("sys.stdin", io.StringIO(body)), redirect_stdout(out), redirect_stderr(io.StringIO()):
+                code = self.issue.main(["--title", title, *args])
+            return code, out.getvalue()
+        with mock.patch.object(self.issue, "create_issue", return_value=
+                "https://github.com/agentrof/agent-marketplace/issues/42") as create:
+            code, preview = invoke("--preview")
+            self.assertEqual(code, 0)
+            payload = json.loads(preview)
+            self.assertEqual(payload["body"], body)
+            self.assertEqual(invoke()[0], 2)
+            self.assertEqual(invoke("--approved-payload-sha256", self.issue.payload_hash(title, "old body"))[0], 2)
+            create.assert_not_called()
+            self.assertEqual(invoke("--approved-payload-sha256", payload["payload_sha256"])[0], 0)
+            create.assert_called_once_with(title, body)
 
     def test_skill_is_chat_previewed_external_and_stateless(self):
         text = ISSUE_SKILL.read_text(encoding="utf-8")
@@ -358,7 +377,7 @@ class ProjectFragmentRefusalTests(unittest.TestCase):
                 return_value="https://github.com/agentrof/agent-marketplace/issues/5") as create, \
                 mock.patch("sys.stdin", io.StringIO(body)), \
                 redirect_stdout(output), redirect_stderr(error):
-            code = self.issue.main(["--title", title, *arguments])
+            code = self.issue.main(["--title", title, "--approved-payload-sha256", self.issue.payload_hash(title, body), *arguments])
         return code, error.getvalue(), create
 
     def test_each_fragment_is_refused_by_kind_and_position_and_never_echoed(self):

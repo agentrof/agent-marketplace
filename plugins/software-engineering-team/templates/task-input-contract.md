@@ -49,16 +49,26 @@ closure; bare `--epic` retains the full root package. Other stage compilers'
 approved receipts, selected scope and named project input files remain the
 authority. A manifest never decides applicability or creates an approval.
 
-An explicit `--context-plan <project-relative JSON>` binds the output of
-`project_context.py resolve` to the task's exact entry, role and source snapshot.
-Its `project_reading` field gives the initial source units and any continuation;
-use `project_context.py read` for their text, `units` for smaller source units and
-`expand` with a reason for further context. A `needs_split` result is incomplete
-reading, never permission to drop required material. The plan guides the order
-and granularity of project reading; it does not remove the role's scope or any
-review obligation. Required project inputs outside its units still require the
-reading their owning flow specifies. Skill selection and instruction reads do
-not change. Every source identity and the plan itself are rechecked at handoff.
+Every project task automatically receives `project_reading` from the resolver,
+using the selected source files and the entry, role and task mode. No opt-in flag
+is needed. An explicit `--context-plan <project-relative JSON>` may supply a
+validated plan instead. `project_context.py read --plan <task manifest>` accepts
+the complete manifest or the nested plan; `units` and `expand` supply smaller
+units and continuation. A `needs_split` or `needs_resolution` result is incomplete.
+A `needs_scope` result requires source selection by the owning flow. An
+`unavailable` resolver never licenses omitted reading: recover through targeted
+manual search and reads, report the failure, and preserve the original scope.
+
+Agent-initiated and parent-directed manual discovery remain allowed whenever
+context is insufficient or appears wrong. Record extra sources and reasons and
+rebind added evidence before relying on it. The plan guides reading order and
+granularity; every owning-flow review obligation remains. Skill selection is
+unchanged. Return `context_findings` to the parent for observed failures and
+recurring friction, including impact, recovery, and a fix and verification case
+when known. The parent uses `issue-report` to offer an anonymous report and
+obtains explicit user approval of its exact payload before any GitHub write.
+Project-only authoring gaps remain with their owner. Declining a report never
+blocks ordinary work. Never copy source content or transcripts into an issue.
 
 The manifest lists full required reads, conditional references with their
 original read conditions, source identities, write boundaries and the output
@@ -117,6 +127,7 @@ Delivery additionally uses `scripts/delivery_verification.py` to enforce its
 frozen candidate and terminal evidence barriers. Generic task inputs alone
 never authorize Delivery evidence or replace a compiler gate.
 
-The manifest is stdout-only and disposable. It creates no cache, project
-document or runtime truth. Issue reporting remains external and stateless;
+The manifest is stdout-only and disposable. Its resolver reuses the project-local
+disposable index, with an in-memory fallback on read-only filesystems. It creates
+no project document or durable truth. Issue reporting remains external and stateless;
 it uses conversation evidence and never creates a project task manifest.

@@ -320,6 +320,11 @@ class BacklogScopeTests(unittest.TestCase):
             return inputs.manifest(self.docs, **kwargs)
 
     def stub(self, **kwargs) -> Stub:
+        # These isolate graph selection with a known empty upstream delta;
+        # GitChangeScopeTests covers the real approval-history boundary.
+        history = mock.patch.object(inputs, "vault_changes", return_value=(set(), {}))
+        history.start()
+        self.addCleanup(history.stop)
         stub = Stub(**kwargs)
         patch = stub.install()
         patch.start()
@@ -329,9 +334,11 @@ class BacklogScopeTests(unittest.TestCase):
     def test_full_reads_as_released(self):
         self.depends(3, 4)
         stub = self.stub()
+        # Policy approval pins draft review metadata in a Git checkout;
+        # compare the same source bytes on both full-reading paths.
+        self.choose(None)
         plain = {name: inputs.manifest(self.docs, **kwargs) for name, kwargs in (
             ("root", {}), ("epic", {"epic": "EP-001"}), ("writer", {"epic": "EP-001", "writer": True}))}
-        self.choose(None)
         for name, kwargs in (("root", {}), ("epic", {"epic": "EP-001"}),
                              ("writer", {"epic": "EP-001", "writer": True})):
             with self.subTest(scope=name):
@@ -599,6 +606,20 @@ class GitChangeScopeTests(unittest.TestCase):
         manifest = inputs.manifest(self.docs)
         return manifest[VALUE], {identity: row["read"] for identity, row
                                  in manifest["check"]["backlog_graph"]["stories"].items()}
+
+    def test_imported_revision_without_approval_history_reads_complete_package(self):
+        subprocess.run(["git", "-C", str(self.project), "checkout", "--orphan", "imported"],
+                       check=True, capture_output=True)
+        self.commit("Imported current revision")
+        self.assertIsNone(task_inputs.approval_base(self.project, "backlog"))
+        manifest = inputs.manifest(self.docs)
+        self.assertEqual(manifest[VALUE]["read"], "full")
+        for number in range(1, 5):
+            self.assertIn(self.story(number), manifest["paths"])
+            self.assertIn(self.story(number, "test-plan"), manifest["paths"])
+        record, errors = backlog.collect(self.docs, review_inputs=True)
+        self.assertFalse(errors)
+        self.assertEqual(inputs.revision_delta(record, self.docs, 100, None)["read"], "full")
 
     def test_an_upstream_criterion_change_reaches_every_story_that_cites_it(self):
         path = self.docs / self.story(3)

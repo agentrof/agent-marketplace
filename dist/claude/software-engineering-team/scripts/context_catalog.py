@@ -93,6 +93,30 @@ def catalog(vault) -> dict:
                     if "<!-- sec: nav -->" in line), len(lines) + 1)
         excluded.update(range(nav, len(lines) + 1))
 
+        # Capture list ancestry once; every small read keeps its governing
+        # condition without rescanning the preceding document per item.
+        list_context, stack = {}, []
+        for number in range(start, len(lines) + 1):
+            line = lines[number - 1]
+            if number in excluded:
+                stack = []
+                continue
+            if number in parsed.fenced:
+                continue
+            match = re.match(r"^( *)(?:[-*+] |[0-9]+[.)] )", line)
+            if match:
+                depth = len(match.group(1))
+                stack = [parent for parent in stack if parent[1] < depth]
+                list_context[number] = [[n, end] for n, _depth, end in stack]
+                stack.append([number, depth, number])
+            elif line.strip():
+                indent = len(line) - len(line.lstrip(" "))
+                if not stack or indent <= stack[-1][1]:
+                    stack = []
+                else:
+                    list_context[number] = [[n, end] for n, _depth, end in stack]
+                    stack[-1][2] = number
+
         def add(kind: str, label: str, ranges: list[list[int]]) -> str | None:
             ancestry = []
             for number, level, heading in parsed.headings:
@@ -102,6 +126,8 @@ def catalog(vault) -> dict:
                 ancestry.append((number, level, heading))
             if kind in {"row", "item", "block"}:
                 ranges = [[number, number] for number, _level, _heading in ancestry] + ranges
+            if kind in {"item", "block"}:
+                ranges = ranges[:-1] + list_context.get(ranges[-1][0], []) + ranges[-1:]
             kept = [[a, b] for a, b in ranges if a <= b and
                     not any(number in excluded for number in range(a, b + 1))]
             if not kept:
@@ -212,18 +238,25 @@ def add_receipts(root: Path, data: dict) -> None:
             parts = path.relative_to(root).parts
             if not ref and row.get("id") and row.get("revision") and "experiences" in parts:
                 ref = f"{parts[parts.index('experiences') + 1]}:{row['id']}@r{row['revision']}"
-            if not isinstance(ref, str) or ref in data["aliases"]:
+            immutable = "_ledger" in parts
+            if not isinstance(ref, str) or (ref in data["aliases"] and not immutable):
                 continue
             identity = f"{relative}::receipt:{'/'.join(map(str, pointer))}"
             content = json.dumps(row, sort_keys=True, ensure_ascii=False)
             data["units"][identity] = {"unit_id": identity, "path": relative,
                 "kind": "receipt", "label": ref, "json_pointer": list(pointer),
                 "source_hash": digest(raw), "content_hash": digest(content.encode()),
-                "bytes": len(content.encode()), "historical": "_ledger" in parts}
+                "bytes": len(content.encode()), "historical": immutable}
+            if isinstance(row.get("content"), str):
+                props, _start, error = ba_compile.parse_frontmatter(row["content"])
+                if not error:
+                    data["units"][identity]["historical_properties"] = props
             document = data["documents"].setdefault(relative, {"path": relative, "type": "receipt",
                 "title": ref, "source_hash": digest(raw), "units": []})
             document["units"].append(identity)
-            data["aliases"][ref] = [identity]
+            previous = [key for key in data["aliases"].get(ref, [])
+                        if data["units"][key].get("historical")]
+            data["aliases"][ref] = previous + [identity]
 
 
 def resolve(data: dict, reference: str) -> list[dict]:

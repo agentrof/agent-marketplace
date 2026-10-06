@@ -2107,7 +2107,8 @@ def delivery_reader_barrier(payload: dict) -> int:
                     and args.count("--worktree") == 1
                     and _cli_path(args[1], cwd) == project
                     and args[2] in {"freeze", "result", "panel-result", "calibrate", "merge-panel", "status",
-                                    "manifest", "validate", "run", "resume-qa", "inspect", "diff", "environment",
+                                    "manifest", "validate", "run", "resume-qa", "inspect", "inspect-context",
+                                    "expand-context", "diff", "environment",
                                     "wait"}):
                 return 0
         paths = None

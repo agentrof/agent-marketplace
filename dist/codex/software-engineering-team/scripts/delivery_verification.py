@@ -3220,6 +3220,40 @@ def inspect_candidate(root: Path, relative: str, *, base: bool = False) -> dict:
             "encoding": encoding, "content": content}
 
 
+def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
+                    refs: list[str] | None = None) -> dict:
+    """Batch source units from the frozen Git candidate, never live text."""
+    import context_catalog
+    import project_context
+    current = require_current(root, read_session(root), allow_evidence=True)
+    if payload.get("candidate_hash") != current["candidate_hash"]:
+        raise RuntimeError("context manifest belongs to another verification candidate")
+    plan = payload["project_reading"]
+    if "request" not in plan:
+        raise RuntimeError("resolve context or use frozen inspect reads before continuing")
+    index = project_context.load_index(root, no_cache=True)
+    project_context.validate_plan(root, index, plan)
+    if reason is not None:
+        return {"candidate_hash": current["candidate_hash"], "product_commit": current["product_commit"],
+                "project_reading": project_context.expand_context(root, index, plan, reason=reason, refs=refs)}
+    units = {}
+    for row in plan["must_read"]:
+        if row.get("source_root") == "project":
+            raise RuntimeError("external context requires an explicit frozen inspect read")
+        unit = dict(index["catalog"]["units"].get(row["unit_id"], row))
+        unit.setdefault("git_revision", current["product_commit"])
+        units[unit["unit_id"]] = unit
+    result = context_catalog.read_units(root / "workspace/docs", {"units": units},
+        list(units), plan["request"]["budget"]["max_source_bytes"])
+    result.update(candidate_hash=current["candidate_hash"], plan_status=plan["status"],
+                  coverage=plan["coverage"])
+    if "continuation" in plan:
+        result["continuation"] = plan["continuation"]
+    if not units and plan["status"] != "ready":
+        result["status"] = plan["status"]
+    return result
+
+
 def candidate_diff(root: Path, paths: list[str]) -> dict:
     value = read_session(root)
     current = require_current(root, value, allow_evidence=True)
@@ -3358,6 +3392,17 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str) -> 
         result["full_read"], closure = closure_read(root, current)
         result.update({CLOSURE_SWITCH: CLOSURE_VALUE, "vault_views": closure["views"],
                        CLOSURE_VALUE: closure["scope"]})
+    import project_context
+    seeds = {path for path in current["inputs"] if path.endswith("/item.md")}
+    result["project_reading"] = project_context.task_context(root, entry="deliver",
+        role=role.replace("_", "-"), mode="review", paths=seeds, no_cache=True)
+    result["read_interface"]["context"] = "inspect-context --plan <saved verification manifest>"
+    result["read_interface"]["expand_context"] = "expand-context --plan <saved context manifest> --reason <reason> [--ref <reference>]"
+    result["context_guidance"] = ("Start with project_reading and batch-read with inspect-context; "
+        "full_read and all verification gates remain mandatory. Expand incomplete plans. "
+        "If context is insufficient, use frozen inspect/diff on your initiative or parent direction "
+        "and report context_findings with sources, impact, recovery and proposed fix to the parent. "
+        "Only the parent offers an anonymous issue through issue-report after exact-payload user approval.")
     panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
     if panel is not None:
         # Every reader of the panel pass receives this same manifest and one assignment.
@@ -3449,6 +3494,12 @@ def main(argv=None) -> int:
     inspect.add_argument("--base", action="store_true")
     diff = subs.add_parser("diff")
     diff.add_argument("--path", action="append", default=[])
+    for verb in ("inspect-context", "expand-context"):
+        context = subs.add_parser(verb)
+        context.add_argument("--plan", required=True)
+        if verb == "expand-context":
+            context.add_argument("--reason", required=True)
+            context.add_argument("--ref", action="append")
     subs.add_parser("resume-qa")
     status = subs.add_parser("status")
     status.add_argument("--summary", action="store_true")
@@ -3461,6 +3512,11 @@ def main(argv=None) -> int:
     try:
         if args.command == "freeze":
             value = freeze(root, args.delivery, args.story, fresh=args.fresh)
+        elif args.command == "inspect-context":
+            value = inspect_context(root, json.loads(Path(args.plan).read_text(encoding="utf-8")))
+        elif args.command == "expand-context":
+            value = inspect_context(root, json.loads(Path(args.plan).read_text(encoding="utf-8")),
+                                    reason=args.reason, refs=args.ref)
         elif args.command == "result":
             value = register_result(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "calibrate":

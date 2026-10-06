@@ -1,6 +1,0 @@
-{
-  "summary": "A task given explicit inputs, outside an exact epic and a code review base, now binds those inputs and the notes they cite by content, the rest of the canonical source inventory by path only under `canonical_source_paths`, and leaves `head` out of its `source_hash`. A new or removed source still makes the task stale, while a commit or a write to an unrelated note leaves it fresh, so independent writers and review panels no longer stale each other. In one measured project about a dozen parallel writer passes each hit a stale manifest and one review panel was restarted.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

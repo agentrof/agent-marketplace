@@ -1,6 +1,0 @@
-{
-  "summary": "Delivery `init` cuts a slug derived from the goal at 48 characters and then drops a trailing hyphen, so a goal whose cut falls right after a word break no longer fails with `invalid Delivery slug`. An explicit `--slug` is validated as before.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

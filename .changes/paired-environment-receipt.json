@@ -1,6 +1,0 @@
-{
-  "summary": "A Verification Contract approval now stamps `paired_environment_revision` and `paired_environment_source_hash` from the approved current Environment Contract, and `operation_compile.py check --kind verification` reports a later Environment Contract approval as advisory drift under `paired_environment`. Writers no longer author the paired receipt, so a wrong draft hash cannot be written and the two contract writers can work side by side. In one measured project the receipt was re-authored in each of six review rounds, always after the other writer had finished.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

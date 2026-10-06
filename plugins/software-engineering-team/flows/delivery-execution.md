@@ -56,6 +56,11 @@ While readers are active, use the same CLI's `inspect --path <file>` and
 selects its exact integration base. These interfaces permit source inspection
 without opening a general shell writer through the barrier.
 Use `inspect --instruction <package-relative-file>` for bound package instructions.
+Switch `level_change_map`: at `assertion_map`, the writer maps the assertions
+of each scenario whose Test Plan level the Item converts, `freeze` refuses an
+incomplete map and the code reviewer reads the pairs it flags, as
+`skill-content/deliver/references/switch-level_change_map-assertion_map.md`
+defines.
 Switch `pre_handoff_regression`: at `touched_suites`, the coordinator runs the
 suites of the earlier stories the candidate touches, with the Item's own Test
 Plan targets, before `freeze`, which refuses until that run passed on the exact

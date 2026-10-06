@@ -59,6 +59,16 @@ REFUSE_MISSING_GROUPS = "refuse_missing_groups"
 GROUP_STATUSES = ("passed", "failed", "not_collected")
 GROUP_COUNTS = ("passed", "failed", "skipped")
 MISSING_GROUP = "missing"
+# At level_change_map assertion_map an Item that rewrites the automation target of
+# a scenario whose Test Plan level changed since its story integrated records,
+# per scenario, the assertions that prove its Then before and after the change;
+# freeze refuses an incomplete or unanchored map and the code reviewer reads the
+# pairs the check flags (#440).
+LEVEL_CHANGE_SWITCH = "level_change_map"
+ASSERTION_MAP = "assertion_map"
+ASSERTION_MAP_FILE = "assertion-map.json"
+ASSERTION_KINDS_PATH = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/assertion-kinds.json"
+ASSERTION_FIELDS = ("path", "code", "kind", "expected")
 # At test_engines partitioned QA's final test run runs the partitions the
 # Verification Contract declares in parallel, one private clone each, over its
 # isolated test engines, longest first by the durations the Item's runtime keeps.
@@ -564,6 +574,8 @@ def candidate(root: Path, delivery_id: str, story: str, *, allow_evidence: bool 
              "item_plan_hash": props["item_plan_hash"], "inputs": identities,
              "instruction_identity": instruction_identity(), "runtime_required": props.get("runtime_required", False),
              "changed_files": changed, "mutation_files": code, "report_paths": sorted(reports)}
+    if delivery.delivery_switch_value(docs, delivery_id, LEVEL_CHANGE_SWITCH) == ASSERTION_MAP:
+        value["assertion_map"] = assertion_map_check(root, value)
     value["candidate_hash"] = digest(value)
     return value
 
@@ -580,6 +592,8 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False) -> 
         if previous and any(worker["state"] == "running" for worker in previous["workers"].values()):
             raise RuntimeError("settle or cancel the existing readers before freezing a new candidate")
         current = candidate(root, delivery_id, story, allow_evidence=True)
+        if current.get("assertion_map", {}).get("problems"):
+            raise RuntimeError("assertion map: " + "; ".join(current["assertion_map"]["problems"]))
         # At touched_suites the readers start only on a candidate whose touched
         # earlier suites and own Test Plan targets passed before the freeze.
         pre_handoff = None
@@ -2562,6 +2576,17 @@ def automation_targets(body: str) -> list[str]:
     return targets
 
 
+def scenario_records(body: str) -> dict[str, dict]:
+    """Each scenario of a Test Plan body by id, with its automation, target, level and Then."""
+    records = {}
+    for identifier, block in scenario_blocks(body):
+        fields, _duplicates = scenario_fields(block)
+        records[identifier] = {key: fields.get(field, "").strip() for key, field in (
+            ("automation", "automation"), ("automation_target", "automation_target"), ("level", "level"),
+            ("then", "Then"))}
+    return records
+
+
 def plan_automation_targets(docs: Path, relative: str, label: str) -> list[str]:
     """The automation targets of a Test Plan's automation-required scenarios, in plan order."""
     if not relative:
@@ -2588,8 +2613,9 @@ def integrated_plan(root: Path, commit: str, plans: list[str], hashes: set[str])
         value = backlog_compile.digest_text(text)
         if value not in hashes:
             return None
+        body = backlog_compile.parse_front_matter_text(text)[1]
         return {"test_plan": relative, "source_hash": value, "commit": holder,
-                "targets": automation_targets(backlog_compile.parse_front_matter_text(text)[1])}
+                "targets": automation_targets(body), "scenarios": scenario_records(body)}
 
     for relative in plans:
         path = docs / relative
@@ -2618,6 +2644,224 @@ def integrated_plan(root: Path, commit: str, plans: list[str], hashes: set[str])
     return None
 
 
+def integrated_items(root: Path, delivery_id: str):
+    """Yield each integrated Item of a merged Delivery or of *delivery_id* as (delivery, current, path, record).
+
+    The current Delivery's integrated Items are no earlier stories, but a story
+    one of them integrated again takes the revision it integrated. A record
+    that cannot be read and a merge state Git cannot decide refuse, so no
+    integrated Item is dropped silently.
+    """
+    docs = delivery.docs_root(root)
+    for directory in delivery.delivery_dirs(docs):
+        record = directory / "delivery.md"
+        if not record.is_file():
+            continue
+        try:
+            props, _ = delivery.split_note(record)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"{record.relative_to(root).as_posix()} cannot be read, so the suites it"
+                               f" merged cannot be selected: {exc}") from exc
+        identifier = str(props.get("id", ""))
+        current_delivery = identifier == delivery_id
+        if not current_delivery:
+            # An unreadable Delivery Review record is an unknown merge state as well.
+            status, unknown = delivery.delivery_state(directory, props)
+            if unknown is not None:
+                raise RuntimeError(f"whether {identifier} merged decides which earlier suites the candidate"
+                                   f" touches: {unknown}")
+            if status != "merged":
+                continue
+        for item_path in sorted(directory.glob("items/*/item.md")):
+            try:
+                item, _ = delivery.split_note(item_path)
+            except (OSError, ValueError) as exc:
+                raise RuntimeError(f"{item_path.relative_to(root).as_posix()} cannot be read, so its suite"
+                                   f" cannot be selected: {exc}") from exc
+            if item.get("status") == "integrated":
+                yield identifier, current_delivery, item_path, item
+
+
+def add_integration(integrations: dict[str, dict], item: dict) -> None:
+    """Add the Test Plan path and revision digest an integrated Item recorded to its story's integrations."""
+    plan = str(item.get("test_plan_path") or "")
+    recorded = item.get("test_plan_source_hash")
+    if plan and delivery._is_normalized_claim(plan) and isinstance(recorded, str) and recorded:
+        integration = integrations.setdefault(str(item.get("story_id", "")), {"plans": [], "hashes": set()})
+        if plan not in integration["plans"]:
+            integration["plans"].append(plan)
+        integration["hashes"].add(recorded)
+
+
+def converted_scenarios(root: Path, delivery_id: str, current: dict) -> list[dict]:
+    """The scenarios the Item converts: automation-required, their target in a file the Item changes, and
+    their Test Plan level changed since the newest revision an integrated Item of their story bound.
+
+    A scenario no integration bound yet, or one whose level is unchanged, is
+    no conversion. A story whose integrated revision neither the candidate nor
+    its history holds refuses, so no conversion is dropped silently.
+    """
+    docs = delivery.docs_root(root)
+    changed = set(current["changed_files"])
+    integrations: dict[str, dict] = {}
+    for _identifier, _current, _path, item in integrated_items(root, delivery_id):
+        add_integration(integrations, item)
+    converted = []
+    for story, integration in sorted(integrations.items()):
+        rewritten = {}
+        for relative in integration["plans"]:
+            path = docs / relative
+            if path.is_symlink() or not path.is_file():
+                continue
+            for identifier, record in scenario_records(delivery.split_note(path)[1]).items():
+                target = record["automation_target"]
+                if (record["automation"].casefold() == "required" and target
+                        and target.partition("::")[0] in changed):
+                    rewritten.setdefault(identifier, (relative, record))
+        if not rewritten:
+            continue
+        revision = integrated_plan(root, current["product_commit"], integration["plans"], integration["hashes"])
+        if revision is None:
+            raise RuntimeError(f"{story} integrated a Test Plan revision neither the candidate nor its history"
+                               f" holds, so whether {', '.join(sorted(rewritten))} changed level cannot be decided")
+        for identifier, (relative, record) in sorted(rewritten.items()):
+            before = revision["scenarios"].get(identifier)
+            if before is None or before["level"] == record["level"]:
+                continue
+            converted.append({"story": story, "scenario": identifier,
+                              "test_plan": (docs / relative).relative_to(root).as_posix(), "then": record["then"],
+                              "before": {"level": before["level"] or None,
+                                         "automation_target": before["automation_target"]},
+                              "after": {"level": record["level"] or None,
+                                        "automation_target": record["automation_target"]}})
+    return converted
+
+
+def assertion_kinds() -> dict:
+    return json.loads(ASSERTION_KINDS_PATH.read_text(encoding="utf-8"))["kinds"]
+
+
+def assertion_map_path(root: Path) -> Path:
+    return session_path(root).parent / ASSERTION_MAP_FILE
+
+
+def anchored(root: Path, commit: str, path: str, code: str) -> bool:
+    """Whether a line of *path* at *commit*, stripped, is *code*, stripped."""
+    shown = subprocess.run(["git", "--no-replace-objects", "-C", str(root), "cat-file", "blob", f"{commit}:{path}"],
+                           capture_output=True, check=False)
+    if shown.returncode:
+        return False
+    try:
+        text = shown.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return code.strip() in {line.strip() for line in text.splitlines()}
+
+
+def assertion_problems(root: Path, commit: str, side: str, identifier: str, entries: object,
+                       kinds: dict) -> list[str]:
+    """Why the *side* assertions of one map entry are no anchored, typed assertions, or nothing."""
+    where = "integration base" if side == "before" else "candidate"
+    if not isinstance(entries, list) or not entries:
+        return [f"{identifier} names no {side} assertion"]
+    problems = []
+    for number, entry in enumerate(entries, 1):
+        label = f"{identifier} {side} assertion {number}"
+        if not isinstance(entry, dict) or set(entry) != set(ASSERTION_FIELDS):
+            problems.append(f"{label} holds other fields than {', '.join(ASSERTION_FIELDS)}")
+            continue
+        path, code, kind, expected = (entry[field] for field in ASSERTION_FIELDS)
+        if not isinstance(path, str) or not delivery._is_normalized_claim(path):
+            problems.append(f"{label} names no normalized repository path")
+        elif not isinstance(code, str) or not code.strip() or "\n" in code or "\r" in code:
+            problems.append(f"{label} names no single line of code")
+        elif kind not in kinds:
+            problems.append(f"{label} names kind {kind!r}, none of {', '.join(kinds)}")
+        elif expected is not None and (not isinstance(expected, str) or not expected.strip()
+                                       or expected not in code):
+            problems.append(f"{label} names an expected value its code does not hold; name null for none")
+        elif not anchored(root, commit, path, code):
+            problems.append(f"{label} is no line of {path} in the {where}")
+    return problems
+
+
+def assertion_map_check(root: Path, current: dict) -> dict:
+    """Check the Item's assertion map against the scenarios it converts.
+
+    Every converted scenario needs one entry whose then is its Then, with at
+    least one before assertion that is a line of the integration base and one
+    after assertion that is a line of the candidate; anything else is a
+    problem freeze refuses. A complete entry is flagged when every after
+    assertion is of a weak kind while a before one was not, or when an
+    expected value of a before assertion is no after assertion's.
+    """
+    converted = converted_scenarios(root, current["delivery"], current)
+    path = safe_runtime_path(root, assertion_map_path(root))
+    result = {"converted_scenarios": converted, "map_hash": None, "problems": [], "flagged": []}
+    if not path.exists():
+        if converted:
+            result["problems"].append("no assertion map names the assertions of the converted scenarios "
+                                      + ", ".join(entry["scenario"] for entry in converted))
+        return result
+    raw = safe_runtime_path(root, path, file_only=True).read_bytes()
+    result["map_hash"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        value = None
+    if (not isinstance(value, dict) or set(value) != {"schema_version", "scenarios"}
+            or type(value["schema_version"]) is not int or value["schema_version"] != 1
+            or not isinstance(value["scenarios"], dict)):
+        result["problems"].append("the assertion map holds no schema_version 1 and scenarios")
+        return result
+    kinds = assertion_kinds()
+    scenarios = {entry["scenario"]: entry for entry in converted}
+    for identifier in sorted(set(value["scenarios"]) - set(scenarios)):
+        result["problems"].append(f"{identifier} is no scenario the Item converts")
+    for identifier, scenario in sorted(scenarios.items()):
+        entry = value["scenarios"].get(identifier)
+        if not isinstance(entry, dict) or set(entry) != {"then", "before", "after"}:
+            result["problems"].append(f"{identifier} has no map entry of then, before and after")
+            continue
+        problems = [] if entry["then"] == scenario["then"] else [
+            f"{identifier} maps another then than its Test Plan's Then: {scenario['then']}"]
+        problems += assertion_problems(root, current["integration_base_commit"], "before", identifier,
+                                       entry["before"], kinds)
+        problems += assertion_problems(root, current["product_commit"], "after", identifier, entry["after"], kinds)
+        if problems:
+            result["problems"].extend(problems)
+            continue
+        flags = []
+        before, after = entry["before"], entry["after"]
+        if (any(not kinds[item["kind"]]["weak"] for item in before)
+                and all(kinds[item["kind"]]["weak"] for item in after)):
+            flags.append("weakened_kind")
+        lost = sorted({item["expected"] for item in before if item["expected"] is not None}
+                      - {item["expected"] for item in after if item["expected"] is not None})
+        if lost:
+            flags.append("expected_value_lost")
+        if flags:
+            result["flagged"].append({"story": scenario["story"], "scenario": identifier, "then": scenario["then"],
+                                      "flags": flags, "lost_expected_values": lost, "before": before,
+                                      "after": after})
+    return result
+
+
+def assertion_map_status(root: Path, delivery_id: str, story: str) -> dict:
+    """The converted scenarios of the committed candidate, its assertion map's check and a template to fill."""
+    root = root.resolve()
+    value = delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, LEVEL_CHANGE_SWITCH)
+    if value != ASSERTION_MAP:
+        raise RuntimeError(f"the assertion map is checked only at process switch {LEVEL_CHANGE_SWITCH}"
+                           f" {ASSERTION_MAP}; {delivery_id} runs it at {value}")
+    check = candidate(root, delivery_id, story, allow_evidence=True)["assertion_map"]
+    return {**check, "assertion_map_file": str(assertion_map_path(root)),
+            "kinds": {kind: spec["summary"] for kind, spec in assertion_kinds().items()},
+            "template": {"schema_version": 1, "scenarios": {
+                entry["scenario"]: {"then": entry["then"], "before": [], "after": []}
+                for entry in check["converted_scenarios"]}}}
+
+
 def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -> dict:
     """Derive the pre-handoff regression selection of an Item's exact candidate.
 
@@ -2642,62 +2886,30 @@ def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -
     changed = current["changed_files"]
     touched_items = []
     integrations: dict[str, dict] = {}
-    for directory in delivery.delivery_dirs(docs):
-        record = directory / "delivery.md"
-        if not record.is_file():
+    for identifier, current_delivery, item_path, item in integrated_items(root, delivery_id):
+        earlier_story = str(item.get("story_id", ""))
+        plan = str(item.get("test_plan_path") or "")
+        recorded = item.get("test_plan_source_hash")
+        add_integration(integrations, item)
+        claims = item.get("path_claims")
+        if current_delivery or not isinstance(claims, list):
             continue
-        try:
-            props, _ = delivery.split_note(record)
-        except (OSError, ValueError) as exc:
-            raise RuntimeError(f"{record.relative_to(root).as_posix()} cannot be read, so the suites it"
-                               f" merged cannot be selected: {exc}") from exc
-        identifier = str(props.get("id", ""))
-        # The current Delivery's integrated Items are no earlier stories, but a
-        # story one of them integrated again takes the revision it integrated.
-        current_delivery = identifier == delivery_id
-        if not current_delivery:
-            # An unreadable Delivery Review record is an unknown merge state as well.
-            status, unknown = delivery.delivery_state(directory, props)
-            if unknown is not None:
-                raise RuntimeError(f"whether {identifier} merged decides which earlier suites the candidate"
-                                   f" touches: {unknown}")
-            if status != "merged":
-                continue
-        for item_path in sorted(directory.glob("items/*/item.md")):
-            try:
-                item, _ = delivery.split_note(item_path)
-            except (OSError, ValueError) as exc:
-                raise RuntimeError(f"{item_path.relative_to(root).as_posix()} cannot be read, so its suite"
-                                   f" cannot be selected: {exc}") from exc
-            if item.get("status") != "integrated":
-                continue
-            earlier_story = str(item.get("story_id", ""))
-            plan = str(item.get("test_plan_path") or "")
-            recorded = item.get("test_plan_source_hash")
-            if plan and delivery._is_normalized_claim(plan) and isinstance(recorded, str) and recorded:
-                integration = integrations.setdefault(earlier_story, {"plans": [], "hashes": set()})
-                if plan not in integration["plans"]:
-                    integration["plans"].append(plan)
-                integration["hashes"].add(recorded)
-            claims = item.get("path_claims")
-            if current_delivery or not isinstance(claims, list):
-                continue
-            touched = sorted({claim for claim in claims if isinstance(claim, str)
-                              and any(delivery._claims_overlap(claim, path) for path in changed)})
-            if not touched:
-                continue
-            label = f"{earlier_story} of {identifier}"
-            if not plan:
-                raise RuntimeError(f"{label} records no Test Plan; its suite cannot be selected")
-            if not delivery._is_normalized_claim(plan):
-                raise RuntimeError(f"{label} records Test Plan {plan}, which is no normalized docs path; its suite"
-                                   " cannot be selected")
-            if not isinstance(recorded, str) or not recorded:
-                raise RuntimeError(f"{label} records no test_plan_source_hash, so the Test Plan revision it"
-                                   " integrated cannot be selected")
-            touched_items.append({"delivery": identifier, "story": earlier_story, "label": label,
-                                  "item": item_path.relative_to(root).as_posix(), "plan": plan,
-                                  "recorded": recorded, "touched": touched})
+        touched = sorted({claim for claim in claims if isinstance(claim, str)
+                          and any(delivery._claims_overlap(claim, path) for path in changed)})
+        if not touched:
+            continue
+        label = f"{earlier_story} of {identifier}"
+        if not plan:
+            raise RuntimeError(f"{label} records no Test Plan; its suite cannot be selected")
+        if not delivery._is_normalized_claim(plan):
+            raise RuntimeError(f"{label} records Test Plan {plan}, which is no normalized docs path; its suite"
+                               " cannot be selected")
+        if not isinstance(recorded, str) or not recorded:
+            raise RuntimeError(f"{label} records no test_plan_source_hash, so the Test Plan revision it"
+                               " integrated cannot be selected")
+        touched_items.append({"delivery": identifier, "story": earlier_story, "label": label,
+                              "item": item_path.relative_to(root).as_posix(), "plan": plan,
+                              "recorded": recorded, "touched": touched})
     revisions: dict[str, dict | None] = {}
     earlier = []
     for entry in touched_items:
@@ -3134,7 +3346,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", required=True)
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run"):
+    for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
@@ -3201,6 +3413,8 @@ def main(argv=None) -> int:
             value = regression_selection(root, args.delivery, args.story)
         elif args.command == "regression-run":
             value = regression_run(root, args.delivery, args.story)
+        elif args.command == "assertion-map":
+            value = assertion_map_status(root, args.delivery, args.story)
         elif args.command == "inspect":
             value = inspect_instruction(root, args.instruction) if args.instruction else inspect_candidate(root, args.path, base=args.base)
         elif args.command == "diff":

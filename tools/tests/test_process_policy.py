@@ -525,6 +525,7 @@ RELEASED_DEFAULTS = {
     "item_review_scale": "fixed",
     "lane_isolation": "shared_checkout",
     "lane_table": "off",
+    "level_change_map": "off",
     "mechanical_pass_tier": "role_tier",
     "own_target_reuse": "off",
     "owner_gates": "per_step",
@@ -724,6 +725,16 @@ SAFETY_RULES = {
         f"{SKILLS}/deliver/references/switch-lane_table-recorded.md": (
             "A lane listed `finished` is never launched again",
             "It is scratch, never a durable record; the Delivery's own records stay the truth",
+        ),
+    },
+    "level_change_map": {
+        f"{SKILLS}/deliver/references/switch-level_change_map-assertion_map.md": (
+            "`freeze` and `assertion-map` derive them; no role chooses them",
+            "A story whose integrated revision neither the candidate nor its history holds refuses, so no"
+            " conversion is dropped silently",
+            "Name every assertion of the Then on both sides, at least one each",
+            "A complete entry is flagged, never refused",
+            "a mislabeled kind that hides a weakened assertion is a major finding",
         ),
     },
     "requirement_fact_check": {
@@ -1040,7 +1051,8 @@ class MeasuredBaselineTests(unittest.TestCase):
                     self.assertTrue(evidence.startswith(" in one measured project"), evidence)
         self.assertEqual(cited, ["calculation_examples", "code_review_panel", "delivery_path",
                                  "dependent_rebind_gate", "epic_review_cadence",
-                                 "execution_planning", "item_qa_tier", "own_target_reuse", "owner_gates",
+                                 "execution_planning", "item_qa_tier", "level_change_map", "own_target_reuse",
+                                 "owner_gates",
                                  "pre_handoff_regression", "qa_gate_order", "reader_waves",
                                  "rebind_review_scope", "remediation_bookkeeping",
                                  "remediation_writers", "requirement_fact_check", "review_scope_record",

@@ -62,11 +62,12 @@ LEVELS = "product-planning/references/switch-test_levels-declared.md"
 # The switch references each shipped task binds, by entry and role. A task
 # binds a reference of a switch that owns one of its entry's flows, from a
 # skill it selects or, for owner_gates, from any skill.
-# The fixed-cost and lane switches of delivery-execution, in the deliver skill.
+# The fixed-cost, lane and level-change switches of delivery-execution, in the deliver skill.
 ITEM_COST = "deliver/references/switch-item_cost_report-per_step.md"
 LANE_TABLE = "deliver/references/switch-lane_table-recorded.md"
 LANE_ISOLATION = "deliver/references/switch-lane_isolation-scratch_clone.md"
-DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE)
+LEVEL_CHANGE = "deliver/references/switch-level_change_map-assertion_map.md"
+DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE, LEVEL_CHANGE)
 EXPECTED = {
     **{f"{entry}:{role}": [] for entry, role in (
         ("business-analysis", "analysis-challenger"), ("business-analysis", "business-analyst"),
@@ -125,7 +126,7 @@ WAVE_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system
                 "execution-plan", "solution-design")
 EXPECTED = {key: sorted([*value, WAVES]) if key.split(":")[0] in WAVE_ENTRIES else value
             for key, value in EXPECTED.items()}
-# Every deliver task binds the deliver skill's fixed-cost and lane references;
+# Every deliver task binds the deliver skill's fixed-cost, lane and level-change references;
 # QA and the code reviewer also bind their own skill's fixed-cost reference, and
 # the Requirement entry binds its fact-check reference.
 OWN_SKILL = {"deliver:qa-engineer": ["qa-verification/references/switch-item_qa_tier-change_tier_per_item.md"],

@@ -830,6 +830,30 @@
         "unit": "At least 3 runs with 2 or more parallel fix lanes.",
         "threshold": "No main checkout branch change and no lost lane work, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "level_change_map": {
+      "summary": "Whether an Item that rewrites the test of a scenario whose Test Plan level changed is trusted to keep the scenario's meaning, or records for each such scenario the assertions that prove its Then before and after the change, which freeze checks and the code reviewer reads where the check flags them.",
+      "issue": 440,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "The writer rewrites the setup and the assertions of a converted scenario, and Code Review and QA count coverage by scenario id, so a converted test that still names its target covers the scenario whatever it asserts. Today's behaviour and the baseline the map is measured against: in one measured project, four parallel lanes moved three stories' live suites to unit tests in 27 minutes, an audit after their merge found 35 weakened or vacuous expectations, and restoring them took 65 more minutes before the next full test run, which still failed."
+        },
+        {
+          "id": "assertion_map",
+          "tradeoffs": "For each scenario whose automation target the Item changes and whose Test Plan level differs from the revision its story integrated, the writer records in the Item's assertion map the assertion lines that prove its Then at the integration base and in the candidate, each with a kind and an expected value; freeze refuses a converted scenario without an entry, an entry whose then is not the Test Plan's Then, a side without an assertion and an assertion line its file does not hold, and flags an entry whose after assertions are all existence or count checks while a before one was not, or that drops an expected value, for the code reviewer to read instead of re-auditing every converted test. The writer maps every converted scenario, the kind and expected value are the writer's own claims, which only the code reviewer's reading of the flagged pairs and of the lines tests, and a vacuous test that keeps its assertion line and its expected value passes the check."
+        }
+      ],
+      "default": "off",
+      "value_data": {
+        "assertion_map": ["skill-content/deliver/data/assertion-kinds.json"]
+      },
+      "metric": "Per Item that converts scenarios: the converted scenarios, the pairs flagged, the flagged pairs the code reviewer confirmed as weakened, the weakened or vacuous expectations a later audit or review round found that the check did not flag, and the wall clock from the conversion to the first passing full test run.",
+      "promotion": {
+        "unit": "At least 3 Items run with assertion_map that convert scenarios to another level.",
+        "threshold": "No weakened or vacuous expectation found after the code review of a converted scenario that the check did not flag, and a median wall clock from the conversion to the first passing full test run under 30 minutes, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

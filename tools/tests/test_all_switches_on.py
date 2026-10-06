@@ -43,7 +43,8 @@ ENGINES = "deliver/references/switch-test_engines-partitioned.md"
 BUNDLE = "execution_planning-single_source_bundle.md"
 REVIEW = ("challenge-review/references/switch-mechanical_pass_tier-mechanical.md",
           "challenge-review/references/switch-review_loop-blocking_delta.md",
-          "challenge-review/references/switch-review_panels-lens_panel.md")
+          "challenge-review/references/switch-review_panels-lens_panel.md",
+          "challenge-review/references/switch-review_rounds-single_pass.md")
 PLANNING = ("execution-plan/references/switch-delivery_path-light_when_eligible.md",
             "execution-plan/references/switch-" + BUNDLE,
             "execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md")
@@ -57,9 +58,15 @@ BACKLOG = (BOUNDED,
            "backlog-plan/references/switch-remediation_bookkeeping-compiler.md")
 SPLIT = "product-planning/references/switch-story_size_budget-propose_split.md"
 COST = "product-planning/references/switch-test_cost_budget-flag_serial_rows.md"
+LEVELS = "product-planning/references/switch-test_levels-declared.md"
 # The switch references each shipped task binds, by entry and role. A task
 # binds a reference of a switch that owns one of its entry's flows, from a
 # skill it selects or, for owner_gates, from any skill.
+# The fixed-cost and lane switches of delivery-execution, in the deliver skill.
+ITEM_COST = "deliver/references/switch-item_cost_report-per_step.md"
+LANE_TABLE = "deliver/references/switch-lane_table-recorded.md"
+LANE_ISOLATION = "deliver/references/switch-lane_isolation-scratch_clone.md"
+DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE)
 EXPECTED = {
     **{f"{entry}:{role}": [] for entry, role in (
         ("business-analysis", "analysis-challenger"), ("business-analysis", "business-analyst"),
@@ -69,10 +76,10 @@ EXPECTED = {
         ("organize-docs", "business-analyst"), ("requirement", "business-analyst"),
         ("setup", "delivery-coordinator"), ("sketch", "ux-designer"),
         ("solution-design", "domain-expert"), ("solution-design", "solution-architect"))},
-    "backlog-plan:product-owner": [*BACKLOG, SPLIT, COST],
-    "backlog-plan:backlog-reviewer": sorted([*BACKLOG, SPLIT, COST, *REVIEW]),
-    "backlog-plan:business-analyst": [*BACKLOG, COST],
-    "backlog-plan:qa-engineer": [*BACKLOG, COST],
+    "backlog-plan:product-owner": [*BACKLOG, SPLIT, COST, LEVELS],
+    "backlog-plan:backlog-reviewer": sorted([*BACKLOG, SPLIT, COST, LEVELS, *REVIEW]),
+    "backlog-plan:business-analyst": [*BACKLOG, COST, LEVELS],
+    "backlog-plan:qa-engineer": [*BACKLOG, COST, LEVELS],
     **{f"configure:{role}": ["configure/references/switch-" + BUNDLE, OWNER_GATES]
        for role in ("delivery-coordinator", "devops-engineer", "qa-engineer")},
     **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES]
@@ -118,6 +125,17 @@ WAVE_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system
                 "execution-plan", "solution-design")
 EXPECTED = {key: sorted([*value, WAVES]) if key.split(":")[0] in WAVE_ENTRIES else value
             for key, value in EXPECTED.items()}
+# Every deliver task binds the deliver skill's fixed-cost and lane references;
+# QA and the code reviewer also bind their own skill's fixed-cost reference, and
+# the Requirement entry binds its fact-check reference.
+OWN_SKILL = {"deliver:qa-engineer": ["qa-verification/references/switch-item_qa_tier-change_tier_per_item.md"],
+             "deliver:code-reviewer": ["code-review/references/switch-item_review_scale-by_change_size.md"],
+             "requirement:business-analyst": [
+                 "requirement/references/switch-requirement_fact_check-pre_approval_reader.md"]}
+EXPECTED = {key: sorted([*value, *(DELIVER if key.startswith("deliver:") else ()),
+                         *OWN_SKILL.get(key, ())])
+            if key.startswith("deliver:") or key in OWN_SKILL else value
+            for key, value in EXPECTED.items()}
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")
 
@@ -153,6 +171,8 @@ class AllSwitchesOnTests(unittest.TestCase):
                     "max_delta_share_percent", "--value", "50")
         self.policy("set", "--switch", "test_cost_budget", "--parameter", "serial_rows",
                     "--value", str(SERIAL_ROWS))
+        self.policy("set", "--switch", "item_review_scale", "--parameter", "changed_lines",
+                    "--value", "200")
         self.policy("approve")
         self.commit("Approve a Process Policy with every switch on")
 
@@ -204,13 +224,19 @@ class AllSwitchesOnTests(unittest.TestCase):
         self.assertEqual((code, result["errors"]), (0, []), result)
         self.assertEqual(result["story_size"]["limits"], LIMITS)
         self.assertEqual(result["test_cost"]["limits"], {"serial_rows": SERIAL_ROWS})
+        # The fixture's scenarios state no level, which is listed and never an error.
+        self.assertEqual(sorted(result["test_levels"]), ["switch", "value", "without_level",
+                                                         "without_level_reason"])
+        self.assertEqual(len(result["test_levels"]["without_level"]), 1)
         manifest = backlog_review_inputs.manifest(self.docs, epic="EP-001")
         # The manifest names the panel and the bounded scope it was derived
         # under and carries the panel's compiler facts and the story measures.
         self.assertEqual((manifest["review_panels"], manifest["review_manifest_scope"]),
                          ("lens_panel", "bounded"))
         self.assertEqual(sorted(manifest["check"]), ["counts", "relation_audit", "review_note",
-                                                     "source_errors", "stories", "story_size", "test_cost"])
+                                                     "source_errors", "stories", "story_size", "test_cost",
+                                                     "test_levels"])
+        self.assertEqual(manifest["check"]["test_levels"], result["test_levels"])
         self.assertEqual(backlog_review_inputs.manifest(
             self.docs, epic="EP-001", expected_hash=manifest["source_hash"]), manifest)
 

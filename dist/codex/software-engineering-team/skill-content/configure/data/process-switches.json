@@ -198,6 +198,32 @@
         "threshold": "Median review-loop minutes at most 50% of the matching baseline, zero valid critical or major findings found later in the same document and traced to a skipped minor round or a calibration downgrade, the shadow judge confirming every downgrade, and an owner role and revisit trigger on every follow-up, with every shared quality guard holding and the owner's approval."
       }
     },
+    "review_rounds": {
+      "summary": "How many readers and rounds a backlog, Solution Design, Design System or Operation contract review runs, and whether its severities are calibrated: the step's own readers and loop, or one reader, no calibration reader, only a critical finding blocking and at most one re-review of the changed text.",
+      "flows": [
+        "backlog-planning",
+        "design-system",
+        "operation",
+        "solution-design"
+      ],
+      "values": [
+        {
+          "id": "current",
+          "tradeoffs": "Every review runs the readers switch `review_panels` selects and the loop switch `review_loop` selects, the baseline the other value is measured against."
+        },
+        {
+          "id": "single_pass",
+          "tradeoffs": "One reader of the step's reader role, never a lens panel, and no calibration reader, so the reader's severity stands as returned. Only a critical finding starts a writer pass and one re-review, which reads only the open critical findings, the changed text and its dependency context; minor and major findings become follow-ups with an owner role and a revisit trigger, and a critical finding still open after that one re-review goes to the owner's approval gate. A revision's first review reads only its delta. The shortest review loop, while an overrated major is never downgraded and an underrated critical ships as a follow-up, a major that would have changed behavior reaches the approved text, and a delta review can miss a knock-on effect outside the dependency context it is given."
+        }
+      ],
+      "default": "current",
+      "metric": "Per reviewed document against its matching baseline, a `current` run under the same `review_loop` value: review minutes from review start to final verdict, fixes included; readers run; rounds; and major findings accepted as follow-ups, with each one's later outcome.",
+      "promotion": {
+        "unit": "At least 5 reviewed documents across at least 2 flows: a contract revision, an epic or root review, or a Solution or Design System review.",
+        "threshold": "Median review minutes at most 40% of the matching baseline, zero valid critical findings found later in the same document and traced to an accepted major or a skipped round, and an owner role and revisit trigger on every follow-up, with every shared quality guard holding and the owner's approval."
+      },
+      "issue": 436
+    },
     "code_review_panel": {
       "summary": "Whether Delivery code review reads a frozen candidate with the official code reviewer alone, or also with a lens panel beside it whose calibrated blocking findings join the official result.",
       "issue": 347,
@@ -297,6 +323,28 @@
       "promotion": {
         "unit": "At least 3 backlog revisions run with flag_serial_rows and 3 Deliveries that contain stories planned under it.",
         "threshold": "No single test runs longer than a quarter of QA's final gate in those Deliveries, and the gate's median wall clock is at most that of Deliveries planned at off for a similar suite, with every shared quality guard holding and the owner's approval. A promotion keeps off as the default, since only a value the owner chooses takes parameters, and ships package_limits for flag_serial_rows."
+      }
+    },
+    "test_levels": {
+      "summary": "Whether backlog planning has each automation-required Test Plan scenario declare its level, unit, fixture or live, so QA proves a decision rule in-process and keeps live scenarios for engine or operating-system behaviour, and the backlog reviewer questions every live scenario.",
+      "issue": 433,
+      "flows": ["backlog-planning"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "No planning step asks at what level a scenario has to run, so a Test Plan tends to prove every acceptance criterion through its most expensive path, a live scenario, even when the assertion is a pure decision; test_cost_budget does not catch it, since a live table under its limit is never listed and sharding a flagged table keeps every row live, and the compiler still validates level where a scenario states it. Today's behaviour and the baseline the declaration is measured against: in one measured project, a final gate ran 166 live cases in 227 minutes, about 82 seconds per case, and a later story's Test Plan asked for 41 scenarios, most of them live, plus one table scenario with 171 live cluster setups, although about 40 in-process unit tests that ran in about a second already proved the decision rules behind most of them."
+        },
+        {
+          "id": "declared",
+          "tradeoffs": "Every automation-required scenario states its level, and a fixture or live one also states what has to be real for its assertion to mean something. QA proves a decision rule at unit level over every combination of its inputs, adds one fixture scenario per entry point and decision family, and keeps live for engine or operating-system behaviour; backlog_compile.py check --json and the review manifests list each scenario that states no level or no reason, the test_cost_budget serial-rows list names each flagged scenario's level, and the backlog reviewer asks of every live scenario whether its assertion is a decision. Advisory only: it never fails a check or blocks a review, and only a stated level outside the three values fails check, as at every value. QA states two more optional fields per scenario, a declared level can go stale as the code moves, and a decision proven at unit level rests on the one fixture scenario per entry point to show that the real entry point consults the rule."
+        }
+      ],
+      "default": "off",
+      "metric": "Per backlog revision run with declared: the scenarios listed without a level or a reason, the live scenarios moved to a cheaper level and the ones kept live with a reason; per Delivery: the live cases and the wall clock of QA's final gate, compared with Deliveries of stories planned at off.",
+      "promotion": {
+        "unit": "At least 3 backlog revisions run with declared and 3 Deliveries that contain stories planned under it.",
+        "threshold": "The live share of the automated cases in those Deliveries' final gates and the gate's median wall clock are lower than in Deliveries planned at off for a similar suite, no acceptance criterion loses its proving scenario, and no defect found after a passing gate sits in a decision that a unit scenario proved in place of a live one, with every shared quality guard holding and the owner's approval."
       }
     },
     "pre_handoff_regression": {
@@ -642,6 +690,145 @@
       "promotion": {
         "unit": "At least 3 Deliveries run with refuse_missing_groups, each under a Verification Contract that declares its test groups.",
         "threshold": "Every first QA gate run reaches every declared group, and no later round raises a blocking finding in a group the first round never ran, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "item_qa_tier": {
+      "summary": "Whether each Item's QA gate runs the project's full acceptance command, or the change-level tier for the Item's change while the Delivery runs the integration tier once over the integrated result before its pull request.",
+      "issue": 432,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "full_per_item",
+          "tradeoffs": "Every Item's QA gate runs the full approved acceptance command, whatever the Item's size. Today's behaviour and the baseline the tiers are measured against: in one measured project, one Item's final gate ran 166 live cases in 227 minutes, and a small Item that changes one component pays that same gate."
+        },
+        {
+          "id": "change_tier_per_item",
+          "tradeoffs": "Where the approved Verification Contract declares a change-level tier and an integration tier, an Item's QA gate runs the change-level tier for that Item's change, and the Delivery runs the integration tier once over the integrated result before its pull request, so the full acceptance command runs once per Delivery instead of once per Item. A small Item's gate shrinks to its own change, while a defect between Items surfaces only at the Delivery's integration run, after the Items are integrated, and a contract without both tiers keeps the full gate per Item."
+        }
+      ],
+      "default": "full_per_item",
+      "metric": "Per Item: the wall clock of QA's final gate and the cases it ran; per Delivery: the wall clock of the integration-tier run and every failure it found that no Item's change-level run had found.",
+      "promotion": {
+        "unit": "At least 3 Deliveries of 2 or more Items run with change_tier_per_item.",
+        "threshold": "A median Item QA gate at most half of the full_per_item gates of a similar suite, and no defect that escaped the integration-tier run, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "item_review_scale": {
+      "summary": "Whether every Item's code review runs the same reader set, or the official reviewer alone reads an Item whose change is under the owner's size limits and the lens panel joins above them.",
+      "issue": 432,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "fixed",
+          "tradeoffs": "Every Item's code review runs the reader set switch code_review_panel selects, whatever the change's size. Today's behaviour and the baseline the scaling is measured against."
+        },
+        {
+          "id": "by_change_size",
+          "tradeoffs": "The coordinator measures the Item's frozen change with the measures the package declares; when every measure with an owner-set limit is at or under its limit, the official code reviewer reads alone, and above any limit the reader set code_review_panel selects reads as today. Smaller Items skip the panel's dispatch and merge, while a small change with a subtle defect loses the panel's second reading, and with no limit set every Item keeps today's reader set."
+        }
+      ],
+      "default": "fixed",
+      "parameters": {
+        "summary": "Owner-set limit per change size measure. The package sets no limit: a measure without a limit never makes a change small.",
+        "values": ["by_change_size"],
+        "declared_by": {
+          "path": "skill-content/code-review/data/change-size-measures.json",
+          "key": "measures"
+        },
+        "type": "positive_integer",
+        "min_count": 1
+      },
+      "value_data": {
+        "by_change_size": ["skill-content/code-review/data/change-size-measures.json"]
+      },
+      "metric": "Per Item: its change size measures, the reader set that read it, the code review wall clock, and every valid critical or major finding later found in an Item the official reviewer read alone.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with at least 5 Items read alone.",
+        "threshold": "Code review wall clock of the Items read alone at most 60% of panel-read Items of similar size, and no valid critical or major finding escaping an Item read alone, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "item_cost_report": {
+      "summary": "Whether the Delivery Review reports the Delivery as a whole, or also each Item's fixed cost step by step: code review, QA gate, evidence records, integration and architecture delta.",
+      "issue": 432,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "The Delivery Review carries no per-Item cost table. Today's behaviour; the fixed cost of an Item is reconstructed afterwards from transcripts, if at all."
+        },
+        {
+          "id": "per_step",
+          "tradeoffs": "The coordinator adds a Fixed cost table to the Delivery Review: one row per Item with the wall clock of its architecture delta, implementation, code review rounds, QA rounds, evidence records and integration, each read from the timestamps the Delivery records already hold. The defaults of item_qa_tier and item_review_scale can then be decided on data from several Deliveries, while the review grows by one table and a missing timestamp is reported as missing, never estimated."
+        }
+      ],
+      "default": "off",
+      "metric": "Per Delivery: the share of Item rows with every step measured, and the fixed-cost share of each Item's wall clock.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with per_step.",
+        "threshold": "Every Item row carries every step it ran, measured rather than estimated, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "requirement_fact_check": {
+      "summary": "Whether a technical Requirement reaches its owner approval question after the compiler check alone, or after one read-only reader also checks its outcome sentences against the contracts, scripts and tests they cite.",
+      "issue": 422,
+      "flows": ["requirement"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "Only the compiler checks the Requirement before the owner approves it; the first independent read of its outcomes happens in Backlog Planning. Today's behaviour and the baseline the reader is measured against: in one measured project, the QA and Product Owner passes found four factual errors in one approved technical Requirement, which went back to draft and took a second owner approval."
+        },
+        {
+          "id": "pre_approval_reader",
+          "tradeoffs": "Before the approval question of a Requirement whose outcomes name contracts, scripts, files or test ids, one read-only reader on the low tier reads those outcome sentences against the files they cite at the current checkout and returns contradictions only; the coordinator fixes each in the draft and recompiles before the owner sees it. One reader step of a few minutes per technical Requirement, while the reader checks only what the outcomes cite, never intent, and a Requirement that cites nothing skips it."
+        }
+      ],
+      "default": "off",
+      "metric": "Per technical Requirement: the contradictions the reader found, the Requirement revisions Backlog Planning forced, and the owner gates before the backlog handoff.",
+      "promotion": {
+        "unit": "At least 5 technical Requirements across at least 2 backlog revisions.",
+        "threshold": "Zero Requirement revisions forced during Backlog Planning with no more than one added reader step per Requirement, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "lane_table": {
+      "summary": "Whether the coordinator tracks parallel lanes in its own context only, or records each lane's start and finish in a lane table under the project-local runtime directory that a restarted session reads before it launches anything.",
+      "issue": 332,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "Lanes live only in the coordinator's context. Today's behaviour; a session restarted after a crash or a context reset can relaunch a lane that had already finished, and a lane's result is found again only by reading its branch or files."
+        },
+        {
+          "id": "recorded",
+          "tradeoffs": "lane_table.py start and finish record each lane's id, role, branch, working directory, state and result note in .agentrof/agent-marketplace/.runtime/lanes/<run>.json, and pending lists the lanes a restarted session still has to launch or resume; start refuses a lane already finished. A restart reads the table instead of guessing, while the coordinator makes two more calls per lane and the table is scratch, never a durable record."
+        }
+      ],
+      "default": "off",
+      "metric": "Per restarted session: the lanes it relaunched that had already finished, and the minutes from restart to the first lane it launched.",
+      "promotion": {
+        "unit": "At least 3 restarted sessions with parallel lanes.",
+        "threshold": "No finished lane relaunched after a restart, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "lane_isolation": {
+      "summary": "Whether a delegated fix lane may work in the main checkout, or each parallel fix lane works in its own scratch clone and no delegated lane switches the main checkout's branch.",
+      "issue": 332,
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "shared_checkout",
+          "tradeoffs": "A delegated lane that fixes a defect on a branch of its own may work in the main checkout. Today's behaviour; two lanes that switch branches there undo each other's working tree, and the coordinator's own branch can change under it."
+        },
+        {
+          "id": "scratch_clone",
+          "tradeoffs": "Each parallel fix lane clones the repository into its own directory under the session scratch and works on its branch there; lane_table.py start refuses a lane whose working directory is the main checkout or inside it, and lane_table.py check refuses when the main checkout's branch differs from the one recorded when the run began. Lanes never collide on one working tree, while each clone costs a fetch and its disk, and a lane must push its branch before its clone is removed."
+        }
+      ],
+      "default": "shared_checkout",
+      "metric": "Per run with parallel fix lanes: the lanes started, the main checkout branch changes check found, and the clone time per lane.",
+      "promotion": {
+        "unit": "At least 3 runs with 2 or more parallel fix lanes.",
+        "threshold": "No main checkout branch change and no lost lane work, with every shared quality guard holding and the owner's approval."
       }
     }
   }

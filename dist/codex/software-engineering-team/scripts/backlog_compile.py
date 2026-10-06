@@ -145,6 +145,10 @@ GENERIC_REVIEW_RE = re.compile(
 )
 ACCEPTED_MINOR_FINDINGS = "Accepted Minor Findings"
 ACCEPTED_MINOR_COLUMNS = ("finding", "owner_role", "reason", "revisit_trigger")
+# A Requirement-mode root review names the Stories that cover each Requirement;
+# requirement_compile.requirement_incorporated reads these rows.
+REQUIREMENT_COVERAGE = "Requirement Coverage"
+REQUIREMENT_COVERAGE_COLUMNS = ("requirement", "story_ids", "disposition")
 STORY_SIZE_SWITCH = "story_size_budget"
 STORY_SIZE_VALUE = "propose_split"
 STORY_SIZE_MEASURES_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
@@ -160,6 +164,13 @@ TEST_COST_LIMITS_PATH = (Path(__file__).resolve().parent.parent / "skill-content
                          / "product-planning" / "data" / "test-cost-limits.json")
 ROW_SPLITS = ("serial", "sharded", "grouped")
 ROWS_RE = re.compile(r"^[1-9][0-9]*$")
+# A Test Plan scenario may state the level its automation target runs at; at
+# test_levels declared the compiler lists each automation-required scenario
+# that states none and each fixture or live one that states no reason.
+TEST_LEVELS_SWITCH = "test_levels"
+TEST_LEVELS_VALUE = "declared"
+LEVELS = ("unit", "fixture", "live")
+REASONED_LEVELS = ("fixture", "live")
 SIZE_EXCEPTIONS = "Size Exceptions"
 SIZE_EXCEPTION_COLUMNS = ("story", "measure", "reason")
 CHECKLIST_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\](?:\s|$)")
@@ -1277,8 +1288,12 @@ def accepted_minor_findings(docs: Path, body: str, path: str,
 
 # Switch review_loop at blocking_delta keeps a review record: the findings a
 # review returned with their ids and severities, the rulings of its calibration
-# reader and the finding id of each accepted minor finding.
+# reader and the finding id of each accepted minor finding. Switch
+# review_rounds at single_pass keeps the same record without calibration: the
+# reader's severity stands, and a major finding is accepted as a follow-up.
 REVIEW_LOOP, RECORDING_LOOP = "review_loop", "blocking_delta"
+REVIEW_ROUNDS, SINGLE_PASS_LOOP = "review_rounds", "single_pass"
+RECORDING_LOOPS = (RECORDING_LOOP, SINGLE_PASS_LOOP)
 RETURNED_FINDINGS = "Returned Findings"
 RETURNED_FINDING_COLUMNS = ("finding", "severity", "description")
 SEVERITY_CALIBRATION = "Severity Calibration"
@@ -1291,14 +1306,18 @@ CLAIM_SEVERITIES = ("critical", "major")
 
 
 def review_loop_value(docs: Path) -> str:
-    """The review_loop value of the project's approved Process Policy.
+    """The review loop a document review runs under in the approved Process Policy.
 
-    Without a policy it is the package default. A draft or invalid policy
-    raises ValueError: it is refused, never read.
+    It is ``single_pass`` when switch review_rounds selects it, which governs
+    the document reviews over review_loop, and the review_loop value
+    otherwise. Without a policy it is the package default. A draft or invalid
+    policy raises ValueError: it is refused, never read.
     """
     import process_policy
 
     values, _snapshot = process_policy.effective_values(docs)
+    if values[REVIEW_ROUNDS]["value"] == SINGLE_PASS_LOOP:
+        return SINGLE_PASS_LOOP
     return values[REVIEW_LOOP]["value"]
 
 
@@ -1337,12 +1356,13 @@ def returned_findings(docs: Path, body: str, path: str) -> tuple[dict[str, str],
 
 
 def severity_calibration(docs: Path, body: str, path: str,
-                         returned: dict[str, str] | None) -> tuple[dict[str, str], list[str]]:
+                         returned: dict[str, str] | None,
+                         *, required: bool = True) -> tuple[dict[str, str], list[str]]:
     """Read a review record's Severity Calibration: each ruled finding id with its ruling.
 
     With ``returned``, the record's Returned Findings, every row rules a
     finding returned at its claimed severity, and every critical or major
-    returned finding has exactly one row.
+    returned finding has exactly one row unless ``required`` is false.
     """
     rows: list[dict[str, str]] = []
     errors: list[str] = []
@@ -1373,25 +1393,32 @@ def severity_calibration(docs: Path, body: str, path: str,
                               f" the severity {identifier} was returned at")
         if known and identifier not in ruled:
             ruled[identifier] = ruling
-    for identifier, severity in sorted((returned or {}).items()):
+    for identifier, severity in sorted((returned or {}).items() if required else ()):
         if severity in CLAIM_SEVERITIES and identifier not in ruled:
             errors.append(f"{path} returned {severity} finding {identifier} has no Severity Calibration row")
     return ruled, errors
 
 
-def review_record_findings(docs: Path, body: str, path: str, *, approved: bool) -> list[str]:
-    """Validate the review record that the blocking_delta loop keeps in a document.
+def review_record_findings(docs: Path, body: str, path: str, *, approved: bool,
+                           loop: str = RECORDING_LOOP) -> list[str]:
+    """Validate the review record that the blocking_delta or single_pass loop keeps.
 
-    A critical or major finding never enters Accepted Minor Findings: each row
-    names the id of a finding the review returned as minor or its calibration
-    lowered to minor. An approved document without Returned Findings was
-    approved before its review kept a record, so it stays as it was.
+    At blocking_delta a critical or major finding never enters Accepted Minor
+    Findings: each row names the id of a finding the review returned as minor
+    or its calibration lowered to minor. At single_pass no calibration runs,
+    and only a critical finding stays out of the table. An approved document
+    without Returned Findings was approved before its review kept a record, so
+    it stays as it was.
     """
     present = headings(body)
     if approved and RETURNED_FINDINGS not in present:
         return []
     returned, errors = returned_findings(docs, body, path)
-    ruled, calibration_errors = severity_calibration(docs, body, path, returned)
+    single_pass = loop == SINGLE_PASS_LOOP
+    ruled, calibration_errors = severity_calibration(docs, body, path, returned,
+                                                     required=not single_pass)
+    accepted_severities = ("minor", "major") if single_pass else ("minor",)
+    only = "a minor or major finding" if single_pass else "a minor finding"
     errors.extend(calibration_errors)
     if ACCEPTED_MINOR_FINDINGS not in present:
         return errors
@@ -1411,12 +1438,12 @@ def review_record_findings(docs: Path, body: str, path: str, *, approved: bool) 
         accepted.add(identifier)
         if identifier not in returned:
             errors.append(f"{label} names {identifier}, which Returned Findings does not list")
-        elif identifier in ruled and ruled[identifier] != "minor":
+        elif identifier in ruled and ruled[identifier] not in accepted_severities:
             errors.append(f"{label} names {identifier}, which calibration ruled {ruled[identifier]};"
-                          " only a minor finding is accepted")
-        elif identifier not in ruled and returned[identifier] != "minor":
+                          f" only {only} is accepted")
+        elif identifier not in ruled and returned[identifier] not in accepted_severities:
             errors.append(f"{label} names {identifier}, which the review returned as"
-                          f" {returned[identifier]}; only a minor finding is accepted")
+                          f" {returned[identifier]}; only {only} is accepted")
     return errors
 
 
@@ -1426,7 +1453,7 @@ def review_loop_record(docs: Path, body: str, path: str, props: dict) -> list[st
     A note without a record section never reads the Process Policy, nor does
     an approved note without Returned Findings, which was approved before its
     review kept a record and stays as it was. At any value but blocking_delta
-    a section of a record's name is authored text.
+    or single_pass a section of a record's name is authored text.
     """
     present = headings(body)
     if not set(REVIEW_RECORD_SECTIONS) & present:
@@ -1438,9 +1465,9 @@ def review_loop_record(docs: Path, body: str, path: str, props: dict) -> list[st
         loop = session_read(("review_loop", docs.resolve()), lambda: review_loop_value(docs))
     except ValueError as exc:
         return [f"{path} needs the review_loop value of the Process Policy: {exc}"]
-    if loop != RECORDING_LOOP:
+    if loop not in RECORDING_LOOPS:
         return []
-    return review_record_findings(docs, body, path, approved=approved)
+    return review_record_findings(docs, body, path, approved=approved, loop=loop)
 
 
 # Switch remediation_bookkeeping at compiler lets one compiler command write
@@ -1810,12 +1837,30 @@ def test_cost_budget(docs: Path) -> dict | None:
     return {"value": budget["value"], "limits": dict(sorted(budget.get("parameters", {}).items()))}
 
 
-def serial_row_scenarios(stories: list[dict], limit: int | None) -> list[dict]:
+def test_levels(docs: Path) -> dict | None:
+    """Return the test_levels value in force, or None while the switch is off.
+
+    Without a Process Policy, or at the switch's default, nothing is read. A
+    draft or invalid policy raises ValueError: it is refused, never read.
+    """
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    declared = values.get(TEST_LEVELS_SWITCH)
+    if declared is None or declared["value"] != TEST_LEVELS_VALUE:
+        return None
+    return {"value": declared["value"]}
+
+
+def serial_row_scenarios(stories: list[dict], limit: int | None,
+                         levels: bool = False) -> list[dict]:
     """List each automation-required scenario that runs more than *limit* rows serially.
 
     A scenario runs them serially when its row_split is serial or absent. A
     scenario without a valid rows count, one at or below the limit, or one
     whose rows are sharded or grouped is never listed; without a limit none is.
+    With *levels*, under test_levels declared, each entry also names the level
+    its scenario states, none when it states none.
     """
     flagged = []
     for story in sorted(stories, key=lambda item: item["id"]):
@@ -1825,16 +1870,50 @@ def serial_row_scenarios(stories: list[dict], limit: int | None) -> list[dict]:
             if (limit is None or fields.get("automation", "").lower() != "required"
                     or not ROWS_RE.fullmatch(rows) or int(rows) <= limit or split not in (None, "serial")):
                 continue
-            flagged.append({"story": story["id"], "scenario": scenario_id,
-                            "automation_target": fields.get("automation_target", "").strip(),
-                            "rows": int(rows), "row_split": split})
+            entry = {"story": story["id"], "scenario": scenario_id,
+                     "automation_target": fields.get("automation_target", "").strip(),
+                     "rows": int(rows), "row_split": split}
+            if levels:
+                entry["level"] = fields.get("level")
+            flagged.append(entry)
     return flagged
 
 
-def test_cost_block(budget: dict, stories: list[dict]) -> dict:
+def test_cost_block(budget: dict, stories: list[dict], levels: bool = False) -> dict:
     """The serial-row flags of *stories*, as check, review manifests and Delivery proposals show them."""
     return {"switch": TEST_COST_SWITCH, "value": budget["value"], "limits": budget["limits"],
-            "serial_row_scenarios": serial_row_scenarios(stories, budget["limits"].get(SERIAL_ROWS))}
+            "serial_row_scenarios": serial_row_scenarios(
+                stories, budget["limits"].get(SERIAL_ROWS), levels)}
+
+
+def level_gap_scenarios(stories: list[dict]) -> dict[str, list[dict]]:
+    """List the scenarios that state no level and the ones that state no reason for it.
+
+    ``without_level`` holds each automation-required scenario that states no
+    level; ``without_level_reason`` each automation-required fixture or live
+    scenario whose level_reason is absent or blank. A manual scenario is never
+    listed, and nor is one whose stated level is outside the three values,
+    which check refuses on its own.
+    """
+    gaps: dict[str, list[dict]] = {"without_level": [], "without_level_reason": []}
+    for story in sorted(stories, key=lambda item: item["id"]):
+        for scenario_id, block in scenario_blocks(story["test_body"]):
+            fields, _duplicates = scenario_fields(block)
+            if fields.get("automation", "").lower() != "required":
+                continue
+            level = fields.get("level")
+            entry = {"story": story["id"], "scenario": scenario_id,
+                     "automation_target": fields.get("automation_target", "").strip()}
+            if level is None:
+                gaps["without_level"].append(entry)
+            elif level in REASONED_LEVELS and not fields.get("level_reason", "").strip():
+                gaps["without_level_reason"].append({**entry, "level": level})
+    return gaps
+
+
+def test_levels_block(levels: dict, stories: list[dict]) -> dict:
+    """The level gaps of *stories*, as check and the review manifests show them."""
+    return {"switch": TEST_LEVELS_SWITCH, "value": levels["value"], **level_gap_scenarios(stories)}
 
 
 def size_exception_rows(docs: Path, epic: dict, review: dict) -> tuple[set[tuple[str, str]],
@@ -2162,6 +2241,8 @@ def scenario_findings(docs: Path, body: str, story_id: str,
             errors.append(f"{path} scenario {scenario_id} rows must be a positive integer")
         if "row_split" in fields and fields["row_split"] not in ROW_SPLITS:
             errors.append(f"{path} scenario {scenario_id} row_split must be one of {', '.join(ROW_SPLITS)}")
+        if "level" in fields and fields["level"] not in LEVELS:
+            errors.append(f"{path} scenario {scenario_id} level must be one of {', '.join(LEVELS)}")
         target = fields.get("automation_target", "").strip()
         if target and (target.startswith("/") or ".." in Path(target).parts
                        or any(char.isspace() for char in target)):
@@ -2967,6 +3048,38 @@ def approval_readiness_findings(record: dict) -> list[str]:
     return sorted(set(errors))
 
 
+def requirement_coverage_findings(record: dict) -> list[str]:
+    """Require the row that reports this approval's Requirement as incorporated.
+
+    requirement_compile.requirement_incorporated reads the latest approved root
+    review: the Requirement counts as incorporated only when a row there names
+    every Story that implements it. With no such Story it cannot count, and no
+    row is required.
+    """
+    backlog = record.get("backlog") or {}
+    requirement = str(backlog.get("props", {}).get("requirement_ref", ""))
+    review = latest(record["backlog_reviews"])
+    if backlog.get("planning_mode") != "requirement" or review is None:
+        return []
+    implementing = sorted(story["id"] for story in record["stories"]
+                          if requirement_compile.implements_requirement(story["implements"], requirement))
+    if not implementing:
+        return []
+    path = review["path"]
+    if REQUIREMENT_COVERAGE in headings(review["body"]):
+        rows, errors = structured_table(section(review["body"], REQUIREMENT_COVERAGE),
+                                        REQUIREMENT_COVERAGE_COLUMNS, path, REQUIREMENT_COVERAGE)
+    else:
+        rows, errors = [], [f"{path} is missing required section: {REQUIREMENT_COVERAGE}"]
+    matching = [row for row in rows if row["requirement"] == requirement]
+    if len(matching) > 1:
+        errors.append(f"{path} {REQUIREMENT_COVERAGE} repeats {requirement}")
+    elif not matching or sorted(filter(None, re.split(r"[\s,]+", matching[0]["story_ids"]))) != implementing:
+        errors.append(f"{path} {REQUIREMENT_COVERAGE} needs one {requirement} row whose story_ids"
+                      f" are exactly the Stories that implement it: {', '.join(implementing)}")
+    return errors
+
+
 def approval_stamp_findings(path: Path, docs: Path) -> list[str]:
     props, _body = parse_front_matter(path)
     rel = path.relative_to(docs).as_posix()
@@ -3604,6 +3717,16 @@ def render(record: dict, docs: Path) -> None:
         write_generated(out / "input-package-coverage.md", ("\n".join(rows) + "\n").encode("utf-8"))
 
 
+def backlog_review_sections(planning_mode: str) -> list[str]:
+    """Return the sections a root review round of this planning mode is written with."""
+    sections = list(backlog_contract()["required_backlog_review_sections"])
+    if planning_mode == "requirement":
+        position = (sections.index("Deferred Criteria") + 1
+                    if "Deferred Criteria" in sections else len(sections))
+        sections.insert(position, REQUIREMENT_COVERAGE)
+    return sections
+
+
 def review_body(title: str, sections: list[str]) -> str:
     lines = [f"# {title}", ""]
     for name in sections:
@@ -3612,6 +3735,11 @@ def review_body(title: str, sections: list[str]) -> str:
             lines.extend([
                 "| criterion_ref | owner_role | reason | revisit_trigger |",
                 "|---|---|---|---|",
+            ])
+        elif name == REQUIREMENT_COVERAGE:
+            lines.extend([
+                "| " + " | ".join(REQUIREMENT_COVERAGE_COLUMNS) + " |",
+                "|---|---|---|",
             ])
         else:
             lines.extend([
@@ -3631,6 +3759,13 @@ def revision_review_body(previous: dict, title: str, backlog_title: str, revisio
     deferred = "## Deferred Criteria\n\n" + raw_section(previous["body"], "Deferred Criteria").strip() + "\n\n"
     body = re.sub(r"^## Deferred Criteria\n.*?(?=^## |\Z)", lambda _match: deferred,
                   body, flags=re.MULTILINE | re.DOTALL)
+    # Earlier Requirements stay incorporated only while the latest approved
+    # round keeps their rows. A last section also holds the navigation.
+    coverage = raw_section(previous["body"], REQUIREMENT_COVERAGE).split(NAV_MARKER, 1)[0].strip()
+    if coverage and REQUIREMENT_COVERAGE in headings(body):
+        body = re.sub(rf"^## {REQUIREMENT_COVERAGE}\n.*?(?=^## |\Z)",
+                      lambda _match: f"## {REQUIREMENT_COVERAGE}\n\n{coverage}\n\n",
+                      body, flags=re.MULTILINE | re.DOTALL)
     context = (f"{root_link} is draft revision {revision}; this round has not evaluated its current inputs. "
                f"{previous_link} retains the preceding approval's evidence.\n\n")
     body = body.replace(f"# {title}\n\n", f"# {title}\n\n" + context, 1)
@@ -3748,8 +3883,7 @@ def init(args) -> int:
              "derives_from": [f"[[backlog/backlog|{backlog_title}]]"],
              "tags": ["doc/backlog-review", "status/draft"],
              "aliases": ["BACKLOG-REVIEW-001"], **round_pin(docs)},
-            review_body(review_title,
-                        backlog_contract()["required_backlog_review_sections"])),
+            review_body(review_title, backlog_review_sections(planning_mode))),
     }
     for path, text in files.items():
         if not path.exists():
@@ -3833,12 +3967,16 @@ def check(args) -> int:
             errors.extend(size_exception_findings(record, docs))
     except (ValueError, RuntimeError) as exc:
         errors.append(str(exc))
-    # A scenario over the serial-row limit is advisory too; at the default nothing is read.
-    test_cost = None
+    # A scenario over the serial-row limit is advisory too, and so is one that
+    # states no level or no reason for it under test_levels; at the default
+    # nothing is read. Only a stated level outside the three values is an error.
+    test_cost = test_level_gaps = None
     try:
-        cost = test_cost_budget(docs)
+        cost, levels = test_cost_budget(docs), test_levels(docs)
         if cost is not None:
-            test_cost = test_cost_block(cost, record["stories"])
+            test_cost = test_cost_block(cost, record["stories"], levels is not None)
+        if levels is not None:
+            test_level_gaps = test_levels_block(levels, record["stories"])
     except (ValueError, RuntimeError) as exc:
         errors.append(str(exc))
     errors = sorted(set(errors))
@@ -3854,6 +3992,8 @@ def check(args) -> int:
         result["story_size"] = story_size
     if test_cost is not None:
         result["test_cost"] = test_cost
+    if test_level_gaps is not None:
+        result["test_levels"] = test_level_gaps
     if pinned_reviews:
         result["pinned_reviews"] = pinned_reviews
     # Only a backlog that has one gains the key, so every other output is unchanged.
@@ -4138,6 +4278,8 @@ def approval_preflight(docs: Path, record: dict,
     """
     findings = approval_readiness_findings(record)
     already_approved = (record.get("backlog") or {}).get("props", {}).get("status") == "approved"
+    if not already_approved:
+        findings.extend(requirement_coverage_findings(record))
     preserved, pin = {}, {}
     if not collect_errors and not findings:
         if already_approved:
@@ -4389,7 +4531,8 @@ def begin_revision(args) -> int:
     ] + ["status/draft"]
     # The new round records the Process Policy in force as it is written.
     review_props.update(round_pin(docs))
-    review_body_text = revision_review_body(latest_review, review_title, backlog_title, revision)
+    review_body_text = revision_review_body(latest_review, review_title, backlog_title, revision,
+                                            backlog_review_sections(args.planning_mode))
     review_path = docs / "backlog" / "reviews" / f"round-{next_round}-backlog-review.md"
     # Navigation may touch every package note, home and the map. Snapshot only
     # those owned paths so rollback cannot erase unrelated concurrent work.
@@ -4542,7 +4685,8 @@ def stub_review(docs: Path, slug: str | None = None) -> int:
                      **pin)
         body = revision_review_body(previous, title, str(root_props["title"]),
                                     int(root_props["revision"]),
-                                    backlog_contract()[f"required_{'epic' if epic else 'backlog'}_review_sections"])
+                                    backlog_contract()["required_epic_review_sections"] if epic
+                                    else backlog_review_sections(record["backlog"]["planning_mode"]))
         body = body.rstrip() + "\n\n" + NAV_MARKER + "\n- [[maps/backlog|Backlog map]]\n- " + parent_link + "\n"
         review_path = docs / Path(parent["path"]).parent / "reviews" / f"round-{number}-{kind}.md"
         with review_path.open("xb") as stream:

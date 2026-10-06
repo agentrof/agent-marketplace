@@ -55,7 +55,8 @@ class BacklogAbsenceHistoryTests(unittest.TestCase):
         props.update(verdict="approved", related_to=["[[backlog/epics/jobs/epic|EP-001]]"],
                      dependency_refs=[])
         root_review.write_text(compiler.front_matter(props, backlog_fixture._complete_review_body(
-            props["title"], compiler.backlog_contract()["required_backlog_review_sections"])))
+            props["title"], compiler.backlog_review_sections("requirement"),
+            ("| REQ-001 | JOB-01 | covered |",))))
         epic_review = self.docs / "backlog/epics/jobs/reviews/round-1-epic-review.md"
         props, _ = compiler.parse_front_matter(epic_review)
         props.update(verdict="approved", verifies=[

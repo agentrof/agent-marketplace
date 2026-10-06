@@ -77,6 +77,18 @@ Verification Contract and the QA Engineer for the Environment Contract, never
 by that contract's writer. The instructions live in the `challenge-review` and
 `code-review` references `switch-review_loop-blocking_delta.md`.
 
+Process switch `review_rounds` caps the readers and rounds of backlog,
+Solution Design, Design System and Operation contract reviews. At `current`,
+the default, they follow `review_panels` and `review_loop`. At `single_pass`,
+defined in `challenge-review/references/switch-review_rounds-single_pass.md`,
+one reader of the step's reader role reads, never a lens panel; no
+calibration reader runs, so the reader's severity stands; only a critical
+finding starts a writer pass, and one re-review of the changed text closes
+it. Minor and major findings become follow-ups, which `backlog_compile.py`
+and `operation_compile.py` accept in `Accepted Minor Findings`, and a critical
+finding still open after the one re-review goes to the owner's approval gate.
+Delivery code review keeps its `review_loop` value.
+
 Process switch `code_review_panel` decides who reads a Delivery Item's frozen
 candidate in code review. At `single_reader`, the default, the official code
 reviewer alone does. At `beside_official`, one fresh `code-reviewer-lens` per
@@ -277,6 +289,41 @@ over the engines, longest first, and merges them into one record whose exit
 code is 0 only when every partition passed intact, as
 `deliver/references/switch-test_engines-partitioned.md` defines.
 
+What an Item's fixed chain costs is set by three process switches. Process
+switch `item_qa_tier`: at `full_per_item`, the default, every Item's QA gate
+runs the full acceptance command; at `change_tier_per_item`, where the
+Verification Contract declares a change-level and an integration tier, the
+Item's gate runs the change-level tier and the Delivery runs the integration
+tier once before its pull request, as
+`qa-verification/references/switch-item_qa_tier-change_tier_per_item.md`
+defines. Process switch `item_review_scale`: at `fixed`, the default, every Item
+gets the reader set `code_review_panel` selects; at `by_change_size`, the
+official code reviewer reads alone an Item whose change is within the owner's
+size limits, as `code-review/references/switch-item_review_scale-by_change_size.md`
+defines. Process switch `item_cost_report`: at `off`, the default, the Delivery
+Review carries no per-Item cost; at `per_step` it adds each Item's fixed cost
+step by step, as `deliver/references/switch-item_cost_report-per_step.md`
+defines.
+
+How a coordinator keeps parallel lanes apart and remembers them is set by two
+process switches. Process switch `lane_table`: at `off`, the default, lanes
+live in the coordinator's context; at `recorded`, `scripts/lane_table.py`
+records each lane's start and finish under the project-local runtime directory
+and lists the lanes a restarted session still has to launch, as
+`deliver/references/switch-lane_table-recorded.md` defines. Process switch
+`lane_isolation`: at `shared_checkout`, the default, a fix lane may work in the
+main checkout; at `scratch_clone`, each parallel fix lane works in its own
+scratch clone and no delegated lane switches the main checkout's branch, as
+`deliver/references/switch-lane_isolation-scratch_clone.md` defines.
+
+Whether a technical Requirement is fact-checked before its approval is process
+switch `requirement_fact_check`. At `off`, the default, only the compiler checks
+it. At `pre_approval_reader`, one read-only low-tier reader checks its outcome
+sentences against the files they cite and returns contradictions only, which
+the coordinator fixes before the owner sees the draft, as
+`requirement/references/switch-requirement_fact_check-pre_approval_reader.md`
+defines.
+
 Backlog planning measures story size as process switch `story_size_budget`
 selects. At `off`, the default, nothing is measured or shown. At
 `propose_split`, `backlog_compile.py check --json` reports each story's
@@ -302,6 +349,20 @@ and QA proposes a split before the epic review, or the owner keeps the scenario
 serial with a recorded reason. The flag is advisory, as
 `product-planning/references/switch-test_cost_budget-flag_serial_rows.md`
 defines.
+
+At what level a Test Plan scenario has to run is process switch `test_levels`.
+A scenario may state `level`, `unit`, `fixture` or `live`, which
+`backlog_compile.py check` validates at every value, and a `level_reason` for
+a `fixture` or `live` one. At `off`, the default, nothing is listed. At
+`declared`, QA proves a decision rule at `unit` level over every combination
+of its inputs, adds one `fixture` scenario per entry point and decision
+family, and keeps `live` for engine or operating-system behaviour;
+`check --json` and the review manifests list each automation-required
+scenario that states no level and each `fixture` or `live` one that states no
+reason, the `test_cost_budget` list names each flagged scenario's level, and
+the backlog reviewer asks of every `live` scenario whether its assertion is a
+decision. The list is advisory, as
+`product-planning/references/switch-test_levels-declared.md` defines.
 
 Execution planning writes and reviews the facts a plan needs as process switch
 `execution_planning` selects. `per_document`, the default, revises and reviews
@@ -362,7 +423,11 @@ Neither host requires another plugin.
 `task_inputs.py` derives the delegated task's full read list, conditional
 references, source identities, role boundary and repair obligations from the
 canonical task-input policy and the owning compiler's selected project inputs.
-The entry checks its source hash again before persisting results. The manifest
+The entry checks its source hash again before persisting results. A task given
+explicit inputs, outside an exact epic and a code review base, binds those
+inputs and the notes they cite by content and the rest of the canonical source
+inventory by path only, without `head`: a new or removed source still makes it
+stale, while a commit or a write to an unrelated note does not. The manifest
 is disposable stdout, not project state or approval authority; required full
 reads remain mandatory. External issue reporting never creates a project
 manifest. Catalog validation requires every role, skill and flow to be mapped.

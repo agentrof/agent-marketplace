@@ -269,6 +269,7 @@ def approved_backlog_sources(
     historical_inputs: bool = False,
     story_size: dict | None = None,
     test_cost: dict | None = None,
+    test_levels: dict | None = None,
 ) -> tuple[dict[str, dict], dict, list[str]]:
     """Resolve the exact approved Story/Test Plan snapshots a Delivery may use.
 
@@ -278,7 +279,8 @@ def approved_backlog_sources(
     before exposing one selected Story. With a story size budget, each selected
     Story also carries its measures under ``story_size`` for display only, and
     with a test cost budget its scenarios over the serial-row limit under
-    ``serial_row_scenarios``, for display only too. A
+    ``serial_row_scenarios``, for display only too, each naming its level when
+    test levels are declared. A
     Story that classifies its Operation impact carries it under
     ``operation_impact``; an unclassified one carries no such key.
     """
@@ -355,7 +357,7 @@ def approved_backlog_sources(
     if test_cost is not None:
         for story_id in selected:
             selected[story_id]["serial_row_scenarios"] = backlog_compile.test_cost_block(
-                test_cost, [stories[story_id]])["serial_row_scenarios"]
+                test_cost, [stories[story_id]], test_levels is not None)["serial_row_scenarios"]
     backlog_props = record["backlog"]["props"]
     snapshot = {
         "backlog_path": str(record["backlog"]["path"]),
@@ -791,7 +793,7 @@ def init_delivery(args) -> int:
     if not DELIVERY_ID_RE.fullmatch(identifier):
         print(json.dumps({"ok": False, "errors": ["invalid Delivery id"]}))
         return 2
-    slug = args.slug or re.sub(r"[^a-z0-9]+", "-", args.goal.lower()).strip("-")[:48]
+    slug = args.slug or re.sub(r"[^a-z0-9]+", "-", args.goal.lower()).strip("-")[:48].rstrip("-")
     if not SLUG_RE.fullmatch(slug):
         print(json.dumps({"ok": False, "errors": ["invalid Delivery slug"]}))
         return 2
@@ -803,14 +805,16 @@ def init_delivery(args) -> int:
     # One read-only candidate snapshot serves the strict read and the handoff check.
     with stage_package.candidate_session():
         # The proposal shows story sizes under story_size_budget and the scenarios
-        # over the serial-row limit under test_cost_budget; neither is a scope rule.
+        # over the serial-row limit under test_cost_budget, each with its level
+        # under test_levels; none is a scope rule.
         try:
             budget, budget_errors = backlog_compile.story_size_budget(docs), []
             cost = backlog_compile.test_cost_budget(docs)
+            levels = backlog_compile.test_levels(docs)
         except ValueError as exc:
-            budget, cost, budget_errors = None, None, [str(exc)]
+            budget, cost, levels, budget_errors = None, None, None, [str(exc)]
         sources, backlog_snapshot, source_errors = approved_backlog_sources(
-            docs, stories, story_size=budget, test_cost=cost)
+            docs, stories, story_size=budget, test_cost=cost, test_levels=levels)
         dod_snapshot, dod_errors = approved_dod_source(docs)
         # New Items declare the implementation schedule the Process Policy selects.
         schedule, policy_errors = policy_implementation_schedule(docs)

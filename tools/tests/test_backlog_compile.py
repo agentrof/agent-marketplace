@@ -89,6 +89,88 @@ class BacklogCompilerTests(unittest.TestCase):
             self.assertEqual(props["implements"], ["[[requirements/req-002-report-export|REQ-002]]"])
             self.assertEqual(backlog_compile.implements_findings(props, "story.md", "REQ-002"), [])
 
+    def test_only_requirement_mode_root_reviews_scaffold_requirement_coverage(self):
+        required = backlog_compile.backlog_contract()["required_backlog_review_sections"]
+        sections = backlog_compile.backlog_review_sections("requirement")
+        self.assertEqual(sections[sections.index("Deferred Criteria") + 1], "Requirement Coverage")
+        self.assertEqual([name for name in sections if name != "Requirement Coverage"], required)
+        self.assertEqual(backlog_compile.backlog_review_sections("manual"), required)
+        for mode, requirement_ref, input_ref in (("requirement", "REQ-001", []),
+                                                 ("manual", "", ["ba", "solution", "design", "application"])):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as raw:
+                docs = Path(raw) / "workspace" / "docs"
+                docs.mkdir(parents=True)
+                args = SimpleNamespace(docs=docs, planning_mode=mode, requirement_ref=requirement_ref,
+                                       input_ref=input_ref)
+                with (
+                    mock.patch.object(backlog_compile, "requirement_input_bindings", return_value=([], [])),
+                    mock.patch.object(backlog_compile, "resolve_manual_input_bindings", return_value=([], [])),
+                    mock.patch.object(backlog_compile, "planning_package_findings", return_value=(mode, [], [])),
+                    redirect_stdout(StringIO()),
+                ):
+                    self.assertEqual(backlog_compile.init(args), 0)
+                _props, body = backlog_compile.parse_front_matter(
+                    docs / "backlog/reviews/round-1-backlog-review.md")
+                if mode == "requirement":
+                    self.assertEqual(backlog_compile.section(body, "Requirement Coverage"),
+                                     "| requirement | story_ids | disposition |\n|---|---|---|")
+                else:
+                    self.assertNotIn("Requirement Coverage", backlog_compile.headings(body))
+
+    def test_a_revision_round_carries_requirement_coverage_rows_without_navigation(self):
+        table = ("| requirement | story_ids | disposition |\n|---|---|---|\n"
+                 "| REQ-001 | ST-001, ST-002 | covered |")
+        required = backlog_compile.backlog_contract()["required_backlog_review_sections"]
+        previous = {
+            "path": "backlog/reviews/round-1-backlog-review.md", "id": "BACKLOG-REVIEW-001",
+            "props": {"title": "Backlog review round 1"},
+            "body": backlog_compile.review_body("Backlog review round 1", required)
+            + f"## Requirement Coverage\n\n{table}\n\n{backlog_compile.NAV_MARKER}\n- [[maps/backlog|Backlog map]]\n",
+        }
+        for mode in ("requirement", "manual"):
+            with self.subTest(mode=mode):
+                body = backlog_compile.revision_review_body(
+                    previous, "Backlog review round 2", "Product Backlog", 2,
+                    backlog_compile.backlog_review_sections(mode))
+                self.assertNotIn(backlog_compile.NAV_MARKER, body)
+                if mode == "requirement":
+                    self.assertEqual(backlog_compile.section(body, "Requirement Coverage"), table)
+                else:
+                    self.assertNotIn("Requirement Coverage", backlog_compile.headings(body))
+
+    def test_requirement_coverage_findings_need_one_exact_row_once_a_story_implements_it(self):
+        link = "[[requirements/req-001-report-export|REQ-001]]"
+        path = "backlog/reviews/round-2-backlog-review.md"
+
+        def findings(mode, implements, *rows, section=True):
+            body = "# Backlog review round 2\n\n"
+            if section:
+                body += ("## Requirement Coverage\n\n| requirement | story_ids | disposition |\n|---|---|---|\n"
+                         + "".join(f"{row}\n" for row in rows))
+            return backlog_compile.requirement_coverage_findings({
+                "backlog": {"planning_mode": mode, "props": {"requirement_ref": "REQ-001"}},
+                "backlog_reviews": [{"path": path, "round": 2, "props": {}, "body": body}],
+                "stories": [{"id": "ST-002", "implements": implements},
+                            {"id": "ST-001", "implements": implements},
+                            {"id": "AUTH-01", "implements": []}],
+            })
+
+        needs = (f"{path} Requirement Coverage needs one REQ-001 row whose story_ids are exactly"
+                 " the Stories that implement it: ST-001, ST-002")
+        self.assertEqual(findings("manual", [link], section=False), [])
+        self.assertEqual(findings("requirement", [], section=False), [])
+        self.assertEqual(findings("requirement", [link], section=False),
+                         [f"{path} is missing required section: Requirement Coverage", needs])
+        self.assertEqual(findings("requirement", [link]), [needs])
+        self.assertEqual(findings("requirement", [link], "| REQ-001 | ST-001 | covered |"), [needs])
+        self.assertEqual(findings("requirement", [link], "| REQ-001 | ST-001, ST-002, AUTH-01 | covered |"),
+                         [needs])
+        self.assertEqual(findings("requirement", [link], "| REQ-001 | ST-001 | covered |",
+                                  "| REQ-001 | ST-002 | covered |"),
+                         [f"{path} Requirement Coverage repeats REQ-001"])
+        self.assertEqual(findings("requirement", [link], "| REQ-002 | AUTH-01 | covered |",
+                                  "| REQ-001 | ST-002, ST-001 | covered |"), [])
+
     def test_stub_story_passes_the_per_write_vault_check(self):
         import vault_check
         with tempfile.TemporaryDirectory() as raw:

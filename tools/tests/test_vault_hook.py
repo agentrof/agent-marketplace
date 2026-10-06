@@ -4214,6 +4214,19 @@ class AutopilotRuntimeGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertEqual((self.runtime / "grant.json").read_bytes(), original)
 
+    def test_a_restored_grant_puts_back_the_arming_record_its_command_consumed(self):
+        self.write("arming.json", {"armed_at": "2026-10-01T21:00:00Z", "arguments": "on --for 2h"})
+        original = (self.runtime / "arming.json").read_bytes()
+
+        def consume_and_grant():
+            (self.runtime / "arming.json").unlink()
+            self.write("grant.json", self.grant())
+
+        result = self.shell_event("cd . && python3 autopilot.py on", consume_and_grant)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertFalse((self.runtime / "grant.json").exists())
+        self.assertEqual((self.runtime / "arming.json").read_bytes(), original)
+
     def test_a_shell_command_may_end_the_grant_or_delete_the_runtime_files(self):
         self.write("grant.json", self.grant())
         ended = self.grant(state="revoked", ended_at="2026-10-01T22:00:00Z")

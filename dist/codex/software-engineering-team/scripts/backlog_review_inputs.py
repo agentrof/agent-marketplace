@@ -314,9 +314,11 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
 
     ``check`` holds only what a switch or those stubs put there: the compiler
     facts at review_panels ``lens_panel``, which the manifest then names, and
-    the story size measures at story_size_budget ``propose_split`` and the
+    the story size measures at story_size_budget ``propose_split``, the
     scenarios over the serial-row limit at test_cost_budget
-    ``flag_serial_rows``. Without any of them a manifest has no ``check``.
+    ``flag_serial_rows`` and the scenarios that state no level or no reason for
+    it at test_levels ``declared``. Without any of them a manifest has no
+    ``check``.
 
     ``scope`` derives an epic reader's manifest under that review_manifest_scope
     value instead of the policy's, for review_scope_record ``both_scopes``,
@@ -607,6 +609,7 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         try:
             budget = backlog.story_size_budget(docs)
             cost = backlog.test_cost_budget(docs)
+            levels = backlog.test_levels(docs)
         except ValueError as exc:
             raise InputError(str(exc)) from exc
         check = compiler_check(docs, record, owning_epics, current_review, relations, epic is None,
@@ -617,9 +620,11 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
             check["story_size"] = backlog.story_size_report(
                 record, docs, budget, {story["id"] for item in owning_epics
                                        for story in item["stories"]})
+        scope_stories = [story for item in owning_epics for story in item["stories"]]
         if cost is not None:
-            check["test_cost"] = backlog.test_cost_block(
-                cost, [story for item in owning_epics for story in item["stories"]])
+            check["test_cost"] = backlog.test_cost_block(cost, scope_stories, levels is not None)
+        if levels is not None:
+            check["test_levels"] = backlog.test_levels_block(levels, scope_stories)
         if carried:
             check["scaffold_findings"] = carried
         if writer and record.get("transition_findings"):

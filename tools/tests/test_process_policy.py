@@ -520,6 +520,11 @@ RELEASED_DEFAULTS = {
     "epic_review_cadence": "wait_per_panel",
     "execution_planning": "per_document",
     "implementation_schedule": "sequential_v1",
+    "item_cost_report": "off",
+    "item_qa_tier": "full_per_item",
+    "item_review_scale": "fixed",
+    "lane_isolation": "shared_checkout",
+    "lane_table": "off",
     "mechanical_pass_tier": "role_tier",
     "own_target_reuse": "off",
     "owner_gates": "per_step",
@@ -532,6 +537,8 @@ RELEASED_DEFAULTS = {
     "review_loop": "current",
     "review_manifest_scope": "transitive",
     "review_panels": "single_reader",
+    "review_rounds": "current",
+    "requirement_fact_check": "off",
     "review_scope_record": "off",
     "root_review_scope": "full",
     "source_decision_gate": "two_gates",
@@ -539,6 +546,7 @@ RELEASED_DEFAULTS = {
     "test_cost_budget": "off",
     "test_engines": "single",
     "test_group_report": "off",
+    "test_levels": "off",
 }
 # The rules that keep a switch value safe, in the files agents read them from:
 # who decides, who reads independently, which severity holds, which gate stays
@@ -686,6 +694,46 @@ SAFETY_RULES = {
             " leave it out of the result",
         ),
     },
+    "item_cost_report": {
+        f"{SKILLS}/deliver/references/switch-item_cost_report-per_step.md": (
+            "A step whose start or end is not recorded is `missing`, never an estimate",
+            "The table reports; it changes no gate, no verdict and no evidence",
+        ),
+    },
+    "item_qa_tier": {
+        f"{SKILLS}/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md": (
+            "A contract that declares one or neither keeps the full acceptance command as the Item's gate",
+            "Never derive, write or edit a tier command in a task",
+            "A tier that skips a Test Plan scenario the Item claims is a coverage finding, never a pass",
+            "The Delivery opens no pull request until that run passed on the exact integrated commit",
+        ),
+    },
+    "item_review_scale": {
+        f"{SKILLS}/code-review/references/switch-item_review_scale-by_change_size.md": (
+            "A measure the owner set no limit for never makes a change small",
+            "The official code reviewer always reads, with its full review passes and the same severity rules",
+        ),
+    },
+    "lane_isolation": {
+        f"{SKILLS}/deliver/references/switch-lane_isolation-scratch_clone.md": (
+            "No delegated lane checks out, switches, rebases or resets a branch in the main checkout",
+            "A lane pushes its branch before its clone is removed",
+        ),
+    },
+    "lane_table": {
+        f"{SKILLS}/deliver/references/switch-lane_table-recorded.md": (
+            "A lane listed `finished` is never launched again",
+            "It is scratch, never a durable record; the Delivery's own records stay the truth",
+        ),
+    },
+    "requirement_fact_check": {
+        f"{SKILLS}/requirement/references/switch-requirement_fact_check-pre_approval_reader.md": (
+            "It returns contradictions only",
+            "never proposes new outcomes",
+            "never a silent fix",
+            "The approval gate itself is unchanged",
+        ),
+    },
     "qa_gate_order": {
         f"{SKILLS}/qa-verification/references/switch-qa_gate_order-gate_first.md": (
             "at the default, `plan_first`, QA plans and maps every check before it executes anything",
@@ -735,6 +783,14 @@ SAFETY_RULES = {
             "Credentials or secrets that reach a client artifact or a log stay critical",
             "Neither the claiming reviewer nor the writer changes a severity",
             "QA keeps its own blocking severities",
+        ),
+    },
+    "review_rounds": {
+        f"{SKILLS}/challenge-review/references/switch-review_rounds-single_pass.md": (
+            "The reader's severity stands as returned",
+            "the writer never lowers or raises a returned severity",
+            "a critical finding never enters it",
+            "No further round starts without that decision",
         ),
     },
     "epic_review_cadence": {
@@ -858,6 +914,19 @@ SAFETY_RULES = {
             "Both contracts change only through the Operation flow, never in a task",
         ),
     },
+    "test_levels": {
+        f"{SKILLS}/product-planning/references/switch-test_levels-declared.md": (
+            "The list is advisory: it never fails a check, never blocks a review or an approval and never rewrites"
+            " a scenario",
+            "refuses a `level` outside the three values whenever a scenario states it, at every value of this"
+            " switch",
+            "A decision rule is proven at `unit` level, over every combination of its inputs",
+            "Coverage never drops: the Test Plan still maps every acceptance criterion to at least one proving"
+            " scenario",
+            "never what it asserts",
+            "The level question only ever yields a minor finding",
+        ),
+    },
     "test_group_report": {
         f"{SKILLS}/deliver/references/switch-test_group_report-refuse_missing_groups.md": (
             "a group that fails to collect is `not_collected`, never left out",
@@ -971,12 +1040,13 @@ class MeasuredBaselineTests(unittest.TestCase):
                     self.assertTrue(evidence.startswith(" in one measured project"), evidence)
         self.assertEqual(cited, ["calculation_examples", "code_review_panel", "delivery_path",
                                  "dependent_rebind_gate", "epic_review_cadence",
-                                 "execution_planning", "own_target_reuse", "owner_gates",
+                                 "execution_planning", "item_qa_tier", "own_target_reuse", "owner_gates",
                                  "pre_handoff_regression", "qa_gate_order", "reader_waves",
                                  "rebind_review_scope", "remediation_bookkeeping",
-                                 "remediation_writers", "review_scope_record", "root_review_scope",
+                                 "remediation_writers", "requirement_fact_check", "review_scope_record",
+                                 "root_review_scope",
                                  "source_decision_gate", "test_cost_budget", "test_engines",
-                                 "test_group_report"])
+                                 "test_group_report", "test_levels"])
 
 
 if __name__ == "__main__":

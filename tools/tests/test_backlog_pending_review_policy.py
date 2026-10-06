@@ -124,6 +124,24 @@ class PendingReviewPolicyTests(unittest.TestCase):
             self.assertEqual(compiler.approve(self.fixture.args), 1)
         return paths
 
+    def test_a_fresh_root_round_carries_the_requirement_coverage_rows(self):
+        scaffold = "| requirement | story_ids | disposition |\n|---|---|---|"
+        props, body = compiler.parse_front_matter(self.root_review)
+        # begin-revision opened this Requirement-mode round with an empty table.
+        self.assertEqual(compiler.section(body, compiler.REQUIREMENT_COVERAGE), scaffold)
+        table = scaffold + "\n| REQ-001 | AUTH-01 | covered |"
+        self.root_review.write_text(compiler.front_matter(props, body.replace(scaffold, table)),
+                                    encoding="utf-8")
+        self.change_policy("review_manifest_scope", "bounded")
+        fresh = {}
+        for kind in ("epic", "backlog"):
+            code, result = self.run_review(kind)
+            self.assertEqual(code, 0, result)
+            self.assertTrue(result["created"])
+            fresh[kind] = compiler.parse_front_matter(Path(result["review"]))[1]
+        self.assertEqual(compiler.section(fresh["backlog"], compiler.REQUIREMENT_COVERAGE), table)
+        self.assertNotIn(compiler.REQUIREMENT_COVERAGE, compiler.headings(fresh["epic"]))
+
     def test_owned_policy_change_creates_fresh_root_and_epic_with_exact_membership(self):
         pin = self.change_policy("review_manifest_scope", "bounded")
         self.assert_new_rounds(pin)

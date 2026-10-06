@@ -1,0 +1,6 @@
+{
+  "summary": "Three process switches let an Item's fixed cost scale with its size, all off by default, so every default output and every bound instruction is unchanged (#432). Process switch `item_qa_tier` (`full_per_item` | `change_tier_per_item`): at `change_tier_per_item`, where the Verification Contract declares a change-level and an integration tier, an Item's QA gate runs the change-level tier and the Delivery runs the integration tier once before its pull request. Process switch `item_review_scale` (`fixed` | `by_change_size`): at `by_change_size`, the official code reviewer reads alone an Item whose frozen change is within the owner's limits on the measures `code-review/data/change-size-measures.json` declares. Process switch `item_cost_report` (`off` | `per_step`): at `per_step`, the Delivery Review carries each Item's fixed cost step by step, a missing timestamp reported as missing, never estimated.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

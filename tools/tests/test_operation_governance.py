@@ -42,11 +42,16 @@ def declare(path: Path, **fields: object) -> None:
 
 def set_review_loop(docs: Path, value: str) -> None:
     """Approve a Process Policy revision that sets switch review_loop to ``value``."""
+    set_switch(docs, "review_loop", value)
+
+
+def set_switch(docs: Path, switch: str, value: str) -> None:
+    """Approve a Process Policy revision that sets ``switch`` to ``value``."""
     sys.path.insert(0, str(SCRIPTS))
     import process_policy
 
     first = "begin-revision" if process_policy.path_for(docs).exists() else "init"
-    for step in ((first,), ("set", "--switch", "review_loop", "--value", value), ("approve",)):
+    for step in ((first,), ("set", "--switch", switch, "--value", value), ("approve",)):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             code = process_policy.main([step[0], "--docs", str(docs), *step[1:]])
@@ -321,6 +326,46 @@ class OperationGovernanceTests(unittest.TestCase):
             self.assertIn("Buildkite pipeline acme/web reports the pull request checks", error)
             self.assertIn("no repository workflow", error)
             self.assertFalse(output.exists())
+
+    def test_verification_approval_projects_the_paired_environment_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace" / "docs"
+            ref = self.approved_solution(docs)
+            for kind in ("environment", "verification"):
+                initialized = self.invoke(OPERATION, "init", "--docs", str(docs), "--kind", kind,
+                                          "--constrained-by", ref)
+                self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+            environment = docs / "operation" / "environment-contract.md"
+            verification = docs / "operation" / "verification-contract.md"
+            declare(environment, env_command="./tools/env")
+            declare(verification, test_command="make test")
+            env_approved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "environment")
+            self.assertEqual(env_approved.returncode, 0, env_approved.stdout + env_approved.stderr)
+            env_hash = json.loads(env_approved.stdout)["source_hash"]
+            approved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "verification")
+            self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+            text = verification.read_text(encoding="utf-8")
+            self.assertIn("paired_environment_revision: 1\n", text)
+            self.assertIn(f"paired_environment_source_hash: {env_hash}\n", text)
+            self.assertEqual([message for _path, message in operation_findings(docs)
+                              if "paired_environment" in message], [])
+            checked = json.loads(self.invoke(OPERATION, "check", "--docs", str(docs), "--kind", "verification").stdout)
+            self.assertTrue(checked["ok"])
+            self.assertEqual(checked["receipt"]["paired_environment"],
+                             {"revision": 1, "source_hash": env_hash, "current": True})
+            # A later Environment Contract approval shows as advisory drift and
+            # the next Verification revision drops the stamp until it is approved.
+            self.invoke(OPERATION, "begin-revision", "--docs", str(docs), "--kind", "environment")
+            reapproved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "environment")
+            self.assertEqual(reapproved.returncode, 0, reapproved.stdout + reapproved.stderr)
+            checked = json.loads(self.invoke(OPERATION, "check", "--docs", str(docs), "--kind", "verification").stdout)
+            self.assertTrue(checked["ok"])
+            self.assertFalse(checked["receipt"]["paired_environment"]["current"])
+            self.invoke(OPERATION, "begin-revision", "--docs", str(docs), "--kind", "verification")
+            self.assertNotIn("paired_environment", verification.read_text(encoding="utf-8"))
+            approved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "verification")
+            self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+            self.assertIn("paired_environment_revision: 2\n", verification.read_text(encoding="utf-8"))
 
     def test_environment_and_governance_require_lifecycle_revisions(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -856,6 +901,31 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
         self.assertEqual(self.errors(), [
             f"{self.PATH} Accepted Minor Findings columns must be: finding,"
             " owner_role, reason, revisit_trigger"])
+
+    def test_single_pass_accepts_the_readers_major_without_calibration(self):
+        # At review_rounds single_pass no calibration reader runs: a major
+        # finding stands as returned and becomes a follow-up, and only a
+        # critical one stays out, whatever the review_loop value.
+        set_review_loop(self.docs, "current")
+        set_switch(self.docs, "review_rounds", "single_pass")
+        major = self.VALID.replace("| OP-2 ", "| OP-1 ")
+        self.record(accepted=(major, self.VALID), calibration=None)
+        self.assertEqual(self.errors(), [])
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+        self.path.write_text(self.draft, encoding="utf-8")
+        critical = tuple(row.replace("| OP-1 | major |", "| OP-1 | critical |") for row in self.RETURNED)
+        self.record(accepted=(major,), returned=critical, calibration=None)
+        self.assertEqual(self.errors(), [
+            f"{self.LABEL} names OP-1, which the review returned as critical;"
+            " only a minor or major finding is accepted"])
+        # The blocking_delta record is unchanged: the same major needs calibration.
+        set_switch(self.docs, "review_rounds", "current")
+        set_review_loop(self.docs, "blocking_delta")
+        self.record(accepted=(major,), calibration=None)
+        self.assertEqual(self.errors(), [
+            f"{self.PATH} returned major finding OP-1 has no Severity Calibration row",
+            f"{self.LABEL} names OP-1, which the review returned as major; only a minor finding is accepted"])
 
     def test_calibration_rows_are_complete_and_rule_returned_claims(self):
         calibration = "operation/verification-contract.md severity calibration 1"

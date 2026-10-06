@@ -6,6 +6,7 @@ import contextlib
 import io
 import unittest
 
+from tools.tests import backlog_fixture
 from tools.tests import test_backlog_pending_review_policy as pending
 
 compiler = pending.compiler
@@ -109,6 +110,56 @@ class PreApprovalCheckTests(unittest.TestCase):
         self.assertEqual(self.base.pin(self.epic_review), self.base.pin(self.root_review))
         code, result = self.base.cli("approve")
         self.assertEqual(code, 0, result)
+
+    def implement_requirement(self):
+        """Add ST-002, which implements the revision's REQ-001, to the reviewed epic."""
+        epic = "delivery-fixture"
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = compiler.main([
+                "stub-story", epic, "export", "--docs", str(self.docs), "--id", "ST-002",
+                "--criterion-ref", backlog_fixture.CRITERION, "--experience-ref", backlog_fixture.EXPERIENCE,
+                "--uses-design", backlog_fixture.DESIGN, "--constrained-by", backlog_fixture.CONSTRAINT])
+        self.assertEqual(code, 0)
+        story = self.docs / f"backlog/epics/{epic}/stories/export"
+        backlog_fixture._author_story(story / "story.md", story / "test-plan.md", "ST-002")
+        props, body = compiler.parse_front_matter(self.epic_review)
+        props["verifies"] = [*props["verifies"], f"[[backlog/epics/{epic}/stories/export/story|ST-002]]",
+                             f"[[backlog/epics/{epic}/stories/export/test-plan|ST-002-TP]]"]
+        props["scenario_refs"] = [*props["scenario_refs"], "ST-002-TS-001"]
+        self.epic_review.write_text(compiler.front_matter(props, body), encoding="utf-8")
+
+    def write_coverage(self, *rows):
+        props, _body = compiler.parse_front_matter(self.root_review)
+        self.root_review.write_text(compiler.front_matter(props, backlog_fixture._complete_review_body(
+            props["title"], compiler.backlog_review_sections("requirement"), rows)), encoding="utf-8")
+
+    def assert_only_approval_refuses(self, *expected):
+        code, result = self.base.cli("check", "--json")
+        self.assertEqual(code, 0, result)
+        code, pre = self.base.cli("check", "--pre-approval", "--json")
+        self.assertEqual(code, 1, pre)
+        before = self.base.fixture.files()
+        code, approval = self.base.cli("approve")
+        self.assertEqual(code, 1, approval)
+        self.assertEqual(self.base.fixture.files(), before)
+        self.assertEqual(pre["errors"], approval["errors"])
+        self.assertEqual(pre["errors"], sorted(expected))
+
+    def test_requirement_mode_approval_needs_the_coverage_row_of_its_implementing_stories(self):
+        self.implement_requirement()
+        rel = self.rel(self.root_review)
+        needs = (f"{rel} Requirement Coverage needs one REQ-001 row whose story_ids are exactly"
+                 " the Stories that implement it: ST-002")
+        self.assert_only_approval_refuses(f"{rel} is missing required section: Requirement Coverage", needs)
+        self.write_coverage("| REQ-001 | AUTH-01 | covered |")
+        self.assert_only_approval_refuses(needs)
+        self.write_coverage("| REQ-001 | ST-002 | covered |")
+        code, result = self.base.cli("check", "--pre-approval", "--json")
+        self.assertEqual(code, 0, result)
+        self.assertFalse(compiler.requirement_compile.requirement_incorporated(self.docs, "REQ-001"))
+        code, result = self.base.cli("approve")
+        self.assertEqual(code, 0, result)
+        self.assertTrue(compiler.requirement_compile.requirement_incorporated(self.docs, "REQ-001"))
 
     def test_pre_approval_and_approved_are_exclusive(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:

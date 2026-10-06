@@ -4,8 +4,7 @@ The flow turns approved product knowledge into a versioned, project-local
 backlog. Its canonical state is Markdown under `workspace/docs/backlog/`.
 
 Spawn template: paste `{{constitution}}` into every role prompt. Load the
-`obsidian-vault` skill before touching the docs tree; its policy is
-authoritative.
+`obsidian-vault` skill before touching the docs tree; its policy is authoritative.
 
 ## 0. Preconditions
 
@@ -21,8 +20,7 @@ authoritative.
   Requirement Coverage.
 - A feature, defect or technical intake carries the exact approved source,
   issue or decision evidence selected by that impact matrix.
-- The user explicitly starts the backlog entry and reviews each authored
-  package.
+- The user explicitly starts the backlog entry and reviews each authored package.
 - Requirement state, when present, comes only from the tracked documents and
   their checks.
 
@@ -50,10 +48,10 @@ the globally current Experience application and its selected process receipt
 set, then renders `backlog/_generated/input-package-coverage.md`. The view lists
 each bound package with its stage and receipt hash, whether the package
 resolver still finds that receipt strict-current, and how many stories cite the
-package. Requirement
-mode instead records `requirement_ref: REQ-###`; stories carry
-`implements: REQ-###`, and the complete Requirement Stage Results receipt set
-is required before approval.
+package. Requirement mode instead records `requirement_ref: REQ-###`; stories
+carry `implements: REQ-###`, and approval requires the complete Requirement
+Stage Results receipt set and, once a story implements the Requirement, a root
+review `Requirement Coverage` row naming exactly those stories.
 
 By default both modes pin the same four input families in compiler-owned
 `input_bindings`, and the compiler rejects any binding that is no longer
@@ -165,19 +163,16 @@ Every scenario has a stable `<story-id>-TS-###` heading and this shape:
 - Then: the observable outcome is correct
 ```
 
-`automation` is `required` or `manual`; `required` needs an
-`automation_target`. The target records intended delivery work and need not
-exist yet. Every scenario has non-empty `source_refs`. Feature scenarios cite
-only their story's declared criteria. Defect and technical scenarios may cite
-their story's declared criteria and approved `related_to` evidence. Every
-declared planning source appears in at least one scenario.
-The `Coverage Classes` table contains exactly `empty`, `boundary`,
-`invalid-input`, `authorization`, `duplicate-concurrent`, `failure` and
-`adjacent-regression`. Each row is `covered` with existing scenario IDs or
-`not_applicable` with no scenario IDs and a concrete reason. The union of all
-`covered` rows equals the story's exact scenario set; one scenario may cover
-multiple classes, but none may remain unclassified. A missing class, unknown
-scenario, orphan scenario or unexplained exclusion fails the compiler.
+`automation` is `required` or `manual`; `required` needs an `automation_target`. The target records
+intended delivery work and need not exist yet. Every scenario has non-empty `source_refs`. Feature
+scenarios cite only their story's declared criteria. Defect and technical scenarios may cite their
+story's declared criteria and approved `related_to` evidence. Every declared planning source appears
+in at least one scenario. The `Coverage Classes` table contains exactly `empty`, `boundary`,
+`invalid-input`, `authorization`, `duplicate-concurrent`, `failure` and `adjacent-regression`. Each
+row is `covered` with existing scenario IDs or `not_applicable` with no scenario IDs and a concrete
+reason. The union of all `covered` rows equals the story's exact scenario set; one scenario may
+cover multiple classes, but none may remain unclassified. A missing class, unknown scenario, orphan
+scenario or unexplained exclusion fails the compiler.
 
 The Requirement trace ends at planned verification:
 
@@ -188,6 +183,9 @@ criterion or rule -> scenario -> automation target
 Switch `calculation_examples`: at `required`, a scenario that exercises a calculation rule takes its
 expected value from the rule's formula or cited worked example and never invents one, as
 `skill-content/requirements-analysis/references/switch-calculation_examples-required.md` defines.
+Switch `test_levels`: at `declared`, QA gives each automation-required scenario a `level` and each
+`fixture` or `live` one a `level_reason`, and the reviewer questions every `live` scenario, as
+`skill-content/product-planning/references/switch-test_levels-declared.md` defines.
 
 Executable tests, execution results, story completion and release readiness
 belong to delivery.
@@ -201,7 +199,9 @@ replace this section's epic and root reviewers, as
 findings name, and the compiler commands of this section and section 5, run as
 `skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md` defines.
 Switch `review_loop`: at `blocking_delta`, this section's review loops follow
-`skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+`skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`; switch
+`review_rounds`: at `single_pass`, its reviews run as one reader and one pass, following
+`skill-content/challenge-review/references/switch-review_rounds-single_pass.md`.
 Switch `source_decision_gate`: at `one_gate_when_drafted`, a finding whose fix changes approved
 analysis documents reaches the owner as one gate on the reviewed exact change when its
 recommendation needs no owner input, as
@@ -323,13 +323,13 @@ Only after every epic package and review is green, run
 `backlog-reviewer` with that manifest: the root backlog, every epic, every
 story and every test plan, its declared context, any `unparsed_link_sources`
 and the exact expected `derives_from` and `related_to` sets. Wait for its
-return. Recompute the root
-manifest with `--expected-hash <source_hash>` before accepting its findings;
-a changed input requires a fresh affected review. The Product Owner then
-writes the root review note and any source fixes. The root review covers
-cross-epic overlap, dependency direction, cycles, delivery sequencing, shared
-contracts, deferred criteria, global test coverage, findings and verdict. After
-the root review is authored, run the full `backlog_compile.py check --docs
+return. Recompute the root manifest with `--expected-hash <source_hash>` before
+accepting its findings; a changed input requires a fresh affected review. The
+Product Owner then writes the root review note and any source fixes. The root
+review covers cross-epic overlap, dependency direction, cycles, delivery
+sequencing, shared contracts, deferred criteria, global test coverage,
+Requirement coverage in Requirement mode, findings and verdict. After the root
+review is authored, run the full `backlog_compile.py check --docs
 <workspace>/docs --render --pre-approval --json`, which adds approval's own
 checks, and scoped vault gate. Both must pass before the package can be offered for approval.
 

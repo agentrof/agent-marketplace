@@ -80,19 +80,19 @@ class HeadlessBacklogHandoffTests(unittest.TestCase):
     def author_reviews(self):
         root_review = self.docs / "backlog/reviews/round-1-backlog-review.md"
         epic_review = self.docs / "backlog/epics/worker/reviews/round-1-epic-review.md"
-        for path, relations, sections in (
+        for path, relations, sections, coverage_rows in (
             (root_review, {"related_to": ["[[backlog/epics/worker/epic|EP-001]]"]},
-             "required_backlog_review_sections"),
+             compiler.backlog_review_sections("requirement"), ("| REQ-001 | ST-001 | covered |",)),
             (epic_review, {
                 "verifies": ["[[backlog/epics/worker/stories/acquire/story|ST-001]]",
                              "[[backlog/epics/worker/stories/acquire/test-plan|ST-001-TP]]"],
                 "scenario_refs": ["ST-001-TS-001"],
-            }, "required_epic_review_sections"),
+            }, compiler.backlog_contract()["required_epic_review_sections"], ()),
         ):
             props, _body = compiler.parse_front_matter(path)
             props.update(verdict="approved", dependency_refs=[], **relations)
             path.write_text(compiler.front_matter(props, backlog_fixture._complete_review_body(
-                props["title"], compiler.backlog_contract()[sections])), encoding="utf-8")
+                props["title"], sections, coverage_rows)), encoding="utf-8")
 
     def test_real_headless_intake_approval_delivery_snapshot_and_revision(self):
         # Both packages pass their real modern compilers and Git commitment
@@ -123,6 +123,9 @@ class HeadlessBacklogHandoffTests(unittest.TestCase):
         flags = ["--planning-mode", "requirement", "--requirement-ref", "REQ-001",
                  "--absent-input", "design-system", "--absent-input", "experience-design"]
         self.assert_cli("init", *flags)
+        _props, scaffold = compiler.parse_front_matter(self.docs / "backlog/reviews/round-1-backlog-review.md")
+        self.assertEqual(compiler.section(scaffold, compiler.REQUIREMENT_COVERAGE),
+                         "| requirement | story_ids | disposition |\n|---|---|---|")
         self.assert_cli("stub-epic", "worker", "--id", "EP-001", "--goal",
                         "Acquire exact inventory artifact digests without a visual interface.")
         self.assert_cli("stub-story", "worker", "acquire", "--id", "ST-001",
@@ -139,6 +142,7 @@ class HeadlessBacklogHandoffTests(unittest.TestCase):
         ), encoding="utf-8")
         self.author_reviews()
         self.assert_cli("approve")
+        self.assertTrue(requirement.requirement_incorporated(self.docs, "REQ-001"))
         self.commit("Approve technical backlog and review evidence")
         self.assert_cli("check", "--approved")
 

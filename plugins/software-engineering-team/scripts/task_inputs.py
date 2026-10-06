@@ -35,6 +35,7 @@ CATALOG_NAME_MAPS = ("role_skills", "required_role_skills", "entries",
                      "required_references", "stack_reference_by_role", "read_only_entry_roles")
 CANONICAL_SUFFIXES = {".md", ".json"}
 OPAQUE_NAMES = {"artifacts", ".obsidian", ".trash"}
+WIKILINK = re.compile(r"\[\[([^\]|#]+)")
 
 
 def digest(value) -> str:
@@ -81,6 +82,11 @@ def source_inventory(root: Path, bound: frozenset[str] | None = None) -> list[di
     """
     if bound is not None:
         return identity(root, [path for path in bound if canonical_source(path)])
+    return identity(root, source_paths(root))
+
+
+def source_paths(root: Path) -> list[str]:
+    """The canonical source inventory's membership, without reading content."""
     docs = root / "workspace/docs"
     for path in (docs.parent, docs):
         if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
@@ -101,7 +107,23 @@ def source_inventory(root: Path, bound: frozenset[str] | None = None) -> list[di
                 pending.append(path)
             elif path.suffix.lower() in CANONICAL_SUFFIXES:
                 paths.append(path.relative_to(root).as_posix())
-    return identity(root, paths)
+    return sorted(paths)
+
+
+def cited_sources(root: Path, paths) -> set[str]:
+    """The canonical notes that the given Markdown inputs cite by wikilink."""
+    cited = set()
+    for relative in sorted(paths):
+        if not relative.endswith(".md"):
+            continue
+        for target in WIKILINK.findall(regular(root, relative).read_text(encoding="utf-8")):
+            target = target.strip()
+            name = "workspace/docs/" + target + ("" if target.endswith((".md", ".json")) else ".md")
+            candidate = root / name
+            if (canonical_source(name) and ".." not in PurePosixPath(name).parts
+                    and candidate.is_file() and not candidate.is_symlink()):
+                cited.add(name)
+    return cited
 
 
 def identity(root: Path, paths) -> list[dict]:
@@ -727,8 +749,17 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     # the epic's review manifest, the task binds those and none of the other
     # canonical sources, which another epic's writer changes in parallel.
     read_set = frozenset(project_files) if epic else None
+    # A task given explicit inputs, outside an epic and a code review base,
+    # binds those inputs and the notes they cite by content, and the rest of
+    # the canonical inventory by membership only, so a new or removed source
+    # still invalidates it while a write to an unrelated note or a commit
+    # leaves it fresh.
+    input_scoped = bool(inputs) and not epic and base is None and project is not None
+    if input_scoped:
+        read_set = frozenset(project_files | cited_sources(project, project_files))
     records = identity(project, project_files) if project is not None else []
     inventory = source_inventory(project, read_set) if project is not None else []
+    membership = source_paths(project) if input_scoped else None
     method_bindings = {}
     technology = set(skills or []) & set(policy["technology_method_skills"])
     if project is not None and technology:
@@ -805,7 +836,8 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
             changes = sorted({os.fsdecode(path) for path in changed.stdout.split(b"\0")
                               if path and not outside(os.fsdecode(path), read_set)}
                              | {record["path"] for record in working})
-        if records != identity(project, project_files) or inventory != source_inventory(project, read_set):
+        if (records != identity(project, project_files) or inventory != source_inventory(project, read_set)
+                or (input_scoped and membership != source_paths(project))):
             raise ValueError("project inputs changed while building task inputs")
         current = subprocess.run([*command, "rev-parse", "--verify", "HEAD"], capture_output=True)
         if bool(current.returncode) != unborn or (not unborn and current.stdout.decode("ascii").strip() != head):
@@ -828,7 +860,11 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
               "selected_method_skills": sorted(skills or [])}
     if pass_kind is not None:
         result["pass_kind"] = pass_kind
+    if input_scoped:
+        result["canonical_source_paths"] = membership
     hashed = result
+    if input_scoped:
+        hashed = {key: value for key, value in result.items() if key != "head"}
     if epic:
         # The closure is bound as its own source_hash binds it: the stubs it
         # lists from notes outside its paths are information, never an input.

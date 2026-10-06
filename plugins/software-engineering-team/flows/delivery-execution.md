@@ -31,6 +31,15 @@ B is queued in the Delivery's `User Decisions` unless it is of an at-once class,
 and the Delivery Review and the merge are decided together in gate B, as
 `skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
 defines.
+Switch `lane_table`: at `recorded`, a coordinator that runs parallel lanes
+records each lane's start and finish and reads the lanes still pending before
+it launches anything, as
+`skill-content/deliver/references/switch-lane_table-recorded.md` defines.
+Switch `lane_isolation`: at `scratch_clone`, each parallel fix lane works in
+its own scratch clone and no delegated lane switches the main checkout's
+branch, as
+`skill-content/deliver/references/switch-lane_isolation-scratch_clone.md`
+defines.
 
 ## Parallel verification
 
@@ -76,6 +85,10 @@ candidate beside the official code reviewer and `merge-panel` registers the
 one code review result, as
 `skill-content/code-review/references/switch-code_review_panel-beside_official.md`
 defines.
+Switch `item_review_scale`: at `by_change_size`, the official code reviewer
+reads alone an Item whose frozen change is within the owner's size limits, as
+`skill-content/code-review/references/switch-item_review_scale-by_change_size.md`
+defines.
 
 A role that waits inside its turn waits at most the Delivery verification
 policy's `wait_bound_seconds`, 240 seconds, in any one tool call, so its next
@@ -107,6 +120,11 @@ Switch `test_engines`: at `partitioned`, `run --kind test` runs the
 partitions the Verification Contract declares in parallel on isolated test
 engines and merges them into one record, as
 `skill-content/deliver/references/switch-test_engines-partitioned.md`
+defines.
+Switch `item_qa_tier`: at `change_tier_per_item`, an Item's QA gate runs the
+change-level tier the Verification Contract declares, and the Delivery runs
+its integration tier once before its pull request, as
+`skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md`
 defines.
 For failed or affected tests first, an optional approved
 `diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
@@ -219,6 +237,10 @@ evidence. The Review is authored as a draft `delivery-review.md` in the
 Delivery package before `approve-review`. Approval keeps every authored
 section, fills only the sections left empty and the navigation the compiler
 owns, and binds that content in its approval hash; the PR body is that Review.
+Switch `item_cost_report`: at `per_step`, the Review also carries each Item's
+fixed cost step by step, as
+`skill-content/deliver/references/switch-item_cost_report-per_step.md`
+defines.
 The Git coordinator first publishes the approved Review, then
 publishes one durable PR-creation intent and records the provider URL as its
 exact descendant. That record is the PR head and moves the reviewed Delivery

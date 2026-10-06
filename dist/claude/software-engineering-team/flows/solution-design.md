@@ -40,6 +40,9 @@ bound as an explicit Requirement reuse, never used to author a new Solution revi
    defines.
    Switch `review_loop`: at `blocking_delta`, this review loop follows
    `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+   Switch `review_rounds`: at `single_pass`, this review runs as one reader and
+   one pass, following
+   `skill-content/challenge-review/references/switch-review_rounds-single_pass.md`.
    Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck
    wave starts at once, after every finished worker is closed, as
    `skill-content/challenge-review/references/switch-reader_waves-all_at_once.md`

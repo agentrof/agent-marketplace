@@ -1,0 +1,6 @@
+{
+  "summary": "Restore bounded project-context reading with complete scope, verified continuation and frozen evidence obligations.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

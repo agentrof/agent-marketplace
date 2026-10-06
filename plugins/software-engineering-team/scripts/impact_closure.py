@@ -232,9 +232,8 @@ def frontmatter_values(value):
             yield from frontmatter_values(item)
 
 
-def reference_owners(vault) -> dict:
-    """Every identity a front-matter value may use: the relation identities
-    vault_check resolves, plus each note's own ``id``."""
+def reference_owners(vault, records: dict | None = None) -> dict:
+    """Resolve note and source-unit identities without selecting an ambiguous owner."""
     owners = dict(vault_check.relation_identity_owners(vault))
     for note in vault_check.authored(vault):
         ident = note.fm.get("id")
@@ -250,11 +249,11 @@ def reference_owners(vault) -> dict:
                      f"ARC:{note.fm.get('component_ref') or 'ROOT'}:{record}@r{revision}")
             owners.setdefault(exact, note.rel)
     import context_catalog
-    receipts = {"documents": {}, "units": {}, "aliases": {}}
-    context_catalog.add_receipts(vault.root, receipts)
-    for reference, units in receipts["aliases"].items():
-        if len(units) == 1:
-            owners.setdefault(reference, receipts["units"][units[0]]["path"])
+    records = context_catalog.catalog(vault) if records is None else records
+    for reference, identities in records["aliases"].items():
+        owners[reference] = (records["units"][identities[0]]["path"] if len(identities) == 1 else None)
+    for identity, unit in records["units"].items():
+        owners[identity] = unit["path"]
     return owners
 
 
@@ -266,6 +265,8 @@ def resolve_reference(vault, value: str, owners: dict) -> str | None:
         return resolve_reference(vault, binding[1], owners)
     if text.startswith("[[") and text.endswith("]]"):
         return vault_check.resolve_wikilink(vault, split_wikilink(text[2:-2])[0], False)
+    if text in owners:
+        return owners[text]
     if not text or "\n" in text or len(text) > 300:
         return None
     rel = normalize(text.lstrip("./"))
@@ -282,20 +283,44 @@ def looks_like_reference(key: str, value: str, relation: bool) -> bool:
             or bool(ID_VALUE.match(text)) or (len(binding) == 3 and binding[2].startswith("sha256:")))
 
 
-def frontmatter_tier(vault, edges: Edges, keys) -> list:
+def frontmatter_tier(vault, edges: Edges, keys, records: dict | None = None) -> list:
     """Edges for every front-matter value that names a note, typed relation or
     not (``requirement_ref``, ``verification_contract_ref``, any wikilink, id,
     alias or path); returns the reference-like values no note resolves."""
+    owners = reference_owners(vault, records)
     for edge in vault_check.relation_edges(vault):
-        if edge.key in keys:
+        if edge.key in keys and not (edge.alias in owners and owners[edge.alias] is None):
             edges.add(edge.source, edge.target, edge.key, "frontmatter")
     unresolved = []
-    owners = reference_owners(vault)
     for note in vault_check.authored(vault):
         for key in sorted(note.fm):
             if key in SELF_KEYS:
                 continue
             for value in frontmatter_values(note.fm[key]):
+                if key == "dependency_refs":
+                    import backlog_compile
+                    names = value.split(" -> ")
+                    detail = None
+                    if len(names) != 2 or any(not backlog_compile.ID_RE.fullmatch(name) for name in names):
+                        detail = "malformed directed dependency edge"
+                        targets = []
+                    else:
+                        targets = [resolve_reference(vault, name, owners) for name in names]
+                        if any(target not in vault.notes or note_type(vault.notes[target]) != "story"
+                               for target in targets):
+                            detail = "dependency endpoint is missing, ambiguous or has the wrong type"
+                        else:
+                            declared = {resolve_reference(vault, link, owners) for link in
+                                        frontmatter_values(vault.notes[targets[0]].fm.get("depends_on", []))}
+                            if targets[1] not in declared:
+                                detail = "directed dependency is not declared by its source"
+                    if detail:
+                        unresolved.append({"path": note.rel, "reason": "unresolved_relation",
+                                           "key": key, "value": value, "detail": detail})
+                    else:
+                        for target in targets:
+                            edges.add(note.rel, target, key, "frontmatter")
+                    continue
                 target = resolve_reference(vault, value, owners)
                 if target in vault.index and target != note.rel:
                     edges.add(note.rel, target, key, "frontmatter")
@@ -393,12 +418,12 @@ def text_tier(vault, edges: Edges, targets) -> None:
             edges.add(note.rel, wanted[match.group(1)], MENTION_KEY, "text")
 
 
-def graph(vault, policy: dict) -> tuple:
+def graph(vault, policy: dict, records: dict | None = None) -> tuple:
     """(Edges, gaps, tiers present) over every relation form the vault uses."""
     edges = Edges(vault)
     keys = set(policy["relation_keys"])
     present = {"index": index_tier(vault, edges)}
-    gaps = frontmatter_tier(vault, edges, keys)
+    gaps = frontmatter_tier(vault, edges, keys, records)
     present["frontmatter"] = True
     present["body"] = body_tier(vault, edges)
     navigation_tier(vault, edges)
@@ -450,6 +475,9 @@ def suggested_fix(gap: dict) -> str:
         return (f"declare the typed relation {gap['source']} names to {path} by identifier"
                 " in the front matter of the citing note")
     if reason == "unresolved_relation":
+        if gap.get("key") == "dependency_refs":
+            return (f"correct `dependency_refs` {gap.get('value')} in {path} against the owning "
+                    f"dependency declarations: {gap.get('detail', 'its endpoints do not resolve')}")
         return (f"correct or remove `{gap.get('key')}` {gap.get('value')} in {path}:"
                 " its target does not resolve")
     return f"correct the relations of {path}"
@@ -613,10 +641,11 @@ def citers(vault, edges: Edges) -> dict:
             for rel, sources in sorted(found.items())}
 
 
-def snapshot(vault, policy: dict | None = None, proofs: dict | None = None) -> dict:
+def snapshot(vault, policy: dict | None = None, proofs: dict | None = None,
+             records: dict | None = None) -> dict:
     """Everything a closure needs, as plain data a cache can keep."""
     policy = closure_policy(vault.policy, policy)
-    edges, gaps, present = graph(vault, policy)
+    edges, gaps, present = graph(vault, policy, records)
     authored = vault_check.authored(vault)
     nodes = {note.rel: note_type(note) for note in authored}
     for _source, target, _key in edges.tiers:

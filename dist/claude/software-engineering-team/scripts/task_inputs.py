@@ -1116,7 +1116,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
             approval_base(project, route.get("scope_kind"), package, inputs or []))
     if project is not None and route["project_state"] and project_reading is None:
         import project_context
-        seeds = set(inputs or []) or set(project_files)
+        seeds = set(project_files) if closure is not None or scoped is not None else set(inputs or []) or set(project_files)
         project_reading = project_context.task_context(project, entry=entry, role=role,
                                                        mode=mode, paths=seeds)
     # An exact epic's closure is derived again on every run, so a source that

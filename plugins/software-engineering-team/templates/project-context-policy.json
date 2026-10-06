@@ -5,6 +5,10 @@
     "max_source_bytes": 48000,
     "max_metadata_bytes": 16000
   },
+  "reading_state": {
+    "max_request_bytes": 1048576,
+    "max_history_bytes": 1048576
+  },
   "required_relations": [
     "constrained_by",
     "uses_design",

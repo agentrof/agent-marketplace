@@ -206,6 +206,18 @@ def catalog(vault) -> dict:
                 unit = add("block", match.group(1), [[number, number]])
                 if unit:
                     alias(f"{relative.removesuffix('.md')}#^{match.group(1)}", unit)
+        if whole:
+            for name in record_aliases(props, relative):
+                if not (ba_compile.BARE_ID_RE.fullmatch(name) or ba_compile.NAMESPACED_ID_RE.fullmatch(name)):
+                    continue
+                own = [units[key] for key in aliases[name] if units[key]["path"] == relative]
+                rows = [unit for unit in own if unit["kind"] == "row"]
+                if (len(own) == 2 and len(rows) == 1 and whole in {unit["unit_id"] for unit in own}
+                        and rows[0]["label"] == name and rows[0].get("row_status") == "active"
+                        and not rows[0].get("historical") and rows[0]["source_hash"] == document["source_hash"]):
+                    # A declared record and its one active mirror share an owner;
+                    # the row's explicit address remains independently readable.
+                    aliases[name].discard(rows[0]["unit_id"])
     result = {"documents": documents, "units": units,
               "aliases": {key: sorted(value) for key, value in sorted(aliases.items())}}
     add_receipts(vault.root, result)
@@ -276,8 +288,64 @@ def resolve(data: dict, reference: str) -> list[dict]:
     return [data["units"][unit] for unit in ids]
 
 
+def unit_content(root: Path, unit: dict) -> bytes:
+    """Verify the source and complete logical unit before addressing a fragment."""
+    source_root = root.parents[1] if unit.get("source_root") == "project" else root
+    if unit.get("git_revision"):
+        from context_history import git_source
+        relative = unit["path"] if unit.get("source_root") == "project" else "workspace/docs/" + unit["path"]
+        raw = git_source(root.parents[1], relative, unit["git_revision"])
+    else:
+        raw = safe_file(source_root, unit["path"]).read_bytes()
+    if digest(raw) != unit["source_hash"]:
+        raise ValueError(f"stale source: {unit['path']}")
+    if "json_pointer" in unit:
+        value = json.loads(raw)
+        for part in unit["json_pointer"]:
+            value = value[part]
+        content = json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    else:
+        lines = raw.decode("utf-8").splitlines(keepends=True)
+        content = "\n".join("".join(lines[a - 1:b]) for a, b in unit["ranges"]).encode("utf-8")
+    expected = unit.get("parent_content_hash", unit["content_hash"])
+    if digest(content) != expected:
+        raise ValueError(f"stale unit: {unit['unit_id']}")
+    if "byte_range" in unit:
+        begin, end = unit["byte_range"]
+        if not (type(begin) is int and type(end) is int and 0 <= begin < end <= len(content)):
+            raise ValueError("invalid fragment range")
+        content = content[begin:end]
+        content.decode("utf-8")
+        if digest(content) != unit["content_hash"]:
+            raise ValueError("stale fragment")
+    if len(content) != unit["bytes"]:
+        raise ValueError("stale unit byte count")
+    return content
+
+
+def fragment(unit: dict, content: bytes, begin: int, max_bytes: int) -> dict | None:
+    """Fragments cover UTF-8 bytes in order; the original unit remains the obligation."""
+    if type(begin) is not int or not 0 <= begin < len(content):
+        raise ValueError("invalid fragment offset")
+    content[:begin].decode("utf-8")
+    end = min(len(content), begin + max_bytes)
+    while end > begin:
+        try:
+            content[begin:end].decode("utf-8")
+            break
+        except UnicodeDecodeError:
+            end -= 1
+    if end == begin:
+        return None
+    result = dict(unit, unit_id=f"{unit['unit_id']}::fragment:{begin}:{end}", kind="fragment",
+        parent_unit_id=unit["unit_id"], parent_kind=unit["kind"],
+        parent_content_hash=unit["content_hash"], parent_bytes=unit["bytes"],
+        byte_range=[begin, end], content_hash=digest(content[begin:end]), bytes=end - begin)
+    return result
+
+
 def read_units(root: Path, data: dict, identities: list[str], max_bytes: int) -> dict:
-    """Read addressed text against its exact source, never silently truncate a unit."""
+    """Read exact addresses, including explicitly bounded fragments of a parent."""
     if max_bytes <= 0:
         raise ValueError("max_bytes must be positive")
     selected = []
@@ -285,24 +353,7 @@ def read_units(root: Path, data: dict, identities: list[str], max_bytes: int) ->
         if identity not in data["units"]:
             raise ValueError(f"unknown unit: {identity}")
         unit = data["units"][identity]
-        source_root = root.parents[1] if unit.get("source_root") == "project" else root
-        if unit.get("git_revision"):
-            from context_history import git_source
-            raw = git_source(root.parents[1], "workspace/docs/" + unit["path"], unit["git_revision"])
-        else:
-            raw = safe_file(source_root, unit["path"]).read_bytes()
-        if digest(raw) != unit["source_hash"]:
-            raise ValueError(f"stale source: {unit['path']}")
-        if "json_pointer" in unit:
-            value = json.loads(raw)
-            for part in unit["json_pointer"]:
-                value = value[part]
-            content = json.dumps(value, sort_keys=True, ensure_ascii=False)
-        else:
-            lines = raw.decode("utf-8").splitlines(keepends=True)
-            content = "\n".join("".join(lines[a - 1:b]) for a, b in unit["ranges"])
-        if digest(content.encode("utf-8")) != unit["content_hash"]:
-            raise ValueError(f"stale unit: {identity}")
+        content = unit_content(root, unit).decode("utf-8")
         public = {key: value for key, value in unit.items() if key not in {"references", "historical_properties"}}
         selected.append({**public, "text": content})
     size = sum(unit["bytes"] for unit in selected)

@@ -255,7 +255,8 @@ def refresh(docs: Path, cache: Path, verify: bool = False,
     proofs = {} if full else {rel: proof for rel, proof in data.get("proofs", {}).items()
                               if rel not in recheck and rel not in dirty}
     proofs.update(impact_closure.proofs_for(docs, authored, recheck))
-    snap = impact_closure.snapshot(vault, proofs={})
+    records = context_catalog.catalog(vault)
+    snap = impact_closure.snapshot(vault, proofs={}, records=records)
     authored_set = set(snap["notes"])
 
     if persist:
@@ -273,7 +274,7 @@ def refresh(docs: Path, cache: Path, verify: bool = False,
 
     data = {
         "schema_version": SCHEMA_VERSION,
-        "catalog": context_catalog.catalog(vault),
+        "catalog": records,
         "builder": builder,
         "docs": str(docs),
         "tiers": snap["tiers"],

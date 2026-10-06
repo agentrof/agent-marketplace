@@ -30,7 +30,11 @@ sys.path.insert(0, str(ROOT / "tools/tests"))
 import delivery_compile as delivery
 import delivery_verification as verification
 import file_lock
+import context_catalog
+import context_history
+import project_context
 from git_fixture import init_repository, remove_temporary
+from tools.tests.test_impact_closure import note
 
 
 @integration
@@ -1900,6 +1904,175 @@ print(sys.argv[1])
         qa["verification_candidate_hash"] = "sha256:different"
         with self.assertRaisesRegex(RuntimeError, "same verification candidate"):
             verification.validate_evidence(item, review, qa)
+
+
+class FrozenContextReadingTests(unittest.TestCase):
+    """Real source/plan validation with only candidate/session transport replaced."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.current = {"candidate_hash": "sha256:" + "a" * 64, "product_commit": "b" * 40}
+        self.frozen = {}
+        self.write("workspace/docs/backlog/source.md", note("story", "Source", body="Preserve the condition."))
+        self.session = mock.patch.object(verification, "read_session", return_value={})
+        self.candidate = mock.patch.object(verification, "require_current", return_value=self.current)
+        self.transport = mock.patch.object(context_history.subprocess, "run", side_effect=self.git_transport)
+        for patch in (self.session, self.candidate, self.transport):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def write(self, relative, text):
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        self.frozen[relative] = path.read_bytes()
+
+    def git_transport(self, command, **_kwargs):
+        if command[-2:] == ["rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(command, 0, str(self.root).encode() + b"\n", b"")
+        if "show" in command:
+            commit, path = command[-1].split(":", 1)
+            if commit == self.current["product_commit"] and path in self.frozen:
+                return subprocess.CompletedProcess(command, 0, self.frozen[path], b"")
+            return subprocess.CompletedProcess(command, 1, b"", b"unavailable fixture source")
+        raise AssertionError("unexpected Git transport")
+
+    def payload(self, *, refs=None, manual=None, budget=None):
+        data = project_context.load_index(self.root, no_cache=True)
+        plan = project_context.resolve_context(self.root, data, entry="deliver", role="qa-engineer",
+            refs=refs or [], manual_sources=manual, purpose="review", budget=budget,
+            snapshot_scope="selection")
+        return {**self.current, "project_reading": plan}
+
+    def test_manual_only_frozen_context_preserves_candidate_bound_obligation(self):
+        self.write("workspace/tests/check.py", "assert True\n")
+        payload = self.payload(manual=["workspace/tests/check.py"])
+        result = verification.inspect_context(self.root, payload)
+        self.assertEqual(result["status"], "needs_manual_read")
+        self.assertEqual(result["units"], [])
+        manual = result["manual_reads"][0]
+        self.assertEqual(manual["path"], "workspace/tests/check.py")
+        self.assertEqual(manual["source_hash"], context_catalog.digest(self.frozen[manual["path"]]))
+        self.assertEqual(manual["product_commit"], self.current["product_commit"])
+        self.assertEqual(manual["disposition"], "requires_frozen_inspect")
+        self.assertNotIn("content", manual)
+        self.assertNotIn("text", manual)
+
+    def test_mixed_frozen_context_keeps_vault_text_and_manual_evidence(self):
+        self.write("workspace/tests/check.py", "assert True\n")
+        payload = self.payload(refs=["backlog/source.md"], manual=["workspace/tests/check.py"])
+        result = verification.inspect_context(self.root, payload)
+        self.assertEqual(result["status"], "needs_manual_read")
+        self.assertEqual(result["units"][0]["text"], self.frozen["workspace/docs/backlog/source.md"].decode())
+        self.assertEqual(result["manual_reads"][0]["product_commit"], self.current["product_commit"])
+        self.assertTrue(all(row["git_revision"] == self.current["product_commit"] for row in result["units"]))
+
+    def test_frozen_capsule_and_fragments_complete_exact_scope_without_state_writes(self):
+        import atomic_file
+        refs = []
+        for number in range(70):
+            relative = f"backlog/selected-{number:03}-" + "source-" * 10 + ".md"
+            self.write("workspace/docs/" + relative, note("story", "Selected",
+                body="Preserve 🙂. " * (80 if number == 0 else 1)))
+            refs.append(relative)
+        payload = self.payload(refs=refs, budget={"max_files": 2, "max_source_bytes": 170,
+                                                "max_metadata_bytes": 5000})
+        self.assertEqual(payload["project_reading"]["request"]["state"]["storage"], "runtime")
+        text, fragments, pages = {}, 0, 0
+        before = {path.relative_to(self.root).as_posix(): path.read_bytes()
+                  for path in self.root.rglob("*") if path.is_file()}
+        with mock.patch.object(atomic_file, "real_directory", side_effect=AssertionError("unexpected write")), \
+                mock.patch.object(atomic_file, "replace_bytes", side_effect=AssertionError("unexpected write")):
+            while True:
+                plan = payload["project_reading"]
+                self.assertEqual(set(project_context.request_data(self.root, plan)["refs"]), set(refs))
+                batch = verification.inspect_context(self.root, payload)
+                self.assertLessEqual(batch["bytes"], 170)
+                self.assertTrue(batch["units"])
+                for unit in batch["units"]:
+                    text[unit["path"]] = text.get(unit["path"], "") + unit["text"]
+                    fragments += unit["kind"] == "fragment"
+                pages += 1
+                self.assertLessEqual(pages, sum(len(self.frozen["workspace/docs/" + ref]) for ref in refs))
+                if plan["status"] == "ready":
+                    break
+                payload = verification.inspect_context(self.root, payload, reason="Read remaining frozen sources")
+                self.assertFalse(payload["project_reading"]["request"]["persist_state"])
+        self.assertEqual(set(text), set(refs))
+        self.assertEqual(text, {ref: self.frozen["workspace/docs/" + ref].decode() for ref in refs})
+        self.assertGreater(fragments, 1)
+        self.assertEqual(before, {path.relative_to(self.root).as_posix(): path.read_bytes()
+                                  for path in self.root.rglob("*") if path.is_file()})
+
+    def test_frozen_external_fragments_read_the_declared_project_path(self):
+        relative = "workspace/memory/selected.md"
+        self.write(relative, "Preserve 🙂. " * 80)
+        payload = self.payload(refs=[relative], budget={"max_source_bytes": 80})
+        text = ""
+        while True:
+            batch = verification.inspect_context(self.root, payload)
+            self.assertLessEqual(batch["bytes"], 80)
+            text += "".join(row["text"] for row in batch["units"])
+            if payload["project_reading"]["status"] == "ready":
+                break
+            payload = verification.inspect_context(self.root, payload, reason="Read selected frozen context")
+        self.assertEqual(text, self.frozen[relative].decode())
+
+    def test_frozen_scope_widening_preserves_manuals_and_runtime_origin_is_write_free(self):
+        import atomic_file
+        self.write("workspace/tests/check.py", "assert True\n")
+        refs = []
+        for number in range(40):
+            relative = f"backlog/selected-{number:03}-" + "source-" * 10 + ".md"
+            self.write("workspace/docs/" + relative, note("story", "Selected"))
+            refs.append(relative)
+        payload = self.payload(refs=refs, manual=["workspace/tests/check.py"],
+            budget={"max_metadata_bytes": 4000, "max_source_bytes": 500})
+        self.assertEqual(payload["project_reading"]["request"]["state"]["storage"], "runtime")
+        with mock.patch.object(atomic_file, "real_directory", side_effect=AssertionError("unexpected write")), \
+                mock.patch.object(atomic_file, "replace_bytes", side_effect=AssertionError("unexpected write")):
+            widened = verification.inspect_context(self.root, payload, reason="Read added frozen evidence",
+                                                   refs=["backlog/source.md"])
+        request = project_context.request_data(self.root, widened["project_reading"])
+        self.assertEqual(set(request["refs"]), set(refs) | {"backlog/source.md"})
+        self.assertEqual(request["manual_sources"], ["workspace/tests/check.py"])
+        self.assertFalse(request["persist_state"])
+        self.assertEqual(widened["project_reading"]["request"]["state"]["storage"], "inline")
+
+    def test_frozen_reader_refuses_modified_plan_source_manual_hash_and_candidate(self):
+        self.write("workspace/tests/check.py", "assert True\n")
+        payload = self.payload(refs=["backlog/source.md"], manual=["workspace/tests/check.py"])
+        modified = copy.deepcopy(payload)
+        modified["project_reading"]["manual_reads"][0]["source_hash"] = "sha256:" + "0" * 64
+        with self.assertRaisesRegex(ValueError, "modified"):
+            verification.inspect_context(self.root, modified)
+        modified = copy.deepcopy(payload)
+        modified["candidate_hash"] = "sha256:" + "0" * 64
+        with self.assertRaisesRegex(RuntimeError, "another verification candidate"):
+            verification.inspect_context(self.root, modified)
+        modified = copy.deepcopy(payload)
+        modified["product_commit"] = "c" * 40
+        with self.assertRaisesRegex(RuntimeError, "another candidate commit"):
+            verification.inspect_context(self.root, modified)
+        self.frozen["workspace/tests/check.py"] = b"assert False\n"
+        with self.assertRaisesRegex(RuntimeError, "differs from the frozen candidate"):
+            verification.inspect_context(self.root, payload)
+        (self.root / "workspace/tests/check.py").write_text("assert False\n")
+        with self.assertRaisesRegex(ValueError, "stale"):
+            verification.inspect_context(self.root, payload)
+
+    def test_frozen_reader_refuses_changed_vault_bytes_and_unresolved_plan_shape(self):
+        payload = self.payload(refs=["backlog/source.md"])
+        self.frozen["workspace/docs/backlog/source.md"] = note("story", "Source", body="Different frozen condition.").encode()
+        with self.assertRaisesRegex(ValueError, "stale source"):
+            verification.inspect_context(self.root, payload)
+        (self.root / "workspace/docs/backlog/source.md").write_text(note("story", "Source", body="Different current condition."))
+        with self.assertRaisesRegex(ValueError, "stale"):
+            verification.inspect_context(self.root, payload)
+        with self.assertRaisesRegex(RuntimeError, "frozen inspect"):
+            verification.inspect_context(self.root, {**self.current, "project_reading": {"status": "unavailable"}})
 
 
 if __name__ == "__main__":

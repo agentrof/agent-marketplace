@@ -98,7 +98,7 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "22adb9a8b875f0e57e629cb6edc93518b17153fcf65609f458fce81494e56364"
+      "12320ffb5da00b7a923a4646ed8f3c36c60ab932ad772801e99e6ea7939619f1"
     ,
     "flows/business-analysis.md":
       "aaebfe00ee5e062d23a881e0d0c989563426b2c026dcb07c78d74b0929477e5c"
@@ -113,7 +113,7 @@
       "b4fb79b6c41d247973cc35a56eecc51daaf00b8774d1a878fdc92cc02bab5a0e"
     ,
     "flows/design-system.md":
-      "17c2305579e348874cc6eebfdc7a5fce32ad4377ff96a6aeb1b74e3b610f0e81"
+      "28a1b3a58e442155450e75c23ee9f6cb04af315860e69d0ae02c5c31dec6c7c0"
     ,
     "flows/design.md":
       "5e87edb63497b9b06deff9bf210b6674bc7990245d70b4f7e2be1b1fad9dfbca"
@@ -125,13 +125,13 @@
       "cdd66de56d9c188ed3e92f4ac7e53a6e4577373c880a014cbe83ce638e683167"
     ,
     "flows/operation.md":
-      "4cc9775649de3b6098fd4313d8a9c939a339b29613ebc3b62759d5ac24373d95"
+      "fb5bd6b58fb6aabe021f65829ca18c2dcabcc7616f5f969aded854d15aa776a4"
     ,
     "flows/requirement.md":
       "70ab7a50fdbb25e8f2d86497bba7a20d38e81f1747b1b034274167ae0e26a31b"
     ,
     "flows/solution-design.md":
-      "26c4ebac809161bfcefc7d3dd6eb188321c67bb96ec87d0d340250be8a3d79d3"
+      "cff854741f130a3d04385aaabf35c2c437604ab85261ebba617456a2865f46ee"
     ,
     "hooks/hooks.json":
       "6907f6c826873e160a411f49ef34e346b7bbf4db046f50b46528184ace2d604a"
@@ -155,7 +155,7 @@
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
     ,
     "scripts/backlog_compile.py":
-      "194ae1c6f4ad344dba30673c7290ee6896aac88ae973bc96453a643bd59ccfde"
+      "f4c8c5f1bcfae6f6f79cc0bbd7f61c435f3ab1386f8a0f9ff2a873a43141d67c"
     ,
     "scripts/backlog_input_policy.py":
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
@@ -215,7 +215,7 @@
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/operation_compile.py":
-      "c0eabacc6a0b7a614b98e0048652f0ff3f46b579c5b934d094f74905d7cb9094"
+      "d760c796ddeb1308380eaf54b7da3f333f3fddcf5a95bc048595341dadf4acf1"
     ,
     "scripts/process_policy.py":
       "673e45268b8b1f8161ecb4f1d26a9d5c970049015022e804a70c84b7da87828a"
@@ -334,6 +334,9 @@
     "skill-content/challenge-review/references/switch-review_panels-lens_panel.md":
       "3b647cbaf841f4212de8e8c18abd1ea2ac727bdf59c4a381f5d5b4846402995e"
     ,
+    "skill-content/challenge-review/references/switch-review_rounds-single_pass.md":
+      "90a44e428dd7876044effa0773d8e83fc38ba38bf554ff832b7e07eb4b1475e5"
+    ,
     "skill-content/challenge-review/references/triage.md":
       "f07174787b4ff740668c4a6a2e48ab99b0a6519dc51c9338f17671579dfaa0df"
     ,
@@ -362,7 +365,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "110a888cde57f06a2365fd841e6334a0eb6b86d291ea5753ce1a034a0cdd81b5"
+      "da6a9e3f28ec8f7db2c7ea6518feefc4d4c1a01ebb1b72e994c0a9c9bc020358"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"

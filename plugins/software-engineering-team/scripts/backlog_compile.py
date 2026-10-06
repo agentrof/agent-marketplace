@@ -1288,8 +1288,12 @@ def accepted_minor_findings(docs: Path, body: str, path: str,
 
 # Switch review_loop at blocking_delta keeps a review record: the findings a
 # review returned with their ids and severities, the rulings of its calibration
-# reader and the finding id of each accepted minor finding.
+# reader and the finding id of each accepted minor finding. Switch
+# review_rounds at single_pass keeps the same record without calibration: the
+# reader's severity stands, and a major finding is accepted as a follow-up.
 REVIEW_LOOP, RECORDING_LOOP = "review_loop", "blocking_delta"
+REVIEW_ROUNDS, SINGLE_PASS_LOOP = "review_rounds", "single_pass"
+RECORDING_LOOPS = (RECORDING_LOOP, SINGLE_PASS_LOOP)
 RETURNED_FINDINGS = "Returned Findings"
 RETURNED_FINDING_COLUMNS = ("finding", "severity", "description")
 SEVERITY_CALIBRATION = "Severity Calibration"
@@ -1302,14 +1306,18 @@ CLAIM_SEVERITIES = ("critical", "major")
 
 
 def review_loop_value(docs: Path) -> str:
-    """The review_loop value of the project's approved Process Policy.
+    """The review loop a document review runs under in the approved Process Policy.
 
-    Without a policy it is the package default. A draft or invalid policy
-    raises ValueError: it is refused, never read.
+    It is ``single_pass`` when switch review_rounds selects it, which governs
+    the document reviews over review_loop, and the review_loop value
+    otherwise. Without a policy it is the package default. A draft or invalid
+    policy raises ValueError: it is refused, never read.
     """
     import process_policy
 
     values, _snapshot = process_policy.effective_values(docs)
+    if values[REVIEW_ROUNDS]["value"] == SINGLE_PASS_LOOP:
+        return SINGLE_PASS_LOOP
     return values[REVIEW_LOOP]["value"]
 
 
@@ -1348,12 +1356,13 @@ def returned_findings(docs: Path, body: str, path: str) -> tuple[dict[str, str],
 
 
 def severity_calibration(docs: Path, body: str, path: str,
-                         returned: dict[str, str] | None) -> tuple[dict[str, str], list[str]]:
+                         returned: dict[str, str] | None,
+                         *, required: bool = True) -> tuple[dict[str, str], list[str]]:
     """Read a review record's Severity Calibration: each ruled finding id with its ruling.
 
     With ``returned``, the record's Returned Findings, every row rules a
     finding returned at its claimed severity, and every critical or major
-    returned finding has exactly one row.
+    returned finding has exactly one row unless ``required`` is false.
     """
     rows: list[dict[str, str]] = []
     errors: list[str] = []
@@ -1384,25 +1393,32 @@ def severity_calibration(docs: Path, body: str, path: str,
                               f" the severity {identifier} was returned at")
         if known and identifier not in ruled:
             ruled[identifier] = ruling
-    for identifier, severity in sorted((returned or {}).items()):
+    for identifier, severity in sorted((returned or {}).items() if required else ()):
         if severity in CLAIM_SEVERITIES and identifier not in ruled:
             errors.append(f"{path} returned {severity} finding {identifier} has no Severity Calibration row")
     return ruled, errors
 
 
-def review_record_findings(docs: Path, body: str, path: str, *, approved: bool) -> list[str]:
-    """Validate the review record that the blocking_delta loop keeps in a document.
+def review_record_findings(docs: Path, body: str, path: str, *, approved: bool,
+                           loop: str = RECORDING_LOOP) -> list[str]:
+    """Validate the review record that the blocking_delta or single_pass loop keeps.
 
-    A critical or major finding never enters Accepted Minor Findings: each row
-    names the id of a finding the review returned as minor or its calibration
-    lowered to minor. An approved document without Returned Findings was
-    approved before its review kept a record, so it stays as it was.
+    At blocking_delta a critical or major finding never enters Accepted Minor
+    Findings: each row names the id of a finding the review returned as minor
+    or its calibration lowered to minor. At single_pass no calibration runs,
+    and only a critical finding stays out of the table. An approved document
+    without Returned Findings was approved before its review kept a record, so
+    it stays as it was.
     """
     present = headings(body)
     if approved and RETURNED_FINDINGS not in present:
         return []
     returned, errors = returned_findings(docs, body, path)
-    ruled, calibration_errors = severity_calibration(docs, body, path, returned)
+    single_pass = loop == SINGLE_PASS_LOOP
+    ruled, calibration_errors = severity_calibration(docs, body, path, returned,
+                                                     required=not single_pass)
+    accepted_severities = ("minor", "major") if single_pass else ("minor",)
+    only = "a minor or major finding" if single_pass else "a minor finding"
     errors.extend(calibration_errors)
     if ACCEPTED_MINOR_FINDINGS not in present:
         return errors
@@ -1422,12 +1438,12 @@ def review_record_findings(docs: Path, body: str, path: str, *, approved: bool) 
         accepted.add(identifier)
         if identifier not in returned:
             errors.append(f"{label} names {identifier}, which Returned Findings does not list")
-        elif identifier in ruled and ruled[identifier] != "minor":
+        elif identifier in ruled and ruled[identifier] not in accepted_severities:
             errors.append(f"{label} names {identifier}, which calibration ruled {ruled[identifier]};"
-                          " only a minor finding is accepted")
-        elif identifier not in ruled and returned[identifier] != "minor":
+                          f" only {only} is accepted")
+        elif identifier not in ruled and returned[identifier] not in accepted_severities:
             errors.append(f"{label} names {identifier}, which the review returned as"
-                          f" {returned[identifier]}; only a minor finding is accepted")
+                          f" {returned[identifier]}; only {only} is accepted")
     return errors
 
 
@@ -1437,7 +1453,7 @@ def review_loop_record(docs: Path, body: str, path: str, props: dict) -> list[st
     A note without a record section never reads the Process Policy, nor does
     an approved note without Returned Findings, which was approved before its
     review kept a record and stays as it was. At any value but blocking_delta
-    a section of a record's name is authored text.
+    or single_pass a section of a record's name is authored text.
     """
     present = headings(body)
     if not set(REVIEW_RECORD_SECTIONS) & present:
@@ -1449,9 +1465,9 @@ def review_loop_record(docs: Path, body: str, path: str, props: dict) -> list[st
         loop = session_read(("review_loop", docs.resolve()), lambda: review_loop_value(docs))
     except ValueError as exc:
         return [f"{path} needs the review_loop value of the Process Policy: {exc}"]
-    if loop != RECORDING_LOOP:
+    if loop not in RECORDING_LOOPS:
         return []
-    return review_record_findings(docs, body, path, approved=approved)
+    return review_record_findings(docs, body, path, approved=approved, loop=loop)
 
 
 # Switch remediation_bookkeeping at compiler lets one compiler command write

@@ -77,6 +77,18 @@ Verification Contract and the QA Engineer for the Environment Contract, never
 by that contract's writer. The instructions live in the `challenge-review` and
 `code-review` references `switch-review_loop-blocking_delta.md`.
 
+Process switch `review_rounds` caps the readers and rounds of backlog,
+Solution Design, Design System and Operation contract reviews. At `current`,
+the default, they follow `review_panels` and `review_loop`. At `single_pass`,
+defined in `challenge-review/references/switch-review_rounds-single_pass.md`,
+one reader of the step's reader role reads, never a lens panel; no
+calibration reader runs, so the reader's severity stands; only a critical
+finding starts a writer pass, and one re-review of the changed text closes
+it. Minor and major findings become follow-ups, which `backlog_compile.py`
+and `operation_compile.py` accept in `Accepted Minor Findings`, and a critical
+finding still open after the one re-review goes to the owner's approval gate.
+Delivery code review keeps its `review_loop` value.
+
 Process switch `code_review_panel` decides who reads a Delivery Item's frozen
 candidate in code review. At `single_reader`, the default, the official code
 reviewer alone does. At `beside_official`, one fresh `code-reviewer-lens` per

@@ -307,7 +307,7 @@ def accepted_solution_ref(docs: Path, value: object) -> bool:
 
 
 def review_record_findings(docs: Path, kind: str, props: dict, body: str) -> list[str]:
-    """Validate the review record that the blocking_delta review loop keeps in a contract.
+    """Validate the review record that the blocking_delta or single_pass loop keeps in a contract.
 
     At any other review_loop value a section of a record's name is authored
     text, as it was before the switch. A contract without such a section never
@@ -324,15 +324,17 @@ def review_record_findings(docs: Path, kind: str, props: dict, body: str) -> lis
     if approved and backlog_compile.RETURNED_FINDINGS not in backlog_compile.headings(authored):
         return []
     try:
-        if backlog_compile.review_loop_value(docs) != backlog_compile.RECORDING_LOOP:
-            return []
+        loop = backlog_compile.review_loop_value(docs)
     except ValueError as exc:
         return [f"the review record needs the review_loop value of the Process Policy: {exc}"]
+    if loop not in backlog_compile.RECORDING_LOOPS:
+        return []
     path = f"operation/{FILE_FOR[kind]}"
     # The backlog review note records accepted minor findings in the same table.
     errors = backlog_compile.accepted_minor_findings(
         docs, authored, path, {"minor_finding_owner_roles": MINOR_FINDING_OWNER_ROLES})
-    return errors + backlog_compile.review_record_findings(docs, authored, path, approved=approved)
+    return errors + backlog_compile.review_record_findings(docs, authored, path, approved=approved,
+                                                           loop=loop)
 
 
 def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict, list[str]]:

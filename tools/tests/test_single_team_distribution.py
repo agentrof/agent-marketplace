@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -61,6 +62,7 @@ def shared_root(variant: str = "pristine") -> Path:
     return _SHARED_ROOTS[variant]
 
 
+@integration
 class SingleTeamDistributionTests(unittest.TestCase):
     """Contracts read from the shared build, which no test here changes."""
 
@@ -316,6 +318,7 @@ class SingleTeamDistributionTests(unittest.TestCase):
             self.assertNotIn("reasoning:", codex)
 
 
+@integration
 class CopiedDistributionTests(unittest.TestCase):
     """Contracts that change a built root, each on its own copy of the shared build."""
 
@@ -640,6 +643,7 @@ class DistributionRuleTests(unittest.TestCase):
             build_distributions.marketplace_snapshot(other)["build_id"],
         )
 
+    @integration
     def test_snapshot_and_provenance_bind_the_package_mode_contract(self):
         relative = "scripts/backlog_compile.py"
         root = copy_root(shared_root(), self.base / "marketplace", with_dist=False)
@@ -684,6 +688,7 @@ class DistributionRuleTests(unittest.TestCase):
         self.assertEqual(list(output.rglob("__pycache__")), [])
         self.assertEqual(list(output.rglob("*.pyc")), [])
 
+    @integration
     def test_documented_provenance_conflicts_are_the_ones_git_reports(self):
         # #311: the provenance serialization and its four descriptions must
         # name every case in which two queued PRs conflict in dist/.
@@ -852,6 +857,7 @@ SHARED_VARIANTS = {
 }
 
 
+@integration
 class ExecutionProfileTests(unittest.TestCase):
     """Per-host catalogs pin each class; profile tables map tiers to a class
     and effort; inherit omits the model and keeps the effort."""

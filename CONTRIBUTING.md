@@ -27,15 +27,14 @@ make check-local
 make verify-local
 ```
 
-`check-local` always runs static gates and the change's own tests from the
-full branch base-to-staged-candidate diff, with four isolated workers by
+`check-local` always runs static gates and the change's own unit tests from
+the full branch base-to-staged-candidate diff, with four isolated workers by
 default: the changed test methods, the tests that name a changed input or a
 changed function, and the modules that import a changed test helper, within a
-budget of about 40 seconds.
-Pull request CI runs every test on Linux and each system's own tests on macOS
-and Windows, so the local gate never runs the whole suite on its own;
-`python3 tools/ci_local.py check --staged --full` runs every test on request,
-for a change whose host-specific behavior CI cannot cover. After committing and
+budget of about 40 seconds. Integration tests never run locally.
+Pull request CI runs every test, integration tests included, on Linux and each
+system's own tests on macOS and Windows; `python3 tools/ci_local.py check
+--staged --full` runs every unit test on request. After committing and
 before pushing, run `make check-pr`, the confidentiality and release-impact
 scan of the committed branch. Partial staging and worktree/index mismatches are rejected. Identical successful local results can be reused for
 at most 24 hours; a changed or failed candidate invalidates them. Verify the
@@ -171,6 +170,13 @@ so every test picks the cheapest level that proves its rule:
   smoke. Independent scenarios are separate test methods sharing a helper.
 - Converting a test never weakens it: the same exception type and message are
   expected, and the converted rule is broken once to see the test fail.
+- Mark every test that starts Git or any other process, builds a
+  distribution, or writes outside its temporary directory with `@integration`
+  from `tools/tests/levels.py`, on the method or on its class. The local gate
+  runs only unit tests, fast and as many of the change's own as fit; pull
+  request CI runs unit and integration tests. CI and local workers fail an
+  unmarked test that starts a process or writes outside its temporary
+  directory, so the split stays true.
 
 ## Guarding the guard
 

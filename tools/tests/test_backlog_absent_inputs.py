@@ -4,6 +4,7 @@ import contextlib
 import io
 import subprocess
 import unittest
+from tools.tests.levels import integration
 from types import SimpleNamespace
 
 from tools.tests.git_fixture import init_repository
@@ -15,6 +16,7 @@ BA = binding_fixture.BA
 SOLUTION = binding_fixture.SOLUTION
 
 
+@integration
 class AbsentInputTests(unittest.TestCase):
     setUp = binding_fixture.RequirementBindingTests.setUp
     requirement = binding_fixture.RequirementBindingTests.requirement

@@ -397,16 +397,16 @@ def estimate_weights(policy, runner_os):
     return weights
 
 
-def changed_ids(root, source, policy, all_ids, weights, budget):
-    """The change's own tests, most specific first, within the local budget.
+def changed_ids(root, source, policy, all_ids, weights, budget, integration=frozenset()):
+    """The change's own unit tests, most specific first, within the local budget.
 
     In order: the changed test methods (a whole changed test module when code
     outside its test methods changed); the test methods that name a changed
     non-Python input; in the own test module of each changed Python module,
     the tests that name a changed function or class, then the test modules
     that import a changed test helper, then the rest of each own test module.
-    Pull request CI runs everything; a test that would take the estimate past
-    the budget is left to it.
+    Pull request CI runs everything; a test marked ``@integration``, or one
+    that would take the estimate past the budget, is left to it.
     """
     # A generated copy is checked by the distribution sync; its canonical source selects the tests.
     real = [path for path in source["changed_paths"] if not tests.matches(path, policy.get("generated_paths", []))]
@@ -434,13 +434,16 @@ def changed_ids(root, source, policy, all_ids, weights, budget):
     tiers = [("changed tests", changed_tests), ("tests naming a changed input", naming_ids(root, real, policy, all_ids)),
              ("tests naming a changed definition", own_first), ("importers of changed test code", importers),
              ("other own-module tests", own_rest)]
-    selected, seen, spent, deferred, counts = [], set(), 0.0, 0, []
+    selected, seen, spent, deferred, left, counts = [], set(), 0.0, 0, 0, []
     for label, tier in tiers:
         taken = 0
         for test_id in tier:
             if test_id in seen:
                 continue
             seen.add(test_id)
+            if test_id in integration:
+                left += 1
+                continue
             cost = tests.test_weight(test_id, weights, policy)
             if budget and spent + cost > budget:
                 deferred += 1
@@ -450,7 +453,9 @@ def changed_ids(root, source, policy, all_ids, weights, budget):
             taken += 1
         if taken:
             counts.append(f"{label} {taken}")
-    reason = f"{len(selected)} tests of the change: " + (", ".join(counts) or "none")
+    reason = f"{len(selected)} unit tests of the change: " + (", ".join(counts) or "none")
+    if left:
+        reason += f"; {left} integration tests left to pull request CI"
     if deferred:
         reason += f"; {deferred} more left to pull request CI past the local budget"
     return sorted(selected), "changed", reason
@@ -463,16 +468,20 @@ def make_plan(root, target="origin/main", jobs=None, full=False):
     ids, inventory_hash = tests.inventory(root)
     runner_os = {"Linux": "ubuntu-latest", "Darwin": "macos-latest", "Windows": "windows-latest"}.get(tests.platform.system())
     weights = estimate_weights(policy, runner_os)
+    # Integration tests start processes or write outside their temporary directory; only CI runs them.
+    integration = tests.integration_ids(root)
+    units = [test_id for test_id in ids if test_id not in integration]
     if full:
-        selected, mode, reason = list(ids), "full", "full local suite requested"
+        selected, mode, reason = units, "full", "every unit test requested"
     elif source["base"] is None:
-        selected, mode, reason = list(ids), "full", "target merge-base unavailable; full local suite required"
+        selected, mode, reason = units, "full", "target merge-base unavailable; every unit test required"
+    elif local_policy["test_selection"] == "changed":
+        # Pull request CI runs every test on Linux; this gate gives the change's own unit tests before the push.
+        selected, mode, reason = changed_ids(root, source, policy, ids, weights,
+                                             local_policy["budget_estimated_seconds"], integration)
     else:
-        # Pull request CI runs every test on Linux; this gate gives the change's own tests before the push.
-        selected, mode, reason = (changed_ids(root, source, policy, ids, weights,
-                                              local_policy["budget_estimated_seconds"])
-                                  if local_policy["test_selection"] == "changed" else
-                                  tests.select_ids("impact", source["changed_paths"], policy, ids, root))
+        selected, mode, reason = tests.select_ids("impact", source["changed_paths"], policy, ids, root)
+        selected = [test_id for test_id in selected if test_id not in integration]
     jobs = local_policy["default_workers"] if jobs is None else jobs
     if type(jobs) is not int or not 1 <= jobs <= local_policy["max_workers"]:
         raise tests.CIError("worker count is outside local policy")
@@ -495,7 +504,7 @@ def validate_plan(plan):
             plan.get("plan_hash") != tests.digest({k: v for k, v in plan.items() if k != "plan_hash"}):
         raise tests.CIError("local plan identity is invalid")
     ids = plan.get("selected_ids", [])
-    if not ids or ids != sorted(set(ids)) or sorted(item for shard in plan["shards"] for item in shard) != ids \
+    if ids != sorted(set(ids)) or sorted(item for shard in plan["shards"] for item in shard) != ids \
             or any(not shard for shard in plan["shards"]):
         raise tests.CIError("local shards do not exactly partition the selection")
 
@@ -552,7 +561,7 @@ def run_worker(root, plan, shard, path):
         if identity != plan["inventory_hash"]:
             raise tests.CIError("test inventory changed")
         result, unattributed = tests.run_guarded(
-            lambda: tests.load_selected(root, plan["shards"][shard], ids), report, path)
+            lambda: tests.load_selected(root, plan["shards"][shard], ids), report, path, tests.integration_ids(root))
         report["status"] = "complete" if result.wasSuccessful() and not unattributed else "failed"
         if unattributed:
             report["error"] = "a class or module fixture " + tests.host_calls_text(unattributed)

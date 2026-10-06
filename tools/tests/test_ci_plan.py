@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -28,6 +29,7 @@ import git_fixture  # noqa: E402
 import test_ci_evidence as evidence_fixtures  # noqa: E402
 
 
+@integration
 class CIPlanIntegrationTests(unittest.TestCase):
     """One repository serves every test: the tests read its history and never change it."""
 

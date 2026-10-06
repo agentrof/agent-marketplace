@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 
@@ -28,6 +29,7 @@ RETIRED_AGENT = {
 }
 
 
+@integration
 class PackageRefreshAcceptanceTests(unittest.TestCase):
     def run_json(
         self, script: Path, *args: str, expected: int = 0

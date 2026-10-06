@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 from tools.tests import fixture_cache
@@ -81,6 +82,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             f"aliases:\n  - {ident}\n---\n\n# {title}\n"
         )
 
+    @integration
     def test_setup_writes_small_config_and_fixed_colors(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -123,6 +125,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             for doc_type, color in BACKLOG_COLORS.items():
                 self.assertEqual(rendered[f"tag:#doc/{doc_type}"], color)
 
+    @integration
     def test_vault_check_rejects_a_backlog_type_outside_its_nested_path(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -146,6 +149,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("type 'story' is not legal at this path", result.stdout)
 
+    @integration
     def test_vault_check_rejects_project_property_type_drift(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -157,6 +161,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("property 'owner_role' must be typed 'text'", result.stdout)
 
+    @integration
     def test_business_analysis_fragment_reconciles_all_declared_property_types(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -174,6 +179,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(types["package_status"], "text")
             self.assertEqual(types["package_approved_at_utc"], "datetime")
 
+    @integration
     def test_vault_check_rejects_project_backlog_color_drift(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -227,6 +233,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             },
         )
 
+    @integration
     def test_normalize_dry_run_and_second_apply_are_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -254,6 +261,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(note.read_bytes(), normalized)
 
+    @integration
     def test_normalize_keeps_quotes_in_a_title_it_strips_an_id_lead_from(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -276,6 +284,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertNotIn("is not byte-identical to the title",
                              self.check_vault(workspace).stdout)
 
+    @integration
     def test_decision_revision_lineage_is_not_read_as_a_supersede_chain(self):
         for lineage, ok in (("ARC:ROOT:ADR-003@r1", True),
                             ("ARC:orders-api:HUB-orders-api@r12", True),
@@ -297,6 +306,7 @@ class ProjectVaultContractTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 1)
                     self.assertIn("quoted wikilink", result.stdout)
 
+    @integration
     def test_title_shape_rejects_generic_and_duplicate_graph_labels(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -313,6 +323,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertIn("generic title 'Overview'", result.stdout)
             self.assertIn("also used by", result.stdout)
 
+    @integration
     def test_relation_render_is_deterministic_and_materializes_inverse(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -347,6 +358,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(target.read_bytes(), rendered)
 
+    @integration
     def test_relation_catalogs_reserve_the_target_link_budget(self):
         for incoming_relations in (100, 101, 198, 199, 200):
             with self.subTest(incoming_relations=incoming_relations), \
@@ -410,6 +422,7 @@ class ProjectVaultContractTests(unittest.TestCase):
                     checked.stdout,
                 )
 
+    @integration
     def test_design_system_fragment_registers_contract_version(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -423,6 +436,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             )
             self.assertEqual(types["types"]["contract_version"], "number")
 
+    @integration
     def test_relation_contract_rejects_wrong_target_type(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -440,6 +454,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("relation 'verifies' cannot target type 'home'", result.stdout)
 
+    @integration
     def test_materialize_payload_is_idempotent_and_preserves_existing_file(self):
         with tempfile.TemporaryDirectory() as temporary:
             docs = Path(temporary) / "docs"
@@ -458,6 +473,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(graph_path.read_bytes(), before)
 
+    @integration
     def test_brand_payload_and_enablement_converge_without_losing_appearance(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -494,6 +510,7 @@ class ProjectVaultContractTests(unittest.TestCase):
                 repaired["enabledCssSnippets"], ["project-custom", "brand"]
             )
 
+    @integration
     def test_standardize_graph_colors_preserves_unowned_knobs(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -524,6 +541,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertIn("already standard", second.stdout)
 
+    @integration
     def test_opaque_artifacts_accept_arbitrary_files_and_relative_links(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -543,6 +561,7 @@ class ProjectVaultContractTests(unittest.TestCase):
             result = self.check_vault(workspace)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    @integration
     def test_artifacts_cannot_create_an_unknown_top_level_subtree(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))

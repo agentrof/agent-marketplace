@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -126,6 +127,7 @@ class ValidatorContractTests(unittest.TestCase):
         mutate(value)
         path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
+    @integration
     def test_valid_single_team_fixture_is_clean_and_deterministic(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
@@ -339,6 +341,7 @@ class ValidatorContractTests(unittest.TestCase):
         self.assertEqual(run(pins, lambda value: value.update(codex=just_above(floors["codex"][0]))),
                          set())
 
+    @integration
     def test_malformed_model_config_is_a_finding_not_a_crash(self):
         missing = "model config is missing or not valid JSON"
         shape = "reasoning_levels must be a non-empty kebab-case list"
@@ -695,6 +698,7 @@ class ReviewPanelValidatorTests(unittest.TestCase):
         self.panels.unlink()
         self.assert_rejected("review panels are referenced but their lens data is missing")
 
+    @integration
     def test_new_lens_regrouping_and_step_are_data_plus_anchor(self):
         self.use_whole_root()
 
@@ -771,6 +775,7 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         messages = self.messages()
         self.assertTrue(any(fragment in message for message in messages), messages)
 
+    @integration
     def test_shipped_registry_and_an_anchored_switch_are_clean(self):
         self.assertEqual(self.messages(), [])
         self.use_whole_root()
@@ -881,6 +886,7 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.registry.unlink()
         self.assert_rejected("process switches are named but the switch registry is missing")
 
+    @integration
     def test_switch_references_are_bound_by_the_policy_never_linked(self):
         self.use_whole_root()
         reference = "skill-content/challenge-review/references/switch-fixture_mode-fast.md"
@@ -1274,6 +1280,7 @@ class HomePathCheckTests(unittest.TestCase):
         match = validate.HOME_PATH_RE.search(text)
         return match and validate.home_path_user(match)
 
+    @integration
     def test_every_file_git_would_commit_is_read_and_an_ignored_one_is_not(self):
         # Generated, memory and top-level files are public once committed.
         read = ("plugins/team/skill-content/topic/SKILL.md", "platforms/claude/adapter.json",
@@ -1316,6 +1323,7 @@ class HomePathCheckTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(self.user(text))
 
+    @integration
     def test_the_folder_form_a_claude_code_project_encodes_is_a_home_path_too(self):
         for text in ("~/.claude/projects/-Users-fixture-Projects-app/run.jsonl",
                      "/tmp/claude-501/-home-fixture-work-app/notes.md",
@@ -1355,6 +1363,7 @@ class HomePathCheckTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(self.user(text))
 
+    @integration
     def test_a_system_or_service_home_names_no_person_and_passes(self):
         homes = {"runner": "Actions checks out into /home/runner/work/app/app.",
                  "node": "WORKDIR /home/node/app",
@@ -1374,6 +1383,7 @@ class HomePathCheckTests(unittest.TestCase):
                 self.assertEqual(self.user(text), name)
                 self.assertEqual(self.findings(root), [("plugins/team/skill-content/ci/SKILL.md", 2)])
 
+    @integration
     def test_a_declared_fake_home_passes_only_in_its_own_file_and_for_its_user(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1389,6 +1399,7 @@ class HomePathCheckTests(unittest.TestCase):
                 self.assertEqual(self.findings(root), [("tools/tests/test_other.py", 1),
                                                        ("tools/tests/test_sample.py", 1)])
 
+    @integration
     def test_the_repository_holds_only_its_declared_fake_homes(self):
         root = TESTS.parents[1]
         self.assertEqual(self.findings(root), [])
@@ -1487,6 +1498,7 @@ class ValidatorBuilderTests(unittest.TestCase):
                 self.assertFalse("tools/tests/fixtures/" in text,
                                  f"{name} names a fixtures folder that does not exist")
 
+    @integration
     def test_each_builder_fires_its_check(self):
         pristine = TreeGuard(self.root)
         for check, builder in sorted(VALIDATOR_BUILDERS.items()):

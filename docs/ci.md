@@ -39,6 +39,13 @@ IDs: missing, duplicate, failed, cancelled or mismatched results fail
 validation. Explicit platform skips remain visible; mandatory native Windows
 regressions cannot skip.
 
+A worker, in CI or local validation, holds every test not marked
+`@integration` to its own process and its temporary directory: while such a
+test runs, starting a process or writing outside the temporary directory
+raises, is recorded and fails the test even when the test catches the error,
+so the unit and integration split cannot drift. Class and module fixtures run
+outside that watch. `make test` runs unittest without it.
+
 A worker, in CI or local validation, runs its tests with tripwire `claude`
 and `codex` binaries in place of the host binaries a session names:
 `CLAUDE_CODE_EXECPATH`, `CODEX_CLI_PATH`, `CODEX_VERSION` and `CODEX_HOME`
@@ -120,9 +127,12 @@ make verify-local
 
 The direct interfaces are `python3 tools/ci_local.py check --staged --target
 origin/main` and `python3 tools/ci_local.py verify --staged --target origin/main`.
-`check --fresh` ignores saved test results. `ci-local-policy.json` sets
-`test_selection`. At `changed` the gate runs the change's own tests, most
-specific first, while pull request CI runs every test on Linux:
+`check --fresh` ignores saved test results. The gate runs unit tests only:
+a test marked `@integration` (`tools/tests/levels.py`), alone or through its
+class, starts a process, builds a distribution or writes outside its
+temporary directory, and only pull request CI runs it. `ci-local-policy.json`
+sets `test_selection`. At `changed` the gate runs the change's own unit tests,
+most specific first, while pull request CI runs every test on Linux:
 1. the changed test methods of each changed test module, or the whole module
    when code outside its test methods changed (blank lines aside);
 2. the test methods whose source names a changed non-Python input (by file
@@ -137,11 +147,11 @@ Generated `dist/` copies select nothing of their own; the distribution sync
 check and their canonical sources cover them. `budget_estimated_seconds` bounds
 the selection by the full-suite lane's per-test estimates, in that order: a
 test that would pass the budget is left to pull request CI, and the selection
-reason counts those tests. 120 estimated seconds run in about 35 seconds with
+reason counts those tests and the integration tests left to CI. A change whose
+own tests are all integration tests runs only the static checks locally. 120 estimated seconds run in about 35 seconds with
 four workers on a recent Mac, static checks included, which run beside the
 test workers. At `impact` the gate selects as `ci_tests.py plan --mode impact` does.
-`check --full` runs every test, for a change whose host-specific behavior CI
-cannot cover; `verify` then checks that full receipt. On macOS, `direct_tools`
+`check --full` runs every unit test; `verify` then checks that full receipt. On macOS, `direct_tools`
 names the tools whose `/usr/bin` entry is an `xcrun` trampoline, which resolves
 the developer directory on every call; workers call the tool it resolves to,
 which in measured runs cut a Git call from about 9 ms to 3 ms. When a worker

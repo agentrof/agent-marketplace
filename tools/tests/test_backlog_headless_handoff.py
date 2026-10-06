@@ -4,6 +4,7 @@ import contextlib
 import io
 import subprocess
 import unittest
+from tools.tests.levels import integration
 
 from tools.tests import backlog_fixture
 from tools.tests import test_backlog_requirement_bindings as requirement_fixture
@@ -19,6 +20,7 @@ requirement = compiler.requirement_compile
 stage_package = compiler.stage_package
 
 
+@integration
 class HeadlessBacklogHandoffTests(unittest.TestCase):
     setUp = requirement_fixture.RequirementBindingTests.setUp
 

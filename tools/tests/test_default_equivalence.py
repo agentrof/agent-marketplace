@@ -43,6 +43,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 
@@ -341,20 +342,24 @@ def run_harness(kind: str, root: Path = ROOT) -> dict:
 class DefaultEquivalenceTests(unittest.TestCase):
     maxDiff = None
 
+    @integration
     def test_delivery_compiler_outputs_match_the_base_on_frozen_inputs(self):
         self.assertEqual(run_harness("delivery"), expected("delivery", DELIVERY_GOLDEN),
                          "run this file with --harness delivery --raw to read the outputs")
 
+    @integration
     def test_delivery_compiler_outputs_match_the_base_under_a_policy_at_the_defaults(self):
         # A policy that exists but sets only review_panels leaves delivery_path at standard.
         self.assertEqual(run_harness("delivery_policy"), DELIVERY_POLICY_GOLDEN,
                          "run this file with --harness delivery_policy --raw to read the outputs")
 
+    @integration
     def test_operation_compiler_checks_match_the_base_on_frozen_inputs(self):
         # A contract without an Accepted Minor Findings section checks as released.
         self.assertEqual(run_harness("operation"), expected("operation", OPERATION_GOLDEN),
                          "run this file with --harness operation --raw to read the outputs")
 
+    @integration
     def test_backlog_compiler_outputs_match_the_base_on_frozen_inputs(self):
         actual = run_harness("backlog")
         golden = expected("backlog", BACKLOG_GOLDEN)
@@ -365,17 +370,20 @@ class DefaultEquivalenceTests(unittest.TestCase):
         self.assertEqual({name.split(":", 1)[1]: value for name, value in actual.items()
                           if name.startswith("policy:")}, golden)
 
+    @integration
     def test_backlog_tasks_match_the_base_on_frozen_inputs(self):
         # A writer's closure carries a check only for the placeholders it lists.
         self.assertEqual(run_harness("backlog_tasks"),
                          expected("backlog_tasks", BACKLOG_TASK_GOLDEN),
                          "run this file with --harness backlog_tasks --raw to read the tasks")
 
+    @integration
     def test_backlog_approval_without_a_policy_writes_the_base_bytes(self):
         # An approval records a Process Policy pin only when a policy exists.
         self.assertEqual(run_harness("approval"), expected("approval", APPROVAL_GOLDEN),
                          "run this file with --harness approval --raw to read the files")
 
+    @integration
     def test_task_manifests_match_the_base_without_a_policy(self):
         actual = run_harness("manifests")
         golden = expected("manifests", MANIFEST_GOLDEN)
@@ -386,6 +394,7 @@ class DefaultEquivalenceTests(unittest.TestCase):
                           for name, value in actual.items()
                           if name.endswith(":with_switch_files")}, golden)
 
+    @integration
     def test_shipped_tasks_bind_the_base_paths_without_a_policy(self):
         # Switch references and switch value data stay out of every default task.
         self.assertEqual(run_harness("shipped"), expected("shipped", SHIPPED_GOLDEN),

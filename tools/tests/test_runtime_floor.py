@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 
@@ -156,6 +157,7 @@ class RuntimeFloorTests(unittest.TestCase):
                         target = command[len(launcher):].split(" ", 1)[0]
                         self.assertTrue((package(host) / target).is_file())
 
+    @integration
     def test_below_the_floor_session_start_reports_the_runtime_and_never_blocks(self):
         for host in ROOT_VARIABLES:
             with self.subTest(host=host):
@@ -171,6 +173,7 @@ class RuntimeFloorTests(unittest.TestCase):
                         f"AGENT_MARKETPLACE_PYTHON: unsupported (Python {BELOW} at {sys.executable})",
                         self.message()))})
 
+    @integration
     def test_below_the_floor_every_other_generic_event_passes_silently(self):
         payloads = {"PostToolUse": {"tool_name": "Write", "tool_input": {"file_path": "workspace/docs/a.md"}},
                     "PostToolUseFailure": {"tool_name": "Bash", "tool_input": {"command": "false"}},
@@ -185,6 +188,7 @@ class RuntimeFloorTests(unittest.TestCase):
                     result = run(argv, payload, project, BELOW)
                     self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
 
+    @integration
     def test_below_the_floor_a_write_to_a_governed_path_is_denied_and_any_other_passes(self):
         project = plugin_project(self.work / "project")
         outside = self.work / "outside"
@@ -219,6 +223,7 @@ class RuntimeFloorTests(unittest.TestCase):
                      project, BELOW)
         self.assertEqual(result.returncode, 2)
 
+    @integration
     def test_below_the_floor_only_a_command_that_runs_a_plugin_script_is_denied(self):
         for host in ROOT_VARIABLES:
             script = package(host) / "scripts" / "setup_project.py"
@@ -239,6 +244,7 @@ class RuntimeFloorTests(unittest.TestCase):
                         self.assertEqual(result.returncode, expected)
                         self.assertEqual(result.stderr, self.message() + "\n" if expected else "")
 
+    @integration
     @unittest.skipIf(os.name == "nt", "a directory symlink needs privileges on Windows")
     def test_below_the_floor_the_resolved_scripts_directory_is_the_plugin_too(self):
         alias = self.work / "alias"
@@ -250,6 +256,7 @@ class RuntimeFloorTests(unittest.TestCase):
                 result = run(argv, {"tool_name": "Bash", "tool_input": {"command": command}}, self.work, BELOW)
                 self.assertEqual(result.returncode, 2)
 
+    @integration
     def test_below_the_floor_only_the_autopilot_entry_prompt_is_blocked(self):
         block = {"decision": "block", "reason": self.message()}
         prompts = {
@@ -272,6 +279,7 @@ class RuntimeFloorTests(unittest.TestCase):
                     self.assertEqual((result.returncode, result.stderr), (0, ""))
                     self.assertEqual(json.loads(result.stdout) if result.stdout else None, expected)
 
+    @integration
     def test_below_the_floor_no_hook_script_is_read(self):
         root = self.work / "package"
         (root / "scripts").mkdir(parents=True)
@@ -346,6 +354,7 @@ class RuntimeFloorTests(unittest.TestCase):
                                  self.autopilot.typed_arguments(payload, ENTRY) is not None)
         self.assertFalse(self.launcher.invokes({"prompt": f"${ENTRY} on"}, None))
 
+    @integration
     def test_at_or_above_the_floor_the_launcher_runs_a_script_as_python_would(self):
         root = self.work / "package"
         (root / "scripts").mkdir(parents=True)
@@ -377,6 +386,7 @@ class RuntimeFloorTests(unittest.TestCase):
         below = run(launcher + ["one", "run"], '{"x": 1}', self.work, "3.13.9")
         self.assertEqual((below.returncode, below.stdout, below.stderr), (0, "", ""))
 
+    @integration
     def test_each_packaged_hook_answers_through_the_launcher_as_it_did_directly(self):
         project = plugin_project(self.work / "project")
         note = str(project / "workspace/docs/maps/note.md")

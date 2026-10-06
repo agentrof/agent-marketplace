@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -183,6 +184,7 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                 with self.subTest(panels=panels, loop=loop, task=task[:3]):
                     self.assertEqual(switch_reads(self.root, task[0], task[1], task[3], catalog), expected)
 
+    @integration
     def test_a_derived_review_task_manifest_binds_the_loop_and_the_panel(self):
         """The one Git-backed derivation of a review task at blocking_delta and lens_panel."""
         commit_project(self.root)
@@ -234,6 +236,7 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                         self.assertFalse(task_inputs.read_only_task(catalog, entry, writer, "revise"))
                         self.assertNotEqual(writer, role)
 
+    @integration
     def test_a_derived_calibration_task_binds_the_claims_its_claimant_never_binds(self):
         """The one Git-backed derivation of a calibration reader beside its claimant."""
         commit_project(self.root)
@@ -262,6 +265,7 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
         self.assertEqual(task["write_boundary"], "named_owner_only")
         self.assertNotEqual(task["role"], calibration["role"])
 
+    @integration
     def test_re_review_task_binds_only_the_findings_the_diff_and_the_context(self):
         docs = "workspace/docs/"
         # step: (entry, rerun reader role, added skills, the changed note, its

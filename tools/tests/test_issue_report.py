@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -80,6 +81,7 @@ class IssueReportTests(unittest.TestCase):
         self.assertIn("Not opened: stdin body is empty", error)
         create.assert_not_called()
 
+    @integration
     def test_confirmed_url_is_the_only_success_and_writes_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -116,6 +118,7 @@ class IssueReportTests(unittest.TestCase):
         )
         self.assertEqual(after, before)
 
+    @integration
     def test_noncanonical_success_response_is_unknown_not_opened(self):
         with mock.patch.object(
             self.issue,
@@ -128,6 +131,7 @@ class IssueReportTests(unittest.TestCase):
         self.assertNotIn("Opened", error)
         self.assertIn("Outcome unknown, do not retry automatically", error)
 
+    @integration
     def test_failed_filing_writes_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -153,6 +157,7 @@ class IssueReportTests(unittest.TestCase):
         self.assertIn("Not opened", error)
         self.assertEqual(after, before)
 
+    @integration
     def test_definite_and_ambiguous_failures_have_distinct_outcomes(self):
         with mock.patch.object(
             self.issue,
@@ -324,6 +329,7 @@ class UpstreamConfidentialityTests(unittest.TestCase):
 
 
 
+@integration
 class ProjectFragmentRefusalTests(unittest.TestCase):
     """Before any request, the filer refuses a title or body that holds a home
     directory, the reporting checkout's path, its Git remote or the project's

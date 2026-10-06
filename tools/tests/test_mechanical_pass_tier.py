@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -180,6 +181,7 @@ class ValidatorTests(unittest.TestCase):
                     for finding in findings), findings)
 
 
+@integration
 class TaskBindingTests(unittest.TestCase):
     """Only an approved policy at `mechanical` binds the reference."""
 
@@ -244,6 +246,7 @@ class TaskBindingTests(unittest.TestCase):
                 self.assertEqual(result["instructions"], plain[task]["instructions"])
 
 
+@integration
 class PassKindTests(unittest.TestCase):
     """The task input policy declares the pass kinds, and task_inputs.py keeps
     every review, re-check, calibration, triage and code repair off them."""

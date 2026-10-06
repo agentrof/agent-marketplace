@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -142,6 +143,7 @@ class CalendarVersionTests(unittest.TestCase):
         self.assertEqual(plan["plugins"]["team"], "0.0.1")
 
 
+@integration
 class ReleaseRepositoryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -517,6 +519,7 @@ def apply_release_reset(root: Path) -> None:
     release.write_json(root / ".release" / "reset.json", reset_marker())
 
 
+@integration
 class ReleaseResetPolicyTests(unittest.TestCase):
     """The one-time reset marker, once merged, is part of every later base and never changes."""
 
@@ -674,6 +677,7 @@ def commit_release_fixture(case, when: datetime.datetime = OCTOBER) -> None:
     case.head_sha = bump_at(case.root, when)
 
 
+@integration
 class ReleaseCommitPolicyTests(unittest.TestCase):
     """check-pr accepts release-owned changes only as the deterministic bump."""
 
@@ -928,6 +932,7 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "complete Git history"):
             self.check()
 
+@integration
 class ReleaseMonthBoundaryTests(unittest.TestCase):
     """check-pr replays a release commit at its own date: it stays valid for
     the month it was made in, whenever its pull request merges."""
@@ -979,6 +984,7 @@ class ReleaseMonthBoundaryTests(unittest.TestCase):
         redate(at(2026, 11, 5), at(2026, 10, 31, 23, 59, 59))
         self.assertEqual(self.check(at(2026, 11, 6)), {"mode": "release", "version": VERSION})
 
+@integration
 class BumpCommandTests(unittest.TestCase):
     """The maintainer's one command for the release commit."""
 
@@ -1103,6 +1109,7 @@ class ReleaseCommitRuleTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "2 parents, not one"):
             release.release_commit_parent(["a" * 40, "b" * 40], never_asked)
 
+    @integration
     def test_a_parent_without_release_impact_cannot_be_bumped(self):
         with git_fixture.temporary_directory() as temporary:
             root = Path(temporary)
@@ -1175,6 +1182,7 @@ class ReleaseMonthRuleTests(unittest.TestCase):
         self.assertEqual(release.next_version("0.0.1", when), "2026.11.1")
 
 
+@integration
 class BumpRuleTests(unittest.TestCase):
     """bump refuses before it writes, decided without Git."""
 
@@ -1332,6 +1340,7 @@ class MainValidationTests(unittest.TestCase):
             self.wait(FakeRuns(failure))
 
 
+@integration
 class ReleaseCandidateTests(unittest.TestCase):
     """verify-candidate and auto-release read main, release tags, stable and validation."""
 
@@ -1623,6 +1632,7 @@ class ReleaseNotesTests(unittest.TestCase):
                     self.assertRaisesRegex(release.ReleaseError, message):
                 release.changelog_section(text, version)
 
+    @integration
     def test_notes_come_from_the_released_commit_not_the_worktree(self):
         with git_fixture.temporary_directory() as temporary:
             root = Path(temporary)
@@ -1704,6 +1714,7 @@ class ShipTests(unittest.TestCase):
             "immutable": True,
         })
 
+    @integration
     def test_an_explicit_commit_is_sent_as_its_full_sha(self):
         with git_fixture.temporary_directory() as temporary:
             root = Path(temporary)
@@ -1744,6 +1755,7 @@ class ShipTests(unittest.TestCase):
             release.ship(Path("."), "v0.0.3", commands=FakeShipCommands())
 
 
+@integration
 class ReleaseFinalizeTests(unittest.TestCase):
     VERSION = "1.2.3"
     FEATURE = "codex/issue-42"
@@ -2002,6 +2014,7 @@ class ReleaseFinalizeTests(unittest.TestCase):
             release.release_ref_audit(self.root, "9.9.9")
 
 
+@integration
 class BootstrapFinalizeTests(unittest.TestCase):
     def test_bootstrap_release_reaches_the_clean_main_terminal_state(self):
         with git_fixture.temporary_directory() as temporary:
@@ -2049,6 +2062,7 @@ class BootstrapFinalizeTests(unittest.TestCase):
             self.assertEqual(run("git", "status", "--porcelain").stdout, "")
 
 
+@integration
 class PullRequestConfidentialityTests(unittest.TestCase):
     """check-pr reads every commit message and added line of base..HEAD, and
     the PR text it is given, because a merge commit keeps every commit: a

@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
+from tools.tests.levels import integration
 from unittest import mock
 
 from tools import ci_local, ci_tests
@@ -74,6 +75,7 @@ class LocalValidationTests(unittest.TestCase):
         with mock.patch('sys.stdout', io.StringIO()):
             return ci_local.check(self.root, **kwargs)
 
+    @integration
     def test_prior_branch_commits_and_staged_rename_deletion_are_in_impact(self):
         self.source.write_text('value = 2\n')
         self.git('add', '--all')
@@ -86,11 +88,13 @@ class LocalValidationTests(unittest.TestCase):
         self.assertNotEqual(plan['candidate']['base'], plan['candidate']['head'])
         self.assertEqual(plan['mode'], 'impact')
 
+    @integration
     def test_missing_target_runs_full_without_fetching(self):
         plan = ci_local.make_plan(self.root, target='no-such-ref')
         self.assertEqual(plan['mode'], 'full')
         self.assertIsNone(plan['candidate']['base'])
 
+    @integration
     def test_partial_staging_untracked_merge_flags_and_same_stat_edits_are_rejected(self):
         self.source.write_text('value = 2\n')
         with self.assertRaisesRegex(ci_tests.CIError, 'bytes differ'):
@@ -111,6 +115,7 @@ class LocalValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ci_tests.CIError, 'untracked'):
             ci_local.make_plan(self.root)
 
+    @integration
     @unittest.skipIf(os.name == 'nt', 'POSIX executable mode')
     def test_executable_mode_change_cannot_hide_behind_core_filemode_false(self):
         self.git('config', 'core.filemode', 'false')
@@ -118,6 +123,7 @@ class LocalValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ci_tests.CIError, 'mode differs'):
             ci_local.make_plan(self.root)
 
+    @integration
     def test_candidate_change_during_static_check_invalidates_previous_success(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
             self.run_check()
@@ -132,6 +138,7 @@ class LocalValidationTests(unittest.TestCase):
         receipt = ci_tests.read_json(self.root / ci_local.CACHE_PATH / 'latest.json')
         self.assertEqual(receipt['status'], 'failed')
 
+    @integration
     def test_a_failing_static_check_fails_the_attempt_after_the_workers_it_ran_beside(self):
         (self.root / 'static.py').write_text('import sys\nprint("static finding")\nsys.exit(3)\n')
         self.git('add', '--all')
@@ -144,6 +151,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertIn('static finding', output.getvalue())
         self.assertEqual(ci_tests.read_json(self.root / ci_local.CACHE_PATH / 'latest.json')['status'], 'failed')
 
+    @integration
     def test_reuse_is_exact_fresh_static_and_does_not_extend_expiry(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)) as worker:
             first = self.run_check()
@@ -160,6 +168,7 @@ class LocalValidationTests(unittest.TestCase):
         changed['reports'][0]['tests'][0]['outcome'] = 'failure'
         self.assertFalse(ci_local.reusable(changed, plan, 86400))
 
+    @integration
     def test_failed_rerun_invalidates_older_success_even_for_same_source(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
             self.run_check()
@@ -169,6 +178,7 @@ class LocalValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ci_tests.CIError, 'no current'):
             self.run_check(verify_only=True)
 
+    @integration
     def test_changed_environment_policy_or_inventory_invalidates_receipt(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
             receipt = self.run_check()
@@ -183,6 +193,7 @@ class LocalValidationTests(unittest.TestCase):
                     plan['plan_hash'] = ci_tests.digest({k: v for k, v in plan.items() if k != 'plan_hash'})
                 self.assertFalse(ci_local.reusable(receipt, plan, 86400))
 
+    @integration
     def test_worker_accounting_rejects_missing_duplicate_partial_wrong_runtime_and_skew(self):
         plan = ci_local.make_plan(self.root)
         for change in ('missing', 'duplicate', 'partial', 'wrong_runtime', 'failure', 'running', 'nan'):
@@ -198,6 +209,7 @@ class LocalValidationTests(unittest.TestCase):
                 with self.assertRaises(ci_tests.CIError):
                     ci_local.verify_reports(plan, reports)
 
+    @integration
     def test_real_workers_have_distinct_temporary_directories_and_account_for_all_tests(self):
         self.test_path.write_text('import os, subprocess, tempfile, unittest\nfrom pathlib import Path\n'
             'class Example(unittest.TestCase):\n'
@@ -218,6 +230,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(receipt['status'], 'complete')
         self.assertEqual(sum(len(report['tests']) for report in receipt['reports']), 2)
 
+    @integration
     @unittest.skipIf(os.name != 'posix', 'the stand-in host binary is a POSIX shell script')
     def test_a_worker_test_that_reaches_a_host_binary_through_the_environment_fails(self):
         # The session that runs the gate names its own Claude Code binary.
@@ -236,6 +249,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(ci_tests.read_json(self.root / ci_local.CACHE_PATH / 'latest.json')['status'], 'failed')
         self.assertFalse((own / 'calls.log').exists())
 
+    @integration
     def test_worker_temp_parent_rejects_candidate_and_other_git_ancestry(self):
         inside = self.root / '.agentrof/tmp'
         inside.mkdir(parents=True)
@@ -257,6 +271,7 @@ class LocalValidationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ci_tests.CIError, 'belongs to a Git repository'):
                     ci_local.worker_temp_parent(self.root)
 
+    @integration
     def test_stdlib_prewarm_ignores_project_modules_and_never_reuses_or_populates_fixture_bytecode(self):
         import py_compile
         with tempfile.TemporaryDirectory() as raw:
@@ -302,6 +317,7 @@ class LocalValidationTests(unittest.TestCase):
             self.assertEqual(bytecode.read_bytes(), poison)
             self.assertFalse(list(cache.rglob('poisoned.*.pyc')))
 
+    @integration
     def test_prewarm_failure_invalidates_receipt_and_never_starts_workers(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
             self.run_check()
@@ -318,6 +334,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(started_workers, [])
         self.assertEqual(ci_tests.read_json(self.root / ci_local.CACHE_PATH / 'latest.json')['status'], 'failed')
 
+    @integration
     def test_worker_cannot_populate_shared_read_only_cache(self):
         self.test_path.write_text('import os, pathlib, unittest\nclass Example(unittest.TestCase):\n'
             '    def test_one(self):\n'
@@ -329,6 +346,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(ci_tests.read_json(self.root / ci_local.CACHE_PATH / 'latest.json')['status'], 'failed')
 
 
+    @integration
     def test_edit_then_restore_during_workers_invalidates_attempt_and_previous_receipt(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
             self.run_check()
@@ -344,6 +362,7 @@ class LocalValidationTests(unittest.TestCase):
                 self.run_check(fresh=True)
         self.assertEqual(ci_tests.read_json(self.root / ci_local.CACHE_PATH / 'latest.json')['status'], 'failed')
 
+    @integration
     def test_tracked_symlink_cannot_hide_ignored_source_content(self):
         cache = self.root / '.agentrof/cache.py'
         cache.parent.mkdir()
@@ -357,6 +376,7 @@ class LocalValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ci_tests.CIError, 'unsupported index entry'):
             ci_local.make_plan(self.root)
 
+    @integration
     def test_cache_reparse_alias_and_lock_hardlink_are_rejected(self):
         alias = self.root / '.agentrof'
         metadata = mock.Mock(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
@@ -373,6 +393,7 @@ class LocalValidationTests(unittest.TestCase):
             with ci_local.receipt_lock(cache):
                 self.fail('unsafe lock acquired')
 
+    @integration
     def test_json_writer_does_not_follow_predictable_temporary_alias(self):
         directory = self.root / '.agentrof'
         directory.mkdir()
@@ -387,6 +408,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(outside.read_text(), 'untouched')
         self.assertEqual(ci_tests.read_json(target), {'valid': True})
 
+    @integration
     def test_worker_exception_or_nonfinite_measurements_cannot_form_a_receipt(self):
         plan = ci_local.make_plan(self.root)
         for field in ('error', 'wall_seconds', 'fixture_seconds'):
@@ -397,6 +419,7 @@ class LocalValidationTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ci_tests.CIError):
                 ci_local.verify_reports(plan, reports)
 
+    @integration
     def test_workers_are_balanced_with_the_full_suite_lanes_measured_estimates(self):
         self.test_path.write_text('import unittest\nclass Example(unittest.TestCase):\n'
                                   '    def test_one(self): pass\n    def test_two(self): pass\n'
@@ -411,6 +434,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(ci_local.make_plan(self.root)['shards'], [[heavy], [
             'tools.tests.test_example.Example.test_three', 'tools.tests.test_example.Example.test_two']])
 
+    @integration
     def test_worker_policy_rejects_oversubscription(self):
         for jobs in (0, 5, True):
             with self.assertRaises(ci_tests.CIError):
@@ -418,6 +442,7 @@ class LocalValidationTests(unittest.TestCase):
         with mock.patch.object(ci_local.os, 'cpu_count', return_value=1):
             self.assertEqual(len(ci_local.make_plan(self.root, jobs=4)['shards']), 1)
 
+    @integration
     def test_reused_test_receipt_still_runs_static_commands(self):
         (self.root / 'static.py').write_text('from pathlib import Path\np = Path(".agentrof/static-count")\n'
             'p.parent.mkdir(exist_ok=True)\np.write_text(str(int(p.read_text()) + 1) if p.exists() else "1")\n')
@@ -427,6 +452,7 @@ class LocalValidationTests(unittest.TestCase):
             self.run_check()
         self.assertEqual((self.root / '.agentrof/static-count').read_text(), '2')
 
+    @integration
     def test_ignored_source_is_rejected_but_declared_runtime_cache_is_allowed(self):
         (self.root / '.gitignore').write_text('.agentrof/\nignored-source.py\n')
         self.git('add', '--all')
@@ -437,6 +463,7 @@ class LocalValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ci_tests.CIError, 'ignored source'):
             ci_local.make_plan(self.root)
 
+    @integration
     def test_mandatory_native_tests_cannot_be_skipped_locally(self):
         plan = ci_local.make_plan(self.root)
         plan['must_run_ids'] = [plan['selected_ids'][0]]
@@ -446,6 +473,7 @@ class LocalValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ci_tests.CIError, 'mandatory native'):
             ci_local.verify_reports(plan, reports)
 
+    @integration
     def test_make_environment_is_normalized_without_mutating_the_callers_environment(self):
         with mock.patch.dict(os.environ, {'MAKELEVEL': '7', 'MAKEFLAGS': 'test', 'LOCAL_SECRET': 'do-not-record'}):
             identity = ci_local.environment_identity(self.root)
@@ -455,6 +483,7 @@ class LocalValidationTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {'MAKELEVEL': '2', 'MAKEFLAGS': 'other', 'LOCAL_SECRET': 'do-not-record'}):
             self.assertEqual(ci_local.environment_identity(self.root), identity)
 
+    @integration
     def test_another_worktree_creating_and_deleting_branches_during_check_keeps_the_receipt(self):
         self.git('branch', 'packed')
         self.git('pack-refs', '--all')
@@ -499,6 +528,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(plan['mode'], 'changed')
         return sorted({ci_tests.module_of(test_id) for test_id in plan['selected_ids']}), plan
 
+    @integration
     def test_changed_selection_runs_the_changes_own_tests_and_leaves_the_rest_to_ci(self):
         self.changed_fixture()
         # A changed module selects its own test module, not every module that imports it.
@@ -513,6 +543,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(self.selected_modules()[0], ['tools.tests.test_helper', 'tools.tests.test_names_input',
                                                       'tools.tests.test_uses_helper'])
 
+    @integration
     def test_changed_selection_stops_at_the_budget_in_its_order(self):
         self.changed_fixture(budget=2)
         (self.root / 'tools/helper.py').write_text('value = 2\n')
@@ -524,6 +555,32 @@ class LocalValidationTests(unittest.TestCase):
         # Changed tests come first, then tests naming a changed input; the own test module waits for CI.
         self.assertEqual(modules, ['tools.tests.test_names_input', 'tools.tests.test_uses_helper'])
         self.assertIn('1 more left to pull request CI past the local budget', plan['selection_reason'])
+
+    @integration
+    def test_the_local_gate_runs_unit_tests_and_leaves_integration_tests_to_ci(self):
+        self.changed_fixture(budget=100)
+        (self.root / 'tools/tests/test_uses_helper.py').write_text(
+            'import unittest\nfrom tools.tests.levels import integration\n'
+            'class Case(unittest.TestCase):\n    def test_it(self): self.assertTrue(True)\n'
+            '    @integration\n    def test_git(self): pass\n'
+            '@integration\nclass Live(unittest.TestCase):\n    def test_live(self): pass\n')
+        self.git('add', '--all')
+        modules, plan = self.selected_modules()
+        self.assertEqual(plan['selected_ids'], ['tools.tests.test_uses_helper.Case.test_it'])
+        self.assertIn('2 integration tests left to pull request CI', plan['selection_reason'])
+        full = ci_local.make_plan(self.root, full=True)
+        self.assertNotIn('tools.tests.test_uses_helper.Case.test_git', full['selected_ids'])
+        self.assertNotIn('tools.tests.test_uses_helper.Live.test_live', full['selected_ids'])
+        self.assertIn('tools.tests.test_uses_helper.Case.test_it', full['selected_ids'])
+        # A change whose own tests are all integration tests leaves the gate to its static checks.
+        (self.root / 'tools/tests/test_uses_helper.py').write_text(
+            'import unittest\nfrom tools.tests.levels import integration\n'
+            '@integration\nclass Live(unittest.TestCase):\n    def test_live(self): self.assertTrue(True)\n')
+        self.git('add', '--all')
+        _modules, plan = self.selected_modules()
+        self.assertEqual((plan['selected_ids'], plan['shards']), ([], []))
+        ci_local.validate_plan(plan)
+        self.assertEqual(ci_local.verify_reports(plan, []), [])
 
     def write_module(self, name, text):
         path = self.root / f'tools/tests/{name}.py'
@@ -542,6 +599,7 @@ class LocalValidationTests(unittest.TestCase):
         self.git('add', '--all')
         return ci_local.make_plan(self.root)['selected_ids']
 
+    @integration
     def test_a_changed_test_method_selects_that_method_and_other_code_its_module(self):
         self.changed_fixture()
         module = ('import unittest\nclass Case(unittest.TestCase):\n    def setUp(self):\n        self.value = 1\n'
@@ -557,6 +615,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(self.selected_ids(), ['tools.tests.test_methods.Case.test_first',
                                                'tools.tests.test_methods.Case.test_second'])
 
+    @integration
     def test_a_named_input_selects_the_methods_that_name_it_or_the_module_that_does(self):
         self.changed_fixture()
         self.write_module('test_inside', 'import unittest\nclass Case(unittest.TestCase):\n'
@@ -570,6 +629,7 @@ class LocalValidationTests(unittest.TestCase):
         # test_names_input names it at module level, so its whole module runs.
         self.assertIn('tools.tests.test_names_input.Case.test_it', selected)
 
+    @integration
     def test_own_module_tests_that_name_a_changed_function_run_first(self):
         self.changed_fixture(budget=1)
         source = 'def alpha():\n    return 1\n\n\ndef beta():\n    return 2\n'
@@ -583,6 +643,7 @@ class LocalValidationTests(unittest.TestCase):
         plan_ids = self.selected_ids()
         self.assertEqual(plan_ids, ['tools.tests.test_helper.Case.test_beta'])
 
+    @integration
     def test_a_changed_test_helper_selects_the_modules_that_import_it(self):
         self.changed_fixture()
         support = self.root / 'tools/tests/support.py'
@@ -594,6 +655,7 @@ class LocalValidationTests(unittest.TestCase):
         support.write_text('VALUE = 1  # changed\n')
         self.assertEqual(self.selected_ids(), ['tools.tests.test_uses_support.Case.test_it'])
 
+    @integration
     def test_a_failed_run_names_its_failing_tests_last_and_keeps_the_worker_logs(self):
         self.test_path.write_text('import unittest\nclass Example(unittest.TestCase):\n'
                                   '    def test_one(self): self.fail("broken on purpose")\n'
@@ -616,6 +678,7 @@ class LocalValidationTests(unittest.TestCase):
         self.run_check()
         self.assertFalse(kept.exists())
 
+    @integration
     def test_macos_workers_call_the_tool_its_xcrun_trampoline_resolves(self):
         local = ci_tests.read_json(self.root / ci_local.POLICY_PATH)
         local['direct_tools'] = ['git']
@@ -659,6 +722,7 @@ class LocalValidationTests(unittest.TestCase):
                                           check=True).stdout.strip())
             self.assertTrue((helpers / 'git-upload-pack').exists())
 
+    @integration
     def test_a_requested_full_suite_is_what_verify_checks(self):
         self.changed_fixture()
         self.source.write_text('value = 2\n')
@@ -669,6 +733,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertEqual(receipt['selected_count'], len(ci_tests.inventory(self.root)[0]))
         self.assertEqual(self.run_check(verify_only=True), receipt)
 
+    @integration
     def test_verify_without_jobs_takes_the_worker_count_check_used(self):
         with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
             receipt = self.run_check(jobs=1)
@@ -677,6 +742,7 @@ class LocalValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ci_tests.CIError, 'no current'):
             self.run_check(verify_only=True, jobs=2)
 
+    @integration
     def test_verify_ignores_host_session_variables_and_names_a_changed_bound_one(self):
         with mock.patch.dict(os.environ, {'PYTHONPATH': 'first-secret-path'}):
             with mock.patch.object(ci_local, 'execute_workers', side_effect=lambda _r, p, _c: self.reports(p)):
@@ -692,6 +758,7 @@ class LocalValidationTests(unittest.TestCase):
         self.assertIn('changed: PYTHONPATH)', str(raised.exception))
         self.assertNotIn('secret-path', str(raised.exception))
 
+    @integration
     def test_every_variable_the_source_reads_is_bound_or_named_as_unbound(self):
         # A variable the tools read changes what the tests do, so the receipt binds it.
         # Workers set their own scratch roots and drop CLAUDE_PID; Make's level is orchestration.

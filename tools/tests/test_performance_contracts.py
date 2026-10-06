@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from unittest import mock
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from tools.tests import test_delivery_git as delivery_tests
 
 
 class PerformanceContractsTests(unittest.TestCase):
+    @integration
     def test_batched_index_matches_individual_byte_mode_and_delete_updates(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -61,6 +63,7 @@ class PerformanceContractsTests(unittest.TestCase):
             self.assertEqual(original.read_bytes(), original_bytes)
             self.assertFalse((root / ".git/index").exists())
 
+    @integration
     def test_execution_seeds_preserve_draft_remote_and_isolate_each_copy(self):
         case = delivery_tests.DeliveryGitTests()
         self.addCleanup(case.doCleanups)
@@ -103,6 +106,7 @@ class PerformanceContractsTests(unittest.TestCase):
         self.assertGreater(final["seed_copy"], initial["seed_copy"])
         self.assertGreater(final["seed_validate"], initial["seed_validate"])
 
+    @integration
     def test_an_applied_project_copy_equals_a_fresh_apply_and_stays_isolated(self):
         cache = fixture_cache.AppliedProjectCache()
         self.addCleanup(cache.close)
@@ -133,6 +137,7 @@ class PerformanceContractsTests(unittest.TestCase):
             cache.apply_to(Path(raw), context)
             self.assertTrue((Path(raw) / "workspace/config.json").is_file())
 
+    @integration
     def test_seed_rejects_shared_git_pointer_and_explicit_worktree(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -204,6 +209,7 @@ class PerformanceContractsTests(unittest.TestCase):
                 case.build_execution_fixture()
         self.assertFalse(root.exists())
 
+    @integration
     def test_windows_emulator_seed_is_exact_context_scoped_and_remains_isolated(self):
         case = delivery_tests.DeliveryGitTests()
         self.addCleanup(case.doCleanups)

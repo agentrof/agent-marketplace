@@ -7,6 +7,7 @@ import io
 import subprocess
 import sys
 import unittest
+from tools.tests.levels import integration
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Optional, Sequence
@@ -664,6 +665,7 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue())["ok"], False)
 
 
+@integration
 class GitTransactionIntegrationTests(unittest.TestCase):
     def test_real_bare_remote_stages_and_rolls_back_atomically(self):
         with temporary_directory() as temporary:

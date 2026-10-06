@@ -12,6 +12,7 @@ import re
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -96,6 +97,7 @@ class ContractTests(unittest.TestCase):
                 self.assertEqual(self.errors(test_groups=["api"], test_group_report=value), [path])
 
 
+@integration
 class BindingTests(unittest.TestCase):
     setUp = base.BindingTests.setUp
     bound = base.BindingTests.bound
@@ -114,6 +116,7 @@ class BindingTests(unittest.TestCase):
                 self.assertEqual(self.bound(entry, role, REFERENCE), entry == "deliver")
 
 
+@integration
 class GroupReportTests(unittest.TestCase):
     """The pre-handoff fixture's DLV-002 Item ST-005, at pre_handoff_regression touched_suites, with
     commands that report its three test directories as groups."""

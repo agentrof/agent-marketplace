@@ -9,6 +9,7 @@ import sys
 import tempfile
 import tokenize
 import unittest
+from tools.tests.levels import integration
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -91,6 +92,7 @@ def approve_solution_naming_method_skills(docs: Path) -> None:
             raise AssertionError(result.stdout + result.stderr)
 
 
+@integration
 class PortableVaultGateTests(unittest.TestCase):
     def setup_project(self, root: Path) -> Path:
         init_repository(root)

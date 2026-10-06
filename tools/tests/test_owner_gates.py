@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -187,6 +188,7 @@ class OwnerGatesTaskInputTests(unittest.TestCase):
                     wanted = {REFERENCE, CLASSES} if binds and state == "two_fixed_gates" else set()
                     self.assertEqual(self.bound(entry, role, catalog), wanted)
 
+    @integration
     def test_a_derived_task_manifest_binds_the_gates_from_the_committed_project(self):
         """The one Git-backed derivation: manifest reads the same policy through the project root."""
         init_repository(self.root)
@@ -204,6 +206,7 @@ class OwnerGatesTaskInputTests(unittest.TestCase):
                 self.assertEqual(paths & {REFERENCE, CLASSES}, wanted)
 
 
+@integration
 class DecisionLogTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
@@ -839,6 +840,7 @@ class ExperienceCompilerTests(unittest.TestCase):
             )
             self.assertEqual(self.tree_snapshot(fixture["docs"]), before)
 
+    @integration
     def test_abort_open_scope_restores_only_tracked_updates(self):
         with temporary_directory() as raw:
             project = Path(raw)
@@ -942,6 +944,7 @@ class ExperienceCompilerTests(unittest.TestCase):
             self.assertFalse(open_revision.exists())
             self.assertFalse(application_state.exists())
 
+    @integration
     def test_abort_open_scope_refuses_untracked_author_content(self):
         with temporary_directory() as raw:
             project = Path(raw)
@@ -1005,6 +1008,7 @@ class ExperienceCompilerTests(unittest.TestCase):
             )
             self.assertTrue(author_note.is_file())
 
+    @integration
     def test_abort_open_scope_refuses_staged_package_content(self):
         with temporary_directory() as raw:
             project = Path(raw)
@@ -1897,6 +1901,7 @@ class ExperienceCompilerTests(unittest.TestCase):
                 missing_owner, actions[1]["primary_process_ref"],
             )
 
+    @integration
     def test_child_status_is_rejected_by_living_package_check(self):
         with tempfile.TemporaryDirectory() as raw:
             package = Path(raw) / "workspace/docs/experience-design/experiences/checkout"
@@ -1915,6 +1920,7 @@ class ExperienceCompilerTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("child records cannot carry approval state", result.stdout)
 
+    @integration
     def test_active_state_requires_canonical_state_class(self):
         with tempfile.TemporaryDirectory() as raw:
             package = Path(raw) / "workspace/docs/experience-design/experiences/checkout"
@@ -2429,6 +2435,7 @@ class ExperienceCompilerTests(unittest.TestCase):
                 "REQ-001",
             )
 
+    @integration
     def test_all_active_stubs_pass_scoped_vault_and_compiler_contracts(self):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw)

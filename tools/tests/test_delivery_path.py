@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -223,6 +224,7 @@ class DeliveryPathInstructionTests(unittest.TestCase):
                 self.assertNotIn("light path", read(relative))
 
 
+@integration
 class DeliveryPathTaskInputTests(unittest.TestCase):
     # (entry, role): the light-path references the task binds at light_when_eligible.
     TASKS = {("delivery-plan", "delivery-coordinator"): {PLAN_REFERENCE},
@@ -285,6 +287,7 @@ class LightPathCompilerTests(unittest.TestCase):
         finally:
             path.write_bytes(before)
 
+    @integration
     def test_the_standard_value_leaves_every_output_and_record_alone(self):
         for state in ("no policy", "standard"):
             with self.subTest(state=state):
@@ -304,6 +307,7 @@ class LightPathCompilerTests(unittest.TestCase):
                 self.assertEqual(refused["errors"], [f"{DELIVERY} runs switch delivery_path at standard; only"
                                                      " light_when_eligible plans a Delivery on the light path"])
 
+    @integration
     def test_the_light_path_proposal_writes_the_standard_records(self):
         docs = self.project()
         written = []
@@ -317,6 +321,7 @@ class LightPathCompilerTests(unittest.TestCase):
             shutil.rmtree(root)
         self.assertEqual(written[0], written[1])
 
+    @integration
     def test_init_reports_an_eligible_selection_with_its_topology_pending(self):
         docs = self.project()
         set_policy(docs, LIGHT, LIMITS)
@@ -327,6 +332,7 @@ class LightPathCompilerTests(unittest.TestCase):
                                   "receipts": [{"kind": "verification", "revision": 1,
                                                 "source_hash": receipt["source_hash"]}]})
 
+    @integration
     def test_the_architects_task_derives_the_topology_pass_on_the_proposal(self):
         docs = self.project()
         set_policy(docs, LIGHT, LIMITS)
@@ -340,6 +346,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertIn("workspace/docs/delivery/process-policy.md",
                       [record["path"] for record in manifest["project_inputs"]])
 
+    @integration
     def test_two_stories_are_not_eligible(self):
         docs = self.project(("AUTH-01", "AUTH-02"))
         set_policy(docs, LIGHT, LIMITS)
@@ -348,6 +355,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual(failed(report), {"single_story": [
             "the selection holds 2 Stories, and the light path plans exactly one"]})
 
+    @integration
     def test_an_architect_role_is_not_eligible(self):
         docs = self.project(roles=("software_architect",))
         set_policy(docs, LIGHT, LIMITS)
@@ -355,6 +363,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual(failed(report), {"no_architect_role": [
             "AUTH-01 lists software_architect among its roles"]})
 
+    @integration
     def test_a_story_classified_with_operation_impact_is_not_eligible(self):
         # The approved Story's classification decides it before any Operation draft exists (#348).
         reason = "Delivering the story needs a queue service the Environment Contract lacks."
@@ -376,6 +385,7 @@ class LightPathCompilerTests(unittest.TestCase):
                     self.assertEqual((code, checked["path"], checked["failed"]), (0, "light", []),
                                      checked)
 
+    @integration
     def test_architecture_impact_needs_the_architects_own_reason(self):
         docs = self.project()
         set_policy(docs, LIGHT, LIMITS)
@@ -401,6 +411,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual((code, report["path"], report["failed"], report["plan_findings"]),
                          (0, "light", [], []), report)
 
+    @integration
     def test_the_light_gate_reports_the_findings_check_plan_reports(self):
         docs = self.project()
         set_policy(docs, LIGHT, LIMITS)
@@ -413,6 +424,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual(report["plan_findings"], checked["errors"])
         self.assertIn("AUTH-01 path_claim is not normalized: ../src/auth.py", checked["errors"])
 
+    @integration
     def test_an_open_or_not_current_operation_contract_is_not_eligible(self):
         docs = self.project()
         set_policy(docs, LIGHT, LIMITS)
@@ -440,6 +452,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual(failed(self.check(docs)[1]), {"operation_contracts_unchanged": [
             "Environment Contract revision 1 is open"]})
 
+    @integration
     def test_an_unmet_waits_for_dependency_is_not_eligible(self):
         docs = self.project(("AUTH-01", "AUTH-02"))
         set_policy(docs, LIGHT, LIMITS)
@@ -464,6 +477,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual(delivery_compile.waited_for_stories({**sources, "AUTH-01": {"depends_on": []}}, None),
                          ["AUTH-03"])
 
+    @integration
     def test_only_the_owners_size_limits_make_a_story_small(self):
         docs = self.project(criteria=2)
         set_policy(docs, {SWITCH: "light_when_eligible"})
@@ -477,6 +491,7 @@ class LightPathCompilerTests(unittest.TestCase):
         set_policy(docs, LIGHT, {"acceptance_criteria": 2})
         self.assertEqual(self.check(docs)[1]["failed"], [])
 
+    @integration
     def test_scope_approval_binds_the_light_path_record(self):
         docs = self.project()
         set_policy(docs, LIGHT, LIMITS)
@@ -500,6 +515,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual((code, execution[SWITCH]), (0, {"path": "light", "failed": [], "line": line}))
         self.assertEqual(user_decisions(docs), line + "\n\nLocal scope proposal; awaiting scope approval.")
 
+    @integration
     def test_an_ineligible_delivery_records_the_standard_path_for_good(self):
         docs = self.project(("AUTH-01", "AUTH-02"))
         set_policy(docs, LIGHT, LIMITS)
@@ -522,6 +538,7 @@ class LightPathCompilerTests(unittest.TestCase):
         code, report = self.check(docs)
         self.assertEqual((code, report["path"], report["recorded"]), (1, "standard", "standard"))
 
+    @integration
     def test_execution_approval_refuses_a_plan_the_light_gate_did_not_show(self):
         """A topology changed after the light path's one gate is a plan its owner never saw: execution
         approval and check-plan refuse it and name /execution-plan with its gate, and it is approved
@@ -557,6 +574,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual((code, execution[SWITCH]), (0, {"path": "standard", "failed": [], "line": line}))
         self.assertEqual(user_decisions(docs).split("\n\n")[0], line)
 
+    @integration
     def test_a_transient_failure_ends_the_light_path_for_good(self):
         """A failure that clears again leaves the fallback in place, so execution approval records the
         standard path the Delivery took and a later check never returns it to the light path (#328)."""
@@ -583,6 +601,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual((code, execution[SWITCH]), (0, {"path": "standard", "failed": [], "line": line}))
         self.assertEqual(user_decisions(docs).split("\n\n")[0], line)
 
+    @integration
     def test_a_refused_step_ends_the_light_path(self):
         """Any refused step of the light sequence ends the light path, whatever its remedy: the host names
         it with --refused, the Delivery records it, and the gate's approval no longer drives the plan (#328)."""
@@ -611,6 +630,7 @@ class LightPathCompilerTests(unittest.TestCase):
                                    "--refused", "start-item"])
         self.assertEqual(exited.exception.code, 2)
 
+    @integration
     def test_execution_approval_records_standard_for_a_scope_approved_without_the_light_path(self):
         docs = self.project()
         set_policy(docs, {"story_size_budget": "propose_split"}, LIMITS)
@@ -633,6 +653,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual((code, execution[SWITCH]["failed"]), (0, [
             {"condition": SWITCH, "finding": "the Process Policy that approve-execution pins sets it to standard"}]))
 
+    @integration
     def test_gate_a_holds_the_light_plan_and_keeps_its_decision_log(self):
         docs = self.project()
         set_policy(docs, {**LIGHT, "owner_gates": "two_fixed_gates"}, LIMITS)
@@ -656,6 +677,7 @@ class LightPathCompilerTests(unittest.TestCase):
                 self.assertEqual(table, header + "\n" + row)
                 self.assertEqual(delivery_compile.delivery_findings(docs, DELIVERY)[1], [])
 
+    @integration
     def test_light_path_check_refuses_outside_the_light_path(self):
         docs = self.project()
         set_policy(docs, LIGHT, LIMITS)
@@ -689,6 +711,7 @@ class LightPathCompilerTests(unittest.TestCase):
         self.assertEqual((code, refused["errors"]), (1, ["Delivery not found"]))
 
 
+@integration
 class LightPathRemoteTests(unittest.TestCase):
     """An eligible Delivery runs on a fixture remote from its proposal to its claims."""
 

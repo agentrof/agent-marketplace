@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -54,6 +55,7 @@ def task_scope(project, entry, role, mode, inputs=(), closure=None, catalog=None
 
 
 class TaskInputTests(unittest.TestCase):
+    @integration
     def test_setup_supports_unborn_repository_but_binds_initial_files_and_commit(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
@@ -142,6 +144,7 @@ class TaskInputTests(unittest.TestCase):
                 self.assertEqual(reader["status"], "read_only")
                 self.assertEqual(reader["allowed_write_area"], [])
 
+    @integration
     def test_product_owner_scope_covers_a_story_right_after_stub_story(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
@@ -172,6 +175,7 @@ class TaskInputTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "untouched"):
                     task_inputs.manifest(**kwargs, role=role, mode=mode)
 
+    @integration
     def test_item_claims_bind_one_item_and_role_without_granting_runtime_or_vault_writes(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
@@ -261,6 +265,7 @@ class TaskInputTests(unittest.TestCase):
                 with self.subTest(entry=entry, role=role, policy=True):
                     self.assertEqual({planning, execution} & bound(entry, role), {reference})
 
+    @integration
     def test_unknown_write_scope_remains_empty_with_unresolved_transition_condition(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
@@ -286,6 +291,7 @@ class TaskInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "symlink"):
                 task_inputs.regular(root, "alias.md")
 
+    @integration
     def test_new_incoming_canonical_source_invalidates_but_opaque_interior_does_not(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
@@ -304,6 +310,7 @@ class TaskInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stale"):
                 task_inputs.manifest(**kwargs, expected_hash=result["source_hash"])
 
+    @integration
     def test_an_input_task_binds_its_inputs_and_cited_notes_and_only_membership_of_the_rest(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
@@ -335,6 +342,7 @@ class TaskInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stale"):
                 task_inputs.manifest(**kwargs, expected_hash=result["source_hash"])
 
+    @integration
     def test_base_inventory_includes_dirty_and_untracked_product_sources(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
@@ -351,6 +359,7 @@ class TaskInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "hidden index"):
                 task_inputs.manifest(**kwargs)
 
+    @integration
     def test_head_drift_during_collection_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
@@ -368,6 +377,7 @@ class TaskInputTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "HEAD changed"):
                     task_inputs.manifest(entry="business-analysis", role="business-analyst", mode="review", project=root)
 
+    @integration
     def test_technology_methods_require_selected_committed_accepted_decisions(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
@@ -388,6 +398,7 @@ class TaskInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "internal skills"):
                 task_inputs.manifest(entry="deliver", role="code-reviewer", mode="review", skills=["setup"])
 
+    @integration
     def test_technology_binding_rejects_git_clean_crlf_bytes_that_differ_from_head(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
@@ -460,6 +471,7 @@ class TaskInputTests(unittest.TestCase):
                     self.assertIn(panels, required)
                     self.assertTrue(task_inputs.read_only_task(catalog, entry, role, "review"))
 
+    @integration
     def test_process_policy_binds_only_the_chosen_switch_references(self):
         with tempfile.TemporaryDirectory() as raw:
             base = Path(raw).resolve()
@@ -506,6 +518,7 @@ class TaskInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "process policy cannot bind switch instructions"):
                 task_inputs.manifest(**reader, expected_hash=default["source_hash"])
 
+    @integration
     def test_a_task_inside_a_pinned_delivery_refuses_a_policy_changed_since_the_pin(self):
         import delivery_compile
 
@@ -617,6 +630,7 @@ class TaskInputTests(unittest.TestCase):
                     self.assertEqual({switch for switch, path in references.items()
                                       if path in required}, owned)
 
+    @integration
     def test_changed_project_input_invalidates_manifest_without_runtime_writes(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -674,6 +688,7 @@ class TaskInputTests(unittest.TestCase):
             task_inputs.manifest(entry="business-analysis", role="frontend-developer", mode="create")
 
 
+@integration
 class EpicTaskScopeTests(unittest.TestCase):
     """EP-001 holds ST-001; EP-002's writer still has to finish the stubs of ST-002."""
 
@@ -797,6 +812,7 @@ class EpicTaskScopeTests(unittest.TestCase):
                               {record["path"] for record in current["canonical_source_inventory"]})
 
 
+@integration
 class BuiltPackageTaskInputTests(unittest.TestCase):
     """A built host package derives tasks with its own scripts and agents."""
 

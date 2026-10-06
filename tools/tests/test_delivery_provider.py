@@ -6,6 +6,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -17,6 +18,7 @@ import delivery_result  # noqa: E402
 from tools.tests.git_fixture import init_repository  # noqa: E402
 
 
+@integration
 class DeliveryProviderTests(unittest.TestCase):
     def test_repository_normalizes_https_and_scp_github_remotes(self):
         with tempfile.TemporaryDirectory() as temporary:

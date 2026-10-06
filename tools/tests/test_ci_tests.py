@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -18,6 +19,7 @@ from tools import ci_tests
 from tools.tests import git_fixture
 
 
+@integration
 class CITestPlannerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -797,6 +799,90 @@ class CITestPlannerTests(unittest.TestCase):
                              {"seed_build": 3.5, "seed_copy": .2, "seed_validate": .1})
         qualified.phase_totals.assert_called_once_with()
         flat.phase_totals.assert_called_once_with()
+
+
+
+class TestLevelTests(unittest.TestCase):
+    PROBE = ci_tests.ROOT / "tools/tests/unit-boundary-probe"
+
+    def test_integration_marks_a_test_or_every_test_of_its_class(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "tools/tests").mkdir(parents=True)
+            (root / "tools/tests/test_marked.py").write_text(
+                "import unittest\nfrom tools.tests import levels\nfrom tools.tests.levels import integration\n"
+                "class Mixed(unittest.TestCase):\n    @integration\n    def test_git(self): pass\n"
+                "    def test_rule(self): pass\n"
+                "@integration\nclass Whole(unittest.TestCase):\n    def test_a(self): pass\n"
+                "    def helper(self): pass\n"
+                "class Qualified(unittest.TestCase):\n    @levels.integration\n    @unittest.skip('x')\n"
+                "    def test_b(self): pass\n", encoding="utf-8")
+            module = "tools.tests.test_marked."
+            self.assertEqual(ci_tests.integration_ids(root),
+                             {module + "Mixed.test_git", module + "Whole.test_a", module + "Qualified.test_b"})
+
+    def run_under_boundary(self, cases, marked=()):
+        """Run *cases* as one TestCase through the worker's guarded runner; each test's report row."""
+        if self.PROBE.exists():
+            self.PROBE.unlink() if self.PROBE.is_file() else self.PROBE.rmdir()
+        suite_class = type("BoundaryCases", (unittest.TestCase,), dict(cases))
+        prefix = f"{suite_class.__module__}.{suite_class.__qualname__}."
+        before = (subprocess.Popen.__init__, open, os.open, os.mkdir, os.system)
+        with tempfile.TemporaryDirectory() as raw, mock.patch("sys.stderr", io.StringIO()):
+            report = {"tests": []}
+            ci_tests.run_guarded(lambda: unittest.TestLoader().loadTestsFromTestCase(suite_class), report,
+                                 Path(raw) / "report.json", {prefix + name for name in marked})
+        # The runner puts every guarded call back once the suite ends.
+        self.assertEqual((subprocess.Popen.__init__, open, os.open, os.mkdir, os.system), before)
+        written = self.PROBE.exists()
+        if written:
+            self.PROBE.unlink() if self.PROBE.is_file() else self.PROBE.rmdir()
+        self.assertFalse(written, "a guarded test wrote outside its temporary directory")
+        return {row["id"][len(prefix):]: row for row in report["tests"]}
+
+    def test_a_unit_test_that_starts_a_process_or_writes_outside_its_temporary_directory_fails(self):
+        probe = self.PROBE
+
+        def writes_inside(_case):
+            with tempfile.TemporaryDirectory() as raw:
+                path = Path(raw) / "kept.txt"
+                path.write_text("inside\n", encoding="utf-8")
+                os.replace(path, Path(raw) / "moved.txt")
+                os.mkdir(Path(raw) / "folder")
+
+        def catches_its_write(_case):
+            try:
+                probe.write_text("outside\n", encoding="utf-8")
+            except AssertionError:
+                pass
+
+        rows = self.run_under_boundary({
+            "test_starts_git": lambda _case: subprocess.run(["git", "--version"], capture_output=True),
+            "test_starts_a_shell": lambda _case: os.system("true"),
+            "test_writes_outside": lambda _case: open(probe, "w", encoding="utf-8").close(),
+            "test_catches_its_write": catches_its_write,
+            "test_makes_a_directory_outside": lambda _case: os.mkdir(probe),
+            "test_opens_outside_for_writing": lambda _case: os.close(os.open(probe, os.O_WRONLY | os.O_CREAT)),
+            "test_writes_inside": writes_inside,
+            "test_reads_the_repository": lambda _case: (ci_tests.ROOT / "README.md").read_bytes(),
+        })
+        self.assertEqual({name: row["outcome"] for name, row in rows.items()}, {
+            "test_starts_git": "failure", "test_starts_a_shell": "failure", "test_writes_outside": "failure",
+            "test_catches_its_write": "failure", "test_makes_a_directory_outside": "failure",
+            "test_opens_outside_for_writing": "failure", "test_writes_inside": "success",
+            "test_reads_the_repository": "success"})
+        self.assertIn("unit test started a process: git", rows["test_starts_git"]["detail"])
+        written = "unit test wrote outside its temporary directory: "
+        for name in ("test_writes_outside", "test_catches_its_write", "test_makes_a_directory_outside",
+                     "test_opens_outside_for_writing"):
+            self.assertIn(written + os.path.normcase(os.path.realpath(probe)), rows[name]["detail"])
+        self.assertIn("mark it @integration", rows["test_catches_its_write"]["detail"])
+
+    @integration
+    def test_a_marked_integration_test_may_start_a_process(self):
+        start = lambda _case: subprocess.run([sys.executable, "-c", "pass"], check=True)
+        rows = self.run_under_boundary({"test_marked": start, "test_unmarked": start}, marked=("test_marked",))
+        self.assertEqual((rows["test_marked"]["outcome"], rows["test_unmarked"]["outcome"]), ("success", "failure"))
 
 
 if __name__ == "__main__":

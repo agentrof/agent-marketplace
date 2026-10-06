@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -120,6 +121,7 @@ class ReviewScopeRecordTests(unittest.TestCase):
                 self.assertEqual(inputs.manifest(self.docs, epic="EP-001")["scope_sizes"]
                                  ["transitive_budget"], {"source_bytes": limit, "over": over})
 
+    @integration
     def test_scope_findings_name_blocking_findings_outside_the_bounded_set(self):
         notes = self.chain()
         choose(self.docs, "both_scopes", switch="review_scope_record")
@@ -143,6 +145,7 @@ class ReviewScopeRecordTests(unittest.TestCase):
         self.assertEqual([row["kind"] for row in rows], ["findings", "manifest"])
         self.assertEqual(rows[1]["scope_sizes"], manifest["scope_sizes"])
 
+    @integration
     def test_the_record_defaults_to_the_workspace_file_and_never_lies_outside_it(self):
         self.chain()
         choose(self.docs, "both_scopes", switch="review_scope_record")
@@ -163,6 +166,7 @@ class ReviewScopeRecordTests(unittest.TestCase):
                 self.assertFalse(path.exists())
         self.assertEqual(len(record.read_text(encoding="utf-8").splitlines()), 1)
 
+    @integration
     def test_the_record_is_a_file_git_keeps_under_setups_ignore_rules(self):
         """The backlog revision commits the record (#395): setup's managed
         .gitignore ignores the runtime root where it first lived, and a record
@@ -251,6 +255,7 @@ class GitBacklogFixture:
         return root, docs
 
 
+@integration
 class RemediationWritersTests(unittest.TestCase):
     FIRST = "workspace/docs/backlog/epics/delivery-fixture/stories/st-001/story.md"
     SECOND = "workspace/docs/backlog/epics/second/stories/st-002/story.md"
@@ -459,6 +464,7 @@ class RootReviewScopeTests(unittest.TestCase):
         self.assertEqual(inputs.manifest(self.docs)["revision_delta"]["reason"],
                          "first backlog revision")
 
+    @integration
     def test_a_root_reader_task_carries_the_delta_and_a_reader_request(self):
         self.depends(3, 4)
         self.choose()
@@ -491,6 +497,7 @@ class RootReviewScopeTests(unittest.TestCase):
             inputs.manifest(self.docs)
 
 
+@integration
 class RemediationBookkeepingTests(unittest.TestCase):
     REVIEW = "backlog/epics/second/reviews/round-1-epic-review.md"
     PLAN = "[[backlog/epics/second/stories/st-002/test-plan|ST-002-TP]]"

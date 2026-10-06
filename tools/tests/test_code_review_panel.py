@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -164,6 +165,7 @@ class CodeReviewPanelValidatorTests(unittest.TestCase):
         self.assertTrue(any("not valid unique-key JSON" in message for message in self.messages()))
 
 
+@integration
 class CodeReviewPanelMachineTests(unittest.TestCase):
     """One parallel-snapshot Item, as test_delivery_verification builds it."""
 

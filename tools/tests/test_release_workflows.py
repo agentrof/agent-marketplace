@@ -9,6 +9,7 @@ import subprocess
 import re
 import sys
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 
@@ -626,6 +627,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, text)
 
+    @integration
     @unittest.skipUnless(shutil.which("bash"), "Bash workflow executor")
     def test_host_aggregate_executes_fail_closed_for_every_path(self):
         text = self.text("release-hosts.yml").split("\n  native-host-lifecycle:\n", 1)[1]
@@ -640,6 +642,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                     self.assertEqual(result.returncode == 0,
                                      plan == "success" and fresh == "success")
 
+    @integration
     @unittest.skipUnless(shutil.which("bash"), "Bash workflow executor")
     def test_aggregate_executes_fail_closed_for_missing_failed_and_cancelled_work(self):
         text = self.text("validate.yml").split("\n  check:\n", 1)[1]

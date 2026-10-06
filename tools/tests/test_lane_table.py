@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +32,7 @@ def call(module, argv: list[str]) -> tuple[int, dict]:
     return code, json.loads(output.getvalue())
 
 
+@integration
 class LaneTableTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -89,6 +91,7 @@ class LaneTableTests(unittest.TestCase):
         self.assertEqual((code, refused["code"]), (2, "LANE_MAIN_BRANCH_CHANGED"))
 
 
+@integration
 class FixedCostSwitchBindingTests(unittest.TestCase):
     """Each new switch binds its reference only at its non-default value."""
 

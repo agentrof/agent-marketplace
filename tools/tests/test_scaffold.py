@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 import sys
 from unittest import mock
@@ -17,6 +18,7 @@ import fixtures  # noqa: E402
 import scaffold  # noqa: E402
 
 
+@integration
 class ScaffoldContracts(unittest.TestCase):
     def test_new_plugin_has_no_dependency_or_extra_catalog(self):
         with tempfile.TemporaryDirectory() as temporary:

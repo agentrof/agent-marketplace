@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -74,6 +75,7 @@ class ReaderWavesTests(unittest.TestCase):
         self.assertIn("Under switch `reader_waves` at `all_at_once`, spawn every reader of a"
                       " review or recheck wave in one message", text)
 
+    @integration
     def test_only_all_at_once_binds_the_reference_to_every_owning_task(self):
         bound = {}
         for value in ("as_slots_free", "all_at_once"):

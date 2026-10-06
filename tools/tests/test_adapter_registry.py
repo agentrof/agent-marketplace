@@ -6,6 +6,7 @@ import json
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -92,6 +93,7 @@ class AdapterRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "platform roots must exactly match"):
             build_distributions.load_adapters(self.root)
 
+    @integration
     def test_marker_owned_retired_host_tree_is_replaced(self):
         marker, _ = build_distributions.packaging_names(self.root)
         retired_package = self.root / "dist" / "retired" / fixtures.PLUGIN
@@ -105,6 +107,7 @@ class AdapterRegistryTests(unittest.TestCase):
             {"claude", "codex"},
         )
 
+    @integration
     def test_unmanaged_tree_is_not_replaced(self):
         (self.root / "dist" / "unmanaged").mkdir(parents=True)
         with self.assertRaisesRegex(ValueError, "unmanaged dist tree"):

@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 import unittest
+from tools.tests.levels import integration
 from unittest import mock
 
 from tools.tests import test_backlog_requirement_bindings as fixtures
@@ -15,6 +16,7 @@ from tools.tests import test_backlog_requirement_bindings as fixtures
 compiler = fixtures.compiler
 
 
+@integration
 class BacklogRevisionAtomicityTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.RequirementBindingTests()

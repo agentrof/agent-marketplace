@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -260,6 +261,7 @@ class FactOwnershipValidatorTests(unittest.TestCase):
                             for finding in findings), findings)
 
 
+@integration
 class ExecutionPlanningTaskInputTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -318,6 +320,7 @@ class ExecutionPlanningTaskInputTests(unittest.TestCase):
             self.bound(("configure", "qa-engineer", "revise", ("challenge-review",)))
 
 
+@integration
 class BundleManifestTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

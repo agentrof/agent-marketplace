@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -139,6 +140,7 @@ class ContractTests(unittest.TestCase):
                     self.assertEqual(any("test_engines" in error for error in errors), not valid, errors)
 
 
+@integration
 class BindingTests(unittest.TestCase):
     setUp = base.BindingTests.setUp
     bound = base.BindingTests.bound
@@ -157,6 +159,7 @@ class BindingTests(unittest.TestCase):
                 self.assertEqual(self.bound(entry, role, REFERENCE), entry == "deliver")
 
 
+@integration
 class PartitionedRunTests(unittest.TestCase):
     """The pre-handoff fixture's DLV-002 Item ST-005, at pre_handoff_regression touched_suites, with a
     partition command over its three test directories as groups."""

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -203,6 +204,7 @@ class AllSwitchesOnBindingTests(unittest.TestCase):
         self.assertEqual(shipped, {path for paths in bound.values() for path in paths})
 
 
+@integration
 class AllSwitchesOnTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()

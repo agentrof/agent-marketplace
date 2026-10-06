@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import unittest
+from tools.tests.levels import integration
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +30,7 @@ import file_lock
 from git_fixture import init_repository, remove_temporary
 
 
+@integration
 class VerificationTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

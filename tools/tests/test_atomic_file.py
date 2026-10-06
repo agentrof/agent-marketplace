@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 from unittest import mock
 
@@ -124,6 +125,7 @@ class AtomicWriterModeTests(unittest.TestCase):
                 self.assertEqual(mode(path), 0o664)
 
 
+@integration
 class AtomicTextLineEndingTests(unittest.TestCase):
     def git(self, root: Path, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=root, capture_output=True, check=True,

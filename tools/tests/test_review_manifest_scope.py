@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -293,6 +294,7 @@ class BoundedManifestTests(unittest.TestCase):
             inputs.manifest(self.docs, epic="EP-001")
 
 
+@integration
 class BoundedTaskInputTests(unittest.TestCase):
     def test_a_reviewer_task_binds_the_reference_and_the_bounded_closure_only_at_bounded(self):
         with tempfile.TemporaryDirectory() as raw:

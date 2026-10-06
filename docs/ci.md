@@ -325,3 +325,5 @@ Timing targets are acceptance goals, not grounds to omit a failed or slow
 gate.
 
 Local unit workers also reject process starts during test-module loading and class/module fixtures, including attempts a fixture catches. Shared fixture seeds must be built in process and remain read-only; each unit test mutates only its own temporary copy.
+
+Descriptor-relative `os.open` writes retain their directory argument in thread-local audit context; an unknown descriptor or an uncaptured relative native open is refused. Nested loaders and class/module fixtures inherit an active ancestor test's filesystem boundary until their own test starts. Caught outside-write refusals remain attached to that active test.

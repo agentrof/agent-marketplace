@@ -907,6 +907,104 @@ class TestLevelTests(unittest.TestCase):
                 self.assertRaisesRegex(ci_tests.UnitBoundaryError, "unit fixture.*started a process"):
             ci_tests.run_guarded(load, {"tests": []}, Path(raw) / "report.json", set(), unit_only=True)
 
+    @unittest.skipIf(os.name == "nt", "directory descriptors require POSIX")
+    def test_open_validates_the_directory_descriptor_and_restores_argument_context(self):
+        with tempfile.TemporaryDirectory() as raw:
+            outside = Path(raw)
+            descriptor = os.open(outside, os.O_RDONLY)
+            self.addCleanup(os.close, descriptor)
+
+            def outside_write(_case):
+                cwd = os.getcwd()
+                try:
+                    os.chdir(tempfile.gettempdir())
+                    try:
+                        stream = os.open("escaped", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
+                    except ci_tests.UnitBoundaryError:
+                        pass
+                    else:
+                        os.close(stream)
+                    Path("owned-after-refusal").write_text("inside")
+                    self.assertEqual(Path("owned-after-refusal").read_text(), "inside")
+                finally:
+                    os.chdir(cwd)
+
+            def inside_write(_case):
+                with tempfile.TemporaryDirectory() as own:
+                    owned = os.open(own, os.O_RDONLY)
+                    try:
+                        stream = os.open("kept", os.O_WRONLY | os.O_CREAT, dir_fd=owned)
+                        os.close(stream)
+                    finally:
+                        os.close(owned)
+                    self.assertTrue((Path(own) / "kept").exists())
+
+            def unknown_descriptor(_case):
+                cwd = os.getcwd()
+                try:
+                    os.chdir(tempfile.gettempdir())
+                    with mock.patch.object(ci_tests.UnitBoundary, "directory_of", return_value=None):
+                        stream = os.open("unknown", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
+                        os.close(stream)
+                finally:
+                    os.chdir(cwd)
+
+            def cached_native_open(_case):
+                native = next(function for function in os.supports_dir_fd if function.__name__ == "open")
+                cwd = os.getcwd()
+                try:
+                    os.chdir(tempfile.gettempdir())
+                    stream = native("cached", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
+                    os.close(stream)
+                finally:
+                    os.chdir(cwd)
+
+            rows = self.run_under_boundary({"test_outside": outside_write, "test_inside": inside_write,
+                                           "test_unknown": unknown_descriptor, "test_cached": cached_native_open})
+            self.assertEqual({key: row["outcome"] for key, row in rows.items()}, {
+                "test_inside": "success", "test_outside": "failure", "test_unknown": "failure",
+                "test_cached": "failure"})
+            self.assertIn("wrote outside", rows["test_outside"]["detail"])
+            self.assertIn("unknown directory descriptor", rows["test_unknown"]["detail"])
+            self.assertFalse((outside / "escaped").exists())
+            self.assertFalse((outside / "unknown").exists())
+            self.assertFalse((outside / "cached").exists())
+
+    def test_nested_loaders_and_fixtures_keep_the_active_outer_write_boundary(self):
+        def nested(kind, outside):
+            def case(_test):
+                parent = Path(tempfile.gettempdir())
+                target = self.outside_temporary if outside else parent / (kind + "-owned")
+
+                def write():
+                    try:
+                        target.write_text("fixture")
+                    except ci_tests.UnitBoundaryError:
+                        pass
+
+                def load():
+                    if kind == "loader":
+                        write()
+                        return unittest.TestSuite()
+                    fixture = type("NestedFixture", (unittest.TestCase,), {
+                        "setUpClass": classmethod(lambda _cls: write()),
+                        "test_noop": lambda _case: None})
+                    return unittest.TestLoader().loadTestsFromTestCase(fixture)
+
+                result, _calls = ci_tests.run_guarded(load, {"tests": []}, parent / (kind + ".json"),
+                                                     set(), unit_only=True)
+                self.assertTrue(result.wasSuccessful())
+                self.assertEqual(target.exists(), not outside)
+            return case
+
+        rows = self.run_under_boundary({"test_" + kind + ("_outside" if outside else "_inside"):
+                                       nested(kind, outside)
+                                       for kind in ("loader", "fixture") for outside in (False, True)})
+        for key, row in rows.items():
+            self.assertEqual(row["outcome"], "failure" if key.endswith("outside") else "success", key)
+            if key.endswith("outside"):
+                self.assertIn("wrote outside", row["detail"])
+
     def test_link_cleanup_is_allowed_but_writing_its_target_is_refused(self):
         with tempfile.TemporaryDirectory() as raw:
             target = Path(raw) / "outside-inner-unit"

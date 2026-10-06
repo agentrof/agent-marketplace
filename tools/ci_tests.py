@@ -150,6 +150,7 @@ class UnitBoundaryError(AssertionError):
 
 _BOUNDARIES = []
 _AUDITING = threading.local()
+_OPEN_ARGUMENTS = threading.local()
 _AUDIT_HOOKED = []
 
 
@@ -157,6 +158,9 @@ def _audit(event, args):
     if not _BOUNDARIES or getattr(_AUDITING, "active", False):
         return
     boundary = _BOUNDARIES[-1]
+    fixture_process = event in boundary.PROCESS_EVENTS and any(item.unit_only for item in _BOUNDARIES)
+    if boundary.test is None and not fixture_process:
+        boundary = next((item for item in reversed(_BOUNDARIES) if item.test is not None), boundary)
     if boundary.test is None and not (any(item.unit_only for item in _BOUNDARIES) and event in boundary.PROCESS_EVENTS):
         return
     _AUDITING.active = True
@@ -174,7 +178,8 @@ class UnitBoundary:
     directory the test gets as its temporary directory raises, is recorded,
     and fails the test even when the test catches the error; so does a thread
     the test leaves running. Class and module fixtures run outside the watch.
-    The innermost boundary decides, so a runner under test keeps its own.
+    The innermost active test decides; nested loading and fixtures retain an
+    active ancestor's write boundary.
     """
 
     WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
@@ -188,8 +193,8 @@ class UnitBoundary:
                    "os.lchflags": ((0, None),), "os.utime": ((0, 3),), "os.truncate": ((0, None),),
                    "os.setxattr": ((0, None),), "os.removexattr": ((0, None),),
                    "os.mkfifo": ((0, 2),), "os.mknod": ((0, 3),)}
-    # Calls that raise no audit event of their own.
-    UNAUDITED = ("mkfifo", "mknod")
+    # Calls with a missing audit event or arguments needed to resolve a path.
+    UNAUDITED = ("mkfifo", "mknod", "open")
 
     def __init__(self, unit_only=False):
         self.unit_only = unit_only
@@ -221,6 +226,15 @@ class UnitBoundary:
         self.saved.clear()
 
     def unaudited(self, name, original):
+        if name == "open":
+            def call(path, flags, mode=0o777, *, dir_fd=None):
+                previous = getattr(_OPEN_ARGUMENTS, "call", None)
+                _OPEN_ARGUMENTS.call = (dir_fd,)
+                try:
+                    return original(path, flags, mode, dir_fd=dir_fd)
+                finally:
+                    _OPEN_ARGUMENTS.call = previous
+            return call
         def call(path, *args, dir_fd=None, **options):
             _audit("os." + name, (path, None, dir_fd) if name == "mkfifo" else (path, None, None, dir_fd))
             return original(path, *args, dir_fd=dir_fd, **options)
@@ -270,11 +284,12 @@ class UnitBoundary:
         if isinstance(path, int) or path is None:
             return
         base = os.getcwd()
-        if descriptor is not None and descriptor >= 0:
+        written = os.fsdecode(os.fspath(path))
+        if not os.path.isabs(written) and descriptor is not None and descriptor >= 0:
             base = self.directory_of(descriptor)
             if base is None:
                 self.cross(f"wrote through an unknown directory descriptor: {os.fsdecode(os.fspath(path))}")
-        joined = os.path.join(base, os.fsdecode(os.fspath(path)))
+        joined = os.path.join(base, written)
         resolved = (os.path.join(os.path.realpath(os.path.dirname(joined)), os.path.basename(joined))
                     if entry else os.path.realpath(joined))
         full = os.path.normcase(resolved)
@@ -287,7 +302,11 @@ class UnitBoundary:
         elif event == "open":
             path, _mode, flags = args
             if flags is not None and flags & self.WRITE_FLAGS:
-                self.check_path(path)
+                arguments = getattr(_OPEN_ARGUMENTS, "call", None)
+                if (_mode is None and arguments is None and not isinstance(path, int)
+                        and not os.path.isabs(os.fsdecode(os.fspath(path)))):
+                    self.cross("relative descriptor open has no directory argument context")
+                self.check_path(path, arguments[0] if arguments else None)
         elif event == "sqlite3.connect":
             database = args[0]
             if isinstance(database, (str, bytes, os.PathLike)) and os.fsdecode(os.fspath(database)) not in ("", ":memory:"):

@@ -110,6 +110,55 @@ class VaultQueryTest(unittest.TestCase):
         written = {p.parent for p in (self.project / ".agentrof").rglob("*") if p.is_file()}
         self.assertEqual(written, {self.cache.parent, self.cache.with_name("index-notes")})
 
+    def test_parallel_queries_rebuild_without_a_race(self) -> None:
+        for number in range(150):
+            (self.docs / f"backlog/n{number}.md").write_text(
+                note("story", f"N{number}"), encoding="utf-8")
+        script = SCRIPTS / "vault_query.py"
+        for round_ in range(2):
+            for number in range(150):
+                (self.docs / f"backlog/n{number}.md").write_text(
+                    note("story", f"N{number}", body=f"Round {round_}."), encoding="utf-8")
+            procs = [subprocess.Popen([sys.executable, str(script), "--docs", str(self.docs), "gaps"],
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                     for _ in range(8)]
+            results = [(p.wait(), p.stderr.read().decode()) for p in procs]
+            for proc in procs:
+                proc.stderr.close()
+            self.assertEqual([code for code, _ in results], [0] * 8, results)
+
+    def test_a_linked_note_is_indexed_inside_the_vault_and_refused_outside(self) -> None:
+        (self.docs / "backlog/alias.md").symlink_to(self.docs / "backlog/story-b.md")
+        self.assertIn("backlog/alias.md", json.dumps(self.run_query("find", "backlog/alias.md")))
+        secret = self.project / "secret.md"
+        secret.write_text("TOKEN=supersecret123\n", encoding="utf-8")
+        (self.docs / "backlog/leak.md").symlink_to(secret)
+        result = self.run_query("search", "TOKEN", code=2)
+        self.assertIn("links outside the vault", result["stderr"])
+        self.assertNotIn("supersecret", result["stderr"])
+
+    def test_a_linked_shard_folder_is_refused(self) -> None:
+        outside = self.project / "outside"
+        outside.mkdir()
+        victim = outside / ("a" * 64 + ".json")
+        victim.write_text("{}", encoding="utf-8")
+        self.cache.parent.mkdir(parents=True)
+        self.cache.with_name("index-notes").symlink_to(outside, target_is_directory=True)
+        self.assertIn("real directory", self.run_query("gaps", code=2)["stderr"])
+        self.assertEqual(victim.read_text(encoding="utf-8"), "{}")
+        self.assertEqual(len(list(outside.iterdir())), 1)
+
+    def test_closure_takes_relative_project_and_absolute_paths(self) -> None:
+        rel = "backlog/story-b.md"
+        expected = self.run_query("closure", "--changed", rel)["closure"]
+        self.assertTrue(expected)
+        for path in (str(self.docs / rel), f"./workspace/docs/{rel}", f"workspace/docs/{rel}"):
+            with self.subTest(path=path):
+                self.assertEqual(self.run_query("closure", "--changed", path)["closure"], expected)
+        for path in ("backlog/missing.md", str(self.project / "elsewhere.md"), "../x.md"):
+            with self.subTest(path=path):
+                self.assertIn("vault", self.run_query("closure", "--changed", path, code=1)["stderr"])
+
     def test_index_is_json_under_the_project_runtime_scratch(self) -> None:
         result = self.run_query("gaps")
         self.assertEqual(result["cache"]["path"], str(self.cache))

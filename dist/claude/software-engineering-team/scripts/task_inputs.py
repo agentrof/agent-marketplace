@@ -114,9 +114,15 @@ def impact_closure(docs: Path, changed, prefix: str = "") -> dict:
     Each proven unchanged note also carries the sha256 of its current bytes,
     so a later write to it stales the manifest that lists it unread.
     """
-    raw = closure_api().closure(docs, sorted({docs_relative(path) for path in changed}))
+    named = sorted({docs_relative(path) for path in changed})
+    if any(".." in path.split("/") or path.startswith("/") for path in named):
+        raise ValueError("a changed path must stay inside workspace/docs")
+    # A deleted note is still a change; the closure starts from what exists.
+    deleted = [path for path in named if not (docs / path).is_file()]
+    raw = closure_api().closure(docs, [path for path in named if path not in deleted])
     if not isinstance(raw, dict) or any(not isinstance(raw.get(key), list) for key in CLOSURE_KEYS):
         raise ValueError(f"impact closure must return the lists {', '.join(CLOSURE_KEYS)}")
+    raw = dict(raw, changed=[*raw["changed"], *deleted])
     result = {key: sorted({prefix + docs_relative(row_path(row)) for row in raw[key]})
               for key in ("changed", "closure", "graph_gaps")}
     result["widened_by"] = sorted(
@@ -494,7 +500,7 @@ def closure_reads(project: Path, project_files: set[str], inputs: set[str], base
     """
     command = ["git", "--no-replace-objects", "-C", str(project)]
     for path in named:
-        if not canonical_source(path) or not path.endswith(".md"):
+        if ".." in path.split("/") or not canonical_source(path) or not path.endswith(".md"):
             raise ValueError(f"--changed must name a workspace/docs note: {path}")
     seen, commit = impact_changes(command, base, None if base else frozenset(inputs) or None)
     changed = seen | set(named)

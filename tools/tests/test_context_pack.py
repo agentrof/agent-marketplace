@@ -178,6 +178,16 @@ class StalePackTests(unittest.TestCase):
         with self.assertRaises(context_pack.Refused):
             context_pack.check(edited, package=self.package)
 
+    def test_check_refuses_a_source_outside_the_package(self) -> None:
+        outside = self.base / "outside.md"
+        outside.write_text("secret\n", encoding="utf-8")
+        for path in (str(outside), "../outside.md"):
+            edited = json.loads(json.dumps(self.pack))
+            edited["sources"][0]["path"] = path
+            with self.subTest(path=path), self.assertRaises(context_pack.Refused) as caught:
+                context_pack.stale_sources(edited, package=self.package)
+            self.assertEqual(caught.exception.code, "CONTEXT_PACK_SOURCE")
+
     def test_cli_check_refuses_stale_pack(self) -> None:
         target = self.base / "pack.json"
         target.write_text(json.dumps(dict(self.pack, pack_hash="sha256:" + "0" * 64)),
@@ -225,8 +235,9 @@ class ProjectSwitchTests(unittest.TestCase):
         note.parent.mkdir(parents=True)
         note.write_text("# Story\n", encoding="utf-8")
         inside = self.project / "workspace/docs/.agentrof/agent-marketplace/.runtime/context-packs/x.json"
+        cased = self.project / "Workspace/Docs/.agentrof/agent-marketplace/.runtime/context-packs/x.json"
         with mock.patch.object(context_pack, "project_value", return_value="role_digest"):
-            for out in (note, self.project / "README.md", self.project / "pack.json", inside):
+            for out in (note, self.project / "README.md", self.project / "pack.json", inside, cased):
                 with self.subTest(out=out.name):
                     code, result = call(["build", "--entry", "backlog-plan", "--role",
                                          "product-owner", "--project-root", str(self.project),

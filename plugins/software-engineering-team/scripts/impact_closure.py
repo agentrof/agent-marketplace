@@ -126,6 +126,33 @@ def normalize(rel: str) -> str:
     return rel
 
 
+def changed_paths(docs: Path, changed: list[str], notes) -> list[str]:
+    """Each changed path as docs-relative, whether given relative to the docs,
+    the project (``workspace/docs/...``, ``./workspace/docs/...``) or absolute.
+
+    A path outside the vault, or naming neither a note nor a file in it, is
+    refused rather than dropped from the closure.
+    """
+    root = Path(docs).resolve()
+    result = []
+    for raw in changed:
+        text = str(raw).replace("\\", "/")
+        if Path(text).is_absolute():
+            try:
+                text = Path(text).resolve().relative_to(root).as_posix()
+            except ValueError:
+                raise ValueError(f"changed path {raw!r} is outside the vault") from None
+        while text.startswith("./"):
+            text = text[2:]
+        rel = normalize(text)
+        if not rel or ".." in rel.split("/") or rel.startswith("/"):
+            raise ValueError(f"changed path {raw!r} is outside the vault")
+        if rel not in notes and not (root / rel).is_file():
+            raise ValueError(f"changed path {raw!r} names no note or file in the vault")
+        result.append(rel)
+    return result
+
+
 def note_type(note) -> str:
     return vault_check.kebab(str(note.fm.get("type", "")))
 
@@ -514,7 +541,8 @@ def closure(docs: Path, changed: list[str], *, policy: dict | None = None) -> di
     contract or process policy widens the closure to every citing note.
     """
     vault = load_vault(Path(docs).absolute())
-    return closure_from(snapshot(vault, policy), changed,
+    snap = snapshot(vault, policy)
+    return closure_from(snap, changed_paths(docs, changed, snap["notes"]),
                         closure_policy(vault.policy, policy))
 
 

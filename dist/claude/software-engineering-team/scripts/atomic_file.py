@@ -87,3 +87,22 @@ def replace_text(path: Path, text: str,
     if b"\r\n" in current and current.replace(b"\r\n", b"\n") == data:
         return
     replace_bytes(path, data, before_replace)
+
+
+def real_directory(root: Path, relative: Path) -> Path:
+    """Create ``root/relative`` as real directories and return it.
+
+    Every component below ``root`` must be a directory, never a symbolic
+    link, so a pre-planted link cannot redirect a write outside the project.
+    """
+    current = Path(root)
+    for part in Path(relative).parts:
+        current = current / part
+        try:
+            os.mkdir(current)
+        except FileExistsError:
+            pass
+        if os.path.islink(current) or not os.path.isdir(current):
+            raise OSError(f"{current} must be a real directory, not a link or file")
+    return current
+

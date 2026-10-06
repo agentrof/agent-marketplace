@@ -277,6 +277,15 @@ class TaskInputScopeTests(unittest.TestCase):
                          [NOTES["b"], NOTES["c"]])
         self.assertNotIn(NOTES["b"], self.read_paths(unproven))
 
+    def test_a_changed_path_cannot_leave_the_vault(self):
+        choose(self.docs, VALUE, self.package)
+        for path in ("workspace/docs/../../outside.md", "workspace/docs/a/../../../x.md"):
+            with self.subTest(path=path), Stub().install(), self.assertRaises(ValueError):
+                task_inputs.manifest(**self.reader, changed=[path])
+        with self.assertRaisesRegex(ValueError, "inside workspace/docs"):
+            task_inputs.impact_closure(self.docs, ["workspace/docs/../outside.md"],
+                                       "workspace/docs/")
+
     def test_the_switch_needs_the_closure_module(self):
         choose(self.docs, VALUE, self.package)
         self.edit("a")

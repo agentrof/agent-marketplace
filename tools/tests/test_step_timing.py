@@ -84,6 +84,34 @@ class StepTimingTests(unittest.TestCase):
         self.assertEqual((step, first, second),
                          ("review#1", "review/backlog-reviewer#1", "review/backlog-reviewer#2"))
 
+    def test_a_linked_timing_folder_or_run_file_is_refused(self) -> None:
+        outside = self.root.parent / "outside"
+        outside.mkdir()
+        folder = self.root / ".agentrof/agent-marketplace"
+        folder.mkdir(parents=True)
+        (folder / "timing").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(step_timing.Refused) as caught:
+            self.start("author", 0)
+        self.assertEqual(caught.exception.code, "TIMING_UNSAFE_PATH")
+        self.assertEqual(list(outside.iterdir()), [])
+        (folder / "timing").unlink()
+        (folder / "timing").mkdir()
+        victim = self.root.parent / "victim.txt"
+        self.run_file().symlink_to(victim)
+        with self.assertRaises(step_timing.Refused) as caught:
+            self.start("author", 0)
+        self.assertEqual(caught.exception.code, "TIMING_UNSAFE_PATH")
+        self.assertFalse(victim.exists())
+
+    def test_an_event_missing_its_keys_is_corrupt(self) -> None:
+        self.run_file().parent.mkdir(parents=True)
+        for line in ('{"event": "start"}', '{"event": "end", "at": "x"}', '{"span": "a#1"}', "[1]"):
+            with self.subTest(line=line):
+                self.run_file().write_text(line + "\n", encoding="utf-8")
+                with self.assertRaises(step_timing.Refused) as caught:
+                    self.start("author", 0)
+                self.assertEqual(caught.exception.code, "TIMING_CORRUPT")
+
     def test_refusals(self) -> None:
         with self.assertRaises(step_timing.Refused) as caught:
             self.start("spawned", 0, kind="spawn", role="qa-engineer")

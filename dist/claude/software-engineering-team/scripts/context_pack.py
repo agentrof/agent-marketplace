@@ -238,8 +238,13 @@ def build(*, entry: str, role: str | None, mode: str = "review", project: Path |
 
 def stale_sources(pack: dict, package: Path = PACKAGE) -> list[dict]:
     stale = []
+    root = Path(package).resolve()
     for record in [*pack.get("sources", []), *pack.get("conditional_reads", [])]:
-        path = package / record["path"]
+        relative = Path(str(record.get("path", "")))
+        path = (root / relative).resolve()
+        if relative.is_absolute() or ".." in relative.parts or not path.is_relative_to(root):
+            raise Refused("CONTEXT_PACK_SOURCE", f"a pack source must stay inside the package:"
+                          f" {record.get('path')!r}")
         current = sha256(path.read_bytes()) if path.is_file() else None
         if current != record["sha256"]:
             stale.append({"path": record["path"], "pack": record["sha256"], "current": current})
@@ -264,9 +269,12 @@ def pack_target(out: Path) -> Path:
     """A pack is written only as a .json file inside a project's context-packs
     folder, resolved; never a vault note or any other project file."""
     resolved = Path(out).absolute().resolve()
-    parts, width = resolved.parts, len(RUNTIME.parts)
-    starts = [i for i in range(len(parts) - width) if parts[i:i + width] == RUNTIME.parts]
-    if resolved.suffix != ".json" or not starts or any(
+    # Casefolded, so a case-insensitive file system cannot alias the vault.
+    parts = tuple(part.casefold() for part in resolved.parts)
+    runtime = tuple(part.casefold() for part in RUNTIME.parts)
+    width = len(runtime)
+    starts = [i for i in range(len(parts) - width) if parts[i:i + width] == runtime]
+    if resolved.suffix.casefold() != ".json" or not starts or any(
             parts[i:i + 2] == ("workspace", "docs") for i in range(starts[0])):
         raise Refused("CONTEXT_PACK_OUT", f"a pack is written only under {RUNTIME.as_posix()}/,"
                       f" never to {out}")

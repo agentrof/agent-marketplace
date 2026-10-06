@@ -40,6 +40,7 @@ from collections import deque
 from pathlib import Path
 
 import atomic_file
+import file_lock
 import impact_closure
 import vault_check
 
@@ -121,7 +122,12 @@ def scan_files(docs: Path, cached: dict, verify: bool = False) -> dict:
             dirs[:] = [d for d in dirs if d not in {".trash", ".obsidian"}]
         for name in names:
             path = base / name
-            if path.is_symlink() or not path.is_file():
+            if path.is_symlink():
+                # vault_check reads a linked note like any other; the index
+                # does the same, but only for a link that stays in the vault.
+                if not path.resolve().is_relative_to(docs.resolve()):
+                    raise ValueError(f"{path.relative_to(docs).as_posix()} links outside the vault")
+            if not path.is_file():
                 continue
             rel = path.relative_to(docs).as_posix()
             info = path.stat()
@@ -148,11 +154,33 @@ def note_identity(note) -> tuple:
 
 
 def load_cache(cache: Path) -> dict:
+    if cache.is_symlink():
+        return {}
     try:
         data = json.loads(cache.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def locked_refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
+    """``refresh`` under the index folder's lock, so parallel queries rebuild in turn.
+
+    The folder is created as real directories below the project root, never
+    through a link.
+    """
+    project = Path(docs).resolve().parents[1]
+    folder = atomic_file.real_directory(project, cache.parent.relative_to(project))
+    descriptor = os.open(folder / ".lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+                         0o666)
+    try:
+        file_lock.lock(descriptor)
+        try:
+            return refresh(docs, cache, verify)
+        finally:
+            file_lock.unlock(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
@@ -185,7 +213,8 @@ def refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
     reuse = {}
     for rel, entry in current.items():
         shard = shards / f"{entry['sha']}.json"
-        if rel.endswith(".md") and rel not in changed and shard.is_file():
+        if rel.endswith(".md") and rel not in changed and shard.is_file() \
+                and not shard.is_symlink():
             try:
                 reuse[rel] = note_from_json(docs, rel, json.loads(shard.read_text(encoding="utf-8")))
             except (OSError, ValueError, KeyError):
@@ -209,7 +238,7 @@ def refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
     snap = impact_closure.snapshot(vault, proofs={})
     authored_set = set(snap["notes"])
 
-    shards.mkdir(parents=True, exist_ok=True)
+    atomic_file.real_directory(cache.parent, Path(shards.name))
     for rel, note in vault.notes.items():
         shard = shards / f"{current[rel]['sha']}.json"
         if rel not in reuse and not shard.is_file():
@@ -219,7 +248,7 @@ def refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
         # Only the index's own shards are ever removed.
         if SHARD_NAME.match(shard.name) and shard.is_file() and not shard.is_symlink() \
                 and shard.name not in live:
-            shard.unlink()
+            shard.unlink(missing_ok=True)  # a parallel rebuild may have removed it
     data = {
         "schema_version": SCHEMA_VERSION,
         "builder": builder,
@@ -397,7 +426,9 @@ def q_search(index: Index, args) -> dict:
 def q_closure(index: Index, args) -> dict:
     policy = impact_closure.closure_policy(
         vault_check.load_policy(vault_check.DEFAULT_POLICY))
-    return impact_closure.closure_from(index.snapshot(), args.changed, policy)
+    snap = index.snapshot()
+    return impact_closure.closure_from(
+        snap, impact_closure.changed_paths(args.docs, args.changed, snap["notes"]), policy)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -438,7 +469,11 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"vault_query: {exc}", file=sys.stderr)
         return 2
-    data, status = refresh(args.docs, cache, args.verify)
+    try:
+        data, status = locked_refresh(args.docs, cache, args.verify)
+    except (OSError, ValueError) as exc:
+        print(f"vault_query: {exc}", file=sys.stderr)
+        return 2
     try:
         result = args.func(Index(data), args)
     except (LookupError, ValueError, subprocess.CalledProcessError) as exc:

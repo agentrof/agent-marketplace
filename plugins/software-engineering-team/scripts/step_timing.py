@@ -156,6 +156,8 @@ def records_path(root: Path, run: str) -> Path:
 
 
 def read_events(path: Path) -> list[dict]:
+    if path.is_symlink() or any(parent.is_symlink() for parent in path.parents):
+        raise Refused("TIMING_UNSAFE_PATH", f"timing records refuse the linked path {path}")
     if not path.is_file():
         return []
     events = []
@@ -169,10 +171,18 @@ def read_events(path: Path) -> list[dict]:
     return events
 
 
+EVENT_KEYS = {"start": ("span", "step", "kind", "phase", "at"), "end": ("span", "at"),
+              "overrun": ("span", "at")}
+
+
 def spans(events: list[dict]) -> dict[str, dict]:
     """Fold start and end events into spans, in start order."""
     result: dict[str, dict] = {}
-    for event in events:
+    for number, event in enumerate(events, start=1):
+        kind = event.get("event") if isinstance(event, dict) else None
+        if kind not in EVENT_KEYS or any(
+                not isinstance(event.get(key), str) for key in EVENT_KEYS[kind]):
+            raise Refused("TIMING_CORRUPT", f"timing event {number} lacks its required keys")
         if event["event"] == "start":
             result[event["span"]] = {key: value for key, value in event.items() if key != "event"}
         elif event["event"] == "end" and event["span"] in result:
@@ -235,8 +245,12 @@ def overrun(span: dict, all_spans: dict[str, dict], limits: dict[str, int],
 def append(root: Path, run: str, build) -> dict:
     """Under the run's lock, build one event from the current spans and append it."""
     path = records_path(root, run)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o666)
+    try:
+        atomic_file.real_directory(root, TIMING)
+        descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND
+                             | getattr(os, "O_NOFOLLOW", 0), 0o666)
+    except OSError as exc:
+        raise Refused("TIMING_UNSAFE_PATH", f"timing records refuse {path}: {exc}") from exc
     try:
         file_lock.lock(descriptor)
         try:

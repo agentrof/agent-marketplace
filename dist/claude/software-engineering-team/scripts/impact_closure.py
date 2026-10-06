@@ -211,31 +211,74 @@ def index_tier(vault, edges: Edges) -> bool:
     return True
 
 
+# Front-matter keys that name the note itself or carry no reference.
+SELF_KEYS = frozenset({"id", "aliases", "title", "type", "status", "source_hash",
+                       "package_hash", "approved_at_utc"})
+REF_KEY = re.compile(r"(_ref|_refs)$")
+ID_VALUE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[0-9]+(?:@r[0-9]+)?$")
+
+
+def frontmatter_values(value):
+    """Every string inside a front-matter value, through lists and mappings."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from frontmatter_values(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from frontmatter_values(item)
+
+
+def reference_owners(vault) -> dict:
+    """Every identity a front-matter value may use: the relation identities
+    vault_check resolves, plus each note's own ``id``."""
+    owners = dict(vault_check.relation_identity_owners(vault))
+    for note in vault_check.authored(vault):
+        ident = note.fm.get("id")
+        if isinstance(ident, str) and ident.strip():
+            owners.setdefault(ident.strip(), note.rel)
+    return owners
+
+
+def resolve_reference(vault, value: str, owners: dict) -> str | None:
+    """The note a front-matter value names, by wikilink, path, id or alias."""
+    text = value.strip()
+    if text.startswith("[[") and text.endswith("]]"):
+        return vault_check.resolve_wikilink(vault, split_wikilink(text[2:-2])[0], False)
+    if not text or "\n" in text or len(text) > 300:
+        return None
+    rel = normalize(text.lstrip("./"))
+    for candidate in (rel, f"{rel}.md"):
+        if candidate in vault.notes:
+            return candidate
+    return owners.get(text)
+
+
+def looks_like_reference(key: str, value: str, relation: bool) -> bool:
+    text = value.strip()
+    return (relation or bool(REF_KEY.search(key)) or text.startswith("[[")
+            or bool(ID_VALUE.match(text)))
+
+
 def frontmatter_tier(vault, edges: Edges, keys) -> list:
-    """Typed front-matter edges; returns the values no note resolves."""
+    """Edges for every front-matter value that names a note, typed relation or
+    not (``requirement_ref``, ``verification_contract_ref``, any wikilink, id,
+    alias or path); returns the reference-like values no note resolves."""
     for edge in vault_check.relation_edges(vault):
         if edge.key in keys:
             edges.add(edge.source, edge.target, edge.key, "frontmatter")
     unresolved = []
-    owners = None
+    owners = reference_owners(vault)
     for note in vault_check.authored(vault):
-        for key in sorted(keys):
-            raw = note.fm.get(key)
-            if raw in (None, "", []):
+        for key in sorted(note.fm):
+            if key in SELF_KEYS:
                 continue
-            for value in raw if isinstance(raw, list) else [raw]:
-                if not isinstance(value, str):
-                    continue
-                if value.startswith("[[") and value.endswith("]]"):
-                    target = vault_check.resolve_wikilink(
-                        vault, split_wikilink(value[2:-2])[0], False)
-                else:
-                    if owners is None:
-                        owners = vault_check.relation_identity_owners(vault)
-                    target = owners.get(value.strip())
+            for value in frontmatter_values(note.fm[key]):
+                target = resolve_reference(vault, value, owners)
                 if target in vault.notes and target != note.rel:
                     edges.add(note.rel, target, key, "frontmatter")
-                else:
+                elif target is None and looks_like_reference(key, value, key in keys):
                     unresolved.append({"path": note.rel, "reason": "unresolved_relation",
                                        "key": key, "value": value})
     return unresolved
@@ -441,11 +484,6 @@ def _governance(path: Path, text: str) -> str:
     return delivery_governance.governance_hash(*_split(text))
 
 
-def _architecture(path: Path, text: str) -> str:
-    import architecture_compile
-    return architecture_compile.source_hash(path)
-
-
 # Each owning compiler's own approval digest; a stamp is proven when the
 # digest of the scheme that wrote it matches the note's current bytes.
 APPROVAL_SCHEMES = {
@@ -456,7 +494,6 @@ APPROVAL_SCHEMES = {
     "experience": _experience,
     "operation": _operation,
     "governance": _governance,
-    "architecture": _architecture,
 }
 
 
@@ -502,10 +539,35 @@ def ba_package_proofs(docs: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def architecture_proofs(docs: Path, notes) -> dict:
+    """A sealed architecture record is proven by its immutable ledger snapshot:
+    the record carries no stamp, the snapshot keeps the sealed source hash."""
+    import architecture_compile
+    root = Path(docs) / "system-architecture"
+    proofs: dict = {}
+    for note in notes:
+        if not note.rel.startswith("system-architecture/") \
+                or note.fm.get("revision_state") != "sealed":
+            continue
+        record_id = architecture_compile.stable_id(note.fm)
+        snapshot = root / "_ledger" / "records" / record_id / f"r{note.fm.get('revision')}.json"
+        try:
+            saved = json.loads(snapshot.read_text(encoding="utf-8")).get("source_hash")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(saved, str) and saved:
+            proofs[note.rel] = {"approval_hash": saved, "scheme": "architecture",
+                                "proven": architecture_compile.source_hash(note.path) == saved}
+    return proofs
+
+
 def proofs_for(docs: Path, notes, only=None) -> dict:
     """Approval proof per stamped note (``only`` limits the notes checked)."""
+    notes = list(notes)
     proofs = {rel: state for rel, state in ba_package_proofs(docs).items()
               if only is None or rel in only}
+    proofs.update(architecture_proofs(docs, [note for note in notes
+                                             if only is None or note.rel in only]))
     for note in notes:
         if only is not None and note.rel not in only:
             continue
@@ -515,6 +577,21 @@ def proofs_for(docs: Path, notes, only=None) -> dict:
     return proofs
 
 
+def citers(vault, edges: Edges) -> dict:
+    """Every authored note that cites a note: by body link or by any front-matter
+    reference, so widening on a shared contract reaches each Item that names it."""
+    found: dict = {}
+    for rel, sources in vault.inbound.items():
+        found.setdefault(rel, set()).update(sources)
+    for source, target, key in edges.tiers:
+        if key != LIST_KEY:
+            found.setdefault(target, set()).add(source)
+    return {rel: sorted(source for source in sources
+                        if source in vault.notes and not vault.notes[source].generated
+                        and source != rel)
+            for rel, sources in sorted(found.items())}
+
+
 def snapshot(vault, policy: dict | None = None, proofs: dict | None = None) -> dict:
     """Everything a closure needs, as plain data a cache can keep."""
     policy = closure_policy(vault.policy, policy)
@@ -522,10 +599,7 @@ def snapshot(vault, policy: dict | None = None, proofs: dict | None = None) -> d
     authored = vault_check.authored(vault)
     return {
         "notes": {note.rel: note_type(note) for note in authored},
-        "citers": {rel: sorted(source for source in sources
-                               if source in vault.notes and not vault.notes[source].generated
-                               and source != rel)
-                   for rel, sources in vault.inbound.items()},
+        "citers": citers(vault, edges),
         "edges": edges.tiers,
         "gaps": gaps,
         "tiers": present,
@@ -533,7 +607,23 @@ def snapshot(vault, policy: dict | None = None, proofs: dict | None = None) -> d
     }
 
 
-def closure(docs: Path, changed: list[str], *, policy: dict | None = None) -> dict:
+def earlier_relations(docs: Path, texts: dict) -> dict:
+    """Notes each deleted note named in its front matter, resolved in the
+    current vault: ``texts`` maps the deleted note to its earlier bytes."""
+    vault = load_vault(Path(docs).absolute())
+    owners = reference_owners(vault)
+    result = {}
+    for rel, text in texts.items():
+        props = parse_frontmatter(text)[0] or {}
+        targets = {resolve_reference(vault, value, owners)
+                   for key, raw in props.items() if key not in SELF_KEYS
+                   for value in frontmatter_values(raw)}
+        result[rel] = sorted(target for target in targets if target in vault.notes)
+    return result
+
+
+def closure(docs: Path, changed: list[str], *, policy: dict | None = None,
+            deleted: dict | None = None) -> dict:
     """The impact closure of ``changed`` (docs-relative note paths).
 
     Every approved note whose stamp no longer matches its bytes joins the
@@ -542,8 +632,20 @@ def closure(docs: Path, changed: list[str], *, policy: dict | None = None) -> di
     """
     vault = load_vault(Path(docs).absolute())
     snap = snapshot(vault, policy)
-    return closure_from(snap, changed_paths(docs, changed, snap["notes"]),
-                        closure_policy(vault.policy, policy))
+    result = closure_from(snap, changed_paths(docs, changed, snap["notes"]),
+                          closure_policy(vault.policy, policy))
+    if deleted:
+        # A deleted note's earlier relations name what it answered to and what
+        # it constrained: those notes, and their closure, are re-read.
+        seeds = sorted({target for targets in earlier_relations(docs, deleted).values()
+                        for target in targets})
+        if seeds:
+            more = closure_from(snap, sorted({*result["changed"], *seeds}),
+                                closure_policy(vault.policy, policy))
+            more["changed"] = result["changed"]
+            result = more
+        result["deleted"] = sorted(deleted)
+    return result
 
 
 def closure_from(snap: dict, changed: list[str], policy: dict) -> dict:

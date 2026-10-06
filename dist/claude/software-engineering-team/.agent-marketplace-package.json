@@ -161,10 +161,10 @@
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
     ,
     "scripts/backlog_review_inputs.py":
-      "b80b902435d49a9fd0d46507282f5d302d92f0845ed5169231305636b1795019"
+      "f937b01276501e8b8aeaa44b0560026d2d1874d7b67dfb03dd0d7f761e87d60b"
     ,
     "scripts/context_pack.py":
-      "0422308256f6fce43e2a23b2abc176b5f2091d532628561eda22a81793638db0"
+      "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
     ,
     "scripts/delivery_compile.py":
       "f8047c8dc5851665d2452caad9ba24ee61b15a046eb95ac35ddfa83b689eca76"
@@ -182,7 +182,7 @@
       "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
     ,
     "scripts/delivery_verification.py":
-      "3749c7de9d9ad43c9ad9c91749e00163136879c51f96eb42b88525c825204306"
+      "7d0f3ce98f969a73427534c65a261d252afbdc8f9bba180daa4cece013804b42"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -212,7 +212,7 @@
       "bd3bc6d9c4043f4bf68a33ca76332b7e5a7911f1e14ea691f8bc2dd0920f0dd3"
     ,
     "scripts/impact_closure.py":
-      "d218b090d2a57898e4280a9086e877b7104440f407d444d286136263e6954a29"
+      "fa18b1865a8c1724dfdd0cfa3cc1c097d211c742d7de199fa5e678df0909ef6c"
     ,
     "scripts/landscape_check.py":
       "afd0b167c4f8b2d685ed4e4041a66178a706cece248d19dcb566814e0f534c43"
@@ -263,7 +263,7 @@
       "b7f2cad266008812a38779f0b2208596e5d5fddf8fd9a47354706406f03ca655"
     ,
     "scripts/task_inputs.py":
-      "e4560b0562f08f483f12c98ca0b3d85e6310988b9a1024e87c61b5b1706a1c46"
+      "45e3e67cf41d414fb8f8cfba332e09262d77b7c61faf677147ffe51a7465ce8b"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -278,7 +278,7 @@
       "d51c4eadc9a3ef93112816dcd5573afbe608a83b52ba6813659af8343737d08c"
     ,
     "scripts/vault_query.py":
-      "b2ac88c4fd47cc0cca69814620fc55c56ea8a902910437a19104121fd8257c54"
+      "5b114ba57e24284d166b7fe8b67d68b79789e81bb9e66ce64c3a7e49f746caa9"
     ,
     "skill-content/autopilot/SKILL.md":
       "cc422eb06937e9e1a6312aaba10a922a5aedc6d0ddb0c461face9288ddcffb25"
@@ -371,7 +371,7 @@
       "90a44e428dd7876044effa0773d8e83fc38ba38bf554ff832b7e07eb4b1475e5"
     ,
     "skill-content/challenge-review/references/switch-review_scope-impact_closure.md":
-      "a943624a913f9cc0a63f1d5ae25365d65563e452232e87d23d5c0d9d7c3d1e94"
+      "a436bfa8acc91add5cc12fbc1445f44c873631e979e74be480ce70598abfcf52"
     ,
     "skill-content/challenge-review/references/switch-step_budgets-enforced.md":
       "28536b3bb86df9ed41511c4546a95816fcb3395dc4d9ee1592e3b48943e53d0b"
@@ -1022,7 +1022,7 @@
       "61f528981276bf3fa4fee92584dd9912be8465a9af02ca6ab0971b16b52e3b26"
     ,
     "templates/task-input-policy.json":
-      "bb8be95ad4d5c83eb37415e512af5b7c1ec653edddcdc3e13fcf5d06e14adcb7"
+      "5a7acfc4ca0d7b718cdf7515bf17f76aac0d95c7a0aeb93c2b10a1f8eb07c0d5"
     ,
     "templates/tier-map.json":
       "7520a0d1c1627d0d8c16c6b540ca3090bd889ffcdfe891bbc7e5081f04bf6c9f"

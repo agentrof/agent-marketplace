@@ -4,9 +4,10 @@
 The index is one human-readable JSON file under the project runtime scratch
 (``.agentrof/agent-marketplace/.runtime/vault-index/index.json``). It holds
 every relation tier impact_closure reads, the approval proofs and the scanned
-notes. Every query hashes the vault's files first: unchanged files are reused,
-changed files are rescanned, and the relation graph is recomputed from the
-cached notes. Deleting the file loses nothing; the next query rebuilds it.
+notes. Every query checks the vault's files first: an unstamped file whose size
+and mtime are unchanged keeps its cached hash, every stamped note is rehashed
+so an approval proof never rests on file metadata, changed files are
+rescanned, and the relation graph is recomputed from the cached notes. Deleting the file loses nothing; the next query rebuilds it.
 
 Verbs (all print JSON):
   closure --changed P...      impact closure of the changed notes
@@ -112,7 +113,8 @@ def note_from_json(root: Path, rel: str, data: dict):
 # ---------------------------------------------------------------------------
 
 
-def scan_files(docs: Path, cached: dict, verify: bool = False) -> dict:
+def scan_files(docs: Path, cached: dict, verify: bool = False,
+               stamped: frozenset = frozenset()) -> dict:
     """rel -> {sha, size, mtime_ns}. A file whose size and mtime match the
     cache keeps its cached hash; any other file (or every file, ``verify``)
     is hashed, and the hash alone decides whether it changed."""
@@ -134,7 +136,9 @@ def scan_files(docs: Path, cached: dict, verify: bool = False) -> dict:
             rel = path.relative_to(docs).as_posix()
             info = path.stat()
             entry = cached.get(rel)
-            if (not verify and entry and entry.get("size") == info.st_size
+            # A stamped note is always rehashed: its approval proof must never
+            # rest on an unchanged size and mtime.
+            if (not verify and rel not in stamped and entry and entry.get("size") == info.st_size
                     and entry.get("mtime_ns") == info.st_mtime_ns):
                 files[rel] = entry
             else:
@@ -200,7 +204,7 @@ def refresh(docs: Path, cache: Path, verify: bool = False,
     if full:
         data = {}
     cached = data.get("files", {})
-    current = scan_files(docs, cached, verify)
+    current = scan_files(docs, cached, verify, frozenset(data.get("proofs", {})))
     changed = sorted(rel for rel, entry in current.items()
                      if rel not in cached or cached[rel]["sha"] != entry["sha"])
     removed = sorted(set(cached) - set(current))

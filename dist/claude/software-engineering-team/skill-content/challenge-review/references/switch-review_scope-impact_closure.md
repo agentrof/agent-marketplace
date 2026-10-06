@@ -18,9 +18,12 @@ writer first; no reader is ever spent on a package its compiler refuses.
 
 ## 2. Derive the closure
 
-1. Run `impact_closure.py closure --docs <workspace>/docs --changed <path>...`
-   with the notes or files the change touched. It returns `changed`,
-   `closure`, `proven_unchanged`, `widened_by` and `graph_gaps`.
+1. The change is every vault file changed in Git since the package's last
+   approved revision, deletions included, never only the notes that lost a
+   stamp. Run `impact_closure.py closure --docs <workspace>/docs --changed
+   <path>...` with those paths. It returns `changed`, `closure`,
+   `proven_unchanged`, `widened_by` and `graph_gaps`; every front-matter
+   reference that names a note is an edge, and one that names none is a gap.
 2. The reader's task binds every `closure` path in full and every
    `proven_unchanged` entry as its summary and `approval_hash`. Derive it
    with `task_inputs.py --changed <note> --base <approved commit>`; a

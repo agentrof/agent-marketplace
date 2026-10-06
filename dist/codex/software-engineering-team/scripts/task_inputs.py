@@ -72,6 +72,12 @@ def pack_api():
     return context_pack
 
 
+def pack_full_read(path: str, role: str | None) -> bool:
+    """Whether a required read stays a full read beside the role digest."""
+    return (path == "constitution.md" or (role is not None and path == f"agents/{role}.md")
+            or "/references/switch-" in path)
+
+
 def role_pack(entry: str, role: str | None, mode: str, project: Path | None, package: Path,
               expected: bool) -> dict:
     """Build the role digest, and check it when the result is about to be kept."""
@@ -108,7 +114,7 @@ def row_path(row) -> str:
     return row.get("path") if isinstance(row, dict) else row
 
 
-def impact_closure(docs: Path, changed, prefix: str = "") -> dict:
+def impact_closure(docs: Path, changed, prefix: str = "", deleted: dict | None = None) -> dict:
     """Return the closure of ``changed`` docs notes with every path under ``prefix``.
 
     Each proven unchanged note also carries the sha256 of its current bytes,
@@ -118,11 +124,15 @@ def impact_closure(docs: Path, changed, prefix: str = "") -> dict:
     if any(".." in path.split("/") or path.startswith("/") for path in named):
         raise ValueError("a changed path must stay inside workspace/docs")
     # A deleted note is still a change; the closure starts from what exists.
-    deleted = [path for path in named if not (docs / path).is_file()]
-    raw = closure_api().closure(docs, [path for path in named if path not in deleted])
+    missing = [path for path in named if not (docs / path).is_file()]
+    earlier = {docs_relative(path): text for path, text in (deleted or {}).items()}
+    api = closure_api()
+    present = [path for path in named if path not in missing]
+    raw = (api.closure(docs, present, deleted=earlier) if earlier
+           else api.closure(docs, present))
     if not isinstance(raw, dict) or any(not isinstance(raw.get(key), list) for key in CLOSURE_KEYS):
         raise ValueError(f"impact closure must return the lists {', '.join(CLOSURE_KEYS)}")
-    raw = dict(raw, changed=[*raw["changed"], *deleted])
+    raw = dict(raw, changed=[*raw["changed"], *missing])
     result = {key: sorted({prefix + docs_relative(row_path(row)) for row in raw[key]})
               for key in ("changed", "closure", "graph_gaps")}
     result["widened_by"] = sorted(
@@ -150,6 +160,55 @@ def vault_views(docs: Path) -> dict:
     if not isinstance(views, dict):
         raise ValueError("impact closure vault_views must return a mapping")
     return views
+
+
+def approval_base(project: Path, scope_kind: str | None, package: Path = PACKAGE) -> str | None:
+    """The commit of the package's last approved revision, from the anchors the
+    task input policy declares for its scope kind: the newest commit in which
+    every anchor note reads approved. None without an anchor or Git history."""
+    try:
+        policy = json.loads(regular(package, POLICY).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    anchors = (policy.get("approval_anchors") or {}).get(scope_kind or "", [])
+    if not anchors:
+        return None
+    command = ["git", "--no-replace-objects", "-C", str(project)]
+    log = subprocess.run([*command, "log", "--format=%H", "--",
+                          *[anchor["path"] for anchor in anchors]], capture_output=True)
+    if log.returncode:
+        return None
+    for commit in log.stdout.decode("ascii").split():
+        def approved(anchor: dict) -> bool:
+            shown = subprocess.run([*command, "show", f"{commit}:{anchor['path']}"],
+                                   capture_output=True)
+            if shown.returncode:
+                return False
+            props = frontmatter_props(shown.stdout.decode("utf-8", "replace"))
+            return str(props.get(anchor["field"], "")) == str(anchor["value"])
+        if all(approved(anchor) for anchor in anchors):
+            return commit
+    return None
+
+
+def frontmatter_props(text: str) -> dict:
+    from ba_compile import parse_frontmatter
+    props = parse_frontmatter(text)[0]
+    return props if isinstance(props, dict) else {}
+
+
+def deleted_texts(project: Path, commit: str | None, paths) -> dict[str, str]:
+    """The bytes each deleted canonical note had at ``commit``, by project path."""
+    if commit is None:
+        return {}
+    command = ["git", "--no-replace-objects", "-C", str(project)]
+    result = {}
+    for path in sorted(paths):
+        if path.endswith(".md") and not (project / path).exists():
+            shown = subprocess.run([*command, "show", f"{commit}:{path}"], capture_output=True)
+            if not shown.returncode:
+                result[path] = shown.stdout.decode("utf-8", "replace")
+    return result
 
 
 def impact_changes(command: list[str], base: str | None, bound) -> tuple[set[str], str | None]:
@@ -486,7 +545,8 @@ def mechanical_pass(policy: dict, registry: dict[str, dict], kind: str, *, entry
 
 
 def closure_reads(project: Path, project_files: set[str], inputs: set[str], base: str | None,
-                  findings: str | None, named: list[str]) -> tuple[set[str], dict]:
+                  findings: str | None, named: list[str],
+                  approved: str | None = None) -> tuple[set[str], dict]:
     """Narrow a reader's project reads to the impact closure of the change.
 
     The change is every canonical note Git sees changed since ``base``, or
@@ -502,12 +562,20 @@ def closure_reads(project: Path, project_files: set[str], inputs: set[str], base
     for path in named:
         if ".." in path.split("/") or not canonical_source(path) or not path.endswith(".md"):
             raise ValueError(f"--changed must name a workspace/docs note: {path}")
-    seen, commit = impact_changes(command, base, None if base else frozenset(inputs) or None)
+    if base is None and approved is not None:
+        # Every vault file changed since the package's last approved revision
+        # starts the closure, never only the notes that lost a stamp.
+        seen, commit = impact_changes(command, approved, None)
+    else:
+        seen, commit = impact_changes(command, base, None if base else frozenset(inputs) or None)
     changed = seen | set(named)
     if not changed:
         return project_files, {"read": "full", "reason": "no changed note: the inputs are read in full",
                                "changed": [], "beyond_closure": []}
-    scope = impact_closure(project / "workspace/docs", changed, DOCS_PREFIX)
+    scope = impact_closure(project / "workspace/docs", changed, DOCS_PREFIX,
+                           deleted_texts(project, commit, changed))
+    if approved is not None and base is None:
+        scope["approved_base"] = approved
     recheck = findings is not None and base is not None
     reach = set(scope["closure"]) | set(scope["graph_gaps"]) | changed
     reads = {path for path in reach if (project / path).is_file()}
@@ -955,8 +1023,9 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         raise ValueError("project root is required for project inputs")
     scoped = None
     if impact and read_only and not epic:
-        project_files, scoped = closure_reads(project, project_files, set(inputs or []),
-                                              base, findings, changed or [])
+        project_files, scoped = closure_reads(
+            project, project_files, set(inputs or []), base, findings, changed or [],
+            approval_base(project, route.get("scope_kind"), package))
     # An exact epic's closure is derived again on every run, so a source that
     # reaches it, an incoming dependency edge included, joins its paths. Like
     # the epic's review manifest, the task binds those and none of the other
@@ -1086,9 +1155,12 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     if pass_kind is not None:
         result["pass_kind"] = pass_kind
     if pack is not None:
-        # The digest replaces the required reads; every source stays bound in
+        # The digest replaces the other required reads; the constitution, the
+        # role's own file and every switch reference stay full reads, so no
+        # rule without a keyword is lost. Every source stays bound in
         # instructions and one read away.
-        result["required_reads"] = []
+        result["required_reads"] = sorted(path for path in result["required_reads"]
+                                          if pack_full_read(path, role))
         result[PACK_SWITCH] = pack
     if impact:
         # Readers and writers alike start from the relation views.

@@ -266,6 +266,61 @@ class ImpactClosureTest(unittest.TestCase):
                     self.assertRaises(SystemExit):
                 impact_closure.main([verb, "--docs", str(self.docs)])
 
+    def test_every_front_matter_reference_is_an_edge(self) -> None:
+        notes = {
+            "operation/verification-contract.md": note(
+                "verification-contract", "Verification contract", extra="id: VEC-001"),
+            "delivery/dlv-001/items/st-1/item.md": note(
+                "delivery-item", "Item 1",
+                extra="verification_contract_ref: operation/verification-contract"),
+            "delivery/dlv-001/items/st-2/item.md": note(
+                "delivery-item", "Item 2",
+                extra='verification_contract_ref: "[[operation/verification-contract|VC]]"'),
+            "delivery/dlv-001/items/st-3/item.md": note(
+                "delivery-item", "Item 3", extra="verification_contract_ref: VEC-001"),
+            "backlog/story-z.md": note("story", "Story Z", extra=f'requirement_ref: "[[{REQ}|Req A]]"'),
+            "backlog/story-v.md": note("story", "Story V", extra="requirement_ref: REQ-404"),
+        }
+        for rel, text in notes.items():
+            (self.docs / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.docs / rel).write_text(text, encoding="utf-8")
+        result = self.closure("operation/verification-contract.md")
+        for item in (1, 2, 3):
+            self.assertIn(f"delivery/dlv-001/items/st-{item}/item.md", result["closure"])
+            self.assertIn(f"delivery/dlv-001/items/st-{item}/item.md",
+                          result["widened_by"][0]["citers"])
+        self.assertIn("backlog/story-z.md", self.closure(f"{REQ}.md")["closure"])
+        gaps = [gap for gap in self.closure()["graph_gaps"] if gap["path"] == "backlog/story-v.md"]
+        self.assertIn({"path": "backlog/story-v.md", "reason": "unresolved_relation",
+                       "key": "requirement_ref", "value": "REQ-404"}, gaps)
+
+    def test_a_deleted_note_seeds_the_closure_with_its_earlier_relations(self) -> None:
+        text = (self.docs / "backlog/story-b.md").read_text(encoding="utf-8")
+        (self.docs / "backlog/story-b.md").unlink()
+        result = impact_closure.closure(self.docs, [], deleted={"backlog/story-b.md": text})
+        self.assertIn(f"{REQ}.md", result["closure"])
+        self.assertEqual(result["deleted"], ["backlog/story-b.md"])
+        self.assertNotIn(f"{REQ}.md", impact_closure.closure(self.docs, [])["closure"])
+
+    def test_a_sealed_architecture_record_is_proven_by_its_ledger(self) -> None:
+        import architecture_compile
+        path = self.docs / "system-architecture/decisions/adr-001.md"
+        path.parent.mkdir(parents=True)
+        path.write_text(note("architecture-decision", "ADR 1", {"related_to": [(REQ, "Req A")]},
+                             extra="record_id: ADR-001\nrevision: 1\nrevision_state: sealed"),
+                        encoding="utf-8")
+        ledger = self.docs / "system-architecture/_ledger/records/ADR-001/r1.json"
+        ledger.parent.mkdir(parents=True)
+        sealed = architecture_compile.source_hash(path)
+        ledger.write_text(json.dumps({"source_hash": sealed}), encoding="utf-8")
+        rel = "system-architecture/decisions/adr-001.md"
+        self.assertIn({"path": rel, "approval_hash": sealed, "scheme": "architecture"},
+                      self.closure("backlog/story-g.md")["proven_unchanged"])
+        path.write_text(path.read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8")
+        result = self.closure("backlog/story-g.md")
+        self.assertIn(rel, result["stale_approved"])
+        self.assertIn(rel, result["closure"])
+
     def test_record_beyond_appends_once_with_reason(self) -> None:
         manifest = {"closure": []}
         self.assertIs(impact_closure.record_beyond(manifest, "docs/a.md", "unsure"), manifest)

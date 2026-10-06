@@ -334,6 +334,18 @@ class VaultQueryTest(unittest.TestCase):
         self.assertEqual(self.run_query("--verify", "gaps")["cache"]["changed"],
                          ["backlog/story-c.md"])
 
+    def test_a_stamped_note_edited_with_the_same_size_and_mtime_is_not_proven(self) -> None:
+        path = self.docs / "backlog/story-c.md"
+        stamp(path)
+        self.assertTrue(self.run_query("hash", "backlog/story-c.md")["proven_unchanged"])
+        info = path.stat()
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace("Content.", "Cxntent.", 1), encoding="utf-8")
+        os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+        self.assertFalse(self.run_query("hash", "backlog/story-c.md")["proven_unchanged"])
+        closure = self.run_query("closure", "--changed", f"{REQ}.md")
+        self.assertIn("backlog/story-c.md", closure["stale_approved"])
+
     def test_touched_file_with_same_bytes_is_not_a_change(self) -> None:
         self.run_query("gaps")
         path = self.docs / "backlog/story-c.md"

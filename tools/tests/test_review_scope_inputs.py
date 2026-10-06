@@ -294,85 +294,6 @@ class TaskInputScopeTests(unittest.TestCase):
                 task_inputs.manifest(**self.reader)
 
 
-class ContextPackTests(unittest.TestCase):
-    """At context_pack role_digest a task binds the role digest instead of its required reads."""
-
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        base = Path(temporary.name).resolve()
-        self.package, self.project = base / "package", base / "project"
-        build_task_package(self.package, switch_files=False)
-        registry = json.loads(json.dumps(FIXTURE_SWITCHES))
-        spec = switch_spec(["fixture-flow"])
-        spec["values"] = [{"id": "off", "tradeoffs": "Full sources."},
-                          {"id": "role_digest", "tradeoffs": "One digest."}]
-        spec["default"] = "off"
-        registry["switches"]["context_pack"] = spec
-        (self.package / process_policy.REGISTRY).write_text(json.dumps(registry, indent=2) + "\n",
-                                                            encoding="utf-8")
-        build_task_project(self.project)
-        self.docs = self.project / "workspace/docs"
-        self.task = dict(entry="fixture-entry", role="fixture-reader", mode="review",
-                         project=self.project, package=self.package,
-                         inputs=["workspace/docs/brief.md"])
-        self.stale = False
-        module = types.ModuleType("context_pack")
-
-        class Refused(Exception):
-            pass
-
-        def build(*, entry, role, mode, project, package):
-            # As the pack lane's build does: its sources are this task's required reads.
-            inner = task_inputs.manifest(entry=entry, role=role, mode=mode, project=project,
-                                         package=package)
-            self.assertNotIn("context_pack", inner)
-            pack = {"entry": entry, "role": role, "mode": mode,
-                    "sources": [{"path": path} for path in inner["required_reads"]]}
-            pack["pack_hash"] = "sha256:" + hashlib.sha256(
-                json.dumps(pack, sort_keys=True).encode()).hexdigest()
-            return pack
-
-        def check(pack, *, project=None, package=None):
-            self.checked = pack["pack_hash"]
-            if self.stale:
-                raise Refused("the pack no longer matches its sources; rebuild it")
-            return {"ok": True}
-
-        module.Refused, module.build, module.check = Refused, build, check
-        patch = mock.patch.dict(sys.modules, {"context_pack": module})
-        patch.start()
-        self.addCleanup(patch.stop)
-
-    def choose(self, value):
-        quiet_policy(self.docs, self.package,
-                     "begin-revision" if process_policy.path_for(self.docs).exists() else "init")
-        quiet_policy(self.docs, self.package, "set", "--switch", "context_pack", "--value", value)
-        quiet_policy(self.docs, self.package, "approve")
-
-    def test_off_binds_the_required_reads(self):
-        self.choose("off")
-        result = task_inputs.manifest(**self.task)
-        self.assertTrue(result["required_reads"])
-        self.assertNotIn("context_pack", result)
-
-    def test_role_digest_binds_the_pack_and_checks_it_before_a_result_is_kept(self):
-        self.choose("off")
-        reads = task_inputs.manifest(**self.task)["required_reads"]
-        self.choose("role_digest")
-        result = task_inputs.manifest(**self.task)
-        self.assertEqual(result["required_reads"], [])
-        self.assertEqual([row["path"] for row in result["context_pack"]["sources"]], reads)
-        self.assertTrue(result["context_pack"]["pack_hash"].startswith("sha256:"))
-        self.assertEqual(result["next_transition_conditions"][0]["condition"], "context_pack_check")
-        self.assertEqual(task_inputs.manifest(**self.task, expected_hash=result["source_hash"]),
-                         result)
-        self.assertEqual(self.checked, result["context_pack"]["pack_hash"])
-        self.stale = True
-        with self.assertRaisesRegex(ValueError, "context pack refused"):
-            task_inputs.manifest(**self.task, expected_hash=result["source_hash"])
-
-
 class BacklogScopeTests(unittest.TestCase):
     """The four-story revision-2 backlog of the root review scope tests."""
 
@@ -537,7 +458,7 @@ class VerificationScopeTests(unittest.TestCase):
             path.write_text(path.read_text(encoding="utf-8") + "\nEdited after approval.\n",
                             encoding="utf-8")
 
-    def closure_manifest(self, edit_after_approval: bool) -> dict:
+    def closure_manifest(self, edit_after_approval: bool, item_json: bool = False) -> dict:
         # A note with no typed relation is a graph gap and always read in
         # full, so the unreached note relates to the reached one.
         self.note(self.REACHED, {"status": "approved"})
@@ -550,6 +471,8 @@ class VerificationScopeTests(unittest.TestCase):
         props["integration_base_commit"] = verification.git(self.root, "rev-parse", "HEAD")
         self.write(self.item_path, verification.delivery.frontmatter(props, body))
         self.write("src/product.py", "value = 3\n")
+        if item_json:
+            self.write("workspace/docs/system-architecture/catalog.json", '{"a": 1}\n')
         self.commit()
         self.freeze()
         with mock.patch.object(verification, "review_scope", return_value=VALUE):
@@ -563,6 +486,10 @@ class VerificationScopeTests(unittest.TestCase):
             "path": self.OTHER, "sha256": value["inputs"][self.OTHER]}])
         self.assertIn("src/product.py", value["full_read"])
         self.assertIn("workspace/docs/backlog/story.md", value["full_read"])
+
+    def test_a_vault_data_file_the_item_changed_seeds_the_closure(self):
+        value = self.closure_manifest(edit_after_approval=False, item_json=True)
+        self.assertIn("workspace/docs/system-architecture/catalog.json", value[VALUE]["seeds"])
 
     def test_an_architecture_note_edited_after_approval_is_read_in_full(self):
         value = self.closure_manifest(edit_after_approval=True)
@@ -623,6 +550,133 @@ class ChangeInventoryTests(unittest.TestCase):
         self.assertEqual(changed, {"workspace/docs/solution-design/_generated/topology.json"})
         self.assertTrue(commit)
 
+
+class GitChangeScopeTests(unittest.TestCase):
+    """A real Git project: the backlog reader's closure starts from every vault
+    file changed since the last approved backlog, never only from lost stamps."""
+
+    EPIC = "backlog/epics/delivery-fixture"
+    ACCEPTANCE = "business-analysis/delivery/domains/identity/acceptance/delivery-acceptance.md"
+
+    def setUp(self):
+        from backlog_fixture import make_approved_backlog
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.project = Path(temporary.name).resolve()
+        self.docs = self.project / "workspace/docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.project / "workspace/config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            make_approved_backlog(self.docs, "ST-001", "ST-002", "ST-003", "ST-004")
+        choose(self.docs, VALUE)
+        init_repository(self.project)
+        self.commit("Approved backlog")
+        speed.RootReviewScopeTests.reopen(self, 2)
+        self.commit("Begin revision 2")
+
+    def commit(self, message):
+        for args in (["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                                     "commit", "-qm", message]):
+            subprocess.run(["git", "-C", str(self.project), *args], check=True,
+                           capture_output=True)
+
+    def story(self, number, name="story"):
+        return f"{self.EPIC}/stories/st-{number:03d}/{name}.md"
+
+    def reads(self):
+        manifest = inputs.manifest(self.docs)
+        return manifest[VALUE], {identity: row["read"] for identity, row
+                                 in manifest["check"]["backlog_graph"]["stories"].items()}
+
+    def test_an_upstream_criterion_change_reaches_every_story_that_cites_it(self):
+        path = self.docs / self.story(3)
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "Administrative bulk operations", "Bulk admin operations"), encoding="utf-8")
+        scope, rows = self.reads()
+        self.assertEqual(rows, {"ST-001": "summary", "ST-002": "summary", "ST-003": "full",
+                                "ST-004": "summary"})
+        acceptance = self.docs / self.ACCEPTANCE
+        acceptance.write_text(acceptance.read_text(encoding="utf-8").replace(
+            "An account can be registered.", "An account can be registered once verified."),
+            encoding="utf-8")
+        scope, rows = self.reads()
+        self.assertIn(self.ACCEPTANCE, scope["changed"])
+        self.assertEqual(set(rows.values()), {"full"})
+
+    def test_a_reader_task_starts_from_every_change_since_the_approval(self):
+        acceptance = self.docs / self.ACCEPTANCE
+        acceptance.write_text(acceptance.read_text(encoding="utf-8").replace(
+            "An account can be registered.", "An account can be registered once verified."),
+            encoding="utf-8")
+        self.commit("Writer commits the upstream edit")
+        result = task_inputs.manifest(entry="backlog-plan", role="backlog-reviewer",
+                                      mode="review", project=self.project)
+        scope = result[VALUE]
+        self.assertEqual(scope["read"], "closure")
+        self.assertIn("workspace/docs/" + self.ACCEPTANCE, scope["changed"])
+        self.assertTrue(scope["approved_base"])
+
+    def test_a_committed_change_still_starts_the_closure(self):
+        acceptance = self.docs / self.ACCEPTANCE
+        acceptance.write_text(acceptance.read_text(encoding="utf-8").replace(
+            "An account can be registered.", "An account can be registered once verified."),
+            encoding="utf-8")
+        self.commit("Writer commits the upstream edit")
+        scope, rows = self.reads()
+        self.assertIn(self.ACCEPTANCE, scope["changed"])
+        self.assertEqual(set(rows.values()), {"full"})
+
+class ConcurrentLevelsTests(unittest.TestCase):
+    """At review_levels concurrent_when_independent the root manifest does not
+    bind the epic round the concurrent epic level is still writing."""
+
+    EPIC = "backlog/epics/delivery-fixture"
+
+    def setUp(self):
+        from backlog_fixture import make_approved_backlog
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.docs = Path(temporary.name).resolve() / "workspace/docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.docs.parent / "config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            make_approved_backlog(self.docs, "ST-001", "ST-002")
+        project = self.docs.parents[1]
+        init_repository(project)
+        for args in (["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                                     "commit", "-qm", "Approved backlog"]):
+            subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
+        speed.RootReviewScopeTests.reopen(self, 2)
+        story = self.docs / f"{self.EPIC}/stories/st-002/story.md"
+        story.write_text(story.read_text(encoding="utf-8").replace(
+            "Administrative bulk operations", "Bulk admin operations"), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            backlog.stub_epic_review(self.docs, "delivery-fixture")
+
+    def record_epic_verdict(self):
+        review = sorted((self.docs / self.EPIC / "reviews").glob("round-*"))[-1]
+        props, body = backlog.parse_front_matter(review)
+        props["verdict"] = "approved"
+        review.write_text(backlog.front_matter(props, body), encoding="utf-8")
+        return review
+
+    def test_the_root_manifest_stays_fresh_while_the_epic_level_records_its_verdict(self):
+        from test_review_manifest_scope import choose as choose_switch
+        choose_switch(self.docs, "concurrent_when_independent", switch="review_levels")
+        root = inputs.manifest(self.docs)
+        review = self.record_epic_verdict()
+        self.assertNotIn(review.relative_to(self.docs).as_posix(), root["paths"])
+        self.assertEqual(inputs.manifest(self.docs, expected_hash=root["source_hash"]), root)
+
+    def test_at_the_default_the_root_binds_the_epic_round_as_released(self):
+        root = inputs.manifest(self.docs)
+        self.record_epic_verdict()
+        with self.assertRaisesRegex(inputs.InputError, "stale"):
+            inputs.manifest(self.docs, expected_hash=root["source_hash"])
 
 if __name__ == "__main__":
     unittest.main()

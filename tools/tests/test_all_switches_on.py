@@ -233,7 +233,12 @@ class AllSwitchesOnTests(unittest.TestCase):
                 reads = ([source["path"] for source in pack["sources"]] if pack
                          else result["required_reads"])
                 if pack:
-                    self.assertEqual(result["required_reads"], [])
+                    # Beside the digest only the constitution, the role and the
+                    # switch references stay full reads.
+                    self.assertIn("constitution.md", result["required_reads"])
+                    self.assertTrue(all(task_inputs.pack_full_read(path, role)
+                                        for path in result["required_reads"]))
+                    self.assertTrue(pack["rules"])
                 bound[f"{entry}:{role}"] = sorted(
                     path.removeprefix("skill-content/") for path in reads
                     if "/references/switch-" in path)

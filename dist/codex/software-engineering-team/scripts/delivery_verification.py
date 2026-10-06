@@ -3280,10 +3280,15 @@ def closure_read(root: Path, current: dict) -> tuple[list[str], dict]:
     props, _ = delivery.split_note(root / item)
     seeds = {prefix + props[key] for key in ITEM_RECORD_KEYS}
     seeds |= {prefix + props[key] + ".md" for key in CONTRACT_KEYS if props.get(key)}
-    seeds |= {path for path in current["changed_files"]
-              if path.startswith(prefix) and path.endswith(".md")}
+    # Every vault file the Item changed since its integration base starts the
+    # closure, notes and data alike; a deleted note seeds it with what it named.
+    changed_vault = {path for path in current["changed_files"]
+                     if path.startswith(prefix) and task_inputs.canonical_source(path)}
+    seeds |= changed_vault
+    deleted = task_inputs.deleted_texts(root, current.get("integration_base_commit"),
+                                        changed_vault)
     try:
-        scope = task_inputs.impact_closure(docs, seeds, prefix)
+        scope = task_inputs.impact_closure(docs, seeds, prefix, deleted)
     except ValueError as exc:
         raise RuntimeError(str(exc)) from exc
     reach = set(scope["closure"]) | set(scope["graph_gaps"]) | seeds

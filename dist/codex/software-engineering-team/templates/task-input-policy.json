@@ -468,5 +468,10 @@
       "switch": "mechanical_pass_tier",
       "value": "mechanical"
     }
+  },
+  "approval_anchors": {
+    "backlog": [
+      {"path": "workspace/docs/backlog/backlog.md", "field": "status", "value": "approved"}
+    ]
   }
 }

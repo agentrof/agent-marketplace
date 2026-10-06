@@ -198,51 +198,109 @@ class StalePackTests(unittest.TestCase):
 
 
 class ProjectSwitchTests(unittest.TestCase):
+    """A real project whose approved Process Policy sets context_pack; nothing mocked."""
+
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(remove_temporary, temporary)
         self.project = Path(temporary.name).resolve() / "project"
-        (self.project / "workspace/docs").mkdir(parents=True)
+        self.docs = self.project / "workspace/docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.project / "workspace/config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
         init_repository(self.project)
         (self.project / "README.md").write_text("x\n", encoding="utf-8")
+
+    def policy(self, value: str | None) -> None:
+        import process_policy
+        argvs = [["init"]]
+        if value is not None:
+            argvs.append(["set", "--switch", "context_pack", "--value", value])
+        argvs.append(["approve"])
+        for argv in argvs:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = process_policy.main([argv[0], "--docs", str(self.docs), *argv[1:]])
+            self.assertEqual(code, 0, output.getvalue())
         subprocess.run(["git", "-C", str(self.project), "add", "."], check=True)
         subprocess.run(["git", "-C", str(self.project), "-c", "user.name=t", "-c",
-                        "user.email=t@example.invalid", "commit", "-qm", "init"], check=True)
+                        "user.email=t@example.invalid", "commit", "-qm", "policy"], check=True)
 
     def test_default_off_refuses_and_writes_nothing(self) -> None:
+        self.policy(None)
         code, result = call(["build", "--entry", "backlog-plan", "--role", "product-owner",
                              "--project-root", str(self.project)])
         self.assertEqual(code, 1)
         self.assertEqual(result["code"], "CONTEXT_PACK_OFF")
         self.assertFalse((self.project / ".agentrof").exists())
 
-    def test_role_digest_writes_the_pack_under_runtime(self) -> None:
-        with mock.patch.object(context_pack, "project_value", return_value="role_digest"):
-            code, result = call(["build", "--entry", "backlog-plan", "--role", "product-owner",
-                                 "--mode", "revise", "--project-root", str(self.project)])
-            self.assertEqual(code, 0, result)
-            path = Path(result["path"])
-            self.assertEqual(path, self.project / ".agentrof/agent-marketplace/.runtime"
-                             "/context-packs/backlog-plan/product-owner-revise.json")
-            pack = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(pack["pack_hash"], context_pack.build(
-                entry="backlog-plan", role="product-owner", mode="revise")["pack_hash"])
-            code, checked = call(["check", "--pack", str(path), "--project-root", str(self.project)])
-            self.assertEqual(code, 0, checked)
+    def test_role_digest_builds_a_full_pack_for_the_project(self) -> None:
+        self.policy("role_digest")
+        code, result = call(["build", "--entry", "backlog-plan", "--role", "backlog-reviewer",
+                             "--mode", "review", "--project-root", str(self.project)])
+        self.assertEqual(code, 0, result)
+        path = Path(result["path"])
+        self.assertEqual(path, self.project / ".agentrof/agent-marketplace/.runtime"
+                         "/context-packs/backlog-plan/backlog-reviewer-review.json")
+        pack = json.loads(path.read_text(encoding="utf-8"))
+        paths = [source["path"] for source in pack["sources"]]
+        self.assertIn("constitution.md", paths)
+        self.assertIn("flows/backlog-planning.md", paths)
+        self.assertIn("skill-content/challenge-review/references/"
+                      "switch-context_pack-role_digest.md", paths)
+        self.assertGreater(len(pack["rules"]), 50)
+        code, checked = call(["check", "--pack", str(path), "--project-root", str(self.project)])
+        self.assertEqual(code, 0, checked)
+        self.assertEqual(checked["sources"], len(paths))
+        # The task binds the same pack, and keeps the constitution, the role
+        # and every switch reference as full reads.
+        import task_inputs
+        task = task_inputs.manifest(entry="backlog-plan", role="backlog-reviewer",
+                                    mode="review", project=self.project)
+        self.assertEqual(task["context_pack"]["pack_hash"], pack["pack_hash"])
+        self.assertIn("constitution.md", task["required_reads"])
+        self.assertIn("agents/backlog-reviewer.md", task["required_reads"])
+        self.assertIn("skill-content/challenge-review/references/"
+                      "switch-context_pack-role_digest.md", task["required_reads"])
+        self.assertNotIn("flows/backlog-planning.md", task["required_reads"])
+
+    def test_a_kept_result_checks_its_pack_against_the_current_package(self) -> None:
+        import task_inputs
+        self.policy("role_digest")
+        package = self.project.parent / "package"
+        shutil.copytree(PACKAGE, package, ignore=shutil.ignore_patterns("__pycache__"))
+        task = dict(entry="backlog-plan", role="backlog-reviewer", mode="review",
+                    project=self.project, package=package)
+        result = task_inputs.manifest(**task)
+        self.assertEqual(result["next_transition_conditions"][0]["condition"],
+                         "context_pack_check")
+        self.assertEqual(task_inputs.manifest(**task, expected_hash=result["source_hash"]), result)
+        flow = package / "flows/backlog-planning.md"
+        flow.write_text(flow.read_text(encoding="utf-8") + "\n- A new step must run.\n",
+                        encoding="utf-8")
+        with self.assertRaises(ValueError):
+            task_inputs.manifest(**task, expected_hash=result["source_hash"])
+
+    def test_an_empty_pack_is_refused(self) -> None:
+        with mock.patch.object(context_pack, "extract", return_value=([], [])):
+            with self.assertRaises(context_pack.Refused) as caught:
+                context_pack.build(entry="backlog-plan", role="backlog-reviewer", mode="review")
+        self.assertEqual(caught.exception.code, "CONTEXT_PACK_EMPTY")
 
     def test_out_never_writes_a_vault_or_project_file(self) -> None:
+        self.policy("role_digest")
         note = self.project / "workspace/docs/backlog/story.md"
         note.parent.mkdir(parents=True)
         note.write_text("# Story\n", encoding="utf-8")
         inside = self.project / "workspace/docs/.agentrof/agent-marketplace/.runtime/context-packs/x.json"
         cased = self.project / "Workspace/Docs/.agentrof/agent-marketplace/.runtime/context-packs/x.json"
-        with mock.patch.object(context_pack, "project_value", return_value="role_digest"):
-            for out in (note, self.project / "README.md", self.project / "pack.json", inside, cased):
-                with self.subTest(out=out.name):
-                    code, result = call(["build", "--entry", "backlog-plan", "--role",
-                                         "product-owner", "--project-root", str(self.project),
-                                         "--out", str(out)])
-                    self.assertEqual((code, result["code"]), (1, "CONTEXT_PACK_OUT"), result)
+        for out in (note, self.project / "README.md", self.project / "pack.json", inside, cased):
+            with self.subTest(out=out.name):
+                code, result = call(["build", "--entry", "backlog-plan", "--role",
+                                     "product-owner", "--project-root", str(self.project),
+                                     "--out", str(out)])
+                self.assertEqual((code, result["code"]), (1, "CONTEXT_PACK_OUT"), result)
         self.assertEqual(note.read_text(encoding="utf-8"), "# Story\n")
         self.assertEqual((self.project / "README.md").read_text(encoding="utf-8"), "x\n")
         self.assertFalse((self.project / "pack.json").exists())

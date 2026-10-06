@@ -207,9 +207,15 @@ def build(*, entry: str, role: str | None, mode: str = "review", project: Path |
     if entry not in policy["entries"]:
         raise Refused("CONTEXT_PACK_UNKNOWN", f"unknown entry: {entry}")
     route = policy["entries"][entry]
-    task = task_inputs.manifest(entry=entry, role=role, mode=mode,
-                                project=project if route["project_state"] else None,
-                                package=package)
+    # The pack derives from the full required reads: build the manifest as the
+    # task would without a pack, never from a manifest a pack already emptied.
+    task_inputs._PACK_BUILDS.append(True)
+    try:
+        task = task_inputs.manifest(entry=entry, role=role, mode=mode,
+                                    project=project if route["project_state"] else None,
+                                    package=package)
+    finally:
+        task_inputs._PACK_BUILDS.pop()
     others = sorted(set(route["roles"]) - {role})
     sources, rules, excluded = [], [], []
     for path in task["required_reads"]:
@@ -232,6 +238,9 @@ def build(*, entry: str, role: str | None, mode: str = "review", project: Path |
             "rules": rules, "excluded": excluded,
             "fallback": "A case these rules do not cover: read the named source in full and"
                         " record the read and its reason in the output."}
+    if not sources or not rules:
+        raise Refused("CONTEXT_PACK_EMPTY", f"the pack for {entry} {role} {mode} has"
+                      f" {len(sources)} sources and {len(rules)} rules; read the full sources")
     pack["pack_hash"] = sha256(canonical(pack))
     return pack
 

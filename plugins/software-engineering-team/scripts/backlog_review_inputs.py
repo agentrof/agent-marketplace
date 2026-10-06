@@ -426,9 +426,23 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         hops: dict[str, int] = {}
         unparsed: set[str] = set()
 
+        # At review_levels concurrent_when_independent the root reader runs
+        # beside the epic level, so the epic rounds that level is still writing
+        # are not the root's input: binding them would stale the root manifest
+        # the moment an epic verdict is recorded.
+        in_flight = set()
+        if root_reader and read_switch(docs, LEVELS_SWITCH)["value"] == LEVELS_VALUE:
+            for item in owning_epics:
+                current = backlog.latest(item["reviews"])
+                if current is not None and not (current["props"].get("source_hash")
+                                                or current["props"].get("approved_at_utc")):
+                    in_flight.add(current["path"])
+
         def include(relative: str, reason: str, hop: int = 0) -> None:
             # A path is validated and hashed once per run; the closing
             # freshness check re-validates every included path.
+            if relative in in_flight:
+                return
             if relative in summarized:
                 hop = LEAF_HOP
             if relative not in hashes:
@@ -653,7 +667,7 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     if epic is None:
         # The root review reads the complete package: every backlog byte binds it.
         structure_hash = digest({path: value for path, value in before.items()
-                                 if path.startswith("backlog/")})
+                                 if path.startswith("backlog/") and path not in in_flight})
     else:
         # A bounded reader follows dependency edges only from its closure, the
         # notes at hop 0, so an edge that reaches a story it reads through a
@@ -703,6 +717,8 @@ WRITERS_SWITCH = "remediation_writers"
 WRITERS_VALUE = "per_epic"
 CLOSURE_SWITCH = "review_scope"
 CLOSURE_VALUE = "impact_closure"
+LEVELS_SWITCH = "review_levels"
+LEVELS_VALUE = "concurrent_when_independent"
 ROOT_SWITCH = "root_review_scope"
 ROOT_VALUE = "revision_delta"
 DELTA_LIMIT = "max_delta_share_percent"
@@ -743,6 +759,30 @@ def changed_stories(record: dict, docs: Path) -> list[str]:
                   or backlog.approval_stamp_findings(docs / story["test_plan"], docs))
 
 
+def vault_changes(docs: Path) -> tuple[set[str], dict[str, str]]:
+    """Every vault file changed since the backlog's last approved revision, as
+    docs paths, with the earlier bytes of each deleted note.
+
+    The change starts the closure whatever it touched: an upstream criterion,
+    a contract or a story. Without Git history only stamps show a change.
+    """
+    import task_inputs
+
+    docs = Path(docs).resolve()
+    if docs.name != "docs" or docs.parent.name != "workspace":
+        return set(), {}
+    project = docs.parents[1]
+    approved = task_inputs.approval_base(project, "backlog")
+    if approved is None:
+        return set(), {}
+    command = ["git", "--no-replace-objects", "-C", str(project)]
+    seen, commit = task_inputs.impact_changes(command, approved, None)
+    prefix = task_inputs.DOCS_PREFIX
+    earlier = task_inputs.deleted_texts(project, commit, seen)
+    return ({path.removeprefix(prefix) for path in seen},
+            {path.removeprefix(prefix): text for path, text in earlier.items()})
+
+
 def impact_scope(record: dict, docs: Path) -> dict:
     """Return a reader's impact closure over the backlog revision.
 
@@ -757,10 +797,12 @@ def impact_scope(record: dict, docs: Path) -> dict:
     if revision < 2:
         return {"read": "full", "reason": "first backlog revision", "beyond_closure": []}
     by_id = {story["id"]: story for story in record["stories"]}
-    changed = [path for identity in changed_stories(record, docs)
-               for path in (by_id[identity]["path"], by_id[identity]["test_plan"])]
+    stamped = {path for identity in changed_stories(record, docs)
+               for path in (by_id[identity]["path"], by_id[identity]["test_plan"])}
+    vault, deleted = vault_changes(docs)
+    changed = sorted(stamped | vault)
     try:
-        scope = task_inputs.impact_closure(docs, changed)
+        scope = task_inputs.impact_closure(docs, changed, deleted=deleted)
     except ValueError as exc:
         raise InputError(str(exc)) from exc
     reads = {path for path in {*scope["closure"], *scope["graph_gaps"], *changed}

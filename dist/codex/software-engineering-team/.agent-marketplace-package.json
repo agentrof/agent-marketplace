@@ -208,6 +208,9 @@
     "scripts/host_models.py":
       "0055612b763ed5d5549432f86d2b978d6d3ff5af243e18e8b6d558f6d8d1f659"
     ,
+    "scripts/impact_closure.py":
+      "dedf2ff52ece862ea793aa2cc8d2b740ffd32e711505fc3465beac9887f5ffc6"
+    ,
     "scripts/landscape_check.py":
       "afd0b167c4f8b2d685ed4e4041a66178a706cece248d19dcb566814e0f534c43"
     ,
@@ -257,13 +260,16 @@
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
     ,
     "scripts/vault_check.py":
-      "7c7e0136437dbec5a5bc04c74da9202daabfe2a1e658330d70a8b589069bbec4"
+      "3d18556f7eb74fd6022f8637bf411d5388b5f889d17cd9d3570f88f2cb2cd3ba"
     ,
     "scripts/vault_gate.py":
       "3eb237e04bbd4e142e6edc14ed50d925378e4c3cc2b0c5c4278f49d4edf7f39e"
     ,
     "scripts/vault_hook.py":
       "d51c4eadc9a3ef93112816dcd5573afbe608a83b52ba6813659af8343737d08c"
+    ,
+    "scripts/vault_query.py":
+      "bcba27ca3e01930aa694f6cce58506a75535895809cfb89cf896d9a8cc789d9b"
     ,
     "skill-content/autopilot/SKILL.md":
       "cc422eb06937e9e1a6312aaba10a922a5aedc6d0ddb0c461face9288ddcffb25"

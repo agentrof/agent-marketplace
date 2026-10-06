@@ -315,6 +315,8 @@ def all_switches_on_backlog(fixture: cost.CostProject) -> None:
                    "max_delta_share_percent", "--value", "50")
     fixture.policy("set", "--switch", cost.SWITCH, "--parameter", "serial_rows",
                    "--value", str(all_on.SERIAL_ROWS))
+    fixture.policy("set", "--switch", "item_review_scale", "--parameter", "changed_lines",
+                   "--value", "200")
     fixture.policy("approve")
     size.approved_backlog(fixture)
 

@@ -155,6 +155,17 @@ the whole package.
 `backlog-plan/references/switch-root_review_scope-revision_delta.md` defines
 the read set.
 
+Whether a small backlog revision skips the epic panel and the root reader is
+process switch `backlog_path`. At `standard`, the default, every revision runs
+its epic and root reviews. At `light_when_eligible`, a Requirement-mode
+revision of a technical or defect Requirement that changes at most
+`max_changed_stories` technical or defect stories in one epic has one reader
+review its story delta, and `backlog_compile.py record-light-root-review`
+writes the root review round from the compiler's structural checks; approval
+re-checks the eligibility.
+`backlog-plan/references/switch-backlog_path-light_when_eligible.md` defines
+the path.
+
 Who writes a backlog remediation pass's bookkeeping is process switch
 `remediation_bookkeeping`. At `writer`, the default, the Product Owner writer
 copies the rechecks' closure rows, reruns the expected-hash checks and writes

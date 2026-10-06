@@ -98,7 +98,7 @@
       "1ee3c784eda6803512c8dbb3d9f1e85c2071c497a3b3f41a47a3adf22ecbbf16"
     ,
     "flows/backlog-planning.md":
-      "12320ffb5da00b7a923a4646ed8f3c36c60ab932ad772801e99e6ea7939619f1"
+      "75abeb4e13d82af3adb70056a2fabc48a085f00975720117a6172b99deb0dd6e"
     ,
     "flows/business-analysis.md":
       "aaebfe00ee5e062d23a881e0d0c989563426b2c026dcb07c78d74b0929477e5c"
@@ -155,7 +155,7 @@
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
     ,
     "scripts/backlog_compile.py":
-      "f4c8c5f1bcfae6f6f79cc0bbd7f61c435f3ab1386f8a0f9ff2a873a43141d67c"
+      "70f7e514961c96de5b5aa255f88d4858ba7b63b5b1a37e3eb24a2294a5ab4830"
     ,
     "scripts/backlog_input_policy.py":
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
@@ -277,11 +277,17 @@
     "skill-content/backlog-plan/SKILL.md":
       "f4314b20877593f179f92b726b93dc88e82e33781603599db0af98fe43349643"
     ,
+    "skill-content/backlog-plan/data/light-backlog-path.json":
+      "ae308dd202b208bfa17dae2bc95ae785a22d4f9876ddddde0933578bacf9bc7f"
+    ,
     "skill-content/backlog-plan/data/review-scope-budget.json":
       "6bcbd98535f3475d4e66dfe911e63ede1742133e3bd0ee745d784662a7dcb62b"
     ,
     "skill-content/backlog-plan/data/root-review-delta.json":
       "138e5358888aa3b4271d931448ec1a0bff54fb7e7589789e099c601ba04a7aad"
+    ,
+    "skill-content/backlog-plan/references/switch-backlog_path-light_when_eligible.md":
+      "510c26008702271b82dcc99989236cf195cb46b6d1c9a25d59a553c4bfc4d279"
     ,
     "skill-content/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md":
       "4126c93245f53e049273a3fdb3394c6bc74158d1ba6c8f6a6c991dabd089bca5"
@@ -374,7 +380,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "d05b62c02a90610c4ea7afa8e4b68c0d5750e87798d0c9adb4943aaaaa383330"
+      "e2dd87ce009862a8ce99d2ee6847c940bbfdc30eb6c315871d431c1f5bc6c0a4"
     ,
     "skill-content/configure/references/config-contract.md":
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
@@ -581,7 +587,7 @@
       "133710c7ea873588dab8559850ad3ac372dc8d2cd66d98bfe305ed82ad59226e"
     ,
     "skill-content/product-planning/references/structured-records.md":
-      "cc3d2873479cb60412b01c8063f4e0c0eae4f884376f97f4fc3d905ac7b2887d"
+      "f697ca32ca305965510fc09d888ba36adab86189b7227002227dfd7dea419439"
     ,
     "skill-content/product-planning/references/switch-story_size_budget-propose_split.md":
       "2518ebe50edf8d0778395117c6147346dad8f543d6380e5f1a50e9292ec75c0f"

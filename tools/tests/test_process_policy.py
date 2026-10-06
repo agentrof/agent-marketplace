@@ -513,6 +513,7 @@ HOSTS = {host: f"platforms/{host}/software-engineering-team/host-contract.md"
 SWITCH_REFERENCE = re.compile(r"switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md")
 # The value each switch ships at: a flip changes every project that chose nothing.
 RELEASED_DEFAULTS = {
+    "backlog_path": "standard",
     "calculation_examples": "off",
     "code_review_panel": "single_reader",
     "delivery_path": "standard",
@@ -859,6 +860,14 @@ SAFETY_RULES = {
             "Never delete or rewrite a row without the owner's approval",
         ),
     },
+    "backlog_path": {
+        f"{SKILLS}/backlog-plan/references/switch-backlog_path-light_when_eligible.md": (
+            "a critical or major finding blocks as on the standard path",
+            "backlog approval still checks the whole backlog",
+            "Approval re-checks the eligibility",
+            "A revision that is not eligible takes the standard path",
+        ),
+    },
     "root_review_scope": {
         f"{SKILLS}/backlog-plan/references/switch-root_review_scope-revision_delta.md": (
             "The root review stays the backlog's cross-story gate",
@@ -1038,7 +1047,7 @@ class MeasuredBaselineTests(unittest.TestCase):
                 cited.append(name)
                 with self.subTest(switch=name):
                     self.assertTrue(evidence.startswith(" in one measured project"), evidence)
-        self.assertEqual(cited, ["calculation_examples", "code_review_panel", "delivery_path",
+        self.assertEqual(cited, ["backlog_path", "calculation_examples", "code_review_panel", "delivery_path",
                                  "dependent_rebind_gate", "epic_review_cadence",
                                  "execution_planning", "item_qa_tier", "own_target_reuse", "owner_gates",
                                  "pre_handoff_regression", "qa_gate_order", "reader_waves",

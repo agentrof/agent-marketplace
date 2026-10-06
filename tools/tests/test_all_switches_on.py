@@ -51,6 +51,7 @@ PLANNING = ("execution-plan/references/switch-delivery_path-light_when_eligible.
 BOUNDED = "backlog-plan/references/switch-review_manifest_scope-bounded.md"
 # The backlog-plan switch references every backlog-plan task binds.
 BACKLOG = (BOUNDED,
+           "backlog-plan/references/switch-backlog_path-light_when_eligible.md",
            "backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md",
            "backlog-plan/references/switch-review_scope_record-both_scopes.md",
            "backlog-plan/references/switch-remediation_writers-per_epic.md",

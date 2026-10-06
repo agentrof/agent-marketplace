@@ -300,23 +300,23 @@ Switch `remediation_writers`: at `per_epic`, one writer per epic with findings a
 cross-epic writer apply the epic reviews' findings, as
 `skill-content/backlog-plan/references/switch-remediation_writers-per_epic.md` defines.
 
-The Product Owner is the single writer: it triages the returned findings,
-repairs source documents, and writes each designated epic review note. An epic
-review uses `derives_from` for its owning epic and `verifies` for the exact
-child story and test-plan set. Its body covers scope, slicing, criteria, test
-design, intra-epic dependencies, role ownership, findings and verdict. Run
-`backlog_compile.py check --docs <workspace>/docs --json` after these serialized
-writes and resolve all source and completed epic-review findings. Only the
-still-unwritten root review's completion findings remain pending until its
-reader returns; they do not authorize ignoring any source finding. An entry
-in `advisories` names an empty last section, or an untouched Delivery Notes
-stub, of a story approved before the compiler read that section above the
-navigation; it never fails the check, and the Product Owner fills the section
-whenever that story is revised.
+The Product Owner is the single writer: it triages the returned findings, repairs source documents,
+and writes each designated epic review note. An epic review uses `derives_from` for its owning epic
+and `verifies` for the exact child story and test-plan set. Its body covers scope, slicing,
+criteria, test design, intra-epic dependencies, role ownership, findings and verdict. Run
+`backlog_compile.py check --docs <workspace>/docs --json` after these serialized writes and resolve
+all source and completed epic-review findings. Only the still-unwritten root review's completion
+findings remain pending until its reader returns; they do not authorize ignoring any source finding.
+An entry in `advisories` names an empty last section, or an untouched Delivery Notes stub, of a
+story approved before the compiler read that section above the navigation; it never fails the check,
+and the Product Owner fills the section whenever that story is revised.
 
 Switch `root_review_scope`: at `revision_delta`, the root reader of a backlog revision reads in full
 only the revision's delta, as
 `skill-content/backlog-plan/references/switch-root_review_scope-revision_delta.md` defines.
+Switch `backlog_path`: at `light_when_eligible`, an eligible revision's story delta takes one reader
+and the compiler writes its root review, as
+`skill-content/backlog-plan/references/switch-backlog_path-light_when_eligible.md` defines.
 
 Only after every epic package and review is green, run
 `backlog_review_inputs.py --docs <workspace>/docs --root`. Invoke one fresh

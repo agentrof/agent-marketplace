@@ -22,6 +22,30 @@
         "threshold": "A median proposal-to-publication time of at most 30 min with exactly one owner gate per light-path Delivery, and zero reopens or re-plans caused by missed architecture or Operation impact, with every shared quality guard holding and the owner's approval."
       }
     },
+    "backlog_path": {
+      "summary": "Whether a backlog revision of a small technical or defect Requirement runs the standard epic and root review ceremony, or one reader reviews the story delta and the compiler writes the root review round as a structural check.",
+      "issue": 441,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "standard",
+          "tradeoffs": "Every backlog revision runs the epic review of each changed epic and a root review read by the root reader or panel, whatever the revision's size or kind. Today's behaviour and the baseline the light path is measured against: in one measured project, a technical Requirement whose code was already prepared ran the full ceremony for one small story, and the writer spent most of the time re-reading the flow and its rule set and running the epic and root review steps, although writing the story took a few minutes."
+        },
+        {
+          "id": "light_when_eligible",
+          "tradeoffs": "A revision the compiler finds eligible, Requirement mode over an earlier approved revision, a Requirement whose request_kind is technical or defect, and at most the package's max_changed_stories changed or added stories, each technical or defect and all in one epic, is reviewed by one reader of that epic's review round who reads only the story delta, and record-light-root-review writes the root review round from the compiler's structural checks; approval re-checks the eligibility and refuses a light root review the revision has outgrown, and every other revision takes the standard path. One review pass instead of an epic panel and a root reader for a small change, while a cross-story defect between the delta and an unchanged story is caught only by the compiler's structural checks, not by a reader."
+        }
+      ],
+      "default": "standard",
+      "value_data": {
+        "light_when_eligible": ["skill-content/backlog-plan/data/light-backlog-path.json"]
+      },
+      "metric": "Per light-path backlog revision: wall clock from begin-revision to approval, review passes and readers, writer reading time, and fallbacks to the standard path with the reason the compiler reported, against standard revisions of a similar size. Guards: a defect found in Delivery that a root reader would have caught, and backlog revisions reopened after a light approval.",
+      "promotion": {
+        "unit": "At least 3 light-path backlog revisions, each replayed as a frozen standard root review. The switch changes only backlog planning, which runs outside any Delivery, so revisions replace the 3-Delivery default.",
+        "threshold": "A median begin-revision-to-approval wall clock at most 40% of comparable standard revisions, the same verdict and every critical and major finding of the standard replay, and zero revisions reopened for a cross-story defect the light path missed, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "execution_planning": {
       "summary": "How execution planning writes and reviews the facts an execution plan needs: each Operation contract written and reviewed on its own, or every fact written once in the document that owns it and the revised contracts reviewed together with the Item topology in one pass.",
       "issue": 324,

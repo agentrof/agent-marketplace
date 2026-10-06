@@ -278,7 +278,8 @@
         "tools.tests.test_backlog_revision_atomicity.*",
         "tools.tests.test_backlog_pending_review_policy.*",
         "tools.tests.test_backlog_pre_approval.*",
-        "tools.tests.test_backlog_upstream_transition.*"
+        "tools.tests.test_backlog_upstream_transition.*",
+        "tools.tests.test_light_backlog_path.*"
       ],
       "depends_on": [
         "delivery"
@@ -588,6 +589,7 @@
     "tools.tests.test_host_models",
     "tools.tests.test_issue_report",
     "tools.tests.test_lane_table",
+    "tools.tests.test_light_backlog_path",
     "tools.tests.test_living_experience_flow",
     "tools.tests.test_maintainer_protocol",
     "tools.tests.test_mechanical_pass_tier",

@@ -30,6 +30,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
+from tools.tests import python_entry
+
 TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR))
 sys.path.insert(0, str(TESTS_DIR.parent))
@@ -144,14 +146,27 @@ class ClaudeFallbackHookTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.temporary.cleanup()
 
-    def run_hook(self, payload, **environment) -> subprocess.CompletedProcess:
+    def run_hook(self, payload, *, process=False, **environment) -> subprocess.CompletedProcess:
         env = {key: value for key, value in os.environ.items()
                if key != "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"}
+        if not process:
+            return python_entry.run([self.package / "scripts/hook_launcher.py", "scripts/model_fallback.py"],
+                                    input=payload if isinstance(payload, str) else json.dumps(payload),
+                                    env={**env, "PYTHONDONTWRITEBYTECODE": "1", **environment})
         return subprocess.run(
             [sys.executable, str(self.package / "scripts/hook_launcher.py"), "scripts/model_fallback.py"],
             input=payload if isinstance(payload, str) else json.dumps(payload),
             capture_output=True, text=True, check=False, timeout=60,
             env={**env, "PYTHONDONTWRITEBYTECODE": "1", **environment})
+
+    @integration
+    def test_fallback_process_accepts_failure_and_stays_silent_on_other_calls(self):
+        payload = failure(f"{PREFIX}code-reviewer", NOT_FOUND.format(model=self.opus))
+        result = self.run_hook(payload, process=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(self.opus, json.loads(result.stdout)["systemMessage"])
+        result = self.run_hook({}, process=True)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
 
     def response(self, payload, **environment) -> dict | None:
         result = self.run_hook(payload, **environment)
@@ -235,7 +250,6 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                             and "Claude hooks lack 'model_fallback.py'" in finding.message
                             for finding in findings), findings)
 
-    @integration
     def test_an_unavailable_pinned_model_asks_for_one_respawn_on_the_session_model(self):
         role = f"{PREFIX}code-reviewer"
         provider = f"us.anthropic.{self.opus}-v1:0"
@@ -270,7 +284,6 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                     self.assertIn(fragment, context)
                 self.assertNotIn("\n", output["systemMessage"])
 
-    @integration
     def test_the_pin_is_each_role_s_own(self):
         lens = f"{PREFIX}code-reviewer-lens"
         output = self.response(failure(lens, NOT_FOUND.format(model=self.sonnet)))
@@ -278,7 +291,6 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         # A not-found error that names another model is not the pin's.
         self.assertIsNone(self.response(failure(lens, NOT_FOUND.format(model=self.opus))))
 
-    @integration
     def test_other_failures_and_other_calls_stay_silent(self):
         role = f"{PREFIX}code-reviewer"
         for name, payload in (
@@ -338,7 +350,6 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(self.opus, json.loads(result.stdout)["systemMessage"])
 
-    @integration
     def test_a_model_the_user_chose_never_triggers_it_and_a_respawn_never_loops(self):
         role = f"{PREFIX}code-reviewer"
         error = NOT_FOUND.format(model=self.opus)
@@ -358,7 +369,6 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                 self.assertIsNotNone(self.response(failure(role, error),
                                                    CLAUDE_CODE_SUBAGENT_MODEL_FORCE=value))
 
-    @integration
     def test_a_role_that_started_on_another_model_is_reported_and_kept(self):
         role = f"{PREFIX}product-owner"
         for name, payload in (("foreground", completed(role, self.sonnet)),
@@ -378,7 +388,6 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                                  "Keep this run and do not spawn the role again"):
                     self.assertIn(fragment, context)
 
-    @integration
     def test_a_role_on_its_pin_or_an_unknown_provider_form_stays_silent(self):
         role = f"{PREFIX}product-owner"
         for resolved in (self.opus, f"{self.opus}[1m]", f"us.anthropic.{self.opus}-v1:0",

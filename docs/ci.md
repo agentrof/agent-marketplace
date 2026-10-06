@@ -52,6 +52,19 @@ The innermost runner decides, so a runner under test keeps its own watch.
 Class and module fixtures run outside it, and `make test` runs unittest
 without it.
 
+CLI rule matrices use `tools/tests/python_entry.py` to execute the actual Python
+entry point in the worker, with isolated argv, import roots, environment, binary
+streams and temporary-directory selection. The helper restores that state even
+on an exception and keeps the unit boundary active. It does not emulate process
+launch, timeout, interpreter encoding, signals or operating-system behavior.
+Explicit `@integration` acceptance and refusal smokes retain those boundaries
+for the compilers, config writer and hooks. Unit fixtures can supply narrowly
+declared Git transport responses; approval, hashes, graph resolution, grant
+decisions and file writes still run through production code. Real Git history,
+worktree routing, package refresh, races and rollback remain CI integration
+tests. Setup preflight rules have minimal input fixtures alongside the real
+setup lifecycle checks. No test is omitted from the remote full suite.
+
 A worker, in CI or local validation, runs its tests with tripwire `claude`
 and `codex` binaries in place of the host binaries a session names:
 `CLAUDE_CODE_EXECPATH`, `CODEX_CLI_PATH`, `CODEX_VERSION` and `CODEX_HOME`

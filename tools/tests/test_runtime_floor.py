@@ -24,6 +24,8 @@ except ModuleNotFoundError:  # run as a script from tools/tests
     from levels import integration
 from pathlib import Path
 
+from tools.tests import python_entry
+
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "tools") not in sys.path:
@@ -89,10 +91,12 @@ def vault_pre(host: str) -> list[str]:
                 if event == "PreToolUse" and argv[1] == "scripts/vault_hook.py")
 
 
-def run(argv: list[str], payload, cwd: Path, version: str | None = None) -> subprocess.CompletedProcess:
+def run(argv: list[str], payload, cwd: Path, version: str | None = None, *, process=False) -> subprocess.CompletedProcess:
     """Run a hook argv (launcher first) on this Python, or on a simulated version."""
     prefix = [sys.executable] if version is None else [sys.executable, "-c", SIMULATE, version]
     text = payload if isinstance(payload, str) else json.dumps(payload)
+    if not process:
+        return python_entry.run(argv, input=text, cwd=cwd, env=environment(), version=version)
     return subprocess.run(prefix + argv, input=text, cwd=cwd, env=environment(),
                           capture_output=True, text=True, check=False, timeout=120)
 
@@ -160,7 +164,6 @@ class RuntimeFloorTests(unittest.TestCase):
                         target = command[len(launcher):].split(" ", 1)[0]
                         self.assertTrue((package(host) / target).is_file())
 
-    @integration
     def test_below_the_floor_session_start_reports_the_runtime_and_never_blocks(self):
         for host in ROOT_VARIABLES:
             with self.subTest(host=host):
@@ -176,7 +179,6 @@ class RuntimeFloorTests(unittest.TestCase):
                         f"AGENT_MARKETPLACE_PYTHON: unsupported (Python {BELOW} at {sys.executable})",
                         self.message()))})
 
-    @integration
     def test_below_the_floor_every_other_generic_event_passes_silently(self):
         payloads = {"PostToolUse": {"tool_name": "Write", "tool_input": {"file_path": "workspace/docs/a.md"}},
                     "PostToolUseFailure": {"tool_name": "Bash", "tool_input": {"command": "false"}},
@@ -191,7 +193,6 @@ class RuntimeFloorTests(unittest.TestCase):
                     result = run(argv, payload, project, BELOW)
                     self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
 
-    @integration
     def test_below_the_floor_a_write_to_a_governed_path_is_denied_and_any_other_passes(self):
         project = plugin_project(self.work / "project")
         outside = self.work / "outside"
@@ -226,7 +227,6 @@ class RuntimeFloorTests(unittest.TestCase):
                      project, BELOW)
         self.assertEqual(result.returncode, 2)
 
-    @integration
     def test_below_the_floor_only_a_command_that_runs_a_plugin_script_is_denied(self):
         for host in ROOT_VARIABLES:
             script = package(host) / "scripts" / "setup_project.py"
@@ -247,7 +247,6 @@ class RuntimeFloorTests(unittest.TestCase):
                         self.assertEqual(result.returncode, expected)
                         self.assertEqual(result.stderr, self.message() + "\n" if expected else "")
 
-    @integration
     @unittest.skipIf(os.name == "nt", "a directory symlink needs privileges on Windows")
     def test_below_the_floor_the_resolved_scripts_directory_is_the_plugin_too(self):
         alias = self.work / "alias"
@@ -259,7 +258,6 @@ class RuntimeFloorTests(unittest.TestCase):
                 result = run(argv, {"tool_name": "Bash", "tool_input": {"command": command}}, self.work, BELOW)
                 self.assertEqual(result.returncode, 2)
 
-    @integration
     def test_below_the_floor_only_the_autopilot_entry_prompt_is_blocked(self):
         block = {"decision": "block", "reason": self.message()}
         prompts = {
@@ -282,7 +280,6 @@ class RuntimeFloorTests(unittest.TestCase):
                     self.assertEqual((result.returncode, result.stderr), (0, ""))
                     self.assertEqual(json.loads(result.stdout) if result.stdout else None, expected)
 
-    @integration
     def test_below_the_floor_no_hook_script_is_read(self):
         root = self.work / "package"
         (root / "scripts").mkdir(parents=True)
@@ -381,12 +378,12 @@ class RuntimeFloorTests(unittest.TestCase):
         for version in (None, "3.14.0", "3.15.2"):
             for last in ("run", "crash"):
                 with self.subTest(version=version, mode=last):
-                    through = run(launcher + ["one", last], '{"x": 1}', self.work, version)
-                    plain = run(direct + ["one", last], '{"x": 1}', self.work)
+                    through = run(launcher + ["one", last], '{"x": 1}', self.work, version, process=True)
+                    plain = run(direct + ["one", last], '{"x": 1}', self.work, process=True)
                     self.assertEqual((through.returncode, through.stdout, through.stderr),
                                      (plain.returncode, plain.stdout, plain.stderr))
                     self.assertEqual(through.returncode, 3 if last == "run" else 1)
-        below = run(launcher + ["one", "run"], '{"x": 1}', self.work, "3.13.9")
+        below = run(launcher + ["one", "run"], '{"x": 1}', self.work, "3.13.9", process=True)
         self.assertEqual((below.returncode, below.stdout, below.stderr), (0, "", ""))
 
     @integration
@@ -405,8 +402,8 @@ class RuntimeFloorTests(unittest.TestCase):
             for (event, matcher), argv in hook_commands(host).items():
                 payload = dict(payloads[event], hook_event_name=event, session_id="floor", cwd=str(project))
                 with self.subTest(host=host, event=event, matcher=matcher):
-                    through = run(argv, payload, project)
-                    plain = run([str(package(host) / argv[1]), *argv[2:]], payload, project)
+                    through = run(argv, payload, project, process=True)
+                    plain = run([str(package(host) / argv[1]), *argv[2:]], payload, project, process=True)
                     self.assertEqual((through.returncode, through.stdout, through.stderr),
                                      (plain.returncode, plain.stdout, plain.stderr))
                     if event == "SessionStart":

@@ -11,11 +11,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 try:
     from tools.tests.levels import integration
 except ModuleNotFoundError:  # run as a script from tools/tests
     from levels import integration
 from pathlib import Path
+
+from tools.tests import python_entry
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -75,11 +78,30 @@ def operation_findings(docs: Path) -> list[tuple[str, str]]:
             if finding.path.startswith("operation/")]
 
 
-@integration
+def unversioned_git(argv, **kwargs):
+    """The synthetic vault has no Git repository; model only that external I/O."""
+    if argv[:3] != ["git", "--no-replace-objects", "--literal-pathspecs"] \
+            or argv[3] not in {"diff", "ls-files"}:
+        raise AssertionError("unexpected process in an unversioned vault fixture")
+    cwd = Path(kwargs["cwd"]).resolve()
+    if any((path / ".git").exists() for path in (cwd, *cwd.parents)):
+        raise AssertionError("unversioned fixture unexpectedly has a Git ancestor")
+    return subprocess.CompletedProcess(argv, 128, b"", b"not a git repository")
+
+
 class OperationGovernanceTests(unittest.TestCase):
+    def setUp(self):
+        if getattr(getattr(type(self), self._testMethodName), "_test_level", None) == "integration":
+            return
+        patcher = mock.patch("subprocess.run", side_effect=unversioned_git)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def invoke(self, script: Path, *args: str):
-        return subprocess.run([sys.executable, str(script), *args], cwd=ROOT,
-                              capture_output=True, text=True, check=False)
+        if getattr(self, "real_process", False):
+            return subprocess.run([sys.executable, str(script), *args], cwd=ROOT,
+                                  capture_output=True, text=True, check=False)
+        return python_entry.run([script, *args], cwd=ROOT)
 
     def approved_solution(self, docs: Path) -> str:
         sys.path.insert(0, str(SCRIPTS))
@@ -100,7 +122,9 @@ class OperationGovernanceTests(unittest.TestCase):
         }), encoding="utf-8")
         return "solution-design/decisions/api-decision"
 
+    @integration
     def test_verification_contract_approval_and_ci_render(self):
+        self.real_process = True
         with tempfile.TemporaryDirectory() as temporary:
             docs = Path(temporary) / "workspace" / "docs"
             ref = self.approved_solution(docs)
@@ -372,7 +396,9 @@ class OperationGovernanceTests(unittest.TestCase):
             self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
             self.assertIn("paired_environment_revision: 2\n", verification.read_text(encoding="utf-8"))
 
+    @integration
     def test_environment_and_governance_require_lifecycle_revisions(self):
+        self.real_process = True
         with tempfile.TemporaryDirectory() as temporary:
             docs = Path(temporary) / "workspace" / "docs"
             ref = self.approved_solution(docs)
@@ -418,7 +444,9 @@ class OperationGovernanceTests(unittest.TestCase):
                 self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
                 self.assertEqual(operation_findings(docs), [])
 
+    @integration
     def test_refused_approval_leaves_the_draft_byte_identical(self):
+        self.real_process = True
         """The writer fixes a refused draft and approves it again, without a revision."""
         sys.path.insert(0, str(SCRIPTS))
         import operation_compile
@@ -727,7 +755,6 @@ def record_section(title: str, header: str, rows: tuple[str, ...] | list[str]) -
     return "\n".join([f"## {title}", "", header, separator, *rows, "", ""])
 
 
-@integration
 class AcceptedMinorFindingsTests(unittest.TestCase):
     """Switch `review_loop` at `blocking_delta` keeps an Operation review's record in
     the contract: the findings the review returned, the calibration rulings and
@@ -754,6 +781,7 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
     PATH = "operation/verification-contract.md"
 
     def setUp(self) -> None:
+        OperationGovernanceTests.setUp(self)
         sys.path.insert(0, str(SCRIPTS))
         import operation_compile
 
@@ -1003,7 +1031,9 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
         self.assertEqual(begun.returncode, 0, begun.stdout + begun.stderr)
         self.assertEqual(self.errors(), [f"{self.LABEL} must start with the id of the finding it accepts"])
 
+    @integration
     def test_refused_approval_leaves_the_draft_byte_identical(self):
+        self.real_process = True
         self.accept(self.VALID.replace("qa_engineer", "product_owner"))
         draft = self.path.read_bytes()
         refused = self.invoke(OPERATION, "approve", *self.args)

@@ -19,6 +19,8 @@ except ModuleNotFoundError:  # run as a script from tools/tests
 import uuid
 from contextlib import redirect_stderr
 from pathlib import Path
+
+from tools.tests import python_entry
 from types import SimpleNamespace
 from unittest import mock
 
@@ -755,9 +757,11 @@ class VaultHookShellContractTests(unittest.TestCase):
         return payload
 
     @staticmethod
-    def run_hook(mode: str, payload: dict) -> subprocess.CompletedProcess[str]:
+    def run_hook(mode: str, payload: dict, *, process=False) -> subprocess.CompletedProcess[str]:
         environment = dict(os.environ)
         environment["PYTHONPATH"] = str(SCRIPTS)
+        if not process:
+            return python_entry.run([LAUNCHER, HOOK, mode], input=json.dumps(payload), env=environment)
         return subprocess.run(
             [sys.executable, str(LAUNCHER), str(HOOK), mode],
             input=json.dumps(payload), capture_output=True, text=True,
@@ -766,14 +770,30 @@ class VaultHookShellContractTests(unittest.TestCase):
 
     @staticmethod
     def run_composed_hook(
-        hook: Path, mode: str, payload: dict,
+        hook: Path, mode: str, payload: dict, *, process=False,
     ) -> subprocess.CompletedProcess[str]:
+        if not process:
+            return python_entry.run([hook.with_name("hook_launcher.py"),
+                                     f"scripts/{hook.name}", mode], input=json.dumps(payload))
         return subprocess.run(
             [sys.executable, str(hook.with_name("hook_launcher.py")),
              f"scripts/{hook.name}", mode],
             input=json.dumps(payload), capture_output=True, text=True,
             check=False,
         )
+
+    @integration
+    def test_hook_process_accepts_ordinary_write_and_refuses_invalid_vault_write(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            docs, _config = self.project(root)
+            payload = {"tool_name": "Write", "cwd": str(root),
+                       "tool_input": {"file_path": str(root / "README.md"), "content": "hello"}}
+            allowed = self.run_hook("pre", payload, process=True)
+            self.assertEqual((allowed.returncode, allowed.stdout, allowed.stderr), (0, "", ""))
+            payload["tool_input"] = {"file_path": str(docs / "home.md"), "content": "[bad](missing.md)"}
+            refused = self.run_hook("pre", payload, process=True)
+            self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
 
     @staticmethod
     def create_directory_alias(alias: Path, target: Path) -> None:
@@ -1931,7 +1951,6 @@ class VaultHookShellContractTests(unittest.TestCase):
         with mock.patch.object(self.hook.sys, "platform", "win32"):
             self.assertIsNone(self.hook.direct_shell_tokens(normalized))
 
-    @integration
     def test_shell_snapshot_requires_a_stable_tool_call_id(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2550,7 +2569,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                 "Turkish",
             )
 
-    @integration
     def test_config_directory_replacement_is_removed_and_restored(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2571,7 +2589,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertTrue(config.is_file())
             self.assertEqual(config.read_text(encoding="utf-8"), original)
 
-    @integration
     def test_byte_identical_config_hardlink_is_broken_by_restore(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2650,7 +2667,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                     self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), after if verdict == 0 else before)
                     self.assertEqual(ledger.read_text(encoding="utf-8"), "{}\n")
 
-    @integration
     def test_missing_recovery_capsule_revokes_primary_writer_grant(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2676,7 +2692,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertIn("recovery capsule is missing", after.stderr)
             self.assertFalse(generated.exists())
 
-    @integration
     def test_equal_event_ids_in_different_projects_do_not_collide(self):
         with tempfile.TemporaryDirectory() as first, \
                 tempfile.TemporaryDirectory() as second:
@@ -2696,7 +2711,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                     after.returncode, 0, after.stdout + after.stderr,
                 )
 
-    @integration
     def test_conflicting_fields_are_denied_before_shell_execution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2707,7 +2721,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("ambiguous", result.stderr)
 
-    @integration
     def test_post_command_drift_revokes_writer_authorization_and_restores(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2746,7 +2759,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             events = json.loads(hooks.read_text(encoding="utf-8"))["hooks"]
             self.assertEqual(events.get("PostToolUseFailure"), events["PostToolUse"], hooks)
 
-    @integration
     def test_failed_command_payload_restores_protected_state(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2774,7 +2786,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             inventory = root / ".agentrof/agent-marketplace/.runtime/vault-inventory"
             self.assertEqual(list(inventory.glob("*.json")), [])
 
-    @integration
     def test_snapshot_expires_project_inventory_left_by_a_missed_post(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2798,7 +2809,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             after = self.run_hook("post", payload)
             self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
 
-    @integration
     def test_post_command_drift_restores_compiler_owned_experience_state(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2926,7 +2936,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(authorized.read_text(encoding="utf-8"), "authorized\n")
             self.assertFalse(unauthorized.exists())
 
-    @integration
     def test_post_diagnostic_drift_cannot_bypass_existing_recovery(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2957,7 +2966,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             )
             self.assertFalse(generated.exists())
 
-    @integration
     def test_shell_diagnostics_are_snapshotted_and_cannot_mutate_config(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2976,7 +2984,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                 "English",
             )
 
-    @integration
     @unittest.skipIf(os.name == "nt", "POSIX FIFO contract")
     def test_config_fifo_is_restored_without_opening_it(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -2996,7 +3003,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertTrue(config.is_file())
             self.assertEqual(config.read_text(encoding="utf-8"), original)
 
-    @integration
     @unittest.skipIf(os.name == "nt", "POSIX FIFO contract")
     def test_experience_fifo_is_rejected_before_shell_execution(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3013,7 +3019,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(before.returncode, 2)
             self.assertIn("not a regular file", before.stderr)
 
-    @integration
     def test_post_without_event_id_recovers_one_unambiguous_session(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -3043,7 +3048,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             )
             self.assertFalse(generated.exists())
 
-    @integration
     def test_post_after_a_directory_change_finds_its_own_snapshot(self):
         """A persistent cd moves the host cwd between the two hook events."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -3065,7 +3069,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                 "English",
             )
 
-    @integration
     def test_directory_change_does_not_admit_a_different_command(self):
         """The relaxed identity must still reject a substituted command."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -3087,7 +3090,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(after.returncode, 2)
             self.assertIn("binding changed", after.stderr)
 
-    @integration
     def test_recovery_capsules_stay_in_a_root_private_to_the_test(self):
         """Another local run of this suite must never read or expire this test's capsule."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -3175,7 +3177,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                 "external-tamper\n",
             )
 
-    @integration
     def test_empty_compiler_directory_is_detected_and_removed(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -3194,7 +3195,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(after.returncode, 2)
             self.assertFalse(generated.exists())
 
-    @integration
     def test_machine_restore_preserves_author_owned_artifact_changes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -3218,7 +3218,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(artifact.read_bytes(), b"author-change")
             self.assertFalse(generated.exists())
 
-    @integration
     @unittest.skipIf(os.name == "nt", "POSIX directory permissions")
     def test_restore_prunes_unreadable_author_owned_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3252,7 +3251,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                 os.chmod(artifacts, 0o700)
             self.assertEqual(artifact.read_bytes(), b"opaque")
 
-    @integration
     def test_noncanonical_artifact_case_is_rejected_without_overwrite(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -3271,7 +3269,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertIn("artifact root spelling is non-canonical", before.stderr)
             self.assertEqual(artifact.read_bytes(), b"author-owned")
 
-    @integration
     def test_restore_never_descends_into_case_changed_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -3308,7 +3305,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             finally:
                 self.hook.cleanup_guard_state(primary, recovery)
 
-    @integration
     @unittest.skipIf(os.name == "nt", "POSIX FIFO contract")
     def test_artifact_root_fifo_is_rejected_without_opening_it(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3325,7 +3321,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(before.returncode, 2)
             self.assertIn("artifact root is not a directory", before.stderr)
 
-    @integration
     @unittest.skipIf(os.name == "nt", "POSIX directory permissions")
     def test_restore_writes_children_before_reapplying_readonly_mode(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3354,7 +3349,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(generated.read_text(encoding="utf-8"), "before\n")
             self.assertEqual(demo.stat().st_mode & 0o777, 0o555)
 
-    @integration
     @unittest.skipIf(os.name == "nt", "POSIX config permissions")
     def test_config_mode_change_is_detected_and_restored(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3428,7 +3422,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertFalse(self.hook.path_is_alias(artifact_root))
             self.assertFalse(artifact_root.exists())
 
-    @integration
     @unittest.skipUnless(os.name == "nt", "native Windows READONLY contract")
     def test_windows_readonly_files_are_cleared_before_recovery(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3469,7 +3462,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(generated.read_text(encoding="utf-8"), "before\n")
             self.assertFalse(unexpected.exists())
 
-    @integration
     @unittest.skipUnless(os.name == "nt", "native Windows READONLY contract")
     def test_windows_readonly_parent_file_is_replaced_during_recovery(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3497,7 +3489,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertTrue(docs.is_dir())
             self.assertEqual(generated.read_text(encoding="utf-8"), "before\n")
 
-    @integration
     def test_recovery_uses_pre_command_project_after_workspace_deletion(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -3524,7 +3515,6 @@ class VaultHookShellContractTests(unittest.TestCase):
             )
             self.assertEqual(generated.read_text(encoding="utf-8"), "before\n")
 
-    @integration
     def test_post_allows_a_command_that_removed_its_own_project(self):
         """A coordinator may remove the Item worktree it runs in."""
         command = "python3 delivery_git.py integrate-item"
@@ -3590,7 +3580,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                 lock.unlink(missing_ok=True)
                 recovery.unlink(missing_ok=True)
 
-    @integration
     def test_present_project_without_its_snapshot_still_fails_closed(self):
         for damage in ("missing", "tampered"):
             with self.subTest(snapshot=damage), \
@@ -3644,7 +3633,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                     if self.hook.path_is_alias(item):
                         self.hook.remove_path_alias(item)
 
-    @integration
     def test_removed_project_without_a_trusted_capsule_still_fails_closed(self):
         for damage in ("missing", "tampered", "rebound"):
             with self.subTest(capsule=damage), \
@@ -3848,8 +3836,8 @@ class VaultHookShellContractTests(unittest.TestCase):
                 (experience_root / "_generated/application-registry.json").is_file()
             )
 
-    @integration
     @unittest.skipUnless(sys.platform == "darwin", "bare Python fallback")
+    @integration
     def test_bare_render_cannot_publish_a_different_valid_transition(self):
         if shutil.which("python3") is None:
             self.skipTest("python3 is unavailable")
@@ -3891,8 +3879,8 @@ class VaultHookShellContractTests(unittest.TestCase):
             )
             self.assertEqual(open_state.read_bytes(), original_open_state)
 
-    @integration
     @unittest.skipUnless(sys.platform == "darwin", "bare Python fallback")
+    @integration
     def test_bare_render_with_forged_registry_is_restored(self):
         if shutil.which("python3") is None:
             self.skipTest("python3 is unavailable")
@@ -4164,7 +4152,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                 (docs / "home.md").read_text(encoding="utf-8"),
             )
 
-    @integration
     @unittest.skipUnless(sys.platform == "darwin", "bare Python fallback")
     def test_bare_python_candidate_with_invalid_result_is_restored(self):
         if shutil.which("python3") is None:

@@ -9,6 +9,8 @@ except ModuleNotFoundError:  # run as a script from tools/tests
     from levels import integration
 from pathlib import Path
 
+from tools.tests import python_entry
+
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPILER = ROOT / "plugins/software-engineering-team/scripts/architecture_compile.py"
@@ -17,14 +19,15 @@ VAULT_CHECK = COMPILER.parent / "vault_check.py"
 
 class ArchitectureCompilerTests(unittest.TestCase):
     def run_cli(self, *args, expected=0):
-        result = subprocess.run([sys.executable, str(COMPILER), *map(str, args)], cwd=ROOT,
-                                capture_output=True, text=True, check=False)
+        runner = subprocess.run if getattr(self, "real_process", False) else None
+        result = (runner([sys.executable, str(COMPILER), *map(str, args)], cwd=ROOT,
+                         capture_output=True, text=True, check=False) if runner else
+                  python_entry.run([COMPILER, *args], cwd=ROOT))
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result
 
     def render_relations(self, docs):
-        result = subprocess.run([sys.executable, str(VAULT_CHECK), "render-relations", "--vault", str(docs)],
-                                cwd=ROOT, capture_output=True, text=True, check=False)
+        result = python_entry.run([VAULT_CHECK, "render-relations", "--vault", docs], cwd=ROOT)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def seal_constrained_decision(self, docs):
@@ -67,6 +70,7 @@ class ArchitectureCompilerTests(unittest.TestCase):
 
     @integration
     def test_architecture_is_materialized_and_stamped_only_for_active_item(self):
+        self.real_process = True
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"
             self.prepare(docs)
@@ -77,7 +81,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             stamped = self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
             self.assertTrue(json.loads(stamped.stdout)["architecture_delta_hash"].startswith("sha256:"))
 
-    @integration
     def test_item_can_stamp_a_second_delta_over_records_it_already_sealed(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"
@@ -98,7 +101,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             root_record = docs / "system-architecture/architecture.md"
             self.assertIn("revision: 1", root_record.read_text(encoding="utf-8"))
 
-    @integration
     def test_revision_cycles_keep_one_blank_line_under_the_frontmatter(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"
@@ -119,7 +121,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             self.assertEqual(self.blank_lines_under_frontmatter(root), 1)
             self.run_cli("check", "--docs", docs)
 
-    @integration
     def test_next_revision_collapses_blank_lines_a_sealed_record_accumulated(self):
         sys.path.insert(0, str(COMPILER.parent))
         import architecture_compile
@@ -149,6 +150,7 @@ class ArchitectureCompilerTests(unittest.TestCase):
 
     @integration
     def test_architecture_rejects_non_active_item(self):
+        self.real_process = True
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"
             self.prepare(docs)
@@ -184,7 +186,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
                     (package / "delivery.md").write_text(note, encoding="utf-8")
                 self.assertEqual(architecture_compile.delivery_id(package), expected, folder)
 
-    @integration
     def test_qualified_item_ref_resolves_a_slugged_delivery_and_keys_the_delta_by_story(self):
         sys.path.insert(0, str(COMPILER.parent))
         import architecture_compile
@@ -209,7 +210,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             self.run_cli("check", "--docs", docs, *qualified)
             self.run_cli("check", "--docs", docs, "--item-ref", "AUTH-01")
 
-    @integration
     def test_an_omitted_item_ref_selects_no_item(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"
@@ -218,7 +218,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             self.assertIn("item_ref is required", refused.stderr)
             self.assertFalse((docs / "system-architecture/architecture.md").exists())
 
-    @integration
     def test_a_story_held_by_two_deliveries_needs_the_qualified_item_ref(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"
@@ -234,7 +233,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             inactive = self.run_cli("check", "--docs", docs, "--item-ref", "DLV-001:AUTH-01", expected=1)
             self.assertIn("claimed or active", inactive.stdout)
 
-    @integration
     def test_sealing_preserves_quoted_wikilinks_and_item_source_hash(self):
         sys.path.insert(0, str(COMPILER.parent))
         import architecture_compile
@@ -267,7 +265,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             self.assertEqual([finding for finding in findings if finding.path == "system-architecture/architecture.md"
                               and "wikilink" in finding.message], [])
 
-    @integration
     def test_sealed_record_detects_direct_drift_and_supports_standards(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"
@@ -283,7 +280,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             result = self.run_cli("check", "--docs", docs, expected=1)
             self.assertIn("sealed revision differs", result.stdout)
 
-    @integration
     def test_sealed_root_and_component_hubs_are_in_the_item_delta(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"
@@ -296,7 +292,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             result = self.run_cli("check", "--docs", docs, expected=1)
             self.assertIn("sealed revision differs", result.stdout)
 
-    @integration
     def test_sealed_record_accepts_its_rerendered_inverse_relation_block(self):
         sys.path.insert(0, str(COMPILER.parent))
         import architecture_compile
@@ -330,7 +325,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
                 self.assertEqual(architecture_compile.record_props(record)["revision"], 1)
                 self.assertEqual(sorted(path.name for path in (ledger / record_id).iterdir()), ["r1.json"])
 
-    @integration
     def test_sealed_record_still_refuses_authored_drift_beside_its_relation_block(self):
         sys.path.insert(0, str(COMPILER.parent))
         import architecture_compile
@@ -369,7 +363,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             decision.write_text(current, encoding="utf-8")
             self.run_cli("check", "--docs", docs)
 
-    @integration
     def test_external_component_cannot_gain_a_fake_internal_module(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"
@@ -389,7 +382,6 @@ class ArchitectureCompilerTests(unittest.TestCase):
             )
             self.assertIn("only build components", rejected.stdout)
 
-    @integration
     def test_decision_lca_and_component_claim_are_mechanical(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"

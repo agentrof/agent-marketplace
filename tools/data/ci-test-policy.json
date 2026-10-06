@@ -211,7 +211,8 @@
         "tools.tests.test_reader_waves.*",
         "tools.tests.test_calculation_examples.*",
         "tools.tests.test_project_context.*",
-        "tools.tests.test_approval_history.*"
+        "tools.tests.test_approval_history.*",
+        "tools.tests.test_python_entry.*"
       ]
     },
     "documentation": {
@@ -238,7 +239,8 @@
         "tools.tests.test_package_refresh.*",
         "tools.tests.test_setup_project.*",
         "tools.tests.test_smoke_plugin_installs.*",
-        "tools.tests.test_ci_*.*"
+        "tools.tests.test_ci_*.*",
+        "tools.tests.test_python_entry.*"
       ],
       "depends_on": [
         "contracts"
@@ -373,7 +375,13 @@
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_git_capture_locks_before_reading_the_tree_or_authority",
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_metadata_symlink_never_receives_a_safety_exemption",
         "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_restore_replays_the_approved_target_and_publishes_its_postimage",
-        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_shell_composition_and_untrusted_executables_receive_no_grant"
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_shell_composition_and_untrusted_executables_receive_no_grant",
+        "tools.tests.test_python_entry.PythonEntryTests.test_binary_streams_argv_environment_cwd_and_exit_code",
+        "tools.tests.test_python_entry.PythonEntryTests.test_captured_crlf_and_cr_are_normalized_like_subprocess_text_mode",
+        "tools.tests.test_python_entry.PythonEntryTests.test_exit_none_and_text_match_interpreter_semantics",
+        "tools.tests.test_python_entry.PythonEntryTests.test_native_lanes_register_each_entry_case_explicitly",
+        "tools.tests.test_python_entry.PythonEntryTests.test_script_cannot_evade_the_unit_process_boundary",
+        "tools.tests.test_python_entry.PythonEntryTests.test_state_and_imports_are_restored_even_when_the_entry_raises"
       ]
     },
     "macos": {
@@ -620,6 +628,7 @@
     "tools.tests.test_project_context",
     "tools.tests.test_project_instructions",
     "tools.tests.test_project_vault_contract",
+    "tools.tests.test_python_entry",
     "tools.tests.test_reader_waves",
     "tools.tests.test_release",
     "tools.tests.test_release_publish",

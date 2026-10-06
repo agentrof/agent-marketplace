@@ -866,15 +866,15 @@
         },
         {
           "id": "impact_closure",
-          "tradeoffs": "impact_closure.py derives the changed notes from the approval stamps and their closure over the typed relations and shared contracts; a role reads the closure in full and every approved, unchanged note outside it only as its hash-bound summary, reads beyond it when unsure and records why, and a writer heals a missing relation through impact_closure.py heal and recomputes the closure. The owning compiler's structural check runs before any reader starts, and a confirmation re-review reads only the fixed lines, the notes the fix touches and the open findings. A first approval, a shared contract or policy change and a graph gap widen the read. Reading scales with the change, while a defect between two unchanged notes with no relation between them is outside every reader's closure until a reader suspects it."
+          "tradeoffs": "impact_closure.py derives the changed notes from the approval stamps and their closure over the typed relations and shared contracts; a role reads the closure in full and every approved, unchanged note outside it only as its hash-bound summary, reads beyond it when unsure and records why, and a writer fixes each reported relation gap through its owning compiler and recomputes the closure. The owning compiler's structural check runs before any reader starts, and a confirmation re-review reads only the fixed lines, the notes the fix touches and the open findings. A first approval, a shared contract or policy change and a graph gap widen the read. Reading scales with the change, while a defect between two unchanged notes with no relation between them is outside every reader's closure until a reader suspects it."
         }
       ],
       "default": "full",
       "reference_scope": "owning_flows",
-      "metric": "Per review or writer pass: wall clock and input tokens per reader, closure size against package size, beyond-closure reads with their reasons, relations healed, widenings with their cause and confirmation re-review minutes, and the verdict and findings against a full read of the same frozen inputs; seeded cross-note defects caught.",
+      "metric": "Per review or writer pass: wall clock and input tokens per reader, closure size against package size, beyond-closure reads with their reasons, relation gaps reported and fixed, widenings with their cause and confirmation re-review minutes, and the verdict and findings against a full read of the same frozen inputs; seeded cross-note defects caught.",
       "promotion": {
         "unit": "At least 5 reviewed changes across at least 3 flows, each replayed as a frozen full read.",
-        "threshold": "The same verdict and every critical and major finding of the full replay, a median reader wall clock at most 40% of the replay's, every seeded defect inside a closure reported and every healed relation accepted by its owning compiler, with every shared quality guard holding and the owner's approval."
+        "threshold": "The same verdict and every critical and major finding of the full replay, a median reader wall clock at most 40% of the replay's, every seeded defect inside a closure reported and every reported relation gap fixed through its owning compiler, with every shared quality guard holding and the owner's approval."
       }
     },
     "review_fanout": {

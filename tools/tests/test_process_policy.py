@@ -1173,13 +1173,19 @@ class ReadingSwitchTests(unittest.TestCase):
         # The verbs the constitution names are the subcommands of the scripts it names.
         import re
         listed = re.search(r"`vault_query.py` verbs first \(([^;)]*);", constitution).group(1)
-        for script, verbs in (("vault_query.py", listed.split(", ")), ("impact_closure.py",
-                                                                        ("heal", "render"))):
+        for script, verbs in (("vault_query.py", listed.split(", ")),):
             source = (TEAM / "scripts" / script).read_text(encoding="utf-8")
             for verb in verbs:
                 with self.subTest(script=script, verb=verb):
                     self.assertRegex(source, rf'add_parser\("{verb}"|\("{verb}", q_')
-        self.assertIn("`impact_closure.py heal` and `render`", constitution)
+        self.assertIn("these tools are read-only", constitution)
+        # The vault tools are read-only: no package text tells a role to call
+        # a write verb of impact_closure.py.
+        for path in sorted(TEAM.rglob("*.md")):
+            text = " ".join(path.read_text(encoding="utf-8").split())
+            for verb in ("heal", "render"):
+                with self.subTest(path=path.name, verb=verb):
+                    self.assertNotIn(f"impact_closure.py {verb}", text)
         for agent in sorted((TEAM / "agents").glob("*.md")):
             with self.subTest(agent=agent.name):
                 self.assertIn(VAULT_FIRST, agent.read_text(encoding="utf-8"))

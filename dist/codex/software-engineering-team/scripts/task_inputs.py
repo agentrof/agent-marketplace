@@ -165,7 +165,7 @@ def impact_changes(command: list[str], base: str | None, bound) -> tuple[set[str
                        "--no-renames", "-z", commit, "--")
              + git_bytes(command, "ls-files", "--others", "--exclude-standard", "-z"))
     found = {os.fsdecode(raw) for raw in names.split(b"\0") if raw}
-    return ({path for path in found if canonical_source(path) and path.endswith(".md")
+    return ({path for path in found if canonical_source(path)
              and (bound is None or path in bound)}, commit)
 
 

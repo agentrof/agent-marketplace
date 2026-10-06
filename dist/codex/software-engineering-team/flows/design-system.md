@@ -75,7 +75,7 @@ the catalog artifact path and relative-artifact link law.
    a re-check given `--findings` derives only the fix delta; every role reads
    the change's impact closure, each approved, unchanged note outside it only
    as its hash-bound summary, reads beyond it when unsure and records why, a
-   writer heals a missing relation with `impact_closure.py heal` and
+   writer fixes a reported graph gap through its owning compiler and
    recomputes the closure, and a confirmation re-review reads only the fix's
    delta, as
    `skill-content/challenge-review/references/switch-review_scope-impact_closure.md`

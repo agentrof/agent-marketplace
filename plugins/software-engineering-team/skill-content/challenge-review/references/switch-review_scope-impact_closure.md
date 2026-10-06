@@ -42,7 +42,7 @@ it names; when they give too little or look wrong it uses its own methods
 and records that it did. It follows the relations of the notes in its
 closure in the constitution's tier order and reads those notes. The closure records which
 tier produced each edge; a disagreement between tiers is a graph gap,
-reported and healed as section 5 says. A role never scans folders or re-reads
+reported as section 5 says. A role never scans folders or re-reads
 a package to find something. An unchanged note's summary proves its approval
 still holds; never infer its content from that summary.
 
@@ -53,20 +53,18 @@ note or file it needs. It records each such read in its output under
 `beyond_closure` with the path and the reason, and a writer passes those rows
 to `impact_closure.py` so the record shows where the graph was insufficient.
 
-## 5. Heal a missing relation
+## 5. Report a missing relation
 
-A read-only reader never writes the vault. It returns a missing, wrong or
-stale relation as a finding with both notes, the text that shows the relation
-and its type. The flow's writer applies it with
-`impact_closure.py heal --docs <workspace>/docs --source <note> --target
-<note> --kind <relation> --evidence <finding> --role <writer role>`, which
-validates it against the relation contract and re-renders the generated
-views; a tier disagreement with no missing relation takes
-`impact_closure.py render --docs <workspace>/docs --role <writer role>`
-instead. A relation added to an approved note follows that package's revision
-rules, never a silent edit. Then recompute the closure in the same run: read
-each note newly inside it, and refresh every review whose manifest hash
-changed before its verdict counts.
+`impact_closure.py` and `vault_query.py` are read-only: they index the vault
+and tell a role where to look, and never write a vault file. Each
+`graph_gaps` row carries its evidence and a `suggested_fix`. A read-only reader never writes the vault. A role returns
+a gap, or any missing, wrong or stale relation it finds, as a finding with
+both notes, the text that shows the relation, its type and the suggested
+fix. The flow's writer applies the fix through the owning compiler during
+its normal revision; a relation added to an approved note follows that
+package's revision rules, never a silent edit. Then recompute the closure in
+the same run: read each note newly inside it, and refresh every review whose
+manifest hash changed before its verdict counts.
 
 ## 6. Confirmation re-review
 
@@ -78,5 +76,5 @@ says.
 ## Measurement
 
 Record per review the closure size against the package size, the
-beyond-closure reads with their reasons, the relations healed and the
+beyond-closure reads with their reasons, the relation gaps reported and fixed and the
 widenings. The registry's promotion rule judges these against full replays.

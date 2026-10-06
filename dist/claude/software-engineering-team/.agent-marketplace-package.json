@@ -95,43 +95,43 @@
       "6e21c4df67b1c23550ef54598f92edec13463e719d2525dce82ba04160a726f2"
     ,
     "constitution.md":
-      "fa9ff0d7693a7eeebce8189d1dd5608c3c3d8274a034b4cc75a4700fa6d37543"
+      "0ffc542773803afbdf92ce2dd2378cb1ca7e4dd20dc90d3976f15a78d6e725f6"
     ,
     "flows/backlog-planning.md":
-      "e620fc5604184109c333927233d4de64fce6b9dbeaf6f478948b3b2f2f7168a0"
+      "8fcfa765ff9fa07ea7ad0818cfb95528d95cd624f686ee4c3c82b3e92ce4efe3"
     ,
     "flows/business-analysis.md":
-      "9de8900de0de0e633cfb1353418f8d1221bc63e3e62f9d9c5c8b1f6d65ec967d"
+      "c7cff4cd58f729827b41f871b29e4daf55d827bd3e01e5834386ee6eeefab58c"
     ,
     "flows/delivery-execution.md":
-      "f58ad92c653f956906b447117e4e5693575e0873340ca44644a50b9c3e0a826a"
+      "aa1fb331c80425c2e68f35521b59928c1667767fbb83496390951ede7a183f38"
     ,
     "flows/delivery-governance.md":
-      "ee605acfc5520c9c1c377e3f1291297d9553e154a28122590262185201bcddc3"
+      "57935b914e0adda760ba6c97c3c8a7b10955cf5d65e30685d2b9d11ab7112dd3"
     ,
     "flows/delivery-planning.md":
-      "d55a0fbcaf5fd3347358153880a39e966cff1dcf9e6f51e78708e0815170abe1"
+      "871559347601c5bc9922b0ee0d47a85e1fa9bd88ea3f59ef7300a69bd510cff7"
     ,
     "flows/design-system.md":
-      "288835855076f7e4e3c529aaf051086c9d7a9e2a67e3d5e48620aa9c28c9c071"
+      "4b1b500fdb0f45106158fcc06c3e0f41d13fe94d11469d9d8338e3960ffa649c"
     ,
     "flows/design.md":
-      "5e39a764d93f8cb7d055a28469b8371e267e2b98374509cb2d5fd4c3121783b7"
+      "a67ee1ddc35e4bb51d633ec1d414658af43011b586066cb3e567c4065361213b"
     ,
     "flows/execution-planning.md":
-      "c5b277d08c5f0655161a02020eee57bbf9b28c67ed28e4ae12aa04be8929c37c"
+      "b050d6febbf6a69fdf3eeeaa043fb351daf99b005ea4f846622eaa4377ff714e"
     ,
     "flows/experience-design.md":
-      "685b826809043beda14181ef7e454e958e943437391d9ad07271e44b5a7d1882"
+      "2617c4e9ebaa14eb05e36bb250d195068d5aad3c68b6a9c25ca508a5e0c11039"
     ,
     "flows/operation.md":
-      "b80c78655d23e38193cdc1936bf7a212b3b8786684815d9d16e8800d825776f2"
+      "d9290e3ce104203f9cff8cbbc714e1fe67f84c6f7295d515d6e9360e5646fe73"
     ,
     "flows/requirement.md":
-      "efaba665732ee429741e0129820a7de6e940f98f62c3f2f3b2c72765add67f8b"
+      "07ef364cd2abe9d43b8dbce3819272db7932d9370bf16a088317de97190d7f76"
     ,
     "flows/solution-design.md":
-      "d12a3e2fa26cff498dca8a906a1ecde638795e5edd80e1718d668e12b6bf9fd3"
+      "074ed80e37052a5a01436a6053013e5467ad01d71e9be3e970625d17dcc396c3"
     ,
     "hooks/hooks.json":
       "f6056501a31710a1c702f64ae0f5bd38c62240d40224b46844eed13467c31e96"
@@ -212,7 +212,7 @@
       "bd3bc6d9c4043f4bf68a33ca76332b7e5a7911f1e14ea691f8bc2dd0920f0dd3"
     ,
     "scripts/impact_closure.py":
-      "dedf2ff52ece862ea793aa2cc8d2b740ffd32e711505fc3465beac9887f5ffc6"
+      "284f3ec23df09bf30a2141bf97a77079948298c1d12938162bc55f9fba57d92c"
     ,
     "scripts/landscape_check.py":
       "afd0b167c4f8b2d685ed4e4041a66178a706cece248d19dcb566814e0f534c43"
@@ -263,7 +263,7 @@
       "89cbc5e6fe8fadba7615adf428b1b4d320226b8272f975c75994f3db533b1af2"
     ,
     "scripts/task_inputs.py":
-      "b1864109b82d14a483c57ce75264b8ba41b826ec6c5e36c3bc555a1870fcc959"
+      "bdebd8e3fd77b05f650fea6b4db0752cfd5e83410bb6be29094422f3f98fe929"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -278,7 +278,7 @@
       "d51c4eadc9a3ef93112816dcd5573afbe608a83b52ba6813659af8343737d08c"
     ,
     "scripts/vault_query.py":
-      "bcba27ca3e01930aa694f6cce58506a75535895809cfb89cf896d9a8cc789d9b"
+      "c2bb096fd6265b9670829ae53b6f2b1d18b7b7c3fd95a1ec6dec01014c104d5b"
     ,
     "skill-content/autopilot/SKILL.md":
       "cc422eb06937e9e1a6312aaba10a922a5aedc6d0ddb0c461face9288ddcffb25"
@@ -371,7 +371,7 @@
       "90a44e428dd7876044effa0773d8e83fc38ba38bf554ff832b7e07eb4b1475e5"
     ,
     "skill-content/challenge-review/references/switch-review_scope-impact_closure.md":
-      "fa6cdc6a4aec00a26795f906d005c23fd4ea32b4de1c524b1b781805b5422339"
+      "a943624a913f9cc0a63f1d5ae25365d65563e452232e87d23d5c0d9d7c3d1e94"
     ,
     "skill-content/challenge-review/references/switch-step_budgets-enforced.md":
       "28536b3bb86df9ed41511c4546a95816fcb3395dc4d9ee1592e3b48943e53d0b"
@@ -413,7 +413,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "d345eaa38075ff710d849142fa23b98bd680635725be07d894d6106a995cea0c"
+      "e7e5ae0cd2057fd837487429fa1f4a1272175cda226efb460f36a63e32011080"
     ,
     "skill-content/configure/data/step-budgets.json":
       "c63c5e90e1726b573c681f28008aa627575600f2d81dc8f8c0851b768e1b04fc"

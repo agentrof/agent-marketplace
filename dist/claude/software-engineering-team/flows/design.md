@@ -80,7 +80,7 @@ reader's inputs with `--changed <note>` and `--base <approved commit>`, and a
 re-check given `--findings` derives only the fix delta; every role reads the
 change's impact closure, each approved, unchanged note outside it only as its
 hash-bound summary, reads beyond it when unsure and records why, a writer
-heals a missing relation with `impact_closure.py heal` and recomputes the
+fixes a reported graph gap through its owning compiler and recomputes the
 closure, and a confirmation re-review reads only the fix's delta, as
 `skill-content/challenge-review/references/switch-review_scope-impact_closure.md`
 defines.

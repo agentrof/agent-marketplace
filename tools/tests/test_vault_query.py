@@ -130,10 +130,25 @@ class VaultQueryTest(unittest.TestCase):
         self.assertEqual(result["changed"], ["backlog/new.md", "backlog/story-b.md"])
         self.assertIn("vault_query:", self.run_query("changed-since", "nope", code=1)["stderr"])
 
+    def test_changed_since_refuses_a_git_option_as_its_ref(self) -> None:
+        init_repository(self.project)
+        git = ["git", "-C", str(self.project), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run([*git, "add", "workspace"], check=True)
+        subprocess.run([*git, "commit", "-qm", "base"], check=True)
+        target = self.project / "written.txt"
+        for ref in (f"--output={target}", "-p"):
+            with self.subTest(ref=ref):
+                self.assertIn("not a Git option",
+                              self.run_query("changed-since", "--", ref, code=1)["stderr"])
+        self.assertFalse(target.exists())
+
     def test_gaps_filter_by_reason(self) -> None:
         gaps = self.run_query("gaps", "--reason", "text_only_relation")["gaps"]
         self.assertEqual(gaps, [{"path": "backlog/story-g.md", "reason": "text_only_relation",
-                                 "source": "backlog/story-t.md", "tiers": ["text"]}])
+                                 "source": "backlog/story-t.md", "tiers": ["text"],
+                                 "suggested_fix": "declare the typed relation backlog/story-t.md"
+                                 " names to backlog/story-g.md by identifier in the front"
+                                 " matter of the citing note"}])
         self.assertGreater(len(self.run_query("gaps")["gaps"]), len(gaps))
 
     def test_search_returns_ids_and_line_anchors(self) -> None:

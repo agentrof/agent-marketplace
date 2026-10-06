@@ -338,7 +338,13 @@ def q_changed_since(index: Index, args) -> dict:
         out = subprocess.run(["git", "-C", str(docs), *argv], capture_output=True,
                              text=True, check=True).stdout
         return [line for line in out.splitlines() if line]
-    paths = set(git("diff", "--name-only", "--relative", args.ref, "--", "."))
+    if args.ref.startswith("-"):
+        raise ValueError(f"changed-since takes a commit, not a Git option: {args.ref!r}")
+    try:
+        commit = git("rev-parse", "--verify", "--end-of-options", args.ref + "^{commit}")[0]
+    except subprocess.CalledProcessError as exc:
+        raise ValueError(f"changed-since: {args.ref!r} is no commit") from exc
+    paths = set(git("diff", "--name-only", "--relative", commit, "--", "."))
     paths |= set(git("ls-files", "--others", "--exclude-standard", "--", "."))
     stale = sorted(rel for rel, p in index.data["proofs"].items() if not p["proven"])
     return {"ref": args.ref, "changed": sorted(paths), "stale_approved": stale}
@@ -412,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
     data, status = refresh(args.docs, cache, args.verify)
     try:
         result = args.func(Index(data), args)
-    except (LookupError, subprocess.CalledProcessError) as exc:
+    except (LookupError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"vault_query: {exc}", file=sys.stderr)
         return 1
     result["cache"] = status

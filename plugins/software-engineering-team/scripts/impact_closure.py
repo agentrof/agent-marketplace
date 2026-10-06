@@ -11,17 +11,16 @@ byte-identical to what was approved.
 Verbs:
   closure  --docs D --changed P...   print the closure as JSON
   views    --docs D                  print the relation views to consult first
-  heal     --docs D --source S --target T --kind K --evidence E --role R
-           write one missing typed relation through vault_check's relation
-           contract and re-render the generated relation views
-  render   --docs D --role R
-           re-render the relation views a tier disagreement found stale
+
+The module is read-only: it indexes the vault and tells a role where to look,
+and never writes a vault file.
 
 The closure never caps a read: a role that reads beyond it records the read
 with ``record_beyond``. Relations are read in tiers (see "Edges, read in tiers"); every edge
 records the tiers that produced it, and a disagreement between tiers is a
-graph gap. A read-only role never heals; it reports the missing relation as
-a finding and the flow's writer calls ``heal`` or ``render``.
+graph gap. Every gap carries its evidence and a ``suggested_fix``; a role
+reports it as a finding and the flow's writer applies the fix through the
+owning compiler during its normal revision.
 
 Stdlib only.
 """
@@ -29,30 +28,29 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
-import contextlib
-import difflib
-import io
 import json
 import re
 import sys
 from pathlib import Path
 
-import atomic_file
 import vault_check
-from ba_compile import frontmatter_item, parse_frontmatter, split_wikilink
+from ba_compile import parse_frontmatter, split_wikilink
 
 # Relation keys outside the vault relation contract that still draw
 # dependency edges: their owning compilers validate them.
 EXTRA_RELATION_KEYS = ("depends_on", "governs", "applies_to")
 # Keys whose targets constrain the source: a changed note pulls them in.
 CONSTRAINT_KEYS = ("constrained_by", "uses_design", "satisfies")
+# Relations that point up to what a note answers to: a change re-reads their
+# targets, one hop, since a changed note may no longer meet them.
+UPWARD_KEYS = ("implements", "derives_from", "verifies")
 # Note types whose change widens the closure to every citing note.
 SHARED_CONTRACT_EXTRA_TYPES = ("verification-contract", "environment-contract",
                                "delivery-governance", "architecture-standard",
                                "definition-of-done")
 POLICY_TYPES = ("process-policy",)
 POLICY_PATHS = ("delivery/process-policy.md",)
-# Keys on which a healed relation must not close a cycle.
+# Keys on which a relation must not close a cycle.
 ACYCLIC_KEYS = ("derives_from",)
 
 # The relation views a role consults first. Each entry is a glob relative to
@@ -83,12 +81,6 @@ VIEW_SPECS = (
     ("delivery/process-policy.md", "process switches in force"),
 )
 
-READ_ONLY_MODES = {"review", "consume"}
-
-
-class HealRefused(ValueError):
-    """A relation heal the relation contract or the role context refuses."""
-
 
 # ---------------------------------------------------------------------------
 # Policy and vault
@@ -105,6 +97,7 @@ def closure_policy(vault_policy: dict, overrides: dict | None = None) -> dict:
     policy = {
         "relation_keys": sorted(set(specs) | set(EXTRA_RELATION_KEYS)),
         "constraint_keys": list(CONSTRAINT_KEYS),
+        "upward_keys": list(UPWARD_KEYS),
         "shared_contract_types": sorted(shared),
         "policy_types": list(POLICY_TYPES),
         "policy_paths": list(POLICY_PATHS),
@@ -346,7 +339,29 @@ def graph(vault, policy: dict) -> tuple:
     for source, target, _key in sorted(edges.of("text")):
         gaps.append({"path": target, "reason": "text_only_relation", "source": source,
                      "tiers": ["text"]})
+    for gap in gaps:
+        gap["suggested_fix"] = suggested_fix(gap)
     return edges, gaps, present
+
+
+def suggested_fix(gap: dict) -> str:
+    """What the flow's writer changes, through the owning compiler, to close ``gap``."""
+    reason, path = gap["reason"], gap["path"]
+    if reason == "tier_disagreement" and gap.get("detail") == "missing from frontmatter":
+        return (f"declare `{gap['key']}` to {gap['target']} in the front matter of {path},"
+                " or remove the stale entry from the generated view by re-rendering it")
+    if reason == "tier_disagreement":
+        return (f"re-render the generated relation views so they carry `{gap['key']}`"
+                f" from {path} to {gap['target']}")
+    if reason == "no_typed_relations":
+        return f"declare the typed relations of {path} in its front matter"
+    if reason == "text_only_relation":
+        return (f"declare the typed relation {gap['source']} names to {path} by identifier"
+                " in the front matter of the citing note")
+    if reason == "unresolved_relation":
+        return (f"correct or remove `{gap.get('key')}` {gap.get('value')} in {path}:"
+                " its target does not resolve")
+    return f"correct the relations of {path}"
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +523,7 @@ def closure_from(snap: dict, changed: list[str], policy: dict) -> dict:
     notes, proofs = snap["notes"], snap["proofs"]
     dependents: dict = {}
     constraints: dict = {}
+    upward: dict = {}
     listings: dict = {}
     citations: dict = {}
     for source, target, key in snap["edges"]:
@@ -520,6 +536,8 @@ def closure_from(snap: dict, changed: list[str], policy: dict) -> dict:
         dependents.setdefault(target, set()).add(source)
         if key in policy["constraint_keys"]:
             constraints.setdefault(source, set()).add(target)
+        if key in policy.get("upward_keys", ()):
+            upward.setdefault(source, set()).add(target)
 
     stale = sorted(rel for rel, state in proofs.items()
                    if rel in notes and not state["proven"])
@@ -561,6 +579,7 @@ def closure_from(snap: dict, changed: list[str], policy: dict) -> dict:
 
     for rel in change_set:
         members.update(listings.get(rel, ()))
+        members.update(upward.get(rel, ()))
 
     outside = sorted(set(notes) - members)
     return {
@@ -606,163 +625,6 @@ def record_beyond(manifest: dict, path: str, reason: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Heal
-# ---------------------------------------------------------------------------
-
-
-def read_only_context(role: str | None, entry: str | None = None,
-                      mode: str | None = None) -> bool:
-    import task_inputs
-    policy = task_inputs.catalog()
-    if mode in READ_ONLY_MODES:
-        return True
-    if role in policy["read_only_roles"]:
-        return True
-    entry = (entry or "").replace("_", "-")
-    return bool(entry) and role in policy["read_only_entry_roles"].get(entry, [])
-
-
-def with_relation(text: str, key: str, item: str) -> str:
-    """``text`` with ``item`` appended to front-matter block list ``key``."""
-    lines = text.split("\n")
-    if not lines or lines[0].strip() != "---":
-        raise HealRefused("source note has no front matter")
-    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
-    if end is None:
-        raise HealRefused("source note front matter is not closed")
-    line = f"  - {item}"
-    for index in range(1, end):
-        if re.match(rf"^{re.escape(key)}:\s*$", lines[index]):
-            last = index
-            while last + 1 < end and re.match(r"^\s+- ", lines[last + 1]):
-                last += 1
-            lines.insert(last + 1, line)
-            return "\n".join(lines)
-        if re.match(rf"^{re.escape(key)}:", lines[index]):
-            raise HealRefused(f"relation '{key}' is not a block list")
-    lines[end:end] = [f"{key}:", line]
-    return "\n".join(lines)
-
-
-def _reaches(edges: set, start: str, goal: str, keys: set) -> bool:
-    forward: dict = {}
-    for source, target, key in edges:
-        if key in keys:
-            forward.setdefault(source, set()).add(target)
-    stack, seen = [start], set()
-    while stack:
-        rel = stack.pop()
-        if rel == goal:
-            return True
-        if rel not in seen:
-            seen.add(rel)
-            stack.extend(forward.get(rel, ()))
-    return False
-
-
-def _snapshot(docs: Path) -> dict:
-    return {p.relative_to(docs).as_posix(): p.read_bytes()
-            for p in docs.rglob("*.md") if p.is_file()}
-
-
-def _render(docs: Path) -> tuple[int, str, dict, dict]:
-    snapshot = _snapshot(docs)
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-        status = vault_check.main(["render-relations", "--vault", str(docs)])
-    return status, out.getvalue().strip(), snapshot, _snapshot(docs)
-
-
-def _changed(before: dict, after: dict, skip: str = "") -> list:
-    return sorted(rel for rel in set(before) | set(after)
-                  if rel != skip and before.get(rel) != after.get(rel))
-
-
-def _refuse_read_only(role: str, entry: str | None, mode: str | None) -> None:
-    if read_only_context(role, entry, mode):
-        raise PermissionError(
-            f"role '{role}' is read-only here: return the relation as a finding;"
-            " the flow's writer applies it")
-
-
-def heal_views(docs: Path, *, role: str, entry: str | None = None,
-               mode: str | None = None) -> dict:
-    """Re-render the generated relation views when a tier disagrees with the
-    typed front matter; the renderer is vault_check's own."""
-    _refuse_read_only(role, entry, mode)
-    docs = Path(docs).absolute()
-    status, output, before, after = _render(docs)
-    if status != 0:
-        raise HealRefused(f"relation views did not re-render: {output}")
-    return {"status": "rendered", "role": role, "views": _changed(before, after)}
-
-
-def heal_relation(docs: Path, source: str, target: str, kind: str, evidence: str, *,
-                  role: str, entry: str | None = None, mode: str | None = None,
-                  alias: str | None = None) -> dict:
-    """Write one missing typed relation and re-render the relation views.
-
-    The postimage must pass vault_check's relation contract with no finding
-    the preimage lacked. An approved source note's stamp goes stale, so the
-    repair belongs to that package's current or next revision.
-    """
-    _refuse_read_only(role, entry, mode)
-    if not isinstance(evidence, str) or not evidence.strip():
-        raise HealRefused("a relation heal records its evidence")
-    docs = Path(docs).absolute()
-    vault = load_vault(docs)
-    specs = vault_check.relation_specs(vault.policy)
-    if kind not in specs:
-        raise HealRefused(f"relation '{kind}' is outside the vault relation contract;"
-                          " its owning compiler writes it")
-    source, target = normalize(source), normalize(target)
-    for rel in (source, target):
-        if rel not in vault.notes or vault.notes[rel].generated:
-            raise HealRefused(f"'{rel}' is not an authored vault note")
-    if source == target:
-        raise HealRefused("a relation never points to its own note")
-    policy = closure_policy(vault.policy)
-    edges = graph(vault, policy)[0]
-    if (source, target, kind) in edges.of("frontmatter"):
-        return {"status": "unchanged", "source": source, "target": target,
-                "kind": kind, "evidence": evidence, "diff": "", "views": []}
-    if kind in policy["acyclic_keys"] and _reaches(set(edges.tiers), target, source, {kind}):
-        raise HealRefused(f"relation '{kind}' from '{source}' to '{target}' closes a cycle")
-    target_note = vault.notes[target]
-    label = alias or vault_check.relation_source_alias(target_note)
-    item = frontmatter_item(f"[[{target[:-3]}|{label}]]")
-    source_path = docs / source
-    before = source_path.read_text(encoding="utf-8")
-    after = with_relation(before, kind, item)
-
-    preimage = vault_check.changed_findings(vault, [source])[source]
-    files = vault_check.VaultFileView(docs)
-    files.put(source_path, after.encode("utf-8"))
-    post = vault_check.build_vault(docs, vault.policy, files)
-    postimage = vault_check.changed_findings(post, [source])[source]
-    known = {(f.check, f.message) for f in preimage}
-    new = [f for f in postimage if (f.check, f.message) not in known]
-    if new:
-        raise HealRefused("relation contract refuses the heal: "
-                          + "; ".join(sorted(f.message for f in new)))
-
-    stale = bool(vault.notes[source].fm.get("source_hash"))
-    snapshot = _snapshot(docs)
-    atomic_file.replace_text(source_path, after)
-    status, output, _written, rendered = _render(docs)
-    if status != 0:
-        atomic_file.replace_text(source_path, before)
-        raise HealRefused(f"relation views did not re-render: {output}")
-    views = _changed(snapshot, rendered, skip=source)
-    diff = "".join(difflib.unified_diff(
-        before.splitlines(keepends=True), after.splitlines(keepends=True),
-        fromfile=f"a/{source}", tofile=f"b/{source}"))
-    return {"status": "written", "source": source, "target": target, "kind": kind,
-            "alias": label, "evidence": evidence.strip(), "role": role,
-            "diff": diff, "views": views, "approval_stale": stale}
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -776,21 +638,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--changed", nargs="*", default=[])
     p = sub.add_parser("views")
     p.add_argument("--docs", type=Path, required=True)
-    p = sub.add_parser("heal")
-    p.add_argument("--docs", type=Path, required=True)
-    p.add_argument("--source", required=True)
-    p.add_argument("--target", required=True)
-    p.add_argument("--kind", required=True)
-    p.add_argument("--evidence", required=True)
-    p.add_argument("--role", required=True)
-    p.add_argument("--entry", default=None)
-    p.add_argument("--mode", default=None)
-    p.add_argument("--alias", default=None)
-    p = sub.add_parser("render")
-    p.add_argument("--docs", type=Path, required=True)
-    p.add_argument("--role", required=True)
-    p.add_argument("--entry", default=None)
-    p.add_argument("--mode", default=None)
     args = parser.parse_args(argv)
     if not args.docs.is_dir():
         print(f"impact_closure: docs directory not found: {args.docs}", file=sys.stderr)
@@ -798,18 +645,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "closure":
             result = closure(args.docs, args.changed)
-        elif args.command == "views":
-            result = vault_views(args.docs)
-        elif args.command == "render":
-            result = heal_views(args.docs, role=args.role, entry=args.entry, mode=args.mode)
         else:
-            result = heal_relation(args.docs, args.source, args.target, args.kind,
-                                   args.evidence, role=args.role, entry=args.entry,
-                                   mode=args.mode, alias=args.alias)
-    except PermissionError as exc:
-        print(f"impact_closure: {exc}", file=sys.stderr)
-        return 3
-    except HealRefused as exc:
+            result = vault_views(args.docs)
+    except ValueError as exc:
         print(f"impact_closure: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))

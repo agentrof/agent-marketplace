@@ -250,7 +250,7 @@ reader starts, `impact_closure.py` derives the changed notes from the approval
 stamps and their closure over the vault's typed relations and shared
 contracts, every role reads that closure in full and each approved, unchanged
 note outside it as its hash-bound summary, reads beyond it when unsure and
-records why, a writer heals a missing relation with `impact_closure.py heal`
+records why, a writer fixes a reported graph gap through its owning compiler
 and recomputes the closure, and a confirmation re-review reads only the fix's
 delta. A first approval, a shared contract or policy change and a graph gap
 widen the read, as

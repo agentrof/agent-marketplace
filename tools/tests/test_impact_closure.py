@@ -1,7 +1,8 @@
 """Impact closure (plugins/software-engineering-team/scripts/impact_closure.py)
 on synthetic vaults: dependents, constraints, cycles, shared-contract and
-policy widening, graph gaps, relation heal with closure recompute, and the
-approval-hash proof of unchanged notes."""
+policy widening, upward hops, graph gaps with suggested fixes, the
+approval-hash proof of unchanged notes, and that the module never writes the
+vault."""
 
 from __future__ import annotations
 
@@ -52,6 +53,10 @@ VAULT = {
 }
 
 
+def vault_bytes(docs: Path) -> dict:
+    return {p.relative_to(docs).as_posix(): p.read_bytes() for p in docs.rglob("*") if p.is_file()}
+
+
 def stamp(path: Path) -> str:
     text = path.read_text(encoding="utf-8").replace("status: draft\n", "status: approved\n", 1)
     digest = backlog_compile.digest_text(text)
@@ -73,7 +78,14 @@ class ImpactClosureTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def closure(self, *changed: str) -> dict:
-        return impact_closure.closure(self.docs, list(changed))
+        """The closure, with each gap's suggested fix checked and set aside."""
+        result = impact_closure.closure(self.docs, list(changed))
+        self.fixes = {}
+        for gap in result["graph_gaps"]:
+            fix = gap.pop("suggested_fix")
+            self.assertTrue(fix.strip(), gap)
+            self.fixes[(gap["path"], gap["reason"])] = fix
+        return result
 
     def test_chain_of_dependents_is_transitive(self) -> None:
         result = self.closure(f"{REQ}.md")
@@ -155,17 +167,13 @@ class ImpactClosureTest(unittest.TestCase):
         self.assertFalse(result["tiers"]["index"])
         self.assertFalse([g for g in result["graph_gaps"] if g["reason"] == "tier_disagreement"])
 
-    def test_stale_index_disagreement_heals_by_render(self) -> None:
+    def test_stale_index_disagreement_is_a_gap_with_a_suggested_fix(self) -> None:
         self.write_matrix(("backlog/story-b", "implements", REQ))
-        self.assertTrue([g for g in self.closure()["graph_gaps"]
-                         if g["reason"] == "tier_disagreement"])
-        with self.assertRaises(PermissionError):
-            impact_closure.heal_views(self.docs, role="backlog-reviewer")
-        healed = impact_closure.heal_views(self.docs, role="product-owner")
-        self.assertIn("maps/_generated/cross-subtree-matrix.md", healed["views"])
-        result = self.closure()
-        self.assertTrue(result["tiers"]["body"])
-        self.assertFalse([g for g in result["graph_gaps"] if g["reason"] == "tier_disagreement"])
+        before = vault_bytes(self.docs)
+        gaps = [g for g in self.closure()["graph_gaps"] if g["reason"] == "tier_disagreement"]
+        self.assertTrue(gaps)
+        self.assertTrue(any("re-render" in self.fixes[(gap["path"], gap["reason"])] for gap in gaps))
+        self.assertEqual(vault_bytes(self.docs), before)
 
     def test_frontmatter_tier_edge(self) -> None:
         result = self.closure(f"{REQ}.md")
@@ -226,81 +234,37 @@ class ImpactClosureTest(unittest.TestCase):
         self.assertIn("backlog/story-g.md", result["changed"])
         self.assertIn("backlog/story-g.md", result["closure"])
 
-    def test_heal_adds_relation_and_closure_recomputes(self) -> None:
-        self.assertNotIn("backlog/story-g.md", self.closure(f"{REQ}.md")["closure"])
-        result = impact_closure.heal_relation(
-            self.docs, "backlog/story-g.md", f"{REQ}.md", "related_to",
-            "Story G's scope restates Req A", role="product-owner")
-        self.assertEqual(result["status"], "written")
-        self.assertIn(f'+  - "[[{REQ}|Req A]]"', result["diff"])
-        self.assertIn("maps/_generated/relation-status.md", result["views"])
-        self.assertIn(f"{REQ}.md", result["views"])
-        self.assertEqual(self.edge_tiers(self.closure(f"{REQ}.md"), "backlog/story-g.md",
-                                         f"{REQ}.md", "related_to"),
-                         ["index", "frontmatter", "body"])
-        self.assertIn("Story G", (self.docs / f"{REQ}.md").read_text(encoding="utf-8"))
-        after = self.closure(f"{REQ}.md")
-        self.assertIn("backlog/story-g.md", after["closure"])
-        self.assertNotIn("backlog/story-g.md", {gap["path"] for gap in after["graph_gaps"]})
-        again = impact_closure.heal_relation(
-            self.docs, "backlog/story-g.md", f"{REQ}.md", "related_to",
-            "same", role="product-owner")
-        self.assertEqual(again["status"], "unchanged")
+    def test_a_changed_note_reads_what_it_answers_to_one_hop(self) -> None:
+        digest = stamp(self.docs / f"{REQ}.md")
+        result = self.closure("backlog/story-b.md")
+        self.assertIn(f"{REQ}.md", result["closure"])
+        self.assertNotIn(f"{REQ}.md", {row["path"] for row in result["proven_unchanged"]})
+        # One hop only: story-c depends on story-b, and what story-b's
+        # Requirement answers to is not pulled in through story-c.
+        self.assertIn("backlog/story-c.md", result["closure"])
+        self.assertTrue(digest)
 
-    def test_heal_on_approved_note_stales_its_stamp(self) -> None:
-        stamp(self.docs / "backlog/story-g.md")
-        result = impact_closure.heal_relation(
-            self.docs, "backlog/story-g.md", f"{REQ}.md", "related_to",
-            "evidence", role="product-owner")
-        self.assertTrue(result["approval_stale"])
-        self.assertIn("backlog/story-g.md", self.closure()["stale_approved"])
-
-    def test_heal_refuses_read_only_context(self) -> None:
-        before = (self.docs / "backlog/story-g.md").read_bytes()
-        for kwargs in ({"role": "backlog-reviewer"},
-                       {"role": "product-owner", "mode": "review"},
-                       {"role": "qa-engineer", "entry": "backlog_plan"}):
-            with self.subTest(**kwargs), self.assertRaises(PermissionError):
-                impact_closure.heal_relation(
-                    self.docs, "backlog/story-g.md", f"{REQ}.md", "related_to",
-                    "evidence", **kwargs)
-        self.assertEqual((self.docs / "backlog/story-g.md").read_bytes(), before)
-
-    def test_heal_refuses_when_the_vault_fails_its_relation_contract(self) -> None:
+    def test_every_gap_carries_evidence_and_a_suggested_fix(self) -> None:
         (self.docs / "backlog/story-h.md").write_text(
             note("story", "Story H", {"related_to": [("backlog/gone", "Gone")]}), encoding="utf-8")
-        before = (self.docs / "backlog/story-g.md").read_bytes()
-        with self.assertRaises(impact_closure.HealRefused):
-            impact_closure.heal_relation(self.docs, "backlog/story-g.md", f"{REQ}.md",
-                                         "related_to", "e", role="product-owner")
-        self.assertEqual((self.docs / "backlog/story-g.md").read_bytes(), before)
+        self.closure()
+        self.assertIn("backlog/gone", self.fixes[("backlog/story-h.md", "unresolved_relation")])
+        self.assertIn("backlog/story-g.md", self.fixes[("backlog/story-g.md", "no_typed_relations")])
+        # The module itself returns the fix on every gap.
+        for gap in impact_closure.closure(self.docs, [])["graph_gaps"]:
+            self.assertTrue(gap["suggested_fix"].strip(), gap)
 
-    def test_heal_refuses_contract_violations(self) -> None:
-        refused = impact_closure.HealRefused
-        cases = (
-            ("backlog/story-g.md", f"{REQ}.md", "related_to", ""),          # no evidence
-            ("backlog/story-g.md", f"{REQ}.md", "depends_on", "e"),         # outside contract
-            ("backlog/story-g.md", "backlog/story-g.md", "related_to", "e"),  # self edge
-            ("backlog/story-g.md", "backlog/gone.md", "related_to", "e"),   # missing target
-        )
-        for source, target, kind, evidence in cases:
-            with self.subTest(kind=kind, target=target), self.assertRaises(refused):
-                impact_closure.heal_relation(self.docs, source, target, kind, evidence,
-                                             role="product-owner")
-
-    def test_heal_validates_the_postimage_before_writing(self) -> None:
-        with self.assertRaisesRegex(impact_closure.HealRefused,
-                                    "^relation contract refuses the heal: .*cannot target type"):
-            impact_closure.heal_relation(self.docs, "backlog/story-g.md", f"{REQ}.md",
-                                         "uses_design", "e", role="product-owner")
-        self.assertFalse((self.docs / "maps").exists())
-
-    def test_heal_refuses_acyclic_cycle(self) -> None:
-        impact_closure.heal_relation(self.docs, "backlog/story-g.md", "backlog/story-u.md",
-                                     "derives_from", "e", role="product-owner")
-        with self.assertRaises(impact_closure.HealRefused):
-            impact_closure.heal_relation(self.docs, "backlog/story-u.md", "backlog/story-g.md",
-                                         "derives_from", "e", role="product-owner")
+    def test_the_module_is_read_only(self) -> None:
+        for name in ("heal_relation", "heal_views", "with_relation"):
+            self.assertFalse(hasattr(impact_closure, name), name)
+        before = vault_bytes(self.docs)
+        self.closure(f"{REQ}.md")
+        impact_closure.vault_views(self.docs)
+        self.assertEqual(vault_bytes(self.docs), before)
+        for verb in ("heal", "render"):
+            with self.subTest(verb=verb), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit):
+                impact_closure.main([verb, "--docs", str(self.docs)])
 
     def test_record_beyond_appends_once_with_reason(self) -> None:
         manifest = {"closure": []}
@@ -318,20 +282,13 @@ class ImpactClosureTest(unittest.TestCase):
         self.assertEqual(views["maps/_generated/relation-status.md"], [])
         self.assertEqual(views["delivery/process-policy.md"], ["delivery/process-policy.md"])
 
-    def test_cli_closure_and_read_only_heal(self) -> None:
+    def test_cli_closure(self) -> None:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             code = impact_closure.main(["closure", "--docs", str(self.docs),
                                         "--changed", f"{REQ}.md"])
         self.assertEqual(code, 0)
         self.assertIn("backlog/story-d.md", json.loads(out.getvalue())["closure"])
-        with contextlib.redirect_stderr(io.StringIO()):
-            code = impact_closure.main([
-                "heal", "--docs", str(self.docs), "--source", "backlog/story-g.md",
-                "--target", f"{REQ}.md", "--kind", "related_to", "--evidence", "e",
-                "--role", "backlog-reviewer"])
-        self.assertEqual(code, 3)
-
 
 if __name__ == "__main__":
     unittest.main()

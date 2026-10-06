@@ -567,5 +567,27 @@ class RealClosureTests(unittest.TestCase):
         self.assertEqual(sorted(task_inputs.vault_views(self.docs)), ["docs", "views"])
 
 
+class ChangeInventoryTests(unittest.TestCase):
+    """A changed canonical input of any canonical suffix is a change, so a
+    reader reads it rather than listing it unchanged."""
+
+    def test_a_changed_json_input_is_a_change(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        project = Path(temporary.name)
+        subprocess.run(["git", "init", "-q", str(project)], check=True)
+        docs = project / "workspace/docs/solution-design/_generated"
+        docs.mkdir(parents=True)
+        (docs / "topology.json").write_text("{}\n", encoding="utf-8")
+        (docs.parent / "note.md").write_text("# Note\n", encoding="utf-8")
+        command = ["git", "-C", str(project), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run([*command, "add", "-A"], check=True)
+        subprocess.run([*command, "commit", "-qm", "base"], check=True)
+        (docs / "topology.json").write_text('{"a": 1}\n', encoding="utf-8")
+        changed, commit = task_inputs.impact_changes(["git", "-C", str(project)], None, None)
+        self.assertEqual(changed, {"workspace/docs/solution-design/_generated/topology.json"})
+        self.assertTrue(commit)
+
+
 if __name__ == "__main__":
     unittest.main()

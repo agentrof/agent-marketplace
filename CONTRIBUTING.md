@@ -170,13 +170,13 @@ so every test picks the cheapest level that proves its rule:
   smoke. Independent scenarios are separate test methods sharing a helper.
 - Converting a test never weakens it: the same exception type and message are
   expected, and the converted rule is broken once to see the test fail.
-- Mark every test that starts Git or any other process, builds a
-  distribution, or writes outside its temporary directory with `@integration`
-  from `tools/tests/levels.py`, on the method or on its class. The local gate
-  runs only unit tests, fast and as many of the change's own as fit; pull
-  request CI runs unit and integration tests. CI and local workers fail an
-  unmarked test that starts a process or writes outside its temporary
-  directory, so the split stays true.
+- Mark every test that starts Git or any other process, or writes outside
+  its own temporary directory, with `@integration` from
+  `tools/tests/levels.py`, on the method or on its class. The local gate runs
+  only unit tests, fast and as many of the change's own as fit; pull request
+  CI runs unit and integration tests. CI and local workers fail an unmarked
+  test that starts a process, writes outside its own temporary directory or
+  leaves a thread running, so the split stays true.
 
 ## Guarding the guard
 

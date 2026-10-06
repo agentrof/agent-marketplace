@@ -481,11 +481,15 @@ def make_plan(root, target="origin/main", jobs=None, full=False):
                                              local_policy["budget_estimated_seconds"], integration)
     else:
         selected, mode, reason = tests.select_ids("impact", source["changed_paths"], policy, ids, root)
+        left = len([test_id for test_id in selected if test_id in integration])
         selected = [test_id for test_id in selected if test_id not in integration]
+        if left:
+            reason += f"; {left} integration tests left to pull request CI"
     jobs = local_policy["default_workers"] if jobs is None else jobs
     if type(jobs) is not int or not 1 <= jobs <= local_policy["max_workers"]:
         raise tests.CIError("worker count is outside local policy")
     jobs = min(jobs, os.cpu_count() or 1)
+    # A mandatory native regression marked @integration runs only in CI, so only a selected unit one binds here.
     must_run = sorted(set(selected) & {test_id for lane in policy["lanes"].values()
                       if lane["os"] == runner_os for test_id in lane.get("required_tests", [])})
     plan = {"schema_version": 1, "authority": "local_only", "candidate": source,

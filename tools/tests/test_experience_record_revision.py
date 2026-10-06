@@ -447,7 +447,7 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
         self.assertEqual(code, 0, output + errors)
         return output
 
-    def fixture(self, temporary):
+    def fixture(self, temporary, *, retired_owner=None):
         fixture = self.helpers.orphaned_create_scope(
             temporary, publish_application=False,
         )
@@ -489,6 +489,13 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
             compiler.fields(root / "experiences/checkout")["primary_process_ref"],
         ]
         compiler.rewrite(returns, data, body)
+        if retired_owner is not None:
+            retired = root / "experiences" / retired_owner / "flows/retired-flow-set.md"
+            retired.write_text(compiler.render_fm({
+                "type": "flow-set", "title": "Retired flow", "id": "FLW-090",
+                "revision": 1, "record_state": "retired",
+                "flow_refs": ["checkout:FLW-002@r1"],
+            }, "# Retired flow\n\nPreserve the historical reference.\n"), encoding="utf-8")
         for package in compiler.packages(root):
             compiler.render_package_record_navigation(package)
         compiler.render_experience_navigation(root)
@@ -546,6 +553,33 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
             self.assertIn(message, output + errors)
         self.assertEqual(self.helpers.tree_snapshot(fixture["docs"]), before)
 
+    def assert_preflight_rejected_unchanged(self, fixture, refs):
+        before = self.helpers.tree_snapshot(fixture["docs"])
+        selected_paths = {path.resolve() for path in fixture["paths"].values()}
+        with mock.patch.object(
+            compiler, "atomic_write_bytes", wraps=compiler.atomic_write_bytes,
+        ) as writes:
+            code, output, errors = self.revise(fixture, refs)
+        record_writes = [
+            call.args[0] for call in writes.call_args_list
+            if Path(call.args[0]).resolve() in selected_paths
+        ]
+        self.assertEqual(record_writes, [], "rejection must precede record writes")
+        self.assertEqual(code, 2, output + errors)
+        self.assertEqual(self.helpers.tree_snapshot(fixture["docs"]), before)
+
+
+    @integration
+    def test_retired_child_reference_rejects_same_and_cross_package_before_writes(self):
+        for owner in ("checkout", "returns"):
+            with self.subTest(owner=owner), tempfile.TemporaryDirectory() as temporary:
+                fixture = self.fixture(temporary, retired_owner=owner)
+                package = fixture["root"] / "experiences" / owner
+                historical = compiler.snapshots(package, "FLW-090", 1)
+                self.assertEqual(historical["record_state"], "retired")
+                self.assertEqual(historical["flow_refs"], ["checkout:FLW-002@r1"])
+                self.assert_preflight_rejected_unchanged(fixture, ["checkout:FLW-002@r1"])
+
     @integration
     def test_input_drift_rejects_with_its_findings_before_reading_the_application(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -569,7 +603,8 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
                 fixture["root"], fixture["plan"], fixture["plan"]["proposal_hash"],
                 phase="in_review",
             )
-            self.assert_rejected_unchanged(fixture)
+            self.assert_rejected_unchanged(
+                fixture, message="application open revision is not bound to the approved scope-plan action")
 
     @integration
     def test_review_phase_rejects_without_writes(self):
@@ -579,7 +614,8 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
                 self.successful(
                     "enter-review", "--experience-root", fixture["root"] / "experiences/checkout",
                 )
-            self.assert_rejected_unchanged(fixture)
+            self.assert_rejected_unchanged(
+                fixture, message="checkout lifecycle identity, phase or successor revision drifted after opening")
 
     @integration
     def test_an_owner_with_invalid_records_rejects_without_writes(self):

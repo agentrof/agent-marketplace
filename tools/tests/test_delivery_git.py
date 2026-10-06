@@ -4443,6 +4443,8 @@ class DeliveryGitTests(unittest.TestCase):
                     delivery_git.refresh_target(project, "DLV-001")
                 if kind != "missing_dod":
                     self.assertIn("changed a pinned source or Operation receipt", str(failure.exception))
+                else:
+                    self.assertIn("workspace/docs/delivery/definition-of-done.md", str(failure.exception))
                 refs = delivery_git.canonical_refs("DLV-001")
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)

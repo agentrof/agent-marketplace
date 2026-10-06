@@ -214,7 +214,8 @@ class LocalValidationTests(unittest.TestCase):
 
     @integration
     def test_real_workers_have_distinct_temporary_directories_and_account_for_all_tests(self):
-        # The Git call runs in the class fixture: a worker holds each unit test to its own process.
+        # The Git call runs in the class fixture: a worker holds each unit test to its own process
+        # and gives it its own temporary directory inside the worker's.
         self.test_path.write_text('import os, subprocess, tempfile, unittest\nfrom pathlib import Path\n'
             'class Example(unittest.TestCase):\n'
             '    @classmethod\n'
@@ -226,7 +227,8 @@ class LocalValidationTests(unittest.TestCase):
             '        temporary_root = Path(tempfile.gettempdir()).resolve()\n'
             '        checkout = Path.cwd().resolve()\n'
             '        self.assertNotIn(checkout, (temporary_root, *temporary_root.parents))\n'
-            '        self.assertEqual(temporary_root.name, expected_worker)\n'
+            '        self.assertEqual(temporary_root.parent.name, expected_worker)\n'
+            '        self.assertTrue(temporary_root.name.startswith("unit-"), temporary_root)\n'
             '        self.assertEqual(tempfile.gettempdir(), os.environ["TEMP"])\n'
             '        self.assertEqual(os.environ["TMPDIR"], os.environ["TMP"])\n'
             '        self.assertNotEqual(self.inside_git.returncode, 0, self.inside_git.stdout)\n'
@@ -565,6 +567,18 @@ class LocalValidationTests(unittest.TestCase):
         # Changed tests come first, then tests naming a changed input; the own test module waits for CI.
         self.assertEqual(modules, ['tools.tests.test_names_input', 'tools.tests.test_uses_helper'])
         self.assertIn('1 more left to pull request CI past the local budget', plan['selection_reason'])
+
+    @integration
+    def test_impact_selection_leaves_its_integration_tests_to_ci(self):
+        self.test_path.write_text('import unittest\nfrom tools.tests.levels import integration\n'
+                                  'class Example(unittest.TestCase):\n    def test_one(self): pass\n'
+                                  '    @integration\n    def test_two(self): pass\n')
+        self.source.write_text('value = 2\n')
+        self.git('add', '--all')
+        plan = ci_local.make_plan(self.root)
+        # A changed test module selects full coverage; the impact planner's selection still drops integration tests.
+        self.assertEqual(plan['selected_ids'], ['tools.tests.test_example.Example.test_one'])
+        self.assertTrue(plan['selection_reason'].endswith('; 1 integration tests left to pull request CI'))
 
     @integration
     def test_the_local_gate_runs_unit_tests_and_leaves_integration_tests_to_ci(self):

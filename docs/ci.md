@@ -40,11 +40,17 @@ validation. Explicit platform skips remain visible; mandatory native Windows
 regressions cannot skip.
 
 A worker, in CI or local validation, holds every test not marked
-`@integration` to its own process and its temporary directory: while such a
-test runs, starting a process or writing outside the temporary directory
-raises, is recorded and fails the test even when the test catches the error,
-so the unit and integration split cannot drift. Class and module fixtures run
-outside that watch. `make test` runs unittest without it.
+`@integration` to its own process and its own temporary directory. Each such
+test gets a fresh directory as `TMPDIR`, `TMP`, `TEMP` and `tempfile`'s
+default, and a process-wide audit hook watches every thread while it runs:
+starting a process (subprocess, multiprocessing, `os.system`, fork, spawn,
+exec) or writing outside that directory (any open for writing, SQLite files,
+directory, link, rename, remove, mode, time and FIFO calls, through a
+directory descriptor too) raises, is recorded and fails the test even when
+the test catches the error, and so does a thread the test leaves running.
+The innermost runner decides, so a runner under test keeps its own watch.
+Class and module fixtures run outside it, and `make test` runs unittest
+without it.
 
 A worker, in CI or local validation, runs its tests with tripwire `claude`
 and `codex` binaries in place of the host binaries a session names:
@@ -129,8 +135,8 @@ The direct interfaces are `python3 tools/ci_local.py check --staged --target
 origin/main` and `python3 tools/ci_local.py verify --staged --target origin/main`.
 `check --fresh` ignores saved test results. The gate runs unit tests only:
 a test marked `@integration` (`tools/tests/levels.py`), alone or through its
-class, starts a process, builds a distribution or writes outside its
-temporary directory, and only pull request CI runs it. `ci-local-policy.json`
+class, starts a process or writes outside its own temporary directory, and
+only pull request CI runs it. `ci-local-policy.json`
 sets `test_selection`. At `changed` the gate runs the change's own unit tests,
 most specific first, while pull request CI runs every test on Linux:
 1. the changed test methods of each changed test module, or the whole module
@@ -211,7 +217,9 @@ bytes and the filtered configuration are compared instead.
 Results expire after at most 24 hours; reuse does not extend that deadline.
 The latest failed, interrupted, changed or corrupt attempt invalidates prior
 success. The source is rechecked after statics and workers. Missing, duplicate,
-partial or failed worker reports and skipped mandatory native regressions fail.
+partial or failed worker reports fail, and so does a skipped mandatory native
+regression the gate selected; the Windows lane's mandatory regressions are
+integration tests, so only its CI shards run them.
 `verify` checks this identity immediately before commit. A process-scoped OS lock
 prevents simultaneous validators in one checkout and releases on process exit.
 

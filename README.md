@@ -105,3 +105,24 @@ Report vulnerabilities only through the repository's
 [private vulnerability reporting form](https://github.com/agentrof/agent-marketplace/security/advisories/new).
 Do not include security details in public issues, pull requests or commit
 messages. See [SECURITY.md](SECURITY.md) for scope and disclosure guidance.
+
+## License
+
+Agentrof Agent Marketplace is licensed under the
+[Apache License 2.0](LICENSE). Redistributions keep the attribution in
+[NOTICE](NOTICE). The Agentrof names and logo are covered by
+[TRADEMARKS.md](TRADEMARKS.md); the license grants no trademark rights.
+
+Releases published before the change to Apache 2.0 remain available under
+the MIT License they were released with.
+
+### Built with Agentrof Agent Marketplace
+
+If your project uses Agentrof Agent Marketplace, we would appreciate it if
+you showed this badge in your README. It is optional.
+
+[![Built with Agentrof Agent Marketplace](https://img.shields.io/badge/Built%20with-Agentrof%20Agent%20Marketplace-informational)](https://github.com/agentrof/agent-marketplace)
+
+```markdown
+[![Built with Agentrof Agent Marketplace](https://img.shields.io/badge/Built%20with-Agentrof%20Agent%20Marketplace-informational)](https://github.com/agentrof/agent-marketplace)
+```

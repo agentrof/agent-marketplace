@@ -1,0 +1,15 @@
+Agentrof Agent Marketplace
+Copyright 2026 Agentrof
+
+This product includes software developed by Agentrof (https://github.com/agentrof/agent-marketplace).
+
+Third-party components
+----------------------
+
+Front Matter Title (Obsidian community plugin), version 4.1.1
+Copyright (C) Snezhig (https://github.com/snezhig)
+Licensed under the GNU General Public License, version 3.
+Vendored unmodified, with its license text, under
+plugins/software-engineering-team/templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/
+as an independent aggregated component; the Apache License 2.0 of this
+product does not apply to it, and its license applies to that component only.

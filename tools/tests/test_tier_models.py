@@ -32,6 +32,8 @@ except ModuleNotFoundError:  # run as a script from tools/tests
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tools.tests import python_entry
+
 TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR))
 sys.path.insert(0, str(TESTS_DIR.parent))
@@ -71,7 +73,9 @@ ISOLATED = fixtures.isolated_hosts(os.environ, Path(ISOLATION.name))
 FAKE_CODEX_VERSION = "0.159.2-test"
 
 
-def run_script(script: Path, *args: str) -> subprocess.CompletedProcess:
+def run_script(script: Path, *args: str, process=True) -> subprocess.CompletedProcess:
+    if not process:
+        return python_entry.run([script, *args], env=dict(ISOLATED, PYTHONDONTWRITEBYTECODE="1"))
     return subprocess.run(
         [sys.executable, str(script), *args], capture_output=True, text=True,
         check=False, timeout=120, env=dict(ISOLATED, PYTHONDONTWRITEBYTECODE="1"),
@@ -191,9 +195,9 @@ class Project:
             value["role_tiers"] = role_tiers
         self.config.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
-    def project_config(self, *args: str, package: Path | None = None) -> subprocess.CompletedProcess:
+    def project_config(self, *args: str, package: Path | None = None, process=False) -> subprocess.CompletedProcess:
         script = (package or self.market.package) / "scripts" / "project_config.py"
-        return run_script(script, args[0], "--config", str(self.config), *args[1:])
+        return run_script(script, args[0], "--config", str(self.config), *args[1:], process=process)
 
     def generator(self, *args: str, package: Path | None = None) -> subprocess.CompletedProcess:
         script = (package or self.market.package) / "scripts" / "generate_claude_project.py"
@@ -517,7 +521,6 @@ class ResolutionTests(unittest.TestCase):
         self.assertEqual(role_settings.source_text(rows[VARIANT]), "package")
 
 
-@integration
 class ConfigTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -548,6 +551,16 @@ class ConfigTests(unittest.TestCase):
 
     def config(self) -> dict:
         return load(self.project.config)
+
+    @integration
+    def test_config_cli_process_accepts_and_refuses_overrides(self):
+        result = self.project.project_config("check", process=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host):
+                result = self.project.project_config("set-tier", "--host", host, "--tier", "high",
+                                                     "--model", "not a model", process=True)
+                self.assertNotEqual(result.returncode, 0)
 
     def test_check_accepts_the_overrides_the_package_takes(self):
         market = self.market
@@ -901,7 +914,6 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("codex", text.stdout)
 
 
-@integration
 class ModelChoiceTests(unittest.TestCase):
     """`tiers --model-list` lists each tier's model choices for the configure topic:
     the package model, then the active host's list or the catalog, then `session`."""
@@ -959,6 +971,7 @@ class ModelChoiceTests(unittest.TestCase):
                     self.assertEqual(choice["recommended_effort"],
                                      self.recommended(host, tier, efforts))
 
+    @integration
     def test_without_a_host_list_the_catalog_stands_in(self):
         # Every build ships the adapter; an older package has none.
         self.assertTrue((self.market.package / "scripts" / "host_models.py").is_file())
@@ -1011,6 +1024,7 @@ class ModelChoiceTests(unittest.TestCase):
                          self.market.efforts("claude", "claude-sonnet-5-5"))
         self.assertEqual(by_model["session"]["efforts"], self.market.efforts("claude", "session"))
 
+    @integration
     def test_codex_offers_only_the_models_its_own_picker_shows(self):
         # Codex's account catalog holds models its picker hides, such as its
         # review model; `/configure models` offers only `list` entries.

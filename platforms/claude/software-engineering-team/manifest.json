@@ -6,7 +6,7 @@
     "name": "Agentrof",
     "url": "https://github.com/agentrof"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": [],
   "skills": "./skills/"
 }

@@ -154,7 +154,7 @@ def scaffold_manifest(name: str, description: str, product_contract: dict) -> di
         },
         "homepage": repository,
         "repository": repository,
-        "license": "MIT",
+        "license": "Apache-2.0",
         "skills": "./skills/",
         "interface": {
             "displayName": _title(name),

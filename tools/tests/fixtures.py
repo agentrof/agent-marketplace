@@ -77,7 +77,7 @@ def make_valid_root(
             "source": f"./dist/claude/{PLUGIN}",
             "description": "fixture",
             "version": version,
-            "license": "MIT",
+            "license": "Apache-2.0",
         }],
     }, indent=2) + "\n")
     write(root / ".agents" / "plugins" / "marketplace.json", json.dumps({

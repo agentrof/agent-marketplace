@@ -128,7 +128,7 @@ def scaffold_manifest(name: str, description: str, product_contract: dict) -> di
             "name": vendor["display_name"],
             "url": f"https://github.com/{vendor['id']}",
         },
-        "license": "MIT",
+        "license": "Apache-2.0",
         "skills": "./skills/",
     }
 
@@ -144,7 +144,7 @@ def scaffold_catalog_entry(name: str, manifest: dict, product_contract: dict) ->
         "source": f"./dist/claude/{name}",
         "description": manifest["description"],
         "version": manifest["version"],
-        "license": "MIT",
+        "license": "Apache-2.0",
     }
 
 

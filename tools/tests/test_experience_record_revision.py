@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from tools.tests.levels import integration
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -533,12 +534,59 @@ class ExperienceRecordRevisionTests(unittest.TestCase):
         with self.upstream(fixture["new_receipts"]):
             return self.helpers.run_in_process(*self.arguments(fixture, refs))
 
-    def assert_rejected_unchanged(self, fixture, refs=None):
+    def assert_rejected_unchanged(self, fixture, refs=None, message=None):
         before = self.helpers.tree_snapshot(fixture["docs"])
         code, output, errors = self.revise(fixture, refs)
         self.assertEqual(code, 2, output + errors)
         self.assertTrue(output or errors)
+        if message is not None:
+            self.assertIn(message, output + errors)
         self.assertEqual(self.helpers.tree_snapshot(fixture["docs"]), before)
+
+    @integration
+    def test_input_drift_rejects_with_its_findings_before_reading_the_application(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.fixture(temporary)
+            before = self.helpers.tree_snapshot(fixture["docs"])
+            with self.upstream(fixture["new_receipts"]), mock.patch.object(
+                compiler.stage_package, "verify", return_value=({}, ["input receipt is stale"]),
+            ):
+                code, output, errors = self.helpers.run_in_process(*self.arguments(fixture))
+            self.assertEqual(code, 1, output + errors)
+            lines = (output + errors).splitlines()
+            self.assertTrue(lines)
+            self.assertEqual(set(lines), {"ERROR input receipt is stale"})
+            self.assertEqual(self.helpers.tree_snapshot(fixture["docs"]), before)
+
+    @integration
+    def test_application_review_phase_rejects_without_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.fixture(temporary)
+            compiler.write_open_application_state(
+                fixture["root"], fixture["plan"], fixture["plan"]["proposal_hash"],
+                phase="in_review",
+            )
+            self.assert_rejected_unchanged(fixture)
+
+    @integration
+    def test_review_phase_rejects_without_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.fixture(temporary)
+            with self.upstream(fixture["new_receipts"]):
+                self.successful(
+                    "enter-review", "--experience-root", fixture["root"] / "experiences/checkout",
+                )
+            self.assert_rejected_unchanged(fixture)
+
+    @integration
+    def test_an_owner_with_invalid_records_rejects_without_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.fixture(temporary)
+            source = fixture["root"] / "experiences/returns/flows/flow-24-flow-set.md"
+            duplicate = source.with_name("flow-99-flow-set.md")
+            duplicate.write_bytes(source.read_bytes())
+            self.assert_rejected_unchanged(
+                fixture, message="returns invalid records: flows/flow-99-flow-set.md: duplicate package record id FLW-024")
 
     def test_twelve_seeds_revise_thirty_three_with_cycle_and_typed_aliases(self):
         with tempfile.TemporaryDirectory() as temporary:

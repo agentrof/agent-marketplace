@@ -3054,30 +3054,45 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.claim_items(project, "DLV-002")["claims"], ["AUTH-02"])
 
     @integration
-    def test_reservation_refuses_a_fence_another_delivery_or_a_slot_holds(self):
-        """A merged Delivery leaves an idle Fence, which a reservation still refuses while another
-        Delivery's Integration ref or a Slot ref holds it, naming that ref as the remote lists it,
-        before any ref moves (#315). Every other Fence state is decided in DeliveryGitDecisionTests."""
+    def test_reservation_refuses_a_busy_ungoverned_or_held_fence(self):
+        """A merged Delivery leaves an idle Fence. A reservation still refuses it, before any ref
+        moves, while the remote Fence is busy, carries another Governance, or another Delivery's
+        Integration ref or a Slot ref holds it, naming that ref as the remote lists it (#315).
+        Every other Fence state is decided in DeliveryGitDecisionTests."""
         project, docs = self.two_story_project()
         for delivery, slug, story in (("DLV-001", "auth", "AUTH-01"), ("DLV-008", "session", "AUTH-02")):
             self.scope_delivery(docs, delivery, slug, story)
         first = delivery_git.reserve_delivery(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-008")
         other = delivery_git.canonical_refs("DLV-001")["integration"]
         # A merged Delivery drops its Integration ref and leaves the idle Fence.
         delivery_git.atomic_push(project, "origin", [(other, first["integration"], "")])
-        for held, oid, name in (
-            (other, first["integration"], "agentrof/deliveries/dlv-001"),
-            ("refs/heads/agentrof/slots/001", first["target"], "agentrof/slots/001"),
+        _ref, idle, values = delivery_git._fence_context(project, "origin")
+        for fence, held, finding in (
+            ({"Mode": "governance"}, {}, ("DELIVERY_REF_COLLISION",
+                                          "reservation requires an idle open Fence, not one with Mode governance")),
+            ({"Governance-Hash": "sha256:" + "2" * 64}, {},
+             ("DELIVERY_FENCE_GOVERNANCE", "the Fence does not carry the approved Governance; "
+                                           "apply it with apply-governance before reserving")),
+            ({}, {other: first["integration"]},
+             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/deliveries/dlv-001")),
+            ({}, {"refs/heads/agentrof/slots/001": first["target"]},
+             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/slots/001")),
         ):
-            with self.subTest(held=name):
-                delivery_git.atomic_push(project, "origin", [(held, "", oid)])
+            with self.subTest(finding=finding[1]):
+                held = dict(held)
+                if fence:
+                    held[refs["fence"]] = delivery_git._fence_child(project, idle, {**values, **fence}, "Hold the Fence")
+                # Each held ref goes back to what it held before: the idle Fence, or absent.
+                resting = {ref: idle if ref == refs["fence"] else "" for ref in held}
+                delivery_git.atomic_push(project, "origin", [(ref, resting[ref], oid) for ref, oid in held.items()])
                 try:
                     before = delivery_git.run_git(project, "ls-remote", "origin")
                     self.assertEqual(self.refused_finding(lambda: delivery_git.reserve_delivery(project, "DLV-008")),
-                                     ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: " + name))
+                                     finding)
                     self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
                 finally:
-                    delivery_git.atomic_push(project, "origin", [(held, oid, "")])
+                    delivery_git.atomic_push(project, "origin", [(ref, oid, resting[ref]) for ref, oid in held.items()])
 
     @integration
     def test_item_start_names_apply_governance_after_a_governance_revision(self):
@@ -3821,6 +3836,7 @@ class DeliveryGitTests(unittest.TestCase):
         beyond = "beyond its Architecture stamp and its converged Integration"
         base_rule = "integration base only forward"
         variants = {
+            "plan_beyond_integration": (lambda: edit_note(worktree / relative["plan"]), "may not edit Delivery control"),
             "item_field_beyond_integration": (lambda: edit_note(item, "owner_role", "frontend_developer"), beyond),
             "base_not_taken": (None, base_rule),
             "base_off_integration": (None, base_rule),
@@ -4406,15 +4422,14 @@ class DeliveryGitTests(unittest.TestCase):
 
     @integration
     def test_target_refresh_rejects_changed_pinned_source_and_operation_receipts(self):
-        """A changed pinned Story is refused from the remote pins alone, and a Definition of Done the
-        target removed is read as the pinned input it is. The pinned-input comparison is decided for
-        every kind in DeliveryGitDecisionTests."""
-        for kind in ("story", "missing_dod"):
+        for kind in ("story", "operation", "dod", "missing_dod"):
             with self.subTest(kind=kind):
                 project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
                 published = delivery_git.publish_execution_plan(project, "DLV-001")
                 props, _body = delivery_compile.split_note(item)
-                path = docs / props["story_path"] if kind == "story" else docs / "delivery/definition-of-done.md"
+                path = (docs / props["story_path"] if kind == "story" else
+                        docs / "delivery/definition-of-done.md" if kind in {"dod", "missing_dod"} else
+                        operation_compile.contract_path(docs, "verification"))
                 if kind == "missing_dod":
                     path.unlink()
                 else:
@@ -4425,8 +4440,6 @@ class DeliveryGitTests(unittest.TestCase):
                     delivery_git.refresh_target(project, "DLV-001")
                 if kind != "missing_dod":
                     self.assertIn("changed a pinned source or Operation receipt", str(failure.exception))
-                else:
-                    self.assertIn("workspace/docs/delivery/definition-of-done.md", str(failure.exception))
                 refs = delivery_git.canonical_refs("DLV-001")
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)

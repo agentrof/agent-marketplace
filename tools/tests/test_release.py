@@ -599,6 +599,16 @@ class ReleaseResetPolicyTests(unittest.TestCase):
                 ),
                 "may only add it",
             ),
+            "deleted": (
+                lambda: (self.root / ".release" / "reset.json").unlink(),
+                "may only add it",
+            ),
+            "renamed": (
+                lambda: (self.root / ".release" / "reset.json").rename(
+                    self.root / ".release" / "earlier-reset.json"
+                ),
+                "may only add it",
+            ),
         }, base=self.reset_sha)
 
 
@@ -932,6 +942,20 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "complete Git history"):
             self.check()
 
+    def test_a_release_commit_made_before_the_base_advanced_is_refused(self):
+        self.git("checkout", "-q", "main")
+        write_changeset(self.root, "later-fix", {fixtures.PLUGIN: "patch"})
+        change_package(self.root, "A later fix on main.")
+        self.git("add", "--all")
+        self.git("commit", "-qm", "fix: a later fix on main")
+        advanced = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "--detach", self.head_sha)
+        with self.assertRaisesRegex(
+            release.ReleaseError, "base advanced after the release commit was made",
+        ):
+            self.check(advanced)
+
+
 @integration
 class ReleaseMonthBoundaryTests(unittest.TestCase):
     """check-pr replays a release commit at its own date: it stays valid for
@@ -983,6 +1007,20 @@ class ReleaseMonthBoundaryTests(unittest.TestCase):
             self.check(at(2026, 11, 2))
         redate(at(2026, 11, 5), at(2026, 10, 31, 23, 59, 59))
         self.assertEqual(self.check(at(2026, 11, 6)), {"mode": "release", "version": VERSION})
+
+    def test_a_release_commit_of_a_month_not_begun_is_refused(self):
+        # Only a clock that runs ahead dates a commit in a later month.
+        self.git("checkout", "-q", "--detach", self.feature_sha)
+        bump_at(self.root, at(2026, 11, 1, 0, 0, 1))
+        with self.assertRaisesRegex(
+            release.ReleaseError,
+            "it is dated 2026-11-01, in a month that has not begun; fix the clock",
+        ):
+            self.check(at(2026, 10, 31, 23, 59, 59))
+        self.assertEqual(
+            self.check(at(2026, 11, 1, 0, 0, 2)), {"mode": "release", "version": "2026.11.1"},
+        )
+
 
 @integration
 class BumpCommandTests(unittest.TestCase):

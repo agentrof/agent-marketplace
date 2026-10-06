@@ -22,6 +22,30 @@
         "threshold": "A median proposal-to-publication time of at most 30 min with exactly one owner gate per light-path Delivery, and zero reopens or re-plans caused by missed architecture or Operation impact, with every shared quality guard holding and the owner's approval."
       }
     },
+    "backlog_path": {
+      "summary": "Whether a backlog revision of a small technical or defect Requirement runs the standard epic and root review ceremony, or one reader reviews the story delta and the compiler writes the root review round as a structural check.",
+      "issue": 441,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "standard",
+          "tradeoffs": "Every backlog revision runs the epic review of each changed epic and a root review read by the root reader or panel, whatever the revision's size or kind. Today's behaviour and the baseline the light path is measured against: in one measured project, a technical Requirement whose code was already prepared ran the full ceremony for one small story, and the writer spent most of the time re-reading the flow and its rule set and running the epic and root review steps, although writing the story took a few minutes."
+        },
+        {
+          "id": "light_when_eligible",
+          "tradeoffs": "A revision the compiler finds eligible, Requirement mode over an earlier approved revision, a Requirement whose request_kind is technical or defect, and at most the package's max_changed_stories changed or added stories, each technical or defect and all in one epic, is reviewed by one reader of that epic's review round who reads only the story delta, and record-light-root-review writes the root review round from the compiler's structural checks; approval re-checks the eligibility and refuses a light root review the revision has outgrown, and every other revision takes the standard path. One review pass instead of an epic panel and a root reader for a small change, while a cross-story defect between the delta and an unchanged story is caught only by the compiler's structural checks, not by a reader."
+        }
+      ],
+      "default": "standard",
+      "value_data": {
+        "light_when_eligible": ["skill-content/backlog-plan/data/light-backlog-path.json"]
+      },
+      "metric": "Per light-path backlog revision: wall clock from begin-revision to approval, review passes and readers, writer reading time, and fallbacks to the standard path with the reason the compiler reported, against standard revisions of a similar size. Guards: a defect found in Delivery that a root reader would have caught, and backlog revisions reopened after a light approval.",
+      "promotion": {
+        "unit": "At least 3 light-path backlog revisions, each replayed as a frozen standard root review. The switch changes only backlog planning, which runs outside any Delivery, so revisions replace the 3-Delivery default.",
+        "threshold": "A median begin-revision-to-approval wall clock at most 40% of comparable standard revisions, the same verdict and every critical and major finding of the standard replay, and zero revisions reopened for a cross-story defect the light path missed, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "execution_planning": {
       "summary": "How execution planning writes and reviews the facts an execution plan needs: each Operation contract written and reviewed on its own, or every fact written once in the document that owns it and the revised contracts reviewed together with the Item topology in one pass.",
       "issue": 324,
@@ -829,6 +853,159 @@
       "promotion": {
         "unit": "At least 3 runs with 2 or more parallel fix lanes.",
         "threshold": "No main checkout branch change and no lost lane work, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "review_scope": {
+      "summary": "What a role reads in full for a change: the whole package its step names, or the change's impact closure over the vault's typed relations, with every approved, unchanged note outside it as a hash-bound summary, compiler structural checks before any reader starts and a delta-only confirmation re-review.",
+      "issue": 441,
+      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
+      "values": [
+        {
+          "id": "full",
+          "tradeoffs": "Every writer and reader reads the complete package its step names, whatever the change touched. Today's behaviour and the baseline the closure read is measured against: in one measured project, a one-story Backlog Planning run spent 31 of its first 68 minutes on readers re-reading approved, unchanged notes, and the confirmation of two small fixes took longer than the fixes."
+        },
+        {
+          "id": "impact_closure",
+          "tradeoffs": "impact_closure.py derives the changed notes from the approval stamps and their closure over the typed relations and shared contracts; a role reads the closure in full and every approved, unchanged note outside it only as its hash-bound summary, reads beyond it when unsure and records why, and a writer fixes each reported relation gap through its owning compiler and recomputes the closure. The owning compiler's structural check runs before any reader starts, and a confirmation re-review reads only the fixed lines, the notes the fix touches and the open findings. A first approval, a shared contract or policy change and a graph gap widen the read. Reading scales with the change, while a defect between two unchanged notes with no relation between them is outside every reader's closure until a reader suspects it."
+        }
+      ],
+      "default": "full",
+      "reference_scope": "owning_flows",
+      "metric": "Per review or writer pass: wall clock and input tokens per reader, closure size against package size, beyond-closure reads with their reasons, relation gaps reported and fixed, widenings with their cause and confirmation re-review minutes, and the verdict and findings against a full read of the same frozen inputs; seeded cross-note defects caught.",
+      "promotion": {
+        "unit": "At least 5 reviewed changes across at least 3 flows, each replayed as a frozen full read.",
+        "threshold": "The same verdict and every critical and major finding of the full replay, a median reader wall clock at most 40% of the replay's, every seeded defect inside a closure reported and every reported relation gap fixed through its owning compiler, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "review_fanout": {
+      "summary": "Whether one reader reads every changed unit of a review, or one reader per changed unit reads in parallel and one aggregator decides the cross-unit questions the compilers do not already enforce.",
+      "issue": 441,
+      "flows": ["backlog-planning", "business-analysis", "design-system", "execution-planning", "experience-design", "operation", "solution-design"],
+      "values": [
+        {
+          "id": "single_reader",
+          "tradeoffs": "The step's reader, or each lens reader of a panel, reads every changed unit in turn. Today's behaviour; review wall clock grows with the sum of the units."
+        },
+        {
+          "id": "per_unit",
+          "tradeoffs": "A review with more than one changed unit, a story, contract, process package, Item or document, spawns one fresh reader per unit in one message, each reading that unit's inputs, and then one aggregator that reads only the readers' findings and the compilers' cross-unit facts and decides overlap, ordering and shared-contract meaning; a single unit keeps one reader. Wall clock bounded by the largest unit, while a cross-unit defect no compiler checks rests on the aggregator, who reads a unit's text only on a stated, recorded request."
+        }
+      ],
+      "default": "single_reader",
+      "reference_scope": "owning_flows",
+      "metric": "Per review with at least two changed units: wall clock against its slowest unit reader, readers run, aggregator requests for unit text with their reasons, and cross-unit findings against a single-reader review of the same frozen inputs.",
+      "promotion": {
+        "unit": "At least 5 reviews of at least 2 changed units across at least 2 flows, each replayed as a frozen single-reader review.",
+        "threshold": "Every critical and major finding of the replay, a median wall clock at most 50% of the replay's and zero cross-unit defects found later that the aggregator had the facts to report, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "review_levels": {
+      "summary": "Whether the review levels of a step run one after another, or a level that consumes no earlier level's verdict starts beside it, with approval still waiting for every level.",
+      "issue": 441,
+      "flows": ["backlog-planning", "execution-planning", "operation"],
+      "values": [
+        {
+          "id": "sequential",
+          "tradeoffs": "Each review level starts only after the earlier one is approved, such as the backlog root review after every epic review. Today's behaviour; one full serial wait per review chain."
+        },
+        {
+          "id": "concurrent_when_independent",
+          "tradeoffs": "A level its flow declares independent starts with the earlier level over the same frozen inputs, such as the backlog root review beside the epic reviews once every source is finished, or an Operation contract review beside the execution-plan topology review when neither cites the other's open findings; approval waits for every level, and a blocking fix re-runs every level whose manifest hash it changes. One serial wait less per chain, while a fix found at one level can make the other level's finished read stale and re-run it."
+        }
+      ],
+      "default": "sequential",
+      "reference_scope": "owning_flows",
+      "metric": "Per review chain: wall clock from the first level's start to the last verdict against the levels' summed times, levels re-run because a fix at another level staled them, and findings against a sequential run of the same frozen inputs.",
+      "promotion": {
+        "unit": "At least 5 review chains of at least 2 levels across at least 2 flows.",
+        "threshold": "Every critical and major finding of a sequential run, a median chain wall clock at most 70% of the summed level times and at most one level re-run per chain on median, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "context_pack": {
+      "summary": "Whether a task starts by reading every flow, skill and reference file its entry binds, or from a derived, hash-bound digest of the rules its role applies at that step, with every source one read away.",
+      "issue": 441,
+      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "A task reads every flow, skill and reference file its manifest binds before it acts. Today's behaviour and the baseline the digest is measured against: in one measured project, a writer spent most of a 33-minute pass reading the full flow and rule set before writing a story of a few minutes' content."
+        },
+        {
+          "id": "role_digest",
+          "tradeoffs": "A spawned role receives its pack from context_pack.py build instead of the full required reads: the rules that role applies at that step, required sections, field contracts, refusals and the switch instructions in force, each with the sha256 of its source file. It reads a named source in full only when the pack does not cover its case and records that read and why, and a pack whose source hashes no longer match is refused. Most of the fixed reading time goes, while a rule the digest misses is applied only when the role notices the gap."
+        }
+      ],
+      "default": "off",
+      "reference_scope": "owning_flows",
+      "metric": "Per task: minutes and input tokens before the first write or finding, source files read beyond the digest with their reasons, and findings or refusals traced to a rule the digest left out, against tasks of the same entry and role at off.",
+      "promotion": {
+        "unit": "At least 10 tasks across at least 3 entries, writers and readers both.",
+        "threshold": "A median time to first write or finding at most 50% of the off baseline and zero defects traced to a rule the digest left out, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "step_timing": {
+      "summary": "Whether the coordinator records the start and end of each flow step and role spawn, with its reading, writing, review and waiting phases, in a durable per-run timing record, or records no step timing.",
+      "issue": 441,
+      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "No step or spawn is timed by the package; step_timing.py start and end write nothing. Today's behaviour; where time goes is reconstructed afterwards, if at all."
+        },
+        {
+          "id": "recorded",
+          "tradeoffs": "The coordinator runs step_timing.py start before each step and end after it, records each role spawn with its phase, and ends every run with step_timing.py report --write, a durable per-run record no package command removes. Every step's time and its breakdown are measured as they happen, while each step costs the coordinator two commands and the record grows with every run."
+        }
+      ],
+      "default": "off",
+      "reference_scope": "owning_flows",
+      "metric": "Per run: steps and spawns recorded against those run, spans left open, and the report written at the run's end.",
+      "promotion": {
+        "unit": "At least 3 Deliveries and 3 backlog revisions run with recorded.",
+        "threshold": "Every step and spawn of each run recorded with no span left open and a report written for every run, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "step_budgets": {
+      "summary": "Whether each flow step and role spawn is timed against a maximum in minutes and every step that exceeds its maximum is reported at once with its breakdown, or steps run without a budget report. A budget is a maximum, never an expectation: a step may finish well under it, and a budget never blocks, fails or shortens a step.",
+      "issue": 441,
+      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "Steps run without a maximum, and nothing compares a step's time with a budget. Today's behaviour; a slow step shows only when the owner asks."
+        },
+        {
+          "id": "enforced",
+          "tradeoffs": "With switch step_timing at recorded, step_timing.py compares each step and role spawn with its maximum, the package target unless the owner sets one; a step may finish well under it, and only a step that exceeds it is reported, at once, with its reading, writing and waiting breakdown, its largest contributor and the lever that applies, and every run ends with a per-step report against the maximums. Enforcement is reporting only: nothing is blocked, failed or shortened for time. The owner sees every exceeded maximum as it happens, while without step_timing at recorded no time is measured and nothing is reported."
+        }
+      ],
+      "default": "off",
+      "reference_scope": "owning_flows",
+      "parameters": {
+        "summary": "Maximum minutes per flow step or role spawn; a step may finish well under it. The package ships its initial targets as package limits, since the budgets only report; a parameter the owner sets replaces its target.",
+        "values": ["enforced"],
+        "declared_by": {
+          "path": "skill-content/configure/data/step-budgets.json",
+          "key": "budgets"
+        },
+        "type": "positive_integer",
+        "min_count": 1,
+        "package_limits": {
+          "backlog_revision": 10,
+          "confirmation_rereview": 3,
+          "delivery_and_execution_planning": 15,
+          "reader_closure_unit": 5,
+          "requirement_technical": 10,
+          "story_end_to_end": 180
+        }
+      },
+      "value_data": {
+        "enforced": ["skill-content/configure/data/step-budgets.json"]
+      },
+      "metric": "Per run: steps over their maximum with their breakdown and named lever, steps with no recorded start or end, and the per-step report's completeness against the steps run.",
+      "promotion": {
+        "unit": "At least 3 Deliveries and 3 backlog revisions run with enforced and step_timing at recorded.",
+        "threshold": "A per-step report for every run with no step missing, every exceeded maximum reported during the run rather than after it, and no step blocked or shortened for time, with every shared quality guard holding and the owner's approval."
       }
     },
     "level_change_map": {

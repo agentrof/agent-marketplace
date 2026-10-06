@@ -6,18 +6,39 @@ backlog. Its canonical state is Markdown under `workspace/docs/backlog/`.
 Spawn template: paste `{{constitution}}` into every role prompt. Load the
 `obsidian-vault` skill before touching the docs tree; its policy is authoritative.
 
+Vault first, per constitution section 5: every role starts from the default `project_reading` plan.
+Batch-read its units, using the frozen context reader for frozen candidates. When context is insufficient, wrong or unavailable, use manual search, reads and relationship discovery
+on the role's initiative or parent direction; record sources and reasons, rebind evidence, preserve gates and return `context_findings` to the parent for user-approved reporting.
+For gaps, use `vault_query.py`, machine indexes and generated views, typed frontmatter, relation blocks and wikilinks, then maps and targeted search.
+Fallback navigation with a shell can use `home.md`,
+`maps/_generated/relation-status.md`, `maps/_generated/cross-subtree-matrix.md` and
+`maps/_generated/stale-relations.md`, `maps/backlog.md`, `backlog_compile.py check --json` (story
+graph, dependency edges, source-to-scenario map), and the epic and root review relation sets. Switch
+`context_pack`: at `role_digest`, a spawned role receives its pack from `context_pack.py build
+--entry <entry> --role <role> --mode <mode> --project-root <root>` instead of the full required
+reads; it reads a named source in full only when the pack does not cover a case, and records that
+read and why, as `skill-content/challenge-review/references/switch-context_pack-role_digest.md`
+defines. Switch `step_timing`: at `recorded`, the coordinator runs `step_timing.py start --run <run>
+--step <step> [--budget <id>]` before each step and `step_timing.py end --run <run> --span <span>`
+after it, and records each role spawn with `--kind spawn --parent <step span> --role <role> --phase
+reading|writing|review|re_review|waiting`. An end that returns overrun is reported to the owner at
+once with its breakdown, largest contributor and lever. The run ends with `step_timing.py report
+--run <run> --write`, as `skill-content/challenge-review/references/switch-step_timing-recorded.md`
+defines. Switch `step_budgets`: at `enforced`, each budgeted step is compared with its maximum, the
+owner's parameter or the package target in `skill-content/configure/data/step-budgets.json`; a step
+may finish well under it, and only an exceeded maximum is reported, never blocking, as
+`skill-content/challenge-review/references/switch-step_budgets-enforced.md` defines.
+
 ## 0. Preconditions
 
 - Requirement Flow has approved the request impact matrix. Every stage marked
   `required` is approved/current, every `reuse` target is valid, and every
   `not_applicable` row has its concrete rationale.
-- Manual mode may start from a strict-current BA scope, solution landscape,
-  Design System MASTER, globally current `application@rN` and zero or more
-  living Experience process packages without a Requirement. Zero process
-  receipts are valid only when the application is the verified empty
-  application; otherwise the supplied set must exactly equal its process set.
-  In manual mode the root package records `Input Package Coverage` rather than
-  Requirement Coverage.
+- Manual mode may start from a strict-current BA scope, solution landscape, Design System MASTER,
+  globally current `application@rN` and zero or more living Experience process packages without a
+  Requirement. Zero process receipts are valid only when the application is the verified empty
+  application; otherwise the supplied set must exactly equal its process set. In manual mode the
+  root package records `Input Package Coverage` rather than Requirement Coverage.
 - A feature, defect or technical intake carries the exact approved source,
   issue or decision evidence selected by that impact matrix.
 - The user explicitly starts the backlog entry and reviews each authored package.
@@ -53,52 +74,43 @@ carry `implements: REQ-###`, and approval requires the complete Requirement
 Stage Results receipt set and, once a story implements the Requirement, a root
 review `Requirement Coverage` row naming exactly those stories.
 
-By default both modes pin the same four input families in compiler-owned
-`input_bindings`, and the compiler rejects any binding that is no longer
-strict-current. In Requirement mode, a stage the Requirement changes or reuses
-binds exactly its Stage Results receipt. A stage the Requirement marks
-`not_applicable` binds the exact approved package named with `--input-ref`
-(allowed only for such stages) or, at `begin-revision`, the previous
-revision's binding, carried forward. A carried binding whose package has since
-advanced fails preflight until it is rebound with `--input-ref`, so a package
-the Requirement does not touch can never drift unnoticed.
+By default both modes pin the same four input families in compiler-owned `input_bindings`, and the
+compiler rejects any binding that is no longer strict-current. In Requirement mode, a stage the
+Requirement changes or reuses binds exactly its Stage Results receipt. A stage the Requirement marks
+`not_applicable` binds the exact approved package named with `--input-ref` (allowed only for such
+stages) or, at `begin-revision`, the previous revision's binding, carried forward. A carried binding
+whose package has since advanced fails preflight until it is rebound with `--input-ref`, so a
+package the Requirement does not touch can never drift unnoticed.
 
-An explicit `headless-v1` exception is available only for a technical or defect
-Requirement whose visual stages are `not_applicable`. Pass
-`--absent-input design-system` and/or `--absent-input experience-design` to
-`init` or `begin-revision` for each genuinely absent family. The compiler still
-requires current approved BA and Solution receipts, an explicit Solution
-topology containing only CLI, worker or scheduler build components, no authored
-Backlog links into the omitted family, and complete Git history proving that
-the family never contained package files. An existing or previously bound
-package cannot become absent by deleting it. Manual and feature planning keep
-the complete input contract. Every new revision must explicitly repeat and
-revalidate its absence flags; the compiler records `input_contract` and
-`absent_input_stages` and shows the omission in Input Package Coverage. Existing
-approved Delivery snapshots retain their original verified boundary when the
-project later gains visual packages.
+An explicit `headless-v1` exception is available only for a technical or defect Requirement whose
+visual stages are `not_applicable`. Pass `--absent-input design-system` and/or `--absent-input
+experience-design` to `init` or `begin-revision` for each genuinely absent family. The compiler
+still requires current approved BA and Solution receipts, an explicit Solution topology containing
+only CLI, worker or scheduler build components, no authored Backlog links into the omitted family,
+and complete Git history proving that the family never contained package files. An existing or
+previously bound package cannot become absent by deleting it. Manual and feature planning keep the
+complete input contract. Every new revision must explicitly repeat and revalidate its absence flags;
+the compiler records `input_contract` and `absent_input_stages` and shows the omission in Input
+Package Coverage. Existing approved Delivery snapshots retain their original verified boundary when
+the project later gains visual packages.
 
 The root contains `backlog.md` and `reviews/`. Each epic is a folder with an
 `epic.md`, `reviews/`, and `stories/`. Each story folder contains exactly
 `story.md` and `test-plan.md`. Membership is derived from the path.
 
-In a draft backlog revision, materialize planned story/test-plan scaffolds
-before opening an existing epic's next review with
-`backlog_compile.py stub-epic <epic-slug> --docs <workspace>/docs --new-review`.
-This creates a fresh TODO round with current policy and exact current
-membership, preserving prior evidence. An existing pending round is reused
-byte-exact only when its recorded backlog-owned switch values and parameters
-match the current approved policy; a changed value creates a fresh successor.
-Delivery-only changes and policy revisions with the same owned values do not
-require a new round. An unreadable recorded policy or an invalid current policy
-refuses creation. For the root review alone, run
-`backlog_compile.py stub-backlog-review --docs <workspace>/docs` with the same
-rules. These round-only writes preserve every prior review and all source,
-revision and input-binding bytes. Derive writer inputs after these writes.
-The final check requires completed current root and epic rounds and retains
-completion/integrity checks for historical approved evidence. Earlier
-unfinished rounds remain unapproved, byte-exact history included in the
-package digest; approval never stamps, retags or rewrites their pins.
+In a draft backlog revision, materialize planned story/test-plan scaffolds before opening an
+existing epic's next review with `backlog_compile.py stub-epic <epic-slug> --docs <workspace>/docs
+--new-review`. This creates a fresh TODO round with current policy and exact current membership,
+preserving prior evidence. An existing pending round is reused byte-exact only when its recorded
+backlog-owned switch values and parameters match the current approved policy; a changed value
+creates a fresh successor. Delivery-only changes and policy revisions with the same owned values do
+not require a new round. An unreadable recorded policy or an invalid current policy refuses
+creation. For the root review alone, run `backlog_compile.py stub-backlog-review --docs
+<workspace>/docs` with the same rules. These round-only writes preserve every prior review and all
+source, revision and input-binding bytes. Derive writer inputs after these writes. The final check
+requires completed current root and epic rounds and retains completion/integrity checks for
+historical approved evidence. Earlier unfinished rounds remain unapproved, byte-exact history
+included in the package digest; approval never stamps, retags or rewrites their pins.
 
 ## 2. Author stories
 
@@ -132,15 +144,13 @@ by its stories and root review. Add canonical `analysis_scopes` to
 `backlog.md` (`<space>` or `<space>#domains/<path>`) only when the whole named
 approved BA scope must receive an exact covered-or-deferred disposition.
 
-Use exact `<experience>:<ID>@rN` values such as `checkout:SCR-001@r2` for
-`experience_refs`. Each value must resolve in a pinned current process receipt
-for the pinned `application@rN`.
-Use vault-absolute wikilinks for `criterion_refs`,
-`derives_from`, `depends_on`, `uses_design` and `constrained_by`. Criterion
-links target the approved owning note and carry its BA registry-qualified
-criterion or rule identity as the alias.
-Dependency links target stories, and every dependency has a reason in the
-`Dependencies` section. List position is not dependency evidence.
+Use exact `<experience>:<ID>@rN` values such as `checkout:SCR-001@r2` for `experience_refs`. Each
+value must resolve in a pinned current process receipt for the pinned `application@rN`. Use
+vault-absolute wikilinks for `criterion_refs`, `derives_from`, `depends_on`, `uses_design` and
+`constrained_by`. Criterion links target the approved owning note and carry its BA
+registry-qualified criterion or rule identity as the alias. Dependency links target stories, and
+every dependency has a reason in the `Dependencies` section. List position is not dependency
+evidence.
 
 ## 3. Author test plans
 
@@ -201,19 +211,17 @@ findings name, and the compiler commands of this section and section 5, run as
 Switch `review_loop`: at `blocking_delta`, this section's review loops follow
 `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`; switch
 `review_rounds`: at `single_pass`, its reviews run as one reader and one pass, following
-`skill-content/challenge-review/references/switch-review_rounds-single_pass.md`.
-Switch `source_decision_gate`: at `one_gate_when_drafted`, a finding whose fix changes approved
-analysis documents reaches the owner as one gate on the reviewed exact change when its
-recommendation needs no owner input, as
+`skill-content/challenge-review/references/switch-review_rounds-single_pass.md`. Switch
+`source_decision_gate`: at `one_gate_when_drafted`, a finding whose fix changes approved analysis
+documents reaches the owner as one gate on the reviewed exact change when its recommendation needs
+no owner input, as
 `skill-content/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md`
-defines.
-Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck wave starts at once,
-after every finished worker is closed, as
+defines. Switch `reader_waves`: at `all_at_once`, every reader of a review or recheck wave starts at
+once, after every finished worker is closed, as
 `skill-content/challenge-review/references/switch-reader_waves-all_at_once.md` and the host contract
-define.
-Switch `story_size_budget`: at `propose_split`, `check --json` also reports each story's size
-against the owner-set limits, and before the first epic review manifest the Product Owner proposes a
-split for each story over budget, which the owner accepts or keeps, as
+define. Switch `story_size_budget`: at `propose_split`, `check --json` also reports each story's
+size against the owner-set limits, and before the first epic review manifest the Product Owner
+proposes a split for each story over budget, which the owner accepts or keeps, as
 `skill-content/product-planning/references/switch-story_size_budget-propose_split.md` defines.
 Switch `test_cost_budget`: at `flag_serial_rows`, `check --json` also lists each automation-required
 scenario that runs more rows serially than the owner-set limit, and before the first epic review
@@ -221,6 +229,22 @@ manifest QA proposes a split for each, as
 `skill-content/product-planning/references/switch-test_cost_budget-flag_serial_rows.md` defines.
 Switch `epic_review_cadence`: at `overlap_calibration`, epic reviews that run one after another
 start as `skill-content/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md`
+defines. Switch `review_scope`: at `impact_closure`, each review manifest's structural check runs
+before any reader is spawned and the epic and root readers read the changed stories' closure;
+`backlog_review_inputs.py` derives the epic and root readers' closure, and a writer's or re-check's
+task takes `task_inputs.py --changed <note> --base <approved commit>`, with `--findings` for the fix
+delta; every role reads the change's impact closure, each approved, unchanged note outside it only
+as its hash-bound summary, reads beyond it when unsure and records why, a writer fixes a reported
+graph gap through its owning compiler and recomputes the closure, and a confirmation re-review
+reads only the fix's delta, as
+`skill-content/challenge-review/references/switch-review_scope-impact_closure.md` defines. Switch
+`review_fanout`: at `per_unit`, a review of more than one changed story with its test plan spawns
+one reader per unit in one message and then one aggregator for the cross-unit checks no compiler
+enforces, as `skill-content/challenge-review/references/switch-review_fanout-per_unit.md` defines.
+Switch `review_levels`: at `concurrent_when_independent`, the root review starts beside the epic
+reviews once every source note is finished and the root manifest derives, and approval still waits
+for every level, as
+`skill-content/challenge-review/references/switch-review_levels-concurrent_when_independent.md`
 defines.
 
 ### Recovery that removes only operating-system metadata
@@ -233,20 +257,17 @@ predecessor inventory minus the exact schema-policy metadata rows. Process
 receipt refs and hashes, BA, Solution, Design System and any Requirement
 semantic hash must remain identical.
 
-Before rebinding, record the committed predecessor HEAD and the complete path
-and byte inventory of every epic, story, test plan and historical review.
-After rebinding, historical reviews, stories and test plans remain byte-exact.
-Each epic retains its authored source, `approved_at_utc` and `source_hash`;
-only its renderer-owned inverse-relation block may change to reflect the new
-root review's existing epic targets. The full vault gate must prove that block
-is the exact generated projection. Authored relation, dependency, role,
-coverage and scenario sets remain identical. Only the backlog root's receipt
-bindings/lifecycle and a fresh root review may otherwise change. Run the full
-compiler and vault gates. A fresh root reviewer independently verifies these conditions
-and the exact recovery delta before ordinary user approval, atomic approval
-and commit. Reused epic reviews retain their original bytes, stamps and hashes;
-do not create new epic approval claims. Any missing proof or meaningful delta
-returns to the normal review flow below. This exception does not apply to
+Before rebinding, record the committed predecessor HEAD and the complete path and byte inventory of
+every epic, story, test plan and historical review. After rebinding, historical reviews, stories and
+test plans remain byte-exact. Each epic retains its authored source, `approved_at_utc` and
+`source_hash`; only its renderer-owned inverse-relation block may change to reflect the new root
+review's existing epic targets. The full vault gate must prove that block is the exact generated
+projection. Authored relation, dependency, role, coverage and scenario sets remain identical. Only
+the backlog root's receipt bindings/lifecycle and a fresh root review may otherwise change. Run the
+full compiler and vault gates. A fresh root reviewer independently verifies these conditions and the
+exact recovery delta before ordinary user approval, atomic approval and commit. Reused epic reviews
+retain their original bytes, stamps and hashes; do not create new epic approval claims. Any missing
+proof or meaningful delta returns to the normal review flow below. This exception does not apply to
 other application-only revisions or general artifact loss.
 
 The Product Owner finishes the candidate source documents. Review notes may
@@ -272,22 +293,19 @@ Switch `review_scope_record`: at `both_scopes`, an epic reader's manifest also m
 scope's read set, and each epic review is recorded as
 `skill-content/backlog-plan/references/switch-review_scope_record-both_scopes.md` defines.
 
-Give one fresh `backlog-reviewer` the returned manifest and every named path:
-the root backlog, that epic, its child stories and test plans, and the incoming
-and outgoing dependency closure with shared contract/source context. Include
-the expected `derives_from` and `verifies` sets and any `unparsed_link_sources`:
-approved upstream notes whose link text does not parse, which the reader checks
-for a missed source instead of failing dispatch. The manifest is disposable
-review input, never a second backlog or approval record. Unresolved closure
-fails before dispatch; evidence outside the manifest requires an expanded
-input set. Independent epic reviewers may run in parallel against unchanged
-inputs. Wait for every epic reviewer to return before any writer action.
-Recompute each manifest with `--expected-hash <source_hash>` before accepting
-its findings for the writer. Changed inputs require a fresh affected review;
-never use a stale manifest to justify omitting a dependency. An epic
-manifest's hash binds the notes it names and the story identities and
-dependency edges that reach them, so another epic's writer finishing its own
-notes leaves it fresh; the root manifest's hash binds every backlog note.
+Give one fresh `backlog-reviewer` the returned manifest and every named path: the root backlog, that
+epic, its child stories and test plans, and the incoming and outgoing dependency closure with shared
+contract/source context. Include the expected `derives_from` and `verifies` sets and any
+`unparsed_link_sources`: approved upstream notes whose link text does not parse, which the reader
+checks for a missed source instead of failing dispatch. The manifest is disposable review input,
+never a second backlog or approval record. Unresolved closure fails before dispatch; evidence
+outside the manifest requires an expanded input set. Independent epic reviewers may run in parallel
+against unchanged inputs. Wait for every epic reviewer to return before any writer action. Recompute
+each manifest with `--expected-hash <source_hash>` before accepting its findings for the writer.
+Changed inputs require a fresh affected review; never use a stale manifest to justify omitting a
+dependency. An epic manifest's hash binds the notes it names and the story identities and dependency
+edges that reach them, so another epic's writer finishing its own notes leaves it fresh; the root
+manifest's hash binds every backlog note.
 
 Readers audit source membership against the manifest's expected relation sets.
 Empty draft review fields and placeholder prose await the writer and do not
@@ -300,76 +318,65 @@ Switch `remediation_writers`: at `per_epic`, one writer per epic with findings a
 cross-epic writer apply the epic reviews' findings, as
 `skill-content/backlog-plan/references/switch-remediation_writers-per_epic.md` defines.
 
-The Product Owner is the single writer: it triages the returned findings,
-repairs source documents, and writes each designated epic review note. An epic
-review uses `derives_from` for its owning epic and `verifies` for the exact
-child story and test-plan set. Its body covers scope, slicing, criteria, test
-design, intra-epic dependencies, role ownership, findings and verdict. Run
-`backlog_compile.py check --docs <workspace>/docs --json` after these serialized
-writes and resolve all source and completed epic-review findings. Only the
-still-unwritten root review's completion findings remain pending until its
-reader returns; they do not authorize ignoring any source finding. An entry
-in `advisories` names an empty last section, or an untouched Delivery Notes
-stub, of a story approved before the compiler read that section above the
-navigation; it never fails the check, and the Product Owner fills the section
-whenever that story is revised.
+The Product Owner is the single writer: it triages the returned findings, repairs source documents,
+and writes each designated epic review note. An epic review uses `derives_from` for its owning epic
+and `verifies` for the exact child story and test-plan set. Its body covers scope, slicing,
+criteria, test design, intra-epic dependencies, role ownership, findings and verdict. Run
+`backlog_compile.py check --docs <workspace>/docs --json` after these serialized writes and resolve
+all source and completed epic-review findings. Only the still-unwritten root review's completion
+findings remain pending until its reader returns; they do not authorize ignoring any source finding.
+An entry in `advisories` names an empty last section, or an untouched Delivery Notes stub, of a
+story approved before the compiler read that section above the navigation; it never fails the check,
+and the Product Owner fills the section whenever that story is revised.
 
 Switch `root_review_scope`: at `revision_delta`, the root reader of a backlog revision reads in full
 only the revision's delta, as
 `skill-content/backlog-plan/references/switch-root_review_scope-revision_delta.md` defines.
+Switch `backlog_path`: at `light_when_eligible`, an eligible revision's story delta takes one reader
+and the compiler writes its root review, as
+`skill-content/backlog-plan/references/switch-backlog_path-light_when_eligible.md` defines.
 
-Only after every epic package and review is green, run
-`backlog_review_inputs.py --docs <workspace>/docs --root`. Invoke one fresh
-`backlog-reviewer` with that manifest: the root backlog, every epic, every
-story and every test plan, its declared context, any `unparsed_link_sources`
-and the exact expected `derives_from` and `related_to` sets. Wait for its
-return. Recompute the root manifest with `--expected-hash <source_hash>` before
-accepting its findings; a changed input requires a fresh affected review. The
-Product Owner then writes the root review note and any source fixes. The root
-review covers cross-epic overlap, dependency direction, cycles, delivery
-sequencing, shared contracts, deferred criteria, global test coverage,
-Requirement coverage in Requirement mode, findings and verdict. After the root
-review is authored, run the full `backlog_compile.py check --docs
-<workspace>/docs --render --pre-approval --json`, which adds approval's own
-checks, and scoped vault gate. Both must pass before the package can be offered for approval.
+Only after every epic package and review is green, run `backlog_review_inputs.py --docs
+<workspace>/docs --root`. Invoke one fresh `backlog-reviewer` with that manifest: the root backlog,
+every epic, every story and every test plan, its declared context, any `unparsed_link_sources` and
+the exact expected `derives_from` and `related_to` sets. Wait for its return. Recompute the root
+manifest with `--expected-hash <source_hash>` before accepting its findings; a changed input
+requires a fresh affected review. The Product Owner then writes the root review note and any source
+fixes. The root review covers cross-epic overlap, dependency direction, cycles, delivery sequencing,
+shared contracts, deferred criteria, global test coverage, Requirement coverage in Requirement mode,
+findings and verdict. After the root review is authored, run the full `backlog_compile.py check
+--docs <workspace>/docs --render --pre-approval --json`, which adds approval's own checks, and
+scoped vault gate. Both must pass before the package can be offered for approval.
 
 Switch `remediation_bookkeeping`: at `compiler`, a writer pass records its rechecks' closure rows,
 expected hashes and preservation report with one compiler command, as
 `skill-content/backlog-plan/references/switch-remediation_bookkeeping-compiler.md` defines.
 
-Use the current host's agent invocation and wait mechanism; no host-specific
-command is canonical. Reviewer responses are input, never durable state.
-Severity, dispositions and re-review scope follow the Review findings section
-of `skill-content/product-planning/references/structured-records.md`: only a
-critical or major finding blocks, and the Product Owner preserves every
-returned severity. After a blocking fix or disproof, regenerate the affected
-manifest and rerun only the affected reviewer with those findings, any cited
-evidence and the changed paths, which are the manifest files whose `sha256`
-changed. It confirms each finding is closed and reviews the changed text with
-its dependency context. Then re-run the compiler. A writer's assertion that
-the fix is complete does not replace that recheck. A minor finding never
-blocks or starts another round: fix it only in a pass that already carries a
-blocking fix, otherwise record it in the review note's
-`Accepted Minor Findings` section. Continue until both review layers are
-approved; no extra clean round is required when no blocking finding remains.
+Use the current host's agent invocation and wait mechanism; no host-specific command is canonical.
+Reviewer responses are input, never durable state. Severity, dispositions and re-review scope follow
+the Review findings section of `skill-content/product-planning/references/structured-records.md`:
+only a critical or major finding blocks, and the Product Owner preserves every returned severity.
+After a blocking fix or disproof, regenerate the affected manifest and rerun only the affected
+reviewer with those findings, any cited evidence and the changed paths, which are the manifest files
+whose `sha256` changed. It confirms each finding is closed and reviews the changed text with its
+dependency context. Then re-run the compiler. A writer's assertion that the fix is complete does not
+replace that recheck. A minor finding never blocks or starts another round: fix it only in a pass
+that already carries a blocking fix, otherwise record it in the review note's `Accepted Minor
+Findings` section. Continue until both review layers are approved; no extra clean round is required
+when no blocking finding remains.
 
-`Deferred Criteria` is a structured table with `criterion_ref`, `owner_role`,
-`reason` and `revisit_trigger`; `owner_role` is exactly `product_owner`.
-`criterion_ref` is an escaped-table,
+`Deferred Criteria` is a structured table with `criterion_ref`, `owner_role`, `reason` and
+`revisit_trigger`; `owner_role` is exactly `product_owner`. `criterion_ref` is an escaped-table,
 vault-absolute wikilink to the approved owning BA note, for example
-`[[business-analysis/erp/domains/inventory/rules/stock-rules\|erp:BR-INV-002]]`.
-The compiler derives every active AC and BR in every approved BA registry when
-the Requirement impact matrix includes that scope and requires the exact
-universe to be covered by one or more story `criterion_refs`, or represented
-once in this table, never both. A shared criterion may support multiple stories
-when the delivery slices are distinct. Otherwise unrelated historical BA
-remains out of scope unless `backlog.md` explicitly declares `analysis_scopes`;
-a declared scope receives the same exact treatment. Unknown and uncovered
-values fail. Every non-deferral review lens uses an
-`Evidence [<section>]:` line with a resolvable vault note and a separate
-`Conclusion [<section>]:` line. Long
-generic approvals such as `the package was reviewed`, `looks good` or
-`no findings` fail.
+`[[business-analysis/erp/domains/inventory/rules/stock-rules\|erp:BR-INV-002]]`. The compiler
+derives every active AC and BR in every approved BA registry when the Requirement impact matrix
+includes that scope and requires the exact universe to be covered by one or more story
+`criterion_refs`, or represented once in this table, never both. A shared criterion may support
+multiple stories when the delivery slices are distinct. Otherwise unrelated historical BA remains
+out of scope unless `backlog.md` explicitly declares `analysis_scopes`; a declared scope receives
+the same exact treatment. Unknown and uncovered values fail. Every non-deferral review lens uses an
+`Evidence [<section>]:` line with a resolvable vault note and a separate `Conclusion [<section>]:`
+line. Long generic approvals such as `the package was reviewed`, `looks good` or `no findings` fail.
 
 `Accepted Minor Findings` is optional in any review note. When present it is a
 structured table with `finding`, `owner_role`, `reason` and `revisit_trigger`;
@@ -387,36 +394,29 @@ backlog_compile.py approve --docs <workspace>/docs
 backlog_compile.py check --docs <workspace>/docs --approved --render --json
 ```
 
-Approval stamps the package, root backlog, epics, reviews and test plans while
-stories remain `planned`. When the project has a Process Policy, each review
-round records the pin a Delivery takes at scope approval, that policy's path,
-revision and source hash, as the policy in force when the round is written:
-`init`, `stub-epic` and `begin-revision` write their rounds with it, and
-`check` pins a round the Product Owner writes the first time it sees it.
-Only `process_policy.py init` and `process_policy.py begin-revision` change
-the policy in force, and each first records the state it replaces in every
-draft round that records none yet: `init` records revision 0, no policy, and
-`begin-revision` the approved revision. The approval records its own pin in
-the root backlog and refuses a review it approves that ran with another value,
-parameters included, of a switch the backlog-planning flow owns, read from the
-current policy or its Git history, or whose pinned revision it cannot read
-back, naming the remedy: a new review round rerun under the current policy, or
-a policy revision that sets those values back. A revision that changes only
-other switches, such as a Delivery's, leaves the reviews valid. Each round
-keeps its own pin, so a revision and its reviews name the switch values they
-ran under. Without a policy nothing is recorded; a draft or invalid policy
-refuses the approval.
-Existing valid unchanged source approvals retain their timestamps, hashes and
-bytes; previously approved reviews are immutable and changes require a new
-review round. Setup's managed `.gitattributes` rule
-checks `workspace/docs/` out without line-ending conversion, which keeps these
-bytes exact on Windows. Commit `workspace/docs/backlog/` and the updated
-`workspace/config.json` in the same project change. Report the package hash
-and exact generated views. A newer approved Experience application receipt,
-including one caused by an application-only revision, makes the backlog input
-non-current. Revise and reapprove the backlog against the new receipt before
-further handoff even when its process receipts did not change. Stop and route
-to `delivery-plan`; do not create Delivery state in this flow.
+Approval stamps the package, root backlog, epics, reviews and test plans while stories remain
+`planned`. When the project has a Process Policy, each review round records the pin a Delivery takes
+at scope approval, that policy's path, revision and source hash, as the policy in force when the
+round is written: `init`, `stub-epic` and `begin-revision` write their rounds with it, and `check`
+pins a round the Product Owner writes the first time it sees it. Only `process_policy.py init` and
+`process_policy.py begin-revision` change the policy in force, and each first records the state it
+replaces in every draft round that records none yet: `init` records revision 0, no policy, and
+`begin-revision` the approved revision. The approval records its own pin in the root backlog and
+refuses a review it approves that ran with another value, parameters included, of a switch the
+backlog-planning flow owns, read from the current policy or its Git history, or whose pinned
+revision it cannot read back, naming the remedy: a new review round rerun under the current policy,
+or a policy revision that sets those values back. A revision that changes only other switches, such
+as a Delivery's, leaves the reviews valid. Each round keeps its own pin, so a revision and its
+reviews name the switch values they ran under. Without a policy nothing is recorded; a draft or
+invalid policy refuses the approval. Existing valid unchanged source approvals retain their
+timestamps, hashes and bytes; previously approved reviews are immutable and changes require a new
+review round. Setup's managed `.gitattributes` rule checks `workspace/docs/` out without line-ending
+conversion, which keeps these bytes exact on Windows. Commit `workspace/docs/backlog/` and the
+updated `workspace/config.json` in the same project change. Report the package hash and exact
+generated views. A newer approved Experience application receipt, including one caused by an
+application-only revision, makes the backlog input non-current. Revise and reapprove the backlog
+against the new receipt before further handoff even when its process receipts did not change. Stop
+and route to `delivery-plan`; do not create Delivery state in this flow.
 
 Human-facing authored titles are direct, natural labels in the project's
 output language. Stable type keys, paths, IDs, CLI messages, registry JSON and

@@ -155,6 +155,17 @@ the whole package.
 `backlog-plan/references/switch-root_review_scope-revision_delta.md` defines
 the read set.
 
+Whether a small backlog revision skips the epic panel and the root reader is
+process switch `backlog_path`. At `standard`, the default, every revision runs
+its epic and root reviews. At `light_when_eligible`, a Requirement-mode
+revision of a technical or defect Requirement that changes at most
+`max_changed_stories` technical or defect stories in one epic has one reader
+review its story delta, and `backlog_compile.py record-light-root-review`
+writes the root review round from the compiler's structural checks; approval
+re-checks the eligibility.
+`backlog-plan/references/switch-backlog_path-light_when_eligible.md` defines
+the path.
+
 Who writes a backlog remediation pass's bookkeeping is process switch
 `remediation_bookkeeping`. At `writer`, the default, the Product Owner writer
 copies the rechecks' closure rows, reruns the expected-hash checks and writes
@@ -231,6 +242,61 @@ readers running at once, as
 `challenge-review/references/switch-reader_waves-all_at_once.md` defines.
 Each host contract states how: Codex counts every open spawned thread against
 its cap, while a finished Claude Code subagent holds none.
+
+What every role reads in full for a change is process switch `review_scope`.
+At `full`, the default, it reads the complete package its step names. At
+`impact_closure`, the owning compiler's structural check runs before any
+reader starts, `impact_closure.py` derives the changed notes from the approval
+stamps and their closure over the vault's typed relations and shared
+contracts, every role reads that closure in full and each approved, unchanged
+note outside it as its hash-bound summary, reads beyond it when unsure and
+records why, a writer fixes a reported graph gap through its owning compiler
+and recomputes the closure, and a confirmation re-review reads only the fix's
+delta. A first approval, a shared contract or policy change and a graph gap
+widen the read, as
+`challenge-review/references/switch-review_scope-impact_closure.md` defines.
+Whatever the value, every role navigates the vault first, in the tier order of
+the constitution's section 5.
+
+How many readers share one review's changed units is process switch
+`review_fanout`. At `single_reader`, the default, the step's reader reads
+every changed unit in turn. At `per_unit`, a review of more than one changed
+unit spawns one reader per unit in one message and then one aggregator that
+reads only their findings and the compilers' cross-unit facts and decides the
+cross-unit questions no compiler enforces, as
+`challenge-review/references/switch-review_fanout-per_unit.md` defines.
+
+Whether review levels wait for each other is process switch `review_levels`.
+At `sequential`, the default, each level starts after the earlier one is
+approved. At `concurrent_when_independent`, a level its flow declares
+independent, such as the backlog root review beside the epic reviews or an
+Operation contract review beside the execution-plan topology review, starts
+with the earlier level over the same frozen inputs; approval waits for every
+level and a blocking fix re-runs every level whose manifest hash it changes,
+as
+`challenge-review/references/switch-review_levels-concurrent_when_independent.md`
+defines.
+
+What a spawned role reads first is process switch `context_pack`. At `off`,
+the default, it reads every flow, skill and reference file its task binds. At
+`role_digest`, it receives the pack `context_pack.py build` derives for its
+entry, role and mode, reads a named source in full only when the pack does not
+cover its case and records that read and why, as
+`challenge-review/references/switch-context_pack-role_digest.md` defines.
+
+Whether flow steps are timed is process switch `step_timing`. At `off`, the
+default, nothing is recorded. At `recorded`, the coordinator wraps each step
+and role spawn in `step_timing.py start` and `end` with its phase, reports an
+overrun at once and ends each run with a durable `step_timing.py report
+--write`, as `challenge-review/references/switch-step_timing-recorded.md`
+defines.
+
+Whether steps are compared with a maximum is process switch `step_budgets`. At
+`off`, the default, none is. At `enforced`, each budgeted step's time is
+compared with its maximum in minutes, the owner's parameter or the package
+target in `configure/data/step-budgets.json`; a step may finish well under it,
+and only an exceeded maximum is reported, at once and never blocking, as
+`challenge-review/references/switch-step_budgets-enforced.md` defines.
 
 A Delivery Item's implementation writers run as process switch
 `implementation_schedule` selects. `sequential_v1`, the default, runs them one

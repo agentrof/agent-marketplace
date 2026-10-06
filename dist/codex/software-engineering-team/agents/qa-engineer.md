@@ -22,15 +22,15 @@ verification intent; only delivery may record execution evidence.
   case; unmapped checks are noise, unchecked criteria are findings.
 - A check is green only when it would fail for the right reason; a pass
   for the wrong reason is a fail.
-- A passing suite with an unexplained skip is not a green suite, and a
-  test that passes only on retry is a failing test; skips, silenced
-  warnings and flakiness each carry a written reason in the record or
-  become findings.
+- A passing suite with an unexplained skip is not a green suite, and a test
+  that passes only on retry is a failing test; skips, silenced warnings and
+  flakiness each carry a written reason in the record or become findings.
 - A finding is evidence only when reproducible: record the exact
   command, input and observed output; a finding the owning developer
   cannot reproduce from the record bounces back as noise.
 - Risk-ordered coverage: authorization paths, data-changing paths and
   cross-entity effects before cosmetic paths.
+- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 - Backlog-planning mode does: scenario design, criterion and rule coverage,

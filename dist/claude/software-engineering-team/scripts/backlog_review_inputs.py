@@ -350,6 +350,9 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     measure = (reader and scope is None
                and read_switch(docs, RECORD_SWITCH)["value"] == RECORD_VALUE)
     panels = read_panels(docs)
+    # At review_scope impact_closure a reader reads the change's impact
+    # closure and every role starts from the vault's relation views.
+    impact = review_scope(docs) == CLOSURE_VALUE
     root_reader = epic is None and not writer
     root_scope = read_switch(docs, ROOT_SWITCH) if root_reader else None
     delta_requested = root_scope is not None and root_scope["value"] == ROOT_VALUE
@@ -383,10 +386,16 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
             owning_epics = epics
         delta = (revision_delta(record, docs, root_scope["parameters"].get(DELTA_LIMIT),
                                 full_root_reason) if delta_requested else None)
-        delta_read = delta is not None and delta["read"] == "delta"
+        closure_scope = impact_scope(record, docs) if impact and not writer else None
+        closure_read = closure_scope is not None and closure_scope["read"] == "closure"
+        # The impact closure generalizes the revision delta; it governs when both are on.
+        delta_read = delta is not None and delta["read"] == "delta" and not closure_read
+        narrow = delta_read or closure_read
         primary = {record["backlog"]["path"]}
         selected_stories = {story["id"] for item in owning_epics for story in item["stories"]}
-        if delta_read:
+        if closure_read:
+            selected_stories &= set(closure_scope.pop("stories"))
+        elif delta_read:
             selected_stories &= set(delta["changed"]) | set(delta["neighbours"])
         primary.update(item["path"] for item in owning_epics)
         primary.update(path for story in record["stories"] if story["id"] in selected_stories
@@ -394,7 +403,9 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         # A delta read takes an unchanged story from the compiler's graph; a link
         # to one reads that note alone.
         summarized = ({path for story in record["stories"] if story["id"] not in selected_stories
-                       for path in (story["path"], story["test_plan"])} if delta_read else set())
+                       for path in (story["path"], story["test_plan"])} if narrow else set())
+        if closure_read:
+            summarized -= set(closure_scope["reads"])
 
         by_id = {story["id"]: story for story in record["stories"]}
         by_path = {story["path"]: story for story in record["stories"]}
@@ -415,9 +426,23 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         hops: dict[str, int] = {}
         unparsed: set[str] = set()
 
+        # At review_levels concurrent_when_independent the root reader runs
+        # beside the epic level, so the epic rounds that level is still writing
+        # are not the root's input: binding them would stale the root manifest
+        # the moment an epic verdict is recorded.
+        in_flight = set()
+        if root_reader and read_switch(docs, LEVELS_SWITCH)["value"] == LEVELS_VALUE:
+            for item in owning_epics:
+                current = backlog.latest(item["reviews"])
+                if current is not None and not (current["props"].get("source_hash")
+                                                or current["props"].get("approved_at_utc")):
+                    in_flight.add(current["path"])
+
         def include(relative: str, reason: str, hop: int = 0) -> None:
             # A path is validated and hashed once per run; the closing
             # freshness check re-validates every included path.
+            if relative in in_flight:
+                return
             if relative in summarized:
                 hop = LEAF_HOP
             if relative not in hashes:
@@ -465,7 +490,7 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
             # The bounded scope's dependency closure is complete before any
             # link is read, so a linked story is read alone, as a delta read
             # reads one outside its delta.
-            if target in by_path and not bounded and not delta_read:
+            if target in by_path and not bounded and not narrow:
                 story_context(by_path[target]["id"], f"Story context from {source}")
 
         def package_reference(value: str, source: str, stage: str | None = None,
@@ -522,17 +547,22 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
 
         # The bounded scope reads the backlog root and the review history
         # without following their links; the root review reads them in full.
-        context_hop = LEAF_HOP if bounded or delta_read else 0
+        context_hop = LEAF_HOP if bounded or narrow else 0
         for path in sorted(primary):
             include(path, "primary review scope",
                     context_hop if path == record["backlog"]["path"] else 0)
         # A delta holds its changed stories and their direct neighbours; every
         # other edge is in the compiler's graph.
-        if not delta_read:
+        if closure_read:
+            # A closure note outside the scope's stories is read, not expanded.
+            for path in closure_scope.pop("reads"):
+                if path not in primary:
+                    include(path, "impact closure of the change", LEAF_HOP)
+        if not narrow:
             for story_id in sorted(selected_stories):
                 story_context(story_id, "incoming/outgoing dependency closure")
         review_notes = [review for item in owning_epics for review in item["reviews"]]
-        if delta_read:
+        if narrow:
             # The current epic reviews closed this revision's epic findings.
             review_notes = [backlog.latest(item["reviews"]) for item in owning_epics]
         if epic is None:
@@ -613,8 +643,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         except ValueError as exc:
             raise InputError(str(exc)) from exc
         check = compiler_check(docs, record, owning_epics, current_review, relations, epic is None,
-                               budget) if panels or delta_read else {}
-        if delta_read:
+                               budget) if panels or narrow else {}
+        if narrow:
             check["backlog_graph"] = backlog_graph(record, docs, selected_stories)
         if budget is not None:
             check["story_size"] = backlog.story_size_report(
@@ -637,7 +667,7 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     if epic is None:
         # The root review reads the complete package: every backlog byte binds it.
         structure_hash = digest({path: value for path, value in before.items()
-                                 if path.startswith("backlog/")})
+                                 if path.startswith("backlog/") and path not in in_flight})
     else:
         # A bounded reader follows dependency edges only from its closure, the
         # notes at hop 0, so an edge that reaches a story it reads through a
@@ -664,6 +694,14 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         result[PANEL_SWITCH] = PANEL_VALUE
     if unparsed:
         result["unparsed_link_sources"] = sorted(unparsed)
+    if impact:
+        import task_inputs
+
+        result[CLOSURE_SWITCH] = CLOSURE_VALUE
+        result["vault_views"] = task_inputs.vault_views(docs)
+        if closure_scope is not None:
+            closure_scope.pop("reads", None)
+            result[CLOSURE_VALUE] = closure_scope
     result["source_hash"] = digest(bound_view(result))
     if measure:
         # The sizes are facts of the sources, so they bind like every other field.
@@ -677,6 +715,10 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
 
 WRITERS_SWITCH = "remediation_writers"
 WRITERS_VALUE = "per_epic"
+CLOSURE_SWITCH = "review_scope"
+CLOSURE_VALUE = "impact_closure"
+LEVELS_SWITCH = "review_levels"
+LEVELS_VALUE = "concurrent_when_independent"
 ROOT_SWITCH = "root_review_scope"
 ROOT_VALUE = "revision_delta"
 DELTA_LIMIT = "max_delta_share_percent"
@@ -699,6 +741,81 @@ def story_adjacency(record: dict) -> dict[str, set[str]]:
     return adjacency
 
 
+def review_scope(docs: Path) -> str:
+    """Return the review_scope value in force; ``full`` while no registry declares it."""
+    import process_policy
+
+    try:
+        values, _snapshot = process_policy.effective_values(docs)
+    except ValueError as exc:
+        raise InputError(f"process policy cannot set {CLOSURE_SWITCH}: {exc}") from exc
+    return values.get(CLOSURE_SWITCH, {}).get("value", "full")
+
+
+def changed_stories(record: dict, docs: Path) -> list[str]:
+    """Return the stories that are new or whose story or test plan lost its approval stamp."""
+    return sorted(story["id"] for story in record["stories"]
+                  if backlog.approval_stamp_findings(docs / story["path"], docs)
+                  or backlog.approval_stamp_findings(docs / story["test_plan"], docs))
+
+
+def vault_changes(docs: Path) -> tuple[set[str] | None, dict[str, str]]:
+    """Every vault file changed since the backlog's last approved revision, as
+    docs paths, with the earlier bytes of each deleted note.
+
+    The change starts the closure whatever it touched: an upstream criterion,
+    a contract or a story. None means the approval boundary cannot be proven.
+    """
+    import task_inputs
+
+    docs = Path(docs).resolve()
+    if docs.name != "docs" or docs.parent.name != "workspace":
+        return None, {}
+    project = docs.parents[1]
+    approved = task_inputs.approval_base(project, "backlog")
+    if approved is None:
+        return None, {}
+    command = ["git", "--no-replace-objects", "-C", str(project)]
+    seen, commit = task_inputs.impact_changes(command, approved, None)
+    prefix = task_inputs.DOCS_PREFIX
+    earlier = task_inputs.deleted_texts(project, commit, seen)
+    return ({path.removeprefix(prefix) for path in seen},
+            {path.removeprefix(prefix): text for path, text in earlier.items()})
+
+
+def impact_scope(record: dict, docs: Path) -> dict:
+    """Return a reader's impact closure over the backlog revision.
+
+    The change is every story whose story or test plan lost its approval
+    stamp. A first backlog has no approved notes to prove, so its reader reads
+    the whole package. ``stories`` holds every story the closure reaches and
+    ``reads`` every note it reads in full; the manifest drops both after use.
+    """
+    import task_inputs
+
+    revision = int(record["backlog"]["props"].get("revision", 1) or 1)
+    if revision < 2:
+        return {"read": "full", "reason": "first backlog revision", "beyond_closure": []}
+    by_id = {story["id"]: story for story in record["stories"]}
+    stamped = {path for identity in changed_stories(record, docs)
+               for path in (by_id[identity]["path"], by_id[identity]["test_plan"])}
+    vault, deleted = vault_changes(docs)
+    if vault is None:
+        return {"read": "full", "reason": "approval history is unavailable", "beyond_closure": []}
+    changed = sorted(stamped | vault)
+    try:
+        scope = task_inputs.impact_closure(docs, changed, deleted=deleted)
+    except ValueError as exc:
+        raise InputError(str(exc)) from exc
+    reads = {path for path in {*scope["closure"], *scope["graph_gaps"], *changed}
+             if path.endswith(".md") and (docs / path).is_file()}
+    scope["proven_unchanged"] = [row for row in scope["proven_unchanged"] if row["path"] not in reads]
+    scope.update(read="closure", reads=sorted(reads),
+                 stories=sorted(story["id"] for story in record["stories"]
+                                if {story["path"], story["test_plan"]} & reads))
+    return scope
+
+
 def revision_delta(record: dict, docs: Path, limit: int | None,
                    full_root_reason: str | None) -> dict:
     """Return what a backlog revision changed and whether the root reader reads only that.
@@ -711,9 +828,15 @@ def revision_delta(record: dict, docs: Path, limit: int | None,
     its reason.
     """
     stories = record["stories"]
-    changed = sorted(story["id"] for story in stories
-                     if backlog.approval_stamp_findings(docs / story["path"], docs)
-                     or backlog.approval_stamp_findings(docs / story["test_plan"], docs))
+    changed = changed_stories(record, docs)
+    vault, deleted = vault_changes(docs)
+    if vault:
+        import task_inputs
+        affected = task_inputs.impact_closure(docs, sorted(vault), deleted=deleted)
+        reached = set(affected["closure"]) | set(affected["graph_gaps"])
+        changed = sorted(set(changed) | {
+            story["id"] for story in stories
+            if {story["path"], story["test_plan"]} & reached})
     adjacency = story_adjacency(record)
     neighbours = sorted({other for identity in changed for other in adjacency[identity]}
                         - set(changed))
@@ -724,6 +847,8 @@ def revision_delta(record: dict, docs: Path, limit: int | None,
     revision = int(record["backlog"]["props"].get("revision", 1) or 1)
     if revision < 2:
         result.update(read="full", reason="first backlog revision")
+    elif vault is None:
+        result.update(read="full", reason="approval history is unavailable")
     elif limit is None:
         result.update(read="full", reason=f"no {DELTA_LIMIT} parameter is set")
     elif 100 * share > limit * len(stories):

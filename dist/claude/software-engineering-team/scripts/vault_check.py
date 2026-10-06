@@ -560,7 +560,10 @@ def scan_note(root: Path, path: Path, marker_prefix: str,
     return note
 
 
-def build_vault(root: Path, policy: dict, files: VaultFileView | None = None) -> Vault:
+def build_vault(root: Path, policy: dict, files: VaultFileView | None = None,
+                reuse: dict | None = None) -> Vault:
+    """Scan the vault. ``reuse`` maps a rel to a Note the caller has proven
+    byte-identical to the file (a hash-checked cache); it is not rescanned."""
     root = root.absolute()
     files = files or VaultFileView(root)
     vault = Vault(root=root, policy=policy, files=files)
@@ -575,7 +578,8 @@ def build_vault(root: Path, policy: dict, files: VaultFileView | None = None) ->
         vault.index.add(rel)
         if (path.suffix == ".md" and rel.split("/")[0] != ".obsidian"
                 and not is_artifact_location(policy, rel)):
-            vault.notes[rel] = scan_note(root, path, marker_prefix, files)
+            vault.notes[rel] = ((reuse or {}).get(rel)
+                                or scan_note(root, path, marker_prefix, files))
     for note in vault.notes.values():
         targets = [t for (_, _, t, _, _, _) in note.wikilinks if t]
         targets.extend(t for (_, t) in note.fm_targets if t)
@@ -749,14 +753,19 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
                 " transient working files leave the vault before the gate"))
 
 
+def resolve_wikilink(vault: Vault, target: str, embed: bool) -> str | None:
+    """The vault file a wikilink target names, or None: vault-absolute, exact
+    case; an embed names a file, a link names a note."""
+    rel = target if embed else f"{target}.md"
+    return rel if rel in vault.index else None
+
+
 def check_wikilink_resolution(vault: Vault, findings: list[Finding]) -> None:
     for note in authored(vault):
         for (lineno, embed, target, _anchor, _alias, _inner) in note.wikilinks:
             if not target:
                 continue  # pure in-note anchor form is judged by anchor check
-            resolved = (target in vault.index if embed
-                        else f"{target}.md" in vault.index)
-            if not resolved:
+            if resolve_wikilink(vault, target, embed) is None:
                 findings.append(Finding(
                     "error", note.rel, lineno, "wikilink_resolution",
                     f"unresolved wikilink target '{target}'",

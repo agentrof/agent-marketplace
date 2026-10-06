@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "max_changed_stories": 3,
+  "work_kinds": [
+    "defect",
+    "technical"
+  ]
+}

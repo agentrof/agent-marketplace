@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "budgets": {
+    "max_files": 8,
+    "max_source_bytes": 48000,
+    "max_metadata_bytes": 16000
+  },
+  "required_relations": [
+    "constrained_by",
+    "uses_design",
+    "satisfies",
+    "verification_contract_ref",
+    "environment_contract_ref",
+    "primary_process_ref"
+  ],
+  "optional_relations": [
+    "derives_from",
+    "implements",
+    "verifies",
+    "depends_on",
+    "governs",
+    "related_to",
+    "applies_to",
+    "links_to"
+  ],
+  "entry_profiles": {
+    "requirement": {
+      "required_relations": [],
+      "preferred_types": []
+    },
+    "business_analysis": {
+      "required_relations": [
+        "governs",
+        "verifies"
+      ],
+      "preferred_types": [
+        "process",
+        "entity",
+        "rule-set",
+        "acceptance-set"
+      ]
+    },
+    "solution_design": {
+      "required_relations": [
+        "derives_from"
+      ],
+      "preferred_types": []
+    },
+    "design_system": {
+      "required_relations": [],
+      "preferred_types": []
+    },
+    "experience_design": {
+      "required_relations": [
+        "flow_refs",
+        "screen_refs",
+        "journey_refs",
+        "derives_from"
+      ],
+      "preferred_types": []
+    },
+    "backlog_plan": {
+      "required_relations": [
+        "criterion_refs",
+        "experience_refs"
+      ],
+      "preferred_types": [
+        "story",
+        "test-plan",
+        "acceptance-set"
+      ]
+    },
+    "delivery_plan": {
+      "required_relations": [],
+      "preferred_types": []
+    },
+    "execution_plan": {
+      "required_relations": [
+        "story_path",
+        "test_plan_path",
+        "architecture_components"
+      ],
+      "preferred_types": [
+        "environment-contract",
+        "verification-contract",
+        "architecture-component"
+      ]
+    },
+    "deliver": {
+      "required_relations": [
+        "story_path",
+        "test_plan_path",
+        "architecture_components"
+      ],
+      "preferred_types": []
+    },
+    "configure": {
+      "required_relations": [],
+      "preferred_types": []
+    },
+    "setup": {
+      "required_relations": [],
+      "preferred_types": []
+    },
+    "organize_docs": {
+      "required_relations": [],
+      "preferred_types": []
+    },
+    "sketch": {
+      "required_relations": [],
+      "preferred_types": []
+    },
+    "demo": {
+      "required_relations": [],
+      "preferred_types": []
+    }
+  },
+  "role_profiles": {
+    "backend_developer": [
+      "interface-contract",
+      "data-model",
+      "rule-set"
+    ],
+    "frontend_developer": [
+      "screen",
+      "state",
+      "transition",
+      "design-master"
+    ],
+    "qa_engineer": [
+      "test-plan",
+      "acceptance-set",
+      "verification-contract"
+    ],
+    "devops_engineer": [
+      "environment-contract",
+      "runtime-view"
+    ],
+    "business_analyst": [
+      "process",
+      "entity",
+      "rule-set",
+      "acceptance-set"
+    ],
+    "software_architect": [
+      "interface-contract",
+      "architecture-component",
+      "decision"
+    ]
+  },
+  "external_sources": {
+    "memory": {
+      "root": "workspace/memory",
+      "extensions": [
+        ".md"
+      ],
+      "authority": "owner_context"
+    },
+    "environment": {
+      "root": "workspace/environment",
+      "extensions": [
+        ".md",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml"
+      ],
+      "authority": "operational_evidence"
+    }
+  },
+  "purposes": [
+    "discover",
+    "implement",
+    "review",
+    "verify"
+  ],
+  "purpose_profiles": {
+    "discover": {
+      "required_relations": []
+    },
+    "implement": {
+      "required_relations": [
+        "implements"
+      ]
+    },
+    "review": {
+      "required_relations": [
+        "derives_from",
+        "implements",
+        "verifies",
+        "depends_on"
+      ]
+    },
+    "verify": {
+      "required_relations": [
+        "verifies",
+        "criterion_refs"
+      ]
+    }
+  },
+  "task_purposes": {
+    "create": "discover",
+    "revise": "implement",
+    "consume": "implement",
+    "review": "review",
+    "repair": "implement"
+  }
+}

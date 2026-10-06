@@ -343,7 +343,8 @@
   "barrier": "Wait for all readers to finish or confirm cancellation before the named owner writes canonical sources.",
   "output_contract": {
     "findings": "Stable IDs, severity, source anchor, impact, repair and verification condition.",
-    "self_check": "Required inputs, mode, ownership and output elements present or missing."
+    "self_check": "Required inputs, mode, ownership and output elements present or missing.",
+    "context_findings": "Observed missing, wrong, stale or excessive context and recurring retrieval friction; expected behavior, source anchors, impact, recovery/result, proposed fix and verification case when known. Return to the parent; no direct filing. Parent uses issue-report with anonymous content and explicit user approval, or routes project-only gaps to the document owner."
   },
   "required_role_skills": {
     "analysis_challenger": [
@@ -468,5 +469,86 @@
       "switch": "mechanical_pass_tier",
       "value": "mechanical"
     }
+  },
+  "approval_anchors": {
+    "backlog": [
+      {
+        "path": "workspace/docs/backlog/backlog.md",
+        "field": "status",
+        "value": "approved"
+      }
+    ],
+    "requirement": [
+      {
+        "path": "workspace/docs/requirements/*.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "file"
+      }
+    ],
+    "business_analysis": [
+      {
+        "path": "workspace/docs/business-analysis/*/space.md",
+        "field": "package_status",
+        "value": "approved",
+        "scope": "package"
+      }
+    ],
+    "solution_design": [
+      {
+        "path": "workspace/docs/solution-design/landscape.md",
+        "field": "package_status",
+        "value": "approved"
+      }
+    ],
+    "design_system": [
+      {
+        "path": "workspace/docs/design-system/MASTER.md",
+        "field": "status",
+        "value": "approved"
+      }
+    ],
+    "experience_design": [
+      {
+        "path": "workspace/docs/experience-design/experiences/*/experience.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "package"
+      }
+    ],
+    "delivery": [
+      {
+        "path": "workspace/docs/delivery/deliveries/*/delivery.md",
+        "field": "scope_hash",
+        "value": "*",
+        "scope": "package"
+      }
+    ],
+    "operation": [
+      {
+        "path": "workspace/docs/operation/environment-contract.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "file"
+      },
+      {
+        "path": "workspace/docs/operation/verification-contract.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "file"
+      },
+      {
+        "path": "workspace/docs/delivery/governance.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "file"
+      },
+      {
+        "path": "workspace/docs/delivery/process-policy.md",
+        "field": "status",
+        "value": "approved",
+        "scope": "file"
+      }
+    ]
   }
 }

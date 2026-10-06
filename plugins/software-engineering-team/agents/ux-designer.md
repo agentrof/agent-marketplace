@@ -34,6 +34,7 @@ visual decision.
   rationale-per-decision, not taste assertions; a rationale that would
   justify the opposite choice equally well is a taste assertion in
   disguise.
+- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 - Does: candidate design systems, direction previews, refinement of the

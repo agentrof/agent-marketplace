@@ -2,6 +2,36 @@
 
 Spawn template: paste `{{constitution}}` into every role prompt.
 
+Vault first, per constitution section 5: every role starts from the default `project_reading` plan.
+Batch-read its units, using the frozen context reader for frozen candidates. When context is insufficient, wrong or unavailable, use manual search, reads and relationship discovery
+on the role's initiative or parent direction; record sources and reasons, rebind evidence, preserve gates and return `context_findings` to the parent for user-approved reporting.
+For gaps, use `vault_query.py`, machine indexes and generated views, typed frontmatter, relation blocks and wikilinks, then maps and targeted search.
+Fallback navigation with a shell can use `home.md`, `maps/_generated/relation-status.md`,
+`maps/_generated/cross-subtree-matrix.md` and
+`maps/_generated/stale-relations.md`, `maps/delivery.md` and the Item's
+story, Test Plan and pinned contract relations. Switch `context_pack`:
+at `role_digest`, a spawned role receives its pack from `context_pack.py
+build --entry <entry> --role <role> --mode <mode> --project-root <root>`
+instead of the full required reads; it reads a named source in full only
+when the pack does not cover a case, and records that read and why, as
+`skill-content/challenge-review/references/switch-context_pack-role_digest.md`
+defines. Switch `step_timing`: at `recorded`, the coordinator runs
+`step_timing.py start --run <run> --step <step> [--budget <id>]` before
+each step and `step_timing.py end --run <run> --span <span>` after it,
+and records each role spawn with `--kind spawn --parent <step span>
+--role <role> --phase reading|writing|review|re_review|waiting`. An end
+that returns overrun is reported to the owner at once with its
+breakdown, largest contributor and lever. The run ends with
+`step_timing.py report --run <run> --write`, as
+`skill-content/challenge-review/references/switch-step_timing-recorded.md`
+defines. Switch `step_budgets`: at `enforced`, each budgeted step is
+compared with its maximum, the owner's parameter or the package target
+in `skill-content/configure/data/step-budgets.json`; a step may finish
+well under it, and only an exceeded maximum is reported, never blocking,
+as
+`skill-content/challenge-review/references/switch-step_budgets-enforced.md`
+defines.
+
 `/deliver DLV-###` resumes from tracked Delivery files and verified remote
 evidence. It starts or resumes one Item only when its exact plan, target,
 predecessor, Fence and global slot checks pass. Each Item its
@@ -51,6 +81,14 @@ DLV-### --story <story>` before invoking the two readers. The resulting
 candidate and session identities bind all source and instruction inputs.
 Generate each role's `manifest` with `--role code_reviewer|qa_engineer` and
 `--mode review_initial|review_repair|qa_diagnostic|qa_final`.
+Every verification manifest includes the default `project_reading` plan. Start
+with `inspect-context --plan <saved verification manifest>` to batch-read its
+units from the frozen Git candidate. Preserve all `full_read` obligations and
+verification gates. Use `expand-context --plan <manifest> --reason <reason>`
+for continuation; `--ref` adds a reference. If context is insufficient or wrong, use frozen `inspect`
+and `diff` on the reader's initiative or parent direction, and return
+`context_findings` with recovery and proposed fix when known. The parent offers
+an anonymous issue through `issue-report` only with exact-payload user approval.
 While readers are active, use the same CLI's `inspect --path <file>` and
 `diff [--path <file>]` to read the frozen Git candidate. `inspect --base`
 selects its exact integration base. These interfaces permit source inspection
@@ -93,6 +131,17 @@ defines.
 Switch `item_review_scale`: at `by_change_size`, the official code reviewer
 reads alone an Item whose frozen change is within the owner's size limits, as
 `skill-content/code-review/references/switch-item_review_scale-by_change_size.md`
+defines.
+Switch `review_scope`: at `impact_closure`, the frozen candidate stays the
+structural check before any reader and the code reviewer reads the changed
+files, the Item's story, Test Plan and pinned contracts and the files those
+relations name; code review and QA read the closure the
+`delivery_verification.py` manifest derives; every role reads the change's
+impact closure, each approved, unchanged note outside it only as its
+hash-bound summary, reads beyond it when unsure and records why, a writer
+fixes a reported graph gap through its owning compiler and recomputes the
+closure, and a confirmation re-review reads only the fix's delta, as
+`skill-content/challenge-review/references/switch-review_scope-impact_closure.md`
 defines.
 
 A role that waits inside its turn waits at most the Delivery verification

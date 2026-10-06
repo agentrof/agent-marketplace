@@ -3,6 +3,38 @@
 Spawn template: paste `{{constitution}}`, exact input/output paths, review
 lens and `SELF-CHECK` into every reviewer prompt.
 
+Vault first, per constitution section 5: every role starts from the default `project_reading` plan.
+Batch-read its units, using the frozen context reader for frozen candidates. When context is insufficient, wrong or unavailable, use manual search, reads and relationship discovery
+on the role's initiative or parent direction; record sources and reasons, rebind evidence, preserve gates and return `context_findings` to the parent for user-approved reporting.
+For gaps, use `vault_query.py`, machine indexes and generated views, typed frontmatter, relation blocks and wikilinks, then maps and targeted search.
+Fallback navigation with a shell can use `home.md`, `maps/_generated/relation-status.md`,
+`maps/_generated/cross-subtree-matrix.md` and
+`maps/_generated/stale-relations.md`, the space's
+`_generated/registry.json`, `_generated/status.md` and
+`_generated/open-questions.md`, and
+`maps/_generated/uncovered-analysis.md`. Switch `context_pack`: at
+`role_digest`, a spawned role receives its pack from `context_pack.py
+build --entry <entry> --role <role> --mode <mode> --project-root <root>`
+instead of the full required reads; it reads a named source in full only
+when the pack does not cover a case, and records that read and why, as
+`skill-content/challenge-review/references/switch-context_pack-role_digest.md`
+defines. Switch `step_timing`: at `recorded`, the coordinator runs
+`step_timing.py start --run <run> --step <step> [--budget <id>]` before
+each step and `step_timing.py end --run <run> --span <span>` after it,
+and records each role spawn with `--kind spawn --parent <step span>
+--role <role> --phase reading|writing|review|re_review|waiting`. An end
+that returns overrun is reported to the owner at once with its
+breakdown, largest contributor and lever. The run ends with
+`step_timing.py report --run <run> --write`, as
+`skill-content/challenge-review/references/switch-step_timing-recorded.md`
+defines. Switch `step_budgets`: at `enforced`, each budgeted step is
+compared with its maximum, the owner's parameter or the package target
+in `skill-content/configure/data/step-budgets.json`; a step may finish
+well under it, and only an exceeded maximum is reported, never blocking,
+as
+`skill-content/challenge-review/references/switch-step_budgets-enforced.md`
+defines.
+
 Read this complete flow before `/business-analysis` changes durable state.
 An exact `REQ-###` is Requirement mode; no Requirement argument is manual
 mode. Manual mode never reads, creates or binds Requirement state.
@@ -23,6 +55,22 @@ mode. Manual mode never reads, creates or binds Requirement state.
    wave starts at once, after every finished worker is closed, as
    `skill-content/challenge-review/references/switch-reader_waves-all_at_once.md`
    and the host contract define.
+   Switch `review_scope`: at `impact_closure`, `ba_compile.py check` runs
+   before any reader is spawned; `task_inputs.py` derives each reader's inputs
+   with `--changed <note>` and `--base <approved commit>`, and a re-check
+   given `--findings` derives only the fix delta; every role reads the
+   change's impact closure, each approved, unchanged note outside it only as
+   its hash-bound summary, reads beyond it when unsure and records why, a
+   writer fixes a reported graph gap through its owning compiler and
+   recomputes the closure, and a confirmation re-review reads only the fix's
+   delta, as
+   `skill-content/challenge-review/references/switch-review_scope-impact_closure.md`
+   defines.
+   Switch `review_fanout`: at `per_unit`, a review of more than one changed
+   analysis document spawns one reader per unit in one message and then one
+   aggregator for the cross-unit checks no compiler enforces, as
+   `skill-content/challenge-review/references/switch-review_fanout-per_unit.md`
+   defines.
 3. Render, move each ready draft through `ba_compile.py enter-review --space
    <space> --doc <relative-doc>`, close individual document gates with `approve`,
    then run `approve-package`. Review entry changes only document status and its

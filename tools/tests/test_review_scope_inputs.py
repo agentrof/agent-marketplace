@@ -1,0 +1,723 @@
+"""Review scope inputs: at `review_scope` `full`, the default, every task,
+review manifest and verification manifest is derived as released. At
+`impact_closure` a reader reads the change's impact closure, lists every proven
+unchanged note with its hashes instead of reading it, starts from the vault's
+relation views and carries a `beyond_closure` list for reads past the closure;
+a confirmation re-check reads only the fixed lines' notes and what the fix
+touches; a writer starts from the vault views (#441).
+
+`impact_closure.py` owns the relation graph; these tests replace it with a stub
+whose closure is the changed notes plus a fixed dependents map.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import io
+import json
+import subprocess
+import sys
+import tempfile
+import types
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
+sys.path.insert(0, str(ROOT / "tools/tests"))
+import backlog_compile as backlog  # noqa: E402
+import backlog_review_inputs as inputs  # noqa: E402
+import delivery_verification as verification  # noqa: E402
+import process_policy  # noqa: E402
+import task_inputs  # noqa: E402
+from git_fixture import init_repository  # noqa: E402
+import test_backlog_review_speed as speed  # noqa: E402
+import test_delivery_verification as verification_tests  # noqa: E402
+from test_default_equivalence import (FIXTURE_SWITCHES, build_task_package,  # noqa: E402
+                                      build_task_project)
+
+SWITCH, VALUE = "review_scope", "impact_closure"
+VIEWS = {"maps/_generated/relation-status.md": "Which relations each note declares and lacks."}
+
+
+def switch_spec(flows: list[str]) -> dict:
+    return {"summary": "How much of a package a reader reads.", "flows": flows,
+            "values": [{"id": "full", "tradeoffs": "Today's reads."},
+                       {"id": VALUE, "tradeoffs": "Reads scale with the change."}],
+            "default": "full", "metric": "Reader minutes per review.",
+            "promotion": {"unit": "3 runs", "threshold": "Same verdicts."}}
+
+
+def with_switch():
+    """Declare review_scope in the shipped registry until it ships there."""
+    original = process_policy.load_registry
+
+    def load(package=None):
+        registry = original(package)
+        if SWITCH not in registry:
+            spec = switch_spec(["backlog-planning"])
+            registry[SWITCH] = {"values": [row["id"] for row in spec["values"]],
+                                "default": "full", "spec": spec}
+        return registry
+    return mock.patch.object(process_policy, "load_registry", load)
+
+
+class Stub:
+    """The documented impact_closure API over a fixed dependents map of docs paths."""
+
+    def __init__(self, dependents=None, proven=(), gaps=(), widened=()):
+        self.dependents = dependents or {}
+        self.proven = list(proven)
+        self.gaps = list(gaps)
+        self.widened = list(widened)
+        self.calls = []
+
+    def closure(self, docs, changed, *, policy=None):
+        self.calls.append(list(changed))
+        reach = set(changed)
+        for path in changed:
+            reach |= set(self.dependents.get(path, []))
+        return {"changed": list(changed), "closure": sorted(reach),
+                "proven_unchanged": [{"path": path, "approval_hash": "sha256:approved-" + path}
+                                     for path in self.proven if path not in reach],
+                "widened_by": self.widened, "graph_gaps": self.gaps}
+
+    def vault_views(self, docs):
+        return dict(VIEWS)
+
+    def record_beyond(self, manifest, path, reason):
+        manifest.setdefault("beyond_closure", []).append({"path": path, "reason": reason})
+        return manifest
+
+    def install(self):
+        module = types.ModuleType("impact_closure")
+        for name in ("closure", "vault_views", "record_beyond"):
+            setattr(module, name, getattr(self, name))
+        return mock.patch.dict(sys.modules, {"impact_closure": module})
+
+
+def quiet_policy(docs: Path, package: Path | None, *argv: str) -> None:
+    output = io.StringIO()
+    patch = (mock.patch.object(process_policy, "PACKAGE", package) if package
+             else contextlib.nullcontext())
+    with patch, contextlib.redirect_stdout(output):
+        code = process_policy.main([argv[0], "--docs", str(docs), *argv[1:]])
+    if code:
+        raise AssertionError(output.getvalue())
+
+
+def choose(docs: Path, value: str | None, package: Path | None = None) -> None:
+    quiet_policy(docs, package, "begin-revision" if process_policy.path_for(docs).exists() else "init")
+    if value is None:
+        quiet_policy(docs, package, "set", "--switch", SWITCH, "--default")
+    else:
+        quiet_policy(docs, package, "set", "--switch", SWITCH, "--value", value)
+    quiet_policy(docs, package, "approve")
+
+
+def git(root: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def commit(root: Path) -> None:
+    git(root, "add", "--all")
+    git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture")
+
+
+NOTES = {name: f"workspace/docs/package/{name}.md" for name in ("a", "b", "c", "d")}
+
+
+class TaskInputScopeTests(unittest.TestCase):
+    """A reader given notes a, b, c of one package; d depends on a."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name).resolve()
+        self.package, self.project = base / "package", base / "project"
+        build_task_package(self.package, switch_files=False)
+        policy_path = self.package / task_inputs.POLICY
+        task_policy = json.loads(policy_path.read_text())
+        task_policy["approval_anchors"] = {"fixture": [{
+            "path": NOTES["a"], "field": "type", "value": "note"}]}
+        policy_path.write_text(json.dumps(task_policy), encoding="utf-8")
+        registry = json.loads(json.dumps(FIXTURE_SWITCHES))
+        registry["switches"][SWITCH] = switch_spec(["fixture-flow"])
+        (self.package / process_policy.REGISTRY).write_text(json.dumps(registry, indent=2) + "\n",
+                                                            encoding="utf-8")
+        build_task_project(self.project, {path: f"---\ntype: note\n---\n\n# {name}\n\nLine one.\n"
+                                                f"Line two.\nLine three.\n"
+                                          for name, path in NOTES.items()})
+        self.docs = self.project / "workspace/docs"
+        self.stub = Stub(dependents={"package/a.md": ["package/d.md"]},
+                         proven=["package/b.md", "package/c.md"])
+        patch = self.stub.install()
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.reader = dict(entry="fixture-entry", role="fixture-reader", mode="review",
+                           project=self.project, package=self.package,
+                           inputs=[NOTES["a"], NOTES["b"], NOTES["c"]])
+        self.writer = dict(self.reader, role="fixture-writer", mode="revise")
+
+    def edit(self, name: str, old: str = "Line two.", new: str = "Line two, fixed.") -> None:
+        path = self.project / NOTES[name]
+        path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
+    def read_paths(self, result: dict) -> list[str]:
+        return [row["path"] for row in result["project_inputs"]]
+
+    def test_full_and_an_unregistered_switch_derive_the_released_manifest(self):
+        choose(self.docs, None, self.package)
+        plain = {name: task_inputs.manifest(**kwargs)
+                 for name, kwargs in (("reader", self.reader), ("writer", self.writer))}
+        # The same project under a registry that never declared the switch.
+        registry = json.loads(json.dumps(FIXTURE_SWITCHES))
+        (self.package / process_policy.REGISTRY).write_text(json.dumps(registry, indent=2) + "\n",
+                                                            encoding="utf-8")
+        for name, kwargs in (("reader", self.reader), ("writer", self.writer)):
+            with self.subTest(task=name):
+                released = task_inputs.manifest(**kwargs)
+                self.assertEqual({key: value for key, value in plain[name].items()
+                                  if key not in {"instructions", "source_hash"}},
+                                 {key: value for key, value in released.items()
+                                  if key not in {"instructions", "source_hash"}})
+                self.assertNotIn(SWITCH, plain[name])
+                self.assertNotIn("vault_views", plain[name])
+        self.assertEqual(self.stub.calls, [])
+        with self.assertRaisesRegex(ValueError, "--changed names the change set"):
+            task_inputs.manifest(**self.reader, changed=[NOTES["a"]])
+
+    def test_a_reader_reads_the_closure_and_lists_proven_notes_by_hash(self):
+        choose(self.docs, VALUE, self.package)
+        commit(self.project)
+        self.reader["base"] = git(self.project, "rev-parse", "HEAD")
+        self.edit("a")
+        result = task_inputs.manifest(**self.reader)
+        self.assertEqual(self.stub.calls, [["package/a.md"]])
+        self.assertEqual(result[SWITCH], VALUE)
+        self.assertEqual(result["vault_views"], VIEWS)
+        scope = result[VALUE]
+        self.assertEqual(scope["read"], "closure")
+        self.assertEqual(scope["closure"], [NOTES["a"], NOTES["d"]])
+        self.assertEqual(scope["beyond_closure"], [])
+        self.assertEqual(self.read_paths(result),
+                         sorted([NOTES["a"], NOTES["d"], "workspace/docs/delivery/process-policy.md"]))
+        proven = {row["path"]: row for row in scope["proven_unchanged"]}
+        self.assertEqual(sorted(proven), [NOTES["b"], NOTES["c"]])
+        self.assertEqual(proven[NOTES["b"]]["approval_hash"], "sha256:approved-package/b.md")
+        self.assertEqual(proven[NOTES["b"]]["sha256"], hashlib.sha256(
+            (self.project / NOTES["b"]).read_bytes()).hexdigest())
+        conditions = [row["condition"] for row in result["next_transition_conditions"]]
+        self.assertEqual(conditions[:2], ["vault_views_first", "impact_closure_reads"])
+        # A proven note's bytes bind the manifest it is listed in unread.
+        task_inputs.manifest(**self.reader, expected_hash=result["source_hash"])
+        self.edit("b", "Line one.", "Line one changed.")
+        with self.assertRaisesRegex(ValueError, "stale"):
+            task_inputs.manifest(**self.reader, expected_hash=result["source_hash"])
+
+    def test_an_input_the_closure_cannot_prove_unchanged_stays_a_full_read(self):
+        choose(self.docs, VALUE, self.package)
+        self.stub.proven = ["package/b.md"]
+        self.stub.gaps = ["package/c.md"]
+        self.edit("a")
+        result = task_inputs.manifest(**self.reader)
+        self.assertIn(NOTES["c"], self.read_paths(result))
+        self.assertNotIn(NOTES["b"], self.read_paths(result))
+        self.assertEqual(result[VALUE]["graph_gaps"], [NOTES["c"]])
+
+    def test_without_a_change_the_reader_reads_every_input(self):
+        choose(self.docs, VALUE, self.package)
+        commit(self.project)
+        self.reader["base"] = git(self.project, "rev-parse", "HEAD")
+        result = task_inputs.manifest(**self.reader)
+        self.assertEqual(result[VALUE]["read"], "full")
+        self.assertTrue({NOTES["a"], NOTES["b"], NOTES["c"]} <= set(self.read_paths(result)))
+        # A named change starts the closure even with a clean worktree.
+        named = task_inputs.manifest(**self.reader, changed=[NOTES["c"]])
+        self.assertEqual(named[VALUE]["changed"], [NOTES["c"]])
+        self.assertNotIn(NOTES["b"], self.read_paths(named))
+
+    def test_a_writer_starts_from_the_views_and_keeps_its_inputs(self):
+        plain = task_inputs.manifest(**self.writer)
+        choose(self.docs, VALUE, self.package)
+        self.edit("a")
+        result = task_inputs.manifest(**self.writer)
+        self.assertEqual(result["vault_views"], VIEWS)
+        self.assertNotIn(VALUE, result)
+        self.assertEqual(result["next_transition_conditions"][0]["condition"], "vault_views_first")
+        self.assertEqual(set(self.read_paths(result)) - set(self.read_paths(plain)),
+                         {"workspace/docs/delivery/process-policy.md"})
+
+    def test_a_recheck_reads_only_the_fixed_lines_notes_and_what_the_fix_touches(self):
+        choose(self.docs, VALUE, self.package)
+        commit(self.project)
+        reviewed = git(self.project, "rev-parse", "HEAD")
+        self.edit("a")
+        commit(self.project)
+        findings = self.project / ".agentrof/findings.json"
+        findings.parent.mkdir()
+        findings.write_text(json.dumps({"findings": [{"id": "F-1", "repair": "Fix line two."}]}),
+                            encoding="utf-8")
+        result = task_inputs.manifest(**self.reader, base=reviewed,
+                                      findings=".agentrof/findings.json")
+        scope = result[VALUE]
+        self.assertEqual(scope["read"], "delta")
+        self.assertEqual(scope["base"], reviewed)
+        self.assertEqual(scope["fixed"], [{"path": NOTES["a"], "lines": [[8, 8]]}])
+        self.assertEqual(scope["touches"], [NOTES["d"]])
+        self.assertEqual(self.read_paths(result), sorted([
+            ".agentrof/findings.json", NOTES["a"], NOTES["d"],
+            "workspace/docs/delivery/process-policy.md"]))
+        self.assertEqual([row["path"] for row in scope["unchanged_since_base"]], [])
+        self.assertEqual(sorted(row["path"] for row in scope["proven_unchanged"]),
+                         [NOTES["b"], NOTES["c"]])
+        self.assertIn("impact_closure_reads",
+                      [row["condition"] for row in result["next_transition_conditions"]])
+        # An input the stub cannot prove is still unchanged since the reviewed commit.
+        self.stub.proven = []
+        unproven = task_inputs.manifest(**self.reader, base=reviewed,
+                                        findings=".agentrof/findings.json")
+        self.assertEqual([row["path"] for row in unproven[VALUE]["unchanged_since_base"]],
+                         [NOTES["b"], NOTES["c"]])
+        self.assertNotIn(NOTES["b"], self.read_paths(unproven))
+
+    def test_a_changed_path_cannot_leave_the_vault(self):
+        choose(self.docs, VALUE, self.package)
+        for path in ("workspace/docs/../../outside.md", "workspace/docs/a/../../../x.md"):
+            with self.subTest(path=path), Stub().install(), self.assertRaises(ValueError):
+                task_inputs.manifest(**self.reader, changed=[path])
+        with self.assertRaisesRegex(ValueError, "inside workspace/docs"):
+            task_inputs.impact_closure(self.docs, ["workspace/docs/../outside.md"],
+                                       "workspace/docs/")
+
+    def test_the_switch_needs_the_closure_module(self):
+        choose(self.docs, VALUE, self.package)
+        self.edit("a")
+        with mock.patch.dict(sys.modules, {"impact_closure": None}):
+            with self.assertRaisesRegex(ValueError, "needs scripts/impact_closure.py"):
+                task_inputs.manifest(**self.reader)
+
+
+class BacklogScopeTests(unittest.TestCase):
+    """The four-story revision-2 backlog of the root review scope tests."""
+
+    setUp = speed.RootReviewScopeTests.setUp
+    reopen = speed.RootReviewScopeTests.reopen
+    path = speed.RootReviewScopeTests.path
+    depends = speed.RootReviewScopeTests.depends
+    EPIC = speed.RootReviewScopeTests.EPIC
+
+    def choose(self, value):
+        with with_switch():
+            choose(self.docs, value)
+
+    def manifest(self, **kwargs):
+        with with_switch():
+            return inputs.manifest(self.docs, **kwargs)
+
+    def stub(self, **kwargs) -> Stub:
+        # These isolate graph selection with a known empty upstream delta;
+        # GitChangeScopeTests covers the real approval-history boundary.
+        history = mock.patch.object(inputs, "vault_changes", return_value=(set(), {}))
+        history.start()
+        self.addCleanup(history.stop)
+        stub = Stub(**kwargs)
+        patch = stub.install()
+        patch.start()
+        self.addCleanup(patch.stop)
+        return stub
+
+    def test_full_reads_as_released(self):
+        self.depends(3, 4)
+        stub = self.stub()
+        # Policy approval pins draft review metadata in a Git checkout;
+        # compare the same source bytes on both full-reading paths.
+        self.choose(None)
+        plain = {name: inputs.manifest(self.docs, **kwargs) for name, kwargs in (
+            ("root", {}), ("epic", {"epic": "EP-001"}), ("writer", {"epic": "EP-001", "writer": True}))}
+        for name, kwargs in (("root", {}), ("epic", {"epic": "EP-001"}),
+                             ("writer", {"epic": "EP-001", "writer": True})):
+            with self.subTest(scope=name):
+                self.assertEqual(self.manifest(**kwargs), plain[name])
+        self.assertEqual(stub.calls, [])
+
+    def test_a_reader_reads_the_changed_story_and_its_closure_only(self):
+        self.depends(3, 4)
+        full = inputs.manifest(self.docs, epic="EP-001")
+        stub = self.stub(dependents={self.path(3): [self.path(4)]},
+                         proven=[self.path(1), self.path(2)])
+        self.choose(VALUE)
+        for kwargs in ({"epic": "EP-001"}, {}):
+            with self.subTest(**kwargs):
+                value = self.manifest(**kwargs)
+                self.assertEqual(stub.calls[-1], [self.path(3), self.path(3, "test-plan")])
+                self.assertEqual(value[SWITCH], VALUE)
+                self.assertEqual(value["vault_views"], VIEWS)
+                scope = value[VALUE]
+                self.assertEqual(scope["read"], "closure")
+                self.assertEqual(scope["beyond_closure"], [])
+                self.assertNotIn("reads", scope)
+                self.assertNotIn("stories", scope)
+                for number in (3, 4):
+                    self.assertIn(self.path(number), value["paths"])
+                for number in (1, 2):
+                    for name in ("story", "test-plan"):
+                        self.assertNotIn(self.path(number, name), value["paths"])
+                self.assertEqual(sorted(row["path"] for row in scope["proven_unchanged"]),
+                                 [self.path(1), self.path(2)])
+                graph = value["check"]["backlog_graph"]["stories"]
+                self.assertEqual({identity: row["read"] for identity, row in graph.items()},
+                                 {"ST-001": "summary", "ST-002": "summary", "ST-003": "full",
+                                  "ST-004": "full"})
+                self.assertEqual(self.manifest(expected_hash=value["source_hash"], **kwargs), value)
+        self.assertLess(len(self.manifest(epic="EP-001")["paths"]), len(full["paths"]))
+
+    def test_adding_unchanged_approved_stories_leaves_the_read_set_unchanged(self):
+        self.depends(3, 4)
+        self.stub(dependents={self.path(3): [self.path(4)]})
+        self.choose(VALUE)
+        small = self.manifest(epic="EP-001")
+        # The same revision of a package with two more approved, unchanged stories.
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.docs = Path(temporary.name) / "workspace/docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.docs.parent / "config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
+        speed.make_approved_backlog(self.docs, *(f"ST-{number:03d}" for number in range(1, 7)))
+        self.reopen(2)
+        self.depends(3, 4)
+        self.choose(VALUE)
+        large = self.manifest(epic="EP-001")
+        self.assertEqual(large["paths"], small["paths"])
+        # The two new stories appear only as hash-bound summaries.
+        self.assertEqual(len(small["check"]["backlog_graph"]["stories"]), 4)
+        self.assertEqual({identity: row["read"] for identity, row
+                          in large["check"]["backlog_graph"]["stories"].items()
+                          if identity in {"ST-005", "ST-006"}},
+                         {"ST-005": "summary", "ST-006": "summary"})
+
+    def test_a_first_revision_reads_the_whole_package(self):
+        self.reopen(1)
+        self.stub()
+        self.choose(VALUE)
+        value = self.manifest()
+        self.assertEqual(value[VALUE], {"read": "full", "reason": "first backlog revision",
+                                        "beyond_closure": []})
+        for number in range(1, 5):
+            self.assertIn(self.path(number, "test-plan"), value["paths"])
+
+    def test_a_writer_starts_from_the_views_and_reads_as_released(self):
+        self.depends(3, 4)
+        stub = self.stub()
+        plain = inputs.manifest(self.docs, epic="EP-001", writer=True)
+        self.choose(VALUE)
+        value = self.manifest(epic="EP-001", writer=True)
+        self.assertEqual(value["vault_views"], VIEWS)
+        self.assertNotIn(VALUE, value)
+        self.assertEqual(value["paths"], plain["paths"])
+        self.assertEqual(stub.calls, [])
+
+
+class VerificationScopeTests(unittest.TestCase):
+    """The verification fixture with two architecture notes, one the story reaches."""
+
+    setUp = verification_tests.VerificationTests.setUp
+    write = verification_tests.VerificationTests.write
+    note = verification_tests.VerificationTests.note
+    commit = verification_tests.VerificationTests.commit
+    freeze = verification_tests.VerificationTests.freeze
+
+    REACHED = "workspace/docs/system-architecture/auth.md"
+    OTHER = "workspace/docs/system-architecture/billing.md"
+
+    def prepare(self):
+        """Approve the architecture before the Item's base, so the Item changes only product code."""
+        for path in (self.REACHED, self.OTHER):
+            self.note(path, {"status": "approved"})
+        self.commit()
+        item = self.root / self.item_path
+        props, body = verification.delivery.split_note(item)
+        props["integration_base_commit"] = verification.git(self.root, "rev-parse", "HEAD")
+        self.write(self.item_path, verification.delivery.frontmatter(props, body))
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        self.freeze()
+
+    def test_full_reads_every_bound_input(self):
+        self.prepare()
+        released = verification.manifest(self.root, "DLV-001", "AUTH-01", "qa_engineer", "qa_final")
+        self.assertIn(self.OTHER, released["full_read"])
+        self.assertNotIn(SWITCH, released)
+        self.assertEqual(verification.review_scope(self.root, "DLV-001"), "full")
+
+    def test_the_policy_value_reaches_the_verification_manifest(self):
+        self.prepare()
+        with with_switch():
+            choose(self.root / "workspace/docs", VALUE)
+            self.assertEqual(verification.review_scope(self.root, "DLV-001"), VALUE)
+
+    def stamp_other(self, edit_after_approval: bool) -> None:
+        """Stamp the unreached architecture note with an approval hash of its bytes."""
+        import test_impact_closure as closure_tests
+        path = self.root / self.OTHER
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "status: approved\n", "status: draft\n", 1), encoding="utf-8")
+        closure_tests.stamp(path)
+        if edit_after_approval:
+            path.write_text(path.read_text(encoding="utf-8") + "\nEdited after approval.\n",
+                            encoding="utf-8")
+
+    def closure_manifest(self, edit_after_approval: bool, item_json: bool = False) -> dict:
+        # A note with no typed relation is a graph gap and always read in
+        # full, so the unreached note relates to the reached one.
+        self.note(self.REACHED, {"status": "approved"})
+        self.note(self.OTHER, {"status": "approved",
+                               "related_to": ["[[system-architecture/auth|Auth]]"]})
+        self.stamp_other(edit_after_approval)
+        self.commit()
+        item = self.root / self.item_path
+        props, body = verification.delivery.split_note(item)
+        props["integration_base_commit"] = verification.git(self.root, "rev-parse", "HEAD")
+        self.write(self.item_path, verification.delivery.frontmatter(props, body))
+        self.write("src/product.py", "value = 3\n")
+        if item_json:
+            self.write("workspace/docs/system-architecture/catalog.json", '{"a": 1}\n')
+        self.commit()
+        self.freeze()
+        with mock.patch.object(verification, "review_scope", return_value=VALUE):
+            return verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer",
+                                         "review_initial")
+
+    def test_an_architecture_note_proven_unchanged_is_listed_by_hash(self):
+        value = self.closure_manifest(edit_after_approval=False)
+        self.assertNotIn(self.OTHER, value["full_read"])
+        self.assertEqual(value[VALUE]["unread_inputs"], [{
+            "path": self.OTHER, "sha256": value["inputs"][self.OTHER]}])
+        self.assertIn("src/product.py", value["full_read"])
+        self.assertIn("workspace/docs/backlog/story.md", value["full_read"])
+
+    def test_a_vault_data_file_the_item_changed_seeds_the_closure(self):
+        value = self.closure_manifest(edit_after_approval=False, item_json=True)
+        self.assertIn("workspace/docs/system-architecture/catalog.json", value[VALUE]["seeds"])
+
+    def test_an_architecture_note_edited_after_approval_is_read_in_full(self):
+        value = self.closure_manifest(edit_after_approval=True)
+        self.assertIn(self.OTHER, value["full_read"])
+        self.assertEqual(value[VALUE]["unread_inputs"], [])
+
+
+class RealClosureTests(unittest.TestCase):
+    """task_inputs over the shipped impact_closure module, no stub: its gap
+    rows and widening rows reach the manifest as docs paths under the prefix."""
+
+    def setUp(self):
+        import test_impact_closure as closure_tests
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.docs = Path(temporary.name) / "docs"
+        for rel, text in closure_tests.VAULT.items():
+            (self.docs / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.docs / rel).write_text(text, encoding="utf-8")
+        self.digest = closure_tests.stamp(self.docs / "backlog/story-g.md")
+        self.contract = closure_tests.CONTRACT
+
+    def test_the_real_closure_reaches_the_manifest_with_paths_under_the_prefix(self):
+        prefix = "workspace/docs/"
+        scope = task_inputs.impact_closure(self.docs, [prefix + self.contract + ".md"], prefix)
+        self.assertEqual(scope["changed"], [prefix + self.contract + ".md"])
+        self.assertIn(prefix + "backlog/story-e.md", scope["closure"])
+        self.assertEqual(scope["widened_by"], [{
+            "path": prefix + self.contract + ".md", "reason": "shared_contract",
+            "citers": [prefix + "backlog/story-e.md", prefix + "backlog/story-f.md"]}])
+        self.assertNotIn(prefix + "backlog/story-g.md", scope["graph_gaps"])
+        selected_gap = task_inputs.impact_closure(self.docs, ["backlog/story-g.md"], prefix)
+        self.assertIn(prefix + "backlog/story-g.md", selected_gap["graph_gaps"])
+        story_g = self.docs / "backlog/story-g.md"
+        self.assertEqual(scope["proven_unchanged"], [{
+            "path": prefix + "backlog/story-g.md", "approval_hash": self.digest,
+            "sha256": hashlib.sha256(story_g.read_bytes()).hexdigest()}])
+        self.assertEqual(scope["beyond_closure"], [])
+        self.assertEqual(sorted(task_inputs.vault_views(self.docs)), ["docs", "views"])
+
+
+class ChangeInventoryTests(unittest.TestCase):
+    """A changed canonical input of any canonical suffix is a change, so a
+    reader reads it rather than listing it unchanged."""
+
+    def test_a_changed_json_input_is_a_change(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        project = Path(temporary.name)
+        init_repository(project)
+        docs = project / "workspace/docs/solution-design/_generated"
+        docs.mkdir(parents=True)
+        (docs / "topology.json").write_text("{}\n", encoding="utf-8")
+        (docs.parent / "note.md").write_text("# Note\n", encoding="utf-8")
+        command = ["git", "-C", str(project), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run([*command, "add", "-A"], check=True)
+        subprocess.run([*command, "commit", "-qm", "base"], check=True)
+        (docs / "topology.json").write_text('{"a": 1}\n', encoding="utf-8")
+        changed, commit = task_inputs.impact_changes(["git", "-C", str(project)], None, None)
+        self.assertEqual(changed, {"workspace/docs/solution-design/_generated/topology.json"})
+        self.assertTrue(commit)
+
+
+class GitChangeScopeTests(unittest.TestCase):
+    """A real Git project: the backlog reader's closure starts from every vault
+    file changed since the last approved backlog, never only from lost stamps."""
+
+    EPIC = "backlog/epics/delivery-fixture"
+    ACCEPTANCE = "business-analysis/delivery/domains/identity/acceptance/delivery-acceptance.md"
+
+    def setUp(self):
+        from backlog_fixture import make_approved_backlog
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.project = Path(temporary.name).resolve()
+        self.docs = self.project / "workspace/docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.project / "workspace/config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            make_approved_backlog(self.docs, "ST-001", "ST-002", "ST-003", "ST-004")
+        choose(self.docs, VALUE)
+        init_repository(self.project)
+        self.commit("Approved backlog")
+        speed.RootReviewScopeTests.reopen(self, 2)
+        self.commit("Begin revision 2")
+
+    def commit(self, message):
+        for args in (["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                                     "commit", "-qm", message]):
+            subprocess.run(["git", "-C", str(self.project), *args], check=True,
+                           capture_output=True)
+
+    def story(self, number, name="story"):
+        return f"{self.EPIC}/stories/st-{number:03d}/{name}.md"
+
+    def reads(self):
+        manifest = inputs.manifest(self.docs)
+        return manifest[VALUE], {identity: row["read"] for identity, row
+                                 in manifest["check"]["backlog_graph"]["stories"].items()}
+
+    def test_imported_revision_without_approval_history_reads_complete_package(self):
+        subprocess.run(["git", "-C", str(self.project), "checkout", "--orphan", "imported"],
+                       check=True, capture_output=True)
+        self.commit("Imported current revision")
+        self.assertIsNone(task_inputs.approval_base(self.project, "backlog"))
+        manifest = inputs.manifest(self.docs)
+        self.assertEqual(manifest[VALUE]["read"], "full")
+        for number in range(1, 5):
+            self.assertIn(self.story(number), manifest["paths"])
+            self.assertIn(self.story(number, "test-plan"), manifest["paths"])
+        record, errors = backlog.collect(self.docs, review_inputs=True)
+        self.assertFalse(errors)
+        self.assertEqual(inputs.revision_delta(record, self.docs, 100, None)["read"], "full")
+
+    def test_an_upstream_criterion_change_reaches_every_story_that_cites_it(self):
+        path = self.docs / self.story(3)
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "Administrative bulk operations", "Bulk admin operations"), encoding="utf-8")
+        scope, rows = self.reads()
+        self.assertEqual(rows, {"ST-001": "summary", "ST-002": "summary", "ST-003": "full",
+                                "ST-004": "summary"})
+        acceptance = self.docs / self.ACCEPTANCE
+        acceptance.write_text(acceptance.read_text(encoding="utf-8").replace(
+            "An account can be registered.", "An account can be registered once verified."),
+            encoding="utf-8")
+        scope, rows = self.reads()
+        self.assertIn(self.ACCEPTANCE, scope["changed"])
+        self.assertEqual(set(rows.values()), {"full"})
+
+    def test_a_reader_task_starts_from_every_change_since_the_approval(self):
+        acceptance = self.docs / self.ACCEPTANCE
+        acceptance.write_text(acceptance.read_text(encoding="utf-8").replace(
+            "An account can be registered.", "An account can be registered once verified."),
+            encoding="utf-8")
+        self.commit("Writer commits the upstream edit")
+        result = task_inputs.manifest(entry="backlog-plan", role="backlog-reviewer",
+                                      mode="review", project=self.project)
+        scope = result[VALUE]
+        self.assertEqual(scope["read"], "closure")
+        self.assertIn("workspace/docs/" + self.ACCEPTANCE, scope["changed"])
+        self.assertTrue(scope["approved_base"])
+
+    def test_root_revision_delta_keeps_stories_reached_from_an_upstream_edit(self):
+        acceptance = self.docs / self.ACCEPTANCE
+        acceptance.write_text(acceptance.read_text(encoding="utf-8").replace(
+            "An account can be registered.", "An account can be registered once verified."),
+            encoding="utf-8")
+        self.commit("Upstream changes after approval")
+        record, _errors = backlog.collect(self.docs)
+        delta = inputs.revision_delta(record, self.docs, 100, None)
+        self.assertEqual(delta["changed"], ["ST-001", "ST-002", "ST-003", "ST-004"])
+
+    def test_a_committed_change_still_starts_the_closure(self):
+        acceptance = self.docs / self.ACCEPTANCE
+        acceptance.write_text(acceptance.read_text(encoding="utf-8").replace(
+            "An account can be registered.", "An account can be registered once verified."),
+            encoding="utf-8")
+        self.commit("Writer commits the upstream edit")
+        scope, rows = self.reads()
+        self.assertIn(self.ACCEPTANCE, scope["changed"])
+        self.assertEqual(set(rows.values()), {"full"})
+
+class ConcurrentLevelsTests(unittest.TestCase):
+    """At review_levels concurrent_when_independent the root manifest does not
+    bind the epic round the concurrent epic level is still writing."""
+
+    EPIC = "backlog/epics/delivery-fixture"
+
+    def setUp(self):
+        from backlog_fixture import make_approved_backlog
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.docs = Path(temporary.name).resolve() / "workspace/docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.docs.parent / "config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            make_approved_backlog(self.docs, "ST-001", "ST-002")
+        project = self.docs.parents[1]
+        init_repository(project)
+        for args in (["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                                     "commit", "-qm", "Approved backlog"]):
+            subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
+        speed.RootReviewScopeTests.reopen(self, 2)
+        story = self.docs / f"{self.EPIC}/stories/st-002/story.md"
+        story.write_text(story.read_text(encoding="utf-8").replace(
+            "Administrative bulk operations", "Bulk admin operations"), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            backlog.stub_epic_review(self.docs, "delivery-fixture")
+
+    def record_epic_verdict(self):
+        review = sorted((self.docs / self.EPIC / "reviews").glob("round-*"))[-1]
+        props, body = backlog.parse_front_matter(review)
+        props["verdict"] = "approved"
+        review.write_text(backlog.front_matter(props, body), encoding="utf-8")
+        return review
+
+    def test_the_root_manifest_stays_fresh_while_the_epic_level_records_its_verdict(self):
+        from test_review_manifest_scope import choose as choose_switch
+        choose_switch(self.docs, "concurrent_when_independent", switch="review_levels")
+        root = inputs.manifest(self.docs)
+        review = self.record_epic_verdict()
+        self.assertNotIn(review.relative_to(self.docs).as_posix(), root["paths"])
+        self.assertEqual(inputs.manifest(self.docs, expected_hash=root["source_hash"]), root)
+
+    def test_at_the_default_the_root_binds_the_epic_round_as_released(self):
+        root = inputs.manifest(self.docs)
+        self.record_epic_verdict()
+        with self.assertRaisesRegex(inputs.InputError, "stale"):
+            inputs.manifest(self.docs, expected_hash=root["source_hash"])
+
+if __name__ == "__main__":
+    unittest.main()

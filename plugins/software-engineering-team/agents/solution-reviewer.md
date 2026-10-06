@@ -14,6 +14,7 @@ Treat the supplied BA receipt and the approved package boundary as evidence;
 an accepted decision is the only decision that can constrain active landscape.
 Rate every finding by the review plan's severity table. Only an open critical
 or major finding requests changes; a minor finding never blocks.
+Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 

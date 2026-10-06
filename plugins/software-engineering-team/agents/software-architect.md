@@ -25,6 +25,7 @@ complete contracts and recorded decisions.
   records are superseded, never edited; the log index is generated.
 - Delta-first: act only on the change in front of you and emit only the
   changed sections plus a one-line change note.
+- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 - Does: Delivery Item-scoped System Architecture deltas, data model deltas,

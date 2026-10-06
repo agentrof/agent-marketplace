@@ -13,6 +13,7 @@ tools: Read, Grep, Glob
 
 Evaluate semantic tokens and components as a coherent system, never as a
 cosmetic preference; upstream BA and Solution constraints remain authoritative.
+Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 

@@ -1,0 +1,6 @@
+{
+  "summary": "At `review_scope: impact_closure` every reviewer input derivation reads the change's impact closure: `task_inputs.py` (business analysis, solution design, design system, experience, Operation contracts, delivery and execution planning, the execution-plan bundle readers), `backlog_review_inputs.py` (epic and root readers) and `delivery_verification.py manifest` (code review and QA). A note the closure proves unchanged is listed with its approval hash and current sha256 instead of being read, every role starts from the vault's relation views, a reader carries a `beyond_closure` list for any read past the closure, and a confirmation re-check given findings and the reviewed commit reads only the fixed lines' notes and what the fix touches. At `context_pack: role_digest` a task binds the role digest and its `pack_hash` instead of its required reads and checks the pack before a result is kept. At the defaults every task, manifest and verification manifest is derived as released.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

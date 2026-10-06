@@ -171,6 +171,12 @@ TEST_LEVELS_SWITCH = "test_levels"
 TEST_LEVELS_VALUE = "declared"
 LEVELS = ("unit", "fixture", "live")
 REASONED_LEVELS = ("fixture", "live")
+BACKLOG_PATH_SWITCH = "backlog_path"
+BACKLOG_PATH_VALUE = "light_when_eligible"
+LIGHT_PATH_DATA_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
+                        / "backlog-plan" / "data" / "light-backlog-path.json")
+LIGHT_PATH_SECTION = "Light Path"
+LIGHT_PATH_LINE_RE = re.compile(r"(?m)^Compiler \[Light Path\]: changed (\S.*?)\s*$")
 SIZE_EXCEPTIONS = "Size Exceptions"
 SIZE_EXCEPTION_COLUMNS = ("story", "measure", "reason")
 CHECKLIST_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\](?:\s|$)")
@@ -4280,6 +4286,7 @@ def approval_preflight(docs: Path, record: dict,
     already_approved = (record.get("backlog") or {}).get("props", {}).get("status") == "approved"
     if not already_approved:
         findings.extend(requirement_coverage_findings(record))
+        findings.extend(light_root_review_findings(record, docs))
     preserved, pin = {}, {}
     if not collect_errors and not findings:
         if already_approved:
@@ -4772,6 +4779,366 @@ def stub_epic(args) -> int:
     return 0
 
 
+def light_path_limits() -> dict:
+    """Return the package's light backlog path limits."""
+    try:
+        data = json.loads(LIGHT_PATH_DATA_PATH.read_text(encoding="utf-8"))
+        limit, kinds = data["max_changed_stories"], data["work_kinds"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"light backlog path data is missing or invalid: {exc}") from exc
+    if (not isinstance(limit, int) or isinstance(limit, bool) or limit < 1
+            or not isinstance(kinds, list) or not kinds
+            or not set(kinds) <= WORK_KINDS - {"feature"}):
+        raise RuntimeError("light backlog path data needs a positive max_changed_stories"
+                           " and work_kinds drawn from defect and technical")
+    return {"max_changed_stories": limit, "work_kinds": sorted(kinds)}
+
+
+def backlog_path_value(docs: Path) -> str:
+    """Return the backlog_path value in force; a draft or invalid policy raises ValueError."""
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    return values[BACKLOG_PATH_SWITCH]["value"]
+
+
+def requirement_note(docs: Path, requirement_ref: str) -> tuple[Path, dict, str] | None:
+    for path in requirement_compile.requirement_paths(docs):
+        if requirement_compile.requirement_id(path) == requirement_ref:
+            props, body = requirement_compile.split_note(path)
+            return path, props, body
+    return None
+
+
+def changed_story_ids(record: dict, docs: Path) -> list[str]:
+    """Stories whose story or test plan is new or no longer carries its approval stamp."""
+    return sorted(story["id"] for story in record["stories"]
+                  if approval_stamp_findings(docs / story["path"], docs)
+                  or approval_stamp_findings(docs / story["test_plan"], docs))
+
+
+def approved_stories(record: dict, docs: Path) -> dict[str, dict]:
+    """The stories of the last approved backlog revision, by id, from Git.
+
+    The newest commit whose backlog root reads approved is the last approval;
+    each story there carries its approved work_kind and epic id. Without Git
+    history nothing is known, and only the current stories count.
+    """
+    where = [Path(docs)]
+
+    def git(*argv: str) -> str | None:
+        out = subprocess.run(["git", "--no-replace-objects", *argv], cwd=where[0],
+                             capture_output=True, check=False)
+        return out.stdout.decode("utf-8", "replace") if out.returncode == 0 else None
+
+    top = git("rev-parse", "--show-toplevel")
+    if top is not None:
+        where[0] = Path(top.strip())
+    root = (record.get("backlog") or {}).get("path")
+    if top is None or not root:
+        return {}
+    prefix = Path(docs).resolve().relative_to(Path(top.strip()).resolve()).as_posix()
+    root_rel = f"{prefix}/{root}"
+    folder = root_rel.rsplit("/", 1)[0]
+    for commit in (git("log", "--format=%H", "--", root_rel) or "").split():
+        text = git("show", f"{commit}:{root_rel}")
+        if text is None or parse_front_matter_text(text)[0].get("status") != "approved":
+            continue
+        epics, stories = {}, {}
+        names = (git("ls-tree", "-r", "--name-only", commit, "--", folder) or "").splitlines()
+        for name in names:
+            if name.endswith("/epic.md"):
+                epics[name.rsplit("/", 1)[0]] = parse_front_matter_text(
+                    git("show", f"{commit}:{name}") or "")[0].get("id")
+        for name in names:
+            if name.endswith("/story.md"):
+                props = parse_front_matter_text(git("show", f"{commit}:{name}") or "")[0]
+                epic_dir = name.split("/stories/", 1)[0]
+                if props.get("id"):
+                    stories[str(props["id"])] = {
+                        "id": str(props["id"]), "work_kind": props.get("work_kind"),
+                        "epic_id": epics.get(epic_dir), "deleted": True}
+        return stories
+    return {}
+
+
+def light_path_status(record: dict, docs: Path) -> dict:
+    """Return whether this revision may take the light backlog path, and why not.
+
+    At the default nothing but the switch is read.
+    """
+    value = backlog_path_value(docs)
+    if value != BACKLOG_PATH_VALUE:
+        return {"backlog_path": value, "eligible": False,
+                "reasons": [f"backlog_path is {value}"]}
+    limits = light_path_limits()
+    kinds, limit = limits["work_kinds"], limits["max_changed_stories"]
+    backlog = record.get("backlog") or {}
+    props = backlog.get("props", {})
+    reasons: list[str] = []
+    if backlog.get("planning_mode") != "requirement":
+        reasons.append("the backlog revision is not in Requirement mode")
+    else:
+        requirement_ref = str(props.get("requirement_ref", ""))
+        note = requirement_note(docs, requirement_ref)
+        kind = str(note[1].get("request_kind", "")) if note else ""
+        if kind not in kinds:
+            reasons.append(f"Requirement {requirement_ref} request_kind is {kind or '(missing)'},"
+                           f" not {' or '.join(kinds)}")
+    if int(props.get("revision", 1) or 1) < 2:
+        reasons.append("the backlog has no earlier approved revision")
+    by_id = {story["id"]: story for story in record["stories"]}
+    # A story the last approval held and the revision removed is a change too.
+    deleted = {story_id: story for story_id, story in approved_stories(record, docs).items()
+               if story_id not in by_id}
+    changed = sorted({*changed_story_ids(record, docs), *deleted})
+    by_id.update(deleted)
+    if not changed:
+        reasons.append("the revision changes no story")
+    elif len(changed) > limit:
+        reasons.append(f"the revision changes {len(changed)} stories, more than"
+                       f" max_changed_stories {limit}")
+    for story_id in changed:
+        if by_id[story_id]["work_kind"] not in kinds:
+            reasons.append(f"{story_id} work_kind is {by_id[story_id]['work_kind'] or '(missing)'},"
+                           f" not {' or '.join(kinds)}")
+    epics = sorted({by_id[story_id]["epic_id"] for story_id in changed})
+    if len(epics) > 1:
+        reasons.append("the changed stories span epics " + ", ".join(epics))
+    result = {"backlog_path": value, "eligible": not reasons, "changed": changed,
+              "epic": epics[0] if len(epics) == 1 else None,
+              "max_changed_stories": limit}
+    if reasons:
+        result["reasons"] = reasons
+    return result
+
+
+def light_epic_review_findings(record: dict, docs: Path, status: dict) -> list[str]:
+    """The changed epic's latest review round must be this revision's own:
+    unstamped, approved and verifying every changed story and test plan."""
+    epic = next((item for item in record["epics"] if item["id"] == status.get("epic")), None)
+    review = latest(epic["reviews"]) if epic else None
+    if review is None:
+        return [f"{status.get('epic')} has no epic review round of this light revision;"
+                " run stub-epic --new-review"]
+    props, path = review["props"], review["path"]
+    if props.get("source_hash") or props.get("approved_at_utc"):
+        return [f"{path} is stamped by an earlier revision; the light path needs a fresh epic"
+                " review round of the changed stories (stub-epic --new-review)"]
+    errors = []
+    if props.get("verdict") != "approved":
+        errors.append(f"{path} verdict is not approved")
+    by_id = {story["id"]: story for story in record["stories"]}
+    verified = set(link_targets(docs, props, "verifies", f"{path} verifies", []))
+    missing = [story_id for story_id in status.get("changed", []) if story_id in by_id
+               and not {by_id[story_id]["path"].removesuffix(".md"),
+                       by_id[story_id]["test_plan"].removesuffix(".md")} <= verified]
+    if missing:
+        errors.append(f"{path} does not verify the changed stories {', '.join(missing)}")
+    return errors
+
+
+def light_root_review_findings(record: dict, docs: Path) -> list[str]:
+    """Refuse a light root review the revision has outgrown.
+
+    A root review without the Light Path section reads nothing, so every
+    standard approval is unchanged.
+    """
+    review = latest(record["backlog_reviews"])
+    if review is None or LIGHT_PATH_SECTION not in headings(review["body"]):
+        return []
+    path = review["path"]
+    try:
+        status = light_path_status(record, docs)
+    except (ValueError, RuntimeError) as exc:
+        return [f"{path} light root review cannot be checked: {exc}"]
+    if not status["eligible"]:
+        return [f"{path} is a light root review but the revision no longer takes the light"
+                " path: " + "; ".join(status["reasons"])
+                + "; open a fresh root round with stub-backlog-review"]
+    line = LIGHT_PATH_LINE_RE.search(section(review["body"], LIGHT_PATH_SECTION))
+    recorded = sorted(filter(None, re.split(r"[\s,]+", line.group(1)))) if line else []
+    if recorded != status["changed"]:
+        return [f"{path} light root review names changed stories {', '.join(recorded) or '(none)'}"
+                f" but the revision changes {', '.join(status['changed'])};"
+                " rerun record-light-root-review"]
+    if review["props"].get("source_hash") or review["props"].get("approved_at_utc"):
+        return []  # approved: its epic round was checked and stamped with it
+    return light_epic_review_findings(record, docs, status)
+
+
+def light_path_status_command(args) -> int:
+    docs = docs_root(args.docs)
+    try:
+        with stage_package.candidate_session(), experience_validation_session():
+            record, _errors = collect(docs, review_inputs=True)
+        result = light_path_status(record, docs)
+    except (ValueError, RuntimeError) as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2, sort_keys=True))
+        return 1
+    print(json.dumps({"ok": True, **result}, indent=2, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def replace_section(body: str, title: str, content: str) -> str:
+    return re.sub(rf"^## {re.escape(title)}\n.*?(?=^## |\Z)",
+                  lambda _match: f"## {title}\n\n{content.strip()}\n\n",
+                  body, flags=re.MULTILINE | re.DOTALL)
+
+
+def light_root_review_body(record: dict, docs: Path, body: str, status: dict) -> str:
+    """Write each root review section from the compiler's structural checks."""
+    backlog = record["backlog"]
+    by_id = {story["id"]: story for story in record["stories"]}
+    changed = [by_id[story_id] for story_id in status["changed"]]
+    epic = next(item for item in record["epics"] if item["id"] == status["epic"])
+    epic_review = latest(epic["reviews"])
+    root_link = wikilink(backlog["path"], str(backlog["props"].get("title", DEFAULT_BACKLOG_TITLE)))
+    epic_links = ", ".join(wikilink(item["path"], item["id"]) for item in record["epics"])
+    review_link = wikilink(epic_review["path"], str(epic_review["props"].get("title", epic["id"])))
+    story_links = ", ".join(wikilink(story["path"], story["id"]) for story in changed)
+    plan_links = ", ".join(wikilink(story["test_plan"], f"{story['id']}-TP") for story in changed)
+    requirement_ref = str(backlog["props"].get("requirement_ref", ""))
+    requirement = requirement_link(docs, requirement_ref) or root_link
+    cross = sorted(dependency_edges(record["stories"], False, record))
+    own = sorted(edge for story in changed for edge in dependency_edges([story], None, record))
+    sections = {
+        "Epic Coverage": (
+            f"{root_link} holds the epics {epic_links}, and the compiler found the latest review"
+            " of each one approved.",
+            "Every story sits in exactly one epic and every epic review of this revision is"
+            " approved, as the compiler check reports."),
+        "Cross-Epic Overlap": (
+            f"{story_links} are the only stories this light revision changes, all inside"
+            f" {wikilink(epic['path'], epic['id'])}.",
+            "No reader compared the delta with unchanged stories; the light path records only"
+            " that the delta stays inside one epic."),
+        "Cross-Epic Dependencies": (
+            f"{root_link} declares {len(cross)} cross-epic dependency edges"
+            + (": " + ", ".join(cross) if cross else "") + ".",
+            "The compiler found no dependency cycle and no unknown target, and dependency_refs"
+            " lists every cross-epic edge."),
+        "Delivery Sequencing": (
+            f"{story_links} declare {len(own)} dependency edges"
+            + (": " + ", ".join(own) if own else "") + ".",
+            "Delivery order follows the declared dependency edges, which the compiler found"
+            " acyclic."),
+        "Shared Contracts": (
+            f"{requirement} is the Requirement this light revision implements.",
+            "The compiler validated every input binding of this revision against its current"
+            " receipt."),
+        "Global Test Coverage": (
+            f"{plan_links} carry the test plans of the changed stories.",
+            "Every changed story maps each planning source to a scenario and classifies every"
+            " scenario in its coverage table, as the compiler check reports."),
+        "Findings": (
+            f"{review_link} holds the one story-delta review of this light revision.",
+            "The compiler structural check of this light revision returned no finding of its"
+            " own."),
+        "Verdict": (
+            f"{review_link} approved the story delta and {root_link} passed the compiler check.",
+            "Approved on the light backlog path from the compiler's structural checks and the"
+            " approved story-delta review."),
+    }
+    main, marker, navigation = body.partition(NAV_MARKER)
+    main = re.sub(r"(?m)^.*this round has not evaluated its current inputs\..*\n+", "", main)
+    for title, (evidence, conclusion) in sections.items():
+        main = replace_section(main, title, f"Evidence [{title}]: {evidence}\n"
+                                            f"Conclusion [{title}]: {conclusion}")
+    if backlog.get("planning_mode") == "requirement":
+        implementing = sorted(story["id"] for story in record["stories"]
+                              if requirement_compile.implements_requirement(story["implements"],
+                                                                            requirement_ref))
+        rows, _errors = structured_table(section(main, REQUIREMENT_COVERAGE),
+                                         REQUIREMENT_COVERAGE_COLUMNS, "", REQUIREMENT_COVERAGE)
+        lines = ["| " + " | ".join(REQUIREMENT_COVERAGE_COLUMNS) + " |", "|---|---|---|"]
+        lines += [f"| {row['requirement']} | {row['story_ids']} | {row['disposition']} |"
+                  for row in rows if row["requirement"] != requirement_ref]
+        lines.append(f"| {requirement_ref} | {', '.join(implementing)} | covered |")
+        main = replace_section(main, REQUIREMENT_COVERAGE, "\n".join(lines))
+    light = (f"Compiler [Light Path]: changed {', '.join(status['changed'])}\n\n"
+             "backlog_compile.py record-light-root-review wrote this round from its structural"
+             " checks in place of a root reader.")
+    if LIGHT_PATH_SECTION in headings(main):
+        main = replace_section(main, LIGHT_PATH_SECTION, light)
+    else:
+        main = main.rstrip() + f"\n\n## {LIGHT_PATH_SECTION}\n\n{light}\n\n"
+    return main.rstrip() + "\n\n" + marker + navigation if marker else main.rstrip() + "\n"
+
+
+def record_light_root_review(args) -> int:
+    """Write the current root review round of an eligible light revision."""
+    docs = docs_root(args.docs)
+    path = original = None
+    try:
+        with stage_package.candidate_session(), experience_validation_session():
+            record, errors = collect(docs, review_inputs=True)
+        status = light_path_status(record, docs)
+        if not status["eligible"]:
+            raise ValueError("the revision takes the standard path: " + "; ".join(status["reasons"]))
+        review = latest(record["backlog_reviews"])
+        if (record["backlog"]["props"].get("status") != "draft" or review is None
+                or review["props"].get("status") == "approved"
+                or review["props"].get("approved_at_utc")):
+            raise ValueError("a light root review needs a draft revision with an open root round;"
+                             " run stub-backlog-review")
+        for epic in record["epics"]:
+            if (latest(epic["reviews"]) or {}).get("props", {}).get("verdict") != "approved":
+                errors.append(f"{epic['id']} latest epic review verdict is not approved")
+        errors.extend(light_epic_review_findings(record, docs, status))
+        if errors:
+            raise ValueError("; ".join(sorted(set(errors))))
+        path = docs / review["path"]
+        original = path.read_bytes()
+        props = dict(review["props"])
+        props.update(
+            related_to=[wikilink(item["path"], item["props"]["title"]) for item in record["epics"]],
+            dependency_refs=sorted(dependency_edges(record["stories"], False, record)),
+            verdict="approved")
+        path.write_bytes(front_matter(
+            props, light_root_review_body(record, docs, review["body"], status)).encode("utf-8"))
+        with stage_package.candidate_session(), experience_validation_session():
+            refreshed, errors = collect(docs)
+        errors.extend(review_coverage_findings(refreshed, docs))
+        errors.extend(requirement_coverage_findings(refreshed))
+        errors.extend(light_root_review_findings(refreshed, docs))
+        if errors:
+            raise ValueError("; ".join(sorted(set(errors))))
+    except (OSError, ValueError, RuntimeError) as exc:
+        if path is not None and original is not None:
+            path.write_bytes(original)
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2,
+                         ensure_ascii=False, sort_keys=True))
+        return 1
+    print(json.dumps({"ok": True, "review": str(path), "changed": status["changed"]},
+                     indent=2, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def requirement_acceptance_items(body: str) -> list[str]:
+    """Return the Outcome and Acceptance list items, or its paragraphs when it lists none."""
+    content = section(body, "Outcome and Acceptance")
+    items = [re.sub(r"^\s*(?:[-*+]|[0-9]{1,9}[.)])\s+(?:\[[ xX]\]\s+)?", "", line).strip()
+             for line in content.splitlines() if LIST_ITEM_RE.match(line)]
+    if not items:
+        items = [paragraph for paragraph in re.split(r"\n\s*\n", content)]
+    return [" ".join(item.split()) for item in items if item.strip()]
+
+
+def requirement_evidence_refs(docs: Path, body: str) -> list[str]:
+    """Return the approved evidence notes the Requirement's evidence section links."""
+    refs = []
+    for value in re.findall(r"\[\[[^\[\]\n]+\]\]", section(body, "Evidence and Constraints")):
+        parts = split_wikilink(value)
+        target = docs / f"{parts[0]}.md" if parts else None
+        if target is None or not target.is_file():
+            continue
+        status, type_name = note_status_and_type(target)
+        if type_name in EVIDENCE_TYPES and status in {"approved", "accepted"} and value not in refs:
+            refs.append(value)
+    return refs
+
+
 def stub_story(args) -> int:
     docs = docs_root(args.docs)
     if not SLUG_RE.fullmatch(args.slug) or not SLUG_RE.fullmatch(args.epic):
@@ -4794,6 +5161,11 @@ def stub_story(args) -> int:
     if planning_mode not in {"manual", "requirement"} and not backlog_props.get("legacy_contract"):
         print("backlog_compile: initialize or revise backlog with a planning_mode first", file=sys.stderr)
         return 2
+    work_kind = args.work_kind
+    acceptance: list[str] = []
+    if getattr(args, "from_requirement", False) and planning_mode != "requirement":
+        print("backlog_compile: --from-requirement needs a Requirement-mode backlog", file=sys.stderr)
+        return 2
     if planning_mode == "requirement":
         requirement_ref = str(backlog_props.get("requirement_ref", ""))
         link = requirement_link(docs, requirement_ref)
@@ -4801,6 +5173,24 @@ def stub_story(args) -> int:
             print(f"backlog_compile: Requirement {requirement_ref} was not found under requirements/", file=sys.stderr)
             return 2
         implements = [link]
+        if getattr(args, "from_requirement", False):
+            _path, requirement_props, requirement_body = requirement_note(docs, requirement_ref)
+            if requirement_props.get("status") != "approved":
+                print(f"backlog_compile: --from-requirement needs approved Requirement {requirement_ref}",
+                      file=sys.stderr)
+                return 2
+            work_kind = str(requirement_props.get("request_kind", ""))
+            if work_kind not in WORK_KINDS:
+                print(f"backlog_compile: Requirement {requirement_ref} has no valid request_kind",
+                      file=sys.stderr)
+                return 2
+            acceptance = requirement_acceptance_items(requirement_body)
+            if not acceptance:
+                print(f"backlog_compile: Requirement {requirement_ref} states no Outcome and"
+                      " Acceptance item", file=sys.stderr)
+                return 2
+            evidence += [value for value in requirement_evidence_refs(docs, requirement_body)
+                         if value not in evidence]
     elif implements:
         print("backlog_compile: manual stories cannot implement a Requirement", file=sys.stderr)
         return 2
@@ -4815,7 +5205,9 @@ def stub_story(args) -> int:
             "## Non-Goals\n\nList behavior deliberately excluded from this story.\n\n"
             "## Implementation Responsibilities\n\n"
             "- backend_developer: Own implementation and integration.\n\n"
-            "## Acceptance\n\n- [ ] Map every cited criterion to an observable result.\n\n"
+            "## Acceptance\n\n"
+            + ("\n".join(f"- [ ] {item}" for item in acceptance) if acceptance
+               else "- [ ] Map every cited criterion to an observable result.") + "\n\n"
             "## Dependencies\n\nNone.\n\n"
             "## Delivery Notes\n\nRecord delivery constraints without execution state.\n"
         )
@@ -4824,7 +5216,7 @@ def stub_story(args) -> int:
             "id": story_id, "owner_role": "backend_developer",
             "supporting_roles": [], "priority": "must",
             "priority_reason": "Required for the epic outcome.", "scope": scope,
-            "work_kind": args.work_kind,
+            "work_kind": work_kind,
             "criterion_refs": criteria, "experience_refs": experience,
             "uses_design": design_refs,
             "constrained_by": constraint_refs,
@@ -4852,11 +5244,22 @@ def stub_story(args) -> int:
     if not test.exists():
         scenario = f"{story_id}-TS-001"
         story_link = f"[[backlog/epics/{args.epic}/stories/{args.slug}/story|{story_id}]]"
-        planning_sources = (criteria if args.work_kind == "feature"
+        planning_sources = (criteria if work_kind == "feature"
                             else criteria + evidence)
         source_refs = "\n".join(f"  - {value}" for value in planning_sources)
         source_block = (f"- source_refs:\n{source_refs}\n"
                         if source_refs else "")
+        name = args.slug.replace("-", "_")
+        scenarios = "\n".join(
+            f"## {story_id}-TS-{number:03d}\n\n"
+            "- category: happy-path\n- target: component\n"
+            "- automation: required\n"
+            f"- automation_target: tests/{name}.py::test_{name}_{number}\n"
+            f"{source_block}"
+            "- Given: the preconditions are satisfied\n"
+            "- When: the user performs the story action\n"
+            f"- Then: {item}\n"
+            for number, item in enumerate(acceptance, 1))
         test.write_bytes(front_matter(
             {"type": "test-plan", "title": test_title, "status": "draft",
              "revision": 1, "owner_role": "qa_engineer",
@@ -4864,14 +5267,15 @@ def stub_story(args) -> int:
              "tags": ["doc/test-plan", "status/draft"],
              "aliases": [f"{story_id}-TP"]},
             f"# {test_title}\n\n{coverage_class_table()}\n\n"
-            f"## {scenario}\n\n"
-            "- category: happy-path\n- target: component\n"
-            "- automation: required\n"
-            f"- automation_target: tests/{args.slug.replace('-', '_')}.py::test_{args.slug.replace('-', '_')}\n"
-            f"{source_block}"
-            "- Given: the preconditions are satisfied\n"
-            "- When: the user performs the story action\n"
-            "- Then: the expected outcome is observable\n").encode("utf-8"))
+            + (scenarios if acceptance else
+               f"## {scenario}\n\n"
+               "- category: happy-path\n- target: component\n"
+               "- automation: required\n"
+               f"- automation_target: tests/{name}.py::test_{name}\n"
+               f"{source_block}"
+               "- Given: the preconditions are satisfied\n"
+               "- When: the user performs the story action\n"
+               "- Then: the expected outcome is observable\n")).encode("utf-8"))
     epic_link = f"[[backlog/epics/{args.epic}/epic|{args.epic.upper()}]]"
     story_link = (
         f"[[backlog/epics/{args.epic}/stories/{args.slug}/story|{story_id}]]"
@@ -4922,7 +5326,17 @@ def main(argv=None) -> int:
     command.add_argument("--uses-design", action="append")
     command.add_argument("--constrained-by", action="append")
     command.add_argument("--implements", action="append")
+    command.add_argument("--from-requirement", action="store_true",
+                         help="Stub the story and test plan from the approved Requirement")
     command.set_defaults(func=stub_story)
+    command = sub.add_parser("light-path-status",
+                             help="report whether the revision takes the light backlog path")
+    command.add_argument("--docs", default=None)
+    command.set_defaults(func=light_path_status_command)
+    command = sub.add_parser("record-light-root-review",
+                             help="write the root review round of an eligible light revision")
+    command.add_argument("--docs", default=None)
+    command.set_defaults(func=record_light_root_review)
     command = sub.add_parser("check")
     command.add_argument("--docs", default=None)
     stage = command.add_mutually_exclusive_group()

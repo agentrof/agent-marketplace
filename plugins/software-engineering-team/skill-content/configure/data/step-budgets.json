@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "budgets": {
+    "reader_closure_unit": {
+      "summary": "Maximum minutes one reader spends on one changed unit's impact closure, from its spawn to its returned findings."
+    },
+    "confirmation_rereview": {
+      "summary": "Maximum minutes a confirmation re-review of a fix takes, from its spawn to its verdict, reading only the fix's delta."
+    },
+    "backlog_revision": {
+      "summary": "Maximum minutes a one-story technical Backlog Planning revision takes end to end, from begin-revision to approval."
+    },
+    "requirement_technical": {
+      "summary": "Maximum minutes a technical Requirement takes from intake to its approval."
+    },
+    "delivery_and_execution_planning": {
+      "summary": "Maximum minutes Delivery Planning plus Execution Planning take for one story, from the proposal's start to the plan's publication."
+    },
+    "story_end_to_end": {
+      "summary": "Maximum minutes one story takes end to end, from its Requirement's intake to its Delivery's merge."
+    }
+  }
+}

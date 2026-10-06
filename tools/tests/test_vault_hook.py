@@ -151,13 +151,15 @@ class VaultHookPrototypeTests(unittest.TestCase):
                 return {"cwd": str(project), "tool_name": "Bash", "shell_family": "cmd" if os.name == "nt" else "posix",
                         "tool_input": {"command": value}}
             # A reader waits through wait while both readers run.
-            for verb in ("status", "inspect", "diff", "environment", "wait"):
+            for verb in ("status", "inspect", "inspect-context", "expand-context", "diff", "environment", "wait"):
                 routed = [*command[:-1], verb]
                 routed_text = subprocess.list2cmdline(routed) if os.name == "nt" else shlex.join(routed)
                 self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(routed_text)), 0)
             # A code review panel registers, calibrates and merges while both readers run,
             # under the checks result passes: the installed script and one --worktree.
             for verb, *arguments in (("result", "--file", str(scratch)), ("panel-result", "--file", str(scratch)),
+                                     ("inspect-context", "--plan", str(scratch)),
+                                     ("expand-context", "--plan", str(scratch), "--reason", "Missing constraint"),
                                      ("calibrate", "--file", str(scratch)), ("merge-panel",)):
                 routed = [*command[:-1], verb, *arguments]
                 for value, expected in ((routed, 0), ([*routed, "--worktree", str(project)], 2),

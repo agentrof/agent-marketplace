@@ -1,0 +1,6 @@
+{
+  "summary": "Bound package PR review and fix verification to local targets, with full-suite reproduction reserved for existing CI failures.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

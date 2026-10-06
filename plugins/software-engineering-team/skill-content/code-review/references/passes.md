@@ -8,6 +8,19 @@ infrastructure and configuration, then tests, then documentation. Stack
 checklists loaded from the bound stack skills extend each pass; they never
 replace it.
 
+## Verification
+
+DO use the project's approved Operation Contracts and existing verification
+evidence. Keep verification read-only; never stage or change another role's
+candidate. For Agent Marketplace package PRs, use `make check-local` and
+`make verify-local` against the owner's exact staged candidate, plus at most
+the single test named in a finding. If that candidate is unavailable, report
+missing evidence. Run a full test module, `make check`, or a `--full` local gate
+only to reproduce a CI failure already reported on the exact PR head, and
+cite that failure with the reproduction command. Pull request CI owns the
+full suite and required platform and host checks; bind its results to the
+exact PR head before claiming readiness.
+
 ## Pass 1: Correctness
 
 The change does what it claims, for all inputs, on all paths.

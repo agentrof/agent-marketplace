@@ -43,6 +43,24 @@ class MaintainerProtocolTests(unittest.TestCase):
         self.assertIn("docs/maintainer-operations-protocol.md", agents)
         self.assertIn("docs/maintainer-operations-protocol.md", contributing)
 
+    def test_review_and_fix_verification_is_bounded_to_local_targets(self):
+        for name in ("AGENTS.md", "CONTRIBUTING.md"):
+            with self.subTest(document=name):
+                text = (REPO / name).read_text(encoding="utf-8")
+                section = text.split("## Review and fix agents", 1)[1].split("\n## ", 1)[0]
+                flat = " ".join(section.split())
+                for term in ("make check-local", "make verify-local", "single test named in a finding",
+                             "only to reproduce a CI failure", "exact PR head", "read-only"):
+                    self.assertIn(term, flat)
+        root = REPO / "plugins/software-engineering-team/skill-content/code-review"
+        entry = (root / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("[verification bounds](references/passes.md#verification)", entry)
+        skill = " ".join((root / "references/passes.md").read_text(encoding="utf-8").split())
+        for term in ("Agent Marketplace package PRs", "make check-local", "make verify-local",
+                     "single test named in a finding", "only to reproduce a CI failure",
+                     "Operation Contracts", "read-only"):
+            self.assertIn(term, skill)
+
     def test_model_catalog_captures_are_bundled_versioned_and_checked(self):
         protocol = PROTOCOL.read_text(encoding="utf-8")
         section = protocol.split("## Model catalog bump", 1)[1].split("\n## ", 1)[0]

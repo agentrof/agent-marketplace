@@ -13,6 +13,21 @@ Read `memory/me.md` and follow it before editing this repository.
 - Stage the complete candidate, run `make check-local`, then `make verify-local` before committing. `make check` remains the exhaustive gate; one validation error fails CI.
 - Text and files committed here never identify a consumer project or its data; follow the Confidentiality section of `docs/maintainer-operations-protocol.md` for every commit, changeset and PR.
 
+## Review and fix agents
+
+For package PR reviews and fixes, use `make check-local` and
+`make verify-local`. Beyond those targets, run at most the single test named
+in a finding. Run a full test module, `make check`, or a `--full` local gate
+only to reproduce a CI failure already reported on the exact PR head; name
+that failure and the reproduction command in the review evidence. Pull
+request CI owns the full suite and required platform and host checks.
+
+Fix agents stage the complete candidate before the local targets. Reviewers
+stay read-only: use the owner's exact staged candidate and its local evidence;
+if that candidate is unavailable, report the missing evidence without staging
+or changing files. Verify remote checks against the exact PR head before
+claiming readiness.
+
 ## Maintainer operations
 
 - Follow `docs/maintainer-operations-protocol.md` for repository issue and

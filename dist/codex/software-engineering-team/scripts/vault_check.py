@@ -1368,7 +1368,8 @@ def relation_identity_owners(vault: Vault, *, registry_paths=None) -> dict[str, 
         for registry_path in sorted(paths):
             try:
                 registry = json.loads(vault.files.read_text(registry_path, encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            except (OSError, ValueError):
+                # Undecodable bytes are as malformed as invalid JSON; neither names an owner.
                 continue
             space = registry_path.parents[1].name
             for ident, info in (registry.get("ids") or {}).items():

@@ -167,12 +167,16 @@ def scan_files(docs, *, digest=True):
                     excluded = target
             if not path.is_file():
                 continue
-            info = path.stat()
+            try:
+                info = path.stat()
+                content = path.read_bytes() if digest else None
+            except FileNotFoundError as exc:
+                raise SourceChangedError(f"source removed while scanning: {relative}") from exc
             entry = {"size": info.st_size, "mtime_ns": info.st_mtime_ns}
             if excluded is not None:
                 entry["excluded_link"] = excluded
             if digest:
-                entry["sha"] = hashlib.sha256(path.read_bytes()).hexdigest()
+                entry["sha"] = hashlib.sha256(content).hexdigest()
             result[relative] = entry
     return result
 
@@ -1033,18 +1037,22 @@ def published_sidecars(cache):
 
 def published_snapshot(cache):
     """The verified bytes of a published cache that has no WAL, read without creating a file, or None
-    while a WAL holds part of it."""
+    while a WAL holds part of it or this Python's sqlite3 cannot load bytes into a connection."""
+    if not hasattr(sqlite3.Connection, "deserialize"):
+        return None
     wal = Path(str(cache) + "-wal")
     deadline = time.monotonic() + policy()["busy_timeout_ms"] / 1000
     while True:
-        guard = None
+        guards = []
         try:
-            if cache.with_name(".snapshot").exists():
-                try:
-                    guard = DatabaseLease(cache, name=".snapshot", read_only=True)
-                except OSError:
-                    # An unreadable lease file leaves only the signature and hash recheck below.
-                    guard = None
+            # A shared .readers lease makes recovery wait before it replaces the file being read.
+            for name in (".readers", ".snapshot"):
+                if cache.with_name(name).exists():
+                    try:
+                        guards.append(DatabaseLease(cache, name=name, read_only=True))
+                    except OSError:
+                        # An unreadable lease file leaves only the signature and hash recheck below.
+                        pass
             before = {path: cache_file_signature(path) for path in (cache, wal)}
             if before[wal] is not None:
                 return None
@@ -1052,17 +1060,17 @@ def published_snapshot(cache):
                 descriptor = os.open(cache, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
                 with os.fdopen(descriptor, "rb") as source:
                     raw = bytearray(source.read())
-                if before == {path: cache_file_signature(path) for path in (cache, wal)} \
-                        and hashlib.sha256(raw).hexdigest() == snapshot_file_hash(cache) \
+                if hashlib.sha256(raw).hexdigest() == snapshot_file_hash(cache) \
                         and before == {path: cache_file_signature(path) for path in (cache, wal)}:
                     if raw.startswith(b"SQLite format 3\x00") and len(raw) >= 100:
                         # An in-memory database cannot use WAL; the legacy header bytes read the same pages.
                         raw[18:20] = b"\x01\x01"
                     return raw
+                raw = None
         except FileNotFoundError:
             pass
         finally:
-            if guard is not None:
+            for guard in reversed(guards):
                 guard.close()
         if time.monotonic() >= deadline:
             raise CacheBusyError("vault cache changed while capturing its snapshot; retry")
@@ -1084,22 +1092,40 @@ def open_published(cache, *, write_free=False):
             return None, None
     except (OSError, ValueError) as exc:
         return None, f"published cache refused: {exc}"
-    lease = connection = raw = None
+    lease = connection = raw = sidecars = None
     try:
         if write_free and not published_sidecars(cache):
             raw = published_snapshot(cache)
             if raw is None and not published_sidecars(cache):
-                raise ValueError("its write-ahead log has no shared-memory file")
+                raise ValueError("its write-ahead log has no shared-memory file"
+                                 if hasattr(sqlite3.Connection, "deserialize") else
+                                 "this Python's sqlite3 cannot load a snapshot into memory")
         if raw is None:
             if cache.with_name(".readers").exists():
                 lease = DatabaseLease(cache, read_only=True)
+            if write_free:
+                sidecars = sidecar_identities(cache)
+                if None in sidecars.values():
+                    raise ValueError("its write-ahead log files were removed while opening it")
             connection = sqlite3.connect(published_uri(cache), uri=True, check_same_thread=False,
                                          timeout=policy()["busy_timeout_ms"] / 1000)
         else:
             connection = sqlite3.connect(":memory:", check_same_thread=False)
             connection.deserialize(raw)
+            raw = None
         connection.execute("BEGIN")
         connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        # Once this read holds the shared memory, a closing writer can no longer remove the sidecars;
+        # before that, one may have removed them and this read-only open created new ones.
+        after = sidecar_identities(cache) if sidecars is not None else None
+        if after is not None and (None in after.values() or replaced_sidecars(sidecars, after)):
+            connection.close()
+            connection = None
+            if lease is not None:
+                lease.close()
+                lease = None
+            remove_created_sidecars(cache, sidecars)
+            raise ValueError("its write-ahead log files were replaced while opening it")
     except BaseException as exc:
         if connection is not None:
             connection.close()
@@ -1109,6 +1135,53 @@ def open_published(cache, *, write_free=False):
             raise
         return None, f"published cache cannot be read in place: {exc}"
     return (connection, lease), None
+
+
+def sidecar_identities(cache):
+    """``{path: (st_dev, st_ino, size) or None}`` of the WAL sidecars."""
+    identities = {}
+    for suffix in ("-wal", "-shm"):
+        path = Path(str(cache) + suffix)
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            identities[path] = None
+            continue
+        identities[path] = info.st_dev, info.st_ino, info.st_size
+    return identities
+
+
+def replaced_sidecars(before, after):
+    """The sidecars in ``after`` that are not the files ``before`` saw. Nothing here truncates a WAL,
+    so one that shrank to empty was recreated even where the file system reused its inode number."""
+    return {path for path, identity in after.items() if identity is not None and (
+        before[path] is None or identity[:2] != before[path][:2] or (before[path][2] and not identity[2]))}
+
+
+def remove_created_sidecars(cache, before):
+    """Remove the empty WAL sidecars a read-only open created, only while no reader or writer
+    session holds the database; otherwise they belong to that session and stay."""
+    try:
+        exclusive = DatabaseLease(cache, exclusive=True, timeout=0, read_only=True)
+    except (OSError, ValueError):
+        return
+    try:
+        now = sidecar_identities(cache)
+        wal, shm = now
+        created = replaced_sidecars(before, now)
+        if wal in created:
+            if now[wal][2]:
+                # Committed frames are never this read's; leave the pair to the next writer.
+                return
+            # SQLite creates and removes the pair together, so a new WAL makes the shared memory new too.
+            if now[shm] is not None:
+                created.add(shm)
+        for path in created:
+            path.unlink()
+    except OSError:
+        pass
+    finally:
+        exclusive.close()
 
 
 def refresh(docs, cache, builder, *, persist=True, rebuild=False, coordinate=True, generation=0, current=None):
@@ -1195,18 +1268,25 @@ def compile_index(docs, cache, builder, *, published, persist, rebuild, coordina
                 store.close()
                 return None
             if dirty:
-                memory = sqlite3.connect(":memory:", check_same_thread=False)
-                try:
-                    if not full:
-                        connection.backup(memory)
-                except BaseException:
-                    memory.close()
-                    raise
+                if not full and connection.execute("PRAGMA database_list").fetchone()[2] == "":
+                    # A deserialized snapshot is already this reader's private copy; the delta applies to it,
+                    # and the store built below takes over its connection.
+                    connection.rollback()
+                    store.session.closed = True
+                    memory = connection
+                else:
+                    memory = sqlite3.connect(":memory:", check_same_thread=False)
+                    try:
+                        if not full:
+                            connection.backup(memory)
+                    except BaseException:
+                        memory.close()
+                        raise
+                    store.close()
                 served = "in_memory_compile" if full else "in_memory_copy"
                 if full:
                     fallback = ("the published cache has a layout this SQLite cannot read" if not layout else
                                 "the published cache is bound to another checkout, derivation or schema")
-                store.close()
                 connection = memory
                 store = Store(docs, connection)
         status = {"path": str(cache), "full": full, "changed": changed, "removed": removed, "persisted": persist}
@@ -1389,7 +1469,8 @@ def recover_database(docs, cache, builder):
         floor = max(published_generation(cache) if cache.exists() else 0, generation_floor(cache))
         with tempfile.TemporaryDirectory(prefix=RECOVERY_PREFIX, dir=cache.parent) as temporary:
             candidate = Path(temporary) / "index.db"
-            data, _status = refresh(docs, candidate, builder, rebuild=True, coordinate=False, generation=floor)
+            data, candidate_status = refresh(docs, candidate, builder, rebuild=True, coordinate=False,
+                                             generation=floor)
             try:
                 if data.store.connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                     raise ValueError("replacement vault database failed integrity verification")
@@ -1398,6 +1479,8 @@ def recover_database(docs, cache, builder):
             with candidate.open("rb+") as handle:
                 os.fsync(handle.fileno())
             os.chmod(candidate, atomic_file.replacement_mode(cache))
+            # The floor leads the replacement, so a database lost after it is never renumbered from below.
+            record_generation(cache, candidate_status["generation"])
             moved = []
             try:
                 for suffix in ("-wal", "-shm", "-journal"):

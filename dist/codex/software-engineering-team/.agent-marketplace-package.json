@@ -167,7 +167,7 @@
       "184a0b11e57d6f5ab407ea40c22690edc425ed2992e2978f26ec0e974d326da0"
     ,
     "scripts/context_catalog.py":
-      "b8ec8ff3656e7961556623ff27808a388e1254d8a3fe572fcda216971289f7d3"
+      "5e5d09caaeaf7eab4a60c1b180d2722a28a25d3e0c4c9d518d0475b3b62a6bda"
     ,
     "scripts/context_history.py":
       "b3c433394ad535b010d12d194eaf277208cc61068b7f41a2a233255e6bcba0c9"
@@ -278,7 +278,7 @@
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
     ,
     "scripts/vault_check.py":
-      "b170f548ee455a17b35c6af82d41e034baf8c919d050c30480ff090267d6c5f5"
+      "3bd52e5d5159562c8b44a21791c433f04721e81fee3b9932c9fb176d85ebe8cb"
     ,
     "scripts/vault_gate.py":
       "3eb237e04bbd4e142e6edc14ed50d925378e4c3cc2b0c5c4278f49d4edf7f39e"
@@ -287,7 +287,7 @@
       "f1400bcead8488e477d55a83ec20fa96e3aaf959b35720c934283fc2e5a35692"
     ,
     "scripts/vault_index.py":
-      "8823ffe4b1c2fcc65af92ce24a33fa1999b18e58d90f10bccecffc0a136c4cf2"
+      "8975b3b9994f9840133e4b1845fed20c788dd101f165e5393e07aaf5a87a3f8e"
     ,
     "scripts/vault_query.py":
       "621e52d77c481dc6e4b3c4cc43b962c2ff697b8f30426b244d856a741d5584e2"

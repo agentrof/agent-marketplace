@@ -267,7 +267,29 @@ def receipt_paths(root: Path, *, candidates=None) -> set[Path]:
         "experience-design/_generated/application-registry.json",
     )
     if candidates is None:
-        return {path for pattern in patterns for path in root.glob(pattern)}
+        # A glob spells literal components as the pattern does; a case-insensitive volume may list them
+        # in another case, and every inventory names files as their directories list them.
+        listings = {}
+        def same(left, right):
+            try:
+                return os.path.samefile(left, right)
+            except OSError:
+                return False
+        def listed(path):
+            spelled = root
+            for part in path.relative_to(root).parts:
+                if spelled not in listings:
+                    try:
+                        listings[spelled] = sorted(os.listdir(spelled))
+                    except OSError:
+                        listings[spelled] = []
+                names = listings[spelled]
+                if part not in names:
+                    part = next((name for name in names if name.casefold() == part.casefold()
+                                 and same(spelled / name, spelled / part)), part)
+                spelled = spelled / part
+            return spelled
+        return {listed(path) for pattern in patterns for path in root.glob(pattern)}
     # Match the already confined inventory without descending into excluded
     # artifact trees, as the glob above would on this file system.
     return {path for path in candidates if any(globbed(root, path, pattern) for pattern in patterns)}

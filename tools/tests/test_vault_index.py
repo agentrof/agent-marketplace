@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -868,6 +869,126 @@ class VaultIndexTests(unittest.TestCase):
                 vault_index.open_published(cache)
         vault_index.DatabaseLease(cache, exclusive=True, timeout=0).close()
 
+
+    def test_no_write_read_without_a_snapshot_api_compiles_from_sources_and_names_why(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        class Legacy(sqlite3.Connection):
+            def __getattribute__(self, name):
+                if name == "deserialize":
+                    raise AttributeError(name)
+                return super().__getattribute__(name)
+        # A Python before 3.11 has no Connection.deserialize.
+        legacy = types.ModuleType("sqlite3")
+        legacy.__dict__.update(sqlite3.__dict__)
+        legacy.Connection = type("Connection", (), {})
+        legacy.connect = lambda *args, **kwargs: sqlite3.connect(*args, factory=Legacy, **kwargs)
+        with mock.patch.object(vault_index, "sqlite3", legacy):
+            index, status = vault_query.refresh(self.docs, cache, persist=False)
+        self.stores.append(index.store)
+        self.assertEqual(status["served"], "in_memory_compile")
+        self.assertIn("cannot load a snapshot into memory", status["fallback"])
+        self.assertEqual(index["catalog"]["documents"]["requirements/a.md"]["title"], "A")
+
+    def test_no_write_read_removes_only_the_sidecars_its_open_created_after_a_writer_closed(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        def listing():
+            return sorted(path.name for path in cache.parent.iterdir())
+        published = listing()
+        self.assertFalse({"index.db-wal", "index.db-shm"} & set(published))
+        connect, sidecars = sqlite3.connect, vault_index.published_sidecars
+        seams = {
+            # The last writer closes after the sidecar check and before the read-only open.
+            "open": lambda close: mock.patch.object(vault_index.sqlite3, "connect",
+                lambda target, *args, **kwargs: (str(target).startswith("file:") and close(),
+                                                 connect(target, *args, **kwargs))[1]),
+            "check": lambda close: mock.patch.object(vault_index, "published_sidecars",
+                lambda path: (sidecars(path), close())[0]),
+        }
+        for seam, patch in seams.items():
+            with self.subTest(seam=seam):
+                writer = connect(cache)
+                writer.execute("SELECT count(*) FROM meta").fetchone()
+                self.assertTrue({"index.db-wal", "index.db-shm"} <= set(listing()))
+                pending = [writer]
+                def close():
+                    if pending:
+                        pending.pop().close()
+                with patch(close):
+                    index, status = vault_query.refresh(self.docs, cache, persist=False)
+                self.stores.append(index.store)
+                self.assertFalse(pending)
+                self.assertEqual(index["catalog"]["documents"]["requirements/a.md"]["title"], "A")
+                index.store.close()
+                self.assertEqual(listing(), published)
+                self.assertIn({"open": "replaced", "check": "removed"}[seam] + " while opening", status["fallback"])
+        # Sidecars a leased session may be using stay, even when they look new to the read.
+        live = connect(cache)
+        self.addCleanup(live.close)
+        live.execute("SELECT count(*) FROM meta").fetchone()
+        holder = vault_index.DatabaseLease(cache)
+        self.addCleanup(holder.close)
+        before = vault_index.sidecar_identities(cache)
+        self.assertNotIn(None, before.values())
+        vault_index.remove_created_sidecars(cache, {path: ("earlier",) for path in before})
+        self.assertEqual(vault_index.sidecar_identities(cache), before)
+
+    def test_a_no_write_delta_applies_to_the_snapshot_without_another_copy(self):
+        self.seed()
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        def listing():
+            return {path.name: path.read_bytes() for path in cache.parent.iterdir() if path.is_file()}
+        before = listing()
+        self.write("backlog/story-b.md", note("story", "Story B", {"implements": [("requirements/req-a", "Requirement")]},
+                   body="Changed source."))
+        copies = []
+        class Counting(sqlite3.Connection):
+            def backup(self, *args, **kwargs):
+                copies.append(args)
+                return super().backup(*args, **kwargs)
+        connect = sqlite3.connect
+        with mock.patch.object(vault_index.sqlite3, "connect",
+                               lambda *args, **kwargs: connect(*args, factory=Counting, **kwargs)):
+            index, status = vault_query.refresh(self.docs, cache, persist=False)
+        self.stores.append(index.store)
+        self.assertEqual((status["served"], status["full"]), ("in_memory_copy", False))
+        self.assertEqual(copies, [])
+        self.assert_graph(index)
+        self.assert_fresh(index)
+        self.assertEqual(listing(), before)
+
+    def test_snapshot_reads_hold_the_readers_lease_so_recovery_waits_and_release_it_on_any_failure(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        self.assertTrue(cache.with_name(".readers").exists())
+        held = []
+        original = vault_index.snapshot_file_hash
+        def recovery_tries(path, destination=None):
+            # Native Windows cannot replace a file another handle has open; recovery must wait instead.
+            try:
+                vault_index.DatabaseLease(cache, exclusive=True, timeout=0).close()
+                held.append(False)
+            except vault_index.CacheBusyError:
+                held.append(True)
+            return original(path, destination)
+        with mock.patch.object(vault_index, "snapshot_file_hash", recovery_tries):
+            self.assertIsNotNone(vault_index.published_snapshot(cache))
+        self.assertEqual(held, [True])
+        class Interrupted(Exception):
+            pass
+        with mock.patch.object(vault_index, "snapshot_file_hash", side_effect=Interrupted()):
+            with self.assertRaises(Interrupted):
+                vault_index.published_snapshot(cache)
+        vault_index.DatabaseLease(cache, exclusive=True, timeout=0).close()
     def test_a_writer_publishing_after_the_pre_lock_hashes_does_not_fail_the_next_refresh(self):
         self.seed()
         data, _ = self.load()
@@ -903,6 +1024,19 @@ class VaultIndexTests(unittest.TestCase):
             with self.assertRaises(vault_index.SourceChangedError):
                 vault_index.refresh(self.docs, cache, vault_query.builder_hash(), persist=False)
 
+
+    def test_a_source_removed_while_scanning_is_reported_as_a_source_change(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        removed = self.write("requirements/b.md", note("requirement", "B"))
+        read = Path.read_bytes
+        def vanishing(path):
+            if path == removed:
+                path.unlink(missing_ok=True)
+            return read(path)
+        with mock.patch.object(Path, "read_bytes", vanishing):
+            with self.assertRaisesRegex(vault_index.SourceChangedError,
+                                        "source removed while scanning: requirements/b.md"):
+                self.load()
     def test_post_write_sync_never_waits_on_the_writer_or_fails_the_hook(self):
         spec = importlib.util.spec_from_file_location(
             "index_sync_hook", ROOT / "platforms/shared/software-engineering-team/overlay/scripts/vault_hook.py")
@@ -1269,6 +1403,30 @@ class VaultIndexTests(unittest.TestCase):
         data.store.close()
         self.assertGreater(rebuilt["generation"], committed[0])
 
+
+    def test_a_database_lost_after_recovery_replaced_it_never_reissues_its_generation(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        cache.write_bytes(b"not a SQLite database")
+        class Killed(BaseException):
+            pass
+        replaced = []
+        original = os.replace
+        def replace_then_die(source, target, *args, **kwargs):
+            original(source, target, *args, **kwargs)
+            if Path(target) == cache:
+                replaced.append(vault_index.published_generation(cache))
+                raise Killed()
+        with mock.patch.object(vault_index.os, "replace", replace_then_die), self.assertRaises(Killed):
+            self.load()
+        self.assertEqual(len(replaced), 1)
+        for suffix in ("", "-wal", "-shm"):
+            Path(str(cache) + suffix).unlink(missing_ok=True)
+        data, rebuilt = self.load()
+        data.store.close()
+        self.assertGreater(rebuilt["generation"], replaced[0])
     def test_another_spelling_of_the_checkout_keeps_its_binding(self):
         target = self.write("backlog/story-b.md", note("story", "Story B"))
         alias = self.project.parent / (self.project.name + "-alias")
@@ -1431,6 +1589,55 @@ class VaultIndexTests(unittest.TestCase):
         self.assertEqual(task_inputs.closure_raw(impact_closure, self.docs, present, {}),
                          impact_closure.closure(self.docs, present))
 
+
+    def test_case_variant_receipt_names_close_over_the_paths_the_reparse_reads(self):
+        import task_inputs
+        probe = self.write("Probe.md", "probe")
+        insensitive = (self.docs / "probe.md").exists()
+        probe.unlink()
+        for label, receipt, ledger in (("lower", "package-revisions.json", "_ledger"),
+                                       ("variant", "Package-Revisions.json", "_Ledger")):
+            with self.subTest(receipt=receipt, ledger=ledger):
+                if label == "variant" and not insensitive:
+                    self.skipTest("a case-sensitive volume lists only the spelled name")
+                docs = Path(self.temp.name).resolve() / label / "workspace/docs"
+                files = {
+                    f"experience-design/experiences/shop/_ledger/{receipt}": json.dumps(
+                        {"revisions": [{"experience_id": "shop", "package_revision": 1, "content": "x"}]}),
+                    "solution-design/landscape.md": '---\ntype: solution-component\ntitle: L\nsatisfies:\n  - "shop@r1"\n---\n# L\n',
+                    "system-architecture/c2.md": "---\ntype: decision\ntitle: Sealed\nrecord_id: CON-001\nrevision: 1\n"
+                                                 "revision_state: sealed\n---\n# Sealed\n",
+                    f"system-architecture/{ledger}/records/CON-001/r1.json": json.dumps(
+                        {"exact_ref": "ARC:CON-001@r1", "content": "---\ntype: decision\n---\nB\n"}),
+                    "backlog/s1.md": '---\ntype: story\nid: ST-001\ndepends_on:\n  - "ARC:CON-001@r1"\n---\n# S\n',
+                }
+                for relative, text in files.items():
+                    (docs / relative).parent.mkdir(parents=True, exist_ok=True)
+                    (docs / relative).write_text(text, encoding="utf-8")
+                data, _ = vault_query.locked_refresh(docs, vault_query.default_cache(docs))
+                data.store.close()
+                named = ["workspace/docs/solution-design/landscape.md", "workspace/docs/system-architecture/c2.md"]
+                indexed = task_inputs.impact_closure(docs, named, "workspace/docs/")
+                with mock.patch.object(task_inputs, "closure_raw",
+                                       lambda api, root, present, deleted: api.closure(root, present)):
+                    reparsed = task_inputs.impact_closure(docs, named, "workspace/docs/")
+                self.assertEqual(indexed, reparsed)
+                self.assertIn(f"workspace/docs/experience-design/experiences/shop/_ledger/{receipt}", reparsed["closure"])
+
+    def test_an_undecodable_registry_closes_alike_with_and_without_a_bound_index(self):
+        import task_inputs
+        self.write("backlog/s1.md", '---\ntype: story\ntitle: S1\nid: ST-001\nderives_from:\n  - "BR-001"\n---\n# S1\n')
+        registry = self.docs / "business-analysis/scope/_generated/registry.json"
+        registry.parent.mkdir(parents=True)
+        registry.write_bytes(b"\xff{}")
+        named = ["workspace/docs/backlog/s1.md"]
+        reparsed = task_inputs.impact_closure(self.docs, named, "workspace/docs/")
+        self.assertFalse(vault_query.default_cache(self.docs).exists())
+        data, _ = self.load()
+        data.store.close()
+        self.assertTrue(vault_index.published_binding_matches(
+            self.docs, vault_query.default_cache(self.docs), vault_query.builder_hash()))
+        self.assertEqual(task_inputs.impact_closure(self.docs, named, "workspace/docs/"), reparsed)
     def test_context_reads_hash_sources_once_and_unchanged_reads_skip_the_writer_lock(self):
         self.seed()
         data, _ = self.load()

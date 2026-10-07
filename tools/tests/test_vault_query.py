@@ -188,7 +188,7 @@ class VaultQueryTest(unittest.TestCase):
         result = self.run_query("gaps")
         self.assertEqual(result["cache"]["path"], str(self.cache))
         self.assertTrue(result["cache"]["full"])
-        with sqlite3.connect(self.cache) as connection:
+        with contextlib.closing(sqlite3.connect(self.cache)) as connection, connection:
             self.assertIsNotNone(connection.execute("SELECT 1 FROM notes WHERE path=?", ("backlog/story-b.md",)).fetchone())
         self.assertFalse((self.cache.parent / "index-notes").exists())
 
@@ -348,7 +348,7 @@ class VaultQueryTest(unittest.TestCase):
         self.run_query("gaps")
         with mock.patch.object(vault_query, "builder_hash", return_value="other"):
             self.assertTrue(self.run_query("gaps")["cache"]["full"])
-        with sqlite3.connect(self.cache) as connection:
+        with contextlib.closing(sqlite3.connect(self.cache)) as connection, connection:
             connection.execute("DELETE FROM search_units")
         self.assertEqual(self.run_query("index", "rebuild")["status"], "ready")
         self.assertIn("depends_on", self.run_query("related", "backlog/story-c.md")["outgoing"])

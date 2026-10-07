@@ -144,7 +144,7 @@ class VaultIndexTests(unittest.TestCase):
         before = {p: p.read_bytes() for p in self.project.rglob("*") if p.is_file()}
         self.assertTrue(self.query("index", "check")["verified"])
         self.assertEqual(before, {p: p.read_bytes() for p in self.project.rglob("*") if p.is_file()})
-        with sqlite3.connect(vault_query.default_cache(self.docs)) as connection:
+        with contextlib.closing(sqlite3.connect(vault_query.default_cache(self.docs))) as connection, connection:
             connection.execute("DELETE FROM search_units")
         self.assertEqual(self.query("index", "check", expected=1)["status"], "incomplete")
         self.query("index", "rebuild")
@@ -181,7 +181,7 @@ class VaultIndexTests(unittest.TestCase):
         data, _ = self.load()
         data.store.close()
         cache = vault_query.default_cache(self.docs)
-        with sqlite3.connect(cache) as connection:
+        with contextlib.closing(sqlite3.connect(cache)) as connection, connection:
             connection.execute("UPDATE meta SET payload=? WHERE key='docs'", (json.dumps("different checkout"),))
         with self.assertRaisesRegex(ValueError, "another checkout"):
             self.load()

@@ -1602,7 +1602,7 @@ def _installed_script_path(value: str, cwd: Path, name: str,
             return None
     except (OSError, RuntimeError):
         return None
-    manifest = expected.parent.parent / ".agent-marketplace-package.json"
+    manifest = hook_directory.parent / ".agent-marketplace-package.json"
     if packaged:
         if not manifest.is_file():
             return None

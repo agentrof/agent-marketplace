@@ -4,11 +4,14 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import hashlib
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -20,6 +23,7 @@ import project_context
 import vault_index
 import vault_query
 from tools.tests.test_impact_closure import VAULT, note
+from tools.tests.levels import integration
 
 
 class VaultIndexTests(unittest.TestCase):
@@ -240,6 +244,124 @@ class VaultIndexTests(unittest.TestCase):
         data, _ = self.load()
         self.assertEqual(context_catalog.resolve(data["catalog"], "ARC:ROOT:CON-001@r1"), [])
         self.assertEqual(context_catalog.resolve(data["catalog"], "api/source.json")[0]["kind"], "json")
+
+    def test_bound_reference_removal_matches_fresh_graph(self):
+        target = self.write("requirements/a.md", note("requirement", "A", extra="aliases:\n  - REQ-001"))
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        self.write("backlog/b.md", note("story", "B",
+            extra=f'requirement_ref: "REQ-001|requirements/a.md|sha256:{digest}"'))
+        data, _ = self.load()
+        self.assertTrue(data.store.edges_for("backlog/b.md"))
+        data.store.close()
+        target.unlink()
+        data, status = self.load()
+        self.assertEqual(status["removed"], ["requirements/a.md"])
+        self.assert_graph(data)
+        self.assertTrue([gap for gap in data["gaps"] if gap.get("key") == "requirement_ref"])
+
+    def test_physically_corrupt_cache_is_recompiled_without_losing_capsules(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        capsule = cache.parent / "reading-state" / "keep.json"
+        capsule.parent.mkdir()
+        capsule.write_bytes(b'{"verified":"retained"}')
+        cache.write_bytes(b"not a SQLite database")
+        result = self.query("index", "rebuild")
+        self.assertEqual(result["status"], "ready")
+        self.assertTrue(result["cache"]["recovered"])
+        self.assertEqual(capsule.read_bytes(), b'{"verified":"retained"}')
+        self.assertTrue(self.query("index", "check")["verified"])
+
+    def test_failed_corrupt_recovery_preserves_the_previous_files(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        cache.write_bytes(b"not a SQLite database")
+        self.write("requirements/b.md", "---\ntype: [malformed\n")
+        original = cache.read_bytes()
+        with self.assertRaises(ValueError):
+            self.load(rebuild=True)
+        self.assertEqual(cache.read_bytes(), original)
+        self.assertFalse(list(cache.parent.glob(".index-recovery-*")))
+
+    def test_readonly_existing_database_uses_source_derived_memory_fallback(self):
+        source = self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        original = cache.read_bytes()
+        cache.chmod(0o444)
+        source.write_text(note("requirement", "A", body="Changed source."), encoding="utf-8")
+        try:
+            data = project_context.load_index(self.project)
+            self.stores.append(data.store)
+            self.assertEqual(data["catalog"]["documents"]["requirements/a.md"]["source_hash"],
+                "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest())
+            self.assertEqual(cache.read_bytes(), original)
+        finally:
+            cache.chmod(0o644)
+
+    def test_index_check_replays_graph_and_search_projection(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        self.write("backlog/b.md", note("story", "B", {"implements": [("requirements/a", "A")]}))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        for damage in ("graph", "search"):
+            with self.subTest(damage=damage):
+                with contextlib.closing(sqlite3.connect(cache)) as connection, connection:
+                    if damage == "graph":
+                        connection.execute("DELETE FROM edge_facts")
+                    else:
+                        rowid = connection.execute("SELECT rowid FROM search_units LIMIT 1").fetchone()[0]
+                        connection.execute("DELETE FROM search_text WHERE rowid=?", (rowid,))
+                        connection.execute("INSERT INTO search_text(rowid,title,body) VALUES(?,?,?)", (rowid, "Incorrect", "Tokens"))
+                result = self.query("index", "check", expected=1)
+                self.assertEqual(result["status"], "incomplete")
+                self.assertFalse(result["verified"])
+                self.query("index", "rebuild")
+                self.assertTrue(self.query("index", "check")["verified"])
+
+    def test_index_check_coexists_with_a_live_reader_without_cache_writes(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        before = {path: path.read_bytes() for path in vault_query.default_cache(self.docs).parent.rglob("*") if path.is_file()}
+        self.assertTrue(self.query("index", "check")["verified"])
+        self.assertEqual(before, {path: path.read_bytes() for path in before})
+        self.assertEqual(data["catalog"]["documents"]["requirements/a.md"]["title"], "A")
+
+    @integration
+    def test_recovery_waits_for_process_readers_and_resumes_after_close(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        script = ("import sys; from pathlib import Path; "
+            "sys.path.insert(0,sys.argv[1]); import project_context; "
+            "root=Path(sys.argv[2]); data=project_context.load_index(root); "
+            "(root/'reader-ready').write_text('ready'); sys.stdin.readline(); data.store.close()")
+        process = subprocess.Popen([sys.executable, "-c", script, str(ROOT / "plugins/software-engineering-team/scripts"),
+            str(self.project)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic() + 15
+            while not (self.project / "reader-ready").exists():
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    self.fail("the child reader did not acquire its database lease")
+                time.sleep(0.02)
+            cache = vault_query.default_cache(self.docs)
+            original = cache.read_bytes()
+            settings = vault_index.policy()
+            with mock.patch.object(vault_index, "policy", return_value=dict(settings, busy_timeout_ms=50)):
+                with self.assertRaisesRegex(ValueError, "active readers"):
+                    vault_index.recover_database(self.docs, cache, vault_query.builder_hash())
+            self.assertEqual(cache.read_bytes(), original)
+        finally:
+            _out, err = process.communicate(input="\n" if process.poll() is None else None, timeout=15)
+        self.assertEqual(process.returncode, 0, err)
+        cache.write_bytes(b"not a SQLite database")
+        self.assertEqual(self.query("index", "rebuild")["status"], "ready")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence, Set
 from collections import ChainMap
+import errno
 import hashlib
+from itertools import zip_longest
 import json
 import os
 from pathlib import Path
@@ -121,13 +123,103 @@ def restore_note(root, relative, value):
         headings=[tuple(row) for row in value["headings"]], block_ids=set(value["block_ids"]))
 
 
+class CacheCorruptError(ValueError):
+    pass
+
+
+class DatabaseLease:
+    """Keep a database inode alive until every library reader has closed it."""
+    def __init__(self, cache, *, exclusive=False, timeout=None, name=".readers", read_only=False):
+        path = Path(cache).with_name(name)
+        check_cache_file(path)
+        flags = os.O_RDONLY if read_only else os.O_RDWR | os.O_CREAT
+        self.descriptor = os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), 0o666)
+        self.token = None
+        try:
+            info = os.fstat(self.descriptor)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError("vault reader lock must be a regular unaliased file")
+            deadline = time.monotonic() + (policy()["busy_timeout_ms"] / 1000 if timeout is None else timeout)
+            while not self.try_lock(exclusive):
+                if time.monotonic() >= deadline:
+                    raise ValueError("vault database has active readers; close them and retry synchronization")
+                time.sleep(min(file_lock.POLL_SECONDS, max(0, deadline - time.monotonic())))
+        except BaseException:
+            os.close(self.descriptor)
+            self.descriptor = None
+            raise
+    def try_lock(self, exclusive):
+        flock = file_lock._flock()
+        if flock is not None:
+            try:
+                flock.flock(self.descriptor, (flock.LOCK_EX if exclusive else flock.LOCK_SH) | flock.LOCK_NB)
+            except BlockingIOError:
+                return False
+            return True
+        import ctypes
+        from ctypes import wintypes
+        import msvcrt
+        class Overlapped(ctypes.Structure):
+            _fields_ = [("Internal", ctypes.c_size_t), ("InternalHigh", ctypes.c_size_t),
+                        ("Offset", wintypes.DWORD), ("OffsetHigh", wintypes.DWORD), ("hEvent", wintypes.HANDLE)]
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        function = kernel.LockFileEx
+        function.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                             wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(Overlapped)]
+        function.restype = wintypes.BOOL
+        token = Overlapped()
+        if not function(msvcrt.get_osfhandle(self.descriptor), 1 | (2 if exclusive else 0), 0, 1, 0, ctypes.byref(token)):
+            error = ctypes.get_last_error()
+            if error == 33:  # ERROR_LOCK_VIOLATION with LOCKFILE_FAIL_IMMEDIATELY
+                return False
+            raise ctypes.WinError(error)
+        self.token = (kernel, token, Overlapped)
+        return True
+    def close(self):
+        if self.descriptor is None:
+            return
+        descriptor, self.descriptor = self.descriptor, None
+        try:
+            flock = file_lock._flock()
+            if flock is not None:
+                flock.flock(descriptor, flock.LOCK_UN)
+            else:
+                import ctypes
+                from ctypes import wintypes
+                import msvcrt
+                kernel, token, kind = self.token
+                function = kernel.UnlockFileEx
+                function.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                                     wintypes.DWORD, ctypes.POINTER(kind)]
+                function.restype = wintypes.BOOL
+                if not function(msvcrt.get_osfhandle(descriptor), 0, 1, 0, ctypes.byref(token)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            os.close(descriptor)
+
+
 class ReaderSession:
-    def __init__(self, connection, docs):
-        self.connection, self.docs = connection, docs
-    def __del__(self):
+    def __init__(self, connection, docs, lease=None, cache=None):
+        self.connection, self.docs, self.lease, self.cache = connection, docs, lease, cache
+        self.closed = False
+    def close(self):
+        if self.closed:
+            return
+        guarded = self.cache is not None and self.cache.with_name(".snapshot").exists()
+        guard = DatabaseLease(self.cache, exclusive=True, name=".snapshot", read_only=True) if guarded else None
         try:
             self.connection.close()
-        except sqlite3.Error:
+            self.closed = True
+        finally:
+            if self.closed and self.lease is not None:
+                self.lease.close()
+                self.lease = None
+            if guard is not None:
+                guard.close()
+    def __del__(self):
+        try:
+            self.close()
+        except (sqlite3.Error, OSError):
             pass
 
 
@@ -250,13 +342,13 @@ class OwnedEdges(impact_closure.Edges):
 
 
 class Store:
-    def __init__(self, docs, connection):
+    def __init__(self, docs, connection, lease=None, cache=None):
         self.docs, self.connection = Path(docs), connection
-        self.session = ReaderSession(connection, self.docs)
+        self.session = ReaderSession(connection, self.docs, lease, cache)
         self.catalog = Catalog(self)
         self.files = Rows(self, "files", "path")
     def close(self):
-        self.connection.close()
+        self.session.close()
     def meta(self, key, default=None):
         row = self.connection.execute("SELECT payload FROM meta WHERE key=?", (key,)).fetchone()
         return json.loads(row[0]) if row else default
@@ -340,12 +432,18 @@ class Store:
             if key in impact_closure.SELF_KEYS:
                 continue
             for text in impact_closure.frontmatter_values(value):
+                text = text.strip()
                 refs.add(text)
+                binding = text.split("|")
+                if len(binding) == 3 and binding[2].startswith("sha256:") and not text.startswith("[["):
+                    text = binding[1].strip()
+                    refs.add(text)
                 if text.startswith("[[") and text.endswith("]]"):
                     target, _anchor, label = vault_check.split_wikilink(text[2:-2])
                     refs.update((target, target + ".md", label))
                 for endpoint in text.split(" -> "):
-                    refs.add(endpoint)
+                    normalized = impact_closure.normalize(endpoint.strip().lstrip("./"))
+                    refs.update((endpoint.strip(), normalized, normalized + ".md"))
         for _line, _embed, target, _anchor, label, _raw in note.wikilinks:
             refs.update((target, target + ".md", label))
         return {r for r in refs if r}
@@ -523,7 +621,17 @@ def check_database_files(cache):
         check_cache_file(path)
 
 
-def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False):
+def sqlite_failure(exc):
+    code = getattr(exc, "sqlite_errorcode", 0) & 0xff
+    message = str(exc).lower()
+    if code in (8, 14) or "readonly database" in message or "unable to open database file" in message:
+        return PermissionError(errno.EACCES, f"vault SQLite cache cannot be written: {exc}")
+    if code in (11, 26) or "not a database" in message or "database disk image is malformed" in message:
+        return CacheCorruptError(f"vault SQLite index is corrupt: {exc}")
+    return ValueError(f"vault SQLite index is unavailable: {exc}")
+
+
+def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False, coordinate=True):
     started = time.perf_counter()
     docs, cache = Path(docs).absolute(), Path(cache)
     if not docs.is_dir():
@@ -531,9 +639,15 @@ def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False):
     capabilities()
     if persist:
         check_database_files(cache)
-    connection = sqlite3.connect(str(cache) if persist else ":memory:", timeout=policy()["busy_timeout_ms"] / 1000)
-    store = Store(docs, connection)
+    lease = DatabaseLease(cache) if persist and coordinate else None
+    guard = None
+    connection = None
+    store = None
     try:
+        if persist and coordinate:
+            guard = DatabaseLease(cache, exclusive=True, name=".snapshot")
+        connection = sqlite3.connect(str(cache) if persist else ":memory:", timeout=policy()["busy_timeout_ms"] / 1000)
+        store = Store(docs, connection, lease, cache if persist and coordinate else None)
         if persist:
             connection.execute("PRAGMA journal_mode=WAL")
         store.initialize()
@@ -628,14 +742,68 @@ def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False):
                       generation=store.meta("generation", 0), state="ready" if len(store.catalog["documents"]) else "ready_empty")
         return store.data(), status
     except sqlite3.Error as exc:
-        connection.close()
-        raise ValueError(f"vault SQLite index is unavailable or corrupt: {exc}") from exc
+        if connection is not None:
+            connection.close()
+        if store is not None:
+            store.session.closed = True
+        if lease is not None:
+            lease.close()
+        raise sqlite_failure(exc) from exc
     except BaseException:
-        connection.close()
+        if connection is not None:
+            connection.close()
+        if store is not None:
+            store.session.closed = True
+        if lease is not None:
+            lease.close()
         raise
+    finally:
+        if guard is not None:
+            guard.close()
+
+
+def recover_database(docs, cache, builder):
+    """Compile before publication; never replace a live database or its WAL."""
+    exclusive = DatabaseLease(cache, exclusive=True)
+    try:
+        check_database_files(cache)
+        if cache.exists() and not os.access(cache, os.W_OK):
+            raise PermissionError(errno.EACCES, "vault SQLite cache is read-only")
+        with tempfile.TemporaryDirectory(prefix=".index-recovery-", dir=cache.parent) as temporary:
+            candidate = Path(temporary) / "index.db"
+            data, _status = refresh(docs, candidate, builder, rebuild=True, coordinate=False)
+            try:
+                if data.store.connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise ValueError("replacement vault database failed integrity verification")
+            finally:
+                data.store.close()
+            with candidate.open("rb+") as handle:
+                os.fsync(handle.fileno())
+            os.chmod(candidate, atomic_file.replacement_mode(cache))
+            moved = []
+            try:
+                for suffix in ("-wal", "-shm", "-journal"):
+                    path = Path(str(cache) + suffix)
+                    check_cache_file(path)
+                    if path.exists():
+                        backup = Path(temporary) / ("old" + suffix)
+                        os.replace(path, backup)
+                        moved.append((path, backup))
+                check_cache_file(cache)
+                os.replace(candidate, cache)
+            except BaseException:
+                for path, backup in reversed(moved):
+                    os.replace(backup, path)
+                raise
+    finally:
+        exclusive.close()
+    result, status = refresh(docs, cache, builder)
+    status.update(full=True, recovered=True)
+    return result, status
 
 
 def locked_refresh(docs, cache, builder, *, verify=True, rebuild=False):
+    docs, cache = Path(docs), Path(cache)
     project = Path(docs).resolve().parents[1]
     folder = atomic_file.real_directory(project, Path(cache).parent.relative_to(project))
     path = folder / ".lock"
@@ -644,7 +812,10 @@ def locked_refresh(docs, cache, builder, *, verify=True, rebuild=False):
     try:
         file_lock.lock(descriptor)
         try:
-            result = refresh(docs, cache, builder, verify=verify, rebuild=rebuild)
+            try:
+                result = refresh(docs, cache, builder, verify=verify, rebuild=rebuild)
+            except CacheCorruptError:
+                result = recover_database(docs, cache, builder)
             cleanup_legacy(Path(cache), Path(docs))
             return result
         finally:
@@ -676,6 +847,31 @@ def cleanup_legacy(cache, docs):
     legacy.unlink()
 
 
+def same_rows(left, right, sql):
+    missing = object()
+    return all(a == b for a, b in zip_longest(left.execute(sql), right.execute(sql), fillvalue=missing))
+
+
+def projection_mismatches(store, fresh):
+    mismatches = []
+    for table in ("parsed_notes", "notes", "note_names", "documents", "units", "aliases", "owners",
+                  "citations", "owner_flags", "raw_refs", "edge_facts", "gaps"):
+        columns = len(store.connection.execute(f"PRAGMA table_info({table})").fetchall())
+        sql = f"SELECT * FROM {table} ORDER BY " + ",".join(str(n) for n in range(1, columns + 1))
+        if not same_rows(store.connection, fresh.connection, sql):
+            mismatches.append(table)
+    for key in ("tiers", "snapshot_inputs"):
+        if store.meta(key) != fresh.meta(key):
+            mismatches.append(key)
+    for connection in (store.connection, fresh.connection):
+        connection.execute("CREATE VIRTUAL TABLE temp.index_tokens USING fts5vocab(main,search_text,instance)")
+    sql = ("SELECT v.term,m.uid,v.col,v.offset FROM temp.index_tokens v "
+           "JOIN search_units m ON m.rowid=v.doc ORDER BY v.term,m.uid,v.col,v.offset")
+    if not same_rows(store.connection, fresh.connection, sql):
+        mismatches.append("search_text")
+    return mismatches
+
+
 def inspect_index(docs, cache, builder, *, check=False):
     """Copy a consistent closed/checkpointed or WAL snapshot without source writes."""
     docs, cache = Path(docs).absolute(), Path(cache)
@@ -685,19 +881,27 @@ def inspect_index(docs, cache, builder, *, check=False):
     # A shared writer lock prevents publication while copying the cache.
     lock = cache.with_name(".lock")
     descriptor = None
+    guard = None
     if lock.exists():
         check_cache_file(lock)
         descriptor = os.open(lock, os.O_RDONLY)
         file_lock.lock(descriptor)
     try:
+        # Last-reader close can checkpoint and remove WAL independently of
+        # the writer lock. Serialize it with the snapshot copy as well.
+        if cache.with_name(".snapshot").exists():
+            guard = DatabaseLease(cache, name=".snapshot", read_only=True)
         with tempfile.TemporaryDirectory(prefix="vault-index-check-") as temporary:
             clone = Path(temporary) / "index.db"
             clone.write_bytes(cache.read_bytes())
-            for suffix in ("-wal", "-shm"):
+            for suffix in ("-wal",):
                 sidecar = Path(str(cache) + suffix)
                 check_cache_file(sidecar)
                 if sidecar.is_file():
                     Path(str(clone) + suffix).write_bytes(sidecar.read_bytes())
+            if guard is not None:
+                guard.close()
+                guard = None
             connection = sqlite3.connect(clone)
             try:
                 store = Store(docs, connection)
@@ -719,15 +923,23 @@ def inspect_index(docs, cache, builder, *, check=False):
                     mapped = {r[0] for r in connection.execute("SELECT rowid FROM search_units")}
                     if expected != found or search_ids != mapped:
                         result["status"] = "incomplete"
-                    for unit in store.catalog["units"].values():
-                        context_catalog.unit_content(docs, unit)
-                    result["verified"] = True
+                    if result["status"] != "stale":
+                        fresh, _status = refresh(docs, cache, builder, persist=False)
+                        try:
+                            mismatches = projection_mismatches(store, fresh.store)
+                        finally:
+                            fresh.store.close()
+                        if mismatches:
+                            result.update(status="incomplete", mismatches=mismatches)
+                    result["verified"] = result["status"] in {"ready", "ready_empty"}
                 return result
             except sqlite3.Error as exc:
                 raise ValueError(f"invalid vault database: {exc}") from exc
             finally:
                 connection.close()
     finally:
+        if guard is not None:
+            guard.close()
         if descriptor is not None:
             file_lock.unlock(descriptor)
             os.close(descriptor)

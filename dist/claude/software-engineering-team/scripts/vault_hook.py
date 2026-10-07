@@ -1467,30 +1467,31 @@ def post(payload: dict) -> int:
 
 
 def sync_vault_index(root: Path, paths) -> None:
-    """A disposable cache failure cannot grant or replace source validation."""
+    """A disposable cache failure cannot grant or replace source validation.
+
+    The sync is a hint: a busy writer lock or any index failure leaves the
+    reconciliation to the next query instead of delaying or failing the hook.
+    """
     if not root.is_dir() or not paths:
         return
-    import vault_index
-    settings = vault_index.policy()
-    artifact = vault_check.load_policy(vault_check.DEFAULT_POLICY)[settings["artifact_directory_policy_key"]]
-    eligible = False
-    for value in paths:
-        path = Path(value)
-        path = path if path.is_absolute() else root / path
-        try:
-            relative = path.relative_to(root)
-        except ValueError:
-            continue
-        if artifact not in relative.parts[:-1] and path.suffix.lower() in settings["extensions"]:
-            eligible = True
-            break
-    if not eligible:
-        return
     try:
+        import vault_index
         import vault_query
-        data, _status = vault_query.locked_refresh(root, vault_query.default_cache(root), True)
-        data.store.close()
-    except (OSError, ValueError) as exc:
+        settings, artifact = vault_index.scope()
+        relatives = []
+        for value in paths:
+            path = Path(value)
+            path = path if path.is_absolute() else root / path
+            try:
+                relatives.append(path.relative_to(root).as_posix())
+            except ValueError:
+                continue
+        if not any(vault_index.eligible(relative, settings, artifact) for relative in relatives):
+            return
+        result = vault_query.locked_refresh(root, vault_query.default_cache(root), True, wait=False)
+        if result is not None:
+            result[0].store.close()
+    except Exception as exc:
         print("vault index requires reconciliation before reading: " + str(exc), file=sys.stderr)
 
 
@@ -4181,6 +4182,7 @@ def shell_verify(payload: dict) -> int:
                 integrity_error += "; project-local vault root is unbound"
                 root_value = str(expected_vault)
     retain_guard_state = False
+    synced = None
     try:
         if (
             recovery_state is not None
@@ -4551,7 +4553,7 @@ def shell_verify(payload: dict) -> int:
                 ))
         if config_violation:
             return deny(config_violation)
-        sync_vault_index(root, [root / key for key in changed])
+        synced = [root / key for key in changed]
         return 0
     except Exception:
         retain_guard_state = True
@@ -4560,6 +4562,8 @@ def shell_verify(payload: dict) -> int:
         if not retain_guard_state:
             cleanup_guard_state(path, recovery)
             release_experience_writer_lock(project, payload)
+        if synced is not None:
+            sync_vault_index(root, synced)
 
 
 def main() -> int:

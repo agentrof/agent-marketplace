@@ -3252,14 +3252,17 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
     plan = payload.get("project_reading")
     if not isinstance(plan, dict) or "request" not in plan:
         raise RuntimeError("resolve context or use frozen inspect reads before continuing")
-    index = project_context.load_index(root, no_cache=True)
-    project_context.validate_plan(root, index, plan)
+    def addressed(index):
+        project_context.validate_plan(root, index, plan)
+        if reason is not None:
+            return project_context.expand_context(root, index, plan, reason=reason, refs=refs, persist_state=False)
+        if refs:
+            raise RuntimeError("expanding frozen context requires a reason")
+        return {row["unit_id"]: dict(index["catalog"]["units"].get(row["unit_id"], row)) for row in plan["must_read"]}
+    addresses = project_context.with_index(root, addressed, no_cache=True)
     if reason is not None:
         return {"candidate_hash": current["candidate_hash"], "product_commit": current["product_commit"],
-                "project_reading": project_context.expand_context(root, index, plan, reason=reason, refs=refs,
-                                                                  persist_state=False)}
-    if refs:
-        raise RuntimeError("expanding frozen context requires a reason")
+                "project_reading": addresses}
     request = project_context.request_data(root, plan)
     manual = []
     for obligation in plan.get("manual_reads", []):
@@ -3274,7 +3277,7 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
             "next_action": "Use delivery_verification.py inspect --path <path> to read this source from the bound candidate before completing its obligation."})
     units = {}
     for row in plan["must_read"]:
-        unit = dict(index["catalog"]["units"].get(row["unit_id"], row))
+        unit = addresses[row["unit_id"]]
         unit.setdefault("git_revision", current["product_commit"])
         units[unit["unit_id"]] = unit
     result = context_catalog.read_units(root / "workspace/docs", {"units": units},

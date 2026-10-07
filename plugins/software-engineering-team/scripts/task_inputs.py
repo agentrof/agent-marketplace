@@ -1085,7 +1085,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         project_reading = json.loads(regular(project, context_plan).read_text(encoding="utf-8"))
         if (project_reading["request"]["entry"], project_reading["request"]["role"]) != (entry, role):
             raise ValueError("context plan belongs to a different entry or role")
-        project_context.validate_plan(project, project_context.load_index(project), project_reading)
+        project_context.with_index(project, lambda index: project_context.validate_plan(project, index, project_reading))
         project_files.add(context_plan)
         project_files.update(row["path"] if row.get("source_root") == "project" else
                              "workspace/docs/" + row["path"] for row in project_reading["must_read"])

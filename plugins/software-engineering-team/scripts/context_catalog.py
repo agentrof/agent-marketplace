@@ -304,25 +304,37 @@ def resolve(data: dict, reference: str) -> list[dict]:
     return [data["units"][unit] for unit in ids]
 
 
-def unit_content(root: Path, unit: dict, *, raw: bytes | None = None) -> bytes:
-    """Verify the source and complete logical unit before addressing a fragment."""
-    source_root = root.parents[1] if unit.get("source_root") == "project" else root
-    if raw is None:
+def unit_content(root: Path, unit: dict, *, sources: dict | None = None) -> bytes:
+    """Verify the source and complete logical unit before addressing a fragment.
+
+    ``sources`` lets one caller verify, decode and split each source once for many units.
+    """
+    key = (unit.get("source_root"), unit["path"], unit.get("git_revision"), unit["source_hash"])
+    source = sources.get(key) if sources is not None else None
+    if source is None:
+        source_root = root.parents[1] if unit.get("source_root") == "project" else root
         if unit.get("git_revision"):
             from context_history import git_source
             relative = unit["path"] if unit.get("source_root") == "project" else "workspace/docs/" + unit["path"]
             raw = git_source(root.parents[1], relative, unit["git_revision"])
         else:
             raw = safe_file(source_root, unit["path"]).read_bytes()
-    if digest(raw) != unit["source_hash"]:
-        raise ValueError(f"stale source: {unit['path']}")
+        if digest(raw) != unit["source_hash"]:
+            raise ValueError(f"stale source: {unit['path']}")
+        source = {"raw": raw}
+        if sources is not None:
+            sources[key] = source
     if "json_pointer" in unit:
-        value = json.loads(raw)
+        if "value" not in source:
+            source["value"] = json.loads(source["raw"])
+        value = source["value"]
         for part in unit["json_pointer"]:
             value = value[part]
         content = json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
     else:
-        lines = raw.decode("utf-8").splitlines(keepends=True)
+        if "lines" not in source:
+            source["lines"] = source["raw"].decode("utf-8").splitlines(keepends=True)
+        lines = source["lines"]
         content = "\n".join("".join(lines[a - 1:b]) for a, b in unit["ranges"]).encode("utf-8")
     expected = unit.get("parent_content_hash", unit["content_hash"])
     if digest(content) != expected:

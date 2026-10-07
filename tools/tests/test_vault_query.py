@@ -89,8 +89,8 @@ class VaultQueryTest(unittest.TestCase):
         self.assertEqual(self.vault_bytes(), before)
 
     def test_legacy_cleanup_removes_only_owned_projection_files(self) -> None:
-        self.run_query("gaps")
         legacy = self.cache.with_name("index.json")
+        legacy.parent.mkdir(parents=True)
         legacy.write_text(json.dumps({"docs": str(self.docs), "schema_version": 2}))
         shards = self.cache.with_name("index-notes")
         shards.mkdir()
@@ -129,15 +129,14 @@ class VaultQueryTest(unittest.TestCase):
                 proc.stderr.close()
             self.assertEqual([code for code, _ in results], [0] * 8, results)
 
-    def test_a_linked_note_is_refused_without_disclosing_target_content(self) -> None:
+    def test_a_linked_note_is_indexed_inside_the_vault_and_refused_outside(self) -> None:
         (self.docs / "backlog/alias.md").symlink_to(self.docs / "backlog/story-b.md")
-        self.assertIn("symbolic link", self.run_query("gaps", code=2)["stderr"])
-        (self.docs / "backlog/alias.md").unlink()
+        self.assertIn("backlog/alias.md", json.dumps(self.run_query("find", "backlog/alias.md")))
         secret = self.project / "secret.md"
         secret.write_text("Private synthetic content.")
         (self.docs / "backlog/leak.md").symlink_to(secret)
         result = self.run_query("search", "Private", code=2)
-        self.assertIn("symbolic link", result["stderr"])
+        self.assertIn("links outside the vault", result["stderr"])
         self.assertNotIn("synthetic content", result["stderr"])
 
     def test_closure_takes_relative_project_and_absolute_paths(self) -> None:
@@ -316,7 +315,7 @@ class VaultQueryTest(unittest.TestCase):
         self.assertIn("backlog/story-g.md", result["closure"])
         self.assertFalse((self.cache.parent / "index-notes").exists())
 
-    def test_stale_cache_same_size_and_mtime_needs_verify(self) -> None:
+    def test_same_size_and_mtime_edit_is_detected_without_verify(self) -> None:
         self.run_query("gaps")
         path = self.docs / "backlog/story-c.md"
         info = path.stat()

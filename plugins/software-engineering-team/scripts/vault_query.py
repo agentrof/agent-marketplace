@@ -21,7 +21,8 @@ Verbs (all print JSON):
   index status|check         readonly diagnostics and coverage verification
 
 Common options: --docs D (required, the project's ``workspace/docs``),
---verify (hash every file instead of trusting an unchanged size and mtime).
+--verify (accepted for compatibility; every query already hashes every eligible
+source before relying on the index).
 The cache location is fixed and never configurable: the tool writes only
 inside that ``vault-index`` folder and never a vault or other project file.
 Python SQLite/FTS5 only; no server or embeddings.
@@ -32,18 +33,12 @@ from __future__ import annotations
 import argparse
 import errno
 import hashlib
-import os
 import json
-import re
 import subprocess
-import sqlite3
 import sys
-import time
 from collections import deque
 from pathlib import Path
 
-import atomic_file
-import file_lock
 import impact_closure
 import vault_check
 import context_catalog
@@ -55,7 +50,6 @@ BUILDER_FILES = ("impact_closure.py", "vault_check.py", "vault_query.py", "ba_co
 
 
 READ_ONLY_ERRORS = {errno.EACCES, errno.EPERM, errno.EROFS}
-SHARD_NAME = re.compile(r"^[0-9a-f]{64}\.json$")
 
 
 def project_docs(project: Path) -> Path:
@@ -69,7 +63,7 @@ def project_docs(project: Path) -> Path:
 
 
 def default_cache(docs: Path) -> Path:
-    """The one cache file: ``<project>/.agentrof/.../vault-index/index.json``.
+    """The one cache file: ``<project>/.agentrof/.../vault-index/index.db``.
 
     ``docs`` must be a project's ``workspace/docs`` directory, so the cache
     folder sits outside the vault; a folder that resolves elsewhere, through a
@@ -99,58 +93,20 @@ def builder_hash() -> str:
     return digest.hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# Note (de)serialization as plain JSON data
-# ---------------------------------------------------------------------------
-
-
-def note_to_json(note) -> dict:
-    return {
-        "fm": note.fm, "fm_end": note.fm_end, "fm_error": note.fm_error,
-        "lines": note.lines, "generated": note.generated, "subtree": note.subtree,
-        "wikilinks": note.wikilinks, "mdlinks": note.mdlinks,
-        "fm_targets": note.fm_targets, "headings": note.headings,
-        "block_ids": sorted(note.block_ids)}
-
-
-def note_from_json(root: Path, rel: str, data: dict):
-    return vault_check.Note(
-        rel=rel, path=root / rel, fm=data["fm"], fm_end=data["fm_end"],
-        fm_error=data["fm_error"], lines=data["lines"], generated=data["generated"],
-        subtree=data["subtree"], wikilinks=[tuple(i) for i in data["wikilinks"]],
-        mdlinks=[tuple(i) for i in data["mdlinks"]],
-        fm_targets=[tuple(i) for i in data["fm_targets"]],
-        headings=[tuple(i) for i in data["headings"]], block_ids=set(data["block_ids"]))
-
-
-# ---------------------------------------------------------------------------
-# Index
-# ---------------------------------------------------------------------------
-
-
-def scan_files(docs: Path, cached: dict, verify: bool = False,
+def scan_files(docs: Path, cached: dict | None = None, verify: bool = True,
                stamped: frozenset = frozenset()) -> dict:
-    return vault_index.scan_files(docs, cached, verify=verify or bool(stamped))
+    """Every eligible source with its hash; the stat-only fast path no longer exists."""
+    return vault_index.scan_files(docs)
 
 
-def shard_dir(cache: Path) -> Path:
-    return cache.with_name("index-notes")
+def locked_refresh(docs: Path, cache: Path, verify: bool = True, *, rebuild: bool = False,
+                   repair: bool = False, failed=None, wait: bool = True):
+    return vault_index.locked_refresh(docs, cache, builder_hash(), rebuild=rebuild, repair=repair,
+                                      failed=failed, wait=wait)
 
 
-def note_identity(note) -> tuple:
-    aliases = [a for a in (note.fm.get("aliases") or []) if isinstance(a, str)]
-    ident = note.fm.get("id")
-    ident = ident if isinstance(ident, str) and ident else (aliases[0] if aliases else "")
-    title = note.fm.get("title")
-    return ident, title if isinstance(title, str) else "", aliases
-
-
-def locked_refresh(docs: Path, cache: Path, verify: bool = False, *, rebuild: bool = False, repair: bool = False):
-    return vault_index.locked_refresh(docs, cache, builder_hash(), verify=True, rebuild=rebuild, repair=repair)
-
-
-def refresh(docs: Path, cache: Path, verify: bool = False, persist: bool = True, *, rebuild: bool = False):
-    return vault_index.refresh(docs, cache, builder_hash(), verify=True, persist=persist, rebuild=rebuild)
+def refresh(docs: Path, cache: Path, verify: bool = True, persist: bool = True, *, rebuild: bool = False):
+    return vault_index.refresh(docs, cache, builder_hash(), persist=persist, rebuild=rebuild)
 
 
 # ---------------------------------------------------------------------------
@@ -247,12 +203,16 @@ def q_path(index: Index, args) -> dict:
         if rel == goal:
             break
         if index.store is not None:
+            # The same hop order as the full edge list: (source, target, key).
             links[rel] = []
-            for field, direction in (("source", "out"), ("target", "in")):
-                for s, t, k, tiers in index.store.edges_for(rel, field):
-                    if k != impact_closure.LIST_KEY:
-                        links[rel].append((t if direction == "out" else s,
-                                           {"key": k, "tiers": tiers, "direction": direction}))
+            for s, t, k, tiers in index.store.edges_touching(rel):
+                if k == impact_closure.LIST_KEY:
+                    continue
+                hop = {"key": k, "tiers": tiers}
+                if s == rel:
+                    links[rel].append((t, {**hop, "direction": "out"}))
+                if t == rel:
+                    links[rel].append((s, {**hop, "direction": "in"}))
         for nxt, hop in sorted(links.get(rel, []), key=lambda item: item[0]):
             if nxt not in previous:
                 previous[nxt] = (rel, hop)
@@ -336,7 +296,8 @@ def q_closure(index: Index, args) -> dict:
 
 
 def q_search_sections(index: Index, args) -> dict:
-    terms = args.query.split()
+    # A term without letters or digits tokenizes to nothing and would match no unit.
+    terms = [term for term in args.query.split() if any(char.isalnum() for char in term)]
     if not terms:
         return {"query": args.query, "hits": [], "truncated": False}
     expression = " AND ".join('"' + term.replace('"', '""') + '"' for term in terms)
@@ -357,13 +318,13 @@ def q_search_sections(index: Index, args) -> dict:
     return {"query": args.query, "hits": hits, "truncated": len(rows) > args.limit}
 
 
-def query_data(args, cache, *, rebuild=False, repair=False):
+def query_data(args, cache, *, rebuild=False, repair=False, failed=None):
     try:
-        return locked_refresh(args.docs, cache, args.verify, rebuild=rebuild, repair=repair)
+        return locked_refresh(args.docs, cache, args.verify, rebuild=rebuild, repair=repair, failed=failed)
     except OSError as exc:
         if exc.errno not in READ_ONLY_ERRORS:
             raise
-        return refresh(args.docs, cache, args.verify, persist=False)
+        return refresh(args.docs, cache, args.verify, persist=False, rebuild=rebuild or repair)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -371,7 +332,7 @@ def main(argv: list[str] | None = None) -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--docs", type=Path, required=True)
     parser.add_argument("--verify", action="store_true",
-                        help="hash every file, ignoring the size and mtime fast path")
+                        help="accepted for compatibility; every query hashes every eligible source")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("closure")
     p.add_argument("--changed", nargs="*", default=[])
@@ -435,12 +396,13 @@ def main(argv: list[str] | None = None) -> int:
                            "documents": len(data["catalog"]["documents"])}
                           if args.command == "index" else args.func(Index(data), args))
                 break
-            except sqlite3.Error as exc:
+            except vault_index.DATABASE_ERRORS as exc:
                 failure = vault_index.sqlite_failure(exc)
                 if attempt or not isinstance(failure, vault_index.CacheCorruptError):
                     raise failure from exc
+                failed = data.store.session.identity
                 data.store.close()
-                data, status = query_data(args, cache, repair=True)
+                data, status = query_data(args, cache, repair=True, failed=failed)
                 status["recovered"] = True
         result["cache"] = status
         print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))

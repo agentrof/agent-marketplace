@@ -232,24 +232,31 @@ def frontmatter_values(value):
             yield from frontmatter_values(item)
 
 
+def note_reference_names(note) -> list:
+    """An authored note's own identities, below relation identities and catalog aliases."""
+    names = []
+    ident = note.fm.get("id")
+    if isinstance(ident, str) and ident.strip():
+        names.append(ident.strip())
+    component = note.fm.get("component_id")
+    if isinstance(component, str) and component:
+        names.append(component)
+    record = note.fm.get("record_id")
+    revision = note.fm.get("revision")
+    if record and revision:
+        names.append(f"ARC:{record}@r{revision}" if str(record).startswith("CON-") else
+                     f"ARC:{note.fm.get('component_ref') or 'ROOT'}:{record}@r{revision}")
+    return names
+
+
 def reference_owners(vault, records: dict | None = None) -> dict:
     """Resolve note and source-unit identities without selecting an ambiguous owner."""
     if records is not None and hasattr(records, "owner_lookup"):
         return records.owner_lookup
     owners = dict(vault_check.relation_identity_owners(vault))
     for note in vault_check.authored(vault):
-        ident = note.fm.get("id")
-        if isinstance(ident, str) and ident.strip():
-            owners.setdefault(ident.strip(), note.rel)
-        component = note.fm.get("component_id")
-        if isinstance(component, str) and component:
-            owners.setdefault(component, note.rel)
-        record = note.fm.get("record_id")
-        revision = note.fm.get("revision")
-        if record and revision:
-            exact = (f"ARC:{record}@r{revision}" if str(record).startswith("CON-") else
-                     f"ARC:{note.fm.get('component_ref') or 'ROOT'}:{record}@r{revision}")
-            owners.setdefault(exact, note.rel)
+        for name in note_reference_names(note):
+            owners.setdefault(name, note.rel)
     import context_catalog
     records = context_catalog.catalog(vault) if records is None else records
     for reference, identities in records["aliases"].items():
@@ -290,7 +297,9 @@ def frontmatter_tier(vault, edges: Edges, keys, records: dict | None = None) -> 
     not (``requirement_ref``, ``verification_contract_ref``, any wikilink, id,
     alias or path); returns the reference-like values no note resolves."""
     owners = reference_owners(vault, records)
-    for edge in vault_check.relation_edges(vault, identity_owners=owners):
+    # Typed relations name authored notes through relation identities only;
+    # a catalog alias such as a sealed receipt never becomes their target.
+    for edge in vault_check.relation_edges(vault, identity_owners=getattr(records, "relation_owners", None)):
         if edge.key in keys and not (edge.alias in owners and owners[edge.alias] is None):
             edges.add(edge.source, edge.target, edge.key, "frontmatter")
     unresolved = []

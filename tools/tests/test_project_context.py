@@ -24,6 +24,7 @@ import operation_compile  # noqa: E402
 import requirement_compile  # noqa: E402
 import impact_closure  # noqa: E402
 import project_context  # noqa: E402
+import vault_index  # noqa: E402
 import vault_query  # noqa: E402
 import task_inputs  # noqa: E402
 from tools.tests.git_fixture import init_repository  # noqa: E402
@@ -1014,7 +1015,7 @@ class ProjectContextTests(unittest.TestCase):
     def test_loader_reuses_the_existing_index_without_reparsing(self):
         first = project_context.load_index(self.project)
         self.assertTrue((self.project / vault_query.RUNTIME / "index.db").is_file())
-        with mock.patch.object(impact_closure, "load_vault_reusing", side_effect=AssertionError("reparsed")):
+        with mock.patch.object(vault_index.Store, "update_note", side_effect=AssertionError("reparsed")):
             second = project_context.load_index(self.project)
         self.assertEqual(first, second)
 

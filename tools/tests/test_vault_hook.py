@@ -2080,42 +2080,99 @@ class VaultHookShellContractTests(unittest.TestCase):
             )
 
     def test_packaged_writer_content_must_match_its_manifest(self):
+        for relative in (
+            "scripts/project_config.py",
+            "skill-content/autopilot/scripts/autopilot.py",
+        ):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as temporary:
+                self.assert_packaged_writer_manifest(Path(temporary), relative)
+
+    def assert_packaged_writer_manifest(self, base: Path, relative: str):
+        package = base / "package"
+        scripts = package / "scripts"
+        scripts.mkdir(parents=True)
+        hook_path = scripts / "vault_hook.py"
+        hook_path.write_text("hook\n", encoding="utf-8")
+        vault_check_path = scripts / "vault_check.py"
+        vault_check_path.write_text("check\n", encoding="utf-8")
+        writer = package / relative
+        writer.parent.mkdir(parents=True, exist_ok=True)
+        writer.write_text("writer\n", encoding="utf-8")
+        digest = self.hook.hashlib.sha256(writer.read_bytes()).hexdigest()
+        (package / ".agent-marketplace-package.json").write_text(
+            json.dumps({"files": {relative: digest}}),
+            encoding="utf-8",
+        )
+        with mock.patch.object(self.hook, "__file__", str(hook_path)), \
+                mock.patch.object(
+                    self.hook.vault_check, "__file__", str(vault_check_path),
+                ):
+            self.assertEqual(
+                self.hook._installed_script_path(
+                    str(writer), package, writer.name, relative,
+                ),
+                writer.resolve(),
+            )
+            (package / ".agent-marketplace-package.json").unlink()
+            self.assertIsNone(self.hook._installed_script_path(
+                str(writer), package, writer.name, relative,
+            ))
+            (package / ".agent-marketplace-package.json").write_text(
+                json.dumps({"files": {relative: digest}}),
+                encoding="utf-8",
+            )
+            writer.write_text("tampered\n", encoding="utf-8")
+            self.assertIsNone(self.hook._installed_script_path(
+                str(writer), package, writer.name, relative,
+            ))
+
+    def test_packaged_autopilot_writer_requires_an_unchanged_direct_command(self):
         with tempfile.TemporaryDirectory() as temporary:
-            package = Path(temporary) / "package"
+            base = Path(temporary)
+            project = base / "project"
+            self.project(project)
+            package = base / "package with spaces"
             scripts = package / "scripts"
             scripts.mkdir(parents=True)
             hook_path = scripts / "vault_hook.py"
             hook_path.write_text("hook\n", encoding="utf-8")
             vault_check_path = scripts / "vault_check.py"
             vault_check_path.write_text("check\n", encoding="utf-8")
-            writer = scripts / "project_config.py"
+            writer = package / self.hook.AUTOPILOT_SCRIPT
+            writer.parent.mkdir(parents=True)
             writer.write_text("writer\n", encoding="utf-8")
             digest = self.hook.hashlib.sha256(writer.read_bytes()).hexdigest()
             (package / ".agent-marketplace-package.json").write_text(
-                json.dumps({"files": {"scripts/project_config.py": digest}}),
+                json.dumps({"files": {self.hook.AUTOPILOT_SCRIPT: digest}}),
                 encoding="utf-8",
+            )
+            external = project / "autopilot.py"
+            external.write_bytes(writer.read_bytes())
+            quote = subprocess.list2cmdline if os.name == "nt" else shlex.join
+            argv = [sys.executable, str(writer), "on"]
+            command = quote(argv)
+            cases = (
+                (command, True),
+                (quote([sys.executable, "-B", str(writer), "on"]), True),
+                (quote([sys.executable, str(external), "on"]), False),
+                (quote(["python3", str(writer), "on"]), False),
+                (command + " && echo done", False),
+                (command + " | echo done", False),
+                ("cd . && " + command, False),
             )
             with mock.patch.object(self.hook, "__file__", str(hook_path)), \
                     mock.patch.object(
                         self.hook.vault_check, "__file__", str(vault_check_path),
                     ):
-                self.assertEqual(
-                    self.hook._installed_script_path(
-                        str(writer), package, "project_config.py",
-                    ),
-                    writer.resolve(),
-                )
-                (package / ".agent-marketplace-package.json").unlink()
-                self.assertIsNone(self.hook._installed_script_path(
-                    str(writer), package, "project_config.py",
-                ))
-                (package / ".agent-marketplace-package.json").write_text(
-                    json.dumps({"files": {"scripts/project_config.py": digest}}),
-                    encoding="utf-8",
-                )
+                for value, allowed in cases:
+                    with self.subTest(command=value):
+                        payload = self.attested_writer_payload(project, value)
+                        self.assertEqual(
+                            self.hook.sanctioned_autopilot_writer(payload), allowed,
+                        )
                 writer.write_text("tampered\n", encoding="utf-8")
-                self.assertIsNone(self.hook._installed_script_path(
-                    str(writer), package, "project_config.py",
+                self.assertFalse(self.hook.sanctioned_autopilot_writer(
+                    self.attested_writer_payload(project, command),
                 ))
 
     def test_packaged_writer_directory_substitution_is_rejected(self):

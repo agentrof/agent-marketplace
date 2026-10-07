@@ -186,6 +186,25 @@ class VaultIndexTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "another checkout"):
             self.load()
 
+    def test_database_sidecars_refuse_aliases_before_opening(self):
+        source = self.write("requirements/a.md", note("requirement", "A"))
+        original = source.read_bytes()
+        cache = vault_query.default_cache(self.docs)
+        cache.parent.mkdir(parents=True)
+        for suffix in ("-wal", "-shm", "-journal"):
+            with self.subTest(suffix=suffix):
+                sidecar = Path(str(cache) + suffix)
+                os.link(source, sidecar)
+                try:
+                    with self.assertRaisesRegex(ValueError, "unaliased"):
+                        self.load()
+                    with self.assertRaisesRegex(ValueError, "unaliased"):
+                        vault_index.inspect_index(self.docs, cache, vault_query.builder_hash())
+                    self.assertEqual(source.read_bytes(), original)
+                    self.assertFalse(cache.exists())
+                finally:
+                    sidecar.unlink()
+
     def test_source_changes_during_indexing_do_not_publish(self):
         path = self.write("requirements/a.md", note("requirement", "A"))
         data, initial = self.load()

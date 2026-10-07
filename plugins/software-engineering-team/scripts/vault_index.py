@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import stat
 import time
 import tempfile
 
@@ -508,14 +509,28 @@ class IndexData(dict):
             return default
 
 
+def check_cache_file(path):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise ValueError("vault database, sidecars and lock must be regular unaliased files")
+
+
+def check_database_files(cache):
+    for path in (cache, *(Path(str(cache) + suffix) for suffix in ("-wal", "-shm", "-journal"))):
+        check_cache_file(path)
+
+
 def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False):
     started = time.perf_counter()
     docs, cache = Path(docs).absolute(), Path(cache)
     if not docs.is_dir():
         raise ValueError("needs_setup: workspace/docs does not exist")
     capabilities()
-    if persist and (cache.is_symlink() or (cache.exists() and cache.stat().st_nlink != 1)):
-        raise ValueError("the vault database must be a regular unaliased file")
+    if persist:
+        check_database_files(cache)
     connection = sqlite3.connect(str(cache) if persist else ":memory:", timeout=policy()["busy_timeout_ms"] / 1000)
     store = Store(docs, connection)
     try:
@@ -624,8 +639,7 @@ def locked_refresh(docs, cache, builder, *, verify=True, rebuild=False):
     project = Path(docs).resolve().parents[1]
     folder = atomic_file.real_directory(project, Path(cache).parent.relative_to(project))
     path = folder / ".lock"
-    if path.is_symlink() or (path.exists() and path.stat().st_nlink != 1):
-        raise ValueError("vault index lock must be unaliased")
+    check_cache_file(path)
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o666)
     try:
         file_lock.lock(descriptor)
@@ -665,16 +679,14 @@ def cleanup_legacy(cache, docs):
 def inspect_index(docs, cache, builder, *, check=False):
     """Copy a consistent closed/checkpointed or WAL snapshot without source writes."""
     docs, cache = Path(docs).absolute(), Path(cache)
+    check_database_files(cache)
     if not cache.exists():
         return {"status": "absent", "documents": 0}
-    if cache.is_symlink() or cache.stat().st_nlink != 1:
-        raise ValueError("vault database must be a regular unaliased file")
     # A shared writer lock prevents publication while copying the cache.
     lock = cache.with_name(".lock")
     descriptor = None
     if lock.exists():
-        if lock.is_symlink() or lock.stat().st_nlink != 1:
-            raise ValueError("vault index lock must be unaliased")
+        check_cache_file(lock)
         descriptor = os.open(lock, os.O_RDONLY)
         file_lock.lock(descriptor)
     try:
@@ -683,8 +695,7 @@ def inspect_index(docs, cache, builder, *, check=False):
             clone.write_bytes(cache.read_bytes())
             for suffix in ("-wal", "-shm"):
                 sidecar = Path(str(cache) + suffix)
-                if sidecar.is_symlink():
-                    raise ValueError("vault database sidecars must not be links")
+                check_cache_file(sidecar)
                 if sidecar.is_file():
                     Path(str(clone) + suffix).write_bytes(sidecar.read_bytes())
             connection = sqlite3.connect(clone)

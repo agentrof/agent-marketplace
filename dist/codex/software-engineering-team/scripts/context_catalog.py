@@ -225,14 +225,23 @@ def catalog(vault, *, include_receipts: bool = True) -> dict:
     return result
 
 
-def receipt_paths(root: Path) -> set[Path]:
-    paths = set(root.glob("system-architecture/_ledger/records/*/*.json"))
-    paths.update(root.glob("experience-design/experiences/*/_ledger/records/*/*.json"))
-    paths.update(root.glob("experience-design/**/application-revisions.json"))
-    paths.update(root.glob("experience-design/**/package-revisions.json"))
-    paths.update(root.glob("experience-design/**/_generated/registry.json"))
-    paths.update(root.glob("experience-design/_generated/application-registry.json"))
-    return paths
+def receipt_paths(root: Path, *, candidates=None) -> set[Path]:
+    patterns = (
+        "system-architecture/_ledger/records/*/*.json",
+        "experience-design/experiences/*/_ledger/records/*/*.json",
+        "experience-design/**/application-revisions.json",
+        "experience-design/**/package-revisions.json",
+        "experience-design/**/_generated/registry.json",
+        "experience-design/_generated/application-registry.json",
+    )
+    if candidates is None:
+        return {path for pattern in patterns for path in root.glob(pattern)}
+    # Match the already confined inventory without descending into excluded
+    # artifact trees. A single star stays within one directory component.
+    matches = [re.compile(re.escape(pattern).replace(r"/\*\*/", r"/(?:[^/]+/)*")
+               .replace(r"\*", r"[^/]*") + r"\Z") for pattern in patterns]
+    return {path for path in candidates
+            if any(pattern.fullmatch(path.relative_to(root).as_posix()) for pattern in matches)}
 
 
 def add_receipts(root: Path, data: dict, *, paths=None) -> None:

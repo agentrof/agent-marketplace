@@ -393,6 +393,7 @@
         "tools.tests.test_experience_compile.ExperienceCompilerTests.test_transaction_rollback_cleans_an_immutable_journal",
         "tools.tests.test_experience_compile.ExperienceCompilerTests.test_transaction_rollback_opens_and_recloses_immutable_docs_parent",
         "tools.tests.test_experience_compile.ExperienceCompilerTests.test_transaction_rollback_reapplies_immutable_map_preimage",
+        "tools.tests.test_project_context.ProjectContextTests.test_oversized_unicode_source_makes_progress_until_complete",
         "tools.tests.test_vault_hook.VaultHookPrototypeTests.test_artifact_restore_clears_user_immutable_files",
         "tools.tests.test_vault_hook.VaultHookPrototypeTests.test_artifact_restore_reapplies_immutable_preimage",
         "tools.tests.test_vault_hook.VaultHookPrototypeTests.test_recovery_clears_post_snapshot_immutable_experience_parent",
@@ -402,7 +403,21 @@
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_has_an_exact_attested_delta",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_preserves_real_codex_draft",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_python_cmd_preserves_attested_codex_result",
-        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_safe_os_metadata_is_preserved_without_entering_the_committed_postimage"
+        "tools.tests.test_vault_hook_git_sync.VaultHookGitSyncTests.test_safe_os_metadata_is_preserved_without_entering_the_committed_postimage",
+        "tools.tests.test_vault_index.VaultIndexTests.test_added_and_conflicting_aliases_rebind_existing_unresolved_source",
+        "tools.tests.test_vault_index.VaultIndexTests.test_catalog_parses_only_changed_note_and_matches_fresh_graph",
+        "tools.tests.test_vault_index.VaultIndexTests.test_checkout_bindings_refuse_foreign_database",
+        "tools.tests.test_vault_index.VaultIndexTests.test_delete_and_move_remove_addresses_and_search_rows",
+        "tools.tests.test_vault_index.VaultIndexTests.test_empty_and_missing_vault_have_distinct_states",
+        "tools.tests.test_vault_index.VaultIndexTests.test_excluded_artifact_change_refreshes_owner_proof_without_index_entry",
+        "tools.tests.test_vault_index.VaultIndexTests.test_failed_rebuild_keeps_published_generation_and_reader_snapshot",
+        "tools.tests.test_vault_index.VaultIndexTests.test_generic_json_does_not_promote_receipt_looking_fields",
+        "tools.tests.test_vault_index.VaultIndexTests.test_index_check_is_readonly_and_detects_missing_fts",
+        "tools.tests.test_vault_index.VaultIndexTests.test_index_receipt_discovery_never_globs_excluded_artifacts",
+        "tools.tests.test_vault_index.VaultIndexTests.test_no_cache_does_not_write_database_or_reading_state",
+        "tools.tests.test_vault_index.VaultIndexTests.test_scope_prunes_every_artifact_tree_and_preserves_receipts",
+        "tools.tests.test_vault_index.VaultIndexTests.test_source_changes_during_indexing_do_not_publish",
+        "tools.tests.test_vault_query.VaultQueryTest.test_parallel_queries_rebuild_without_a_race"
       ],
       "depends_on": [
         "platform"
@@ -469,6 +484,7 @@
         "tools.tests.test_pre_handoff_regression.CandidateTests.test_qa_reuses_the_pre_handoff_run_for_the_earlier_stories_on_the_frozen_tree",
         "tools.tests.test_pre_handoff_regression.CandidateTests.test_the_run_holds_the_environment_lock_and_reads_only_the_committed_candidate",
         "tools.tests.test_pre_handoff_regression.CandidateTests.test_while_its_command_runs_the_worktree_takes_writes_and_the_environment_stays_held",
+        "tools.tests.test_project_context.ProjectContextTests.test_oversized_unicode_source_makes_progress_until_complete",
         "tools.tests.test_task_inputs.BuiltPackageTaskInputTests.test_every_built_package_checks_its_catalog_and_derives_a_role_task",
         "tools.tests.test_task_inputs.TaskInputTests.test_base_inventory_includes_dirty_and_untracked_product_sources",
         "tools.tests.test_task_inputs.TaskInputTests.test_item_claims_bind_one_item_and_role_without_granting_runtime_or_vault_writes",
@@ -513,7 +529,21 @@
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_windows_readonly_files_are_cleared_before_recovery",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_windows_readonly_parent_file_is_replaced_during_recovery",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_workspace_symlink_swap_restores_local_protected_state",
-        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_writer_consumers_accept_only_the_required_no_bytecode_flag"
+        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_writer_consumers_accept_only_the_required_no_bytecode_flag",
+        "tools.tests.test_vault_index.VaultIndexTests.test_added_and_conflicting_aliases_rebind_existing_unresolved_source",
+        "tools.tests.test_vault_index.VaultIndexTests.test_catalog_parses_only_changed_note_and_matches_fresh_graph",
+        "tools.tests.test_vault_index.VaultIndexTests.test_checkout_bindings_refuse_foreign_database",
+        "tools.tests.test_vault_index.VaultIndexTests.test_delete_and_move_remove_addresses_and_search_rows",
+        "tools.tests.test_vault_index.VaultIndexTests.test_empty_and_missing_vault_have_distinct_states",
+        "tools.tests.test_vault_index.VaultIndexTests.test_excluded_artifact_change_refreshes_owner_proof_without_index_entry",
+        "tools.tests.test_vault_index.VaultIndexTests.test_failed_rebuild_keeps_published_generation_and_reader_snapshot",
+        "tools.tests.test_vault_index.VaultIndexTests.test_generic_json_does_not_promote_receipt_looking_fields",
+        "tools.tests.test_vault_index.VaultIndexTests.test_index_check_is_readonly_and_detects_missing_fts",
+        "tools.tests.test_vault_index.VaultIndexTests.test_index_receipt_discovery_never_globs_excluded_artifacts",
+        "tools.tests.test_vault_index.VaultIndexTests.test_no_cache_does_not_write_database_or_reading_state",
+        "tools.tests.test_vault_index.VaultIndexTests.test_scope_prunes_every_artifact_tree_and_preserves_receipts",
+        "tools.tests.test_vault_index.VaultIndexTests.test_source_changes_during_indexing_do_not_publish",
+        "tools.tests.test_vault_query.VaultQueryTest.test_parallel_queries_rebuild_without_a_race"
       ],
       "depends_on": [
         "platform"

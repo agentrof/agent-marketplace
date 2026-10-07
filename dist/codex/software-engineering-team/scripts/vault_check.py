@@ -1327,7 +1327,7 @@ def canonical_scope_for_note(note: Note) -> str | None:
     return None
 
 
-def relation_identity_owners(vault: Vault) -> dict[str, str]:
+def relation_identity_owners(vault: Vault, *, registry_paths=None) -> dict[str, str]:
     owners: dict[str, str] = {}
     for note in authored(vault):
         aliases = note.fm.get("aliases")
@@ -1361,7 +1361,8 @@ def relation_identity_owners(vault: Vault) -> dict[str, str]:
             owners.setdefault("design-system/MASTER", note.rel)
     ba_root = vault.root / "business-analysis"
     if vault.files.is_dir(ba_root):
-        for registry_path in sorted(vault.files.glob(ba_root, "*/_generated/registry.json")):
+        paths = vault.files.glob(ba_root, "*/_generated/registry.json") if registry_paths is None else registry_paths
+        for registry_path in sorted(paths):
             try:
                 registry = json.loads(vault.files.read_text(registry_path, encoding="utf-8"))
             except (OSError, json.JSONDecodeError):

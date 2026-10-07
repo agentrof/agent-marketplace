@@ -83,6 +83,19 @@ class VaultIndexTests(unittest.TestCase):
         result = self.query("index", "ensure", expected=1)
         self.assertEqual(result["status"], "needs_setup")
 
+    def test_index_receipt_discovery_never_globs_excluded_artifacts(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        self.write("experience-design/artifacts/deep/application-revisions.json", "invalid")
+        self.write("business-analysis/artifacts/_generated/registry.json", "invalid")
+        self.write("experience-design/application-revisions.json", json.dumps({"revisions": []}))
+        self.write("experience-design/experiences/sample/_ledger/records/group/r1.json",
+                   json.dumps({"exact_ref": "sample:REC-001@r1", "content": "Source."}))
+        with mock.patch.object(Path, "glob", side_effect=AssertionError("index discovery must use its eligible inventory")):
+            data, _ = self.load()
+        self.assertEqual(len(context_catalog.resolve(data["catalog"], "sample:REC-001@r1")), 1)
+        self.assertEqual(set(data["files"]), {"requirements/a.md", "experience-design/application-revisions.json",
+            "experience-design/experiences/sample/_ledger/records/group/r1.json"})
+
     def test_catalog_parses_only_changed_note_and_matches_fresh_graph(self):
         self.seed()
         data, _ = self.load()

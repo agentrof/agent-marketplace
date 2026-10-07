@@ -554,7 +554,8 @@ def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False):
                 for path in affected:
                     store.delete_source(path)
                 markdown = set()
-                receipts = context_catalog.receipt_paths(docs) if any(p.endswith(".json") for p in changed) else set()
+                receipts = context_catalog.receipt_paths(docs,
+                    candidates=[docs / p for p in changed if p.endswith(".json")])
                 for path in changed:
                     connection.execute("INSERT INTO files VALUES(?,?)", (path, encoded(current[path])))
                     if path.endswith(".md"):
@@ -576,7 +577,10 @@ def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False):
                 # Registry identities are compiler-owned. Reuse parsed notes;
                 # only derivation and identity changes require this global namespace.
                 if full or any(p.endswith(".json") for p in affected) or namespace_changed:
-                    owners = vault_check.relation_identity_owners(store.vault())
+                    registries = [docs / p for p in current if len(Path(p).parts) == 4
+                        and Path(p).parts[0] == "business-analysis"
+                        and Path(p).parts[-2:] == ("_generated", "registry.json")]
+                    owners = vault_check.relation_identity_owners(store.vault(), registry_paths=registries)
                     connection.execute("DELETE FROM owners")
                     connection.executemany("INSERT INTO owners VALUES(?,?)", owners.items())
                 owners_to_update = markdown | old_owners

@@ -1,0 +1,6 @@
+{
+  "summary": "Allow an approved, unpublished execution plan to resume Delivery reservation while retaining all source, Fence and ref checks.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -595,6 +595,32 @@ class DeliveryGitTests(unittest.TestCase):
             remove_temporary(temporary)
             raise
 
+    @integration
+    def test_reservation_resumes_a_locally_approved_unpublished_execution_plan(self):
+        """Local plan approval before reservation retains its pins and can publish and claim."""
+        with mock.patch.object(delivery_git, "reserve_delivery", return_value={}):
+            temporary, project, docs = self.reserve_scope()
+        self.addCleanup(remove_temporary, temporary)
+        self.author_execution_topology(docs)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        directory = delivery_compile.find_delivery(docs, "DLV-001")
+        approved = {path: path.read_bytes() for path in directory.rglob("*.md")}
+        self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], [])
+        self.assertEqual(self.coordination_branches(project), [])
+
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        self.assertTrue(reserved["ok"])
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", reserved["integration"] + "^@"),
+                         reserved["target"])
+        self.assertEqual({path: path.read_bytes() for path in approved}, approved)
+        self.assertEqual(delivery_git.split_remote_note(
+            project, reserved["integration"], delivery_git.rel_posix(project, directory / "delivery.md"),
+            delivery_compile.split_note)[0]["status"], "execution_approved")
+        self.assertEqual(self.coordination_branches(project), ["agentrof/deliveries/dlv-001", "agentrof/fence"])
+        self.assertTrue(delivery_git.publish_execution_plan(project, "DLV-001")["ok"])
+        self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-01"])
+
     def prepare_pr_intent(self, author_review=None, *, use_cache=True):
         """Keep each mutable repository isolated; altered setup contexts use the real builder."""
         if use_cache and author_review is None and self.pr_intent_cache_context_unchanged():
@@ -6863,6 +6889,65 @@ class DeliveryGitDecisionTests(unittest.TestCase):
             with self.subTest(finding=finding[1]):
                 self.assertEqual(self.refused_finding(lambda: delivery_git.require_fence_takeover(
                     {**idle, **fence}, listed, lambda: governance)), finding)
+
+    def test_reservation_accepts_scope_or_execution_approval_with_the_same_transaction(self):
+        root = Path(tempfile.gettempdir()) / "unpublished-delivery-never-read"
+        docs = root / "workspace/docs"
+        directory = docs / "delivery/deliveries/dlv-001-fixture"
+        for status in ("scope_approved", "execution_approved"):
+            with self.subTest(status=status), \
+                    mock.patch.object(delivery_git, "main_worktree", return_value=root), \
+                    mock.patch.object(delivery_compile, "docs_root", return_value=docs), \
+                    mock.patch.object(delivery_compile, "delivery_findings", return_value=(directory, [])) as portable, \
+                    mock.patch.object(delivery_compile, "split_note", return_value=({"status": status}, "")), \
+                    mock.patch.object(delivery_git, "resolve_target", return_value=("main", "a" * 40)), \
+                    mock.patch.object(delivery_git, "remote_has_ref", return_value=False) as exists, \
+                    mock.patch.object(delivery_git, "package_paths", return_value=["package.md"]), \
+                    mock.patch.object(delivery_git, "carried_policy_blobs", return_value={}), \
+                    mock.patch.object(delivery_git, "governed_governance_hash", return_value="sha256:" + "4" * 64), \
+                    mock.patch.object(delivery_git, "commit_tree", side_effect=["b" * 40, "c" * 40]), \
+                    mock.patch.object(delivery_git, "atomic_push") as push:
+                result = delivery_git.reserve_delivery(root, "DLV-001")
+                refs = delivery_git.canonical_refs("DLV-001")
+                portable.assert_called_once_with(docs, "DLV-001")
+                self.assertEqual(exists.call_args_list, [mock.call(root, "origin", refs["integration"]),
+                                                        mock.call(root, "origin", refs["fence"])])
+                push.assert_called_once_with(root, "origin", [(refs["fence"], "", "c" * 40),
+                                                              (refs["integration"], "", "b" * 40)])
+                self.assertEqual((result["integration"], result["fence"]), ("b" * 40, "c" * 40))
+
+    def test_reservation_refuses_every_other_status_before_remote_reads_or_mutation(self):
+        root = Path(tempfile.gettempdir()) / "unpublished-delivery-never-read"
+        docs = root / "workspace/docs"
+        directory = docs / "delivery/deliveries/dlv-001-fixture"
+        for status in (*sorted(set(delivery_compile.STATUSES) - {"scope_approved", "execution_approved"}), None):
+            with self.subTest(status=status), \
+                    mock.patch.object(delivery_git, "main_worktree", return_value=root), \
+                    mock.patch.object(delivery_compile, "docs_root", return_value=docs), \
+                    mock.patch.object(delivery_compile, "delivery_findings", return_value=(directory, [])), \
+                    mock.patch.object(delivery_compile, "split_note", return_value=({"status": status}, "")), \
+                    mock.patch.object(delivery_git, "resolve_target") as target, \
+                    mock.patch.object(delivery_git, "atomic_push") as push:
+                with self.assertRaisesRegex(RuntimeError, "^reserve-delivery requires scope_approved or execution_approved$"):
+                    delivery_git.reserve_delivery(root, "DLV-001")
+                target.assert_not_called()
+                push.assert_not_called()
+
+    def test_reservation_checks_portability_before_accepting_execution_approval(self):
+        root = Path(tempfile.gettempdir()) / "unpublished-delivery-never-read"
+        docs = root / "workspace/docs"
+        directory = docs / "delivery/deliveries/dlv-001-fixture"
+        with mock.patch.object(delivery_git, "main_worktree", return_value=root), \
+                mock.patch.object(delivery_compile, "docs_root", return_value=docs), \
+                mock.patch.object(delivery_compile, "delivery_findings", return_value=(directory, ["stale source pin"])), \
+                mock.patch.object(delivery_compile, "split_note") as status, \
+                mock.patch.object(delivery_git, "resolve_target") as target, \
+                mock.patch.object(delivery_git, "atomic_push") as push:
+            with self.assertRaisesRegex(RuntimeError, "^Delivery package is not portable: stale source pin$"):
+                delivery_git.reserve_delivery(root, "DLV-001")
+            status.assert_not_called()
+            target.assert_not_called()
+            push.assert_not_called()
 
     def test_a_cancelled_delivery_refuses_every_verb_that_would_continue_it(self):
         """A cancellation is final: nothing publishes, claims, refreshes, revises, bars or upgrades

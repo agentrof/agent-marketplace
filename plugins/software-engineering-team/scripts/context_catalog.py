@@ -47,7 +47,7 @@ def record_aliases(props: dict, relative: str) -> list[str]:
     return sorted({item for item in aliases if isinstance(item, str) and item})
 
 
-def catalog(vault) -> dict:
+def catalog(vault, *, include_receipts: bool = True) -> dict:
     """Build addresses from authored source, without trusting a stale registry's text."""
     documents, units, aliases = {}, {}, defaultdict(set)
 
@@ -220,18 +220,25 @@ def catalog(vault) -> dict:
                     aliases[name].discard(rows[0]["unit_id"])
     result = {"documents": documents, "units": units,
               "aliases": {key: sorted(value) for key, value in sorted(aliases.items())}}
-    add_receipts(vault.root, result)
+    if include_receipts:
+        add_receipts(vault.root, result)
     return result
 
 
-def add_receipts(root: Path, data: dict) -> None:
-    """Exact immutable record/package receipts, without upgrading a pinned revision."""
+def receipt_paths(root: Path) -> set[Path]:
     paths = set(root.glob("system-architecture/_ledger/records/*/*.json"))
     paths.update(root.glob("experience-design/experiences/*/_ledger/records/*/*.json"))
     paths.update(root.glob("experience-design/**/application-revisions.json"))
     paths.update(root.glob("experience-design/**/package-revisions.json"))
     paths.update(root.glob("experience-design/**/_generated/registry.json"))
     paths.update(root.glob("experience-design/_generated/application-registry.json"))
+    return paths
+
+
+def add_receipts(root: Path, data: dict, *, paths=None) -> None:
+    """Exact immutable record/package receipts, without upgrading a pinned revision."""
+    if paths is None:
+        paths = receipt_paths(root)
     for path in sorted(paths):
         relative = path.relative_to(root).as_posix()
         raw = safe_file(root, relative).read_bytes()
@@ -288,15 +295,16 @@ def resolve(data: dict, reference: str) -> list[dict]:
     return [data["units"][unit] for unit in ids]
 
 
-def unit_content(root: Path, unit: dict) -> bytes:
+def unit_content(root: Path, unit: dict, *, raw: bytes | None = None) -> bytes:
     """Verify the source and complete logical unit before addressing a fragment."""
     source_root = root.parents[1] if unit.get("source_root") == "project" else root
-    if unit.get("git_revision"):
-        from context_history import git_source
-        relative = unit["path"] if unit.get("source_root") == "project" else "workspace/docs/" + unit["path"]
-        raw = git_source(root.parents[1], relative, unit["git_revision"])
-    else:
-        raw = safe_file(source_root, unit["path"]).read_bytes()
+    if raw is None:
+        if unit.get("git_revision"):
+            from context_history import git_source
+            relative = unit["path"] if unit.get("source_root") == "project" else "workspace/docs/" + unit["path"]
+            raw = git_source(root.parents[1], relative, unit["git_revision"])
+        else:
+            raw = safe_file(source_root, unit["path"]).read_bytes()
     if digest(raw) != unit["source_hash"]:
         raise ValueError(f"stale source: {unit['path']}")
     if "json_pointer" in unit:

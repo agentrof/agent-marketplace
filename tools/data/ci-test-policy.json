@@ -212,7 +212,8 @@
         "tools.tests.test_calculation_examples.*",
         "tools.tests.test_project_context.*",
         "tools.tests.test_approval_history.*",
-        "tools.tests.test_python_entry.*"
+        "tools.tests.test_python_entry.*",
+        "tools.tests.test_vault_index.*"
       ]
     },
     "documentation": {
@@ -667,6 +668,7 @@
     "tools.tests.test_vault_gate",
     "tools.tests.test_vault_hook",
     "tools.tests.test_vault_hook_git_sync",
+    "tools.tests.test_vault_index",
     "tools.tests.test_vault_query",
     "tools.tests.test_writer_line_endings"
   ],

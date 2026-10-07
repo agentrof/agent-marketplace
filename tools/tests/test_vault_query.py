@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import sqlite3
 import unittest
 from tools.tests.levels import integration
 from pathlib import Path
@@ -53,7 +54,7 @@ class VaultQueryTest(unittest.TestCase):
 
     @property
     def cache(self) -> Path:
-        return self.project / ".agentrof/agent-marketplace/.runtime/vault-index/index.json"
+        return vault_query.default_cache(self.docs)
 
     def vault_bytes(self) -> dict:
         return {p.relative_to(self.project).as_posix(): p.read_bytes()
@@ -87,20 +88,19 @@ class VaultQueryTest(unittest.TestCase):
         self.assertIn("outside the runtime scratch", self.run_query("gaps", code=2)["stderr"])
         self.assertEqual(self.vault_bytes(), before)
 
-    def test_the_sweep_removes_only_its_own_shards(self) -> None:
+    def test_legacy_cleanup_removes_only_owned_projection_files(self) -> None:
         self.run_query("gaps")
+        legacy = self.cache.with_name("index.json")
+        legacy.write_text(json.dumps({"docs": str(self.docs), "schema_version": 2}))
         shards = self.cache.with_name("index-notes")
-        foreign = {name: b"keep\n" for name in ("minutes.md", "notes.json", "ABC.json",
-                                                   "0" * 63 + ".json")}
-        for name, data in foreign.items():
-            (shards / name).write_bytes(data)
-        stale = shards / ("f" * 64 + ".json")
-        stale.write_text("{}", encoding="utf-8")
-        (self.docs / "backlog/story-b.md").write_text(note("story", "Story B3"), encoding="utf-8")
+        shards.mkdir()
+        foreign = shards / "minutes.md"
+        foreign.write_text("Keep unrelated files.")
+        (shards / ("a" * 64 + ".json")).write_text("{}")
         self.run_query("gaps")
-        self.assertFalse(stale.exists())
-        for name, data in foreign.items():
-            self.assertEqual((shards / name).read_bytes(), data, name)
+        self.assertFalse(legacy.exists())
+        self.assertEqual(foreign.read_text(), "Keep unrelated files.")
+        self.assertFalse((shards / ("a" * 64 + ".json")).exists())
 
     def test_queries_write_nothing_outside_the_index_folder(self) -> None:
         before = self.vault_bytes()
@@ -109,7 +109,7 @@ class VaultQueryTest(unittest.TestCase):
             self.run_query(*argv)
         self.assertEqual(self.vault_bytes(), before)
         written = {p.parent for p in (self.project / ".agentrof").rglob("*") if p.is_file()}
-        self.assertEqual(written, {self.cache.parent, self.cache.with_name("index-notes")})
+        self.assertEqual(written, {self.cache.parent})
 
     @integration
     def test_parallel_queries_rebuild_without_a_race(self) -> None:
@@ -129,26 +129,16 @@ class VaultQueryTest(unittest.TestCase):
                 proc.stderr.close()
             self.assertEqual([code for code, _ in results], [0] * 8, results)
 
-    def test_a_linked_note_is_indexed_inside_the_vault_and_refused_outside(self) -> None:
+    def test_a_linked_note_is_refused_without_disclosing_target_content(self) -> None:
         (self.docs / "backlog/alias.md").symlink_to(self.docs / "backlog/story-b.md")
-        self.assertIn("backlog/alias.md", json.dumps(self.run_query("find", "backlog/alias.md")))
+        self.assertIn("symbolic link", self.run_query("gaps", code=2)["stderr"])
+        (self.docs / "backlog/alias.md").unlink()
         secret = self.project / "secret.md"
-        secret.write_text("TOKEN=supersecret123\n", encoding="utf-8")
+        secret.write_text("Private synthetic content.")
         (self.docs / "backlog/leak.md").symlink_to(secret)
-        result = self.run_query("search", "TOKEN", code=2)
-        self.assertIn("links outside the vault", result["stderr"])
-        self.assertNotIn("supersecret", result["stderr"])
-
-    def test_a_linked_shard_folder_is_refused(self) -> None:
-        outside = self.project / "outside"
-        outside.mkdir()
-        victim = outside / ("a" * 64 + ".json")
-        victim.write_text("{}", encoding="utf-8")
-        self.cache.parent.mkdir(parents=True)
-        self.cache.with_name("index-notes").symlink_to(outside, target_is_directory=True)
-        self.assertIn("real directory", self.run_query("gaps", code=2)["stderr"])
-        self.assertEqual(victim.read_text(encoding="utf-8"), "{}")
-        self.assertEqual(len(list(outside.iterdir())), 1)
+        result = self.run_query("search", "Private", code=2)
+        self.assertIn("symbolic link", result["stderr"])
+        self.assertNotIn("synthetic content", result["stderr"])
 
     def test_closure_takes_relative_project_and_absolute_paths(self) -> None:
         rel = "backlog/story-b.md"
@@ -194,13 +184,13 @@ class VaultQueryTest(unittest.TestCase):
         self.assertFalse(result["cache"]["persisted"])
         self.assertFalse((self.project / ".agentrof").exists())
 
-    def test_index_is_json_under_the_project_runtime_scratch(self) -> None:
+    def test_index_is_sqlite_under_the_project_runtime_scratch(self) -> None:
         result = self.run_query("gaps")
         self.assertEqual(result["cache"]["path"], str(self.cache))
         self.assertTrue(result["cache"]["full"])
-        data = json.loads(self.cache.read_text(encoding="utf-8"))
-        self.assertIn("backlog/story-b.md", data["notes"])
-        self.assertTrue((self.cache.parent / "index-notes").is_dir())
+        with sqlite3.connect(self.cache) as connection:
+            self.assertIsNotNone(connection.execute("SELECT 1 FROM notes WHERE path=?", ("backlog/story-b.md",)).fetchone())
+        self.assertFalse((self.cache.parent / "index-notes").exists())
 
     def test_closure(self) -> None:
         result = self.run_query("closure", "--changed", f"{REQ}.md")
@@ -324,8 +314,7 @@ class VaultQueryTest(unittest.TestCase):
         self.assertFalse(result["cache"]["full"])
         self.assertEqual(scanned, ["backlog/story-g.md"])
         self.assertIn("backlog/story-g.md", result["closure"])
-        shards = {p.name for p in (self.cache.parent / "index-notes").iterdir()}
-        self.assertEqual(len(shards), len(json.loads(self.cache.read_text())["notes"]))
+        self.assertFalse((self.cache.parent / "index-notes").exists())
 
     def test_stale_cache_same_size_and_mtime_needs_verify(self) -> None:
         self.run_query("gaps")
@@ -334,9 +323,8 @@ class VaultQueryTest(unittest.TestCase):
         text = path.read_text(encoding="utf-8")
         path.write_text(text.replace("Story B", "Story X", 1), encoding="utf-8")
         os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
-        self.assertEqual(self.run_query("gaps")["cache"]["changed"], [])
-        self.assertEqual(self.run_query("--verify", "gaps")["cache"]["changed"],
-                         ["backlog/story-c.md"])
+        self.assertEqual(self.run_query("gaps")["cache"]["changed"], ["backlog/story-c.md"])
+        self.assertEqual(self.run_query("--verify", "gaps")["cache"]["changed"], [])
 
     def test_a_stamped_note_edited_with_the_same_size_and_mtime_is_not_proven(self) -> None:
         path = self.docs / "backlog/story-c.md"
@@ -360,14 +348,11 @@ class VaultQueryTest(unittest.TestCase):
         self.run_query("gaps")
         with mock.patch.object(vault_query, "builder_hash", return_value="other"):
             self.assertTrue(self.run_query("gaps")["cache"]["full"])
-        self.cache.write_text("{not json", encoding="utf-8")
-        result = self.run_query("related", "backlog/story-c.md")
-        self.assertTrue(result["cache"]["full"])
-        self.assertIn("depends_on", result["outgoing"])
-        shard = next((self.cache.parent / "index-notes").iterdir())
-        shard.write_text("garbage", encoding="utf-8")
-        (self.docs / "backlog/story-b.md").write_text(note("story", "Story B"), encoding="utf-8")
+        with sqlite3.connect(self.cache) as connection:
+            connection.execute("DELETE FROM search_units")
+        self.assertEqual(self.run_query("index", "rebuild")["status"], "ready")
         self.assertIn("depends_on", self.run_query("related", "backlog/story-c.md")["outgoing"])
+
 
 
 if __name__ == "__main__":

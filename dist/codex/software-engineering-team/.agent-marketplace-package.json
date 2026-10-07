@@ -167,7 +167,7 @@
       "184a0b11e57d6f5ab407ea40c22690edc425ed2992e2978f26ec0e974d326da0"
     ,
     "scripts/context_catalog.py":
-      "bc726c9a76196d997a7bd6e1b95d3aee93b774cfb657bf931f1cc94afe8fa2b4"
+      "287a03a7396d7cd687af9d8ecaf086d04dac331b94b1130b97625d91385916e3"
     ,
     "scripts/context_history.py":
       "b3c433394ad535b010d12d194eaf277208cc61068b7f41a2a233255e6bcba0c9"
@@ -221,7 +221,7 @@
       "0055612b763ed5d5549432f86d2b978d6d3ff5af243e18e8b6d558f6d8d1f659"
     ,
     "scripts/impact_closure.py":
-      "9f95e6a0874f351e9c8438af1afd22d08328e1325ea405539fd2db9f4baaca87"
+      "8523e66e03ad5f5f10d7ea359c09e5de67f3d7d0d1d064bf4fbb68176b7a5c08"
     ,
     "scripts/landscape_check.py":
       "afd0b167c4f8b2d685ed4e4041a66178a706cece248d19dcb566814e0f534c43"
@@ -242,7 +242,7 @@
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
     ,
     "scripts/project_context.py":
-      "93941f346e1bf0247bf054e231fcdcb1a42b5c04e785dcc85ec6b2656285237b"
+      "9ae3e1c52cbefa6b957fd78547aa2a54c678d734bf097b1a2aea719caec9cc5f"
     ,
     "scripts/project_instructions.py":
       "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
@@ -263,7 +263,7 @@
       "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
     ,
     "scripts/setup_project.py":
-      "304afa2a9b5ed5951049d47206f3b3fc85620b7072a2375d28ac7a921af07b78"
+      "ddfad711127a09adbe3f84843749e3b4d3bd03f653082e5dcd1f47499299ccac"
     ,
     "scripts/stage_package.py":
       "e0d667a6012af3cc67afa787ebaa6d12a9b9bf87adc422cc70dcd4b61456427b"
@@ -284,10 +284,13 @@
       "3eb237e04bbd4e142e6edc14ed50d925378e4c3cc2b0c5c4278f49d4edf7f39e"
     ,
     "scripts/vault_hook.py":
-      "d4d70dde91135ed199d0954e3e383a117f22d6503bb807a04e4e14654641ef22"
+      "cbefc9298c708aaf0ea04f34b00fcc2a1d119f73e5e6f1a5e7b7e05ced7cfbaa"
+    ,
+    "scripts/vault_index.py":
+      "632061e6df32f182da573193592a4907c7fa19e397352a4e3944236371746ade"
     ,
     "scripts/vault_query.py":
-      "6d004efad53e91c9616e64abb77a77ebdf867c26b6bc80848b77b98543ff52a1"
+      "47645388b7fc38c289aa2ea4af8a098935c5f846335558b54f0b22156168fafd"
     ,
     "skill-content/autopilot/SKILL.md":
       "cc422eb06937e9e1a6312aaba10a922a5aedc6d0ddb0c461face9288ddcffb25"
@@ -1044,6 +1047,9 @@
     ,
     "templates/tier-map.json":
       "7520a0d1c1627d0d8c16c6b540ca3090bd889ffcdfe891bbc7e5081f04bf6c9f"
+    ,
+    "templates/vault-index-policy.json":
+      "d44d46600e86a49f6b054d6a79ce989ff8b43740357fa8c8b0cfe9b015755584"
     ,
     "templates/vault/.obsidian/app.json":
       "d81f5f2d2db5f65f24db5235301c5dffd41412e66db7202cf65f9f032cde078d"

@@ -1462,7 +1462,36 @@ def post(payload: dict) -> int:
         code = post_target(file_path, batches)
         if code:
             return code
+    sync_vault_index(project_vault, paths)
     return 0
+
+
+def sync_vault_index(root: Path, paths) -> None:
+    """A disposable cache failure cannot grant or replace source validation."""
+    if not root.is_dir() or not paths:
+        return
+    import vault_index
+    settings = vault_index.policy()
+    artifact = vault_check.load_policy(vault_check.DEFAULT_POLICY)[settings["artifact_directory_policy_key"]]
+    eligible = False
+    for value in paths:
+        path = Path(value)
+        path = path if path.is_absolute() else root / path
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            continue
+        if artifact not in relative.parts[:-1] and path.suffix.lower() in settings["extensions"]:
+            eligible = True
+            break
+    if not eligible:
+        return
+    try:
+        import vault_query
+        data, _status = vault_query.locked_refresh(root, vault_query.default_cache(root), True)
+        data.store.close()
+    except (OSError, ValueError) as exc:
+        print("vault index requires reconciliation before reading: " + str(exc), file=sys.stderr)
 
 
 def changed_target_findings(paths: list[str]) -> dict[tuple[Path, str], list]:
@@ -4522,6 +4551,7 @@ def shell_verify(payload: dict) -> int:
                 ))
         if config_violation:
             return deny(config_violation)
+        sync_vault_index(root, [root / key for key in changed])
         return 0
     except Exception:
         retain_guard_state = True

@@ -16,9 +16,11 @@ executes an environment command or creates approval authority.
    <root> read --plan <saved task manifest>`. The command accepts either the
    complete manifest or a standalone resolver plan. It returns the selected
    source text in one call, including table headers and governing parent items.
-3. A `needs_split` plan has required work left. `units --ref <source>` lists
-   smaller source units; `expand --plan <path> --reason <reason>` takes the next
-   page. Oversized units require smaller units or an explicit larger budget.
+3. A `needs_split` plan has required work left. `expand --plan <path> --reason
+   <reason>` takes the next bounded page, including UTF-8 fragments of an
+   oversized logical unit. The parent obligation remains until its final byte
+   is read. `units --ref <source>` lists addresses without replacing required
+   scope. A budget smaller than the next character reports its exact minimum.
    `needs_resolution` requires investigating the reported relationship gaps.
 4. A role may use manual search, file reads and relationship discovery whenever
    the plan is insufficient, incorrect or unavailable, on its own initiative
@@ -117,14 +119,37 @@ metadata/source bytes and extra reads separately. Functional replay must retain
 every required source and seeded cross-unit defect before any speed improvement
 is accepted. Model time is reported separately from resolver time.
 
-The implementation uses Python's standard library and the existing JSON index.
-The first writable query prepares that index in runtime scratch; later queries
-reuse its parsed records while checking source hashes. `--no-cache` builds in
-memory without filesystem writes, and read-only filesystems use the same
-fallback automatically.
-Canonical code is shared by Claude Code and Codex; distributions are generated.
-Path and encoding tests run in the normal Linux suite, and the existing native
-Windows and macOS lanes cover their filesystem and lifecycle behavior. No new
-service, database migration, release, or consumer configuration migration is
-required. Resolver-first reading is the default for project tasks. Manual
-recovery remains available, while existing review and approval gates stay in force.
+The implementation uses Python's SQLite/FTS5 support and a checkout-local
+`.agentrof/agent-marketplace/.runtime/vault-index/index.db`. The first writable
+query builds from canonical sources. Later queries reconcile eligible source
+hashes, reparse changed sources, re-resolve affected references and update
+catalog, graph and FTS together. Queries read indexed records rather than
+loading a full JSON catalog. `--no-cache` builds in memory without filesystem
+writes, and read-only filesystems use the same fallback automatically. Small
+verified request/provenance capsules retain their existing JSON and bounded
+inline formats; they are not a second vault index.
+
+The scope is `.md` and `.json` beneath `workspace/docs`, excluding `artifacts`
+directories at every depth and the declared Obsidian/trash exclusions. Source
+class and authority still follow vault and owning-compiler contracts. Artifact
+integrity and approval checks retain excluded inputs. Every main checkout or
+Git worktree owns its own database. A missing initialized cache builds
+automatically; an empty eligible scope has an empty schema. Indexing does not
+create authored workspace content.
+
+`vault_query.py --docs workspace/docs index ensure|sync|rebuild` provides cache
+maintenance. `index status|check` provides read-only stored status or
+source/integrity coverage checks. `rebuild` publishes fresh derived state in
+one transaction, preserving the last generation when compilation fails. Only
+owned legacy JSON/shard projections are cleaned after successful SQLite
+publication. `search-sections` returns FTS candidate addresses; legacy `search`
+retains its line matching contract.
+
+Both hosts use the shared post-write hook after source validation. Notifications
+are hints; external edits are reconciled before queries. No watcher dependency
+or background service is installed. SQLite serializes index writers while
+existing workflow scopes continue to coordinate authored-file mutations.
+Canonical code and generated distributions remain shared by Claude Code and
+Codex. Path/encoding and lifecycle coverage remains required on Linux, Windows
+and macOS. No database server or consumer source/configuration migration is
+required. Existing review and approval gates remain authoritative.

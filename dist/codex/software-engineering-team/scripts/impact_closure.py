@@ -234,6 +234,8 @@ def frontmatter_values(value):
 
 def reference_owners(vault, records: dict | None = None) -> dict:
     """Resolve note and source-unit identities without selecting an ambiguous owner."""
+    if records is not None and hasattr(records, "owner_lookup"):
+        return records.owner_lookup
     owners = dict(vault_check.relation_identity_owners(vault))
     for note in vault_check.authored(vault):
         ident = note.fm.get("id")

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from collections import Counter, deque
+from collections import Counter, deque, ChainMap
 import copy
 import json
 from pathlib import Path
@@ -170,15 +170,28 @@ def external_sources(project: Path, data: dict, refs: list[str], policy: dict) -
             "title": Path(ref).name, "source_hash": catalog.digest(raw), "units": [identity]}
 
 
-def snapshot(data: dict, policy: dict) -> str:
+def snapshot(data: dict, policy: dict, *, store=None) -> str:
     """Membership and relations bind the plan as well as each selected source."""
     # Every graph edge and address is derived from these exact source bytes.
     # Re-serializing all parsed units here would make each small lookup pay for
     # the entire corpus again.
+    if store is not None:
+        inputs = dict(store.meta("snapshot_inputs"))
+        sources = dict(inputs["sources"])
+        overlay = data["catalog"]["documents"]
+        if isinstance(overlay, ChainMap):
+            sources.update({path: record["source_hash"] for path, record in overlay.maps[0].items()})
+        inputs.update(sources=sources, policy={key: value for key, value in policy.items() if key != "reading_state"})
+        return catalog.digest(encoded(inputs))
     files = {path: entry["sha"] for path, entry in data.get("files", {}).items()}
     sources = {path: record["source_hash"] for path, record in data["catalog"]["documents"].items()}
     return catalog.digest(encoded({"builder": data.get("builder"), "files": files,
         "sources": sources, "policy": {key: value for key, value in policy.items() if key != "reading_state"}}))
+
+
+def catalog_view(source):
+    """Invocation-local overlays leave the shared source index immutable."""
+    return {key: ChainMap({}, value) for key, value in source.items()}
 
 
 def paged_context(project: Path, source: dict, all_required: list[dict], optional: dict,
@@ -350,9 +363,10 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
         limits.update(budget)
     if any(type(value) is not int or value <= 0 for value in limits.values()):
         raise ValueError("context budgets must be positive integers")
-    data = dict(index, catalog={key: dict(value) for key, value in index["catalog"].items()})
+    store = getattr(index, "store", None)
+    data = dict(index, catalog=catalog_view(index["catalog"]))
     external_sources(project, data["catalog"], refs, policy)
-    version = snapshot(data, policy)
+    version = snapshot(data, policy, store=store) if snapshot_scope == "vault" else None
     if snapshot_scope == "vault" and not manual_sources and expected_snapshot is not None and version != expected_snapshot:
         raise ValueError("stale context snapshot; resolve the current sources again")
     profile = policy["entry_profiles"][entry]
@@ -380,8 +394,9 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
             raise ValueError(f"reference must resolve exactly once: {ref} ({len(hits)} matches)")
         include(hits[0], "requested reference: " + ref)
     outgoing = {}
-    for origin, target, key, _tiers in data.get("edges", []):
-        outgoing.setdefault(origin, []).append((target, key))
+    if store is None:
+        for origin, target, key, _tiers in data.get("edges", []):
+            outgoing.setdefault(origin, []).append((target, key))
     visited = set()
     while pending:
         current = pending.popleft()
@@ -430,7 +445,9 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
                     include(targets[0], f"{key} from {path}")
                 else:
                     unresolved.append({"source": path, "reference": reference, "key": key})
-        for target, key in ([] if current.get("historical") else outgoing.get(path, [])):
+        links = ([(target, key) for _origin, target, key, _tiers in store.edges_for(path)]
+                 if store is not None else outgoing.get(path, []))
+        for target, key in ([] if current.get("historical") else links):
             if (target, key) in covered:
                 continue
             units = catalog.resolve(source, target)
@@ -473,7 +490,8 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
     if offset >= len(ordered) and offset:
         raise ValueError("continuation is outside the required reading set")
     relevant_paths = {unit["path"] for unit in ordered}
-    gaps = [gap for gap in data.get("gaps", [])
+    available_gaps = store.gaps_for(relevant_paths) if store is not None else data.get("gaps", [])
+    gaps = [gap for gap in available_gaps
             if gap.get("path") in relevant_paths or gap.get("source") in relevant_paths
             or gap.get("target") in relevant_paths]
     picked, paths, source_bytes = [], set(), 0
@@ -602,7 +620,7 @@ def read_plan(project: Path, index: dict, plan: dict, *, policy: dict | None = N
     validate_plan(project, index, plan, policy=policy)
     policy = policy or json.loads(POLICY.read_text(encoding="utf-8"))
     request = request_data(project, plan, policy=policy)
-    source = {key: dict(value) for key, value in index["catalog"].items()}
+    source = catalog_view(index["catalog"])
     external_sources(project, source, request["refs"], policy)
     for unit in plan["must_read"]:
         if unit.get("git_revision") or unit.get("kind") == "fragment":

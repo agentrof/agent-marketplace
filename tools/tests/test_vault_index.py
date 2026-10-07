@@ -468,6 +468,84 @@ class VaultIndexTests(unittest.TestCase):
             path.write_bytes(original)
         self.assertEqual(self.query("index", "status")["generation"], first["generation"])
 
+    def test_registry_reference_edges_use_the_verified_owner_snapshot(self):
+        self.write("business-analysis/scope-one/a.md", note("story", "Target A"))
+        self.write("business-analysis/scope-one/b.md", note("story", "Target B"))
+        self.write("backlog/source.md", note("story", "Source", extra="related_to:\n  - scope-one:ACT-001"))
+        registry = self.write("business-analysis/scope-one/_generated/registry.json",
+            json.dumps({"ids": {"ACT-001": {"doc": "a.md"}}}))
+        original = registry.read_bytes()
+        alternate = json.dumps({"ids": {"ACT-001": {"doc": "b.md"}}}).encode()
+        actual = vault_index.vault_check.relation_edges
+        def racing(vault, **kwargs):
+            if set(vault.notes) == {"backlog/source.md"}:
+                registry.write_bytes(alternate)
+                try:
+                    return actual(vault, **kwargs)
+                finally:
+                    registry.write_bytes(original)
+            return actual(vault, **kwargs)
+        with mock.patch.object(vault_index.vault_check, "relation_edges", side_effect=racing):
+            data, _ = self.load()
+        self.assertEqual(data.store.edges_for("backlog/source.md"),
+            [["backlog/source.md", "business-analysis/scope-one/a.md", "related_to", ["frontmatter"]]])
+        self.assert_graph(data)
+
+    def test_registry_namespace_rejects_bytes_outside_the_inventory_snapshot(self):
+        self.write("business-analysis/scope-one/a.md", note("story", "Target A"))
+        self.write("backlog/source.md", note("story", "Source", extra="related_to:\n  - scope-one:ACT-001"))
+        registry = self.write("business-analysis/scope-one/_generated/registry.json",
+            json.dumps({"ids": {"ACT-001": {"doc": "a.md"}}}))
+        original = registry.read_bytes()
+        actual = vault_index.Store.registry_vault
+        def racing(store, paths):
+            registry.write_bytes(b'{"ids":{}}')
+            try:
+                return actual(store, paths)
+            finally:
+                registry.write_bytes(original)
+        with mock.patch.object(vault_index.Store, "registry_vault", racing):
+            with self.assertRaisesRegex(ValueError, "source changed while indexing"):
+                self.load()
+        data, _ = self.load()
+        self.assert_graph(data)
+
+    def test_section_search_recovers_corruption_detected_during_the_query(self):
+        self.write("requirements/a.md", note("requirement", "Source", body="Distinct phrase."))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        with contextlib.closing(sqlite3.connect(cache)) as connection, connection:
+            self.assertTrue(connection.execute("SELECT 1 FROM search_text_data WHERE id>10").fetchone())
+            connection.execute("UPDATE search_text_data SET block=x'00' WHERE id>10")
+        result = self.query("search-sections", "Distinct")
+        self.assertTrue(result["hits"])
+        self.assertTrue(result["cache"]["recovered"])
+        self.assertTrue(self.query("index", "check")["verified"])
+
+    def test_query_corruption_recovery_is_bounded_to_one_retry(self):
+        self.write("requirements/a.md", note("requirement", "Source"))
+        error = sqlite3.DatabaseError("database disk image is malformed")
+        with mock.patch.object(vault_query, "q_search_sections", side_effect=error) as search, \
+                mock.patch.object(vault_query, "locked_refresh", wraps=vault_query.locked_refresh) as loader:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                code = vault_query.main(["--docs", str(self.docs), "search-sections", "Source"])
+        self.assertEqual(code, 1)
+        self.assertEqual(search.call_count, 2)
+        self.assertEqual(loader.call_count, 2)
+        lease = vault_index.DatabaseLease(vault_query.default_cache(self.docs), exclusive=True, timeout=0.05)
+        lease.close()
+
+    def test_extension_eligibility_and_processing_use_the_same_normalization(self):
+        self.write("api/catalog.JSON", '{"label":"Eligible source"}')
+        self.write("requirements/a.MD", note("requirement", "Eligible note"))
+        data, _ = self.load()
+        self.assertEqual(set(data["files"]), set(data["catalog"]["documents"]))
+        self.assertEqual(len(context_catalog.resolve(data["catalog"], "api/catalog.JSON")), 1)
+        self.assertEqual(len(context_catalog.resolve(data["catalog"], "requirements/a.MD")), 1)
+        self.assertTrue(self.query("search-sections", "Eligible")["hits"])
+        self.assertTrue(self.query("index", "check")["verified"])
+
 
 if __name__ == "__main__":
     unittest.main()

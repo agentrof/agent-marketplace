@@ -129,7 +129,8 @@ writes, and read-only filesystems use the same fallback automatically. Small
 verified request/provenance capsules retain their existing JSON and bounded
 inline formats; they are not a second vault index.
 
-The scope is `.md` and `.json` beneath `workspace/docs`, excluding `artifacts`
+The scope is `.md` and `.json` beneath `workspace/docs`, with case-insensitive
+extension matching, excluding `artifacts`
 directories at every depth and the declared Obsidian/trash exclusions. Source
 class and authority still follow vault and owning-compiler contracts. Artifact
 integrity and approval checks retain excluded inputs. Every main checkout or
@@ -156,6 +157,9 @@ SQLite readonly errors use the same source-derived memory fallback as filesystem
 permission failures. Reader cleanup does not wait on long compiler work, and
 read-only inspections verify their copied bytes against a concurrent WAL
 checkpoint before trusting the snapshot.
+When `vault_query.py` first discovers corruption while executing a query, it
+closes that reader and rebuilds a complete database before one bounded retry.
+Repeated query failures remain explicit errors.
 
 Both hosts use the shared post-write hook after source validation. Notifications
 are hints; external edits are reconciled before queries. No watcher dependency

@@ -393,6 +393,17 @@ class Store:
         return vault_check.Vault(root=self.docs,
             policy=vault_check.load_policy(vault_check.DEFAULT_POLICY), index=FileSet(self),
             notes=NoteMap(self, selected))
+    def registry_vault(self, paths):
+        vault = self.vault()
+        view = vault_check.VaultFileView(self.docs)
+        for path in paths:
+            raw = path.read_bytes()
+            relative = path.relative_to(self.docs).as_posix()
+            if hashlib.sha256(raw).hexdigest() != self.files[relative]["sha"]:
+                raise ValueError(f"source changed while indexing: {relative}")
+            view.put(path, raw)
+        vault.files = view
+        return vault
     def delete_source(self, path):
         ids = [r[0] for r in self.connection.execute("SELECT uid FROM units WHERE path=?", (path,))]
         for uid in ids:
@@ -690,13 +701,13 @@ def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False, c
                     store.delete_source(path)
                 markdown = set()
                 receipts = context_catalog.receipt_paths(docs,
-                    candidates=[docs / p for p in changed if p.endswith(".json")])
+                    candidates=[docs / p for p in changed if Path(p).suffix.lower() == ".json"])
                 for path in changed:
                     connection.execute("INSERT INTO files VALUES(?,?)", (path, encoded(current[path])))
-                    if path.endswith(".md"):
+                    if Path(path).suffix.lower() == ".md":
                         store.update_note(path)
                         markdown.add(path)
-                    elif path.endswith(".json"):
+                    elif Path(path).suffix.lower() == ".json":
                         store.update_json(path, docs / path in receipts)
                 if markdown:
                     store.catalog_rows(context_catalog.catalog(store.vault(markdown), include_receipts=False))
@@ -711,12 +722,12 @@ def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False, c
                     namespace_changed = namespace_changed or now != before_aliases.get(path, set())
                 # Registry identities are compiler-owned. Reuse parsed notes;
                 # only derivation and identity changes require this global namespace.
-                if full or any(p.endswith(".json") for p in affected) or namespace_changed:
+                if full or any(Path(p).suffix.lower() == ".json" for p in affected) or namespace_changed:
                     prior_owners = dict(connection.execute("SELECT name,path FROM owners"))
                     registries = [docs / p for p in current if len(Path(p).parts) == 4
                         and Path(p).parts[0] == "business-analysis"
                         and Path(p).parts[-2:] == ("_generated", "registry.json")]
-                    owners = vault_check.relation_identity_owners(store.vault(), registry_paths=registries)
+                    owners = vault_check.relation_identity_owners(store.registry_vault(registries), registry_paths=registries)
                     identities.update(name for name in prior_owners.keys() | owners.keys()
                                       if prior_owners.get(name) != owners.get(name))
                     connection.execute("DELETE FROM owners")
@@ -724,7 +735,7 @@ def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False, c
                 owners_to_update = markdown | old_owners
                 for ref in identities:
                     owners_to_update.update(r[0] for r in connection.execute("SELECT owner FROM raw_refs WHERE ref=?", (ref,)))
-                if full or any(p.endswith(".json") for p in affected):
+                if full or any(Path(p).suffix.lower() == ".json" for p in affected):
                     owners_to_update = set(NoteMap(store))
                 for owner in sorted(owners_to_update):
                     store.graph_owner(owner)
@@ -811,7 +822,7 @@ def recover_database(docs, cache, builder):
     return result, status
 
 
-def locked_refresh(docs, cache, builder, *, verify=True, rebuild=False):
+def locked_refresh(docs, cache, builder, *, verify=True, rebuild=False, repair=False):
     docs, cache = Path(docs), Path(cache)
     project = Path(docs).resolve().parents[1]
     folder = atomic_file.real_directory(project, Path(cache).parent.relative_to(project))
@@ -823,6 +834,9 @@ def locked_refresh(docs, cache, builder, *, verify=True, rebuild=False):
         try:
             try:
                 result = refresh(docs, cache, builder, verify=verify, rebuild=rebuild)
+                if repair:
+                    result[0].store.close()
+                    result = recover_database(docs, cache, builder)
             except CacheCorruptError:
                 result = recover_database(docs, cache, builder)
             cleanup_legacy(Path(cache), Path(docs))

@@ -36,6 +36,7 @@ import os
 import json
 import re
 import subprocess
+import sqlite3
 import sys
 import time
 from collections import deque
@@ -144,8 +145,8 @@ def note_identity(note) -> tuple:
     return ident, title if isinstance(title, str) else "", aliases
 
 
-def locked_refresh(docs: Path, cache: Path, verify: bool = False, *, rebuild: bool = False):
-    return vault_index.locked_refresh(docs, cache, builder_hash(), verify=True, rebuild=rebuild)
+def locked_refresh(docs: Path, cache: Path, verify: bool = False, *, rebuild: bool = False, repair: bool = False):
+    return vault_index.locked_refresh(docs, cache, builder_hash(), verify=True, rebuild=rebuild, repair=repair)
 
 
 def refresh(docs: Path, cache: Path, verify: bool = False, persist: bool = True, *, rebuild: bool = False):
@@ -356,6 +357,15 @@ def q_search_sections(index: Index, args) -> dict:
     return {"query": args.query, "hits": hits, "truncated": len(rows) > args.limit}
 
 
+def query_data(args, cache, *, rebuild=False, repair=False):
+    try:
+        return locked_refresh(args.docs, cache, args.verify, rebuild=rebuild, repair=repair)
+    except OSError as exc:
+        if exc.errno not in READ_ONLY_ERRORS:
+            raise
+        return refresh(args.docs, cache, args.verify, persist=False)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -414,28 +424,32 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(args, "limit") and args.limit <= 0:
         parser.error("limit must be positive")
     try:
-        try:
-            data, status = locked_refresh(args.docs, cache, args.verify,
-                                         rebuild=args.command == "index" and args.action == "rebuild")
-        except OSError as exc:
-            if exc.errno not in READ_ONLY_ERRORS:
-                raise
-            # A read-only file system or sandbox: build the index in memory,
-            # reusing a warm cache read-only, and write nothing.
-            data, status = refresh(args.docs, cache, args.verify, persist=False)
+        data, status = query_data(args, cache, rebuild=args.command == "index" and args.action == "rebuild")
     except (OSError, ValueError) as exc:
         print(f"vault_query: {exc}", file=sys.stderr)
         return 2
     try:
-        result = ({"status": status["state"], "generation": status["generation"],
-                   "documents": len(data["catalog"]["documents"])}
-                  if args.command == "index" else args.func(Index(data), args))
-    except (LookupError, ValueError, subprocess.CalledProcessError) as exc:
+        for attempt in range(2):
+            try:
+                result = ({"status": status["state"], "generation": status["generation"],
+                           "documents": len(data["catalog"]["documents"])}
+                          if args.command == "index" else args.func(Index(data), args))
+                break
+            except sqlite3.Error as exc:
+                failure = vault_index.sqlite_failure(exc)
+                if attempt or not isinstance(failure, vault_index.CacheCorruptError):
+                    raise failure from exc
+                data.store.close()
+                data, status = query_data(args, cache, repair=True)
+                status["recovered"] = True
+        result["cache"] = status
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return 0
+    except (LookupError, ValueError, OSError, subprocess.CalledProcessError) as exc:
         print(f"vault_query: {exc}", file=sys.stderr)
         return 1
-    result["cache"] = status
-    print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
-    return 0
+    finally:
+        data.store.close()
 
 
 if __name__ == "__main__":

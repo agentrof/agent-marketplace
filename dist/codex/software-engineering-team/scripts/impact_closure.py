@@ -290,7 +290,7 @@ def frontmatter_tier(vault, edges: Edges, keys, records: dict | None = None) -> 
     not (``requirement_ref``, ``verification_contract_ref``, any wikilink, id,
     alias or path); returns the reference-like values no note resolves."""
     owners = reference_owners(vault, records)
-    for edge in vault_check.relation_edges(vault):
+    for edge in vault_check.relation_edges(vault, identity_owners=owners):
         if edge.key in keys and not (edge.alias in owners and owners[edge.alias] is None):
             edges.add(edge.source, edge.target, edge.key, "frontmatter")
     unresolved = []

@@ -1376,9 +1376,10 @@ def relation_identity_owners(vault: Vault, *, registry_paths=None) -> dict[str, 
     return owners
 
 
-def relation_edges(vault: Vault) -> list[RelationEdge]:
+def relation_edges(vault: Vault, *, identity_owners=None) -> list[RelationEdge]:
     edges: list[RelationEdge] = []
     keys = relation_specs(vault.policy)
+    owners = relation_identity_owners(vault) if identity_owners is None else identity_owners
     for note in authored(vault):
         for key in sorted(keys):
             values = note.fm.get(key)
@@ -1389,7 +1390,7 @@ def relation_edges(vault: Vault) -> list[RelationEdge]:
                     target, _anchor, alias = split_wikilink(value[2:-2])
                     target_rel = f"{target}.md"
                 elif isinstance(value, str):
-                    target_rel = relation_identity_owners(vault).get(value, "")
+                    target_rel = owners.get(value, "")
                     alias = value
                 else:
                     continue

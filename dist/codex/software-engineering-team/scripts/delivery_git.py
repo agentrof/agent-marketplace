@@ -2129,10 +2129,12 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
 
 
 def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
-    """Reserve a scope-approved Delivery by pushing its Integration ref under the project Fence.
+    """Reserve an approved, unpublished Delivery under the project Fence.
 
     The Integration ref must be absent. A project without a Fence gets a new
     one on the target tip, and both refs are created in one atomic push.
+    A locally approved Execution Plan may precede this reservation after an
+    interrupted planning session; publication and Item claims still follow.
 
     A merged Delivery drops its Integration ref and integrated Item refs but
     leaves the Fence, so every later reservation meets it. That Fence is taken
@@ -2161,8 +2163,8 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
         raise RuntimeError("Delivery package is not portable: " + "; ".join(findings))
     delivery_path_value = directory / "delivery.md"
     props, _ = split_note(delivery_path_value)
-    if props.get("status") != "scope_approved":
-        raise RuntimeError("reserve-delivery requires scope_approved")
+    if props.get("status") not in {"scope_approved", "execution_approved"}:
+        raise RuntimeError("reserve-delivery requires scope_approved or execution_approved")
     target_branch, target_oid = resolve_target(root, remote)
     refs = canonical_refs(delivery_id)
     if remote_has_ref(root, remote, refs["integration"]):

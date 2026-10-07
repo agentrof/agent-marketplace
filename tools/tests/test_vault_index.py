@@ -667,7 +667,6 @@ class VaultIndexTests(unittest.TestCase):
         self.assertTrue(self.query("search-sections", "Eligible")["hits"])
         self.assertTrue(self.query("index", "check")["verified"])
 
-
     def test_unparseable_sources_are_reported_without_blocking_navigation(self):
         self.write("requirements/a.md", note("requirement", "A"))
         self.write("backlog/_generated/registry.json", '{\n<<<<<<< ours\n"rows": []\n=======\n}\n')
@@ -869,7 +868,6 @@ class VaultIndexTests(unittest.TestCase):
                 vault_index.open_published(cache)
         vault_index.DatabaseLease(cache, exclusive=True, timeout=0).close()
 
-
     def test_no_write_read_without_a_snapshot_api_compiles_from_sources_and_names_why(self):
         self.write("requirements/a.md", note("requirement", "A"))
         data, _ = self.load()
@@ -926,7 +924,8 @@ class VaultIndexTests(unittest.TestCase):
                 self.assertEqual(index["catalog"]["documents"]["requirements/a.md"]["title"], "A")
                 index.store.close()
                 self.assertEqual(listing(), published)
-                self.assertIn({"open": "replaced", "check": "removed"}[seam] + " while opening", status["fallback"])
+                # The race left nothing behind, so the one retry reads the verified snapshot.
+                self.assertEqual((status["served"], status.get("fallback")), ("published_snapshot", None))
         # Sidecars a leased session may be using stay, even when they look new to the read.
         live = connect(cache)
         self.addCleanup(live.close)
@@ -937,6 +936,92 @@ class VaultIndexTests(unittest.TestCase):
         self.assertNotIn(None, before.values())
         vault_index.remove_created_sidecars(cache, {path: ("earlier",) for path in before})
         self.assertEqual(vault_index.sidecar_identities(cache), before)
+
+    @integration
+    def test_a_lease_less_connection_on_recreated_sidecars_cannot_revert_a_later_generation(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        script = ("import sqlite3, sys\n"
+                  "connection = sqlite3.connect(sys.argv[1], timeout=5, isolation_level=None)\n"
+                  "for line in sys.stdin:\n"
+                  "    if line.strip() == 'open':\n"
+                  "        connection.execute('SELECT count(*) FROM meta').fetchone()\n"
+                  "    elif line.strip() == 'write':\n"
+                  "        connection.execute('BEGIN IMMEDIATE')\n"
+                  "        connection.execute(\"UPDATE meta SET payload=payload WHERE key='generation'\")\n"
+                  "        connection.execute('COMMIT')\n"
+                  "    print('done', flush=True)\n"
+                  "connection.close()\n")
+        foreign = subprocess.Popen([sys.executable, "-c", script, str(cache)], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        def tell(command):
+            foreign.stdin.write(command + "\n")
+            foreign.stdin.flush()
+            self.assertEqual(foreign.stdout.readline().strip(), "done", command)
+        try:
+            connect, identities = sqlite3.connect, vault_index.sidecar_identities
+            writer = connect(cache)
+            writer.execute("SELECT count(*) FROM meta").fetchone()
+            pending, calls = [writer], []
+            def opening(target, *args, **kwargs):
+                # The last leased writer closes between the sidecar check and the read-only open.
+                if str(target).endswith("mode=ro") and pending:
+                    pending.pop().close()
+                return connect(target, *args, **kwargs)
+            def joining(path):
+                calls.append(path)
+                if len(calls) == 2:
+                    # A tool outside the leases attaches to the sidecars the read-only open created.
+                    tell("open")
+                return identities(path)
+            with mock.patch.object(vault_index.sqlite3, "connect", opening), \
+                    mock.patch.object(vault_index, "sidecar_identities", joining):
+                index, _status = vault_query.refresh(self.docs, cache, persist=False)
+            index.store.close()
+            self.assertFalse(pending)
+            tell("write")
+            self.write("requirements/a.md", note("requirement", "A", body="Changed."))
+            data, status = self.load()
+            data.store.close()
+            committed = status["generation"]
+        finally:
+            _out, err = foreign.communicate(input="" if foreign.poll() is None else None, timeout=15)
+        self.assertEqual(foreign.returncode, 0, err)
+        check = connect(cache)
+        try:
+            self.assertEqual(check.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(json.loads(check.execute("SELECT payload FROM meta WHERE key='generation'").fetchone()[0]),
+                             committed)
+        finally:
+            check.close()
+        index, status = vault_query.refresh(self.docs, cache, persist=False)
+        self.stores.append(index.store)
+        self.assertEqual((status["generation"], status["changed"]), (committed, []))
+
+    def test_a_no_write_read_retries_a_sidecar_race_once_before_compiling_from_sources(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        original = vault_index.open_published
+        for races, served in ((1, "published_snapshot"), (2, "in_memory_compile")):
+            with self.subTest(races=races):
+                calls = []
+                def racing(path, **kwargs):
+                    calls.append(kwargs)
+                    if len(calls) <= races:
+                        return None, ("published cache cannot be read in place: its write-ahead log files were "
+                                      + ("removed", "replaced")[len(calls) % 2] + " while opening it")
+                    return original(path, **kwargs)
+                with mock.patch.object(vault_index, "open_published", racing):
+                    index, status = vault_query.refresh(self.docs, cache, persist=False)
+                self.stores.append(index.store)
+                self.assertEqual(calls, [{"write_free": True}] * 2)
+                self.assertEqual(status["served"], served)
+                self.assertEqual("fallback" in status, races == 2)
+                self.assertEqual(index["catalog"]["documents"]["requirements/a.md"]["title"], "A")
 
     def test_a_no_write_delta_applies_to_the_snapshot_without_another_copy(self):
         self.seed()
@@ -989,6 +1074,7 @@ class VaultIndexTests(unittest.TestCase):
             with self.assertRaises(Interrupted):
                 vault_index.published_snapshot(cache)
         vault_index.DatabaseLease(cache, exclusive=True, timeout=0).close()
+
     def test_a_writer_publishing_after_the_pre_lock_hashes_does_not_fail_the_next_refresh(self):
         self.seed()
         data, _ = self.load()
@@ -1024,7 +1110,6 @@ class VaultIndexTests(unittest.TestCase):
             with self.assertRaises(vault_index.SourceChangedError):
                 vault_index.refresh(self.docs, cache, vault_query.builder_hash(), persist=False)
 
-
     def test_a_source_removed_while_scanning_is_reported_as_a_source_change(self):
         self.write("requirements/a.md", note("requirement", "A"))
         removed = self.write("requirements/b.md", note("requirement", "B"))
@@ -1037,6 +1122,45 @@ class VaultIndexTests(unittest.TestCase):
             with self.assertRaisesRegex(vault_index.SourceChangedError,
                                         "source removed while scanning: requirements/b.md"):
                 self.load()
+
+    def test_receipt_respelling_compares_each_name_once_per_listing(self):
+        for number in range(200):
+            for revision in (1, 2):
+                self.write(f"system-architecture/_ledger/records/CON-{number:03d}/r{revision}.json", "{}")
+        compared = []
+        class Name(str):
+            __hash__ = str.__hash__
+            def __eq__(self, other):
+                compared.append(self)
+                return str.__eq__(self, other)
+        listdir = os.listdir
+        with mock.patch.object(context_catalog.os, "listdir", lambda path: [Name(name) for name in listdir(path)]):
+            paths = context_catalog.receipt_paths(self.docs)
+        self.assertEqual(len(paths), 400)
+        # Respelling looks each path component up in its directory listing; a list scan grows with the listing.
+        self.assertLessEqual(len(compared), sum(len(path.relative_to(self.docs).parts) for path in paths))
+
+    def test_a_source_removed_before_the_catalog_reads_it_is_retried_as_a_source_change(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        removed = self.write("requirements/b.md", note("requirement", "B"))
+        safe_file = context_catalog.safe_file
+        def vanishing(root, relative):
+            if relative == "requirements/b.md":
+                removed.unlink(missing_ok=True)
+            return safe_file(root, relative)
+        with mock.patch.object(context_catalog, "safe_file", vanishing):
+            data, status = self.load()
+        self.assertEqual(set(data["files"]), {"requirements/a.md"})
+        self.assertEqual(status["generation"], 1)
+        with self.assertRaises(context_catalog.SourceMissingError):
+            context_catalog.safe_file(self.docs, "requirements/b.md")
+        outside = self.project / "outside.md"
+        outside.write_text("outside", encoding="utf-8")
+        (self.docs / "requirements/link.md").symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "escapes its declared root") as caught:
+            context_catalog.safe_file(self.docs, "requirements/link.md")
+        self.assertNotIsInstance(caught.exception, context_catalog.SourceChangedError)
+
     def test_post_write_sync_never_waits_on_the_writer_or_fails_the_hook(self):
         spec = importlib.util.spec_from_file_location(
             "index_sync_hook", ROOT / "platforms/shared/software-engineering-team/overlay/scripts/vault_hook.py")
@@ -1365,6 +1489,27 @@ class VaultIndexTests(unittest.TestCase):
         self.assertTrue(self.query("index", "check")["verified"])
         self.assertFalse(list(folder.glob(".index-copy-*"))[1:])
 
+    def test_every_writer_sweeps_interrupted_generation_floor_writes(self):
+        path = self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        folder = vault_query.default_cache(self.docs).parent
+        (folder / "..generation.interrupted").write_bytes(b"3")
+        kept = folder / "..generation.directory"
+        kept.mkdir()
+        target = self.project / "target"
+        target.write_bytes(b"3")
+        link = folder / "..generation.link"
+        try:
+            link.symlink_to(target)
+        except OSError:
+            link = None
+        path.write_text(note("requirement", "A", body="Edited."), encoding="utf-8")
+        self.query("index", "sync")
+        self.assertEqual(sorted(p.name for p in folder.iterdir() if p.name.startswith("..generation.")),
+                         sorted([kept.name] + ([link.name] if link else [])))
+        self.assertEqual(target.read_bytes(), b"3")
+
     def test_recovery_keeps_generation_above_an_unreadable_database(self):
         path = self.write("requirements/a.md", note("requirement", "A"))
         for revision in range(4):
@@ -1403,7 +1548,6 @@ class VaultIndexTests(unittest.TestCase):
         data.store.close()
         self.assertGreater(rebuilt["generation"], committed[0])
 
-
     def test_a_database_lost_after_recovery_replaced_it_never_reissues_its_generation(self):
         self.write("requirements/a.md", note("requirement", "A"))
         data, _ = self.load()
@@ -1427,6 +1571,27 @@ class VaultIndexTests(unittest.TestCase):
         data, rebuilt = self.load()
         data.store.close()
         self.assertGreater(rebuilt["generation"], replaced[0])
+
+    def test_a_failed_first_build_leaves_no_database_and_an_uninitialized_one_is_named(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        cache = vault_query.default_cache(self.docs)
+        class Interrupted(Exception):
+            pass
+        with mock.patch.object(vault_index.Store, "diagnostics", side_effect=Interrupted()), \
+                self.assertRaises(Interrupted):
+            self.load()
+        self.assertEqual(sorted(path.name for path in cache.parent.iterdir() if path.name.startswith("index.db")), [])
+        connection = sqlite3.connect(cache)
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.close()
+        index, status = vault_query.refresh(self.docs, cache, persist=False)
+        self.stores.append(index.store)
+        self.assertEqual(status["served"], "in_memory_compile")
+        self.assertIn("never initialized", status["fallback"])
+        data, status = self.load()
+        self.assertEqual(status["generation"], 1)
+        self.assertEqual(data["catalog"]["documents"]["requirements/a.md"]["title"], "A")
+
     def test_another_spelling_of_the_checkout_keeps_its_binding(self):
         target = self.write("backlog/story-b.md", note("story", "Story B"))
         alias = self.project.parent / (self.project.name + "-alias")
@@ -1589,7 +1754,6 @@ class VaultIndexTests(unittest.TestCase):
         self.assertEqual(task_inputs.closure_raw(impact_closure, self.docs, present, {}),
                          impact_closure.closure(self.docs, present))
 
-
     def test_case_variant_receipt_names_close_over_the_paths_the_reparse_reads(self):
         import task_inputs
         probe = self.write("Probe.md", "probe")
@@ -1638,6 +1802,7 @@ class VaultIndexTests(unittest.TestCase):
         self.assertTrue(vault_index.published_binding_matches(
             self.docs, vault_query.default_cache(self.docs), vault_query.builder_hash()))
         self.assertEqual(task_inputs.impact_closure(self.docs, named, "workspace/docs/"), reparsed)
+
     def test_context_reads_hash_sources_once_and_unchanged_reads_skip_the_writer_lock(self):
         self.seed()
         data, _ = self.load()

@@ -188,11 +188,12 @@ full-text layout this SQLite cannot open is never served: the next query
 recompiles it from this checkout's sources. Physically corrupt disposable
 databases are recompiled from canonical sources. A complete replacement is
 built before publication and waits for existing readers to close; failed
-compilation preserves the prior files and separate reading-state capsules.
+compilation preserves the prior files and separate reading-state capsules, and
+a failed first build leaves no database file.
 Each publication records its generation in a file beside the writer lock, so a
 recovered database continues above the last published generation even when the
 damaged one cannot be read, and every writer removes interrupted recovery
-candidates.
+candidates and generation records.
 SQLite readonly errors use the same source-derived fallback as filesystem
 permission failures. Reader cleanup does not wait on long compiler work, and
 read-only inspections verify their copied bytes against a concurrent WAL

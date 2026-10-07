@@ -17,6 +17,10 @@ class SourceChangedError(ValueError):
     """A source's bytes differ from the bytes an index or address was built from."""
 
 
+class SourceMissingError(SourceChangedError):
+    """A source an index or address names is no longer a file inside its declared root."""
+
+
 def digest(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
 
@@ -52,8 +56,10 @@ def safe_file(root: Path, relative: str) -> Path:
     if path.is_absolute() or not path.parts or ".." in path.parts or "\\" in relative:
         raise ValueError("source must be a relative path inside its declared root")
     result = root / path
-    if contained(result.resolve(), root.resolve()) is None or not result.is_file():
-        raise ValueError(f"source is missing or escapes its declared root: {relative}")
+    if contained(result.resolve(), root.resolve()) is None:
+        raise ValueError(f"source escapes its declared root: {relative}")
+    if not result.is_file():
+        raise SourceMissingError(f"source is missing: {relative}")
     return result
 
 
@@ -280,13 +286,17 @@ def receipt_paths(root: Path, *, candidates=None) -> set[Path]:
             for part in path.relative_to(root).parts:
                 if spelled not in listings:
                     try:
-                        listings[spelled] = sorted(os.listdir(spelled))
+                        names = sorted(os.listdir(spelled))
                     except OSError:
-                        listings[spelled] = []
-                names = listings[spelled]
+                        names = []
+                    folded = defaultdict(list)
+                    for name in names:
+                        folded[name.casefold()].append(name)
+                    listings[spelled] = set(names), folded
+                names, folded = listings[spelled]
                 if part not in names:
-                    part = next((name for name in names if name.casefold() == part.casefold()
-                                 and same(spelled / name, spelled / part)), part)
+                    part = next((name for name in folded.get(part.casefold(), ())
+                                 if same(spelled / name, spelled / part)), part)
                 spelled = spelled / part
             return spelled
         return {listed(path) for pattern in patterns for path in root.glob(pattern)}

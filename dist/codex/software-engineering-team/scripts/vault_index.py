@@ -80,6 +80,8 @@ TABLES = frozenset(statement.split()[2].split("(")[0] for statement in SCHEMA
                    if statement.startswith("CREATE TABLE")) | {SEARCH_TABLE}
 COPY_PREFIX = ".index-copy-"
 RECOVERY_PREFIX = ".index-recovery-"
+# atomic_file names its temporary for ".generation" with this prefix.
+GENERATION_TEMP_PREFIX = "..generation."
 SourceChangedError = context_catalog.SourceChangedError
 
 
@@ -569,6 +571,13 @@ class Store:
             return self.meta("generation", 0)
         except sqlite3.Error:
             return 0
+    def initialized(self):
+        """Whether a compilation ever committed this database's tables."""
+        try:
+            return self.connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone() is not None
+        except sqlite3.Error:
+            return True
     def layout_supported(self):
         """Whether every derived table exists and this SQLite can open the stored full-text table."""
         try:
@@ -1004,9 +1013,9 @@ def bound(binding, docs, builder):
         return False
 
 
-def published_uri(cache, *, immutable=False):
+def published_uri(cache, *, immutable=False, mode="ro"):
     # No authority part: "file:///D:/..." names a UNC-like path on Windows, "file:D:/..." the drive path.
-    return ("file:" + urllib.parse.quote(Path(cache).absolute().as_posix(), safe="/:") + "?mode=ro"
+    return ("file:" + urllib.parse.quote(Path(cache).absolute().as_posix(), safe="/:") + "?mode=" + mode
             + ("&immutable=1" if immutable else ""))
 
 
@@ -1077,6 +1086,11 @@ def published_snapshot(cache):
         time.sleep(file_lock.POLL_SECONDS)
 
 
+# The two ways a closing writer can race a no-write in-place open; a second open no longer meets them.
+SIDECAR_RACES = ("its write-ahead log files were removed while opening it",
+                 "its write-ahead log files were replaced while opening it")
+
+
 def open_published(cache, *, write_free=False):
     """``((connection, lease), None)`` reading the published cache, or ``(None, reason)``.
 
@@ -1106,7 +1120,7 @@ def open_published(cache, *, write_free=False):
             if write_free:
                 sidecars = sidecar_identities(cache)
                 if None in sidecars.values():
-                    raise ValueError("its write-ahead log files were removed while opening it")
+                    raise ValueError(SIDECAR_RACES[0])
             connection = sqlite3.connect(published_uri(cache), uri=True, check_same_thread=False,
                                          timeout=policy()["busy_timeout_ms"] / 1000)
         else:
@@ -1125,7 +1139,7 @@ def open_published(cache, *, write_free=False):
                 lease.close()
                 lease = None
             remove_created_sidecars(cache, sidecars)
-            raise ValueError("its write-ahead log files were replaced while opening it")
+            raise ValueError(SIDECAR_RACES[1])
     except BaseException as exc:
         if connection is not None:
             connection.close()
@@ -1159,7 +1173,7 @@ def replaced_sidecars(before, after):
 
 
 def remove_created_sidecars(cache, before):
-    """Remove the empty WAL sidecars a read-only open created, only while no reader or writer
+    """Let SQLite remove the empty WAL sidecars a read-only open created, only while no reader or writer
     session holds the database; otherwise they belong to that session and stay."""
     try:
         exclusive = DatabaseLease(cache, exclusive=True, timeout=0, read_only=True)
@@ -1167,18 +1181,20 @@ def remove_created_sidecars(cache, before):
         return
     try:
         now = sidecar_identities(cache)
-        wal, shm = now
-        created = replaced_sidecars(before, now)
-        if wal in created:
-            if now[wal][2]:
-                # Committed frames are never this read's; leave the pair to the next writer.
-                return
-            # SQLite creates and removes the pair together, so a new WAL makes the shared memory new too.
-            if now[shm] is not None:
-                created.add(shm)
-        for path in created:
-            path.unlink()
-    except OSError:
+        wal = Path(str(cache) + "-wal")
+        if not replaced_sidecars(before, now) or (now[wal] is not None and now[wal][2]):
+            # Nothing new, or committed frames that are never this read's; leave the pair to the next writer.
+            return
+        check_database_files(cache)
+        connection = sqlite3.connect(published_uri(cache, mode="rw"), uri=True,
+                                     check_same_thread=False, timeout=0)
+        try:
+            connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        finally:
+            # The last connection to close removes both sidecars, and only when it obtains the exclusive
+            # database lock; a connection outside the leases still attached to them keeps them.
+            connection.close()
+    except (OSError, ValueError, sqlite3.Error):
         pass
     finally:
         exclusive.close()
@@ -1193,6 +1209,8 @@ def refresh(docs, cache, builder, *, persist=True, rebuild=False, coordinate=Tru
     fallback = None
     if not persist and not rebuild:
         published, fallback = open_published(cache, write_free=True)
+        if published is None and fallback and fallback.endswith(SIDECAR_RACES):
+            published, fallback = open_published(cache, write_free=True)
         if published is not None:
             snapshot = published[0].execute("PRAGMA database_list").fetchone()[2] == ""
             try:
@@ -1232,6 +1250,7 @@ def compile_index(docs, cache, builder, *, published, persist, rebuild, coordina
     started = time.perf_counter()
     lease = connection = store = None
     served = fallback = None
+    created = persist and not os.path.lexists(cache)
     try:
         if published is not None:
             connection, lease = published
@@ -1251,6 +1270,7 @@ def compile_index(docs, cache, builder, *, published, persist, rebuild, coordina
         # A foreign checkout, another derivation or schema, or an FTS layout this SQLite
         # cannot open is recompiled from this checkout's sources, never served.
         layout = store.layout_supported()
+        initialized = layout or store.initialized()
         binding = store.binding() if layout else None
         full = rebuild or not bound(binding, docs, builder)
         rebind = not full and binding["docs"] != str(docs)
@@ -1285,7 +1305,8 @@ def compile_index(docs, cache, builder, *, published, persist, rebuild, coordina
                     store.close()
                 served = "in_memory_compile" if full else "in_memory_copy"
                 if full:
-                    fallback = ("the published cache has a layout this SQLite cannot read" if not layout else
+                    fallback = ("the published cache was never initialized" if not initialized else
+                                "the published cache has a layout this SQLite cannot read" if not layout else
                                 "the published cache is bound to another checkout, derivation or schema")
                 connection = memory
                 store = Store(docs, connection)
@@ -1380,9 +1401,30 @@ def compile_index(docs, cache, builder, *, published, persist, rebuild, coordina
             connection.close()
         if lease is not None:
             lease.close()
+        if created:
+            discard_uninitialized(cache)
         if isinstance(exc, DATABASE_ERRORS):
             raise sqlite_failure(exc) from exc
         raise
+
+
+def discard_uninitialized(cache):
+    """Remove a database file a failed first build created, while no compilation committed its tables
+    and no connection still holds its sidecars; the next writer creates it again."""
+    try:
+        if any(os.path.lexists(str(cache) + suffix) for suffix in ("-wal", "-shm", "-journal")):
+            return
+        check_cache_file(Path(cache))
+        connection = sqlite3.connect(published_uri(cache, immutable=True), uri=True)
+        try:
+            initialized = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone() is not None
+        finally:
+            connection.close()
+        if not initialized:
+            Path(cache).unlink()
+    except (OSError, ValueError, sqlite3.Error):
+        pass
 
 
 def published_generation(cache):
@@ -1448,9 +1490,14 @@ def copy_alive(directory):
 
 
 def sweep_runtime(folder):
-    """Remove interrupted recovery candidates and ended inspection copies; callers hold ``.lock``."""
+    """Remove interrupted recovery candidates, ended inspection copies and interrupted generation floor
+    writes; callers hold ``.lock``."""
     for name in sorted(os.listdir(folder)):
         stale = Path(folder) / name
+        if name.startswith(GENERATION_TEMP_PREFIX) and stale.is_file() and not stale.is_symlink():
+            # Only record_generation writes these, and every writer runs it under this same lock.
+            stale.unlink(missing_ok=True)
+            continue
         if not name.startswith((RECOVERY_PREFIX, COPY_PREFIX)) or stale.is_symlink() or not stale.is_dir():
             continue
         # Only a recovery under this same lock creates a candidate, so none is live here.

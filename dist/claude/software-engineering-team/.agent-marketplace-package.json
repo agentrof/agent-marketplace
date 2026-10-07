@@ -167,7 +167,7 @@
       "184a0b11e57d6f5ab407ea40c22690edc425ed2992e2978f26ec0e974d326da0"
     ,
     "scripts/context_catalog.py":
-      "5e5d09caaeaf7eab4a60c1b180d2722a28a25d3e0c4c9d518d0475b3b62a6bda"
+      "68eac8dafaec25b0c0a4930196c5df55cb8e46b93f574958430f8a3a933c4b16"
     ,
     "scripts/context_history.py":
       "b3c433394ad535b010d12d194eaf277208cc61068b7f41a2a233255e6bcba0c9"
@@ -290,7 +290,7 @@
       "f1400bcead8488e477d55a83ec20fa96e3aaf959b35720c934283fc2e5a35692"
     ,
     "scripts/vault_index.py":
-      "8975b3b9994f9840133e4b1845fed20c788dd101f165e5393e07aaf5a87a3f8e"
+      "d2068ec522002f5cc668d174db3fb6462bba81de48a0a53c73d8edfd1d785c4b"
     ,
     "scripts/vault_query.py":
       "621e52d77c481dc6e4b3c4cc43b962c2ff697b8f30426b244d856a741d5584e2"

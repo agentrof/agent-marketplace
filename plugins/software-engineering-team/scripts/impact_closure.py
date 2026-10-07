@@ -108,20 +108,18 @@ def closure_policy(vault_policy: dict, overrides: dict | None = None) -> dict:
 
 
 def load_vault(docs: Path) -> vault_check.Vault:
-    """The vault; a note linked to an excluded location is no note, as in the vault index."""
+    """The vault; a note outside the vault index's scope, such as one in an artifacts
+    directory at any depth or one linked to an excluded location, is no note, as in the index."""
     import vault_index
     vault_policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
     vault = vault_check.build_vault(Path(docs), vault_check.effective_policy(vault_policy, Path(docs)))
-    excluded = [rel for rel in vault.notes if vault_index.excluded_link_target(vault.root, rel)]
+    settings, artifact = vault_index.scope()
+    excluded = [rel for rel in vault.notes if not vault_index.eligible(rel, settings, artifact)
+                or vault_index.excluded_link_target(vault.root, rel)]
     if excluded:
         for rel in excluded:
             del vault.notes[rel]
-        vault.inbound.clear()
-        for note in vault.notes.values():
-            targets = [t for (_, _, t, _, _, _) in note.wikilinks if t]
-            targets.extend(t for (_, t) in note.fm_targets if t)
-            for target in targets:
-                vault.inbound.setdefault(f"{target}.md", set()).add(note.rel)
+        vault_check.index_inbound(vault)
     return vault
 
 

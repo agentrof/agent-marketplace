@@ -14,6 +14,7 @@ import shutil
 import stat
 import time
 import tempfile
+import urllib.parse
 
 try:
     import sqlite3
@@ -224,9 +225,9 @@ def note_identity(note):
     return ident, title if isinstance(title, str) else "", aliases
 
 
-def ba_registry(relative):
-    parts = PurePosixPath(relative).parts
-    return len(parts) == 4 and parts[0] == "business-analysis" and parts[2:] == ("_generated", "registry.json")
+def ba_registry(docs, relative):
+    """Whether vault_check's registry glob reports this source on the running file system."""
+    return context_catalog.globbed(Path(docs), Path(docs) / relative, "business-analysis/*/_generated/registry.json")
 
 
 class CacheCorruptError(ValueError):
@@ -365,6 +366,14 @@ class Aliases(Mapping):
         return self.store.connection.execute("SELECT 1 FROM aliases WHERE name=? LIMIT 1", (key,)).fetchone() is not None
 
 
+def claim_order(tier, source):
+    """Registry claims rank like vault_check's sorted registry Paths, component by component;
+    note claims rank by path."""
+    if tier != 1:
+        return (source,)
+    return tuple(os.path.normcase(source).replace("\\", "/").split("/"))
+
+
 class OwnerLookup(Mapping):
     """impact_closure.reference_owners over verified rows: catalog units and aliases, then claims.
 
@@ -386,11 +395,11 @@ class OwnerLookup(Mapping):
                 paths = [path for rank, path in rows if rank == priority]
                 return paths[0] if len(paths) == 1 else None
         marks = ",".join("?" for _ in self.tiers)
-        row = connection.execute(f"SELECT path FROM owner_claims WHERE name=? AND tier IN ({marks}) "
-                                 "ORDER BY tier,source LIMIT 1", (key, *self.tiers)).fetchone()
-        if row is None:
+        rows = connection.execute(f"SELECT tier,source,path FROM owner_claims WHERE name=? AND tier IN ({marks})",
+                                  (key, *self.tiers)).fetchall()
+        if not rows:
             raise KeyError(key)
-        return row[0]
+        return min(rows, key=lambda row: (row[0], claim_order(row[0], row[1]), row[2]))[2]
     def __iter__(self):
         connection = self.store.connection
         marks = ",".join("?" for _ in self.tiers)
@@ -747,7 +756,7 @@ class Store:
                 "content_hash": context_catalog.digest(content), "bytes": len(content)}},
                 "aliases": {path: [uid]}}
         self.catalog_rows(records)
-        if ba_registry(path):
+        if ba_registry(self.docs, path):
             registry = vault_check.Vault(root=self.docs, policy=self.vault_policy, files=self.overlay(path, raw))
             try:
                 owners = vault_check.relation_identity_owners(registry, registry_paths=[self.docs / path])
@@ -991,15 +1000,82 @@ def bound(binding, docs, builder):
         return False
 
 
-def published_uri(cache):
-    return Path(cache).absolute().as_uri() + "?mode=ro"
+def published_uri(cache, *, immutable=False):
+    # No authority part: "file:///D:/..." names a UNC-like path on Windows, "file:D:/..." the drive path.
+    return ("file:" + urllib.parse.quote(Path(cache).absolute().as_posix(), safe="/:") + "?mode=ro"
+            + ("&immutable=1" if immutable else ""))
 
 
-def open_published(cache):
-    """``((connection, lease), None)`` reading the published cache in place, or ``(None, reason)``.
+def published_binding_matches(docs, cache, builder):
+    """Whether a published cache bound to this checkout exists; reads its database file without
+    creating a file or taking a lock, so a probe racing a writer may only miss a binding."""
+    cache = Path(cache)
+    try:
+        check_database_files(cache)
+        if sqlite3 is None or not cache.is_file():
+            return False
+        connection = sqlite3.connect(published_uri(cache, immutable=True), uri=True)
+    except (OSError, ValueError) + DATABASE_ERRORS:
+        return False
+    try:
+        rows = connection.execute(
+            "SELECT key,payload FROM meta WHERE key IN ('docs','builder','schema_version')").fetchall()
+        return bound({key: json.loads(payload) for key, payload in rows}, Path(docs).resolve(), builder)
+    except (sqlite3.Error, ValueError):
+        return False
+    finally:
+        connection.close()
 
-    The read-only connection holds one read transaction, so it keeps serving the
-    generation it opened while writers publish later ones.
+
+def published_sidecars(cache):
+    return all(Path(str(cache) + suffix).exists() for suffix in ("-wal", "-shm"))
+
+
+def published_snapshot(cache):
+    """The verified bytes of a published cache that has no WAL, read without creating a file, or None
+    while a WAL holds part of it."""
+    wal = Path(str(cache) + "-wal")
+    deadline = time.monotonic() + policy()["busy_timeout_ms"] / 1000
+    while True:
+        guard = None
+        try:
+            if cache.with_name(".snapshot").exists():
+                try:
+                    guard = DatabaseLease(cache, name=".snapshot", read_only=True)
+                except OSError:
+                    # An unreadable lease file leaves only the signature and hash recheck below.
+                    guard = None
+            before = {path: cache_file_signature(path) for path in (cache, wal)}
+            if before[wal] is not None:
+                return None
+            if before[cache] is not None:
+                descriptor = os.open(cache, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                with os.fdopen(descriptor, "rb") as source:
+                    raw = bytearray(source.read())
+                if before == {path: cache_file_signature(path) for path in (cache, wal)} \
+                        and hashlib.sha256(raw).hexdigest() == snapshot_file_hash(cache) \
+                        and before == {path: cache_file_signature(path) for path in (cache, wal)}:
+                    if raw.startswith(b"SQLite format 3\x00") and len(raw) >= 100:
+                        # An in-memory database cannot use WAL; the legacy header bytes read the same pages.
+                        raw[18:20] = b"\x01\x01"
+                    return raw
+        except FileNotFoundError:
+            pass
+        finally:
+            if guard is not None:
+                guard.close()
+        if time.monotonic() >= deadline:
+            raise CacheBusyError("vault cache changed while capturing its snapshot; retry")
+        time.sleep(file_lock.POLL_SECONDS)
+
+
+def open_published(cache, *, write_free=False):
+    """``((connection, lease), None)`` reading the published cache, or ``(None, reason)``.
+
+    The connection holds one read transaction, so it keeps serving the
+    generation it opened while writers publish later ones. With ``write_free``
+    no file is created: the cache is read in place only while both WAL
+    sidecars exist, else from a verified in-memory snapshot.
     """
     cache = Path(cache)
     try:
@@ -1008,19 +1084,29 @@ def open_published(cache):
             return None, None
     except (OSError, ValueError) as exc:
         return None, f"published cache refused: {exc}"
-    lease = connection = None
+    lease = connection = raw = None
     try:
-        if cache.with_name(".readers").exists():
-            lease = DatabaseLease(cache, read_only=True)
-        connection = sqlite3.connect(published_uri(cache), uri=True, check_same_thread=False,
-                                     timeout=policy()["busy_timeout_ms"] / 1000)
+        if write_free and not published_sidecars(cache):
+            raw = published_snapshot(cache)
+            if raw is None and not published_sidecars(cache):
+                raise ValueError("its write-ahead log has no shared-memory file")
+        if raw is None:
+            if cache.with_name(".readers").exists():
+                lease = DatabaseLease(cache, read_only=True)
+            connection = sqlite3.connect(published_uri(cache), uri=True, check_same_thread=False,
+                                         timeout=policy()["busy_timeout_ms"] / 1000)
+        else:
+            connection = sqlite3.connect(":memory:", check_same_thread=False)
+            connection.deserialize(raw)
         connection.execute("BEGIN")
         connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
-    except (OSError, ValueError, sqlite3.Error) as exc:
+    except BaseException as exc:
         if connection is not None:
             connection.close()
         if lease is not None:
             lease.close()
+        if not isinstance(exc, (OSError, ValueError, sqlite3.Error)):
+            raise
         return None, f"published cache cannot be read in place: {exc}"
     return (connection, lease), None
 
@@ -1033,11 +1119,15 @@ def refresh(docs, cache, builder, *, persist=True, rebuild=False, coordinate=Tru
     capabilities()
     fallback = None
     if not persist and not rebuild:
-        published, fallback = open_published(cache)
+        published, fallback = open_published(cache, write_free=True)
         if published is not None:
+            snapshot = published[0].execute("PRAGMA database_list").fetchone()[2] == ""
             try:
-                return compile_index(docs, cache, builder, published=published, persist=False, rebuild=False,
-                                     coordinate=False, generation=generation, current=current)
+                data, status = compile_index(docs, cache, builder, published=published, persist=False,
+                                             rebuild=False, coordinate=False, generation=generation, current=current)
+                if snapshot and status.get("served") == "published_cache":
+                    status["served"] = "published_snapshot"
+                return data, status
             except (CacheCorruptError, CacheUnavailableError) as exc:
                 fallback = f"published cache cannot be reconciled: {exc}"
     data, status = compile_index(docs, cache, builder, published=None, persist=persist, rebuild=rebuild,
@@ -1172,10 +1262,15 @@ def compile_index(docs, cache, builder, *, published, persist, rebuild, coordina
                 hashes = {p: entry["sha"] for p, entry in checked.items()}
                 sources = {p: "sha256:" + hashes[p] for p in Rows(store, "documents", "path")}
                 store.set_meta("snapshot_inputs", {"builder": builder, "files": hashes, "sources": sources})
+                if guard is not None:
+                    # The floor leads the commit, so a database lost after it is never renumbered from below.
+                    record_generation(cache, prior_generation + 1)
                 publish(connection, guard)
-            except BaseException:
+            except BaseException as exc:
                 if connection.in_transaction:
                     connection.rollback()
+                if isinstance(exc, FileNotFoundError):
+                    raise SourceChangedError(f"source removed while indexing: {exc.filename}") from exc
                 raise
         elif persist and (current != cached or rebind):
             connection.execute("BEGIN IMMEDIATE")
@@ -1381,8 +1476,16 @@ def locked_refresh(docs, cache, builder, *, rebuild=False, repair=False, failed=
         try:
             sweep_runtime(folder)
             try:
-                result = refresh(docs, cache, builder, rebuild=rebuild, current=current,
-                                 generation=generation_floor(cache))
+                try:
+                    result = refresh(docs, cache, builder, rebuild=rebuild, current=current,
+                                     generation=generation_floor(cache))
+                except (SourceChangedError, FileNotFoundError):
+                    if current is None:
+                        raise
+                    # A writer may have published newer sources after the pre-lock hashes; hash them again.
+                    current = None
+                    result = refresh(docs, cache, builder, rebuild=rebuild, current=current,
+                                     generation=generation_floor(cache))
                 # Another process may already have replaced the database this reader failed on.
                 if repair and (failed is None or failed == database_identity(cache)):
                     result[0].store.close()

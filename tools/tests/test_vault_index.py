@@ -28,6 +28,7 @@ import project_context
 import vault_index
 import vault_query
 from tools.tests.test_impact_closure import VAULT, note
+from tools.tests import git_fixture
 from tools.tests.levels import integration
 
 
@@ -195,6 +196,14 @@ class VaultIndexTests(unittest.TestCase):
 
     def test_no_cache_does_not_write_database_or_reading_state(self):
         self.write("requirements/a.md", note("requirement", "A", body="## Conditions\n\n" + "Keep 🙂. " * 80))
+        data, _ = self.load()
+        data.store.close()
+        runtime = self.project / ".agentrof"
+        def listing():
+            return {path.relative_to(runtime).as_posix(): path.read_bytes() if path.is_file() else None
+                    for path in runtime.rglob("*")}
+        before = listing()
+        self.assertTrue(any(name.endswith("index.db") for name in before))
         data = project_context.load_index(self.project, no_cache=True)
         self.stores.append(data.store)
         plan = project_context.resolve_context(self.project, data, entry="requirement", role="business-analyst",
@@ -202,7 +211,23 @@ class VaultIndexTests(unittest.TestCase):
         while plan["status"] != "ready":
             project_context.read_plan(self.project, data, plan)
             plan = project_context.expand_context(self.project, data, plan, reason="Read remaining source", persist_state=False)
-        self.assertFalse((self.project / ".agentrof").exists())
+        self.assertEqual(listing(), before)
+
+    def test_read_only_runtime_folder_reuses_the_published_cache_without_recompiling(self):
+        if os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0):
+            self.skipTest("directory modes do not restrict this user")
+        self.seed()
+        data, _ = self.load()
+        data.store.close()
+        folder = vault_query.default_cache(self.docs).parent
+        names = sorted(os.listdir(folder))
+        folder.chmod(0o555)
+        self.addCleanup(folder.chmod, 0o755)
+        with mock.patch.object(context_catalog, "catalog", side_effect=AssertionError("recompiled")):
+            result = self.query("find", "Story B")
+        self.assertEqual((result["cache"]["served"], result["cache"]["full"]), ("published_snapshot", False))
+        self.assertEqual(result["notes"][0]["title"], "Story B")
+        self.assertEqual(sorted(os.listdir(folder)), names)
 
     def test_foreign_checkout_binding_is_rebuilt_without_serving_its_rows(self):
         self.write("requirements/a.md", note("requirement", "A"))
@@ -303,9 +328,11 @@ class VaultIndexTests(unittest.TestCase):
         data.store.close()
         path.write_text(note("requirement", "A", body="Updated."), encoding="utf-8")
         actual = context_catalog.catalog
+        edits = iter(range(10))
         def racing(*args, **kwargs):
             result = actual(*args, **kwargs)
-            path.write_text(note("requirement", "A", body="Changed during build."), encoding="utf-8")
+            # Every attempt, including the one retry with fresh hashes, sees another edit.
+            path.write_text(note("requirement", "A", body=f"Changed during build {next(edits)}."), encoding="utf-8")
             return result
         with mock.patch.object(context_catalog, "catalog", side_effect=racing), self.assertRaisesRegex(ValueError, "stale source|changed during indexing"):
             self.load()
@@ -777,18 +804,26 @@ class VaultIndexTests(unittest.TestCase):
     def test_no_write_reads_serve_the_warm_cache_in_place_and_reconcile_edits_in_memory(self):
         self.seed()
         data, _ = self.load()
-        data.store.close()
         cache = vault_query.default_cache(self.docs)
-        def durable():
-            # SQLite's read-only connection may add its WAL and shared-memory sidecars.
-            return {path.name: path.read_bytes() for path in cache.parent.iterdir()
-                    if path.is_file() and not path.name.endswith(("-wal", "-shm"))}
-        before = durable()
+        def listing():
+            return {path.name: path.read_bytes() for path in cache.parent.iterdir() if path.is_file()}
         copied = mock.patch.object(vault_index.tempfile, "TemporaryDirectory", side_effect=AssertionError("copied"))
-        with copied, mock.patch.object(context_catalog, "catalog", side_effect=AssertionError("recompiled")):
+        recompiled = mock.patch.object(context_catalog, "catalog", side_effect=AssertionError("recompiled"))
+        # A live reader keeps both WAL sidecars, so the cache is read in place and no file is added.
+        names = set(listing())
+        self.assertTrue({"index.db-wal", "index.db-shm"} <= names)
+        with copied, recompiled:
+            index, status = vault_query.refresh(self.docs, cache, persist=False)
+            index.store.close()
+        self.assertEqual(status["served"], "published_cache")
+        self.assertEqual(set(listing()), names)
+        data.store.close()
+        before = listing()
+        self.assertFalse({"index.db-wal", "index.db-shm"} & set(before))
+        with copied, recompiled:
             index, status = vault_query.refresh(self.docs, cache, persist=False)
             self.stores.append(index.store)
-            self.assertEqual(status["served"], "published_cache")
+            self.assertEqual((status["served"], status["full"]), ("published_snapshot", False))
             self.assertEqual(index["catalog"]["documents"]["backlog/story-b.md"]["title"], "Story B")
             index = project_context.load_index(self.project, no_cache=True)
             self.stores.append(index.store)
@@ -801,7 +836,7 @@ class VaultIndexTests(unittest.TestCase):
         self.assertNotIn("fallback", status)
         self.assert_graph(index)
         self.assert_fresh(index)
-        self.assertEqual(before, durable())
+        self.assertEqual(before, listing())
 
     def test_no_write_read_reports_why_it_compiled_from_sources(self):
         self.write("requirements/a.md", note("requirement", "A"))
@@ -815,6 +850,58 @@ class VaultIndexTests(unittest.TestCase):
         self.assertIn("published cache cannot be read in place", status["fallback"])
         self.assertEqual(index["catalog"]["documents"]["requirements/a.md"]["title"], "A")
         self.assertEqual(cache.read_bytes(), b"not a SQLite database")
+
+    def test_published_reads_name_the_drive_path_and_release_their_lease_on_any_failure(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        uri = vault_index.published_uri(cache)
+        # The CI write audit strips the scheme and query; an authority part would name another path on Windows.
+        self.assertEqual(uri.removeprefix("file:").split("?", 1)[0], cache.absolute().as_posix())
+        self.assertTrue(uri.endswith("?mode=ro"))
+        self.assertTrue(cache.with_name(".readers").exists())
+        class Interrupted(Exception):
+            pass
+        with mock.patch.object(vault_index.sqlite3, "connect", side_effect=Interrupted()):
+            with self.assertRaises(Interrupted):
+                vault_index.open_published(cache)
+        vault_index.DatabaseLease(cache, exclusive=True, timeout=0).close()
+
+    def test_a_writer_publishing_after_the_pre_lock_hashes_does_not_fail_the_next_refresh(self):
+        self.seed()
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        original = vault_index.serve_unchanged
+        for change in ("edit", "delete"):
+            with self.subTest(change=change):
+                path = self.write("backlog/story-g.md", note("story", "Story G", body="First " + change + "."))
+                pending = [change]
+                def interleaved(*args, **kwargs):
+                    served = original(*args, **kwargs)
+                    if not pending:
+                        return served
+                    pending.clear()
+                    if change == "edit":
+                        path.write_text(note("story", "Story G", body="Second."), encoding="utf-8")
+                    else:
+                        path.unlink()
+                    other, _ = vault_query.locked_refresh(self.docs, cache)
+                    other.store.close()
+                    return served
+                with mock.patch.object(vault_index, "serve_unchanged", interleaved):
+                    data, status = self.load()
+                self.assertEqual("backlog/story-g.md" in data["catalog"]["documents"], change == "edit")
+                self.assert_fresh(data)
+        self.write("backlog/story-g.md", note("story", "Story G"))
+        removed = vault_index.Store.verified
+        def vanishing(store, relative):
+            (store.docs / relative).unlink()
+            return removed(store, relative)
+        with mock.patch.object(vault_index.Store, "verified", vanishing):
+            with self.assertRaises(vault_index.SourceChangedError):
+                vault_index.refresh(self.docs, cache, vault_query.builder_hash(), persist=False)
 
     def test_post_write_sync_never_waits_on_the_writer_or_fails_the_hook(self):
         spec = importlib.util.spec_from_file_location(
@@ -1159,6 +1246,29 @@ class VaultIndexTests(unittest.TestCase):
         self.assertGreater(result["generation"], before)
         self.assertEqual(json.loads(cache.with_name(".generation").read_text()), result["generation"])
 
+    def test_a_database_lost_after_an_unrecorded_publication_never_reissues_its_generation(self):
+        path = self.write("requirements/a.md", note("requirement", "A"))
+        data, first = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        class Killed(BaseException):
+            pass
+        committed = []
+        original = vault_index.publish
+        def publish_then_die(connection, guard):
+            original(connection, guard)
+            committed.append(json.loads(connection.execute("SELECT payload FROM meta WHERE key='generation'").fetchone()[0]))
+            raise Killed()
+        path.write_text(note("requirement", "A", body="Published, then the process died."), encoding="utf-8")
+        with mock.patch.object(vault_index, "publish", publish_then_die), self.assertRaises(Killed):
+            self.load()
+        self.assertEqual(committed, [first["generation"] + 1])
+        for suffix in ("", "-wal", "-shm"):
+            Path(str(cache) + suffix).unlink(missing_ok=True)
+        data, rebuilt = self.load()
+        data.store.close()
+        self.assertGreater(rebuilt["generation"], committed[0])
+
     def test_another_spelling_of_the_checkout_keeps_its_binding(self):
         target = self.write("backlog/story-b.md", note("story", "Story B"))
         alias = self.project.parent / (self.project.name + "-alias")
@@ -1246,11 +1356,18 @@ class VaultIndexTests(unittest.TestCase):
     def test_task_input_closure_through_the_index_equals_the_reparse(self):
         import task_inputs
         self.seed()
-        self.write("backlog/story-s.md", note("story", "Story S", {"implements": [("requirements/req-a", "Req A")]},
-                   extra="source_hash: sha256:stale"))
+        stale = note("story", "Story S", {"implements": [("requirements/req-a", "Req A")]}, extra="source_hash: sha256:stale")
+        for path in ("backlog/story-s.md", "artifacts/x.md", "notes/artifacts/x.md"):
+            self.write(path, stale)
+        self.write("business-analysis/one/rules.md", note("rule-set", "Rules"))
+        self.write("business-analysis/one/_generated/REGISTRY.JSON", json.dumps({"ids": {"BR-001": {"doc": "rules.md"}}}))
+        self.write("backlog/story-r.md", '---\ntype: story\ntitle: Story R\nderives_from:\n  - "BR-001"\n---\n# Story R\n')
         earlier = (self.docs / "backlog/story-c.md").read_text(encoding="utf-8")
         (self.docs / "backlog/story-c.md").unlink()
-        cases = ((["requirements/req-a.md"], {}), ([], {}), (["backlog/story-b.md"], {"backlog/story-c.md": earlier}))
+        data, _ = self.load()
+        data.store.close()
+        cases = ((["requirements/req-a.md"], {}), ([], {}), (["backlog/story-b.md"], {"backlog/story-c.md": earlier}),
+                 (["business-analysis/one/rules.md"], {}))
         for present, deleted in cases:
             with self.subTest(present=present, deleted=sorted(deleted)):
                 expected = impact_closure.closure(self.docs, present, deleted=deleted) if deleted \
@@ -1264,6 +1381,55 @@ class VaultIndexTests(unittest.TestCase):
                                api.closure(docs, present, deleted=deleted) if deleted else api.closure(docs, present)):
             reparsed = task_inputs.impact_closure(self.docs, changed, "workspace/docs/", {"workspace/docs/backlog/story-c.md": earlier})
         self.assertEqual(indexed, reparsed)
+
+    def test_task_input_closure_reparses_without_a_bound_cache_and_never_builds_one(self):
+        import task_inputs
+        self.seed()
+        expected = impact_closure.closure(self.docs, ["requirements/req-a.md"])
+        actual = task_inputs.closure_raw(impact_closure, self.docs, ["requirements/req-a.md"], {})
+        self.assertEqual(json.dumps(actual, sort_keys=True), json.dumps(expected, sort_keys=True))
+        self.assertFalse((self.project / ".agentrof").exists())
+
+    def test_task_input_closure_through_linked_docs_never_touches_the_linked_project(self):
+        import task_inputs
+        self.seed()
+        data, _ = self.load()
+        data.store.close()
+        self.write("backlog/story-b.md", note("story", "Story B", {"implements": [("requirements/req-a", "Req A")]},
+                   body="Edited after publication."))
+        runtime = self.project / ".agentrof"
+        def listing():
+            return {path.relative_to(runtime).as_posix(): path.read_bytes() if path.is_file() else None
+                    for path in runtime.rglob("*")}
+        before = listing()
+        linked = Path(self.temp.name).resolve() / "linked"
+        (linked / "workspace").mkdir(parents=True)
+        try:
+            (linked / "workspace/docs").symlink_to(self.docs, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"directory links unavailable: {exc}")
+        docs = linked / "workspace/docs"
+        expected = impact_closure.closure(docs, ["requirements/req-a.md"])
+        actual = task_inputs.closure_raw(impact_closure, docs, ["requirements/req-a.md"], {})
+        self.assertEqual(json.dumps(actual, sort_keys=True), json.dumps(expected, sort_keys=True))
+        self.assertEqual(listing(), before)
+        self.assertFalse((linked / ".agentrof").exists())
+
+    def test_duplicate_registry_ids_resolve_to_the_first_registry_in_path_order(self):
+        import task_inputs
+        for space in ("pay", "pay-v2"):
+            self.write(f"business-analysis/{space}/rules.md", note("rule-set", f"Rules {space}"))
+            self.write(f"business-analysis/{space}/_generated/registry.json",
+                       json.dumps({"ids": {"BR-001": {"doc": "rules.md"}}}))
+        self.write("backlog/s1.md", '---\ntype: story\ntitle: S1\nid: ST-001\nderives_from:\n  - "BR-001"\n---\n# S1\n')
+        data, _ = self.load()
+        self.assert_graph(data)
+        self.assertIn(["backlog/s1.md", "business-analysis/pay/rules.md", "derives_from", ["frontmatter"]],
+                      list(data["edges"]))
+        data.store.close()
+        present = ["business-analysis/pay/rules.md"]
+        self.assertEqual(task_inputs.closure_raw(impact_closure, self.docs, present, {}),
+                         impact_closure.closure(self.docs, present))
 
     def test_context_reads_hash_sources_once_and_unchanged_reads_skip_the_writer_lock(self):
         self.seed()
@@ -1357,7 +1523,7 @@ class VaultIndexTests(unittest.TestCase):
         self.write("requirements/a.md", note("requirement", "Main A"))
         def git(*args):
             subprocess.run(["git", "-C", str(main), *args], check=True, capture_output=True, text=True)
-        git("init", "-q")
+        git_fixture.init_repository(main)
         git("add", "--all")
         git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
             "commit", "-qm", "Fixture")

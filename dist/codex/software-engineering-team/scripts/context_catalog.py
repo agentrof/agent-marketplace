@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import fnmatch
 import hashlib
 import json
 import os
@@ -268,11 +269,47 @@ def receipt_paths(root: Path, *, candidates=None) -> set[Path]:
     if candidates is None:
         return {path for pattern in patterns for path in root.glob(pattern)}
     # Match the already confined inventory without descending into excluded
-    # artifact trees. A single star stays within one directory component.
-    matches = [re.compile(re.escape(pattern).replace(r"/\*\*/", r"/(?:[^/]+/)*")
-               .replace(r"\*", r"[^/]*") + r"\Z") for pattern in patterns]
-    return {path for path in candidates
-            if any(pattern.fullmatch(path.relative_to(root).as_posix()) for pattern in matches)}
+    # artifact trees, as the glob above would on this file system.
+    return {path for path in candidates if any(globbed(root, path, pattern) for pattern in patterns)}
+
+
+def globbed(root: Path, path: Path, pattern: str) -> bool:
+    """Whether ``root.glob(pattern)`` reports this file on the running file system.
+
+    Wildcard components match the listed spelling with the platform's case rule;
+    literal ones match whatever the file system's own lookup finds, so a
+    case-insensitive volume matches another case of the same file.
+    """
+    parts = path.relative_to(root).parts
+    wanted = pattern.split("/")
+    def spell(i, j):
+        if i == len(wanted):
+            return [] if j == len(parts) else None
+        if wanted[i] == "**":
+            for k in range(j, len(parts) + 1):
+                rest = spell(i + 1, k)
+                if rest is not None:
+                    return [*parts[j:k], *rest]
+            return None
+        if j == len(parts):
+            return None
+        if any(char in wanted[i] for char in "*?["):
+            if not fnmatch.fnmatchcase(os.path.normcase(parts[j]), os.path.normcase(wanted[i])):
+                return None
+            spelled = parts[j]
+        elif parts[j].casefold() == wanted[i].casefold():
+            spelled = wanted[i]
+        else:
+            return None
+        rest = spell(i + 1, j + 1)
+        return None if rest is None else [spelled, *rest]
+    spelled = spell(0, 0)
+    if spelled is None:
+        return False
+    try:
+        return os.path.samefile(root.joinpath(*spelled), path)
+    except OSError:
+        return False
 
 
 def add_receipts(root: Path, data: dict, *, paths=None) -> None:

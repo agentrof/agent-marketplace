@@ -118,23 +118,28 @@ def closure_raw(api, docs: Path, present: list, earlier: dict) -> dict:
     """``api.closure`` over the verified vault index when this Python has SQLite FTS5.
 
     The result equals the reparse ``api.closure`` computes. A closure module that
-    provides only the documented ``closure`` call, a vault outside a project's
-    ``workspace/docs`` (which has no checkout index) and a Python without SQLite
-    FTS5 use that reparse.
+    provides only the documented ``closure`` call, a vault that is not a project's
+    own ``workspace/docs`` (which has no checkout index), a project without a
+    published index bound to it and a Python without SQLite FTS5 use that reparse.
     """
     def reparse():
         return api.closure(docs, present, deleted=earlier) if earlier else api.closure(docs, present)
-    root = Path(docs).resolve()
-    if not hasattr(api, "closure_from") or root.name != "docs" or root.parent.name != "workspace":
+    spelled = Path(docs).absolute()
+    if not hasattr(api, "closure_from") or spelled.name != "docs" or spelled.parent.name != "workspace":
         return reparse()
     import vault_index
+    import vault_query
     try:
         vault_index.capabilities()
+        root = vault_query.project_docs(spelled.parents[1])
+        cache = vault_query.default_cache(root)
     except ValueError:
+        return reparse()
+    # Building an index costs more than one reparse, so only an existing bound cache is used.
+    if not vault_index.published_binding_matches(root, cache, vault_query.builder_hash()):
         return reparse()
     import project_context
     import vault_check
-    import vault_query
 
     def run(index):
         snap = vault_query.Index(index).snapshot()

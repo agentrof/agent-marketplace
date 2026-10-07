@@ -132,12 +132,15 @@ the identifier set they match changes. Queries read indexed records rather than
 loading a full JSON catalog; one context check or read hashes the sources once,
 and approval proofs are computed only for stamped notes, or only the requested
 note for `hash`. Task-input impact closure reads the same verified index and
-returns the reparse's exact result. `--no-cache` and read-only filesystems read
-a compatible published cache in place through SQLite's read-only mode under the
-shared reader lease, apply a source delta to an in-memory backup, and compile
-an incompatible, unreadable or absent cache in memory; they never write the
-published database, and the status names why sources were compiled
-(`fallback`). Small verified request/provenance capsules retain their existing
+returns the reparse's exact result. `--no-cache` and read-only filesystems
+create no file in the runtime folder: while a live connection keeps both WAL
+sidecars, they read a compatible published cache in place through SQLite's
+read-only mode, under the shared reader lease when `.readers` exists;
+otherwise they load a snapshot verified by file signature and hash, under the
+shared snapshot lease when `.snapshot` exists, into memory. They apply a source
+delta to an in-memory copy and compile an incompatible, unreadable or absent
+cache in memory; they never write the published database, and the status names
+why sources were compiled (`fallback`). Small verified request/provenance capsules retain their existing
 JSON and bounded inline formats; they are not a second vault index.
 
 The scope is `.md` and `.json` beneath `workspace/docs`, excluding `artifacts`

@@ -6,6 +6,7 @@ import copy
 import contextlib
 import io
 import json
+import errno
 from pathlib import Path
 import sys
 import tempfile
@@ -18,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 
 import context_catalog  # noqa: E402
+import context_history  # noqa: E402
+import operation_compile  # noqa: E402
+import requirement_compile  # noqa: E402
 import impact_closure  # noqa: E402
 import project_context  # noqa: E402
 import vault_query  # noqa: E402
@@ -93,12 +97,319 @@ class ProjectContextTests(unittest.TestCase):
         self.assertNotIn("BR-ORD-002", text)
         self.assertNotIn("references", result["units"][0])
 
+    def approved_contract(self, kind, *, leading=2, newline="\n", legacy=False):
+        path = self.docs / "operation" / (kind + ".md")
+        text = note(kind, "Approved contract", body="The condition is mandatory.",
+            extra="revision: 1").replace("status: draft", "status: approved")
+        text = text.replace("---\n\n#", "---\n" + "\n" * leading + "#", 1)
+        props, body = operation_compile.parse_text(text, path)
+        expected = (operation_compile._source_hash(props, body.rstrip() + "\n") if legacy
+                    else operation_compile.source_hash(props, body))
+        text = text.replace("revision: 1", f"revision: 1\nsource_hash: {expected}")
+        raw = text.replace("\n", newline).encode("utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+        return path, raw, expected
+
+    def test_bound_operation_hash_uses_owner_parser_across_blank_and_newline_modes(self):
+        for kind in ("verification-contract", "environment-contract"):
+            for leading in (0, 1, 3):
+                for newline in ("\n", "\r\n"):
+                    for legacy in (False, True):
+                        with self.subTest(kind=kind, leading=leading, newline=newline, legacy=legacy):
+                            path, raw, expected = self.approved_contract(kind, leading=leading,
+                                newline=newline, legacy=legacy)
+                            props, body = operation_compile.parse_text(raw.decode(), path)
+                            self.assertEqual(operation_compile.receipt_hash(props, body), expected)
+                            self.assertTrue(context_history.matches(path, raw, expected))
+                            self.assertFalse(context_history.matches(path, raw.replace(
+                                b"mandatory", b"optional"), expected))
+                            self.assertFalse(context_history.matches(path, raw, "sha256:" + "0" * 64))
+                            self.assertFalse(context_history.matches(path, raw.replace(
+                                expected.encode(), ("sha256:" + "0" * 64).encode()), expected))
+
+    def test_bound_requirement_hash_matches_the_owning_body_parser(self):
+        path = self.docs / "requirements/selected.md"
+        path.parent.mkdir(parents=True)
+        for leading in (0, 1, 3):
+            for newline in ("\n", "\r\n"):
+                with self.subTest(leading=leading, newline=newline):
+                    text = note("requirement", "Selected requirement", body="Preserve the required outcome.")
+                    text = text.replace("---\n\n#", "---\n" + "\n" * leading + "#", 1)
+                    path.write_bytes(text.replace("\n", newline).encode())
+                    props, body = requirement_compile.split_note(path)
+                    expected = requirement_compile.semantic_hash(props, body)
+                    raw = text.replace("status: draft", f"status: draft\nsource_hash: {expected}").replace("\n", newline).encode()
+                    self.assertTrue(context_history.matches(path, raw, expected))
+                    self.assertFalse(context_history.matches(path, raw.replace(b"required", b"altered"), expected))
+                    self.assertFalse(context_history.matches(path, raw, "sha256:" + "0" * 64))
+                    self.assertFalse(context_history.matches(path, raw.replace(
+                        expected.encode(), ("sha256:" + "0" * 64).encode()), expected))
+
+    def test_current_operation_bindings_resolve_and_read_exact_source_bytes(self):
+        for kind in ("verification-contract", "environment-contract"):
+            with self.subTest(kind=kind):
+                path, raw, expected = self.approved_contract(kind, leading=3, newline="\r\n", legacy=True)
+                stem = kind.replace("-", "_")
+                self.write("backlog/pinned-current.md", note("delivery-item", "Selected current binding",
+                    extra=f"id: ITEM-902\n{stem}_ref: operation/{kind}.md\n{stem}_hash: {expected}"))
+                data = self.index()
+                plan = project_context.resolve_context(self.project, data, entry="deliver",
+                    role="backend-developer", refs=["ITEM-902"])
+                self.assertEqual(plan["unresolved_required_count"], 0)
+                self.assertEqual(plan["status"], "ready")
+                self.assertEqual(context_history.bound_source(self.project, path.relative_to(self.docs).as_posix(), expected),
+                                 {"current": True})
+                rows = project_context.read_plan(self.project, data, plan)["units"]
+                selected = next(row for row in rows if row["path"] == path.relative_to(self.docs).as_posix())
+                self.assertNotIn("historical", selected)
+                self.assertEqual(selected["text"].encode(), raw)
+
+    def test_historical_operation_bindings_use_owner_normalization_and_exact_git_bytes(self):
+        revision = "a" * 40
+        for kind in ("verification-contract", "environment-contract"):
+            for newline in ("\n", "\r\n"):
+                for legacy in (False, True):
+                    with self.subTest(kind=kind, newline=newline, legacy=legacy):
+                        path, raw, expected = self.approved_contract(kind, leading=3, newline=newline, legacy=legacy)
+                        relative = path.relative_to(self.docs).as_posix()
+                        path.write_bytes(raw.replace(b"mandatory", b"changed"))
+                        stem = kind.replace("-", "_")
+                        self.write("backlog/pinned-historical.md", note("delivery-item", "Selected historical binding",
+                            extra=f"id: ITEM-903\n{stem}_ref: {relative}\n{stem}_hash: {expected}"))
+
+                        def transport(command, **_kwargs):
+                            if command[-2:] == ["rev-parse", "--show-toplevel"]:
+                                return subprocess.CompletedProcess(command, 0, str(self.project).encode() + b"\n", b"")
+                            if command[-3:] == ["rev-parse", "--verify", "HEAD^{commit}"]:
+                                return subprocess.CompletedProcess(command, 0, ("b" * 40).encode() + b"\n", b"")
+                            if "log" in command:
+                                return subprocess.CompletedProcess(command, 0, revision.encode() + b"\n", b"")
+                            if command[-2:] == ["show", f"{revision}:workspace/docs/{relative}"]:
+                                return subprocess.CompletedProcess(command, 0, raw, b"")
+                            raise AssertionError("unexpected Git transport")
+
+                        with mock.patch.object(context_history.subprocess, "run", side_effect=transport):
+                            data = self.index()
+                            plan = project_context.resolve_context(self.project, data, entry="deliver",
+                                role="backend-developer", refs=["ITEM-903"])
+                            self.assertEqual(plan["unresolved_required_count"], 0)
+                            selected = next(row for row in project_context.read_plan(self.project, data, plan)["units"]
+                                            if row.get("historical"))
+                            self.assertEqual(selected["bound_hash"], expected)
+                            self.assertEqual(selected["git_revision"], revision)
+                            self.assertEqual(selected["text"].encode(), raw)
+                            with mock.patch.object(context_history, "matches", wraps=context_history.matches) as verify:
+                                self.assertIsNone(context_history.bound_source(self.project, relative, "sha256:" + "0" * 64))
+                            self.assertTrue(verify.called)
+
+    def history_cache_fixture(self):
+        path, raw, expected = self.approved_contract("verification-contract", leading=3)
+        relative = path.relative_to(self.docs).as_posix()
+        path.write_bytes(raw.replace(b"mandatory", b"changed"))
+        state = {"head": "b" * 40, "raw": raw, "missing": False, "logs": 0, "shows": 0}
+
+        def transport(command, **_kwargs):
+            root = command[3]
+            if command[-2:] == ["rev-parse", "--show-toplevel"]:
+                return subprocess.CompletedProcess(command, 0, root.encode() + b"\n", b"")
+            if command[-3:] == ["rev-parse", "--verify", "HEAD^{commit}"]:
+                return subprocess.CompletedProcess(command, 0, state["head"].encode() + b"\n", b"")
+            if "log" in command:
+                state["logs"] += 1
+                return subprocess.CompletedProcess(command, 0, ("a" * 40).encode() + b"\n", b"")
+            if command[-2:] == ["show", f"{'a' * 40}:workspace/docs/{relative}"]:
+                state["shows"] += 1
+                return subprocess.CompletedProcess(command, int(state["missing"]),
+                    b"" if state["missing"] else state["raw"], b"")
+            raise AssertionError("unexpected Git transport")
+
+        return path, relative, expected, state, transport
+
+    def test_positive_history_cache_rechecks_bytes_and_preserves_current_preference(self):
+        path, relative, expected, state, transport = self.history_cache_fixture()
+        with mock.patch.object(context_history.subprocess, "run", side_effect=transport):
+            first = context_history.bound_source(self.project, relative, expected)
+            self.assertFalse(first["current"])
+            self.assertEqual(state["logs"], 1)
+            first["historical_properties"]["title"] = "Mutated caller copy"
+            second = context_history.bound_source(self.project, relative, expected)
+            self.assertEqual(state["logs"], 1)
+            self.assertEqual(state["shows"], 2)
+            self.assertNotEqual(second["historical_properties"]["title"], "Mutated caller copy")
+            path.write_bytes(state["raw"])
+            self.assertEqual(context_history.bound_source(self.project, relative, expected), {"current": True})
+            self.assertEqual(state["shows"], 2)
+
+    def test_history_cache_does_not_keep_missing_tampered_head_or_foreign_root_results(self):
+        path, relative, expected, state, transport = self.history_cache_fixture()
+        with mock.patch.object(context_history.subprocess, "run", side_effect=transport):
+            self.assertIsNotNone(context_history.bound_source(self.project, relative, expected))
+            original = state["raw"]
+            state["raw"] = original.replace(b"mandatory", b"tampered")
+            self.assertIsNone(context_history.bound_source(self.project, relative, expected))
+            state["raw"] = original
+            self.assertIsNotNone(context_history.bound_source(self.project, relative, expected))
+            before = state["logs"]
+            state["head"] = "c" * 40
+            self.assertIsNotNone(context_history.bound_source(self.project, relative, expected))
+            self.assertEqual(state["logs"], before + 1)
+            other = self.project / "other-root"
+            other_path = other / "workspace/docs" / relative
+            other_path.parent.mkdir(parents=True)
+            other_path.write_bytes(path.read_bytes())
+            self.assertIsNotNone(context_history.bound_source(other, relative, expected))
+            self.assertEqual(state["logs"], before + 2)
+            state["missing"] = True
+            self.assertIsNone(context_history.bound_source(other, relative, expected))
+            after_missing = state["logs"]
+            state["missing"] = False
+            self.assertIsNotNone(context_history.bound_source(other, relative, expected))
+            self.assertEqual(state["logs"], after_missing + 1)
+            self.assertIsNone(context_history.bound_source(self.project, relative, "sha256:" + "0" * 64))
+
+    def test_positive_history_cache_obeys_serialized_byte_policy(self):
+        _path, relative, expected, state, transport = self.history_cache_fixture()
+        with mock.patch.object(context_history.subprocess, "run", side_effect=transport), \
+                mock.patch.object(context_history, "history_limit", return_value=1):
+            self.assertIsNotNone(context_history.bound_source(self.project, relative, expected))
+            self.assertIsNotNone(context_history.bound_source(self.project, relative, expected))
+            self.assertEqual(state["logs"], 2)
+            self.assertLessEqual(context_history._HISTORY_CACHE_BYTES, 1)
+
+    def test_history_cache_search_is_pinned_across_interleaved_head_change(self):
+        _path, relative, expected, state, transport = self.history_cache_fixture()
+        captured = "b" * 40
+        switched = False
+        logs = []
+
+        def interleaved(command, **kwargs):
+            nonlocal switched
+            if command[-3:] == ["rev-parse", "--verify", "HEAD^{commit}"] and not switched:
+                switched = True
+                state["head"] = "c" * 40
+                return subprocess.CompletedProcess(command, 0, captured.encode() + b"\n", b"")
+            if "log" in command:
+                logs.append(command)
+                if captured in command:
+                    return subprocess.CompletedProcess(command, 0, b"", b"")
+            return transport(command, **kwargs)
+
+        with mock.patch.object(context_history.subprocess, "run", side_effect=interleaved):
+            self.assertIsNone(context_history.bound_source(self.project, relative, expected))
+            self.assertIn(captured, logs[0])
+            self.assertNotIn((str(self.project), relative, expected, captured), context_history._HISTORY_CACHE)
+            state["head"] = captured
+            self.assertIsNone(context_history.bound_source(self.project, relative, expected))
+            self.assertEqual(len(logs), 2)
+            state["head"] = "invalid-head"
+            self.assertIsNone(context_history.bound_source(self.project, relative, expected))
+            self.assertEqual(len(logs), 2)
+
+    def test_exact_byte_budget_keeps_row_integrity_and_one_less_pages_it(self):
+        data = self.index()
+        parent = context_catalog.resolve(data["catalog"], "example:BR-ORD-001")[0]
+        params = dict(entry="business-analysis", role="business-analyst", refs=["example:BR-ORD-001"])
+        whole = project_context.resolve_context(self.project, data, **params,
+            budget={"max_source_bytes": parent["bytes"]})
+        self.assertEqual(whole["must_read"][0]["unit_id"], parent["unit_id"])
+        self.assertEqual(whole["status"], "ready")
+        expected = project_context.read_plan(self.project, data, whole)["units"][0]["text"]
+        first = project_context.resolve_context(self.project, data, **params,
+            budget={"max_source_bytes": parent["bytes"] - 1})
+        self.assertEqual(first["must_read"][0]["ranges"], parent["ranges"])
+        self.assertEqual(first["coverage"]["returned_units"], 0)
+        second = project_context.expand_context(self.project, data, first, reason="Finish the row")
+        self.assertEqual(second["status"], "ready")
+        self.assertEqual(second["coverage"]["returned_units"], 1)
+        self.assertEqual("".join(project_context.read_plan(self.project, data, page)["units"][0]["text"]
+                                 for page in (first, second)), expected)
+
     def test_duplicate_bare_id_is_not_silently_resolved(self):
         rule = (self.docs / "business-analysis/example/domains/orders/rules/orders-rules.md").read_text()
         self.write("business-analysis/another/domains/orders/rules/orders-rules.md", rule)
         with self.assertRaisesRegex(ValueError, "2 matches"):
             self.plan(refs=["BR-ORD-001"])
         self.assertEqual(len(self.plan(refs=["another:BR-ORD-001"])["must_read"]), 1)
+
+    def mirrored_decision(self, path="system-architecture/decisions/selected.md", *, rows=None):
+        rows = rows or [("DEC-TEST-001", "active")]
+        body = ("## Decisions\n\n| id | statement | status |\n|---|---|---|\n" +
+                "".join(f"| {identity} | Preserve the decision. | {status} |\n" for identity, status in rows) +
+                "\n## Conditions\n\nPreserve the additional condition.\n")
+        self.write(path, note("decision", "Selected decision", extra="aliases:\n  - DEC-TEST-001", body=body))
+        return path
+
+    def test_declared_document_record_mirror_resolves_bare_and_qualified_to_whole_source(self):
+        path = self.mirrored_decision()
+        data = self.index()["catalog"]
+        for reference in ("DEC-TEST-001", f"[[{path.removesuffix('.md')}|DEC-TEST-001]]"):
+            with self.subTest(reference=reference):
+                hits = context_catalog.resolve(data, reference)
+                self.assertEqual(len(hits), 1)
+                self.assertEqual(hits[0]["kind"], "document")
+                plan = self.plan(refs=[reference])
+                text = context_catalog.read_units(self.docs, data,
+                    [plan["must_read"][0]["unit_id"]], 10000)["units"][0]["text"]
+                self.assertIn("Preserve the additional condition.", text)
+        row = next(unit for unit in data["units"].values() if unit["path"] == path and unit["kind"] == "row")
+        self.assertEqual(context_catalog.resolve(data, row["unit_id"]), [row])
+        text = context_catalog.read_units(self.docs, data, [row["unit_id"]], 10000)["units"][0]["text"]
+        self.assertNotIn("Preserve the additional condition.", text)
+
+    def test_document_record_mirror_keeps_cross_document_ambiguity(self):
+        first = self.mirrored_decision()
+        second = self.mirrored_decision("system-architecture/decisions/other.md")
+        data = self.index()["catalog"]
+        hits = context_catalog.resolve(data, "DEC-TEST-001")
+        self.assertEqual({unit["path"] for unit in hits}, {first, second})
+        self.assertEqual(len(hits), 2)
+        with self.assertRaisesRegex(ValueError, "2 matches"):
+            self.plan(refs=["DEC-TEST-001"])
+        for path in (first, second):
+            hit = context_catalog.resolve(data, f"[[{path.removesuffix('.md')}|DEC-TEST-001]]")
+            self.assertEqual(len(hit), 1)
+            self.assertEqual(hit[0]["kind"], "document")
+
+    def test_document_record_mirror_keeps_duplicate_and_inactive_row_ambiguity(self):
+        for rows in ([('DEC-TEST-001', 'active'), ('DEC-TEST-001', 'active')],
+                     [('DEC-TEST-001', 'inactive')], [('DEC-TEST-001', 'historical')]):
+            with self.subTest(rows=rows):
+                path = self.mirrored_decision(rows=rows)
+                data = self.index()["catalog"]
+                hits = context_catalog.resolve(data, f"[[{path.removesuffix('.md')}|DEC-TEST-001]]")
+                self.assertEqual(len(hits), 1 + len(rows))
+                with self.assertRaisesRegex(ValueError, "matches"):
+                    self.plan(refs=[f"[[{path.removesuffix('.md')}|DEC-TEST-001]]"])
+
+    def test_document_record_mirror_leaves_distinct_rows_and_explicit_section_addresses(self):
+        path = self.mirrored_decision(rows=[("DEC-TEST-001", "active"), ("DEC-TEST-002", "active")])
+        data = self.index()["catalog"]
+        self.assertEqual(context_catalog.resolve(data, "DEC-TEST-001")[0]["kind"], "document")
+        distinct = context_catalog.resolve(data, "DEC-TEST-002")
+        self.assertEqual(len(distinct), 1)
+        self.assertEqual(distinct[0]["kind"], "row")
+        section = context_catalog.resolve(data, path + "::section:Conditions")
+        self.assertEqual(len(section), 1)
+        self.assertEqual(section[0]["kind"], "section")
+
+    def test_record_mirror_does_not_coalesce_other_kinds_or_nondeclared_aliases(self):
+        path = "backlog/scenario-mirror.md"
+        self.write(path, note("test-plan", "Scenario mirror", extra="aliases:\n  - ST-901-TS-001",
+            body="## ST-901-TS-001\n\nPreserve the scenario condition."))
+        data = self.index()["catalog"]
+        hits = context_catalog.resolve(data, "ST-901-TS-001")
+        self.assertEqual({unit["kind"] for unit in hits}, {"document", "scenario"})
+        self.assertEqual(len(hits), 2)
+        path = self.mirrored_decision()
+        self.write(path, (self.docs / path).read_text().replace("  - DEC-TEST-001", "  - Display alias"))
+        data = self.index()["catalog"]
+        self.assertEqual(context_catalog.resolve(data, "DEC-TEST-001")[0]["kind"], "row")
+        self.assertEqual(context_catalog.resolve(data, "Display alias")[0]["kind"], "document")
+        document = context_catalog.resolve(data, path)[0]
+        row = next(unit for unit in data["units"].values() if unit["path"] == path and unit["kind"] == "row")
+        data["aliases"][path] = [document["unit_id"], row["unit_id"]]
+        self.assertEqual(len(context_catalog.resolve(data, path)), 2)
 
     def test_full_document_subsumes_a_requested_section(self):
         plan = self.plan(refs=["ST-901", "backlog/example.md::section:Scope"])
@@ -117,9 +428,463 @@ class ProjectContextTests(unittest.TestCase):
     def test_oversized_required_source_is_not_dropped_or_truncated(self):
         plan = self.plan(budget={"max_source_bytes": 1})
         self.assertEqual(plan["status"], "needs_split")
-        self.assertEqual(plan["must_read"], [])
-        self.assertGreater(plan["oversized"]["available_smaller_units"], 0)
+        self.assertEqual(plan["coverage"]["source_bytes"], 1)
+        self.assertEqual(plan["must_read"][0]["parent_kind"], "document")
         self.assertEqual(plan["coverage"]["remaining_required_units"], 2)
+
+    def test_oversized_unicode_source_makes_progress_until_complete(self):
+        self.write("backlog/large.md", note("story", "Large", body=
+            "## Conditions\n\n" + "- Keep every condition. αβγ🙂\n" * 80))
+        data = self.index()
+        parent = context_catalog.resolve(data["catalog"], "backlog/large.md")[0]
+        expected = context_catalog.read_units(self.docs, data["catalog"],
+                                             [parent["unit_id"]], parent["bytes"])["units"][0]["text"]
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=["backlog/large.md"],
+            budget={"max_source_bytes": 170, "max_metadata_bytes": 4000})
+        fragments, pages = [], 0
+        while True:
+            self.assertTrue(plan["must_read"])
+            read = project_context.read_plan(self.project, data, plan)
+            self.assertLessEqual(read["bytes"], 170)
+            fragments.extend(unit["text"] for unit in read["units"])
+            pages += 1
+            self.assertLess(pages, parent["bytes"])
+            if plan["status"] == "ready":
+                break
+            self.assertEqual(plan["coverage"]["remaining_required_units"], 1)
+            plan = project_context.expand_context(self.project, data, plan, reason="Read remaining conditions")
+        self.assertEqual("".join(fragments), expected)
+        self.assertGreater(pages, 1)
+
+    def test_oversized_single_line_and_nested_unit_preserve_parent_scope(self):
+        self.write("backlog/large.md", note("story", "Large", body=
+            "## Acceptance\n\n- If validation fails:\n  - " + "Preserve 🙂. " * 100 + "\n"))
+        data = self.index()
+        child = next(unit for unit in data["catalog"]["units"].values()
+                     if unit["path"] == "backlog/large.md" and unit["kind"] == "item"
+                     and unit["label"].startswith("- Preserve"))
+        expected = context_catalog.read_units(self.docs, data["catalog"],
+                                             [child["unit_id"]], child["bytes"])["units"][0]["text"]
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=[child["unit_id"]], budget={"max_source_bytes": 160})
+        text = ""
+        while True:
+            row = plan["must_read"][0]
+            self.assertEqual(row["parent_unit_id"], child["unit_id"])
+            self.assertEqual(row["ranges"], child["ranges"])
+            text += project_context.read_plan(self.project, data, plan)["units"][0]["text"]
+            if plan["status"] == "ready":
+                break
+            plan = project_context.expand_context(self.project, data, plan, reason="Read the same item")
+        self.assertEqual(text, expected)
+        self.assertIn("If validation fails", text)
+
+    def test_smaller_expansion_never_completes_original_document_early(self):
+        self.write("backlog/large.md", note("story", "Large", body=
+            "## First\n\nFirst condition.\n\n## Remaining\n\n" + "Remaining condition.\n" * 100))
+        data = self.index()
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=["backlog/large.md"], budget={"max_source_bytes": 200})
+        second = project_context.expand_context(self.project, data, plan,
+            refs=["backlog/large.md::section:First"], reason="Read the smaller address")
+        self.assertEqual(second["status"], "needs_split")
+        self.assertEqual(second["coverage"]["required_units"], 1)
+        self.assertGreater(second["must_read"][0]["byte_range"][0], 0)
+        self.assertIn("backlog/large.md", project_context.request_data(self.project, second)["refs"])
+
+    def test_large_reference_set_and_growing_history_stay_bounded(self):
+        refs = []
+        for number in range(140):
+            relative = f"backlog/selected-{number:03}-" + "source-" * 10 + ".md"
+            self.write(relative, note("story", "Selected", body=f"Required condition {number}."))
+            refs.append(relative)
+        data = self.index()
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=refs,
+            budget={"max_files": 3, "max_source_bytes": 500, "max_metadata_bytes": 5000})
+        read_paths, pages = set(), 0
+        state_path = plan["request"]["state"]["path"]
+        while True:
+            self.assertLessEqual(len(project_context.encoded(plan)), 5000)
+            self.assertEqual(project_context.request_data(self.project, plan)["refs"], refs)
+            self.assertEqual(plan["request"]["state"]["path"], state_path)
+            self.assertNotIn("seen_units", plan["request"])
+            self.assertTrue(plan["must_read"])
+            read = project_context.read_plan(self.project, data, plan)
+            read_paths.update(unit["path"] for unit in read["units"])
+            pages += 1
+            self.assertLessEqual(pages, len(refs))
+            if plan["status"] == "ready":
+                break
+            plan = project_context.expand_context(self.project, data, plan, reason="Read remaining selected sources")
+        self.assertEqual(read_paths, set(refs))
+        self.assertGreater(pages, 1)
+
+    def large_scope(self, *, no_cache=False, metadata_bytes=3500):
+        refs = []
+        for number in range(40):
+            relative = f"backlog/selected-{number:03}-" + "source-" * 10 + ".md"
+            self.write(relative, note("story", "Selected", body=f"Condition {number}."))
+            refs.append(relative)
+        data = self.index()
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=refs, persist_state=not no_cache,
+            budget={"max_files": 2, "max_source_bytes": 400, "max_metadata_bytes": metadata_bytes})
+        return data, plan, refs
+
+    def test_request_capsule_loss_corruption_and_alias_escape_fail_closed(self):
+        data, plan, refs = self.large_scope()
+        path = self.project / plan["request"]["state"]["path"]
+        original = path.read_bytes()
+        path.write_bytes(original + b" ")
+        with self.assertRaisesRegex(ValueError, "hash mismatch"):
+            project_context.read_plan(self.project, data, plan)
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, "rerun the original"):
+            project_context.expand_context(self.project, data, plan, reason="Continue")
+        replacement = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=refs, budget=plan["request"]["budget"])
+        self.assertEqual(replacement["plan_hash"], plan["plan_hash"])
+        target = self.project / "state-copy.json"
+        target.write_bytes(original)
+        path.unlink()
+        path.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, "symbolic link"):
+            project_context.validate_plan(self.project, data, plan)
+        modified = copy.deepcopy(plan)
+        modified["request"]["state"]["path"] = "../state-copy.json"
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            project_context.validate_plan(self.project, data, modified)
+
+    def test_request_capsule_rejects_foreign_root_and_symlink_ancestor(self):
+        data, plan, _refs = self.large_scope()
+        foreign = self.project / "other-project"
+        foreign.mkdir()
+        with self.assertRaisesRegex(ValueError, "different project root"):
+            project_context.request_data(foreign, plan)
+        root = self.project / project_context.STATE_ROOT
+        relocated = root.with_name("request-copy")
+        root.rename(relocated)
+        root.symlink_to(relocated, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "symbolic link"):
+            project_context.validate_plan(self.project, data, plan)
+
+    def test_inline_large_scope_is_write_free_and_completes(self):
+        data, plan, refs = self.large_scope(no_cache=True)
+        self.assertEqual(plan["request"]["state"]["storage"], "inline")
+        paths = set()
+        while True:
+            self.assertFalse((self.project / ".agentrof").exists())
+            self.assertLessEqual(len(project_context.encoded(plan)), 3500)
+            paths.update(row["path"] for row in project_context.read_plan(self.project, data, plan)["units"])
+            if plan["status"] == "ready":
+                break
+            plan = project_context.expand_context(self.project, data, plan, reason="Read selected scope")
+        self.assertEqual(paths, set(refs))
+
+    def test_read_only_request_storage_uses_inline_and_keeps_full_scope(self):
+        import atomic_file
+        with mock.patch.object(atomic_file, "real_directory", side_effect=OSError(errno.EROFS, "Read only")):
+            data, plan, refs = self.large_scope()
+            self.assertEqual(plan["request"]["state"]["storage"], "inline")
+            project_context.validate_plan(self.project, data, plan)
+        self.assertEqual(project_context.request_data(self.project, plan)["refs"], refs)
+        self.assertFalse((self.project / ".agentrof").exists())
+
+    def test_no_cache_cli_expands_runtime_origin_without_writing_new_state(self):
+        import atomic_file
+        _data, fixture, refs = self.large_scope()
+        data = project_context.load_index(self.project, no_cache=True)
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=refs, budget=fixture["request"]["budget"])
+        self.assertEqual(plan["request"]["state"]["storage"], "runtime")
+        path = self.project / "runtime-plan.json"
+        path.write_text(json.dumps(plan))
+        before = {file.relative_to(self.project).as_posix(): file.read_bytes()
+                  for file in self.project.rglob("*") if file.is_file()}
+        for arguments in (["check", "--plan", str(path)], ["read", "--plan", str(path)],
+                          ["expand", "--plan", str(path), "--reason", "Read added selected evidence",
+                           "--ref", "operation/verification-contract.md"]):
+            with self.subTest(command=arguments[0]), contextlib.redirect_stdout(io.StringIO()) as output, \
+                    mock.patch.object(atomic_file, "real_directory", side_effect=AssertionError("unexpected write")), \
+                    mock.patch.object(atomic_file, "replace_bytes", side_effect=AssertionError("unexpected write")):
+                code = project_context.main(["--project-root", str(self.project), "--no-cache", *arguments])
+            self.assertEqual(code, 0, output.getvalue())
+            result = json.loads(output.getvalue())
+            if arguments[0] == "expand":
+                self.assertEqual(result["request"]["state"]["storage"], "inline")
+                self.assertFalse(result["request"]["persist_state"])
+        after = {file.relative_to(self.project).as_posix(): file.read_bytes()
+                 for file in self.project.rglob("*") if file.is_file()}
+        self.assertEqual(after, before)
+        modified = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=["ST-901"], budget=fixture["request"]["budget"])
+        modified["request"]["refs"] = refs
+        path.write_text(json.dumps(modified))
+        with contextlib.redirect_stdout(io.StringIO()) as output, \
+                mock.patch.object(atomic_file, "real_directory", side_effect=AssertionError("unexpected write")), \
+                mock.patch.object(atomic_file, "replace_bytes", side_effect=AssertionError("unexpected write")):
+            code = project_context.main(["--project-root", str(self.project), "--no-cache", "read",
+                                         "--plan", str(path)])
+        self.assertEqual(code, 1)
+        self.assertIn("modified", json.loads(output.getvalue())["reason"])
+
+    def test_no_cache_unchanged_large_seed_reuses_verified_runtime_descriptor(self):
+        import atomic_file
+        import hashlib
+        refs = []
+        for number in range(70):
+            relative = "backlog/selected-" + hashlib.sha512(str(number).encode()).hexdigest()[:80] + ".md"
+            self.write(relative, note("story", "Selected", body="Preserve the condition."))
+            refs.append(relative)
+        data = self.index()
+        plan = project_context.resolve_context(self.project, data, entry="backlog-plan", role="backlog-reviewer",
+            refs=refs, purpose="review", snapshot_scope="selection", budget={"max_metadata_bytes": 4000})
+        state = plan["request"]["state"]
+        self.assertEqual(state["storage"], "runtime")
+        with mock.patch.object(atomic_file, "real_directory", side_effect=AssertionError("unexpected write")), \
+                mock.patch.object(atomic_file, "replace_bytes", side_effect=AssertionError("unexpected write")):
+            second = project_context.expand_context(self.project, data, plan,
+                reason="Read the next verified page", persist_state=False)
+            self.assertEqual(second["request"]["state"], state)
+            self.assertFalse(second["request"]["persist_state"])
+            self.assertEqual(project_context.request_data(self.project, second)["refs"], refs)
+            self.assertLessEqual(len(project_context.encoded(second)), 4000)
+            project_context.validate_plan(self.project, data, second)
+            with self.assertRaisesRegex(ValueError, "metadata budget requires at least"):
+                project_context.expand_context(self.project, data, plan,
+                    reason="Read added evidence", refs=["backlog/example.md"], persist_state=False)
+        state_path = self.project / state["path"]
+        state_path.write_bytes(state_path.read_bytes() + b" ")
+        with self.assertRaisesRegex(ValueError, "hash mismatch"):
+            project_context.expand_context(self.project, data, second,
+                reason="Read the next verified page", persist_state=False)
+
+    def test_shared_source_provenance_stays_complete_under_metadata_paging(self):
+        refs = []
+        for number in range(80):
+            relative = f"backlog/source-{number:03}-" + "selected-" * 8 + ".md"
+            self.write(relative, note("story", "Selected", relations={
+                "constrained_by": [("operation/verification-contract", "Verification")]}))
+            refs.append(relative)
+        data = project_context.load_index(self.project, no_cache=True)
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=refs,
+            budget={"max_files": 2, "max_source_bytes": 500, "max_metadata_bytes": 3500})
+        paths, provenance = set(), []
+        while True:
+            self.assertLessEqual(len(project_context.encoded(plan)), 3500)
+            read = project_context.read_plan(self.project, data, plan)
+            paths.update(row["path"] for row in read["units"])
+            for row in plan["must_read"]:
+                if row["path"] == "operation/verification-contract.md":
+                    reasons = row["reasons"]
+                    provenance = (project_context.navigation_data(self.project, reasons["state"])["reasons"]
+                                  if isinstance(reasons, dict) else reasons)
+            if plan["status"] == "ready":
+                break
+            plan = project_context.expand_context(self.project, data, plan, reason="Read selected constraints")
+        self.assertEqual(paths, set(refs) | {"operation/verification-contract.md"})
+        self.assertEqual(len(provenance), 80)
+        import atomic_file
+        path = self.project / "provenance-plan.json"
+        path.write_text(json.dumps(plan))
+        for arguments in (["read"], ["check"], ["expand", "--reason", "Read selected provenance",
+                                               "--ref", "operation/verification-contract.md"]):
+            with contextlib.redirect_stdout(io.StringIO()) as output, \
+                    mock.patch.object(atomic_file, "real_directory", side_effect=AssertionError("unexpected write")), \
+                    mock.patch.object(atomic_file, "replace_bytes", side_effect=AssertionError("unexpected write")):
+                code = project_context.main(["--project-root", str(self.project), "--no-cache", *arguments,
+                                             "--plan", str(path)])
+            self.assertEqual(code, 0, output.getvalue())
+            if arguments[0] == "expand":
+                result = json.loads(output.getvalue())
+                self.assertFalse(result["request"]["persist_state"])
+                self.assertEqual(result["request"]["state"]["storage"], "inline")
+
+    def test_inline_budget_refusal_reports_the_measured_minimum_without_writes(self):
+        with self.assertRaisesRegex(ValueError, "requires at least [0-9]+ bytes"):
+            self.large_scope(no_cache=True, metadata_bytes=1000)
+        self.assertFalse((self.project / ".agentrof").exists())
+
+    def test_corrupt_and_truncated_inline_state_refuses_before_reading(self):
+        data, plan, _refs = self.large_scope(no_cache=True)
+        for payload in ("AAAA", plan["request"]["state"]["data"][:-4]):
+            modified = copy.deepcopy(plan)
+            modified["request"]["state"]["data"] = payload
+            with self.subTest(payload=payload[:8]), self.assertRaises(ValueError):
+                project_context.read_plan(self.project, data, modified)
+        self.assertFalse((self.project / ".agentrof").exists())
+
+    def test_fragment_plan_changes_and_stale_parent_source_are_refused(self):
+        self.write("backlog/large.md", note("story", "Large", body="Preserve all conditions. " * 60))
+        data = self.index()
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=["backlog/large.md"], budget={"max_source_bytes": 80})
+        modified = copy.deepcopy(plan)
+        modified["must_read"][0]["byte_range"][1] -= 1
+        with self.assertRaisesRegex(ValueError, "modified"):
+            project_context.read_plan(self.project, data, modified)
+        path = self.docs / "backlog/large.md"
+        path.write_text(path.read_text().replace("Preserve", "Change", 1))
+        with self.assertRaisesRegex(ValueError, "stale"):
+            project_context.expand_context(self.project, data, plan, reason="Continue")
+
+    def test_fragment_cursor_and_continuation_tampering_are_refused(self):
+        self.write("backlog/large.md", note("story", "Large", body="Preserve every condition. " * 30))
+        data = self.index()
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=["backlog/large.md"], budget={"max_source_bytes": 80})
+        for block, key, value in (("request", "unit", 1), ("request", "byte", 100000),
+                                  ("request", "scope_hash", "sha256:" + "0" * 64),
+                                  ("continuation", "byte", 0)):
+            modified = copy.deepcopy(plan)
+            modified[block]["cursor"][key] = value
+            with self.subTest(block=block, key=key), self.assertRaises(ValueError):
+                project_context.read_plan(self.project, data, modified)
+
+    def test_utf8_character_larger_than_budget_has_no_looping_continuation(self):
+        path = self.project / "workspace/memory/character.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("🙂")
+        data = self.index()
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=["workspace/memory/character.md"],
+            budget={"max_source_bytes": 1})
+        self.assertEqual(plan["must_read"], [])
+        self.assertEqual(plan["oversized"]["minimum_source_bytes"], 4)
+        with self.assertRaisesRegex(ValueError, "at least 4"):
+            project_context.expand_context(self.project, data, plan, reason="Continue")
+
+    def test_widened_fragment_scope_rereads_safely_and_keeps_every_obligation(self):
+        self.write("backlog/large.md", note("story", "Large", body="Preserve all conditions. " * 60))
+        data = self.index()
+        plan = project_context.resolve_context(self.project, data, entry="deliver",
+            role="backend-developer", refs=["backlog/large.md"], budget={"max_source_bytes": 80})
+        wider = project_context.expand_context(self.project, data, plan,
+            refs=["operation/verification-contract.md"], reason="Read added constraint")
+        self.assertEqual(wider["coverage"]["required_units"], 2)
+        self.assertEqual(wider["coverage"]["remaining_required_units"], 2)
+        self.assertEqual(wider["must_read"][0]["byte_range"][0], 0)
+        self.assertEqual(set(project_context.request_data(self.project, wider)["refs"]),
+                         {"backlog/large.md", "operation/verification-contract.md"})
+
+    @integration
+    def test_real_cli_large_scope_reads_expands_and_checks_to_completion(self):
+        _data, _plan, refs = self.large_scope()
+        self.write(refs[0], note("story", "Selected", body="Preserve 🙂. " * 100))
+        expected = (self.docs / refs[0]).read_text()
+        maximum_pages = sum((self.docs / ref).stat().st_size for ref in refs)
+        script = ROOT / "plugins/software-engineering-team/scripts/project_context.py"
+
+        def invoke(arguments):
+            result = subprocess.run([sys.executable, str(script), "--project-root", str(self.project),
+                                     *arguments], check=False, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return json.loads(result.stdout)
+
+        arguments = ["resolve", "--entry", "deliver", "--role", "backend-developer",
+                     "--max-files", "2", "--max-source-bytes", "400", "--max-metadata-bytes", "3500"]
+        for ref in refs:
+            arguments.extend(["--ref", ref])
+        plan = invoke(arguments)
+        self.assertEqual(plan["request"]["state"]["storage"], "runtime")
+        self.assertTrue(invoke(["units", "--ref", refs[0]])["units"])
+        path = self.project / "cli-plan.json"
+        read_paths, text = set(), ""
+        fragments = 0
+        pages = 0
+        while True:
+            path.write_text(json.dumps(plan))
+            self.assertEqual(invoke(["check", "--plan", str(path)])["status"], "current")
+            reading = invoke(["read", "--plan", str(path)])
+            self.assertLessEqual(reading["bytes"], 400)
+            read_paths.update(row["path"] for row in reading["units"])
+            for row in reading["units"]:
+                if row["path"] == refs[0]:
+                    text += row["text"]
+                    fragments += row["kind"] == "fragment"
+            pages += 1
+            self.assertLessEqual(pages, maximum_pages)
+            if plan["status"] == "ready":
+                break
+            plan = invoke(["expand", "--plan", str(path), "--reason", "Read remaining selected sources"])
+            self.assertLessEqual(len(project_context.encoded(plan)), 3500)
+        self.assertEqual(read_paths, set(refs))
+        self.assertEqual(text, expected)
+        self.assertGreater(fragments, 1)
+        modified = copy.deepcopy(plan)
+        modified["must_read"] = []
+        path.write_text(json.dumps(modified))
+        refused = subprocess.run([sys.executable, str(script), "--project-root", str(self.project),
+                                  "read", "--plan", str(path)], capture_output=True, text=True)
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("modified", json.loads(refused.stdout)["reason"])
+        code = self.project / "workspace/environment/check.py"
+        code.parent.mkdir(parents=True)
+        code.write_text("assert True\n")
+        refused = subprocess.run([sys.executable, str(script), "--project-root", str(self.project),
+            "resolve", "--entry", "deliver", "--role", "backend-developer", "--ref",
+            "workspace/environment/check.py"], capture_output=True, text=True)
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("type", json.loads(refused.stdout)["reason"])
+
+    @integration
+    def test_owning_review_closure_seeds_navigation_with_explicit_input(self):
+        from tools.tests.backlog_fixture import make_approved_backlog
+        root = self.project / "review-project"
+        docs = root / "workspace/docs"
+        (docs / "maps").mkdir(parents=True)
+        (root / "workspace/config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}))
+        with contextlib.redirect_stdout(io.StringIO()):
+            make_approved_backlog(docs, "ST-001")
+        init_repository(root)
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                        "commit", "-qm", "Fixture"], check=True, capture_output=True)
+        selected = "workspace/docs/backlog/backlog.md"
+        manifest = task_inputs.manifest(project=root, entry="backlog-plan", role="backlog-reviewer",
+            mode="review", epic="", inputs=[selected])
+        required = {"workspace/docs/" + path for path in manifest["backlog_scope"]["paths"]}
+        reading = project_context.request_data(root, manifest["project_reading"])
+        self.assertLessEqual(required, set(reading["refs"]) | set(reading.get("manual_sources", [])))
+        self.assertGreater(len(reading["refs"]), 1)
+
+    def test_mixed_selected_code_preserves_navigation_and_manual_hash_obligation(self):
+        code = self.project / "workspace/environment/check.py"
+        code.parent.mkdir(parents=True)
+        code.write_text("assert True\n")
+        result = project_context.task_context(self.project, entry="deliver", role="backend-developer",
+            mode="consume", paths={"workspace/docs/backlog/example.md", "workspace/environment/check.py"})
+        self.assertNotEqual(result["status"], "unavailable")
+        self.assertIn("backlog/example.md", {row["path"] for row in result["must_read"]})
+        manual = result["manual_reads"][0]
+        self.assertEqual(manual["path"], "workspace/environment/check.py")
+        self.assertEqual(manual["source_hash"], context_catalog.digest(code.read_bytes()))
+        with self.assertRaisesRegex(ValueError, "type"):
+            self.plan(refs=["workspace/environment/check.py"])
+        read = project_context.read_plan(self.project, project_context.load_index(self.project), result)
+        self.assertEqual(read["status"], "needs_manual_read")
+        code.write_text("assert False\n")
+        with self.assertRaisesRegex(ValueError, "stale"):
+            project_context.validate_plan(self.project, project_context.load_index(self.project), result)
+
+    def test_manual_only_selection_retains_outstanding_evidence_without_empty_success(self):
+        code = self.project / "workspace/tests/check.py"
+        code.parent.mkdir(parents=True)
+        code.write_text("assert True\n")
+        plan = project_context.task_context(self.project, entry="deliver", role="qa-engineer",
+            mode="review", paths={"workspace/tests/check.py"}, no_cache=True)
+        self.assertEqual(plan["must_read"], [])
+        self.assertEqual(plan["manual_reads"][0]["path"], "workspace/tests/check.py")
+        result = project_context.read_plan(self.project, project_context.load_index(self.project, no_cache=True), plan)
+        self.assertEqual(result["status"], "needs_manual_read")
+        self.assertEqual(result["manual_reads"][0]["source_hash"], context_catalog.digest(code.read_bytes()))
+        self.assertFalse((self.project / ".agentrof").exists())
 
     def test_read_cli_preserves_incomplete_plan_status(self):
         plan = project_context.resolve_context(self.project, project_context.load_index(self.project),
@@ -131,7 +896,8 @@ class ProjectContextTests(unittest.TestCase):
             code = project_context.main(["--project-root", str(self.project), "read", "--plan", str(path)])
         self.assertEqual(code, 0)
         result = json.loads(output.getvalue())
-        self.assertEqual(result["status"], "needs_split")
+        self.assertEqual(result["plan_status"], "needs_split")
+        self.assertEqual(result["bytes"], 1)
         self.assertEqual(result["coverage"]["remaining_required_units"], 2)
 
     def test_invalid_or_too_small_budget_is_refused(self):
@@ -252,6 +1018,16 @@ class ProjectContextTests(unittest.TestCase):
             second = project_context.load_index(self.project)
         self.assertEqual(first, second)
 
+    def test_index_build_reuses_one_catalog_for_unit_alias_gap_resolution(self):
+        self.write("backlog/selected-plan.md", note("test-plan", "Selected plan",
+            body="## ST-901-TS-001\n\nPreserve the selected condition."))
+        self.write("backlog/selected-review.md", note("backlog-review", "Selected review",
+            extra="scenario_refs:\n  - ST-901-TS-001"))
+        with mock.patch.object(context_catalog, "catalog", wraps=context_catalog.catalog) as build:
+            data = project_context.load_index(self.project, no_cache=True)
+        self.assertEqual(build.call_count, 1)
+        self.assertFalse([gap for gap in data["gaps"] if gap.get("key") == "scenario_refs"])
+
     def test_no_cache_mode_creates_no_runtime_files(self):
         project_context.load_index(self.project, no_cache=True)
         self.assertFalse((self.project / ".agentrof").exists())
@@ -336,8 +1112,8 @@ class ProjectContextTests(unittest.TestCase):
         contract = self.docs / "operation/verification-contract.md"
         text = note("verification-contract", "Verification", body="Earlier approved behavior.",
                     extra="revision: 1").replace("status: draft", "status: approved")
-        props, start, _error = ba_compile.parse_frontmatter(text)
-        digest = operation_compile.source_hash(props, "\n".join(text.splitlines()[start - 1:]))
+        props, body = operation_compile.parse_text(text, contract)
+        digest = operation_compile.source_hash(props, body)
         contract.write_text(text.replace("revision: 1", f"revision: 1\nsource_hash: {digest}"))
         init_repository(self.project)
         subprocess.run(["git", "-C", str(self.project), "add", "-A"], check=True, capture_output=True)
@@ -359,6 +1135,21 @@ class ProjectContextTests(unittest.TestCase):
         data["units"][historic["unit_id"]] = historic
         result = context_catalog.read_units(self.docs, data, [historic["unit_id"]], 10000)
         self.assertIn("Earlier approved behavior", result["units"][0]["text"])
+        expected = result["units"][0]["text"]
+        index = self.index()
+        page = project_context.resolve_context(self.project, index, entry="deliver",
+            role="backend-developer", refs=["ITEM-901"], budget={"max_source_bytes": 80})
+        text = ""
+        while True:
+            read = project_context.read_plan(self.project, index, page)
+            for unit in read["units"]:
+                if unit.get("historical"):
+                    self.assertEqual(unit["bound_hash"], digest)
+                    text += unit["text"]
+            if page["status"] == "ready":
+                break
+            page = project_context.expand_context(self.project, index, page, reason="Read the pinned bytes")
+        self.assertEqual(text, expected)
 
     def test_malformed_source_returns_explicit_manual_recovery(self):
         self.write("backlog/example.md", "---\ninvalid frontmatter\n---\nBroken source")

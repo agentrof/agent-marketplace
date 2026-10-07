@@ -128,6 +128,73 @@ class ImpactClosureTest(unittest.TestCase):
                        "key": "related_to", "value": "[[backlog/gone|Gone]]"}, gaps)
         self.assertNotIn("backlog/story-b.md", {gap["path"] for gap in gaps})
 
+    def dependency_graph(self, edge):
+        (self.docs / "backlog/source.md").write_text(note("story", "Source", extra="id: ST-901",
+            relations={"depends_on": [("backlog/target", "Target")]}))
+        (self.docs / "backlog/target.md").write_text(note("story", "Target", extra="id: ST-902"))
+        (self.docs / "backlog/review.md").write_text(note("backlog-review", "Review", extra=
+            "dependency_refs:\n  - " + json.dumps(edge)))
+        vault = impact_closure.load_vault(self.docs)
+        return impact_closure.graph(vault, impact_closure.closure_policy(vault.policy))
+
+    def test_declared_dependency_edge_resolves_both_endpoints_without_false_gap(self):
+        edges, gaps, _tiers = self.dependency_graph("ST-901 -> ST-902")
+        self.assertFalse([gap for gap in gaps if gap.get("key") == "dependency_refs"])
+        self.assertIn(("backlog/source.md", "backlog/target.md", "depends_on"), edges.tiers)
+        self.assertIn(("backlog/review.md", "backlog/source.md", "dependency_refs"), edges.tiers)
+        self.assertIn(("backlog/review.md", "backlog/target.md", "dependency_refs"), edges.tiers)
+
+    def test_invalid_dependency_edge_syntax_endpoints_and_direction_remain_gaps(self):
+        for edge in ("ST-901 ST-902", "ST-901 -> ST-902 -> ST-903", " -> ST-902", "ST-901 -> ",
+                     "ST-901->ST-902", "ST-901 -> ST-999", "ST-902 -> ST-901"):
+            with self.subTest(edge=edge):
+                _edges, gaps, _tiers = self.dependency_graph(edge)
+                found = [gap for gap in gaps if gap.get("key") == "dependency_refs"]
+                self.assertEqual(len(found), 1)
+                self.assertEqual(found[0]["value"], edge)
+                self.assertEqual(found[0]["reason"], "unresolved_relation")
+        (self.docs / "backlog/duplicate.md").write_text(note("story", "Duplicate", extra="id: ST-902"))
+        _edges, gaps, _tiers = self.dependency_graph("ST-901 -> ST-902")
+        self.assertEqual(len([gap for gap in gaps if gap.get("key") == "dependency_refs"]), 1)
+
+    def test_many_valid_dependency_edges_share_endpoints_without_false_diagnostics(self):
+        references = []
+        for target in range(12):
+            (self.docs / f"backlog/target-{target}.md").write_text(note("story", "Target",
+                extra=f"id: ST-{2000 + target}"))
+        for origin in range(20):
+            (self.docs / f"backlog/source-{origin}.md").write_text(note("story", "Source",
+                extra=f"id: ST-{1000 + origin}", relations={"depends_on": [
+                    (f"backlog/target-{target}", "Target") for target in range(12)]}))
+            references.extend(f"ST-{1000 + origin} -> ST-{2000 + target}" for target in range(12))
+        (self.docs / "backlog/review.md").write_text(note("backlog-review", "Review", extra=
+            "dependency_refs:\n" + "\n".join("  - " + json.dumps(value) for value in references)))
+        vault = impact_closure.load_vault(self.docs)
+        edges, gaps, _tiers = impact_closure.graph(vault, impact_closure.closure_policy(vault.policy))
+        self.assertFalse([gap for gap in gaps if gap.get("key") == "dependency_refs"])
+        declared = [edge for edge in edges.tiers if edge[0].startswith("backlog/source-") and edge[2] == "depends_on"]
+        self.assertEqual(len(declared), 240)
+
+    def test_catalog_scenario_alias_resolves_its_owning_note_and_keeps_ambiguity(self):
+        path = self.docs / "backlog/test-plan.md"
+        path.write_text(note("test-plan", "Plan", body="## ST-901-TS-001\n\nKeep the condition."))
+        review = self.docs / "backlog/review.md"
+        review.write_text(note("backlog-review", "Review", extra="scenario_refs:\n  - ST-901-TS-001"))
+        vault = impact_closure.load_vault(self.docs)
+        edges, gaps, _tiers = impact_closure.graph(vault, impact_closure.closure_policy(vault.policy))
+        self.assertFalse([gap for gap in gaps if gap.get("key") == "scenario_refs"])
+        self.assertIn(("backlog/review.md", "backlog/test-plan.md", "scenario_refs"), edges.tiers)
+        for source in (None, "backlog/duplicate-plan.md"):
+            if source:
+                (self.docs / source).write_text(path.read_text())
+            else:
+                review.write_text(note("backlog-review", "Review", extra="scenario_refs:\n  - ST-901-TS-999"))
+            if source:
+                review.write_text(note("backlog-review", "Review", extra="scenario_refs:\n  - ST-901-TS-001"))
+            vault = impact_closure.load_vault(self.docs)
+            _edges, gaps, _tiers = impact_closure.graph(vault, impact_closure.closure_policy(vault.policy))
+            self.assertEqual(len([gap for gap in gaps if gap.get("key") == "scenario_refs"]), 1)
+
     def write_matrix(self, *rows: tuple) -> None:
         matrix = self.docs / "maps/_generated/cross-subtree-matrix.md"
         matrix.parent.mkdir(parents=True, exist_ok=True)

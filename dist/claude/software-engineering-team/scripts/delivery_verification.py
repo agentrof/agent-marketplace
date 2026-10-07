@@ -3242,32 +3242,51 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
                     refs: list[str] | None = None) -> dict:
     """Batch source units from the frozen Git candidate, never live text."""
     import context_catalog
+    import context_history
     import project_context
     current = require_current(root, read_session(root), allow_evidence=True)
     if payload.get("candidate_hash") != current["candidate_hash"]:
         raise RuntimeError("context manifest belongs to another verification candidate")
-    plan = payload["project_reading"]
-    if "request" not in plan:
+    if payload.get("product_commit", current["product_commit"]) != current["product_commit"]:
+        raise RuntimeError("context manifest names another candidate commit")
+    plan = payload.get("project_reading")
+    if not isinstance(plan, dict) or "request" not in plan:
         raise RuntimeError("resolve context or use frozen inspect reads before continuing")
     index = project_context.load_index(root, no_cache=True)
     project_context.validate_plan(root, index, plan)
     if reason is not None:
         return {"candidate_hash": current["candidate_hash"], "product_commit": current["product_commit"],
-                "project_reading": project_context.expand_context(root, index, plan, reason=reason, refs=refs)}
+                "project_reading": project_context.expand_context(root, index, plan, reason=reason, refs=refs,
+                                                                  persist_state=False)}
+    if refs:
+        raise RuntimeError("expanding frozen context requires a reason")
+    request = project_context.request_data(root, plan)
+    manual = []
+    for obligation in plan.get("manual_reads", []):
+        relative = obligation["path"]
+        if not delivery._is_normalized_claim(relative):
+            raise RuntimeError("manual frozen context path must be normalized and repository-relative")
+        raw = context_history.git_source(root, relative, current["product_commit"])
+        if context_catalog.digest(raw) != obligation["source_hash"] or len(raw) != obligation["source_bytes"]:
+            raise RuntimeError("manual context source differs from the frozen candidate")
+        manual.append({**obligation, "candidate_hash": current["candidate_hash"],
+            "product_commit": current["product_commit"], "disposition": "requires_frozen_inspect",
+            "next_action": "Use delivery_verification.py inspect --path <path> to read this source from the bound candidate before completing its obligation."})
     units = {}
     for row in plan["must_read"]:
-        if row.get("source_root") == "project":
-            raise RuntimeError("external context requires an explicit frozen inspect read")
         unit = dict(index["catalog"]["units"].get(row["unit_id"], row))
         unit.setdefault("git_revision", current["product_commit"])
         units[unit["unit_id"]] = unit
     result = context_catalog.read_units(root / "workspace/docs", {"units": units},
-        list(units), plan["request"]["budget"]["max_source_bytes"])
+        list(units), request["budget"]["max_source_bytes"])
     result.update(candidate_hash=current["candidate_hash"], plan_status=plan["status"],
                   coverage=plan["coverage"])
     if "continuation" in plan:
         result["continuation"] = plan["continuation"]
-    if not units and plan["status"] != "ready":
+    if manual:
+        result["manual_reads"] = manual
+        result["status"] = "needs_manual_read"
+    if not units and not manual and plan["status"] != "ready":
         result["status"] = plan["status"]
     return result
 

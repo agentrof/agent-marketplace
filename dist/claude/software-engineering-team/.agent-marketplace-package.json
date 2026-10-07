@@ -167,7 +167,7 @@
       "184a0b11e57d6f5ab407ea40c22690edc425ed2992e2978f26ec0e974d326da0"
     ,
     "scripts/context_catalog.py":
-      "db3243f0134d69f4a9b4dfeb60d6903d3c7929183d0b7f1ea63ff8f6d1a7cd07"
+      "cec56dd4ca72b413c3c62cec4a98ff06aaf1944278e04d2a53b76997f6a247fb"
     ,
     "scripts/context_history.py":
       "b3c433394ad535b010d12d194eaf277208cc61068b7f41a2a233255e6bcba0c9"
@@ -206,7 +206,7 @@
       "99bb5ce4c91560911d0155f8ac34cc75ca05943bb0b2de3b41c5e035d6e1d28b"
     ,
     "scripts/file_lock.py":
-      "d7588927231905320708a1ea2e7fc9251dffdf6a66f4a49ff24a3f353b1cc066"
+      "c1ea21c439be664099cfba1779d9b98d1fbed9944d899f7fecd54fef57b5fc3b"
     ,
     "scripts/generate_claude_project.py":
       "b00dc3a5b4f919ba6762130c87c58464a35346a6e632c867e66f35afd3f24692"
@@ -221,7 +221,7 @@
       "bd3bc6d9c4043f4bf68a33ca76332b7e5a7911f1e14ea691f8bc2dd0920f0dd3"
     ,
     "scripts/impact_closure.py":
-      "780ba48dc5e17c46f076e5d223aef15a89372cdc467ba2de951ceb16d655c391"
+      "51f197609725ab19cc418f9443cae185cc6d98045ae62aa4326fbaeffc942305"
     ,
     "scripts/landscape_check.py":
       "afd0b167c4f8b2d685ed4e4041a66178a706cece248d19dcb566814e0f534c43"
@@ -245,7 +245,7 @@
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
     ,
     "scripts/project_context.py":
-      "0e095e74b06239283d052a96e9882beb2097422bea752e0027411939efec309b"
+      "bf21e9bf8c7886022a786363f9e30db7ec66dcb8f796355c6bcd012408e46fbc"
     ,
     "scripts/project_instructions.py":
       "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
@@ -275,7 +275,7 @@
       "b7f2cad266008812a38779f0b2208596e5d5fddf8fd9a47354706406f03ca655"
     ,
     "scripts/task_inputs.py":
-      "6c35b9b7fafff773d0acd40fc33e6458c89e5c4b11a4bbb943eacd1be02371e2"
+      "f1c0f0c05784d29a3c2fc9ae6e9b613ae5769e8958cf08f75d168f89d2338d81"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -287,13 +287,13 @@
       "3eb237e04bbd4e142e6edc14ed50d925378e4c3cc2b0c5c4278f49d4edf7f39e"
     ,
     "scripts/vault_hook.py":
-      "81e6c2da48e8055b22b577e34f22d2222347e0141cd122f4064fd897759e7f1b"
+      "f1400bcead8488e477d55a83ec20fa96e3aaf959b35720c934283fc2e5a35692"
     ,
     "scripts/vault_index.py":
-      "8787ee0c94ceb17d5cdcb0b240bb68df6364dc27c5f6921d4b7ce6557f8b09cb"
+      "1cc442a293437907ac1d9ca75c6af986d175649a67928d0dc333ccbcc871ee0f"
     ,
     "scripts/vault_query.py":
-      "381086e15461c3c44367e7c96dc2f3f6544c8759edbf02aeadfe2ba060f176a1"
+      "621e52d77c481dc6e4b3c4cc43b962c2ff697b8f30426b244d856a741d5584e2"
     ,
     "skill-content/autopilot/SKILL.md":
       "cc422eb06937e9e1a6312aaba10a922a5aedc6d0ddb0c461face9288ddcffb25"

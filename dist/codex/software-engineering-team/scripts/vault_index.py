@@ -66,11 +66,20 @@ SCHEMA = (
     "CREATE INDEX probes_path ON probes(path)",
     "CREATE TABLE source_errors(path TEXT PRIMARY KEY,reason TEXT NOT NULL)",
     "CREATE TABLE search_units(uid TEXT PRIMARY KEY,rowid INTEGER NOT NULL UNIQUE)",
+    "CREATE TABLE lookups(owner TEXT NOT NULL,name TEXT NOT NULL,PRIMARY KEY(owner,name))",
+    "CREATE INDEX lookups_name ON lookups(name)",
+    "CREATE TABLE stamped(path TEXT PRIMARY KEY)",
 )
-# Probes are invalidation bookkeeping that may include lookups made through another
-# note's content, so they are compared through the edges and gaps they produce.
+SEARCH_TABLE = "search_text"
+# Probes and lookups are invalidation bookkeeping that may include lookups made through
+# another note's content, so they are compared through the edges and gaps they produce.
 PROJECTION = ("parsed_notes", "notes", "note_names", "documents", "units", "aliases", "owner_claims",
-              "citations", "owner_flags", "raw_refs", "edge_facts", "gaps", "source_errors")
+              "citations", "owner_flags", "raw_refs", "edge_facts", "gaps", "source_errors", "stamped")
+TABLES = frozenset(statement.split()[2].split("(")[0] for statement in SCHEMA
+                   if statement.startswith("CREATE TABLE")) | {SEARCH_TABLE}
+COPY_PREFIX = ".index-copy-"
+RECOVERY_PREFIX = ".index-recovery-"
+SourceChangedError = context_catalog.SourceChangedError
 
 
 def encoded(value):
@@ -120,11 +129,20 @@ def eligible(relative, settings=None, artifact=None):
             and artifact not in path.parts[:-1] and path.suffix.lower() in settings["extensions"])
 
 
+contained = context_catalog.contained
+
+
 def scan_files(docs, *, digest=True):
-    """Eligible paths only; excluded trees and directory links are never traversed."""
+    """Eligible paths only; excluded trees and directory links are never traversed.
+
+    A link inside the vault to an excluded location stays inventoried and is
+    reported unparsed, never silently dropped.
+    """
     docs = Path(docs)
     settings, artifact = scope()
     root = docs.resolve()
+    info = os.stat(root)
+    root_identity = info.st_dev, info.st_ino
     result = {}
     def failed(exc):
         raise exc
@@ -137,18 +155,21 @@ def scan_files(docs, *, digest=True):
             if path.suffix.lower() not in settings["extensions"]:
                 continue
             relative = path.relative_to(docs).as_posix()
+            excluded = None
             if path.is_symlink():
                 # vault_check reads a linked note like any other; the index does
                 # the same, but only for a link that stays in its indexed scope.
-                target = path.resolve()
-                if not target.is_relative_to(root):
+                target = contained(path.resolve(), root, root_identity)
+                if target is None:
                     raise ValueError(f"{relative} links outside the vault")
-                if not eligible(target.relative_to(root).as_posix(), settings, artifact):
-                    continue
+                if not eligible(target, settings, artifact):
+                    excluded = target
             if not path.is_file():
                 continue
             info = path.stat()
             entry = {"size": info.st_size, "mtime_ns": info.st_mtime_ns}
+            if excluded is not None:
+                entry["excluded_link"] = excluded
             if digest:
                 entry["sha"] = hashlib.sha256(path.read_bytes()).hexdigest()
             result[relative] = entry
@@ -170,6 +191,28 @@ def restore_note(root, relative, value):
         mdlinks=[tuple(row) for row in value["mdlinks"]],
         fm_targets=[tuple(row) for row in value["fm_targets"]],
         headings=[tuple(row) for row in value["headings"]], block_ids=set(value["block_ids"]))
+
+
+def source_key(entry):
+    return entry["sha"], entry.get("excluded_link")
+
+
+def excluded_link_target(docs, relative):
+    """The excluded location an in-vault link names, as impact_closure needs it, or None."""
+    path = Path(docs) / relative
+    if not path.is_symlink():
+        return None
+    root = Path(docs).resolve()
+    info = os.stat(root)
+    target = contained(path.resolve(), root, (info.st_dev, info.st_ino))
+    return target if target is not None and not eligible(target) else None
+
+
+def stamped(note):
+    """Whether impact_closure.proofs_for can prove this authored note from its own stamp."""
+    stamp = note.fm.get("source_hash")
+    return (isinstance(stamp, str) and bool(stamp)) or (
+        note.rel.startswith("system-architecture/") and note.fm.get("revision_state") == "sealed")
 
 
 def note_identity(note):
@@ -194,6 +237,10 @@ class CacheUnavailableError(ValueError):
     pass
 
 
+class CacheBusyError(ValueError):
+    """Another process holds a lease this operation waited for until its timeout."""
+
+
 def database_identity(path):
     try:
         info = os.stat(path)
@@ -203,82 +250,67 @@ def database_identity(path):
 
 
 class DatabaseLease:
-    """Keep a database inode alive until every library reader has closed it."""
+    """Keep a database inode alive until every library reader has closed it.
+
+    ``.readers`` is shared by readers and taken exclusively by recovery;
+    ``.snapshot`` is shared by snapshot copies and taken exclusively by publication.
+    """
+    BUSY = {(".readers", True): "vault database has active readers; close them and retry synchronization",
+            (".snapshot", False): "vault index publication in progress; retry",
+            (".snapshot", True): "vault index snapshot copy in progress; retry synchronization"}
+
     def __init__(self, cache, *, exclusive=False, timeout=None, name=".readers", read_only=False):
         path = Path(cache).with_name(name)
-        check_cache_file(path)
-        flags = os.O_RDONLY if read_only else os.O_RDWR | os.O_CREAT
-        self.descriptor = os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), 0o666)
-        self.token = None
-        try:
-            info = os.fstat(self.descriptor)
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                raise ValueError("vault reader lock must be a regular unaliased file")
-            deadline = time.monotonic() + (policy()["busy_timeout_ms"] / 1000 if timeout is None else timeout)
-            while not self.try_lock(exclusive):
-                if time.monotonic() >= deadline:
-                    raise ValueError("vault database has active readers; close them and retry synchronization")
-                time.sleep(min(file_lock.POLL_SECONDS, max(0, deadline - time.monotonic())))
-        except BaseException:
-            os.close(self.descriptor)
-            self.descriptor = None
-            raise
-    def try_lock(self, exclusive):
-        flock = file_lock._flock()
-        if flock is not None:
+        self.shared = not exclusive
+        self.descriptor = None
+        timeout = policy()["busy_timeout_ms"] / 1000 if timeout is None else timeout
+        deadline = time.monotonic() + timeout
+        flags = (os.O_RDONLY if read_only else os.O_RDWR | os.O_CREAT) | getattr(os, "O_NOFOLLOW", 0)
+        while True:
+            check_cache_file(path)
+            descriptor = os.open(path, flags, 0o666)
             try:
-                flock.flock(self.descriptor, (flock.LOCK_EX if exclusive else flock.LOCK_SH) | flock.LOCK_NB)
-            except BlockingIOError:
-                return False
-            return True
-        import ctypes
-        from ctypes import wintypes
-        import msvcrt
-        class Overlapped(ctypes.Structure):
-            _fields_ = [("Internal", ctypes.c_size_t), ("InternalHigh", ctypes.c_size_t),
-                        ("Offset", wintypes.DWORD), ("OffsetHigh", wintypes.DWORD), ("hEvent", wintypes.HANDLE)]
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        function = kernel.LockFileEx
-        function.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
-                             wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(Overlapped)]
-        function.restype = wintypes.BOOL
-        token = Overlapped()
-        if not function(msvcrt.get_osfhandle(self.descriptor), 1 | (2 if exclusive else 0), 0, 1, 0, ctypes.byref(token)):
-            error = ctypes.get_last_error()
-            if error == 33:  # ERROR_LOCK_VIOLATION with LOCKFILE_FAIL_IMMEDIATELY
-                return False
-            raise ctypes.WinError(error)
-        self.token = (kernel, token, Overlapped)
-        return True
+                info = os.fstat(descriptor)
+                if info.st_nlink and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1):
+                    raise ValueError("vault reader lock must be a regular unaliased file")
+            except BaseException:
+                os.close(descriptor)
+                raise
+            if info.st_nlink:
+                break
+            # The name was unlinked after it was opened; a lock on that inode guards nothing.
+            os.close(descriptor)
+            if time.monotonic() >= deadline:
+                raise CacheBusyError("vault reader lock was replaced while opening it; retry")
+            time.sleep(file_lock.POLL_SECONDS)
+        try:
+            if not file_lock.acquire(descriptor, shared=self.shared, timeout=max(0, deadline - time.monotonic())):
+                raise CacheBusyError(self.BUSY.get((name, exclusive), "vault index lease is busy; retry"))
+        except BaseException:
+            os.close(descriptor)
+            raise
+        self.descriptor = descriptor
+
     def close(self):
         if self.descriptor is None:
             return
         descriptor, self.descriptor = self.descriptor, None
         try:
-            flock = file_lock._flock()
-            if flock is not None:
-                flock.flock(descriptor, flock.LOCK_UN)
-            else:
-                import ctypes
-                from ctypes import wintypes
-                import msvcrt
-                kernel, token, kind = self.token
-                function = kernel.UnlockFileEx
-                function.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
-                                     wintypes.DWORD, ctypes.POINTER(kind)]
-                function.restype = wintypes.BOOL
-                if not function(msvcrt.get_osfhandle(descriptor), 0, 1, 0, ctypes.byref(token)):
-                    raise ctypes.WinError(ctypes.get_last_error())
+            file_lock.unlock(descriptor, shared=self.shared)
         finally:
             os.close(descriptor)
 
 
 class ReaderSession:
-    def __init__(self, connection, docs, lease=None, cache=None, temporary=None):
+    def __init__(self, connection, docs, lease=None, cache=None):
         self.connection, self.docs, self.lease, self.cache = connection, docs, lease, cache
-        self.temporary = temporary
         self.identity = database_identity(cache) if cache is not None else None
         self.closed = False
+        # Names, paths and notes one owner's graph consulted, while it is being graphed.
+        self.recorded = None
+    def record(self, key):
+        if self.recorded is not None:
+            self.recorded.add(key)
     def close(self):
         if self.closed:
             return
@@ -287,13 +319,8 @@ class ReaderSession:
         finally:
             self.closed = True
             lease, self.lease = self.lease, None
-            temporary, self.temporary = self.temporary, None
-            try:
-                if lease is not None:
-                    lease.close()
-            finally:
-                if temporary is not None:
-                    temporary.cleanup()
+            if lease is not None:
+                lease.close()
     def __del__(self):
         try:
             self.close()
@@ -346,6 +373,7 @@ class OwnerLookup(Mapping):
     def __init__(self, store, tiers=(0, 1, 2), catalog=True):
         self.store, self.tiers, self.catalog = getattr(store, "session", store), tiers, catalog
     def __getitem__(self, key):
+        self.store.record(key)
         connection = self.store.connection
         if self.catalog:
             row = connection.execute("SELECT path FROM units WHERE uid=? AND kind!='json'", (key,)).fetchone()
@@ -389,7 +417,11 @@ class NoteMap(Rows):
         super().__init__(store, "parsed_notes", "path")
         self.selected = selected
     def __getitem__(self, path):
+        self.store.record(path)
         return restore_note(self.store.docs, path, super().__getitem__(path))
+    def __contains__(self, path):
+        self.store.record(path)
+        return super().__contains__(path)
     def __iter__(self):
         return super().__iter__() if self.selected is None else iter(sorted(self.selected))
     def __len__(self):
@@ -427,6 +459,7 @@ class FileSet(Set):
     def __contains__(self, path):
         if not isinstance(path, str):
             return False
+        self.store.session.record(path)
         if path in self.store.files:
             return True
         present = self.present(path)
@@ -489,9 +522,9 @@ class OwnedEdges(impact_closure.Edges):
 
 
 class Store:
-    def __init__(self, docs, connection, lease=None, cache=None, temporary=None):
+    def __init__(self, docs, connection, lease=None, cache=None):
         self.docs, self.connection = Path(docs), connection
-        self.session = ReaderSession(connection, self.docs, lease, cache, temporary)
+        self.session = ReaderSession(connection, self.docs, lease, cache)
         self.catalog = Catalog(self)
         self.files = Rows(self, "files", "path")
         self.loaded_policy = None
@@ -524,11 +557,12 @@ class Store:
         except sqlite3.Error:
             return 0
     def layout_supported(self):
-        """Whether this SQLite can open the stored full-text table, which an older library may not."""
+        """Whether every derived table exists and this SQLite can open the stored full-text table."""
         try:
-            self.connection.execute("SELECT rowid FROM search_text LIMIT 0").fetchall()
-        except sqlite3.OperationalError as exc:
-            return "no such table" in str(exc).lower()
+            names = {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if not TABLES <= names:
+                return False
+            self.connection.execute(f"SELECT rowid FROM {SEARCH_TABLE} LIMIT 0").fetchall()
         except sqlite3.Error:
             return False
         return True
@@ -536,11 +570,9 @@ class Store:
         tokenizer = policy()["fts_tokenizer"]
         for statement in SCHEMA:
             self.connection.execute(statement)
-        # Modern SQLite can discard duplicate source text while retaining its
-        # token index and normal rowid deletion. Older FTS5 builds remain usable.
-        contentless = sqlite3.sqlite_version_info >= (3, 43, 0)
-        suffix = ",content='',contentless_delete=1" if contentless else ""
-        self.connection.execute(f"CREATE VIRTUAL TABLE search_text USING fts5(title,body,tokenize='{tokenizer}'{suffix})")
+        # A table that keeps its text deletes each row's exact token statistics,
+        # so ranking after any edit history equals a fresh compilation.
+        self.connection.execute(f"CREATE VIRTUAL TABLE {SEARCH_TABLE} USING fts5(title,body,tokenize='{tokenizer}')")
     def reset(self):
         """Replace every derived table in the open transaction, whatever schema the file had."""
         try:
@@ -564,13 +596,19 @@ class Store:
     def verified(self, path):
         raw = (self.docs / path).read_bytes()
         if hashlib.sha256(raw).hexdigest() != self.files[path]["sha"]:
-            raise ValueError(f"source changed while indexing: {path}")
+            raise SourceChangedError(f"source changed while indexing: {path}")
         return raw
     def overlay(self, path, raw):
         """A file view that serves the verified bytes; a linked note binds them to its target."""
         view = vault_check.VaultFileView(self.docs)
         source = self.docs / path
-        view.put(source.resolve() if source.is_symlink() else source, raw)
+        if source.is_symlink():
+            # Another spelling of the vault root binds the target by file identity; the
+            # catalog's source hash check still refuses bytes read past this view.
+            info = os.stat(view.resolved_root)
+            target = contained(source.resolve(), view.resolved_root, (info.st_dev, info.st_ino))
+            source = view.root / target if target is not None else source.resolve()
+        view.put(source, raw)
         return view
     def identities(self, path):
         """Every name whose resolution a change to this source can alter."""
@@ -584,11 +622,13 @@ class Store:
             "SELECT name FROM owner_claims WHERE source=? OR path=?", (path, path)))
         return names
     def citing(self, names):
+        """Owners whose own references, or whose recorded graph lookups, name any of ``names``."""
         owners = set()
         for chunk in chunks(sorted(names)):
             marks = ",".join("?" for _ in chunk)
             owners.update(row[0] for row in self.connection.execute(
-                f"SELECT DISTINCT owner FROM raw_refs WHERE ref IN ({marks})", chunk))
+                f"SELECT owner FROM raw_refs WHERE ref IN ({marks}) "
+                f"UNION SELECT owner FROM lookups WHERE name IN ({marks})", chunk * 2))
         return owners
     def flipped_probes(self):
         """Owners whose excluded link targets appeared or disappeared since they were graphed."""
@@ -603,19 +643,20 @@ class Store:
         for uid in ids:
             row = self.connection.execute("SELECT rowid FROM search_units WHERE uid=?", (uid,)).fetchone()
             if row:
-                self.connection.execute("DELETE FROM search_text WHERE rowid=?", row)
+                self.connection.execute(f"DELETE FROM {SEARCH_TABLE} WHERE rowid=?", row)
                 self.connection.execute("DELETE FROM search_units WHERE uid=?", (uid,))
             self.connection.execute("DELETE FROM aliases WHERE uid=?", (uid,))
         self.connection.execute("DELETE FROM units WHERE path=?", (path,))
-        for table in ("documents", "parsed_notes", "notes", "files", "note_names", "owner_flags", "source_errors"):
+        for table in ("documents", "parsed_notes", "notes", "files", "note_names", "owner_flags", "source_errors",
+                      "stamped"):
             self.connection.execute(f"DELETE FROM {table} WHERE path=?", (path,))
-        for table in ("raw_refs", "citations", "edge_facts", "gaps", "probes"):
+        for table in ("raw_refs", "citations", "edge_facts", "gaps", "probes", "lookups"):
             self.connection.execute(f"DELETE FROM {table} WHERE owner=?", (path,))
         self.connection.execute("DELETE FROM owner_claims WHERE source=?", (path,))
     def catalog_rows(self, records):
         for path, doc in records["documents"].items():
             if doc["source_hash"] != "sha256:" + self.files[path]["sha"]:
-                raise ValueError(f"source changed while indexing: {path}")
+                raise SourceChangedError(f"source changed while indexing: {path}")
             self.connection.execute("INSERT OR REPLACE INTO documents VALUES(?,?)", (path, encoded(doc)))
         sources = {}
         for uid, unit in records["units"].items():
@@ -623,7 +664,7 @@ class Store:
             self.connection.execute("INSERT OR REPLACE INTO units VALUES(?,?,?,?,?)",
                                     (uid, unit["path"], encoded(unit), priority, unit["kind"]))
             content = context_catalog.unit_content(self.docs, unit, sources=sources).decode("utf-8")
-            row = self.connection.execute("INSERT INTO search_text(title,body) VALUES(?,?)", (unit["label"], content))
+            row = self.connection.execute(f"INSERT INTO {SEARCH_TABLE}(title,body) VALUES(?,?)", (unit["label"], content))
             self.connection.execute("INSERT OR REPLACE INTO search_units VALUES(?,?)", (uid, row.lastrowid))
         self.connection.executemany("INSERT OR IGNORE INTO aliases VALUES(?,?)",
             ((name, uid) for name, ids in records["aliases"].items() for uid in ids))
@@ -673,6 +714,8 @@ class Store:
         targets = {target + ".md" for _line, _embed, target, _anchor, _label, _raw in note.wikilinks if target}
         targets.update(target + ".md" for _key, target in note.fm_targets if target)
         self.connection.executemany("INSERT OR IGNORE INTO citations VALUES(?,?)", ((path, target) for target in targets))
+        if not note.generated and stamped(note):
+            self.connection.execute("INSERT INTO stamped VALUES(?)", (path,))
         if not note.generated:
             # Relation identities, then reference_owners' fallbacks; the first claim wins in rel order.
             single = vault_check.Vault(root=self.docs, policy=self.vault_policy, notes={path: note})
@@ -716,18 +759,27 @@ class Store:
         self.connection.execute("DELETE FROM edge_facts WHERE owner=? AND tier!='text'", (path,))
         self.connection.execute("DELETE FROM gaps WHERE owner=? AND reason='unresolved_relation'", (path,))
         self.connection.execute("DELETE FROM probes WHERE owner=?", (path,))
+        self.connection.execute("DELETE FROM lookups WHERE owner=?", (path,))
         if path not in NoteMap(self):
             return
         vault = self.vault({path})
         vault.index.probes = {}
         edges = OwnedEdges(vault, path)
         keys = set(impact_closure.closure_policy(vault.policy)["relation_keys"])
-        unresolved = impact_closure.frontmatter_tier(vault, edges, keys, self.catalog)
-        if path == impact_closure.MATRIX:
-            impact_closure.index_tier(vault, edges)
-        body_ready = impact_closure.body_tier(vault, edges)
+        # Every name, path and note this graph consults, including through another
+        # note's content (a dependency endpoint's depends_on), re-graphs it on change.
+        self.session.recorded = set()
+        try:
+            unresolved = impact_closure.frontmatter_tier(vault, edges, keys, self.catalog)
+            if path == impact_closure.MATRIX:
+                impact_closure.index_tier(vault, edges)
+            body_ready = impact_closure.body_tier(vault, edges)
+            impact_closure.navigation_tier(vault, edges)
+            recorded = self.session.recorded - {path}
+        finally:
+            self.session.recorded = None
         self.connection.execute("INSERT OR REPLACE INTO owner_flags VALUES(?,?)", (path, int(body_ready)))
-        impact_closure.navigation_tier(vault, edges)
+        self.connection.executemany("INSERT OR IGNORE INTO lookups VALUES(?,?)", ((path, name) for name in recorded))
         self.connection.executemany("INSERT OR IGNORE INTO edge_facts VALUES(?,?,?,?,?)",
             ((path, s, t, key, tier) for (s, t, key), tiers in edges.tiers.items() for tier in tiers))
         self.add_gaps(path, unresolved, 0, path)
@@ -797,8 +849,38 @@ class Store:
                           sequence=sequence)
         tiers["text"] = bool(isolated)
         self.set_meta("tiers", tiers)
-    def fresh_proofs(self):
-        return impact_closure.proofs_for(self.docs, vault_check.authored(self.vault()))
+    def fresh_proofs(self, only=None):
+        """impact_closure.proofs_for over the stamped authored notes only; ``only`` limits the paths."""
+        paths = [row[0] for row in self.connection.execute("SELECT path FROM stamped ORDER BY path")]
+        if only is not None:
+            paths = [path for path in paths if path in only]
+        notes = NoteMap(self, set(paths))
+        return impact_closure.proofs_for(self.docs, [notes[path] for path in paths], only=only)
+    def closure_snapshot(self):
+        """vault_query.Index.snapshot from one grouped edge read; proofs only for stamped notes."""
+        edges = grouped_edges(self.connection.execute(
+            "SELECT source,target,key,tier FROM edge_facts ORDER BY source,target,key"))
+        authored, nodes = set(), {}
+        for path, payload in self.connection.execute("SELECT path,payload FROM notes ORDER BY path"):
+            value = json.loads(payload)
+            if value["authored"]:
+                authored.add(path)
+                nodes[path] = value["type"]
+        notes = {row[0] for row in self.connection.execute("SELECT path FROM notes")}
+        for _source, target, _key, _tiers in edges:
+            if target.endswith(".json") and target not in notes:
+                nodes[target] = "compiler-record"
+        found = {}
+        for owner, target in self.connection.execute("SELECT owner,target FROM citations"):
+            found.setdefault(target, set()).add(owner)
+        for source, target, key, _tiers in edges:
+            if key != impact_closure.LIST_KEY:
+                found.setdefault(target, set()).add(source)
+        citers = {path: sorted(source for source in values if source in authored and source != path)
+                  for path, values in sorted(found.items())}
+        return {"notes": dict(sorted(nodes.items())), "citers": citers,
+                "edges": {(s, t, k): set(tiers) for s, t, k, tiers in edges},
+                "gaps": self.gaps_for(), "tiers": self.meta("tiers", {}), "proofs": self.fresh_proofs()}
     def find_notes(self, name):
         notes = NoteRows(self)
         paths = [row[0] for row in self.connection.execute("SELECT path FROM note_names WHERE name=? ORDER BY path", (name,))]
@@ -842,6 +924,9 @@ class Store:
 
 
 class IndexData(dict):
+    # Every refresh hashes the eligible inventory before serving it.
+    verified_inventory = True
+
     def __init__(self, store):
         self.store = store
         super().__init__(schema_version=SCHEMA_VERSION, builder=store.meta("builder"),
@@ -853,15 +938,7 @@ class IndexData(dict):
         if key == "proofs":
             return self.store.fresh_proofs()
         if key == "citers":
-            authored = {path for path, payload in self.store.connection.execute("SELECT path,payload FROM notes")
-                        if json.loads(payload)["authored"]}
-            result = {}
-            for owner, target in self.store.connection.execute("SELECT owner,target FROM citations"):
-                result.setdefault(target, set()).add(owner)
-            for s, t, key, _tiers in self["edges"]:
-                if key != impact_closure.LIST_KEY:
-                    result.setdefault(t, set()).add(s)
-            return {p: sorted(s for s in values if s in authored and s != p) for p, values in sorted(result.items())}
+            return self.store.closure_snapshot()["citers"]
         return super().__getitem__(key)
     def get(self, key, default=None):
         try:
@@ -871,9 +948,12 @@ class IndexData(dict):
 
 
 def check_cache_file(path):
+    """Refuse a cache file that is not regular or has another name; one being unlinked counts as absent."""
     try:
         info = path.lstat()
     except FileNotFoundError:
+        return
+    if info.st_nlink == 0:
         return
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
         raise ValueError("vault database, sidecars and lock must be regular unaliased files")
@@ -894,79 +974,160 @@ def sqlite_failure(exc):
     return CacheUnavailableError(f"vault SQLite index is unavailable: {exc}")
 
 
-def private_copy(cache):
-    """A consistent private copy of the published cache, or None when there is none to reuse."""
+def bound(binding, docs, builder):
+    """Whether a stored binding names this checkout, derivation and schema.
+
+    Another spelling of the same docs directory, such as a different case on a
+    case-insensitive volume, names the same checkout.
+    """
+    if not binding or binding.get("builder") != builder or binding.get("schema_version") != SCHEMA_VERSION:
+        return False
+    stored = binding.get("docs")
+    if stored == str(docs):
+        return True
+    try:
+        return isinstance(stored, str) and os.path.samefile(stored, docs)
+    except OSError:
+        return False
+
+
+def published_uri(cache):
+    return Path(cache).absolute().as_uri() + "?mode=ro"
+
+
+def open_published(cache):
+    """``((connection, lease), None)`` reading the published cache in place, or ``(None, reason)``.
+
+    The read-only connection holds one read transaction, so it keeps serving the
+    generation it opened while writers publish later ones.
+    """
     cache = Path(cache)
     try:
         check_database_files(cache)
         if not cache.is_file():
-            return None
-        temporary = tempfile.TemporaryDirectory(prefix="vault-index-copy-", ignore_cleanup_errors=True)
-    except (OSError, ValueError):
-        return None
-    guard = None
+            return None, None
+    except (OSError, ValueError) as exc:
+        return None, f"published cache refused: {exc}"
+    lease = connection = None
     try:
-        if cache.with_name(".snapshot").exists():
-            guard = DatabaseLease(cache, name=".snapshot", read_only=True)
-        clone = Path(temporary.name) / "index.db"
-        copy_cache_snapshot(cache, clone)
-        return temporary, clone
-    except (OSError, ValueError):
-        temporary.cleanup()
-        return None
+        if cache.with_name(".readers").exists():
+            lease = DatabaseLease(cache, read_only=True)
+        connection = sqlite3.connect(published_uri(cache), uri=True, check_same_thread=False,
+                                     timeout=policy()["busy_timeout_ms"] / 1000)
+        connection.execute("BEGIN")
+        connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        if connection is not None:
+            connection.close()
+        if lease is not None:
+            lease.close()
+        return None, f"published cache cannot be read in place: {exc}"
+    return (connection, lease), None
+
+
+def refresh(docs, cache, builder, *, persist=True, rebuild=False, coordinate=True, generation=0, current=None):
+    """Reconcile sources into the cache; without writes, read it in place or reconcile it in memory."""
+    docs, cache = Path(docs).resolve(), Path(cache)
+    if not docs.is_dir():
+        raise ValueError("needs_setup: workspace/docs does not exist")
+    capabilities()
+    fallback = None
+    if not persist and not rebuild:
+        published, fallback = open_published(cache)
+        if published is not None:
+            try:
+                return compile_index(docs, cache, builder, published=published, persist=False, rebuild=False,
+                                     coordinate=False, generation=generation, current=current)
+            except (CacheCorruptError, CacheUnavailableError) as exc:
+                fallback = f"published cache cannot be reconciled: {exc}"
+    data, status = compile_index(docs, cache, builder, published=None, persist=persist, rebuild=rebuild,
+                                 coordinate=coordinate, generation=generation, current=current)
+    if fallback:
+        # The sources answer correctly; the status names why the published cache was not used.
+        status["fallback"] = fallback
+    return data, status
+
+
+def publish(connection, cache):
+    """Commit, with the checkpoint it may run, while snapshot copies of ``cache`` are paused."""
+    guard = DatabaseLease(cache, exclusive=True, name=".snapshot") if cache is not None else None
+    try:
+        connection.commit()
     finally:
         if guard is not None:
             guard.close()
 
 
-def refresh(docs, cache, builder, *, persist=True, rebuild=False, coordinate=True, generation=0):
-    """Reconcile sources into the cache, or without writes into a private copy or memory."""
-    docs, cache = Path(docs).resolve(), Path(cache)
-    if not docs.is_dir():
-        raise ValueError("needs_setup: workspace/docs does not exist")
-    capabilities()
-    if not persist and not rebuild:
-        copy = private_copy(cache)
-        if copy is not None:
-            try:
-                return compile_index(docs, cache, builder, copy=copy, persist=False, rebuild=False,
-                                     coordinate=False, generation=generation)
-            except (CacheCorruptError, CacheUnavailableError):
-                pass  # the copy cannot be reconciled; compile the sources in memory
-    return compile_index(docs, cache, builder, copy=None, persist=persist, rebuild=rebuild,
-                         coordinate=coordinate, generation=generation)
+def compile_index(docs, cache, builder, *, published, persist, rebuild, coordinate, generation,
+                  current=None, defer=False):
+    """Compile the delta between the sources and the stored projection.
 
-
-def compile_index(docs, cache, builder, *, copy, persist, rebuild, coordinate, generation):
+    ``published`` reads the published cache in place: unchanged, it is served
+    as is; changed, the delta is applied to an in-memory backup, or with
+    ``defer`` the call returns None so a writer can publish it.
+    """
     started = time.perf_counter()
-    temporary, clone = copy if copy is not None else (None, None)
-    lease = guard = connection = store = None
+    lease = connection = store = None
+    served = fallback = None
     try:
-        if persist:
-            check_database_files(cache)
-        if persist and coordinate:
-            lease = DatabaseLease(cache)
-            guard = DatabaseLease(cache, exclusive=True, name=".snapshot")
-        target = str(cache) if persist else str(clone) if clone is not None else ":memory:"
-        connection = sqlite3.connect(target, timeout=policy()["busy_timeout_ms"] / 1000, check_same_thread=False)
-        store = Store(docs, connection, lease, cache if persist and coordinate else None, temporary)
-        lease = temporary = None
+        if published is not None:
+            connection, lease = published
+            served = "published_cache"
+        else:
+            if persist:
+                check_database_files(cache)
+                if coordinate:
+                    lease = DatabaseLease(cache)
+            connection = sqlite3.connect(str(cache) if persist else ":memory:",
+                                         timeout=policy()["busy_timeout_ms"] / 1000, check_same_thread=False)
+            served = None if persist else "in_memory_compile"
+        store = Store(docs, connection, lease, cache if published is not None or (persist and coordinate) else None)
+        lease = None
         if persist:
             connection.execute("PRAGMA journal_mode=WAL")
         # A foreign checkout, another derivation or schema, or an FTS layout this SQLite
         # cannot open is recompiled from this checkout's sources, never served.
-        full = rebuild or not store.layout_supported() or store.binding() != {
-            "docs": str(docs), "builder": builder, "schema_version": SCHEMA_VERSION}
+        layout = store.layout_supported()
+        binding = store.binding() if layout else None
+        full = rebuild or not bound(binding, docs, builder)
+        rebind = not full and binding["docs"] != str(docs)
         prior_generation = max(store.generation(), generation)
-        current = scan_files(docs)
+        if current is None:
+            current = scan_files(docs)
         cached = {} if full else store.file_entries()
-        changed = sorted(p for p, entry in current.items() if p not in cached or entry["sha"] != cached[p]["sha"])
+        changed = sorted(p for p, entry in current.items()
+                         if p not in cached or source_key(entry) != source_key(cached[p]))
         removed = sorted(set(cached) - set(current))
         flipped = set() if full else store.flipped_probes()
+        dirty = bool(changed or removed or full or flipped)
+        if published is not None:
+            if defer and (dirty or rebind or current != cached):
+                store.close()
+                return None
+            if dirty:
+                memory = sqlite3.connect(":memory:", check_same_thread=False)
+                try:
+                    if not full:
+                        connection.backup(memory)
+                except BaseException:
+                    memory.close()
+                    raise
+                served = "in_memory_compile" if full else "in_memory_copy"
+                if full:
+                    fallback = ("the published cache has a layout this SQLite cannot read" if not layout else
+                                "the published cache is bound to another checkout, derivation or schema")
+                store.close()
+                connection = memory
+                store = Store(docs, connection)
         status = {"path": str(cache), "full": full, "changed": changed, "removed": removed, "persisted": persist}
-        if changed or removed or full or flipped:
-            with connection:
-                connection.execute("BEGIN IMMEDIATE")
+        if served is not None:
+            status["served"] = served
+        if fallback:
+            status["fallback"] = fallback + "; compiled from sources"
+        guard = cache if persist and coordinate else None
+        if dirty:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
                 if full:
                     store.reset()
                 affected = set(changed) | set(removed)
@@ -981,7 +1142,10 @@ def compile_index(docs, cache, builder, *, copy, persist, rebuild, coordinate, g
                 for path in changed:
                     connection.execute("INSERT INTO files VALUES(?,?)", (path, encoded(current[path])))
                     suffix = Path(path).suffix
-                    if suffix == ".md":
+                    if current[path].get("excluded_link"):
+                        store.unparsed(path, store.verified(path),
+                                       f"links to an excluded location: {current[path]['excluded_link']}")
+                    elif suffix == ".md":
                         store.update_note(path)
                         markdown.add(path)
                     elif suffix.lower() == ".json":
@@ -997,8 +1161,8 @@ def compile_index(docs, cache, builder, *, copy, persist, rebuild, coordinate, g
                     store.graph_owner(owner)
                 store.diagnostics(None if full else affected)
                 checked = scan_files(docs)
-                if {p: v["sha"] for p, v in checked.items()} != {p: v["sha"] for p, v in current.items()}:
-                    raise ValueError("source changed during indexing; retry synchronization")
+                if {p: source_key(v) for p, v in checked.items()} != {p: source_key(v) for p, v in current.items()}:
+                    raise SourceChangedError("source changed during indexing; retry synchronization")
                 for path, entry in checked.items():
                     connection.execute("UPDATE files SET payload=? WHERE path=?", (encoded(entry), path))
                 store.set_meta("builder", builder)
@@ -1008,12 +1172,26 @@ def compile_index(docs, cache, builder, *, copy, persist, rebuild, coordinate, g
                 hashes = {p: entry["sha"] for p, entry in checked.items()}
                 sources = {p: "sha256:" + hashes[p] for p in Rows(store, "documents", "path")}
                 store.set_meta("snapshot_inputs", {"builder": builder, "files": hashes, "sources": sources})
-        elif current != cached:
-            with connection:
+                publish(connection, guard)
+            except BaseException:
+                if connection.in_transaction:
+                    connection.rollback()
+                raise
+        elif persist and (current != cached or rebind):
+            connection.execute("BEGIN IMMEDIATE")
+            try:
                 for path, entry in current.items():
                     if entry != cached[path]:
                         connection.execute("UPDATE files SET payload=? WHERE path=?", (encoded(entry), path))
-        connection.execute("BEGIN")
+                if rebind:
+                    store.set_meta("docs", str(docs))
+                publish(connection, guard)
+            except BaseException:
+                if connection.in_transaction:
+                    connection.rollback()
+                raise
+        if not connection.in_transaction:
+            connection.execute("BEGIN")
         status.update(ms=round((time.perf_counter() - started) * 1000, 1),
                       generation=store.meta("generation", 0), state="ready" if len(store.catalog["documents"]) else "ready_empty")
         unparsed = store.unparsed_paths()
@@ -1027,19 +1205,14 @@ def compile_index(docs, cache, builder, *, copy, persist, rebuild, coordinate, g
             connection.close()
         if lease is not None:
             lease.close()
-        if temporary is not None:
-            temporary.cleanup()
         if isinstance(exc, DATABASE_ERRORS):
             raise sqlite_failure(exc) from exc
         raise
-    finally:
-        if guard is not None:
-            guard.close()
 
 
 def published_generation(cache):
     try:
-        connection = sqlite3.connect(f"file:{Path(cache).as_posix()}?mode=ro", uri=True)
+        connection = sqlite3.connect(published_uri(cache), uri=True)
     except sqlite3.Error:
         return 0
     try:
@@ -1052,6 +1225,64 @@ def published_generation(cache):
         connection.close()
 
 
+def generation_floor(cache):
+    """The last generation this folder published, kept outside the database it numbers."""
+    path = Path(cache).with_name(".generation")
+    try:
+        check_cache_file(path)
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    return value if type(value) is int and value > 0 else 0
+
+
+def record_generation(cache, value):
+    if type(value) is int and value > generation_floor(cache):
+        path = Path(cache).with_name(".generation")
+        check_cache_file(path)
+        atomic_file.replace_bytes(path, str(value).encode("ascii"))
+
+
+def copy_alive(directory):
+    """Whether the inspection that owns a copy folder may still run.
+
+    A folder younger than the busy timeout counts as live, since its owner
+    creates and locks the marker only after creating the folder; an older one
+    is live while its owner holds the marker lock.
+    """
+    try:
+        if time.time() - directory.stat().st_mtime < policy()["busy_timeout_ms"] / 1000:
+            return True
+    except OSError:
+        return False
+    marker = directory / ".live"
+    try:
+        check_cache_file(marker)
+        descriptor = os.open(marker, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        return True
+    try:
+        if not file_lock.try_lock(descriptor):
+            return True
+        file_lock.unlock(descriptor)
+        return False
+    finally:
+        os.close(descriptor)
+
+
+def sweep_runtime(folder):
+    """Remove interrupted recovery candidates and ended inspection copies; callers hold ``.lock``."""
+    for name in sorted(os.listdir(folder)):
+        stale = Path(folder) / name
+        if not name.startswith((RECOVERY_PREFIX, COPY_PREFIX)) or stale.is_symlink() or not stale.is_dir():
+            continue
+        # Only a recovery under this same lock creates a candidate, so none is live here.
+        if name.startswith(RECOVERY_PREFIX) or not copy_alive(stale):
+            shutil.rmtree(stale, ignore_errors=True)
+
+
 def recover_database(docs, cache, builder):
     """Compile before publication; never replace a live database or its WAL."""
     exclusive = DatabaseLease(cache, exclusive=True)
@@ -1059,12 +1290,9 @@ def recover_database(docs, cache, builder):
         check_database_files(cache)
         if cache.exists() and not os.access(cache, os.W_OK):
             raise PermissionError(errno.EACCES, "vault SQLite cache is read-only")
-        for stale in cache.parent.glob(".index-recovery-*"):
-            # An interrupted recovery leaves only its unpublished candidate here.
-            if stale.is_dir() and not stale.is_symlink():
-                shutil.rmtree(stale, ignore_errors=True)
-        floor = published_generation(cache) if cache.exists() else 0
-        with tempfile.TemporaryDirectory(prefix=".index-recovery-", dir=cache.parent) as temporary:
+        sweep_runtime(cache.parent)
+        floor = max(published_generation(cache) if cache.exists() else 0, generation_floor(cache))
+        with tempfile.TemporaryDirectory(prefix=RECOVERY_PREFIX, dir=cache.parent) as temporary:
             candidate = Path(temporary) / "index.db"
             data, _status = refresh(docs, candidate, builder, rebuild=True, coordinate=False, generation=floor)
             try:
@@ -1097,28 +1325,71 @@ def recover_database(docs, cache, builder):
     return result, status
 
 
+def serve_unchanged(docs, cache, builder, current):
+    """The published cache when it already holds exactly these sources, else None."""
+    published, _reason = open_published(cache)
+    if published is None:
+        return None
+    try:
+        result = compile_index(docs, cache, builder, published=published, persist=False, rebuild=False,
+                               coordinate=False, generation=0, current=current, defer=True)
+    except (CacheCorruptError, CacheUnavailableError, PermissionError):
+        return None
+    if result is not None:
+        result[1]["persisted"] = True
+    return result
+
+
 def locked_refresh(docs, cache, builder, *, rebuild=False, repair=False, failed=None, wait=True):
-    """Serialize writers; with wait=False return None instead of queueing behind another writer."""
+    """Serve an unchanged published cache without the writer lock; serialize writers for a delta.
+
+    The sources are hashed before the lock is taken. With wait=False return
+    None instead of queueing behind another writer.
+    """
     docs, cache = Path(docs).resolve(), Path(cache)
+    if not docs.is_dir():
+        raise ValueError("needs_setup: workspace/docs does not exist")
     project = docs.parents[1]
     folder = atomic_file.real_directory(project, cache.parent.relative_to(project))
     path = folder / ".lock"
+    current = None
+    if not rebuild and not repair:
+        capabilities()
+        current = scan_files(docs)
+        served = serve_unchanged(docs, cache, builder, current)
+        if served is not None:
+            check_cache_file(path)
+            descriptor = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o666)
+            try:
+                if file_lock.try_lock(descriptor):
+                    try:
+                        sweep_runtime(folder)
+                    finally:
+                        file_lock.unlock(descriptor)
+            finally:
+                os.close(descriptor)
+            return served
     check_cache_file(path)
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o666)
     try:
-        if wait:
+        if not file_lock.try_lock(descriptor):
+            if not wait:
+                return None
             file_lock.lock(descriptor)
-        elif not file_lock.try_lock(descriptor):
-            return None
+            # Another writer ran meanwhile; the earlier hashes may predate its sources.
+            current = None
         try:
+            sweep_runtime(folder)
             try:
-                result = refresh(docs, cache, builder, rebuild=rebuild)
+                result = refresh(docs, cache, builder, rebuild=rebuild, current=current,
+                                 generation=generation_floor(cache))
                 # Another process may already have replaced the database this reader failed on.
                 if repair and (failed is None or failed == database_identity(cache)):
                     result[0].store.close()
                     result = recover_database(docs, cache, builder)
             except CacheCorruptError:
                 result = recover_database(docs, cache, builder)
+            record_generation(cache, result[1]["generation"])
             if result[1]["full"]:
                 cleanup_legacy(cache, docs)
             return result
@@ -1178,11 +1449,14 @@ def projection_mismatches(store, fresh):
 
 
 def cache_file_signature(path):
-    check_cache_file(path)
     try:
-        info = path.stat()
+        info = path.lstat()
     except FileNotFoundError:
         return None
+    if info.st_nlink == 0:
+        return None
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise ValueError("vault database, sidecars and lock must be regular unaliased files")
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
@@ -1190,6 +1464,9 @@ def snapshot_file_hash(path, destination=None):
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     with os.fdopen(descriptor, "rb") as source:
         info = os.fstat(source.fileno())
+        if info.st_nlink == 0:
+            # SQLite is deleting this WAL or the file is being replaced; capture again.
+            raise FileNotFoundError(errno.ENOENT, "vault snapshot input is being unlinked", str(path))
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise ValueError("vault snapshot inputs must be regular unaliased files")
         digest = hashlib.sha256()
@@ -1229,84 +1506,119 @@ def copy_cache_snapshot(cache, clone):
         except FileNotFoundError:
             pass
         if time.monotonic() >= deadline:
-            raise ValueError("vault cache changed while capturing its snapshot; retry inspection")
+            raise CacheBusyError("vault cache changed while capturing its snapshot; retry inspection")
         time.sleep(file_lock.POLL_SECONDS)
 
 
+def snapshot_directory(cache):
+    """``(folder, marker, fallback)``: a copy folder in the runtime folder that the next writer
+    sweeps once this inspection ends, or a system one when the runtime folder is read-only."""
+    try:
+        temporary = tempfile.TemporaryDirectory(prefix=COPY_PREFIX, dir=cache.parent, ignore_cleanup_errors=True)
+    except OSError as exc:
+        return (tempfile.TemporaryDirectory(prefix="vault-index-check-", ignore_cleanup_errors=True), None,
+                f"the runtime folder is not writable ({exc}); the snapshot was copied to the system temporary folder")
+    try:
+        marker = os.open(Path(temporary.name) / ".live", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o666)
+        file_lock.try_lock(marker)
+    except BaseException:
+        temporary.cleanup()
+        raise
+    return temporary, marker, None
+
+
 def inspect_index(docs, cache, builder, *, check=False):
-    """Copy a consistent closed/checkpointed or WAL snapshot without source or cache writes."""
+    """Copy a consistent closed/checkpointed or WAL snapshot without source or published-cache writes."""
+    capabilities()
     docs, cache = Path(docs).resolve(), Path(cache)
     check_database_files(cache)
     if not cache.exists():
         return {"status": "absent", "documents": 0}
-    guard = None
     try:
-        # The shared snapshot lease pauses publication only for the copy itself.
-        if cache.with_name(".snapshot").exists():
-            guard = DatabaseLease(cache, name=".snapshot", read_only=True)
-        with tempfile.TemporaryDirectory(prefix="vault-index-check-", ignore_cleanup_errors=True) as temporary:
-            clone = Path(temporary) / "index.db"
-            copy_cache_snapshot(cache, clone)
-            if guard is not None:
-                guard.close()
-                guard = None
-            connection = sqlite3.connect(clone)
+        temporary, marker, fallback = snapshot_directory(cache)
+        try:
+            guard = None
             try:
-                store = Store(docs, connection)
-                if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                    return {"status": "corrupt"}
-                binding = store.binding()
-                if not binding:
-                    return {"status": "absent", "documents": 0}
-                expected = {"docs": str(docs), "builder": builder, "schema_version": SCHEMA_VERSION}
-                if binding != expected:
-                    return {"status": "incompatible", "docs": binding.get("docs"),
-                            "reasons": [key for key in expected if binding.get(key) != expected[key]]}
-                stored = store.file_entries()
-                result = {"status": "ready" if len(store.catalog["documents"]) else "ready_empty",
-                          "generation": store.meta("generation"), "documents": len(store.catalog["documents"]),
-                          "units": len(store.catalog["units"]), "files": len(stored), "docs": binding["docs"],
-                          "schema_version": SCHEMA_VERSION, "verified": False}
-                unparsed = store.unparsed_paths()
-                if unparsed:
-                    result["unparsed"] = unparsed
-                if not check:
-                    observed = scan_files(docs, digest=False)
-                    result["possibly_stale"] = observed != {
-                        path: {"size": entry["size"], "mtime_ns": entry["mtime_ns"]} for path, entry in stored.items()}
-                    return result
-                hashes = {p: v["sha"] for p, v in stored.items()}
-                if {p: v["sha"] for p, v in scan_files(docs).items()} != hashes:
-                    result["status"] = "stale"
-                    return result
-                expected_ids = {r[0] for r in connection.execute("SELECT uid FROM units")}
-                found = {r[0] for r in connection.execute("SELECT uid FROM search_units")}
-                search_ids = {r[0] for r in connection.execute("SELECT rowid FROM search_text")}
-                mapped = {r[0] for r in connection.execute("SELECT rowid FROM search_units")}
-                if expected_ids != found or search_ids != mapped:
-                    result["status"] = "incomplete"
-                try:
-                    fresh, _status = refresh(docs, cache, builder, persist=False, rebuild=True)
-                except ValueError as exc:
-                    if "changed" not in str(exc):
-                        raise
-                    result["status"] = "stale"
-                    return result
-                try:
-                    if fresh.store.meta("snapshot_inputs")["files"] != hashes:
-                        result["status"] = "stale"
-                        return result
-                    mismatches = projection_mismatches(store, fresh.store)
-                finally:
-                    fresh.store.close()
-                if mismatches:
-                    result.update(status="incomplete", mismatches=mismatches)
-                result["verified"] = result["status"] in {"ready", "ready_empty"}
-                return result
-            except sqlite3.Error as exc:
-                raise ValueError(f"invalid vault database: {exc}") from exc
+                # The shared snapshot lease pauses publication only for the copy itself.
+                if cache.with_name(".snapshot").exists():
+                    guard = DatabaseLease(cache, name=".snapshot", read_only=True)
+                clone = Path(temporary.name) / "index.db"
+                copy_cache_snapshot(cache, clone)
             finally:
-                connection.close()
+                if guard is not None:
+                    guard.close()
+            result = inspect_copy(docs, cache, clone, builder, check)
+            if fallback:
+                result["copy_fallback"] = fallback
+            return result
+        finally:
+            if marker is not None:
+                try:
+                    file_lock.unlock(marker)
+                finally:
+                    os.close(marker)
+            temporary.cleanup()
+    except CacheBusyError as exc:
+        return {"status": "busy", "reason": str(exc)}
+
+
+def inspect_copy(docs, cache, clone, builder, check):
+    connection = sqlite3.connect(clone)
+    try:
+        store = Store(docs, connection)
+        if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            return {"status": "corrupt"}
+        binding = store.binding()
+        if not binding:
+            return {"status": "absent", "documents": 0}
+        if not bound(binding, docs, builder):
+            reasons = [] if bound(dict(binding, builder=builder, schema_version=SCHEMA_VERSION), docs, builder) else ["docs"]
+            reasons += [key for key, value in (("builder", builder), ("schema_version", SCHEMA_VERSION))
+                        if binding.get(key) != value]
+            return {"status": "incompatible", "docs": binding.get("docs"), "reasons": reasons}
+        if not store.layout_supported():
+            return {"status": "incompatible", "docs": binding.get("docs"), "reasons": ["layout"]}
+        stored = store.file_entries()
+        result = {"status": "ready" if len(store.catalog["documents"]) else "ready_empty",
+                  "generation": store.meta("generation"), "documents": len(store.catalog["documents"]),
+                  "units": len(store.catalog["units"]), "files": len(stored), "docs": binding["docs"],
+                  "schema_version": SCHEMA_VERSION, "verified": False}
+        unparsed = store.unparsed_paths()
+        if unparsed:
+            result["unparsed"] = unparsed
+        if not check:
+            observed = scan_files(docs, digest=False)
+            stat_only = lambda entries: {path: (entry["size"], entry["mtime_ns"], entry.get("excluded_link"))
+                                         for path, entry in entries.items()}
+            result["possibly_stale"] = stat_only(observed) != stat_only(stored)
+            return result
+        hashes = {p: v["sha"] for p, v in stored.items()}
+        if {p: source_key(v) for p, v in scan_files(docs).items()} != {p: source_key(v) for p, v in stored.items()}:
+            result["status"] = "stale"
+            return result
+        expected_ids = {r[0] for r in connection.execute("SELECT uid FROM units")}
+        found = {r[0] for r in connection.execute("SELECT uid FROM search_units")}
+        search_ids = {r[0] for r in connection.execute(f"SELECT rowid FROM {SEARCH_TABLE}")}
+        mapped = {r[0] for r in connection.execute("SELECT rowid FROM search_units")}
+        if expected_ids != found or search_ids != mapped:
+            result["status"] = "incomplete"
+        try:
+            fresh, _status = refresh(docs, cache, builder, persist=False, rebuild=True)
+        except SourceChangedError:
+            result["status"] = "stale"
+            return result
+        try:
+            if fresh.store.meta("snapshot_inputs")["files"] != hashes:
+                result["status"] = "stale"
+                return result
+            mismatches = projection_mismatches(store, fresh.store)
+        finally:
+            fresh.store.close()
+        if mismatches:
+            result.update(status="incomplete", mismatches=mismatches)
+        result["verified"] = result["status"] in {"ready", "ready_empty"}
+        return result
+    except sqlite3.Error as exc:
+        raise ValueError(f"invalid vault database: {exc}") from exc
     finally:
-        if guard is not None:
-            guard.close()
+        connection.close()

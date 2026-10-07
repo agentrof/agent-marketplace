@@ -93,19 +93,18 @@ def builder_hash() -> str:
     return digest.hexdigest()
 
 
-def scan_files(docs: Path, cached: dict | None = None, verify: bool = True,
-               stamped: frozenset = frozenset()) -> dict:
-    """Every eligible source with its hash; the stat-only fast path no longer exists."""
+def scan_files(docs: Path) -> dict:
+    """Every eligible source with its size, modification time and hash."""
     return vault_index.scan_files(docs)
 
 
-def locked_refresh(docs: Path, cache: Path, verify: bool = True, *, rebuild: bool = False,
+def locked_refresh(docs: Path, cache: Path, *, rebuild: bool = False,
                    repair: bool = False, failed=None, wait: bool = True):
     return vault_index.locked_refresh(docs, cache, builder_hash(), rebuild=rebuild, repair=repair,
                                       failed=failed, wait=wait)
 
 
-def refresh(docs: Path, cache: Path, verify: bool = True, persist: bool = True, *, rebuild: bool = False):
+def refresh(docs: Path, cache: Path, *, persist: bool = True, rebuild: bool = False):
     return vault_index.refresh(docs, cache, builder_hash(), persist=persist, rebuild=rebuild)
 
 
@@ -120,20 +119,23 @@ class Index:
         self.store = getattr(data, "store", None)
 
     def resolve(self, ref: str) -> str:
+        """A graph node: a note, or a machine record an edge cites; never a generic JSON source."""
         rel = impact_closure.normalize(ref)
         for candidate in (rel, f"{rel}.md"):
             if candidate in self.data["notes"]:
                 return candidate
-        hits = self.find(ref)
+        hits = self.find(ref, graph=True)
         if len(hits) == 1:
             return hits[0]["path"]
         raise LookupError(f"'{ref}' names {len(hits)} notes; use a path"
                           + (": " + ", ".join(h["path"] for h in hits[:10]) if hits else ""))
 
-    def find(self, ref: str) -> list:
+    def find(self, ref: str, graph: bool = False) -> list:
         wanted = ref.strip().lower()
         notes = self.data["notes"]
         records = context_catalog.resolve(self.data.get("catalog", {"units": {}, "aliases": {}}), ref)
+        if graph:
+            records = [row for row in records if row["kind"] != "json"]
         if records:
             return [{"path": row["path"], "id": ref, "title": row["label"],
                      "type": self.data["catalog"]["documents"][row["path"]]["type"],
@@ -157,6 +159,8 @@ class Index:
                 if (s, t)[field] == rel]
 
     def snapshot(self) -> dict:
+        if self.store is not None:
+            return self.store.closure_snapshot()
         return {
             "notes": {rel: n["type"] for rel, n in self.data["notes"].items() if n["authored"]},
             "citers": self.data["citers"],
@@ -235,7 +239,8 @@ def q_find(index: Index, args) -> dict:
 def q_hash(index: Index, args) -> dict:
     rel = index.resolve(args.ref)
     entry = index.data["files"].get(rel, {})
-    proof = index.data["proofs"].get(rel)
+    proofs = index.store.fresh_proofs(only={rel}) if index.store is not None else index.data["proofs"]
+    proof = proofs.get(rel)
     return {"note": rel, "file_sha256": entry.get("sha"),
             "approval_hash": proof["approval_hash"] if proof else None,
             "scheme": proof["scheme"] if proof else None,
@@ -320,11 +325,11 @@ def q_search_sections(index: Index, args) -> dict:
 
 def query_data(args, cache, *, rebuild=False, repair=False, failed=None):
     try:
-        return locked_refresh(args.docs, cache, args.verify, rebuild=rebuild, repair=repair, failed=failed)
+        return locked_refresh(args.docs, cache, rebuild=rebuild, repair=repair, failed=failed)
     except OSError as exc:
         if exc.errno not in READ_ONLY_ERRORS:
             raise
-        return refresh(args.docs, cache, args.verify, persist=False, rebuild=rebuild or repair)
+        return refresh(args.docs, cache, persist=False, rebuild=rebuild or repair)
 
 
 def main(argv: list[str] | None = None) -> int:

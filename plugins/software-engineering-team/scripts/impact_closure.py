@@ -108,14 +108,21 @@ def closure_policy(vault_policy: dict, overrides: dict | None = None) -> dict:
 
 
 def load_vault(docs: Path) -> vault_check.Vault:
-    return load_vault_reusing(docs, None)
-
-
-def load_vault_reusing(docs: Path, reuse: dict | None) -> vault_check.Vault:
-    """The vault, reusing hash-proven cached notes (see vault_query)."""
+    """The vault; a note linked to an excluded location is no note, as in the vault index."""
+    import vault_index
     vault_policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-    return vault_check.build_vault(
-        Path(docs), vault_check.effective_policy(vault_policy, Path(docs)), reuse=reuse)
+    vault = vault_check.build_vault(Path(docs), vault_check.effective_policy(vault_policy, Path(docs)))
+    excluded = [rel for rel in vault.notes if vault_index.excluded_link_target(vault.root, rel)]
+    if excluded:
+        for rel in excluded:
+            del vault.notes[rel]
+        vault.inbound.clear()
+        for note in vault.notes.values():
+            targets = [t for (_, _, t, _, _, _) in note.wikilinks if t]
+            targets.extend(t for (_, t) in note.fm_targets if t)
+            for target in targets:
+                vault.inbound.setdefault(f"{target}.md", set()).add(note.rel)
+    return vault
 
 
 def normalize(rel: str) -> str:
@@ -406,7 +413,8 @@ def navigation_tier(vault, edges: Edges) -> None:
 
 def identifiers(note) -> list:
     found = []
-    for value in [note.fm.get("id"), *(note.fm.get("aliases") or [])]:
+    aliases = note.fm.get("aliases")
+    for value in [note.fm.get("id"), *(aliases if isinstance(aliases, list) else [])]:
         if isinstance(value, str) and len(value.strip()) >= 3 and re.search(r"[0-9:-]", value):
             found.append(value.strip())
     return found
@@ -572,14 +580,16 @@ def approval_state(note) -> dict | None:
     return {"approval_hash": stamp, "scheme": None, "proven": False}
 
 
-def ba_package_proofs(docs: Path) -> dict:
-    """Notes of approved analysis spaces whose package hash still matches."""
+def ba_package_proofs(docs: Path, only=None) -> dict:
+    """Notes of approved analysis spaces whose package hash still matches (``only`` limits the spaces)."""
     import ba_compile
     proofs: dict = {}
     root = docs / "business-analysis"
     if not root.is_dir():
         return proofs
     for space in sorted(p for p in root.iterdir() if p.is_dir()):
+        if only is not None and not any(rel.startswith(f"business-analysis/{space.name}/") for rel in only):
+            continue
         overview = space / "space.md"
         if not overview.is_file():
             continue
@@ -624,7 +634,7 @@ def architecture_proofs(docs: Path, notes) -> dict:
 def proofs_for(docs: Path, notes, only=None) -> dict:
     """Approval proof per stamped note (``only`` limits the notes checked)."""
     notes = list(notes)
-    proofs = {rel: state for rel, state in ba_package_proofs(docs).items()
+    proofs = {rel: state for rel, state in ba_package_proofs(docs, only).items()
               if only is None or rel in only}
     proofs.update(architecture_proofs(docs, [note for note in notes
                                              if only is None or note.rel in only]))
@@ -672,11 +682,13 @@ def snapshot(vault, policy: dict | None = None, proofs: dict | None = None,
     }
 
 
-def earlier_relations(docs: Path, texts: dict) -> dict:
+def earlier_relations(docs: Path, texts: dict, *, vault=None, owners=None) -> dict:
     """Notes each deleted note named in its front matter, resolved in the
-    current vault: ``texts`` maps the deleted note to its earlier bytes."""
-    vault = load_vault(Path(docs).absolute())
-    owners = reference_owners(vault)
+    current vault: ``texts`` maps the deleted note to its earlier bytes. An
+    indexed caller passes its verified vault view and owner lookup."""
+    if vault is None:
+        vault = load_vault(Path(docs).absolute())
+        owners = reference_owners(vault)
     result = {}
     for rel, text in texts.items():
         props = parse_frontmatter(text)[0] or {}

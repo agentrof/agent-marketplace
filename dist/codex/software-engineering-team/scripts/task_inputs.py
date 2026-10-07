@@ -114,6 +114,46 @@ def row_path(row) -> str:
     return row.get("path") if isinstance(row, dict) else row
 
 
+def closure_raw(api, docs: Path, present: list, earlier: dict) -> dict:
+    """``api.closure`` over the verified vault index when this Python has SQLite FTS5.
+
+    The result equals the reparse ``api.closure`` computes. A closure module that
+    provides only the documented ``closure`` call, a vault outside a project's
+    ``workspace/docs`` (which has no checkout index) and a Python without SQLite
+    FTS5 use that reparse.
+    """
+    def reparse():
+        return api.closure(docs, present, deleted=earlier) if earlier else api.closure(docs, present)
+    root = Path(docs).resolve()
+    if not hasattr(api, "closure_from") or root.name != "docs" or root.parent.name != "workspace":
+        return reparse()
+    import vault_index
+    try:
+        vault_index.capabilities()
+    except ValueError:
+        return reparse()
+    import project_context
+    import vault_check
+    import vault_query
+
+    def run(index):
+        snap = vault_query.Index(index).snapshot()
+        policy = api.closure_policy(vault_check.effective_policy(
+            vault_check.load_policy(vault_check.DEFAULT_POLICY), docs))
+        result = api.closure_from(snap, api.changed_paths(docs, present, snap["notes"]), policy)
+        if earlier:
+            relations = api.earlier_relations(docs, earlier, vault=index.store.vault(),
+                                              owners=index.store.catalog.owner_lookup)
+            seeds = sorted({target for targets in relations.values() for target in targets})
+            if seeds:
+                more = api.closure_from(snap, sorted({*result["changed"], *seeds}), policy)
+                more["changed"] = result["changed"]
+                result = more
+            result["deleted"] = sorted(earlier)
+        return result
+    return project_context.with_index(root.parents[1], run)
+
+
 def impact_closure(docs: Path, changed, prefix: str = "", deleted: dict | None = None) -> dict:
     """Return the closure of ``changed`` docs notes with every path under ``prefix``.
 
@@ -128,8 +168,7 @@ def impact_closure(docs: Path, changed, prefix: str = "", deleted: dict | None =
     earlier = {docs_relative(path): text for path, text in (deleted or {}).items()}
     api = closure_api()
     present = [path for path in named if path not in missing]
-    raw = (api.closure(docs, present, deleted=earlier) if earlier
-           else api.closure(docs, present))
+    raw = closure_raw(api, docs, present, earlier)
     if not isinstance(raw, dict) or any(not isinstance(raw.get(key), list) for key in CLOSURE_KEYS):
         raise ValueError(f"impact closure must return the lists {', '.join(CLOSURE_KEYS)}")
     raw = dict(raw, changed=[*raw["changed"], *missing])

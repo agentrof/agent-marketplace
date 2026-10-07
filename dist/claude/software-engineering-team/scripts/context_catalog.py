@@ -5,14 +5,45 @@ from __future__ import annotations
 from collections import defaultdict
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 
 import ba_compile
 
 
+class SourceChangedError(ValueError):
+    """A source's bytes differ from the bytes an index or address was built from."""
+
+
 def digest(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def contained(target: Path, root: Path, root_identity=None) -> str | None:
+    """``target`` relative to ``root``, or None outside it.
+
+    A directory is matched by file identity, so another spelling of the same
+    root (case or Unicode form on a case-insensitive volume) still contains it.
+    """
+    try:
+        return target.relative_to(root).as_posix()
+    except ValueError:
+        pass
+    if root_identity is None:
+        try:
+            info = os.stat(root)
+        except OSError:
+            return None
+        root_identity = info.st_dev, info.st_ino
+    for parent in target.parents:
+        try:
+            info = os.stat(parent)
+        except OSError:
+            continue
+        if (info.st_dev, info.st_ino) == root_identity:
+            return target.relative_to(parent).as_posix()
+    return None
 
 
 def safe_file(root: Path, relative: str) -> Path:
@@ -20,7 +51,7 @@ def safe_file(root: Path, relative: str) -> Path:
     if path.is_absolute() or not path.parts or ".." in path.parts or "\\" in relative:
         raise ValueError("source must be a relative path inside its declared root")
     result = root / path
-    if not result.resolve().is_relative_to(root.resolve()) or not result.is_file():
+    if contained(result.resolve(), root.resolve()) is None or not result.is_file():
         raise ValueError(f"source is missing or escapes its declared root: {relative}")
     return result
 
@@ -62,7 +93,7 @@ def catalog(vault, *, include_receipts: bool = True) -> dict:
         raw = path.read_bytes()
         text = raw.decode("utf-8")
         if text.splitlines() != note.lines:
-            raise ValueError(f"source changed while indexing: {relative}")
+            raise SourceChangedError(f"source changed while indexing: {relative}")
         lines = text.splitlines(keepends=True)
         props, start, error = ba_compile.parse_frontmatter(text)
         if error:
@@ -320,7 +351,7 @@ def unit_content(root: Path, unit: dict, *, sources: dict | None = None) -> byte
         else:
             raw = safe_file(source_root, unit["path"]).read_bytes()
         if digest(raw) != unit["source_hash"]:
-            raise ValueError(f"stale source: {unit['path']}")
+            raise SourceChangedError(f"stale source: {unit['path']}")
         source = {"raw": raw}
         if sources is not None:
             sources[key] = source
@@ -338,7 +369,7 @@ def unit_content(root: Path, unit: dict, *, sources: dict | None = None) -> byte
         content = "\n".join("".join(lines[a - 1:b]) for a, b in unit["ranges"]).encode("utf-8")
     expected = unit.get("parent_content_hash", unit["content_hash"])
     if digest(content) != expected:
-        raise ValueError(f"stale unit: {unit['unit_id']}")
+        raise SourceChangedError(f"stale unit: {unit['unit_id']}")
     if "byte_range" in unit:
         begin, end = unit["byte_range"]
         if not (type(begin) is int and type(end) is int and 0 <= begin < end <= len(content)):
@@ -346,9 +377,9 @@ def unit_content(root: Path, unit: dict, *, sources: dict | None = None) -> byte
         content = content[begin:end]
         content.decode("utf-8")
         if digest(content) != unit["content_hash"]:
-            raise ValueError("stale fragment")
+            raise SourceChangedError("stale fragment")
     if len(content) != unit["bytes"]:
-        raise ValueError("stale unit byte count")
+        raise SourceChangedError("stale unit byte count")
     return content
 
 

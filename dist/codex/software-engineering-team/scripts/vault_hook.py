@@ -1469,8 +1469,9 @@ def post(payload: dict) -> int:
 def sync_vault_index(root: Path, paths) -> None:
     """A disposable cache failure cannot grant or replace source validation.
 
-    The sync is a hint: a busy writer lock or any index failure leaves the
-    reconciliation to the next query instead of delaying or failing the hook.
+    The sync is a hint that runs synchronously: a busy writer lock skips it,
+    a missing or incompatible cache compiles here, and any index failure
+    leaves reconciliation to the next query without changing the hook result.
     """
     if not root.is_dir() or not paths:
         return
@@ -1488,7 +1489,7 @@ def sync_vault_index(root: Path, paths) -> None:
                 continue
         if not any(vault_index.eligible(relative, settings, artifact) for relative in relatives):
             return
-        result = vault_query.locked_refresh(root, vault_query.default_cache(root), True, wait=False)
+        result = vault_query.locked_refresh(root, vault_query.default_cache(root), wait=False)
         if result is not None:
             result[0].store.close()
     except Exception as exc:

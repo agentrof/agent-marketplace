@@ -264,7 +264,7 @@ SHIPPED_ADDITIONS = {
         72, "#441: the cached vault query CLI, a package script every task binds with the"
             " other package scripts; no default-path step runs it."),
     "scripts/vault_index.py": (
-        72, "#462: the checkout-local SQLite index used by the vault query and context"
+        72, "#465: the checkout-local SQLite index used by the vault query and context"
             " resolver, bound by every task with the other package scripts."),
     "scripts/context_pack.py": (
         72, "#441: the role digest of switch context_pack, a package script every task binds"

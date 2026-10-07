@@ -62,7 +62,7 @@ class ProjectContextTests(unittest.TestCase):
         edges, gaps, _tiers = impact_closure.graph(vault, impact_closure.closure_policy(vault.policy))
         return {"catalog": context_catalog.catalog(vault),
                 "edges": [[s, t, key, sorted(tiers)] for (s, t, key), tiers in edges.tiers.items()],
-                "files": vault_query.scan_files(self.docs, {}, verify=True), "gaps": gaps}
+                "files": vault_query.scan_files(self.docs), "gaps": gaps}
 
     def plan(self, **kwargs):
         params = dict(entry="deliver", role="backend-developer", refs=["ST-901"])

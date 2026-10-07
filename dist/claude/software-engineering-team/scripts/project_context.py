@@ -595,9 +595,10 @@ def expand_context(project: Path, index: dict, plan: dict, *, reason: str,
 
 
 def validate_plan(project: Path, index: dict, plan: dict, *, policy: dict | None = None) -> None:
-    if index.get("files"):
+    # An index loaded in this invocation already hashed every eligible source.
+    if index.get("files") and not getattr(index, "verified_inventory", False):
         import vault_query
-        files = vault_query.scan_files(project / "workspace/docs", {}, verify=True)
+        files = vault_query.scan_files(project / "workspace/docs")
         if {p: v["sha"] for p, v in files.items()} != {p: v["sha"] for p, v in index["files"].items()}:
             raise ValueError("stale context source inventory")
     state_reuse = {}
@@ -642,16 +643,16 @@ def load_index(project: Path, *, no_cache: bool = False, repair: bool = False, f
     import vault_query
     docs = vault_query.project_docs(project)
     cache = vault_query.default_cache(docs)
-    # A no-write repair compiles the sources instead of reusing a copy of the damaged cache.
+    # A no-write repair compiles the sources instead of reading the damaged cache.
     if no_cache:
-        data, _status = vault_query.refresh(docs, cache, verify=True, persist=False, rebuild=repair)
+        data, _status = vault_query.refresh(docs, cache, persist=False, rebuild=repair)
     else:
         try:
-            data, _status = vault_query.locked_refresh(docs, cache, verify=True, repair=repair, failed=failed)
+            data, _status = vault_query.locked_refresh(docs, cache, repair=repair, failed=failed)
         except OSError as exc:
             if exc.errno not in vault_query.READ_ONLY_ERRORS:
                 raise
-            data, _status = vault_query.refresh(docs, cache, verify=True, persist=False, rebuild=repair)
+            data, _status = vault_query.refresh(docs, cache, persist=False, rebuild=repair)
     return data
 
 
@@ -696,7 +697,7 @@ def task_context(project: Path, *, entry: str, role: str | None, mode: str,
         return with_index(project, lambda index: resolve_context(project, index, entry=entry, role=role, refs=refs,
             purpose=policy["task_purposes"][mode], snapshot_scope="selection",
             manual_sources=manual or None, persist_state=not no_cache), no_cache=no_cache or not refs)
-    except (ValueError, OSError, UnicodeError) as exc:
+    except (ValueError, OSError, UnicodeError, TypeError) as exc:
         return {"status": "unavailable", "must_read": [], "reason": str(exc)[:500],
                 "next_action": "Use targeted manual reads within the project, preserve required scope and report the context finding."}
 

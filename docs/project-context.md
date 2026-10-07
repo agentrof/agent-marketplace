@@ -121,15 +121,24 @@ is accepted. Model time is reported separately from resolver time.
 
 The implementation uses Python's SQLite/FTS5 support and a checkout-local
 `.agentrof/agent-marketplace/.runtime/vault-index/index.db`. The first writable
-query builds from canonical sources. Later queries reconcile eligible source
-hashes, reparse changed sources, re-resolve the references whose identities,
-owner claims or excluded link targets changed, and update catalog, graph and
-FTS together. Text mentions are rescanned only for changed sources unless the
-identifier set they match changes. Queries read indexed records rather than
-loading a full JSON catalog. `--no-cache` and read-only filesystems reconcile a
-private temporary copy of a compatible published cache, or compile in memory,
-without project writes. Small verified request/provenance capsules retain their
-existing JSON and bounded inline formats; they are not a second vault index.
+query builds from canonical sources. Later queries hash eligible sources before
+taking the writer lock: an unchanged cache is served in place without it, and
+only a delta waits for the lock to publish. Publication reparses changed
+sources, re-resolves the references whose identities, owner claims or excluded
+link targets changed, including names a note's graph consulted through another
+note such as a dependency endpoint's `depends_on`, and updates catalog, graph
+and FTS together. Text mentions are rescanned only for changed sources unless
+the identifier set they match changes. Queries read indexed records rather than
+loading a full JSON catalog; one context check or read hashes the sources once,
+and approval proofs are computed only for stamped notes, or only the requested
+note for `hash`. Task-input impact closure reads the same verified index and
+returns the reparse's exact result. `--no-cache` and read-only filesystems read
+a compatible published cache in place through SQLite's read-only mode under the
+shared reader lease, apply a source delta to an in-memory backup, and compile
+an incompatible, unreadable or absent cache in memory; they never write the
+published database, and the status names why sources were compiled
+(`fallback`). Small verified request/provenance capsules retain their existing
+JSON and bounded inline formats; they are not a second vault index.
 
 The scope is `.md` and `.json` beneath `workspace/docs`, excluding `artifacts`
 directories at every depth and the declared Obsidian/trash exclusions.
@@ -137,12 +146,17 @@ Markdown notes keep the vault's exact `.md` rule. Another spelling of an
 eligible extension, or JSON that does not parse, stays inventoried as an
 unparsed source and is reported instead of blocking navigation; a canonical
 receipt that does not parse names its path in the refusal. JSON sources are
-addressable for reading and section search, never graph identities or notes.
-A linked file inside the vault is read like its target, a link leaving the
-vault is refused, and directory links are not followed. Source class and
+addressable for reading and section search, never graph identities or notes;
+the graph verbs refuse a JSON source no edge cites. Scalar `aliases` values are
+ignored as on the reparse path. A linked file inside the vault is read like its
+target, a link to an excluded location stays inventoried as an unparsed source
+and is left out of the impact-closure graph too, a link leaving the vault is
+refused, and directory links are not followed. Source class and
 authority still follow vault and owning-compiler contracts. Artifact integrity
 and approval checks retain excluded inputs. Every main checkout or Git worktree
-owns its own database, bound to its resolved path. A missing initialized cache
+owns its own database, bound to its resolved path; another spelling of that
+directory, such as a different case on a case-insensitive volume, keeps the
+binding and only rewrites the stored spelling. A missing initialized cache
 builds automatically; an empty eligible scope has an empty schema. Indexing
 does not create authored workspace content.
 
@@ -150,14 +164,20 @@ does not create authored workspace content.
 maintenance. `index status` reports the stored binding, schema, generation,
 counts, unparsed sources and a stat-only `possibly_stale` signal without
 rehashing; `index check` verifies source and integrity coverage. Neither takes
-the writer lock beyond copying a consistent snapshot. `check` independently
+the writer lock: each copies a consistent snapshot under the shared snapshot
+lease into a folder beside the cache, which the next writer sweeps once the
+inspection ends. A writer holds the exclusive snapshot lease only while it
+commits a publication, so an inspection that waits past the busy timeout
+reports `busy`; a Python without SQLite or FTS5 reports `invalid` with that
+diagnostic, and a missing derived table reports `incompatible`. `check` independently
 recompiles the source projection in memory and compares catalog, namespaces,
 relationships, gaps and search tokens; incomplete projections never report
 `verified: true`, and a source edited during the check reports `stale`.
 `rebuild` publishes fresh derived state in one transaction, preserving the last
 generation when compilation fails. Only owned legacy JSON/shard projections are
 cleaned after a successful full SQLite publication. `search-sections` returns
-FTS candidate addresses; legacy `search` retains its line matching contract over
+FTS candidate addresses, ranked after any edit history exactly as a fresh
+rebuild ranks them; legacy `search` retains its line matching contract over
 notes and the machine records their edges cite.
 
 A cache bound to another checkout path, another derivation or schema, or a
@@ -166,6 +186,10 @@ recompiles it from this checkout's sources. Physically corrupt disposable
 databases are recompiled from canonical sources. A complete replacement is
 built before publication and waits for existing readers to close; failed
 compilation preserves the prior files and separate reading-state capsules.
+Each publication records its generation in a file beside the writer lock, so a
+recovered database continues above the last published generation even when the
+damaged one cannot be read, and every writer removes interrupted recovery
+candidates.
 SQLite readonly errors use the same source-derived fallback as filesystem
 permission failures. Reader cleanup does not wait on long compiler work, and
 read-only inspections verify their copied bytes against a concurrent WAL
@@ -173,11 +197,14 @@ checkpoint before trusting the snapshot. When `vault_query.py` or
 `project_context.py` first discovers corruption while executing a query, it
 closes that reader and rebuilds a complete database before one bounded retry.
 Repeated query failures remain explicit errors. A Python without SQLite or FTS5
-receives that diagnostic from setup and an unavailable resolver plan.
+receives that diagnostic from setup, `index status` and `index check`, and an
+unavailable resolver plan.
 
 Both hosts use the shared post-write hook after source validation. Its index
-sync is a hint: it never waits for another index writer and never fails or
-delays the hook's own outcome; external edits are reconciled before queries. No
+sync is a hint that runs synchronously inside the hook: it skips when another
+index writer holds the lock, a missing or incompatible cache compiles there,
+and no index failure changes the hook's result; external edits are reconciled
+before queries. No
 watcher dependency or background service is installed. SQLite serializes index
 writers while existing workflow scopes continue to coordinate authored-file
 mutations. Canonical code and generated distributions remain shared by Claude

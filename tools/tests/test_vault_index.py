@@ -10,6 +10,7 @@ import gc
 import os
 from pathlib import Path
 import random
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -773,22 +774,47 @@ class VaultIndexTests(unittest.TestCase):
             self.assert_fresh(data)
             data.store.close()
 
-    def test_no_write_reads_reconcile_a_private_copy_of_the_warm_cache(self):
+    def test_no_write_reads_serve_the_warm_cache_in_place_and_reconcile_edits_in_memory(self):
         self.seed()
         data, _ = self.load()
         data.store.close()
-        folder = vault_query.default_cache(self.docs).parent
-        before = {path: path.read_bytes() for path in folder.iterdir() if path.is_file()}
-        with mock.patch.object(context_catalog, "catalog", side_effect=AssertionError("recompiled")):
+        cache = vault_query.default_cache(self.docs)
+        def durable():
+            # SQLite's read-only connection may add its WAL and shared-memory sidecars.
+            return {path.name: path.read_bytes() for path in cache.parent.iterdir()
+                    if path.is_file() and not path.name.endswith(("-wal", "-shm"))}
+        before = durable()
+        copied = mock.patch.object(vault_index.tempfile, "TemporaryDirectory", side_effect=AssertionError("copied"))
+        with copied, mock.patch.object(context_catalog, "catalog", side_effect=AssertionError("recompiled")):
+            index, status = vault_query.refresh(self.docs, cache, persist=False)
+            self.stores.append(index.store)
+            self.assertEqual(status["served"], "published_cache")
+            self.assertEqual(index["catalog"]["documents"]["backlog/story-b.md"]["title"], "Story B")
             index = project_context.load_index(self.project, no_cache=True)
             self.stores.append(index.store)
-            self.assertEqual(index["catalog"]["documents"]["backlog/story-b.md"]["title"], "Story B")
         self.write("backlog/story-b.md", note("story", "Story B", {"implements": [("requirements/req-a", "Requirement")]},
                    body="Changed source."))
-        index = project_context.load_index(self.project, no_cache=True)
+        with copied:
+            index, status = vault_query.refresh(self.docs, cache, persist=False)
         self.stores.append(index.store)
+        self.assertEqual(status["served"], "in_memory_copy")
+        self.assertNotIn("fallback", status)
         self.assert_graph(index)
-        self.assertEqual(before, {path: path.read_bytes() for path in folder.iterdir() if path.is_file()})
+        self.assert_fresh(index)
+        self.assertEqual(before, durable())
+
+    def test_no_write_read_reports_why_it_compiled_from_sources(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        cache.write_bytes(b"not a SQLite database")
+        index, status = vault_query.refresh(self.docs, cache, persist=False)
+        self.stores.append(index.store)
+        self.assertEqual(status["served"], "in_memory_compile")
+        self.assertIn("published cache cannot be read in place", status["fallback"])
+        self.assertEqual(index["catalog"]["documents"]["requirements/a.md"]["title"], "A")
+        self.assertEqual(cache.read_bytes(), b"not a SQLite database")
 
     def test_post_write_sync_never_waits_on_the_writer_or_fails_the_hook(self):
         spec = importlib.util.spec_from_file_location(
@@ -941,6 +967,418 @@ class VaultIndexTests(unittest.TestCase):
         self.assertTrue(result["cache"]["recovered"])
         self.assertGreater(result["cache"]["generation"], first["generation"])
         self.assertFalse(stale.exists())
+
+    def test_cache_files_being_unlinked_count_as_absent_and_are_captured_again(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        wal = Path(str(cache) + "-wal")
+        wal.write_bytes(b"")
+        class Unlinking:
+            def __init__(self, info, nlink):
+                self.info, self.st_nlink = info, nlink
+            def __getattr__(self, name):
+                return getattr(self.info, name)
+        real_lstat, real_fstat = Path.lstat, os.fstat
+        def lstat(path, nlink):
+            info = real_lstat(path)
+            return Unlinking(info, nlink) if path == wal else info
+        with mock.patch.object(Path, "lstat", lambda path: lstat(path, 0)):
+            vault_index.check_cache_file(wal)
+            self.assertIsNone(vault_index.cache_file_signature(wal))
+            self.assertEqual(self.query("index", "status")["status"], "ready")
+        with mock.patch.object(Path, "lstat", lambda path: lstat(path, 2)):
+            with self.assertRaisesRegex(ValueError, "unaliased"):
+                vault_index.check_cache_file(wal)
+        for seam in ("snapshot", "lease"):
+            with self.subTest(seam=seam):
+                calls = []
+                def fstat(descriptor):
+                    calls.append(descriptor)
+                    info = real_fstat(descriptor)
+                    return Unlinking(info, 0) if len(calls) == 1 else info
+                with mock.patch.object(vault_index.os, "fstat", side_effect=fstat):
+                    if seam == "snapshot":
+                        clone = self.project / "clone.db"
+                        vault_index.copy_cache_snapshot(cache, clone)
+                        self.assertEqual(clone.read_bytes(), cache.read_bytes())
+                    else:
+                        vault_index.DatabaseLease(cache, timeout=1).close()
+                self.assertGreater(len(calls), 1)
+
+    def test_dependency_refs_regraph_when_endpoint_dependencies_resolve_differently(self):
+        source = "---\ntype: story\ntitle: S1\nid: ST-001\ndepends_on:\n  - {}\n---\n# S1\n"
+        plan = ("backlog/plan.md", "---\ntype: test-plan\ntitle: Plan\ndependency_refs:\n  - \"ST-001 -> ST-002\"\n---\n# Plan\n")
+        rules = "---\ntype: story\ntitle: Rules\nid: ST-002\n{}---\n# Rules\n"
+        registry = "business-analysis/scope-one/_generated/registry.json"
+        other = ("business-analysis/scope-one/other.md", "---\ntype: epic\ntitle: O\n---\n# o\n")
+        cases = {
+            "registry added": ([("backlog/s1.md", source.format("ACT-ONE-001")), ("business-analysis/scope-one/rules.md", rules.format("")), plan],
+                               [(registry, json.dumps({"ids": {"ACT-ONE-001": {"doc": "rules.md"}}}))]),
+            "registry deleted": ([("backlog/s1.md", source.format("ACT-ONE-001")), ("business-analysis/scope-one/rules.md", rules.format("")), plan,
+                                  (registry, json.dumps({"ids": {"ACT-ONE-001": {"doc": "rules.md"}}}))], [(registry, None)]),
+            "registry retargeted": ([("backlog/s1.md", source.format("ACT-ONE-001")), ("business-analysis/scope-one/rules.md", rules.format("")), plan, other,
+                                     (registry, json.dumps({"ids": {"ACT-ONE-001": {"doc": "rules.md"}}}))],
+                                    [(registry, json.dumps({"ids": {"ACT-ONE-001": {"doc": "other.md"}}}))]),
+            "alias added elsewhere": ([("backlog/s1.md", source.format("Beta")), ("business-analysis/scope-one/rules.md", rules.format("aliases:\n  - Beta\n")), plan],
+                                      [("backlog/x.md", "---\ntype: epic\ntitle: X\naliases:\n  - Beta\n---\n# x\n")]),
+            "alias dropped elsewhere": ([("backlog/s1.md", source.format("Beta")), ("business-analysis/scope-one/rules.md", rules.format("aliases:\n  - Beta\n")), plan,
+                                         ("backlog/x.md", "---\ntype: epic\ntitle: X\naliases:\n  - Beta\n---\n# x\n")],
+                                        [("backlog/x.md", "---\ntype: epic\ntitle: X\n---\n# x\n")]),
+        }
+        for name, (setup, edits) in cases.items():
+            with self.subTest(case=name):
+                for path in [*self.docs.iterdir(), self.project / ".agentrof"]:
+                    shutil.rmtree(path, ignore_errors=True)
+                for path, text in setup:
+                    self.write(path, text)
+                data, _ = self.load()
+                data.store.close()
+                for path, text in edits:
+                    if text is None:
+                        (self.docs / path).unlink()
+                    else:
+                        self.write(path, text)
+                data, status = self.load()
+                try:
+                    self.assertFalse(status["full"])
+                    self.assert_fresh(data)
+                    self.assert_graph(data)
+                finally:
+                    data.store.close()
+
+    def test_check_reports_a_source_changed_during_its_recompile_as_stale(self):
+        path = self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        actual = vault_index.Store.catalog_rows
+        def racing(store, records):
+            if store.session.cache is None:
+                path.write_text(note("requirement", "A", body="Edited by another agent."), encoding="utf-8")
+            return actual(store, records)
+        with mock.patch.object(vault_index.Store, "catalog_rows", racing):
+            result = self.query("index", "check", expected=1)
+        self.assertEqual(result["status"], "stale")
+        self.assertTrue(issubclass(vault_index.SourceChangedError, ValueError))
+
+    def test_status_and_check_report_missing_sqlite_or_fts5_as_invalid(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        self.query("index", "ensure")
+        for action in ("status", "check"):
+            with self.subTest(action=action):
+                with mock.patch.object(vault_index, "sqlite3", None):
+                    result = self.query("index", action, expected=1)
+                self.assertEqual(result["status"], "invalid")
+                self.assertIn("lacks the sqlite3 module", result["reason"])
+                with mock.patch.object(vault_index, "capabilities", side_effect=ValueError("Python's SQLite lacks FTS5")):
+                    result = self.query("index", action, expected=1)
+                self.assertEqual((result["status"], result["reason"]), ("invalid", "Python's SQLite lacks FTS5"))
+
+    def test_publication_lease_waits_report_busy_and_compilation_leaves_snapshot_copies_free(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        settings = vault_index.policy()
+        guard = vault_index.DatabaseLease(cache, exclusive=True, name=".snapshot")
+        try:
+            with mock.patch.object(vault_index, "policy", return_value=dict(settings, busy_timeout_ms=50)):
+                for action in ("status", "check"):
+                    result = self.query("index", action, expected=1)
+                    self.assertEqual(result["status"], "busy")
+                    self.assertIn("publication in progress", result["reason"])
+        finally:
+            guard.close()
+        free = []
+        actual = vault_index.Store.graph_owner
+        def probing(store, path):
+            lease = vault_index.DatabaseLease(cache, name=".snapshot", read_only=True, timeout=0)
+            lease.close()
+            free.append(path)
+            return actual(store, path)
+        self.write("requirements/a.md", note("requirement", "A", body="Edited."))
+        with mock.patch.object(vault_index.Store, "graph_owner", probing):
+            data, _ = self.load()
+        data.store.close()
+        self.assertEqual(free, ["requirements/a.md"])
+
+    def test_missing_derived_tables_are_incompatible_and_rebuilt(self):
+        self.write("requirements/a.md", note("requirement", "A", body="Distinct body."))
+        data, _ = self.load()
+        data.store.close()
+        for table in ("search_text", "lookups"):
+            with self.subTest(table=table):
+                with contextlib.closing(sqlite3.connect(vault_query.default_cache(self.docs))) as connection, connection:
+                    connection.execute(f"DROP TABLE {table}")
+                status = self.query("index", "status", expected=1)
+                self.assertEqual((status["status"], status["reasons"]), ("incompatible", ["layout"]))
+                result = self.query("search-sections", "Distinct")
+                self.assertTrue(result["cache"]["full"])
+                self.assertTrue(result["hits"])
+                self.assertTrue(self.query("index", "check")["verified"])
+
+    def test_every_writer_sweeps_interrupted_recovery_and_ended_copy_folders(self):
+        path = self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        folder = vault_query.default_cache(self.docs).parent
+        recovery, ended, unmarked, live = (folder / ".index-recovery-interrupted", folder / ".index-copy-ended",
+                                           folder / ".index-copy-unmarked", folder / ".index-copy-live")
+        for directory in (recovery, ended, unmarked, live):
+            directory.mkdir()
+            (directory / "index.db").write_bytes(b"partial")
+        (ended / ".live").write_bytes(b"")
+        descriptor = os.open(live / ".live", os.O_RDWR | os.O_CREAT)
+        old = time.time() - 3600
+        for directory in (ended, unmarked, live):
+            os.utime(directory, (old, old))
+        try:
+            self.assertTrue(file_lock.try_lock(descriptor))
+            path.write_text(note("requirement", "A", body="Edited."), encoding="utf-8")
+            self.query("index", "sync")
+            self.assertEqual(sorted(p.name for p in folder.iterdir() if p.name.startswith(".index-")), [live.name])
+        finally:
+            file_lock.unlock(descriptor)
+            os.close(descriptor)
+        self.assertTrue(self.query("index", "check")["verified"])
+        self.assertFalse(list(folder.glob(".index-copy-*"))[1:])
+
+    def test_recovery_keeps_generation_above_an_unreadable_database(self):
+        path = self.write("requirements/a.md", note("requirement", "A"))
+        for revision in range(4):
+            path.write_text(note("requirement", "A", body=f"Revision {revision}."), encoding="utf-8")
+            self.query("index", "sync")
+        before = self.query("index", "status")["generation"]
+        cache = vault_query.default_cache(self.docs)
+        raw = bytearray(cache.read_bytes())
+        raw[:16] = b"garbage garbage!"
+        cache.write_bytes(bytes(raw))
+        result = self.query("index", "sync")
+        self.assertTrue(result["cache"]["recovered"])
+        self.assertGreater(result["generation"], before)
+        self.assertEqual(json.loads(cache.with_name(".generation").read_text()), result["generation"])
+
+    def test_another_spelling_of_the_checkout_keeps_its_binding(self):
+        target = self.write("backlog/story-b.md", note("story", "Story B"))
+        alias = self.project.parent / (self.project.name + "-alias")
+        try:
+            alias.symlink_to(self.project, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"directory links unavailable: {exc}")
+        self.addCleanup(alias.unlink)
+        (self.docs / "backlog/link.md").symlink_to(alias / "workspace/docs/backlog/story-b.md")
+        data, _ = self.load()
+        self.assertEqual([row["path"] for row in data.store.unparsed_paths()], [])
+        data.store.close()
+        spellings = [alias / "workspace/docs"]
+        upper = Path(str(self.docs).upper())
+        if upper != self.docs and upper.exists() and os.path.samefile(upper, self.docs):
+            spellings.append(upper)
+        cache = vault_query.default_cache(self.docs)
+        for spelling in spellings:
+            with self.subTest(spelling=str(spelling)):
+                with contextlib.closing(sqlite3.connect(cache)) as connection, connection:
+                    connection.execute("UPDATE meta SET payload=? WHERE key='docs'", (json.dumps(str(spelling)),))
+                self.assertEqual(self.query("index", "status")["status"], "ready")
+                data, status = self.load()
+                self.assertFalse(status["full"])
+                self.assertEqual(data.store.meta("docs"), str(self.docs))
+                self.assertIn("backlog/link.md", data["files"])
+                data.store.close()
+
+    def test_section_ranking_after_edits_equals_a_fresh_rebuild(self):
+        self.write("backlog/a.md", "---\ntype: story\ntitle: A\n---\nwidget\n")
+        self.write("backlog/b.md", "---\ntype: story\ntitle: B\n---\nwidget widget " + "filler " * 12 + "\n")
+        small = self.write("backlog/c.md", "---\ntype: story\ntitle: C\n---\nsmall\n").read_text()
+        self.query("index", "ensure")
+        for revision in range(5):
+            self.write("backlog/c.md", "---\ntype: story\ntitle: C\n---\n" + f"bulk{revision} " * 3000 + "\n")
+            self.query("index", "sync")
+        self.write("backlog/c.md", small)
+        ranked = lambda result: [(hit["unit_id"], hit["score"]) for hit in result["hits"]]
+        incremental = ranked(self.query("search-sections", "widget"))
+        self.query("index", "rebuild")
+        self.assertEqual(incremental, ranked(self.query("search-sections", "widget")))
+
+    def test_in_vault_link_to_an_excluded_location_is_reported_and_kept_out_of_both_graphs(self):
+        self.write("requirements/r.md", note("requirement", "R", extra="id: REQ-001"))
+        self.write("backlog/artifacts/spec.md", note("story", "Linked", {"implements": [("requirements/r", "R")]}))
+        try:
+            (self.docs / "backlog/linked.md").symlink_to("artifacts/spec.md")
+        except OSError as exc:
+            self.skipTest(f"symbolic links unavailable: {exc}")
+        data, status = self.load()
+        self.assertEqual(status["unparsed"], [{"path": "backlog/linked.md",
+                         "reason": "links to an excluded location: backlog/artifacts/spec.md"}])
+        self.assertNotIn("backlog/linked.md", impact_closure.load_vault(self.docs).notes)
+        self.assert_graph(data)
+        self.assertEqual(self.query("who-cites", "requirements/r.md")["citers"], [])
+        self.assertTrue(self.query("index", "check")["verified"])
+
+    def test_scalar_aliases_neither_abort_the_index_nor_leak_from_task_context(self):
+        self.seed()
+        self.write("backlog/odd.md", "---\ntype: story\ntitle: Odd\nid: ST-077\naliases: 5\n---\n# Odd\n")
+        data, _ = self.load()
+        self.assert_graph(data)
+        self.assertEqual(self.query("find", "Story B")["notes"][0]["path"], "backlog/story-b.md")
+        plan = project_context.task_context(self.project, entry="requirement", role="business-analyst",
+                                            mode="review", paths={"workspace/docs/backlog/story-b.md"})
+        self.assertEqual(plan["status"], "ready")
+        with mock.patch.object(project_context, "resolve_context", side_effect=TypeError("unexpected value")):
+            plan = project_context.task_context(self.project, entry="requirement", role="business-analyst",
+                                                mode="review", paths={"workspace/docs/backlog/story-b.md"})
+        self.assertEqual((plan["status"], plan["reason"]), ("unavailable", "unexpected value"))
+
+    def test_graph_verbs_refuse_a_generic_json_source_and_find_keeps_it(self):
+        self.seed()
+        self.write("api/x.json", json.dumps({"label": "x"}))
+        self.write("solution-design/_generated/caps.json", json.dumps({"label": "caps"}))
+        self.write("backlog/story-j.md", note("story", "Story J", body="![[solution-design/_generated/caps.json]]"))
+        for verb in (["who-cites", "api/x.json"], ["related", "api/x.json"], ["path", "api/x.json", "backlog/story-b.md"]):
+            with self.subTest(verb=verb[0]):
+                code, _out, err = self.run_cli(self.docs, *verb)
+                self.assertEqual(code, 1)
+                self.assertIn("names 0 notes", err)
+        self.assertEqual(self.query("find", "api/x.json")["notes"][0]["unit_kind"], "json")
+        self.assertEqual(self.query("who-cites", "solution-design/_generated/caps.json")["citers"], ["backlog/story-j.md"])
+
+    def test_task_input_closure_through_the_index_equals_the_reparse(self):
+        import task_inputs
+        self.seed()
+        self.write("backlog/story-s.md", note("story", "Story S", {"implements": [("requirements/req-a", "Req A")]},
+                   extra="source_hash: sha256:stale"))
+        earlier = (self.docs / "backlog/story-c.md").read_text(encoding="utf-8")
+        (self.docs / "backlog/story-c.md").unlink()
+        cases = ((["requirements/req-a.md"], {}), ([], {}), (["backlog/story-b.md"], {"backlog/story-c.md": earlier}))
+        for present, deleted in cases:
+            with self.subTest(present=present, deleted=sorted(deleted)):
+                expected = impact_closure.closure(self.docs, present, deleted=deleted) if deleted \
+                    else impact_closure.closure(self.docs, present)
+                with mock.patch.object(impact_closure, "load_vault", side_effect=AssertionError("reparsed")):
+                    actual = task_inputs.closure_raw(impact_closure, self.docs, present, deleted)
+                self.assertEqual(json.dumps(actual, sort_keys=True), json.dumps(expected, sort_keys=True))
+        changed = ["workspace/docs/requirements/req-a.md", "workspace/docs/backlog/story-c.md"]
+        indexed = task_inputs.impact_closure(self.docs, changed, "workspace/docs/", {"workspace/docs/backlog/story-c.md": earlier})
+        with mock.patch.object(task_inputs, "closure_raw", lambda api, docs, present, deleted:
+                               api.closure(docs, present, deleted=deleted) if deleted else api.closure(docs, present)):
+            reparsed = task_inputs.impact_closure(self.docs, changed, "workspace/docs/", {"workspace/docs/backlog/story-c.md": earlier})
+        self.assertEqual(indexed, reparsed)
+
+    def test_context_reads_hash_sources_once_and_unchanged_reads_skip_the_writer_lock(self):
+        self.seed()
+        data, _ = self.load()
+        data.store.close()
+        plan = project_context.task_context(self.project, entry="requirement", role="business-analyst",
+                                            mode="review", paths={"workspace/docs/backlog/story-b.md"})
+        path = self.project / "plan.json"
+        path.write_text(json.dumps(plan), encoding="utf-8")
+        hashed = []
+        actual = vault_index.scan_files
+        def counting(docs, *, digest=True):
+            hashed.append(digest)
+            return actual(docs, digest=digest)
+        for verb in ("check", "read"):
+            with self.subTest(verb=verb):
+                hashed.clear()
+                with mock.patch.object(vault_index, "scan_files", counting), \
+                        mock.patch.object(file_lock, "lock", side_effect=AssertionError("writer lock")), \
+                        contextlib.redirect_stdout(io.StringIO()) as out:
+                    code = project_context.main(["--project-root", str(self.project), verb, "--plan", str(path)])
+                self.assertEqual(code, 0, out.getvalue())
+                self.assertEqual(hashed, [True])
+        data, status = self.load()
+        data.store.close()
+        self.assertEqual(status["served"], "published_cache")
+        self.write("backlog/story-b.md", note("story", "Story B", body="Edited."))
+        data, status = self.load()
+        data.store.close()
+        self.assertEqual((status["changed"], status["persisted"]), (["backlog/story-b.md"], True))
+        self.assertNotIn("served", status)
+
+    def test_hash_and_closure_prove_only_the_notes_they_need(self):
+        self.seed()
+        self.write("backlog/story-s.md", note("story", "Story S", extra="source_hash: sha256:one"))
+        self.write("backlog/story-t.md", note("story", "Story T", extra="source_hash: sha256:two"))
+        proved = []
+        actual = impact_closure.approval_state
+        def recording(note):
+            proved.append(note.rel)
+            return actual(note)
+        with mock.patch.object(impact_closure, "approval_state", side_effect=recording):
+            result = self.query("hash", "backlog/story-s.md")
+            self.assertEqual((result["stamped"], proved), (True, ["backlog/story-s.md"]))
+            proved.clear()
+            data, _ = self.load()
+            statements = []
+            data.store.connection.set_trace_callback(statements.append)
+            snapshot = vault_query.Index(data).snapshot()
+            data.store.connection.set_trace_callback(None)
+        self.assertEqual(sorted(proved), ["backlog/story-s.md", "backlog/story-t.md"])
+        self.assertEqual(sum("FROM edge_facts" in sql for sql in statements), 1)
+        expected = impact_closure.snapshot(impact_closure.load_vault(self.docs))
+        self.assertEqual({key: snapshot[key] for key in expected}, expected)
+
+    def test_shared_and_exclusive_leases_use_the_one_file_lock(self):
+        path = self.project / "lease"
+        descriptors = [os.open(path, os.O_RDWR | os.O_CREAT) for _ in range(3)]
+        try:
+            self.assertTrue(file_lock.try_lock(descriptors[0], shared=True))
+            self.assertTrue(file_lock.try_lock(descriptors[1], shared=True))
+            self.assertFalse(file_lock.acquire(descriptors[2], timeout=0.05))
+            file_lock.unlock(descriptors[0], shared=True)
+            file_lock.unlock(descriptors[1], shared=True)
+            self.assertTrue(file_lock.acquire(descriptors[2], timeout=0.05))
+            self.assertFalse(file_lock.try_lock(descriptors[0], shared=True))
+            file_lock.unlock(descriptors[2])
+        finally:
+            for descriptor in descriptors:
+                os.close(descriptor)
+        self.assertFalse(hasattr(vault_index.DatabaseLease, "try_lock"))
+        calls = []
+        class Kernel:
+            def __getattr__(self, name):
+                def function(*arguments):
+                    calls.append((name, arguments[1:4] if name == "LockFileEx" else arguments[1:3]))
+                    return 1
+                return function
+        import ctypes
+        with mock.patch.dict(sys.modules, {"fcntl": None, "msvcrt": mock.Mock(get_osfhandle=lambda descriptor: descriptor)}), \
+                mock.patch.object(ctypes, "WinDLL", create=True, return_value=Kernel()), \
+                mock.patch.object(ctypes, "get_last_error", create=True, return_value=0):
+            self.assertTrue(file_lock.try_lock(7, shared=True))
+            file_lock.unlock(7, shared=True)
+        # LOCKFILE_FAIL_IMMEDIATELY without LOCKFILE_EXCLUSIVE_LOCK over the first byte.
+        self.assertEqual(calls, [("LockFileEx", (1, 0, 1)), ("UnlockFileEx", (0, 1))])
+
+    @integration
+    def test_each_git_worktree_owns_its_own_index(self):
+        main = self.project
+        self.write("requirements/a.md", note("requirement", "Main A"))
+        def git(*args):
+            subprocess.run(["git", "-C", str(main), *args], check=True, capture_output=True, text=True)
+        git("init", "-q")
+        git("add", "--all")
+        git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+            "commit", "-qm", "Fixture")
+        worktree = main.parent / (main.name + "-worktree")
+        git("worktree", "add", "-q", "--detach", str(worktree))
+        self.addCleanup(lambda: subprocess.run(["git", "-C", str(main), "worktree", "remove", "--force", str(worktree)],
+                                               capture_output=True))
+        other = worktree / "workspace/docs"
+        (other / "requirements/a.md").write_text(note("requirement", "Worktree A"), encoding="utf-8")
+        (other / "requirements/only-worktree.md").write_text(note("requirement", "Only here"), encoding="utf-8")
+        for docs in (self.docs, other):
+            self.assertEqual(self.run_cli(docs, "index", "ensure")[0], 0)
+        caches = [vault_query.default_cache(docs) for docs in (self.docs, other)]
+        self.assertNotEqual(caches[0].resolve(), caches[1].resolve())
+        for docs, cache, title in ((self.docs, caches[0], "Main A"), (other, caches[1], "Worktree A")):
+            with contextlib.closing(sqlite3.connect(cache)) as connection:
+                self.assertEqual(json.loads(connection.execute("SELECT payload FROM meta WHERE key='docs'").fetchone()[0]),
+                                 str(docs.resolve()))
+                files = {row[0] for row in connection.execute("SELECT path FROM files")}
+                self.assertEqual(files, {p.relative_to(docs).as_posix() for p in docs.rglob("*.md")})
+            self.assertEqual(json.loads(self.run_cli(docs, "find", "requirements/a.md")[1])["notes"][0]["title"], title)
 
 
 if __name__ == "__main__":

@@ -139,11 +139,23 @@ create authored workspace content.
 
 `vault_query.py --docs workspace/docs index ensure|sync|rebuild` provides cache
 maintenance. `index status|check` provides read-only stored status or
-source/integrity coverage checks. `rebuild` publishes fresh derived state in
+source/integrity coverage checks. `check` independently recompiles the source
+projection in memory and compares catalog, namespaces, relationships, gaps and
+search tokens; incomplete projections never report `verified: true`.
+`rebuild` publishes fresh derived state in
 one transaction, preserving the last generation when compilation fails. Only
 owned legacy JSON/shard projections are cleaned after successful SQLite
 publication. `search-sections` returns FTS candidate addresses; legacy `search`
 retains its line matching contract.
+
+Physically corrupt disposable databases are recompiled from canonical sources.
+A complete replacement is built before publication and waits for existing
+readers to close; failed compilation preserves the prior files and separate
+reading-state capsules. A cache belonging to another checkout remains refused.
+SQLite readonly errors use the same source-derived memory fallback as filesystem
+permission failures. Reader cleanup does not wait on long compiler work, and
+read-only inspections verify their copied bytes against a concurrent WAL
+checkpoint before trusting the snapshot.
 
 Both hosts use the shared post-write hook after source validation. Notifications
 are hints; external edits are reconciled before queries. No watcher dependency

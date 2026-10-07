@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import hashlib
+import gc
 import os
 from pathlib import Path
 import sqlite3
@@ -362,6 +363,110 @@ class VaultIndexTests(unittest.TestCase):
         self.assertEqual(process.returncode, 0, err)
         cache.write_bytes(b"not a SQLite database")
         self.assertEqual(self.query("index", "rebuild")["status"], "ready")
+
+    def test_canonical_scope_addition_and_removal_rebind_existing_references(self):
+        self.write("backlog/source.md", note("story", "Source", extra="governs:\n  - scope-one"))
+        data, _ = self.load()
+        self.assertTrue([gap for gap in data["gaps"] if gap.get("key") == "governs"])
+        data.store.close()
+        target = self.write("business-analysis/scope-one/space.md", note("space", "Scope one"))
+        data, _ = self.load()
+        self.assert_graph(data)
+        self.assertFalse([gap for gap in data["gaps"] if gap.get("key") == "governs"])
+        data.store.close()
+        target.unlink()
+        data, _ = self.load()
+        self.assert_graph(data)
+        self.assertTrue([gap for gap in data["gaps"] if gap.get("key") == "governs"])
+
+    def test_reader_finalization_releases_lease_during_snapshot_lock(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        self.stores.remove(data.store)
+        cache = vault_query.default_cache(self.docs)
+        guard = vault_index.DatabaseLease(cache, exclusive=True, name=".snapshot")
+        failures = []
+        settings = vault_index.policy()
+        try:
+            with mock.patch.object(sys, "unraisablehook", side_effect=lambda value: failures.append(value.exc_value)), \
+                    mock.patch.object(vault_index, "policy", return_value=dict(settings, busy_timeout_ms=25)):
+                del data
+                gc.collect()
+            self.assertEqual(failures, [])
+            lease = vault_index.DatabaseLease(cache, exclusive=True, timeout=0.05)
+            lease.close()
+        finally:
+            guard.close()
+
+    def test_borrowed_mapping_iterators_keep_their_reader_alive(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        for key in ("documents", "aliases"):
+            with self.subTest(mapping=key):
+                data, _ = self.load()
+                self.stores.remove(data.store)
+                iterator = iter(data["catalog"][key])
+                del data
+                gc.collect()
+                self.assertTrue(list(iterator))
+                gc.collect()
+                lease = vault_index.DatabaseLease(vault_query.default_cache(self.docs), exclusive=True, timeout=0.05)
+                lease.close()
+
+    def test_snapshot_copy_retries_a_concurrent_last_reader_checkpoint(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        cache = vault_query.default_cache(self.docs)
+        actual = vault_index.snapshot_file_hash
+        copies = []
+        def checkpointing(path, destination=None):
+            result = actual(path, destination)
+            if path == cache and destination is not None:
+                copies.append(path)
+                if len(copies) == 1:
+                    data.store.close()
+            return result
+        with mock.patch.object(vault_index, "snapshot_file_hash", side_effect=checkpointing):
+            self.assertTrue(self.query("index", "check")["verified"])
+        self.assertGreaterEqual(len(copies), 2)
+
+    def test_restored_source_cannot_publish_an_intermediate_generation(self):
+        path = self.write("requirements/a.md", note("requirement", "A", body="Original source."))
+        original = path.read_bytes()
+        alternate = original.replace(b"Original source.", b"Intermediate source.")
+        data, first = self.load()
+        data.store.close()
+        actual = vault_index.Store.update_note
+        def transient(store, relative):
+            path.write_bytes(alternate)
+            return actual(store, relative)
+        try:
+            with mock.patch.object(vault_index.Store, "update_note", transient):
+                with self.assertRaisesRegex(ValueError, "source changed while indexing"):
+                    self.load(rebuild=True)
+        finally:
+            path.write_bytes(original)
+        self.assertEqual(self.query("index", "status")["generation"], first["generation"])
+        data, status = self.load()
+        self.assertEqual(status["changed"], [])
+        self.assertEqual(data["catalog"]["documents"]["requirements/a.md"]["source_hash"],
+            "sha256:" + hashlib.sha256(original).hexdigest())
+
+    def test_json_source_hash_matches_the_captured_inventory(self):
+        path = self.write("api/source.json", '{"marker":"original"}')
+        original = path.read_bytes()
+        data, first = self.load()
+        data.store.close()
+        actual = vault_index.Store.update_json
+        def transient(store, relative, canonical=False):
+            path.write_bytes(b'{"marker":"intermediate"}')
+            return actual(store, relative, canonical)
+        try:
+            with mock.patch.object(vault_index.Store, "update_json", transient):
+                with self.assertRaisesRegex(ValueError, "source changed while indexing"):
+                    self.load(rebuild=True)
+        finally:
+            path.write_bytes(original)
+        self.assertEqual(self.query("index", "status")["generation"], first["generation"])
 
 
 if __name__ == "__main__":

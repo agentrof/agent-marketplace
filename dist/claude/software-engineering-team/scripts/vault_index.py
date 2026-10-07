@@ -205,21 +205,17 @@ class ReaderSession:
     def close(self):
         if self.closed:
             return
-        guarded = self.cache is not None and self.cache.with_name(".snapshot").exists()
-        guard = DatabaseLease(self.cache, exclusive=True, name=".snapshot", read_only=True) if guarded else None
         try:
             self.connection.close()
-            self.closed = True
         finally:
-            if self.closed and self.lease is not None:
+            self.closed = True
+            if self.lease is not None:
                 self.lease.close()
                 self.lease = None
-            if guard is not None:
-                guard.close()
     def __del__(self):
         try:
             self.close()
-        except (sqlite3.Error, OSError):
+        except Exception:
             pass
 
 
@@ -233,7 +229,8 @@ class Rows(Mapping):
             raise KeyError(key)
         return json.loads(row[0])
     def __iter__(self):
-        return (row[0] for row in self.store.connection.execute(f"SELECT {self.key} FROM {self.table} ORDER BY {self.key}"))
+        for row in self.store.connection.execute(f"SELECT {self.key} FROM {self.table} ORDER BY {self.key}"):
+            yield row[0]
     def __len__(self):
         return self.store.connection.execute(f"SELECT count(*) FROM {self.table}").fetchone()[0]
     def __contains__(self, key):
@@ -251,7 +248,8 @@ class Aliases(Mapping):
         priority = max(row[1] for row in rows)
         return [uid for uid, rank in rows if rank == priority]
     def __iter__(self):
-        return (row[0] for row in self.store.connection.execute("SELECT DISTINCT name FROM aliases ORDER BY name"))
+        for row in self.store.connection.execute("SELECT DISTINCT name FROM aliases ORDER BY name"):
+            yield row[0]
     def __len__(self):
         return self.store.connection.execute("SELECT count(DISTINCT name) FROM aliases").fetchone()[0]
     def __contains__(self, key):
@@ -414,6 +412,8 @@ class Store:
         self.connection.execute("DELETE FROM gaps WHERE owner=?", (path,))
     def catalog_rows(self, records):
         for path, doc in records["documents"].items():
+            if doc["source_hash"] != "sha256:" + self.files[path]["sha"]:
+                raise ValueError(f"source changed while indexing: {path}")
             self.connection.execute("INSERT OR REPLACE INTO documents VALUES(?,?)", (path, encoded(doc)))
         source_bytes = {}
         for uid, unit in records["units"].items():
@@ -449,7 +449,12 @@ class Store:
         return {r for r in refs if r}
     def update_note(self, path):
         settings = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        note = vault_check.scan_note(self.docs, self.docs / path, settings["generated_marker_prefix"])
+        raw = (self.docs / path).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != self.files[path]["sha"]:
+            raise ValueError(f"source changed while indexing: {path}")
+        view = vault_check.VaultFileView(self.docs)
+        view.put(self.docs / path, raw)
+        note = vault_check.scan_note(self.docs, self.docs / path, settings["generated_marker_prefix"], files=view)
         self.connection.execute("INSERT INTO parsed_notes VALUES(?,?)", (path, encoded(note_value(note))))
         aliases = [a for a in note.fm.get("aliases", []) if isinstance(a, str)]
         ident = note.fm.get("id") or (aliases[0] if aliases else "")
@@ -646,7 +651,8 @@ def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False, c
     try:
         if persist and coordinate:
             guard = DatabaseLease(cache, exclusive=True, name=".snapshot")
-        connection = sqlite3.connect(str(cache) if persist else ":memory:", timeout=policy()["busy_timeout_ms"] / 1000)
+        connection = sqlite3.connect(str(cache) if persist else ":memory:", timeout=policy()["busy_timeout_ms"] / 1000,
+                                     check_same_thread=False)
         store = Store(docs, connection, lease, cache if persist and coordinate else None)
         if persist:
             connection.execute("PRAGMA journal_mode=WAL")
@@ -706,10 +712,13 @@ def refresh(docs, cache, builder, *, verify=True, persist=True, rebuild=False, c
                 # Registry identities are compiler-owned. Reuse parsed notes;
                 # only derivation and identity changes require this global namespace.
                 if full or any(p.endswith(".json") for p in affected) or namespace_changed:
+                    prior_owners = dict(connection.execute("SELECT name,path FROM owners"))
                     registries = [docs / p for p in current if len(Path(p).parts) == 4
                         and Path(p).parts[0] == "business-analysis"
                         and Path(p).parts[-2:] == ("_generated", "registry.json")]
                     owners = vault_check.relation_identity_owners(store.vault(), registry_paths=registries)
+                    identities.update(name for name in prior_owners.keys() | owners.keys()
+                                      if prior_owners.get(name) != owners.get(name))
                     connection.execute("DELETE FROM owners")
                     connection.executemany("INSERT INTO owners VALUES(?,?)", owners.items())
                 owners_to_update = markdown | old_owners
@@ -872,6 +881,62 @@ def projection_mismatches(store, fresh):
     return mismatches
 
 
+def cache_file_signature(path):
+    check_cache_file(path)
+    try:
+        info = path.stat()
+    except FileNotFoundError:
+        return None
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+def snapshot_file_hash(path, destination=None):
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(descriptor, "rb") as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("vault snapshot inputs must be regular unaliased files")
+        digest = hashlib.sha256()
+        output = destination.open("wb") if destination is not None else None
+        try:
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                if output is not None:
+                    output.write(chunk)
+        finally:
+            if output is not None:
+                output.close()
+        return digest.hexdigest()
+
+
+def copy_cache_snapshot(cache, clone):
+    """A closing reader may checkpoint WAL; retry a changed byte snapshot."""
+    paths = (cache, Path(str(cache) + "-wal"))
+    deadline = time.monotonic() + policy()["busy_timeout_ms"] / 1000
+    while True:
+        try:
+            before = {path: cache_file_signature(path) for path in paths}
+            copied = {}
+            for path, signature in before.items():
+                target = clone if path == cache else Path(str(clone) + "-wal")
+                if signature is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    copied[path] = snapshot_file_hash(path, target)
+            if before == {path: cache_file_signature(path) for path in paths}:
+                checked = {path: snapshot_file_hash(path) for path in copied}
+                if checked == copied and before == {path: cache_file_signature(path) for path in paths}:
+                    return
+        except FileNotFoundError:
+            pass
+        if time.monotonic() >= deadline:
+            raise ValueError("vault cache changed while capturing its snapshot; retry inspection")
+        time.sleep(file_lock.POLL_SECONDS)
+
+
 def inspect_index(docs, cache, builder, *, check=False):
     """Copy a consistent closed/checkpointed or WAL snapshot without source writes."""
     docs, cache = Path(docs).absolute(), Path(cache)
@@ -887,18 +952,13 @@ def inspect_index(docs, cache, builder, *, check=False):
         descriptor = os.open(lock, os.O_RDONLY)
         file_lock.lock(descriptor)
     try:
-        # Last-reader close can checkpoint and remove WAL independently of
-        # the writer lock. Serialize it with the snapshot copy as well.
+        # Writer publication is blocked. Reader close remains nonblocking;
+        # byte verification detects any concurrent WAL checkpoint.
         if cache.with_name(".snapshot").exists():
             guard = DatabaseLease(cache, name=".snapshot", read_only=True)
         with tempfile.TemporaryDirectory(prefix="vault-index-check-") as temporary:
             clone = Path(temporary) / "index.db"
-            clone.write_bytes(cache.read_bytes())
-            for suffix in ("-wal",):
-                sidecar = Path(str(cache) + suffix)
-                check_cache_file(sidecar)
-                if sidecar.is_file():
-                    Path(str(clone) + suffix).write_bytes(sidecar.read_bytes())
+            copy_cache_snapshot(cache, clone)
             if guard is not None:
                 guard.close()
                 guard = None

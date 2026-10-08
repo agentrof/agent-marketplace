@@ -85,5 +85,10 @@ the catalog artifact path and relative-artifact link law.
    defines.
 5. Run compiler checks, then `approve`; changes to an approved MASTER begin a
    revision first. Compiler approval and a committed package are handoff.
+   Switch `dependent_rebind_gate`: at `with_source`, the gate that approves a
+   revision of the approved MASTER also shows and approves the mechanical
+   rebinds of the Experience packages it makes stale, as
+   `skill-content/business-analysis/references/switch-dependent_rebind_gate-with_source.md`
+   defines.
 4. Requirement mode binds its receipt. Manual mode returns it and suggests
    `/experience-design` without automatic dispatch.

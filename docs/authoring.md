@@ -175,6 +175,30 @@ replacement and permits an interrupted exact before/after mixture to resume
 with the same source commit and owner-approved hash. Setup never applies it
 automatically.
 
+### Source rebind receipts
+
+At process switch `source_rebind` `receipt_when_unchanged`,
+`plan-source-rebind --source-commit <approved-commit>` derives the
+`backlog-source-rebind-v1` receipt of a revision whose root changes only its
+bindings, Requirement and lifecycle fields: each changed binding with its
+before and after approval commits, changed documents and row ids, every
+story, test plan and epic note's content hash, and each epic as `reviewed`
+with its reasons or `reused` with its approved review. `owner_approval` is
+the hash of the receipt without that field and the sealed
+`after_package_hash`. `record-source-rebind-root-review` writes the root
+round's `Source Rebind` section naming that hash, which scopes every reader
+manifest; `apply-source-rebind --approve-receipt <hash>` writes the receipt
+below `backlog/artifacts/source-rebinds/`, runs the ordinary atomic approval
+and seals the approved package hash. Plain `approve` refuses such a round.
+
+`backlog_migration.pin_chain` is the one helper that accepts a Delivery's old
+backlog pin: it walks committed migration and source-rebind receipts from the
+pinned to the current package hash, refuses an ambiguous step, replays each
+hop from Git and returns the Test Plan aliases and the impacted notes. The
+relation closure an approval read cannot be rebuilt later, so a later replay
+requires every reason it can rebuild from Git and accepts the recorded ones
+beyond them; the approved root review binds the receipt hash.
+
 ## Host and runtime contract
 
 Claude Code and Codex install the same standalone team through their native

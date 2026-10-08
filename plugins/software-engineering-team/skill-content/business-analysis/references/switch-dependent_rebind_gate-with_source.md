@@ -4,9 +4,10 @@ These are the instructions of process switch `dependent_rebind_gate` at
 `with_source`. A task binds this file only when the project's Process Policy
 selects that value; at the default, `separate`, an approved Experience
 package that a source approval makes stale is found while bindings are
-refreshed and gets its own scope gate. Every task of the Business Analysis
-and Experience Design flows binds it, and only the orchestrating entry asks
-the owner.
+refreshed and gets its own scope gate. Every task of the Business Analysis,
+Solution Design, Design System and Experience Design flows binds it, and only
+the orchestrating entry asks the owner. A source is a Business Analysis
+space, the Solution landscape or the Design System MASTER.
 
 The Experience Design rule stays: the owner approves the complete action set
 before any lifecycle mutation. This value shows that set in the source gate
@@ -16,7 +17,8 @@ instead of after it.
 
 1. With the source change drafted in the working tree, run
    `experience_compile.py source-impact --root workspace/docs/experience-design
-   --source-ref business-analysis/<space>/space`. It lists every approved
+   --source-ref <source>`, where `<source>` is `business-analysis/<space>/space`,
+   `solution-design/landscape` or `design-system/MASTER`. It lists every approved
    Experience package that binds the source's current receipt, the changed
    source rows and documents, the package notes that cite them, and per
    package `rebind`: `mechanical` when no note cites a changed row or

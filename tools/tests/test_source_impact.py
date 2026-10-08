@@ -158,6 +158,77 @@ class SourceImpactTests(unittest.TestCase):
         self.assertEqual((code, json.loads(output.getvalue())["dependents"]), (0, []))
 
 
+@integration
+class SolutionAndDesignSourceImpactTests(unittest.TestCase):
+    """A Solution or Design System revision is a source too (#463)."""
+
+    SOURCES = {
+        "solution-design/landscape": ("solution-design", "landscape.md", "package_hash",
+                                      "decisions/cache.md", "SOL-CACHE-001"),
+        "design-system/MASTER": ("design-system", "MASTER.md", "baseline_hash",
+                                 "tokens/color.md", "DS-COLOR-001"),
+    }
+
+    setUp = SourceImpactTests.setUp
+    write = SourceImpactTests.write
+    commit = SourceImpactTests.commit
+
+    def approved(self, source_ref: str, cites: str) -> None:
+        folder, anchor, key, document, row = self.SOURCES[source_ref]
+        stage = source_ref.split("/", 1)[0]
+        self.write(self.docs / folder / anchor,
+                   f"---\ntype: source\nstatus: approved\n{key}: {OLD}\n---\n\n# Source\n")
+        self.write(self.docs / folder / document,
+                   f"---\ntype: rule_set\nstatus: approved\n---\n\n# Rules\n\n| id | rule |\n|---|---|\n"
+                   f"| {row} | Entries expire after ten minutes. |\n")
+        self.write(self.package / "experience.md", experience_note(OLD, 1).replace(
+            f"solution-design|solution-design/landscape|sha256:{'c' * 64}",
+            f"{stage}|{source_ref}|{OLD}"))
+        self.write(self.package / "screens/lead-list-screen.md", SCREEN.format(cites=cites))
+        self.write(self.package / "artifacts/list.html", "<main>leads</main>\n")
+        self.write(self.root / "artifacts/index.html", "<main>app</main>\n")
+        self.commit("approve")
+
+    def impact(self, source_ref: str) -> dict:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = experience_compile.main(["source-impact", "--root", str(self.root),
+                                            "--source-ref", source_ref])
+        self.assertEqual(code, 0)
+        dependents = json.loads(output.getvalue())["dependents"]
+        self.assertEqual(len(dependents), 1, dependents)
+        return dependents[0]
+
+    def test_a_solution_or_design_revision_classes_its_dependents(self):
+        for source_ref, (folder, anchor, key, document, row) in self.SOURCES.items():
+            for cites, expected in (("BR-SCO-002", "mechanical"), (row, "semantic"),
+                                    (f"[[{folder}/{document[:-3]}|Rules]]", "semantic")):
+                with self.subTest(source=source_ref, cites=cites):
+                    self.setUp()
+                    self.approved(source_ref, cites)
+                    self.write(self.docs / folder / document, (self.docs / folder / document).read_text(
+                        encoding="utf-8").replace("ten minutes", "five minutes"))
+                    result = self.impact(source_ref)
+                    self.assertEqual((result["rebind"], result["changed_source_documents"],
+                                      result["changed_source_ids"]), (expected, [document], [row]))
+                    self.write(self.docs / folder / anchor,
+                               f"---\ntype: source\nstatus: approved\n{key}: {NEW}\n---\n\n# Source\n")
+                    self.commit("approve source revision")
+                    stage = source_ref.split("/", 1)[0]
+                    self.write(self.package / "experience.md", experience_note(NEW, 2, "in_review").replace(
+                        f"solution-design|solution-design/landscape|sha256:{'c' * 64}",
+                        f"{stage}|{source_ref}|{NEW}").replace(
+                        f"business-analysis|{REF}|{NEW}", f"business-analysis|{REF}|{OLD}"))
+                    result = self.impact(source_ref)
+                    self.assertEqual(result["package_change"], "source_rebind_only")
+                    self.assertEqual(result["review_scope"],
+                                     "source_delta" if expected == "mechanical" else "full")
+
+    def test_an_unknown_source_reference_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "solution-design/landscape or design-system/MASTER"):
+            experience_compile._source_package("operation/verification-contract")
+
+
 class DependentRebindGateTests(unittest.TestCase):
     REFERENCE = ("skill-content/business-analysis/references/"
                  "switch-dependent_rebind_gate-with_source.md")
@@ -166,17 +237,19 @@ class DependentRebindGateTests(unittest.TestCase):
         import process_policy
         spec = process_policy.load_registry()["dependent_rebind_gate"]
         self.assertEqual((spec["default"], spec["values"]), ("separate", ["separate", "with_source"]))
-        self.assertEqual(spec["spec"]["flows"], ["business-analysis", "experience-design"])
+        self.assertEqual(spec["spec"]["flows"], ["business-analysis", "experience-design",
+                                                 "solution-design", "design-system"])
 
     def test_both_owning_flows_name_the_reference(self):
         team = ROOT / "plugins/software-engineering-team"
-        for flow in ("business-analysis", "experience-design"):
+        for flow in ("business-analysis", "experience-design", "solution-design", "design-system"):
             with self.subTest(flow=flow):
                 text = " ".join((team / "flows" / f"{flow}.md").read_text(encoding="utf-8").split())
                 self.assertIn(self.REFERENCE, text)
         text = " ".join((team / self.REFERENCE).read_text(encoding="utf-8").split())
         for phrase in ("`experience_compile.py source-impact --root workspace/docs/experience-design"
-                       " --source-ref business-analysis/<space>/space`",
+                       " --source-ref <source>`, where `<source>` is `business-analysis/<space>/space`,"
+                       " `solution-design/landscape` or `design-system/MASTER`",
                        "Open the question with one sentence in everyday words",
                        "continue only while it reports `package_change` `source_rebind_only` and"
                        " `rebind` `mechanical`"):

@@ -1,0 +1,6 @@
+{
+  "summary": "Add process switch source_rebind: a backlog revision that only rebinds its sources reviews only the epics an owner-approved, Git-replayed receipt names as impacted, a Delivery keeps its execution approval across that receipt, and Experience source impact covers Solution and Design System revisions.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

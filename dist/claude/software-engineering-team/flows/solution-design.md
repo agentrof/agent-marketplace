@@ -100,6 +100,11 @@ bound as an explicit Requirement reuse, never used to author a new Solution revi
    requires `topology_selected: true`, a version-3 confirmation receipt and a
    complete BA allocation universe. An approved package changes only through
    `begin-revision`.
+   Switch `dependent_rebind_gate`: at `with_source`, the gate that approves a
+   revision of the approved package also shows and approves the mechanical
+   rebinds of the Experience packages it makes stale, as
+   `skill-content/business-analysis/references/switch-dependent_rebind_gate-with_source.md`
+   defines.
 6. Requirement mode binds the result. Manual mode returns the exact solution
    package receipt and suggests `/design-system`. It never creates an app,
    System Architecture record or Delivery Item.

@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+from typing import NamedTuple
 
 import atomic_file
 import backlog_compile as backlog
@@ -164,7 +165,8 @@ def verify_inventory(docs: Path, before: dict[str, bytes], after: dict[str, byte
             raise ValueError(f"migration has unrelated or concurrent changes: {name}")
 
 
-def replay_receipt(docs: Path, receipt: dict) -> dict:
+def replay_receipt(docs: Path, receipt: dict, *, final: bool = True) -> dict:
+    """Replay a migration receipt; a final hop proves the working tree, an earlier one its approval."""
     if not isinstance(receipt, dict) or receipt.get("migration") != MIGRATION:
         raise ValueError("unknown migration receipt")
     strings = ("source_commit", "from_version", "to_version", "owner_approval",
@@ -179,28 +181,91 @@ def replay_receipt(docs: Path, receipt: dict) -> dict:
     expected, outputs = migration_plan(sources, oid, receipt["from_version"], receipt["to_version"])
     if receipt != expected:
         raise ValueError("migration receipt does not equal deterministic replay")
-    verify_inventory(docs, sources, outputs)
+    if final:
+        verify_inventory(docs, sources, outputs)
+    else:
+        found = approved_package_sources(docs, receipt["after_package_hash"])
+        if found is None or found[1] != outputs:
+            raise ValueError("no committed approval holds the migration postimage")
     return expected
 
 
-def compatible_pins(docs: Path, old_hash: str, new_hash: str) -> dict[str, tuple[str, str]]:
-    """Return only the exact hash aliases proven by a retained owner-approved receipt."""
+def approved_package_sources(docs: Path, package_hash: str) -> tuple[str, dict[str, bytes]] | None:
+    """The newest committed, hash-verified approval whose package hash is ``package_hash``."""
+    project = backlog.history_project(docs)
+    if project is None:
+        return None
+    for commit in backlog.history_commits(project, docs / "backlog/backlog.md", package_hash):
+        sources = backlog.approved_history_sources(project, docs, commit)
+        if sources is None:
+            continue
+        notes = {path.relative_to(docs).as_posix(): data for path, data in sources.items()
+                 if NOTE.fullmatch(path.relative_to(docs).as_posix())}
+        props, _body = backlog.parse_front_matter_text(notes["backlog/backlog.md"].decode("utf-8"))
+        if props.get("package_hash") == package_hash:
+            return commit, notes
+    return None
+
+
+class PinChain(NamedTuple):
+    """What a chain of owner-approved receipts proves between two backlog package hashes.
+
+    ``aliases`` maps a Test Plan path to its pinned and current source hash;
+    ``impacted`` holds every Story and Test Plan a source rebind on the chain
+    names as impacted by its changed sources.
+    """
+    aliases: dict[str, tuple[str, str]]
+    impacted: frozenset[str]
+
+
+def pin_chain(docs: Path, old_hash: str, new_hash: str) -> PinChain | None:
+    """Prove the pinned package hash reaches the current one through retained receipts.
+
+    This is the one helper every consumer of a backlog pin calls. Each hop is
+    a schema migration or a sealed source rebind, replayed from its committed
+    predecessor; the last hop proves the current postimage and every earlier
+    one its committed approval. None means no receipt chain joins the two
+    hashes, and two receipts that leave one hash make the chain ambiguous.
+    """
     if old_hash == new_hash:
-        return {}
+        return PinChain({}, frozenset())
+    import backlog_rebind
+
+    hops = []
     directory = docs / RECEIPTS
-    if not directory.exists():
-        return {}
-    receipts = []
-    for path in sorted(directory.glob("*.json")):
+    for path in sorted(directory.glob("*.json")) if directory.exists() else []:
         safe_path(docs, path.relative_to(docs).as_posix())
         receipt = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(receipt, dict) and receipt.get("before_package_hash") == old_hash \
-                and receipt.get("after_package_hash") == new_hash:
-            receipts.append(replay_receipt(docs, receipt))
-    if len(receipts) > 1:
-        raise ValueError("migration binding is ambiguous")
-    return {row["path"]: (row["before_source_hash"], row["after_source_hash"])
-            for row in receipts[0]["files"]} if receipts else {}
+        if isinstance(receipt, dict):
+            hops.append(("migration", receipt))
+    hops += [("rebind", receipt) for receipt in backlog_rebind.receipts(docs)
+             if receipt.get("after_package_hash")]
+    chain, current, seen = [], old_hash, {old_hash}
+    while current != new_hash:
+        following = [hop for hop in hops if hop[1].get("before_package_hash") == current]
+        if not following:
+            return None
+        if len(following) > 1:
+            raise ValueError("backlog pin receipt chain is ambiguous")
+        chain.append(following[0])
+        current = following[0][1].get("after_package_hash")
+        if not isinstance(current, str) or current in seen:
+            raise ValueError("backlog pin receipt chain does not reach the current package")
+        seen.add(current)
+    aliases: dict[str, tuple[str, str]] = {}
+    impacted: set[str] = set()
+    for index, (kind, receipt) in enumerate(chain):
+        final = index == len(chain) - 1
+        if kind == "migration":
+            replay_receipt(docs, receipt, final=final)
+            for row in receipt["files"]:
+                if row["before_source_hash"] != row["after_source_hash"]:
+                    pinned = aliases.get(row["path"], (row["before_source_hash"],))[0]
+                    aliases[row["path"]] = (pinned, row["after_source_hash"])
+        else:
+            backlog_rebind.replay(docs, receipt, final=final)
+            impacted |= backlog_rebind.impacted_paths(receipt)
+    return PinChain(aliases, frozenset(impacted))
 
 
 def require_opt_in(docs: Path) -> None:

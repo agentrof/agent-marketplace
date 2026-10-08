@@ -635,16 +635,19 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
 
     if delivery_props.get("backlog_path") != backlog_snapshot["backlog_path"]:
         errors.append("Delivery backlog_path does not identify the canonical backlog")
-    migration_pins = {}
+    migration_pins, rebind_impacted = {}, frozenset()
     if delivery_props.get("backlog_package_hash") != backlog_snapshot["backlog_package_hash"]:
         import backlog_migration
+        chain = None
         try:
-            migration_pins = backlog_migration.compatible_pins(
+            chain = backlog_migration.pin_chain(
                 docs, delivery_props.get("backlog_package_hash"), backlog_snapshot["backlog_package_hash"])
         except (OSError, ValueError, KeyError, RuntimeError) as exc:
-            errors.append(f"Delivery schema migration receipt is invalid: {exc}")
-        if not migration_pins:
+            errors.append(f"Delivery backlog pin receipt is invalid: {exc}")
+        if chain is None:
             errors.append("Delivery backlog_package_hash is stale against the approved backlog")
+        else:
+            migration_pins, rebind_impacted = chain.aliases, chain.impacted
     for key in DOD_SOURCE_FIELDS:
         if delivery_props.get(key) != dod[key]:
             errors.append(f"Delivery {key} is stale against the approved Definition of Done")
@@ -666,6 +669,10 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
                         and migration_pins.get(source["test_plan_path"]) == (recorded, current))
             if recorded != current and not migrated:
                 errors.append(f"{item_path} {key} is stale against approved Story {story_id}")
+        impacted = sorted({source["story_path"], source["test_plan_path"]} & rebind_impacted)
+        if impacted:
+            errors.append(f"{item_path} Story {story_id} is impacted by a source rebind of its backlog"
+                          f" pin ({', '.join(impacted)}); approve the Delivery's execution again")
         expected_source = [link(source["story_path"].removesuffix(".md"), story_id)]
         if item_props.get("derives_from") != expected_source:
             errors.append(f"{item_path} derives_from must contain only {story_id}")

@@ -170,7 +170,8 @@ class BacklogMigrationTests(unittest.TestCase):
         with mock.patch.object(delivery, "delivery_source_snapshots",
                                return_value=([(self.docs / "item.md", item)],
                                              {"EXAMPLE-01": source}, snapshot, dod, [])), \
-                mock.patch.object(migration, "compatible_pins", return_value={PLAN: ("old", "new")}):
+                mock.patch.object(migration, "pin_chain",
+                                  return_value=migration.PinChain({PLAN: ("old", "new")}, frozenset())):
             self.assertEqual(delivery.delivery_source_findings(self.docs, self.docs, props)[1], [])
             for key, value in (("test_plan_source_hash", "foreign"), ("story_source_hash", "foreign"),
                                ("owner_role", "other"), ("test_plan_path", "other.md")):
@@ -182,7 +183,7 @@ class BacklogMigrationTests(unittest.TestCase):
         with mock.patch.object(delivery, "delivery_source_snapshots",
                                return_value=([(self.docs / "item.md", item)],
                                              {"EXAMPLE-01": source}, snapshot, dod, [])), \
-                mock.patch.object(migration, "compatible_pins", side_effect=ValueError("tampered")):
+                mock.patch.object(migration, "pin_chain", side_effect=ValueError("tampered")):
             errors = delivery.delivery_source_findings(self.docs, self.docs, props)[1]
             self.assertTrue(any("receipt is invalid" in error for error in errors))
             self.assertTrue(any("backlog_package_hash is stale" in error for error in errors))
@@ -194,14 +195,47 @@ class BacklogMigrationTests(unittest.TestCase):
         (directory / "receipt.json").write_bytes(migration.encoded(self.receipt))
         old, new = self.receipt["before_package_hash"], self.receipt["after_package_hash"]
         with mock.patch.object(migration, "approved_sources", return_value=(COMMIT, self.before)):
-            aliases = migration.compatible_pins(self.docs, old, new)
-            self.assertEqual(aliases[PLAN], (backlog.digest_text(self.before[PLAN].decode()),
-                                           backlog.digest_text(self.after[PLAN].decode())))
-            self.assertEqual(migration.compatible_pins(self.docs, "foreign", new), {})
-            self.assertEqual(migration.compatible_pins(self.docs, old, "foreign"), {})
+            chain = migration.pin_chain(self.docs, old, new)
+            self.assertEqual(chain.aliases, {PLAN: (backlog.digest_text(self.before[PLAN].decode()),
+                                                    backlog.digest_text(self.after[PLAN].decode()))})
+            self.assertEqual(chain.impacted, frozenset())
+            self.assertEqual(migration.pin_chain(self.docs, new, new), migration.PinChain({}, frozenset()))
+            self.assertIsNone(migration.pin_chain(self.docs, "foreign", new))
+            self.assertIsNone(migration.pin_chain(self.docs, old, "foreign"))
             (directory / "duplicate.json").write_bytes(migration.encoded(self.receipt))
             with self.assertRaisesRegex(ValueError, "ambiguous"):
-                migration.compatible_pins(self.docs, old, new)
+                migration.pin_chain(self.docs, old, new)
+
+    def test_an_earlier_hop_proves_its_committed_approval_and_aliases_compose(self):
+        later = {**self.receipt, "before_package_hash": self.receipt["after_package_hash"],
+                 "after_package_hash": "sha256:" + "9" * 64,
+                 "files": [{**row, "before_source_hash": row["after_source_hash"],
+                            "after_source_hash": "sha256:" + "8" * 64}
+                           if row["path"] == PLAN else row for row in self.receipt["files"]]}
+        directory = self.docs / migration.RECEIPTS
+        directory.mkdir(parents=True)
+        (directory / "first.json").write_bytes(migration.encoded(self.receipt))
+        (directory / "second.json").write_bytes(migration.encoded(later))
+        replays = []
+
+        def replay(docs, receipt, *, final=True):
+            replays.append((receipt["after_package_hash"], final))
+            return receipt
+
+        with mock.patch.object(migration, "replay_receipt", side_effect=replay):
+            chain = migration.pin_chain(self.docs, self.receipt["before_package_hash"],
+                                        later["after_package_hash"])
+        self.assertEqual(replays, [(self.receipt["after_package_hash"], False),
+                                   (later["after_package_hash"], True)])
+        self.assertEqual(chain.aliases[PLAN], (backlog.digest_text(self.before[PLAN].decode()),
+                                               "sha256:" + "8" * 64))
+        with mock.patch.object(migration, "approved_sources", return_value=(COMMIT, self.before)), \
+                mock.patch.object(migration, "approved_package_sources", return_value=None):
+            with self.assertRaisesRegex(ValueError, "no committed approval holds the migration postimage"):
+                migration.replay_receipt(self.docs, self.receipt, final=False)
+        with mock.patch.object(migration, "approved_sources", return_value=(COMMIT, self.before)), \
+                mock.patch.object(migration, "approved_package_sources", return_value=("c", self.after)):
+            self.assertEqual(migration.replay_receipt(self.docs, self.receipt, final=False), self.receipt)
 
     def test_default_policy_refuses_migration_and_invalid_policy_propagates(self):
         import process_policy

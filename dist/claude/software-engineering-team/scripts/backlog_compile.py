@@ -177,6 +177,7 @@ LIGHT_PATH_DATA_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
                         / "backlog-plan" / "data" / "light-backlog-path.json")
 LIGHT_PATH_SECTION = "Light Path"
 LIGHT_PATH_LINE_RE = re.compile(r"(?m)^Compiler \[Light Path\]: changed (\S.*?)\s*$")
+SOURCE_REBIND_SECTION = "Source Rebind"
 SIZE_EXCEPTIONS = "Size Exceptions"
 SIZE_EXCEPTION_COLUMNS = ("story", "measure", "reason")
 CHECKLIST_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\](?:\s|$)")
@@ -4275,8 +4276,19 @@ def with_policy_pin(props: dict, pin: dict) -> dict:
     return result
 
 
+def source_rebind_findings(record: dict, docs: Path, *, approving: bool = False) -> list[str]:
+    """Replay the source-rebind receipt a root round names; a round without one reads nothing."""
+    review = latest(record["backlog_reviews"])
+    if review is None or SOURCE_REBIND_SECTION not in headings(review["body"]):
+        return []
+    import backlog_rebind
+
+    return backlog_rebind.approval_findings(record, docs, approving=approving)
+
+
 def approval_preflight(docs: Path, record: dict,
-                       collect_errors: list[str]) -> tuple[list[str], dict, dict, bool]:
+                       collect_errors: list[str], *,
+                       approving: bool = False) -> tuple[list[str], dict, dict, bool]:
     """Run every check atomic approval runs before it writes.
 
     Returns the findings beyond the collect errors, the preserved approved
@@ -4287,6 +4299,7 @@ def approval_preflight(docs: Path, record: dict,
     if not already_approved:
         findings.extend(requirement_coverage_findings(record))
         findings.extend(light_root_review_findings(record, docs))
+        findings.extend(source_rebind_findings(record, docs, approving=approving))
     preserved, pin = {}, {}
     if not collect_errors and not findings:
         if already_approved:
@@ -4314,7 +4327,8 @@ def approve(args) -> int:
     # stale receipt data after the approval transition mutates Markdown.
     with stage_package.candidate_session(), experience_validation_session():
         record, errors = collect(docs)
-    findings, preserved, pin, already_approved = approval_preflight(docs, record, errors)
+    findings, preserved, pin, already_approved = approval_preflight(docs, record, errors,
+                                                                    approving=True)
     errors = sorted(set(errors + findings))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2,
@@ -5380,6 +5394,19 @@ def main(argv=None) -> int:
             command.add_argument("--approve-receipt", required=True)
         import backlog_migration
         command.set_defaults(func=backlog_migration.command)
+    for name in ("plan-source-rebind", "apply-source-rebind", "record-source-rebind-root-review"):
+        command = sub.add_parser(name, help="plan, record or owner-approve a source-rebind receipt"
+                                            " (source_rebind receipt_when_unchanged)")
+        command.add_argument("--docs", default=None)
+        command.add_argument("--source-commit", required=True,
+                             help="the committed approval the revision rebinds from")
+        command.add_argument("--review-epic", action="append", default=[],
+                             help="an epic a root reader's finding moved to review")
+        if name == "apply-source-rebind":
+            command.add_argument("--approve-receipt", required=True)
+        import backlog_rebind
+        command.set_defaults(func=backlog_rebind.record_root_review
+                             if name == "record-source-rebind-root-review" else backlog_rebind.command)
     command = sub.add_parser("begin-revision")
     command.add_argument("--docs", default=None)
     command.add_argument("--delivery-snapshot")

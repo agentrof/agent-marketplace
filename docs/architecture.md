@@ -100,6 +100,15 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     Test Plan pins only when deterministic receipt replay proves the complete
     current postimage from a committed, hash-verified predecessor; execution
     approval and every other binding remain unchanged.
+    At process switch `source_rebind` `receipt_when_unchanged`, a revision
+    whose root differs from its approved predecessor only in its bindings,
+    Requirement and lifecycle fields reviews only the epics its receipt names
+    as impacted by the changed sources; every other epic keeps its approved
+    review byte for byte, one scoped root reader stays, and the owner approves
+    the exact receipt hash. Every later check rebuilds the receipt from Git,
+    and a Delivery accepts a chain of migration and source-rebind receipts as
+    its backlog pin while every Item's Story and Test Plan stay byte-identical
+    and unimpacted, also after the switch returns to its default.
 15. File names are stable slugs; membership is path-derived. A story does not
     duplicate its epic relationship in front matter.
 16. Authored titles are direct, natural phrases in the configured output
@@ -160,7 +169,8 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     and backlog state must bind the new application receipt before a new
     handoff. An already-created Delivery continues to verify its exact pinned,
     approved backlog and Story/Test Plan hashes instead of being invalidated by
-    an unrelated later application revision. Retiring the final process keeps
+    an unrelated later application revision; a backlog rebind to it carries
+    that pin only through the source-rebind receipt of invariant 14. Retiring the final process keeps
     the application receipt sequence alive with an empty artifact inventory and
     no process receipts; a later process can join through the next application
     revision. Reviewers provide fidelity and usability advice; approval uses a

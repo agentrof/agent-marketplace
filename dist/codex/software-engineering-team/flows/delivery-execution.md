@@ -318,9 +318,12 @@ integrated Item ref, Slot or writer receipt of the Delivery stays.
 `closure-audit --delivery DLV-###` or `--all` only reads, and names each
 outcome with its recovery: `closed`; `merged_cleanup_pending`, recovered by
 `verify-merge`; `awaiting_merge`, with whatever keeps its recorded head from
-closing it; `open`; or `external_product_merge`, where the Delivery's product
-reached the target without the recorded-head merge, which is never reported as
-merged and whose recovery the project owner decides. Broad delegation, time
+closing it; `open`; `external_product_merge`, where the Delivery's product
+reached the target without the recorded-head merge; or `unproven_record_merge`,
+where the target merged a PR record that is not the Delivery's current
+recorded head as the coordinator wrote it. Neither is ever reported as merged,
+and the project owner decides their recovery; identical product bytes alone
+are only a warning. Broad delegation, time
 pressure and an autopilot grant authorize running this flow as prescribed and
 never waive evidence, integration, the PR record or closure. A quality
 exception the flow permits is accepted only at its explicit gate, with the

@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "288ebbef1b61646cdbedecbff1108b6704b0e14eaa5c009b1774ea5a18517c19"
+      "5e7d34805ba8cdb0cfe51174e78c35002e604a67ba80346b3ede897b48ba6368"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -176,22 +176,22 @@
       "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
     ,
     "scripts/delivery_closure.py":
-      "f8e5eaf9abf0e7b319061b36f744f6be44b827a38282a02d758e3344855677da"
+      "14563f81ed558589becb4325d1af75b578b4b3402d45052c1aad15c39eb67230"
     ,
     "scripts/delivery_compile.py":
       "6d0cbef39a03a7915abc4253cbb32156e17da6bbd971ec0939fef493c9c582f6"
     ,
     "scripts/delivery_git.py":
-      "b4d4a37e6e441270046a6fa8c414bebdf8c77410fa1d3f15de7aa69ccef9a220"
+      "e1051295fd5ddc25bbce08f7fd989d9fbcbb92add71629c9cf1a0e009875a66a"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
     ,
     "scripts/delivery_provider.py":
-      "cb4b3de7ce005aa87aea7cb391a0c037607ef3448b248ed41c8d2fbe0363cac5"
+      "6332887c15451a8695e6c911a6e3073d691b049d092f4f06d399b1777dc8a506"
     ,
     "scripts/delivery_result.py":
-      "529de8ce767cb26992d40f789e2d45507a201cc9c93c26d97f45c86fc811fede"
+      "c520155cdafe3dc81d204385efed97a37adf6fb9c5fe7147d4996d4d696a89d2"
     ,
     "scripts/delivery_verification.py":
       "eaa79f4b352d7ee059cf75afdd8f387ae2d8b16d2fac9dff6d9535d6a4ebf1f2"
@@ -236,7 +236,7 @@
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/operation_compile.py":
-      "f4fd80e3858d1e957d4dbadf6f7a8fc9d0776a77bec5666ef84994631da7d602"
+      "3fb6df9e647e942c52eb6651826b11f096e59d8acd454832fe6e6e7a6c54a478"
     ,
     "scripts/process_policy.py":
       "673e45268b8b1f8161ecb4f1d26a9d5c970049015022e804a70c84b7da87828a"
@@ -449,7 +449,7 @@
       "d9cd3b9a72a9831caa012d32f02553e4fe39976859b9e3d02bd3c8ab624b2c81"
     ,
     "skill-content/deliver/SKILL.md":
-      "b2d22e8e13266e8a6bf1b4ea9ddbe0ed90e649f51c3d8768041e5ba8b617616b"
+      "a64b55510cc9df7995f9fdfff650257c6a1305c15a0f0a6fa58dcf61e879a470"
     ,
     "skill-content/deliver/data/assertion-kinds.json":
       "363444381c22a9a1453172f615690be2cacb2bac7c6cb90fde0ab11dc12eac53"
@@ -470,7 +470,7 @@
       "4b47d51cd4c24d0aa448c2ccd5aef23c48da807c226543b2868f8b0c86e6e731"
     ,
     "skill-content/deliver/data/delivery-result-contract.json":
-      "3b15c771c83735cfe32d947baa2dcb83028db24b7f9b7c9e01b3f18713ddfc12"
+      "16e8cdf7bfb8b97ccf70ea391b3bd8b6dd881af00c2bfee494b6a0a11e2c8e42"
     ,
     "skill-content/deliver/data/delivery-verification-policy.json":
       "a0e4d9344a90c4fd222491b55953017c3e8b5f245c8d041dd69f405adf13e236"
@@ -761,7 +761,7 @@
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
-      "39d8bde3bbe309ccd856b3e8934f3b4731866539fdb2158c5eab7f09c0518fc1"
+      "961bf50e1837085904c34742da369485bc8661a5d9b4410a424325688715149c"
     ,
     "skill-content/setup/references/windows-long-paths.md":
       "f6ce03aee49421cf7fd313388af3a9c9e2eb74f3e20a8019be0d4703cfca5705"
@@ -1013,7 +1013,7 @@
       "0d05078ab3c81a50c20b8a08ce2f1bef6c8fe7b01d7c6230e122e1b140a49cc7"
     ,
     "templates/delivery-closure.yml":
-      "2d3f46cef36ccdd7ff686118d5a9f7a4b6bca8a3a7542b14ec40185c6d498ef3"
+      "be75ec57ba6800ec0295e505858b06a3d70c28807acac5d9cd14028f5badd90a"
     ,
     "templates/gitignore":
       "fa6da40c9313474f7d39f430d2311c2a6d646dfbceb5df566b454af6052d6a8e"

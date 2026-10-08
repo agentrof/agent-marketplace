@@ -922,23 +922,35 @@ Item ref, Slot or writer receipt of the Delivery stays. `closure-audit
 --delivery DLV-###` or `--all` only reads, and reports each Delivery as
 `closed`, `merged_cleanup_pending` (recovery `verify-merge`), `awaiting_merge`
 with whatever keeps its recorded head from closing it, `open`, or
-`external_product_merge` when the Delivery's product reached the target
-without the recorded-head merge. An external merge is never reported as
-merged; the project owner decides its recovery, and a Slot is still released
-only by `integrate-item` or `cancel-delivery`. Planning runs `closure-audit
+`external_product_merge` when a commit, product tip or package of the
+Delivery reached the target without the recorded-head merge, or
+`unproven_record_merge` when the target merged a PR record that is not the
+current Integration tip or not the record, intent and Review the coordinator
+wrote. Neither is ever reported as merged; the project owner decides their
+recovery, and a Slot is still released only by `integrate-item` or
+`cancel-delivery`. Item product bytes the target holds without that evidence,
+in full or in part, are a warning, since an independent change can write them.
+Only a writer receipt that binds a live Item writer keeps a Delivery from
+`closed`. Planning runs `closure-audit
 --all` before the scope handoff and shows every incomplete prior closure with
 its recovery. Broad delegation, time pressure and an autopilot grant never
 waive evidence, integration, the PR record or closure.
 
 The opt-in `delivery-closure` workflow runs `closure-check` from the base
-branch on every pull request: a pull request no open Delivery manages passes,
-and a managed one passes only as its Delivery's recorded PR head with every
-closure precondition met. `protection-status` reports, read-only, whether a
-ruleset on the target branch requires that check, requires a pull request and
-has no bypass actors. Only such an owner-installed ruleset with no bypass
-actors can stop a direct provider merge, an admin bypass or an owner push; no
-command of the package can, and neither the report nor a missing ruleset or
-workflow refuses execution approval.
+branch on every pull request it is opened, pushed, reopened or edited for, so
+a retarget runs it again: a pull request no open Delivery manages passes, and
+a managed one passes only as its Delivery's recorded PR head with every
+closure precondition met, including a PR record, intent and Review that carry
+exactly what their verbs write and an Integration line whose every product
+change an Item, target merge or cancellation owns. `merge-pr` refuses the same
+unbound head. `protection-status` reports, read-only, whether a ruleset on the
+target branch requires that check from the GitHub Actions app or requires the
+closure workflow, requires a pull request and has no bypass actors; a check
+required by name only is not configured, as a commit status or a same-name job
+can meet it. Only such an owner-installed ruleset with no bypass actors can
+stop a direct provider merge, an admin bypass or an owner push; no command of
+the package can, and neither the report nor a missing ruleset or workflow
+refuses execution approval.
 
 ## Target changes, recovery and cancellation
 

@@ -4,7 +4,7 @@ name: delivery-closure
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -12,11 +12,12 @@ permissions:
 jobs:
   delivery-closure:
     name: delivery-closure
+    # Every edit runs it, as a skipped job reports success to a required check.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Fetch the pull request head as data
         env:

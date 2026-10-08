@@ -34,7 +34,12 @@ Delivery PR, its Integration or an Item branch through the provider or Git
 directly. Report a Delivery complete only when `closure-audit` returns
 `closed`. Any other outcome is reported as it is, with the recovery the audit
 names: `merged_cleanup_pending` needs `verify-merge`, and
-`external_product_merge` is never a merge and goes to the project owner.
+`external_product_merge` and `unproven_record_merge` are never a merge and go
+to the project owner. Identical product bytes on the target alone are a
+warning for the owner to check, never an external merge. The
+`delivery-closure` check is red on `opened` until the PR record's push runs
+it again; after a recovery step that changes no PR head, such as the release
+of a leftover Slot, re-run the failed check before `merge-pr`.
 Broad delegation, time pressure and an autopilot grant authorize running the
 flow as prescribed and never waive evidence, integration, the PR record or
 closure. A quality exception the flow permits is accepted only at its

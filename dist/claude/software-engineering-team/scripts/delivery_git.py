@@ -894,6 +894,23 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
     """
     trailers = _normalise_control_trailers(trailers)
     parent_args = [arg for parent in (parents or (base,)) for arg in ("-p", parent)]
+    projected = replacements_tree(root, base, replacements, delivery_projections=delivery_projections)
+    message = subject + "\n\n" + "\n".join(
+        f"Agentrof-{key}: {value}" for key, value in trailers.items()
+    ) + "\n"
+    commit = git_with_input(root, ["commit-tree", projected, *parent_args], message, os.environ.copy())
+    if commit.returncode:
+        raise RuntimeError(commit.stderr.strip() or "cannot create candidate commit")
+    return commit.stdout.strip()
+
+
+def replacements_tree(root: Path, base: str, replacements: dict[str, str], *,
+                      delivery_projections: bool = False) -> str:
+    """The tree of *base* with exact in-memory file replacements and, optionally, derived projections.
+
+    It writes blobs and trees only, so a checkout without a Git identity can
+    compute it.
+    """
     with tempfile.TemporaryDirectory(prefix="agentrof-index-") as temporary:
         index = Path(temporary) / "index"
         env = os.environ.copy()
@@ -913,15 +930,8 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
                               encoding="utf-8", capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write candidate tree")
-        projected = (write_delivery_projection_tree(root, env, tree.stdout.strip())
-                     if delivery_projections else tree.stdout.strip())
-        message = subject + "\n\n" + "\n".join(
-            f"Agentrof-{key}: {value}" for key, value in trailers.items()
-        ) + "\n"
-        commit = git_with_input(root, ["commit-tree", projected, *parent_args], message, env)
-        if commit.returncode:
-            raise RuntimeError(commit.stderr.strip() or "cannot create candidate commit")
-        return commit.stdout.strip()
+        return (write_delivery_projection_tree(root, env, tree.stdout.strip())
+                if delivery_projections else tree.stdout.strip())
 
 
 def epoch_token() -> str:
@@ -1431,6 +1441,50 @@ def prepare_pr_creation(project_root: Path, delivery_id: str,
             "attempt": attempt, "provider": "github", "refs": short_refs(delivery_id)}
 
 
+def pr_record_replacements(root: Path, intent: str, package: str, url: str) -> tuple[dict[str, str], bool]:
+    """The notes the PR record of the canonical PR *url* replaces on the PR *intent*, and whether it re-renders.
+
+    Only the Review's pull_request_url and source_hash, and a reviewed
+    Delivery's awaiting_merge status, change; projections are derived only
+    with that status. The closure check recomputes the record's tree from
+    these and Git objects alone, so the PR head carries nothing the
+    coordinator did not write.
+    """
+    from delivery_compile import split_note, frontmatter, content_hash, pr_recorded_props
+    canonical_url, _number = canonical_github_pr(url)
+    relative_review = f"{package}/delivery-review.md"
+    review_props, review_body = split_remote_note(root, intent, relative_review, split_note)
+    review_props["pull_request_url"] = canonical_url
+    review_props["source_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
+    replacements = {relative_review: frontmatter(review_props, review_body)}
+    relative_delivery = f"{package}/delivery.md"
+    delivery_props, delivery_body = split_remote_note(root, intent, relative_delivery, split_note)
+    recorded = pr_recorded_props(delivery_props, delivery_body)
+    if recorded is not None:
+        replacements[relative_delivery] = frontmatter(recorded, delivery_body)
+    return replacements, recorded is not None
+
+
+def pr_record_candidate(root: Path, intent: str, package: str, delivery_id: str, url: str) -> str:
+    """The PR record commit that records the canonical PR *url* on the PR *intent*."""
+    canonical_url, number = canonical_github_pr(url)
+    replacements, projections = pr_record_replacements(root, intent, package, canonical_url)
+    return commit_replacements(
+        root, intent, replacements,
+        f"Record PR for {delivery_id}",
+        {"Record": "pr-url-recorded-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Intent": intent, "Provider": "github", "Pull-Request": number,
+         "URL-Hash": pr_url_hash(canonical_url)},
+        delivery_projections=projections,
+    )
+
+
+def pr_record_tree(root: Path, intent: str, package: str, url: str) -> str:
+    """The tree of the PR record that records *url* on *intent*, written without a commit or a Git identity."""
+    replacements, projections = pr_record_replacements(root, intent, package, url)
+    return replacements_tree(root, intent, replacements, delivery_projections=projections)
+
+
 def record_pr_remote(project_root: Path, delivery_id: str, url: str,
                      remote: str = "origin") -> dict:
     """Record a provider-verified PR URL as the exact intent child.
@@ -1445,7 +1499,7 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     """
     root = main_worktree(project_root.resolve())
     refuse_merged_delivery(root, delivery_id, remote)
-    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash, pr_recorded_props
+    from delivery_compile import docs_root, find_delivery, split_note
     canonical_url, number = canonical_github_pr(url)
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
@@ -1465,24 +1519,7 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
         raise RuntimeError("record-pr requires the exact unmatched PR intent")
     if intent_record == "pr-adoption-intent-v1" and not binds_pr(intent_message, canonical_url):
         raise RuntimeError("DELIVERY_PR_UNCERTAIN: the requested PR is not the PR the adoption intent names")
-    relative_review = rel_posix(root, review_path)
-    review_props, review_body = split_remote_note(root, integration_oid, relative_review, split_note)
-    review_props["pull_request_url"] = canonical_url
-    review_props["source_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
-    replacements = {relative_review: frontmatter(review_props, review_body)}
-    relative_delivery = rel_posix(root, directory / "delivery.md")
-    delivery_props, delivery_body = split_remote_note(root, integration_oid, relative_delivery, split_note)
-    recorded = pr_recorded_props(delivery_props, delivery_body)
-    if recorded is not None:
-        replacements[relative_delivery] = frontmatter(recorded, delivery_body)
-    candidate = commit_replacements(
-        root, integration_oid, replacements,
-        f"Record PR for {delivery_id}",
-        {"Record": "pr-url-recorded-v1", "Protocol": "1", "Delivery": delivery_id,
-         "Intent": integration_oid, "Provider": "github", "Pull-Request": number,
-         "URL-Hash": pr_url_hash(canonical_url)},
-        delivery_projections=recorded is not None,
-    )
+    candidate = pr_record_candidate(root, integration_oid, rel_posix(root, directory), delivery_id, canonical_url)
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
@@ -1654,6 +1691,11 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin", *,
     if trailer(integration_message, "Record") != "pr-url-recorded-v1":
         raise RuntimeError("merge-pr requires the current recorded Delivery PR")
     canonical_url = recorded_pr_url(root, integration_oid, directory / "delivery-review.md")
+    from delivery_closure import recorded_head_findings
+    unbound = recorded_head_findings(root, remote, delivery_id, integration_oid, canonical_url)
+    if unbound:
+        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: merge-pr refuses a PR head the coordinator did not"
+                           " write as recorded: " + "; ".join(unbound))
     target_branch, target_before = resolve_target(root, remote)
     provider = GitHubProvider(root, remote)
     candidates = [item for item in provider.list_pull_requests(short_refs(delivery_id)["integration"], target_branch)

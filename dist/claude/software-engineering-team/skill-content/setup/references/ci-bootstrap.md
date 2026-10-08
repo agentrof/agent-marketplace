@@ -70,31 +70,65 @@ changing the packaged template does not edit them.
 The packaged `templates/delivery-closure.yml` is an opt-in workflow that
 `operation_compile.py render-closure-ci --output
 .github/workflows/delivery-closure.yml` writes as it ships; the project then
-commits it and pushes it to the target branch. Setup and refresh never write
-or edit a committed workflow, and execution approval never requires this one.
-It runs on `pull_request_target` for `opened`, `synchronize` and `reopened`
-with read-only `contents` permission, checks out the base with full history,
-fetches `refs/pull/<number>/head`, verifies that it is the event's head
-commit, and runs the base branch's `vault-gate.pyz delivery-closure`. Event
-values reach the steps only through `env:`, and the pull request's own files
-are read as Git data and never run. The check passes a pull request no open
-Delivery manages. A pull request is managed when its head ref is an
-`agentrof/` ref, when its head holds commits of an open Delivery's
-Integration or Item refs that the base lacks, or when it changes a path under
-a path claim of a non-terminal Item of an open Delivery; labels and other
-branch names never decide it. A managed pull request passes only as the
-recorded PR head of its Delivery with every closure precondition met, and
-each failure names the step that owns its recovery.
+commits it and pushes it to the target branch. The workflow runs the base
+branch's tracked `.github/agentrof/vault-gate.pyz`, so `render-closure-ci`
+refuses while that archive lacks the `delivery-closure` subcommand: reinstall
+it with `vault_gate.py install` and commit it in the same commit as the
+workflow, or every pull request fails. Setup and refresh never write or edit a
+committed workflow or archive, and execution approval never requires this one.
+It runs on `pull_request_target` for `opened`, `synchronize`, `reopened` and
+`edited`, so retargeting a pull request to another base runs it again; every
+edit runs it, because a job skipped by its `if:` condition reports success to
+a required check. It has read-only `contents` permission, checks out the
+event's `github.sha`, the base branch tip that holds the workflow, with full
+history, fetches `refs/pull/<number>/head`, verifies that it is the event's
+head commit, and runs the base branch's `vault-gate.pyz delivery-closure`.
+Event values reach the steps only through `env:`, and the pull request's own
+files are read as Git data and never run. The check passes a pull request no
+open Delivery manages. A pull request is managed when its head ref is an
+`agentrof/` ref, when its head holds commits that only an open Delivery's
+Integration or Item refs reach and its base lacks, when it changes a path under
+a path claim of a not cancelled Item of an open Delivery, compared from its
+merge base with the Delivery target, or when it carries the exact product bytes
+of such an Item that its base lacks; labels and other branch names never decide
+it, and a promotion between branches that holds only target commits is not
+managed. A managed pull request passes only as the recorded PR head of its
+Delivery with every closure precondition met: the PR record, its intent and
+its published Review carry exactly what their verbs write, and each commit on
+the reviewed Integration line is a control record whose product change is its
+Item's, its target merge's or its cancellation's. Each failure names the step
+that owns its recovery; a merged Delivery's claims hold until `verify-merge`
+drops its refs, and the check names that step.
+
+The check is red on `opened`, because the head then is the PR intent, and turns
+green on the `synchronize` that the PR record's push runs. A recovery step that
+changes no PR head, such as the release of a leftover Slot, does not run it
+again: re-run the failed check from the pull request's checks page after that
+step. A pull request that changes
+`.github/workflows/delivery-closure.yml` or `.github/agentrof/vault-gate.pyz`
+still runs the base branch's copies, but gets a `DELIVERY_CLOSURE_GATE_CHANGED`
+warning, as the changed copies decide every later pull request; protect both
+paths with CODEOWNERS and required code owner review, or a ruleset that
+restricts them, so the project owner reviews each such change.
 
 A green check prevents nothing by itself. Only an owner-installed ruleset on
-the target branch that requires the `delivery-closure` check, with no bypass
-actors, can stop a direct provider merge, an admin bypass or an owner push;
-no command of this package can. The owner may also protect `agentrof/**`
-from deletion and force pushes. `delivery_git.py protection-status` reads the
-provider's rules read-only and reports whether the check is required, whether
-a pull request is required and whether the ruleset has no bypass actors, each
-`configured`, `not_configured` or `unknown`; a token that cannot read a rule
-or its bypass actors gets `unknown`. The report never refuses anything.
+the target branch that requires the `delivery-closure` check from the GitHub
+Actions app (`integration_id` 15368), or requires
+`.github/workflows/delivery-closure.yml` of this repository with a workflows
+rule, with no bypass actors, can stop a direct provider merge, an admin bypass
+or an owner push; no command of this package can. A check required by name only
+can be met by a commit status or by a same-name job, so `protection-status`
+reports it `not_configured`. Pinning the check to the Actions app still
+accepts a same-name job from a workflow a pull request adds, which the path
+protection above or a workflows rule closes. The owner may also protect
+`agentrof/**` from deletion and force pushes. `delivery_git.py
+protection-status` reads the provider's rules read-only and reports whether
+the check is required, whether a pull request is required and whether the
+ruleset has no bypass actors, each `configured`, `not_configured` or `unknown`,
+with the reason for a check required by name only. Readable branch rules
+without the rule, and a branch GitHub reports as not protected, read as
+`not_configured`; a token that cannot read the branch rules or a ruleset's
+bypass actors gets `unknown`. The report never refuses anything.
 
 The Delivery activation materializer, `operation_compile.py render-ci`, reads
 the approved Verification and, when required, Environment Contracts. It

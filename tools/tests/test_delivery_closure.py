@@ -706,8 +706,8 @@ class DeliveryClosureTests(unittest.TestCase):
             with mock.patch("delivery_provider.GitHubProvider", provider):
                 delivery_git.merge_pr(project, "DLV-001")
             self.assertEqual(self.outcome(project)["outcome"], "closed")
-        # A historical closed Delivery is not walked again by the audit.
-        with mock.patch.object(delivery_closure, "pr_record_chain", side_effect=AssertionError("walked")):
+        # A historical closed Delivery is proven again without recomputing the notes open-pr authored.
+        with mock.patch.object(delivery_git, "pr_record_replacements", side_effect=AssertionError("recomputed")):
             audited = delivery_closure.audit(project)
         self.assertEqual((audited["ok"], [item["outcome"] for item in audited["deliveries"]]), (True, ["closed"]))
 
@@ -796,6 +796,199 @@ class DeliveryClosureTests(unittest.TestCase):
                                      [("DELIVERY_EXTERNAL_MERGE", "warning")])
                     self.assertIn(expected, findings[0]["message"])
                     git(project, "push", "-q", "--force", "origin", f"{start}:refs/heads/main")
+
+    # Round 3: post-merge Fence state, per-Delivery claims, deleted refs, cancellation reverts and own-line stops.
+
+    def source_handoff(self, project: Path, _docs: Path) -> str:
+        """A source handoff that leaves the target tip as it is and moves the Fence target to it."""
+        delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+        tip = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        git(project, "push", "-q", "origin", f"{tip}:refs/heads/handoff-source")
+        authorized = delivery_git.authorize_target_update(project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                                                          "direct_target", "refs/heads/handoff-source", "direct",
+                                                          tip, tip, "upstream")
+        delivery_git.mark_target_call_started(project, "source_handoff", authorized["attempt"])
+        delivery_git.apply_target_update(project, "source_handoff")
+        return delivery_git.finish_source_handoff(project)["target"]
+
+    def test_a_handoff_after_the_provider_merge_is_post_merge_state_and_verify_merge_closes(self):
+        """A Fence target that holds the merged record is neither a stop nor drift."""
+        handoffs = {"governance": lambda project, docs: self.case.governance_target_handoff(project, docs)[0],
+                    "source": self.source_handoff}
+        for name, handoff in handoffs.items():
+            with self.subTest(handoff=name):
+                project, docs, _product, head, provider = self.recorded()
+                provider(project).merge_commit(URL, head)
+                git(project, "fetch", "-q", "origin", "main")
+                git(project, "reset", "-q", "--hard", "origin/main")
+                moved = handoff(project, docs)
+                self.assertEqual(delivery_closure.fence_target(project, "origin"), moved)
+                self.assertTrue(delivery_git.is_ancestor(project, head, moved))
+                self.assertEqual(self.outcome(project)["outcome"], "merged_cleanup_pending")
+                with mock.patch("delivery_provider.GitHubProvider", provider):
+                    self.assertEqual(delivery_git.merge_pr(project, "DLV-001", verify_only=True)["status"], "merged")
+                audited = delivery_closure.audit(project, "DLV-001")
+                self.assertEqual((audited["ok"], audited["deliveries"][0]["outcome"]), (True, "closed"))
+
+    def check_into(self, project: Path, head: str, base: str, head_ref: str) -> dict:
+        """The check as CI runs it: the repository default branch, main, is the --target."""
+        return delivery_closure.check_pull_request(project, head=head, base=base, url=URL.replace("17", "18"),
+                                                   head_ref=head_ref, target="main")
+
+    def test_claims_are_measured_from_each_deliverys_own_target_and_only_at_paths_the_pr_changes(self):
+        """A prior develop change at a claimed path never makes an unrelated PR into develop managed."""
+        project, _docs = self.pre_start()
+        main = git(project, "rev-parse", "origin/main")
+        develop = self.forge(project, main, self.auth("legacy = 1\n"), amend=False, message="Develop work")
+        self.push_branch(project, "develop", develop)
+        unrelated = self.forge(project, develop, lambda view: (view / "README.md").write_text(
+            "fixture\nunrelated\n", encoding="utf-8"), amend=False, message="Document")
+        self.push_branch(project, "feature/docs", unrelated)
+        claimed = self.forge(project, develop, self.auth("def authenticate():\n    return 'direct'\n"),
+                             amend=False, message="Change a claimed path")
+        self.push_branch(project, "feature/auth", claimed)
+        integration = delivery_git.remote_oid(project, "origin", "refs/heads/" + INTEGRATION)
+        package = delivery_closure.package_directory(project, integration, "DLV-001")
+        props, body = delivery_git.split_remote_note(project, integration, f"{package}/delivery.md",
+                                                     delivery_compile.split_note)
+        targeting_develop = self.commit_tree(project, self.tree_with(project, integration, {
+            f"{package}/delivery.md": self.blob(project, delivery_compile.frontmatter(
+                {**props, "target_branch": "develop"}, body))}), [integration], "Target develop\n")
+        for target_branch, tip in (("main", integration), ("develop", targeting_develop)):
+            git(project, "push", "-q", "--force", "origin", f"{tip}:refs/heads/{INTEGRATION}")
+            with self.subTest(delivery_target=target_branch):
+                checked = self.check_into(project, unrelated, "develop", "feature/docs")
+                self.assertEqual((checked["managed"], checked["ok"]), (False, True), checked)
+                checked = self.check_into(project, claimed, "develop", "feature/auth")
+                self.assertEqual((checked["managed"], checked["ok"]), (True, False), checked)
+                self.assertIn("under a path claim of AUTH-01 of DLV-001", " ".join(checked["reasons"]))
+        git(project, "push", "-q", "--force", "origin", f"{integration}:refs/heads/{INTEGRATION}")
+        promotion = self.check_into(project, develop, "main", "develop")
+        self.assertEqual((promotion["managed"], promotion["ok"]), (True, False), promotion)
+
+    def test_deleting_the_delivery_refs_after_a_provider_merge_never_skips_the_merged_proof(self):
+        project, _docs, _product, head, provider = self.recorded()
+        chain = self.chain(project, head)
+        slipped = self.commit_tree(
+            project, self.tree_with(project, chain["reviewed"], {"src/evil.py": self.blob(project, "EVIL\n")}),
+            [chain["reviewed"]], "Claim\n\nAgentrof-Record: claims-established-v1\nAgentrof-Protocol: 1\n"
+                                 "Agentrof-Delivery: DLV-001\n")
+        record = self.review_on(project, chain, slipped)
+        git(project, "push", "-q", "--force", "origin", f"{record}:refs/heads/{INTEGRATION}")
+        provider(project).merge_commit(URL, record)
+        for ref in git(project / "remote.git", "for-each-ref", "--format=%(refname)",
+                       "refs/heads/agentrof/deliveries/", "refs/heads/agentrof/items/").split():
+            git(project, "push", "-q", "origin", f":{ref}")
+        outcome = self.outcome(project)
+        self.assertEqual(outcome["outcome"], "unproven_record_merge")
+        self.assertIn(f"the claims_established_v1 record {slipped} of DLV-001 changes the product paths src/evil.py",
+                      " ".join(outcome["evidence"]))
+
+    def two_path_cancellation(self) -> tuple[Path, str, str, type]:
+        """A Delivery whose AUTH-01 merge changed two product paths, cancelled through the real flow.
+
+        Returns the project, the recorded cancellation PR head, the reverted Item merge and the provider.
+        """
+        project, docs = self.pre_start()
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        item = delivery_compile.find_delivery(docs, "DLV-001") / "items" / "auth-01" / "item.md"
+        props, body = delivery_compile.split_note(item)
+        props["path_claims"] = ["src"]
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(
+                type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.finish_plan_revision(project, "DLV-001")
+        worktree = Path(delivery_git.start_item(project, "DLV-001", "AUTH-01")["worktree"])
+        (worktree / "src").mkdir(exist_ok=True)
+        (worktree / "src" / "auth.py").write_text("def authenticate():\n    return 1\n", encoding="utf-8")
+        (worktree / "src" / "session.py").write_text("SESSION = 1\n", encoding="utf-8")
+        git(worktree, "add", "src")
+        git(worktree, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-qm", "Implement")
+        self.assertEqual(self.case.approve_item_evidence(str(worktree)), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        merge = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")["integration"]
+        provider = self.case.fake_provider_type({})
+        delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        delivery_git.prepare_pr_creation(project, "DLV-001")
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            head = delivery_git.open_pr(project, "DLV-001")["integration"]
+        return project, head, merge, provider
+
+    def test_a_cancellation_revert_must_restore_every_product_path_its_item_merge_changed(self):
+        project, head, merge, provider = self.two_path_cancellation()
+        first = git(project, "rev-parse", merge + "^1")
+        self.assertEqual(sorted(path for path in delivery_closure.tree_delta(project, first, merge)
+                                if delivery_closure.is_product_path(path)), ["src/auth.py", "src/session.py"])
+        honest = self.check(project, head)
+        self.assertEqual((honest["ok"], honest.get("errors")), (True, []), honest)
+        chain = self.chain(project, head)
+        line = delivery_closure.line_commits(project, chain["reviewed"], [merge])
+        revert = next(oid for oid, _lineage, message in line
+                      if delivery_git.trailer(message, "Record") == "cancellation-revert-v1")
+        kept_paths = {"no-op revert": ("src/auth.py", "src/session.py"), "partial revert": ("src/session.py",)}
+        for label, kept in kept_paths.items():
+            with self.subTest(revert=label):
+                changes = {path: self.entry(project, merge, path) for path in kept}
+                rebuilt = git(project, "rev-parse", revert + "^1")
+                for oid, lineage, message in line[[entry[0] for entry in line].index(revert):]:
+                    self.assertEqual(len(lineage), 1)
+                    rebuilt = self.commit_tree(project, self.tree_with(project, oid, changes), [rebuilt], message)
+                    if oid == revert:
+                        forged_revert = rebuilt
+                record = self.review_on(project, chain, rebuilt)
+                expected = (f"the cancellation revert {forged_revert} of DLV-001 leaves {', '.join(kept)} as the"
+                            " reverted Item merge wrote them")
+                git(project, "push", "-q", "--force", "origin", f"{record}:refs/heads/{INTEGRATION}")
+                self.assertIn(expected, " ".join(self.check(project, record)["errors"]))
+                with mock.patch("delivery_provider.GitHubProvider", provider):
+                    with self.assertRaisesRegex(RuntimeError, "merge-pr refuses a PR head the coordinator did not"):
+                        delivery_git.merge_pr(project, "DLV-001")
+                self.assertEqual(self.outcome(project)["outcome"], "awaiting_merge")
+        git(project, "push", "-q", "--force", "origin", f"{head}:refs/heads/{INTEGRATION}")
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            delivery_git.merge_pr(project, "DLV-001")
+        self.assertEqual(self.outcome(project)["outcome"], "closed")
+
+    def test_a_target_merge_whose_first_parent_is_the_records_own_line_is_no_proof_stop(self):
+        project, _docs, _product, head, provider = self.recorded()
+        chain = self.chain(project, head)
+        slipped = self.commit_tree(
+            project, self.tree_with(project, chain["reviewed"], {"src/evil.py": self.blob(project, "EVIL\n")}),
+            [chain["reviewed"]], "Claim\n\nAgentrof-Record: claims-established-v1\nAgentrof-Protocol: 1\n"
+                                 "Agentrof-Delivery: DLV-001\n")
+        record = self.review_on(project, chain, slipped)
+        git(project, "push", "-q", "--force", "origin", f"{record}:refs/heads/{INTEGRATION}")
+        merge = self.commit_tree(project, record + "^{tree}", [slipped, record], "Merge pull request #17\n")
+        git(project, "push", "-q", "--force", "origin", f"{merge}:refs/heads/main")
+        expected = f"the target {slipped} the proof of DLV-001 would stop at lies on its recorded PR head's own line"
+        outcome = self.outcome(project)
+        self.assertEqual(outcome["outcome"], "unproven_record_merge")
+        self.assertIn(expected, " ".join(outcome["evidence"]))
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            with self.assertRaisesRegex(RuntimeError, re.escape(expected)):
+                delivery_git.merge_pr(project, "DLV-001", verify_only=True)
+
+    def test_a_fast_forwarded_record_never_stops_at_a_fence_target_on_its_own_line(self):
+        project, _docs, _product, head, provider = self.recorded()
+        chain = self.chain(project, head)
+        plain = self.commit_tree(
+            project, self.tree_with(project, chain["reviewed"], {"src/evil.py": self.blob(project, "EVIL\n")}),
+            [chain["reviewed"]], "Plain product change\n")
+        fence = git(project, "ls-remote", "origin", "refs/heads/agentrof/fence").split()[0]
+        forged_fence = self.commit_tree(project, fence + "^{tree}", [fence],
+                                        self.retrailer(delivery_git.commit_message(project, fence), Target=plain))
+        git(project, "push", "-q", "--force", "origin", f"{forged_fence}:refs/heads/agentrof/fence")
+        record = self.review_on(project, chain, plain)
+        git(project, "push", "-q", "--force", "origin", f"{record}:refs/heads/{INTEGRATION}")
+        git(project, "push", "-q", "--force", "origin", f"{record}:refs/heads/main")
+        checked = self.check(project, record)
+        self.assertFalse(checked["ok"])
+        self.assertIn(f"the Integration commit {plain} is not a control record of DLV-001", " ".join(checked["errors"]))
+        self.assertNotEqual(self.outcome(project)["outcome"], "closed")
+        self.assertIn(f"the Integration commit {plain} is not a control record of DLV-001", " ".join(
+            delivery_closure.recorded_head_findings(project, "origin", "DLV-001", record, URL)))
 
 
 @integration
@@ -991,6 +1184,21 @@ class ClosureTextTests(unittest.TestCase):
                      "vault_gate.py install", "CODEOWNERS", "DELIVERY_CLOSURE_GATE_CHANGED"):
             self.assertIn(text, bootstrap)
         self.assertIn("re-run the failed check", self.text(PACKAGE / "skill-content/deliver/SKILL.md"))
+
+    def test_the_trust_boundary_and_the_required_agentrof_ref_protection_are_stated(self):
+        """Closure proves record shape and binding, never authorship, so the agentrof refs need protection."""
+        for path in (PACKAGE / "skill-content/setup/references/ci-bootstrap.md",
+                     ROOT / "docs/requirement-delivery-protocol.md"):
+            with self.subTest(path=path.name):
+                text = self.text(path)
+                for phrase in ("does not prove who wrote a Review", "can write consistent notes that pass",
+                               "`refs/heads/agentrof/**`", "part of the required setup",
+                               "only required to be non-product paths"):
+                    self.assertIn(phrase, text)
+                self.assertNotIn("may also protect", text)
+        bootstrap = self.text(PACKAGE / "skill-content/setup/references/ci-bootstrap.md")
+        self.assertIn("A property reads `not_configured` only when both the branch rules and the classic branch"
+                      " protection are readable", bootstrap)
 
 
 if __name__ == "__main__":

@@ -943,8 +943,13 @@ a managed one passes only as its Delivery's recorded PR head with every
 closure precondition met, including a PR record, intent and Review that carry
 exactly what their verbs write and an Integration line whose every product
 change an Item, target merge or cancellation owns, where each Item integration
-merges a Story of the reviewed package with its own evidence. A merged record
-is proven against the target as it was before the merge. `merge-pr` refuses the same
+merges a Story of the reviewed package and its own tree holds evidence notes
+bound to the product tip its seal names, and each cancellation revert restores
+every product path its Item merge changed. A merged record is proven against
+the target as it was before the merge, also once its Delivery refs are gone; a
+Fence target that already holds the merged record, as a later handoff leaves
+it, is post-merge state, and a stop on the record's own line after a commit of
+the Delivery is refused. `merge-pr` refuses the same
 unbound head. `protection-status` reports, read-only, whether a ruleset on the
 target branch requires that check from the GitHub Actions app or requires the
 closure workflow, requires a pull request and has no bypass actors; a check
@@ -953,6 +958,15 @@ can meet it. Only such an owner-installed ruleset with no bypass actors can
 stop a direct provider merge, an admin bypass or an owner push; no command of
 the package can, and neither the report nor a missing ruleset or workflow
 refuses execution approval.
+
+Closure proves that the records have the coordinator's shape and bind each
+other, the reviewed package and the product; it does not prove who wrote a
+Review, a code review or a verification. Anyone who can push the `agentrof/`
+refs can write consistent notes that pass, so a ruleset that protects
+`refs/heads/agentrof/**` from deletion and force pushes, with only the accounts
+that run the coordinator as bypass actors, is part of the required setup. A PR
+record's paths other than the notes `open-pr` authors are only required to be
+non-product paths under `workspace/docs/`.
 
 ## Target changes, recovery and cancellation
 

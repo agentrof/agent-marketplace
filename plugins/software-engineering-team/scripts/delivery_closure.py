@@ -245,7 +245,8 @@ def holds_item_bytes(root: Path, item: dict[str, str | None], commit: str) -> li
 
 def classify(root: Path, remote: str, head: str, base_tip: str, paths: list[str],
              head_ref: str = "", state: dict | None = None, target_tip: str = "", *,
-             pr_paths: list[str] | None = None, targets: tuple[str, ...] = ()) -> dict:
+             pr_paths: list[str] | None = None, targets: tuple[str, ...] = (),
+             delivery_paths: dict[str, list[str]] | None = None) -> dict:
     """Whether a pull request is managed by an open Delivery, and why.
 
     A pull request is managed when its head ref is an Agentrof ref, when its
@@ -257,7 +258,9 @@ def classify(root: Path, remote: str, head: str, base_tip: str, paths: list[str]
     hold are no Delivery's own, so a promotion between other branches is not
     managed for them; *paths* are what the head changes against its merge
     base with the Delivery target and *pr_paths*, by default the same, what
-    it changes against its merge base with its own base. The exact bytes
+    it changes against its merge base with its own base. *delivery_paths*
+    replaces *paths* for each Delivery it names, as measured from that
+    Delivery's own target. The exact bytes
     count only at paths the pull request itself changes, so a branch that
     merely predates an Item's deletion carries nothing of it. Labels, branch
     names outside the Agentrof namespace and PR text never decide it, so
@@ -289,7 +292,8 @@ def classify(root: Path, remote: str, head: str, base_tip: str, paths: list[str]
                 # An integrated Item's claim holds until the Delivery's recorded merge closes it.
                 if props.get("status") == "cancelled":
                     continue
-                claimed = sorted(path for path in paths if claims_cover(path, props.get("path_claims")))
+                claimed = sorted(path for path in (delivery_paths or {}).get(delivery_id, paths)
+                                 if claims_cover(path, props.get("path_claims")))
                 if claimed:
                     reasons.append(f"it changes {', '.join(claimed)} under a path claim of {story} of {delivery_id}")
                     deliveries.add(delivery_id)
@@ -449,12 +453,19 @@ def integration_line_findings(root: Path, delivery_id: str, reviewed: str, stops
                 errors.append(f"DELIVERY_COORDINATION_CORRUPT: the cancellation revert {oid} of {delivery_id} names"
                               " no Item integration on the Integration line" + resume)
                 continue
+            first = parents(root, reverted_merge)[0]
             changed = [path for path in deltas[oid] if is_product_path(path)]
-            restored, replaced = blobs(root, oid, changed), blobs(root, parents(root, reverted_merge)[0], changed)
+            # The coordinator's revert refuses a path a later commit rewrote, so it restores every one.
+            merged = [path for path in tree_delta(root, first, reverted_merge) if is_product_path(path)]
+            restored, replaced = blobs(root, oid, changed + merged), blobs(root, first, changed + merged)
             wrong = sorted(path for path in changed if restored.get(path) != replaced.get(path))
+            kept = sorted(path for path in set(merged) - set(changed) if restored.get(path) != replaced.get(path))
             if wrong:
                 errors.append(f"DELIVERY_COORDINATION_CORRUPT: the cancellation revert {oid} of {delivery_id} writes"
                               f" {', '.join(wrong)} other than the reverted Item merge had them" + resume)
+            if kept:
+                errors.append(f"DELIVERY_COORDINATION_CORRUPT: the cancellation revert {oid} of {delivery_id} leaves"
+                              f" {', '.join(kept)} as the reverted Item merge wrote them" + resume)
             continue
         elif len(lineage) == 1:
             changed = sorted(path for path in deltas[oid] if is_product_path(path))
@@ -503,7 +514,8 @@ def merge_evidence_findings(root: Path, delivery_id: str, merge: str, seal: str,
             for problem in evidence_findings(root, merge, delivery_id, story, item_path, item_props, found)]
 
 
-def record_binding_findings(root: Path, delivery_id: str, chain: dict, stops: list[str]) -> list[str]:
+def record_binding_findings(root: Path, delivery_id: str, chain: dict, stops: list[str],
+                            recompute_notes: bool = True) -> list[str]:
     """Every way the PR record, its intent and its published Review carry more than their verbs write.
 
     The notes open-pr authors on the intent, the Review's PR URL and the
@@ -513,7 +525,10 @@ def record_binding_findings(root: Path, delivery_id: str, chain: dict, stops: li
     non-product path under the workspace docs. The intent's tree is its
     Review's; the Review changes no product path; it reviewed the Integration
     its note names; and the reviewed Integration line holds no product bytes
-    no step owns.
+    no step owns. Without *recompute_notes*, as for a merged record whose
+    Integration ref verify-merge dropped, the notes open-pr authors are not
+    recomputed, since a later package release may write them differently,
+    and every path the record changes must only stay outside the product.
     """
     resume = recovery(f"close this PR; /deliver {delivery_id} records the PR again on the reviewed Integration")
     record, intent, review, reviewed = (chain[key] for key in ("record", "intent", "review", "reviewed_integration"))
@@ -524,7 +539,8 @@ def record_binding_findings(root: Path, delivery_id: str, chain: dict, stops: li
     try:
         url, _number = canonical_github_pr(str(tree_note(root, record, f"{package}/delivery-review.md")[0]
                                                .get("pull_request_url", "")))
-        replacements, _projections = delivery_git.pr_record_replacements(root, intent, package, url)
+        replacements = (delivery_git.pr_record_replacements(root, intent, package, url)[0]
+                        if recompute_notes else {})
         reviewed_note = tree_note(root, review, f"{package}/delivery-review.md")[0]
     except (RuntimeError, ValueError) as exc:
         return [f"DELIVERY_COORDINATION_CORRUPT: the PR record of {delivery_id} cannot be recomputed: {exc}" + resume]
@@ -551,7 +567,7 @@ def record_binding_findings(root: Path, delivery_id: str, chain: dict, stops: li
 
 
 def pr_record_chain(root: Path, head: str, delivery_id: str, url: str,
-                    stops: list[str]) -> tuple[dict, list[str]]:
+                    stops: list[str], recompute_notes: bool = True) -> tuple[dict, list[str]]:
     """Walk the recorded PR head back to its intent and published Review, each exactly.
 
     The head must be the PR record that binds this PR, whose only parent is
@@ -592,7 +608,7 @@ def pr_record_chain(root: Path, head: str, delivery_id: str, url: str,
                                                               f" /deliver {delivery_id}, then open-pr")]
     chain.update(record=head, intent=intent, review=review, reviewed_integration=reviewed,
                  approval_hash=trailer(review_message, "Approval-Hash"))
-    return chain, errors + record_binding_findings(root, delivery_id, chain, stops)
+    return chain, errors + record_binding_findings(root, delivery_id, chain, stops, recompute_notes)
 
 
 def blob_oid(root: Path, text: str) -> str:
@@ -626,28 +642,64 @@ def target_before_merge(root: Path, record: str, target: str) -> str:
     return "" if not before or is_ancestor(root, record, before) else before
 
 
+def own_line_stop(root: Path, delivery_id: str, head: str, stop: str) -> bool:
+    """Whether *stop* lies on *head*'s own first-parent line at or above a commit of this Delivery.
+
+    The line enters the target's history below the Delivery's reservation, so
+    an honest stop on it is a target commit that holds no commit of the
+    Delivery; one that does would hide the line commits below it.
+    """
+    line = run_git(root, "rev-list", "--first-parent", head, "--not", stop, "--").split()
+    if (parents(root, line[-1])[:1] if line else [head]) != [stop]:
+        return False
+    listed = run_git(root, "rev-list", "--first-parent", "--fixed-strings", f"--grep=Agentrof-Delivery: {delivery_id}",
+                     stop, "--")
+    return any(delivery_trailer_lines(commit_message(root, oid), delivery_id) for oid in listed.split())
+
+
 def proof_stops(root: Path, delivery_id: str, head: str, target: str, fence: str) -> tuple[list[str], list[str]]:
-    """Where the Integration line proof of *head* stops, and the drift that keeps the Fence target out of it.
+    """Where the Integration line proof of *head* stops, and the findings that keep a stop out of it.
 
     The proof stops at the target, or, once the target holds *head*, at the
     target as it was before the merge, so a merged line is still walked. The
     Fence target is a stop only when that target holds it; a Fence target
-    the target never had could hide any commit below it. A head the target
-    holds on its own first-parent line, as a fast-forward leaves it, has no
-    target before the merge, so its Fence target must be the head's own.
+    the target never had could hide any commit below it, so it is drift. A
+    Fence target that holds the merged *head*, as a handoff after the merge
+    leaves it, is post-merge state and neither a stop nor drift. A head the
+    target holds on its own first-parent line, as a fast-forward leaves it,
+    has no target before the merge, so it is refused and gets no Fence stop.
+    A stop on *head*'s own first-parent line at or above a commit of the
+    Delivery is refused.
     """
     merged = bool(target) and is_ancestor(root, head, target)
     base = target_before_merge(root, head, target) if merged else target
-    stops = {base} if base else set()
-    anchor = base or (head if merged else "")
-    drift = []
-    if fence and anchor and is_ancestor(root, fence, anchor):
-        stops.add(fence)
-    elif fence:
-        drift.append(f"DELIVERY_TARGET_DRIFT: the Fence target {fence} of {delivery_id} is not in the target history"
-                     " its recorded PR head is proven against"
-                     + recovery(f"run refresh-target through /deliver {delivery_id} against the Delivery's target"))
-    return sorted(stops), drift
+    stops: set[str] = set()
+    findings = []
+    resume = recovery(f"the project owner decides in /deliver {delivery_id}; the target never held this commit"
+                      " before the Delivery's merge")
+    if merged and not base:
+        findings.append(f"DELIVERY_COORDINATION_CORRUPT: the target holds the recorded PR head of {delivery_id} on its"
+                        " own first-parent line, as a fast-forward leaves it, so no target before its merge bounds"
+                        " its proof" + recovery(f"the project owner decides in /deliver {delivery_id}; merge-pr"
+                                                " merges the recorded head only with a two-parent merge"))
+    for name, stop in (("target", base), ("Fence target", fence)):
+        if not stop:
+            continue
+        if name == "Fence target":
+            if merged and (not base or is_ancestor(root, head, stop)):
+                continue
+            if not base or not is_ancestor(root, stop, base):
+                findings.append(f"DELIVERY_TARGET_DRIFT: the Fence target {stop} of {delivery_id} is not in the target"
+                                " history its recorded PR head is proven against"
+                                + recovery(f"run refresh-target through /deliver {delivery_id} against the Delivery's"
+                                           " target"))
+                continue
+        if own_line_stop(root, delivery_id, head, stop):
+            findings.append(f"DELIVERY_COORDINATION_CORRUPT: the {name} {stop} the proof of {delivery_id} would stop at"
+                            " lies on its recorded PR head's own line after a commit of the Delivery" + resume)
+            continue
+        stops.add(stop)
+    return sorted(stops), findings
 
 
 def recorded_head_findings(root: Path, remote: str, delivery_id: str, head: str, url: str) -> list[str]:
@@ -796,9 +848,10 @@ def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base:
                 " Integration head can merge Delivery work"
                 + recovery(f"close this PR and continue through /deliver {delivery_id}")]
     fence = state.get("fence_target", "")
-    # A Fence target the base lacks is reported below as drift, so only its stops are taken here.
-    stops, _drift = proof_stops(root, delivery_id, head, base_tip, fence)
+    # A Fence target the base lacks is reported below as drift, so only the other findings are taken here.
+    stops, located = proof_stops(root, delivery_id, head, base_tip, fence)
     chain, errors = pr_record_chain(root, head, delivery_id, url, stops)
+    errors = [finding for finding in located if not finding.startswith("DELIVERY_TARGET_DRIFT")] + errors
     if not chain:
         return errors
     directory = package_directory(root, head, delivery_id)
@@ -879,16 +932,23 @@ def check_pull_request(project_root: Path, *, head: str, base: str, url: str, he
     base_tip = remote_branch_tip(root, remote, base)
     target_tip = remote_branch_tip(root, remote, target) if target and target != base else base_tip
     state = coordination_state(root, remote)
-    targets = tuple(sorted(set(delivery_target_tips(root, remote, state).values())))
+    tips = delivery_target_tips(root, remote, state)
+    targets = tuple(sorted(set(tips.values())))
     # A base that shares no history with the head, as an orphan pages branch, compares trees directly.
     pr_paths = changed_paths(root, base_tip, head)
     if pr_paths is None:
         pr_paths = tree_delta(root, base_tip, head)
-    claimed_paths = changed_paths(root, target_tip, head)
-    if claimed_paths is None:
-        claimed_paths = pr_paths
+
+    def claimable(tip: str) -> list[str]:
+        # A PR claims only paths it changes itself; a promotion still changes them against its base.
+        measured = changed_paths(root, tip, head)
+        return sorted(set(pr_paths if measured is None else measured) & set(pr_paths))
+
+    claimed_paths = claimable(target_tip)
+    delivery_paths = {delivery_id: claimable(tips[delivery_id]) if delivery_id in tips else claimed_paths
+                      for delivery_id in state["integrations"]}
     classified = classify(root, remote, head, base_tip, claimed_paths, head_ref, state, target_tip,
-                          pr_paths=pr_paths, targets=targets)
+                          pr_paths=pr_paths, targets=targets, delivery_paths=delivery_paths)
     result = {"ok": True, "managed": classified["managed"], "reasons": classified["reasons"],
               "observations": [{"kind": "provider", "target": "pull_request_head", "value": head},
                                {"kind": "ref", "target": "closure/classification",
@@ -1068,8 +1128,8 @@ def audit_delivery(root: Path, delivery_id: str, target: str, state: dict, remot
     receipts = writer_receipts(root, delivery_id, state)
     record = delivery_compile.merged_pr_record(root, delivery_id, target)
     if record is not None:
-        # A Delivery whose Integration ref is gone, as verify-merge drops it after its proof, is not proven again.
-        unproven = merged_record_findings(root, delivery_id, record, integration, target, state) if integration else []
+        # Deleting the Delivery's refs never skips the proof; only the notes' bytes are not recomputed then.
+        unproven = merged_record_findings(root, delivery_id, record, integration, target, state)
         if unproven:
             return {"delivery": delivery_id, "outcome": "unproven_record_merge", "record": record,
                     "evidence": unproven, "leftovers": [f"Slot {ref.removeprefix('refs/heads/')}" for ref in slots],
@@ -1118,7 +1178,9 @@ def merged_record_findings(root: Path, delivery_id: str, record: str, integratio
 
     It proves closure only as the Delivery's current recorded head, the
     Integration tip or, once verify-merge dropped that ref, the record itself,
-    and only as the record, intent and Review the coordinator wrote.
+    and only as the record, intent and Review the coordinator wrote. Without
+    the Integration ref the notes open-pr authors are not recomputed, as a
+    later package release may write them differently; every other check runs.
     """
     if integration and integration != record:
         return [f"the target merged the PR record {record}, but the Integration of {delivery_id} has since moved to"
@@ -1131,7 +1193,7 @@ def merged_record_findings(root: Path, delivery_id: str, record: str, integratio
     except (RuntimeError, ValueError) as exc:
         return [f"the merged PR record {record} of {delivery_id} names no PR: {exc}"]
     stops, drift = proof_stops(root, delivery_id, record, target, state.get("fence_target", ""))
-    _chain, errors = pr_record_chain(root, record, delivery_id, canonical, stops)
+    _chain, errors = pr_record_chain(root, record, delivery_id, canonical, stops, recompute_notes=bool(integration))
     return drift + errors
 
 

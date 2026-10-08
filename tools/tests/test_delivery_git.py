@@ -1559,12 +1559,13 @@ class DeliveryGitTests(unittest.TestCase):
                 with self.subTest(code=code, message=message):
                     self.assertEqual(self.merge_pr_findings(project, provider_type), [(code, message)])
                     self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
-            # A fast-forward puts the reviewed head itself on the target: no merge commit binds it.
+            # A fast-forward puts the reviewed head itself on the target: no merge commit binds it, and no
+            # target before the merge bounds the proof of its line.
             delivery_git.atomic_push(project, "origin", [("refs/heads/main", target, integration)])
-            self.assertEqual(self.merge_pr_findings(project, provider({**merged, "merge": integration})), [
-                ("DELIVERY_MERGE_POLICY_INVALID",
-                 "provider merge is not an exact two-parent merge of the reviewed Integration"),
-            ])
+            [(code, message)] = self.merge_pr_findings(project, provider({**merged, "merge": integration}))
+            self.assertEqual(code, "DELIVERY_COORDINATION_CORRUPT")
+            self.assertIn("the target holds the recorded PR head of DLV-001 on its own first-parent line, as a"
+                          " fast-forward leaves it", message)
         finally:
             remove_temporary(temporary)
 

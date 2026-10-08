@@ -220,7 +220,7 @@ class TaskInputTests(unittest.TestCase):
                              claims + "path_claims:\n  - src/auth.py\n")
             self.commit(root)
             remote = Path(raw).resolve() / "remote.git"
-            subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, capture_output=True)
+            init_repository(remote, bare=True)
             subprocess.run(["git", "-C", str(root), "remote", "add", "origin", str(remote)], check=True)
             ref = delivery_git.canonical_refs("DLV-001")["integration"]
             subprocess.run(["git", "-C", str(root), "push", "-q", "origin", "HEAD:" + ref], check=True,
@@ -266,8 +266,11 @@ class TaskInputTests(unittest.TestCase):
                          claims + "path_claims:\n  - src/auth.py\n")
         self.commit(root)
         remote = Path(raw).resolve() / "remote.git"
-        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, capture_output=True)
+        init_repository(remote, bare=True)
         subprocess.run(["git", "-C", str(root), "remote", "add", remote_name, str(remote)], check=True)
+        # Record commits are written with commit-tree, which needs an identity CI hosts lack.
+        for key, value in (("user.name", "Fixture"), ("user.email", "fixture@example.invalid")):
+            subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
         ref = delivery_git.canonical_refs("DLV-001")["integration"]
         published = delivery_git.commit_tree(root, "HEAD", [], "Reserve Delivery DLV-001", {
             "Record": "delivery-reservation-v1", "Protocol": "1", "Delivery": "DLV-001"})

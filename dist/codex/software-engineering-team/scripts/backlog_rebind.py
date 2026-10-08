@@ -599,8 +599,9 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
     # documents: every changed source document; targets: what a backlog note
     # depends on when it cites it, which narrows a landscape to its changed rows
     # while the Solution only gains notes and rows. edits: an existing Solution
-    # document changed, so the landscape counts whole and passes changes on;
-    # other sources reach the backlog through their own targets and closure.
+    # document, or an existing note the landscape links, changed, so the
+    # landscape counts whole and passes changes on; other sources reach the
+    # backlog through their own targets and closure.
     changes, documents, targets, ids, upstream_texts, edits = [], set(), set(), set(), {}, False
     for key in sorted(after_rows):
         old_ref, old_hash = before_rows.get(key, (None, None))
@@ -668,6 +669,12 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
                 upstream_texts[old_path] = (old_text, None)
             if new_path is not None:
                 upstream_texts[new_path] = (None, new_text)
+    if not edits and ("solution-design", "solution-design/landscape") in after_rows:
+        # The landscape passes a change on when it links an edited note of any
+        # stage: a note it constrains depends on what that link carries.
+        bound = dict(after_reader.listing("solution-design")).get(LANDSCAPE, "")
+        edits = any(old_text is not None and path != LANDSCAPE and cites(bound, [path[:-3]], [])
+                    for path, (old_text, _new_text) in upstream_texts.items())
     if edits and LANDSCAPE in documents:
         targets.add(LANDSCAPE)
     links = sorted(path[:-3] for path in targets)

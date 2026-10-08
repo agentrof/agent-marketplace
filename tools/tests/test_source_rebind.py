@@ -869,6 +869,60 @@ class SourceRebindTests(unittest.TestCase):
         self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: implements REQ-001",
                       epics["EP-002"]["impacted_by"])
 
+    def ba_process_revision(self, *, linked: bool) -> dict:
+        """A Business Analysis revision that only edits one existing process note,
+        which the bound landscape links or does not."""
+        first, second = "sha256:" + "d" * 64, "sha256:" + "e" * 64
+        space = self.docs / "business-analysis/core/space.md"
+        space.parent.mkdir(parents=True, exist_ok=True)
+        space.write_text(f"---\ntype: space\ntitle: Core\nstatus: approved\npackage_hash: {first}\n---\n\n# Core\n",
+                         encoding="utf-8")
+        process = self.docs / "business-analysis/core/processes/session-lookup.md"
+        process.parent.mkdir(parents=True, exist_ok=True)
+        process.write_text("---\ntype: process\ntitle: Session lookup\nstatus: approved\n---\n\n# Session lookup\n\n"
+                           "| id | rule |\n|---|---|\n| BR-CORE-001 | Lookups take under 50 ms. |\n", encoding="utf-8")
+        if linked:
+            landscape = self.docs / "solution-design/landscape.md"
+            landscape.write_text(landscape.read_text(encoding="utf-8")
+                                 + "\nAllocates [[business-analysis/core/processes/session-lookup|Session lookup]].\n",
+                                 encoding="utf-8")
+        self.commit("Business Analysis approved")
+        if linked:
+            self.pin_solution()
+        self.receipts[bindings.BA] = first
+        root = self.docs / "backlog/backlog.md"
+        props, body = compiler.parse_front_matter(root)
+        props["input_bindings"] = [f"business-analysis|{bindings.BA}|{first}" if value.startswith("business-analysis|")
+                                   else f"solution-design|{SOLUTION}|{self.receipts[SOLUTION]}"
+                                   if value.startswith("solution-design|") else value
+                                   for value in props["input_bindings"]]
+        root.write_text(compiler.front_matter(props, body), encoding="utf-8")
+        self.cite_in_predecessor(self.docs / "backlog/epics" / SECOND / "stories/bl-001/story.md",
+                                 "Billing is unchanged.")
+        self.switch_on()
+        process.write_text(process.read_text(encoding="utf-8").replace("50 ms", "5 ms"), encoding="utf-8")
+        space.write_text(space.read_text(encoding="utf-8").replace(first, second), encoding="utf-8")
+        self.commit("Business Analysis revision tightens the lookup budget")
+        self.receipts[bindings.BA] = second
+        self.revise()
+        receipt = self.plan()
+        change, = receipt["binding_changes"]
+        self.assertEqual(change["changed_documents"], ["business-analysis/core/processes/session-lookup.md"])
+        return receipt
+
+    def test_an_edited_process_the_landscape_links_reviews_every_story_it_constrains(self):
+        receipt = self.ba_process_revision(linked=True)
+        for row in receipt["epics"]:
+            self.assertEqual(row["disposition"], "reviewed", row)
+        self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: closure",
+                      next(row for row in receipt["epics"] if row["id"] == "EP-002")["impacted_by"])
+        self.assertFalse(rebind.mechanical(receipt))
+
+    def test_an_edited_process_the_landscape_does_not_link_keeps_the_landscape_barrier(self):
+        receipt = self.ba_process_revision(linked=False)
+        for row in receipt["epics"]:
+            self.assertEqual((row["disposition"], row["impacted_by"]), ("reused", []), row)
+
     def test_an_edited_decision_the_landscape_indexes_reviews_every_story_it_constrains(self):
         self.rebind_revision()
         receipt = self.plan()

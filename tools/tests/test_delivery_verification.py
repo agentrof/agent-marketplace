@@ -457,11 +457,12 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
             with self.subTest(partitioned=partitioned):
                 if partitioned:
                     docs = delivery.docs_root(self.root)
-                    for arguments in (("init",), ("set", "--switch", "test_engines", "--value", "partitioned"),
-                                      ("approve",)):
+                    for command, options in (("init", ()),
+                                             ("set", ("--switch", "test_engines", "--value", "partitioned")),
+                                             ("approve", ())):
                         output = io.StringIO()
                         with contextlib.redirect_stdout(output):
-                            code = delivery.process_policy.main([arguments[0], "--docs", str(docs), *arguments[1:]])
+                            code = delivery.process_policy.main([command, "--docs", str(docs), *options])
                         self.assertEqual(code, 0, output.getvalue())
                     path = docs / "operation/verification-contract.md"
                     contract, body = delivery.split_note(path)

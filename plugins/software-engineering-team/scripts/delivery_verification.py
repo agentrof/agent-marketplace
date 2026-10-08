@@ -1045,7 +1045,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         if session["session_id"] != session_id:
             raise RuntimeError("verification session changed while the command ran")
         require_current(root, session, allow_evidence=True)
-        output_name = "scratch/" + kind + "-" + key.removeprefix("sha256:") + ".log"
+        output_prefix = f"scratch/{kind}-{key.removeprefix('sha256:')}-{uuid.uuid4().hex}"
+        output_name = output_prefix + ".log"
         output = raw_output_path(root, output_name)
         atomic_file.replace_bytes(output, completed.stdout)
         record = {"identity": identity, "exit_code": completed.returncode, "candidate_intact": intact,
@@ -1062,7 +1063,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         if partition_records is not None:
             record["partitions"] = []
             for index, entry in enumerate(partition_records):
-                name = f"scratch/{kind}-{key.removeprefix('sha256:')}-partition-{index}.log"
+                name = f"{output_prefix}-partition-{index}.log"
                 atomic_file.replace_bytes(raw_output_path(root, name), entry["output"])
                 record["partitions"].append({**{field: value for field, value in entry.items()
                                                 if field not in {"output", "test_groups", "missing_test_groups"}},

@@ -14,7 +14,7 @@ import tempfile
 import sqlite3
 import unittest
 from tools.tests.levels import integration
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -87,6 +87,80 @@ class VaultQueryTest(unittest.TestCase):
         before = self.vault_bytes()
         self.assertIn("outside the runtime scratch", self.run_query("gaps", code=2)["stderr"])
         self.assertEqual(self.vault_bytes(), before)
+
+    def test_windows_namespace_spellings_keep_cache_containment_during_creation(self) -> None:
+        resolved_paths = {}
+
+        class WindowsPath(PureWindowsPath):
+            def absolute(self):
+                return self
+
+            def resolve(self, strict=False):
+                return resolved_paths.get(self, self)
+
+        roots = ((WindowsPath("C:/fixture"), WindowsPath("//?/C:/fixture")),
+                 (WindowsPath("//server/share/fixture"), WindowsPath("//?/UNC/server/share/fixture")))
+        with mock.patch.object(vault_query, "Path", WindowsPath):
+            for ordinary, extended in roots:
+                for project in (ordinary, extended):
+                    docs = project / "workspace/docs"
+                    folder = project / vault_query.RUNTIME
+                    for target in (ordinary, extended):
+                        for runtime in (ordinary, extended):
+                            with self.subTest(project=project, target=target, runtime=runtime):
+                                resolved_paths.clear()
+                                resolved_paths.update({folder: target / vault_query.RUNTIME,
+                                                       project / ".agentrof": runtime / ".agentrof"})
+                                self.assertEqual(vault_query.default_cache(docs), folder / "index.db")
+                    foreign = (WindowsPath("D:/foreign") / vault_query.RUNTIME,
+                               WindowsPath("//foreign/share/fixture") / vault_query.RUNTIME,
+                               project.with_name("fixture-other") / vault_query.RUNTIME,
+                               docs / "backlog", project / ".agentrof-other/vault-index",
+                               WindowsPath("//?/Volume{synthetic}/fixture") / vault_query.RUNTIME,
+                               WindowsPath("//?/GLOBALROOT/Device/synthetic/fixture") / vault_query.RUNTIME)
+                    for target in foreign:
+                        with self.subTest(project=project, foreign=target):
+                            resolved_paths.clear()
+                            resolved_paths[folder] = target
+                            with self.assertRaisesRegex(ValueError, "outside the runtime scratch"):
+                                vault_query.default_cache(docs)
+                    with self.subTest(project=project, runtime="foreign"):
+                        resolved_paths.clear()
+                        resolved_paths[project / ".agentrof"] = WindowsPath("D:/foreign/.agentrof")
+                        with self.assertRaisesRegex(ValueError, "outside the runtime scratch"):
+                            vault_query.default_cache(docs)
+            with self.subTest(drive="non-ASCII"):
+                project = WindowsPath("K:/fixture")
+                resolved_paths.clear()
+                resolved_paths[project / vault_query.RUNTIME] = WindowsPath("//?/K:/fixture") / vault_query.RUNTIME
+                with self.assertRaisesRegex(ValueError, "outside the runtime scratch"):
+                    vault_query.default_cache(project / "workspace/docs")
+
+        self.assertEqual(vault_query.default_cache(self.docs), self.project / vault_query.RUNTIME / "index.db")
+        if os.name == "nt":
+            import ntpath
+
+            folder = self.project / vault_query.RUNTIME
+            original = ntpath._getfinalpathname
+            lookup_errors = []
+
+            def create_ancestor(path):
+                if ntpath.normcase(path) == ntpath.normcase(str(folder)):
+                    try:
+                        return original(path)
+                    except OSError as error:
+                        lookup_errors.append(error.winerror)
+                        if len(lookup_errors) == 1:
+                            self.assertEqual(error.winerror, 3)
+                            folder.parent.mkdir(parents=True)
+                        raise
+                return original(path)
+
+            with mock.patch.object(ntpath, "_getfinalpathname", side_effect=create_ancestor):
+                self.assertEqual(vault_query.default_cache(self.docs), folder / "index.db")
+            self.assertEqual(lookup_errors[0], 3)
+            self.assertIn(2, lookup_errors[1:])
+            self.assertFalse(folder.exists())
 
     def test_legacy_cleanup_removes_only_owned_projection_files(self) -> None:
         legacy = self.cache.with_name("index.json")

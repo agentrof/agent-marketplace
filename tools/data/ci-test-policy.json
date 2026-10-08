@@ -555,7 +555,8 @@
         "tools.tests.test_vault_index.VaultIndexTests.test_shared_and_exclusive_leases_use_the_one_file_lock",
         "tools.tests.test_vault_index.VaultIndexTests.test_snapshot_copy_retries_a_concurrent_last_reader_checkpoint",
         "tools.tests.test_vault_index.VaultIndexTests.test_snapshot_reads_hold_the_readers_lease_so_recovery_waits_and_release_it_on_any_failure",
-        "tools.tests.test_vault_query.VaultQueryTest.test_parallel_queries_rebuild_without_a_race"
+        "tools.tests.test_vault_query.VaultQueryTest.test_parallel_queries_rebuild_without_a_race",
+        "tools.tests.test_vault_query.VaultQueryTest.test_windows_namespace_spellings_keep_cache_containment_during_creation"
       ],
       "depends_on": [
         "platform"

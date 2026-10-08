@@ -638,6 +638,12 @@ def stamp_item(docs: Path, item_ref: str) -> int:
         if row["connects"] and not set(row["connects"]).issubset(claimed_components):
             print("architecture_compile: connection delta exceeds claimed components")
             return 1
+        props = record_props(root / row["path"])
+        affected = {scope.split("#module/", 1)[0]
+                    for scope in props.get("affected_scopes", [])}
+        if claimed_components and not affected.issubset(claimed_components):
+            print("architecture_compile: Item delta exceeds claimed affected scopes")
+            return 1
     # A record this Item already sealed stays part of its delta. Requiring every one
     # of them to be draft would let an Item stamp exactly one delta for its life, so a
     # reopened Item, or one whose contracts were revised mid-flight, could never record

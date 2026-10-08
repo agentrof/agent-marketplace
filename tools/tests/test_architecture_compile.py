@@ -101,6 +101,52 @@ class ArchitectureCompilerTests(unittest.TestCase):
             root_record = docs / "system-architecture/architecture.md"
             self.assertIn("revision: 1", root_record.read_text(encoding="utf-8"))
 
+    def test_stamp_enforces_shared_affected_scopes_before_sealing(self):
+        sys.path.insert(0, str(COMPILER.parent))
+        import architecture_compile
+        import delivery_git
+
+        def protected_bytes(docs):
+            return {path.relative_to(docs).as_posix(): path.read_bytes()
+                    for path in docs.rglob("*")
+                    if path.is_file() and "_generated" not in path.parts}
+
+        for case in ("new_outside_claim", "allocated", "carried_outside_claim"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as raw:
+                docs = Path(raw) / "workspace/docs"
+                self.prepare(docs)
+                item = docs / "delivery/deliveries/dlv-001-test/items/auth-01/item.md"
+                claims = (["orders-api"] if case == "new_outside_claim"
+                          else ["orders-api", "other-api"])
+                architecture_compile.rewrite(item, {
+                    "architecture_impact": "required",
+                    "architecture_components": claims,
+                    "architecture_record_kinds": ["system-architecture", "decision"],
+                })
+                self.run_cli("init-root", "--docs", docs, "--item-ref", "AUTH-01")
+                self.run_cli("stub", "--docs", docs, "--item-ref", "AUTH-01",
+                             "--kind", "decision", "--record-id", "ADR-001",
+                             "--slug", "shared-boundary", "--affected-scope", "orders-api",
+                             "--affected-scope", "other-api")
+                self.run_cli("render", "--docs", docs)
+                if case == "carried_outside_claim":
+                    self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+                    architecture_compile.rewrite(item, {
+                        "architecture_components": ["orders-api"],
+                    })
+                before = protected_bytes(docs)
+                expected = 0 if case == "allocated" else 1
+                result = self.run_cli("stamp-item", "--docs", docs,
+                                      "--item-ref", "AUTH-01", expected=expected)
+                if expected:
+                    self.assertIn("exceeds claimed affected scopes", result.stdout)
+                    self.assertEqual(protected_bytes(docs), before)
+                else:
+                    _, props, _ = architecture_compile.item_context(docs, "AUTH-01")
+                    delivery_git.require_architecture_delta(
+                        docs / "system-architecture", props, "AUTH-01",
+                        props["architecture_delta_hash"])
+
     def test_revision_cycles_keep_one_blank_line_under_the_frontmatter(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"

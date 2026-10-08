@@ -178,11 +178,24 @@ def claims_cover(path: str, claims) -> bool:
     return False
 
 
-def changed_paths(root: Path, base: str, head: str) -> list[str]:
-    """The paths *head* changes against its merge base with *base*."""
-    merge_base = run_git(root, "merge-base", base, head)
+def merge_base(root: Path, first: str, second: str) -> str | None:
+    """The merge base of two commits, or None when their histories share no commit, as an orphan branch's."""
+    result = subprocess.run(["git", "merge-base", first, second], cwd=root, encoding="utf-8",
+                            capture_output=True, check=False)
+    if result.returncode == 1 and not result.stdout.strip() and not result.stderr.strip():
+        return None
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or f"git merge-base {first} {second} failed")
+    return result.stdout.strip()
+
+
+def changed_paths(root: Path, base: str, head: str) -> list[str] | None:
+    """The paths *head* changes against its merge base with *base*, or None without a merge base."""
+    start = merge_base(root, base, head)
+    if start is None:
+        return None
     return delivery_git.git_paths(root, "--no-replace-objects", "diff", "--no-renames", "--name-only", "-z",
-                                  merge_base, head)
+                                  start, head)
 
 
 def rev_set(root: Path, *args: str) -> set[str]:
@@ -231,23 +244,29 @@ def holds_item_bytes(root: Path, item: dict[str, str | None], commit: str) -> li
 
 
 def classify(root: Path, remote: str, head: str, base_tip: str, paths: list[str],
-             head_ref: str = "", state: dict | None = None, target_tip: str = "") -> dict:
+             head_ref: str = "", state: dict | None = None, target_tip: str = "", *,
+             pr_paths: list[str] | None = None, targets: tuple[str, ...] = ()) -> dict:
     """Whether a pull request is managed by an open Delivery, and why.
 
     A pull request is managed when its head ref is an Agentrof ref, when its
     head holds commits the base lacks that only an open Delivery's Integration
     or Item refs reach, when a path it changes lies under a path claim of a
-    not cancelled Item of an open Delivery, or when it carries the exact
+    not cancelled Item of an open Delivery, or when it writes the exact
     product bytes of such an Item that its base lacks. Commits the base, the
-    Fence target or the Delivery target already hold are no Delivery's own,
-    so a promotion between other branches is not managed for them; *paths*
-    are what the head changes against its merge base with the Delivery
-    target. Labels, branch names outside the Agentrof namespace and PR text
-    never decide it, so renaming a branch or removing a label cannot take a
-    PR out of the check. An open Delivery is one whose Integration ref exists.
+    Fence target or a Delivery target (*target_tip* and *targets*) already
+    hold are no Delivery's own, so a promotion between other branches is not
+    managed for them; *paths* are what the head changes against its merge
+    base with the Delivery target and *pr_paths*, by default the same, what
+    it changes against its merge base with its own base. The exact bytes
+    count only at paths the pull request itself changes, so a branch that
+    merely predates an Item's deletion carries nothing of it. Labels, branch
+    names outside the Agentrof namespace and PR text never decide it, so
+    renaming a branch or removing a label cannot take a PR out of the check.
+    An open Delivery is one whose Integration ref exists.
     """
     state = state or coordination_state(root, remote)
-    stops = sorted({oid for oid in (base_tip, state.get("fence_target", ""), target_tip) if oid})
+    pr_paths = set(paths if pr_paths is None else pr_paths)
+    stops = sorted({oid for oid in (base_tip, state.get("fence_target", ""), target_tip, *targets) if oid})
     reasons: list[str] = []
     deliveries: set[str] = set()
     ref = head_ref.removeprefix("refs/heads/")
@@ -277,6 +296,7 @@ def classify(root: Path, remote: str, head: str, base_tip: str, paths: list[str]
         for product in sorted(product_tips(root, delivery_id, integration, items)):
             start = product_start(root, product, delivery_id)
             item = item_product_blobs(root, product, start) if start else {}
+            item = {path: blob for path, blob in item.items() if path in pr_paths}
             if (item and len(holds_item_bytes(root, item, head)) == len(item)
                     and len(holds_item_bytes(root, item, base_tip)) != len(item)):
                 reasons.append(f"it carries the exact product bytes of the Item product tip {product} of {delivery_id}")
@@ -315,6 +335,56 @@ def merge_delta_findings(root: Path, merge: str, first: str, second: str) -> lis
                   if merged.get(path) != theirs.get(path) or ours.get(path) != common.get(path))
 
 
+def line_commits(root: Path, head: str, stops: list[str]) -> list[tuple[str, list[str], str]]:
+    """The first-parent line from *head* back to *stops*, oldest first, with each commit's parents and message.
+
+    One Git call reads the whole line.
+    """
+    listed = subprocess.run(["git", "--no-replace-objects", "-c", "log.showSignature=false", "log", "--no-color",
+                             "--first-parent", "-z", "--format=%H %P%n%B", head,
+                             *(("--not", *stops) if stops else ()), "--"],
+                            cwd=root, capture_output=True, check=False)
+    if listed.returncode:
+        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: cannot read the Integration line of " + head + ": "
+                           + listed.stderr.decode("utf-8", "replace").strip())
+    commits = []
+    for entry in listed.stdout.decode("utf-8", "replace").split("\0"):
+        if entry:
+            header, _newline, message = entry.partition("\n")
+            oid, *lineage = header.split()
+            commits.append((oid, lineage, message.strip()))
+    return list(reversed(commits))
+
+
+def single_parent_deltas(root: Path, commits: list[str]) -> dict[str, list[str]]:
+    """The paths each single-parent commit of *commits* changes against its parent, read in one Git call."""
+    if not commits:
+        return {}
+    listed = subprocess.run(["git", "--no-replace-objects", "diff-tree", "--stdin", "--always", "-r", "-z",
+                             "--no-renames", "--name-only"], cwd=root, input="".join(f"{oid}\n" for oid in commits)
+                            .encode("ascii"), capture_output=True, check=False)
+    if listed.returncode:
+        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: cannot read the Integration line changes: "
+                           + listed.stderr.decode("utf-8", "replace").strip())
+    deltas: dict[str, list[str]] = {}
+    expected, current = iter(commits), None
+    upcoming = next(expected, None)
+    for token in listed.stdout.decode("utf-8", "replace").split("\0"):
+        if token and token == upcoming:
+            current, upcoming = token, next(expected, None)
+            deltas[current] = []
+        elif token and current is not None:
+            deltas[current].append(token)
+    # A path that spells a commit id makes the batch ambiguous, so each commit is then read alone.
+    if set(deltas) != set(commits) or any(path in deltas for paths in deltas.values() for path in paths):
+        return {oid: tree_delta(root, oid + "^", oid) for oid in commits}
+    return deltas
+
+
+def strip_code(message: str) -> str:
+    return re.sub(r"^[A-Z][A-Z0-9_]+: ", "", message)
+
+
 def integration_line_findings(root: Path, delivery_id: str, reviewed: str, stops: list[str]) -> list[str]:
     """Every commit on the reviewed Integration's first-parent line that brings product bytes no step owns.
 
@@ -323,15 +393,23 @@ def integration_line_findings(root: Path, delivery_id: str, reviewed: str, stops
     record of this Delivery. A record changes no product path, except an Item
     integration, whose product delta must be its sealed Item's own, a target
     merge, whose delta must come from a target commit, and a cancellation
-    revert, which must restore what the Item merge it names replaced.
+    revert, which must restore what the Item merge it names replaced. Every
+    Item integration, not only a Story's latest, must merge a Story of the
+    reviewed package, which a cancelled Story stays only with the revert that
+    names that merge, and must carry in its own tree the approved code review
+    and passed verification of the product tip its seal names.
     """
     resume = recovery(f"rebuild the Integration through /deliver {delivery_id}; only coordinator records may"
                       " change it")
-    line = run_git(root, "rev-list", "--first-parent", reviewed, *(("--not", *stops) if stops else ()), "--").split()
+    commits = line_commits(root, reviewed, stops)
+    deltas = single_parent_deltas(root, [oid for oid, lineage, _message in commits if len(lineage) == 1])
+    package = package_directory(root, reviewed, delivery_id)
+    reviewed_items = tree_items(root, reviewed, package) if package else {}
+    reverted = {trailer(message, "Previous-Tip") for _oid, _lineage, message in commits
+                if trailer(message, "Record") == "cancellation-revert-v1"}
     errors: list[str] = []
     item_merges: dict[str, str] = {}
-    for oid in reversed(line):
-        message = commit_message(root, oid)
+    for oid, lineage, message in commits:
         try:
             kind = record_kind(message)
         except RuntimeError as exc:
@@ -341,41 +419,45 @@ def integration_line_findings(root: Path, delivery_id: str, reviewed: str, stops
             errors.append(f"DELIVERY_COORDINATION_CORRUPT: the Integration commit {oid} is not a control record of"
                           f" {delivery_id}" + resume)
             continue
-        lineage = parents(root, oid)
         if len(lineage) == 2 and kind == "item_integration_v1":
             seal = lineage[1]
             seal_message = commit_message(root, seal)
             product = trailer(seal_message, "Product-Tip") or ""
+            story = trailer(message, "Story") or ""
             sealed = (record_kind(seal_message) == "item_integration_v1"
                       and trailer(seal_message, "Delivery") == delivery_id
-                      and trailer(seal_message, "Story") == trailer(message, "Story")
+                      and trailer(seal_message, "Story") == story
                       and trailer(message, "Reviewed-Tip") == seal
                       and delivery_git.OID_RE.fullmatch(product) is not None and has_object(root, product))
             if not sealed or any(is_product_path(path) for path in tree_delta(root, product, seal)):
                 errors.append(f"DELIVERY_COORDINATION_CORRUPT: the Item integration {oid} of {delivery_id} does not"
                               " merge a sealed Item whose product bytes are its product tip's" + resume)
                 continue
-            item_merges[oid] = trailer(message, "Story") or ""
+            item_merges[oid] = story
+            errors.extend(f"DELIVERY_COORDINATION_CORRUPT: the Item integration {oid} of {delivery_id} {problem}"
+                          + resume for problem in merge_evidence_findings(
+                              root, delivery_id, oid, seal, seal_message, product, story,
+                              reviewed_items, oid in reverted))
         elif len(lineage) == 2 and kind in TARGET_MERGE_RECORDS:
             if not any(is_ancestor(root, lineage[1], stop) for stop in stops):
                 errors.append(f"DELIVERY_COORDINATION_CORRUPT: the target merge {oid} of {delivery_id} does not"
                               " merge a commit of the target" + resume)
                 continue
         elif len(lineage) == 1 and kind == "cancellation_revert_v1":
-            reverted = trailer(message, "Previous-Tip") or ""
-            if item_merges.get(reverted) != trailer(message, "Story"):
+            reverted_merge = trailer(message, "Previous-Tip") or ""
+            if item_merges.get(reverted_merge) != trailer(message, "Story"):
                 errors.append(f"DELIVERY_COORDINATION_CORRUPT: the cancellation revert {oid} of {delivery_id} names"
                               " no Item integration on the Integration line" + resume)
                 continue
-            changed = [path for path in tree_delta(root, lineage[0], oid) if is_product_path(path)]
-            restored, replaced = blobs(root, oid, changed), blobs(root, parents(root, reverted)[0], changed)
+            changed = [path for path in deltas[oid] if is_product_path(path)]
+            restored, replaced = blobs(root, oid, changed), blobs(root, parents(root, reverted_merge)[0], changed)
             wrong = sorted(path for path in changed if restored.get(path) != replaced.get(path))
             if wrong:
                 errors.append(f"DELIVERY_COORDINATION_CORRUPT: the cancellation revert {oid} of {delivery_id} writes"
                               f" {', '.join(wrong)} other than the reverted Item merge had them" + resume)
             continue
         elif len(lineage) == 1:
-            changed = sorted(path for path in tree_delta(root, lineage[0], oid) if is_product_path(path))
+            changed = sorted(path for path in deltas[oid] if is_product_path(path))
             if changed:
                 errors.append(f"DELIVERY_COORDINATION_CORRUPT: the {kind} record {oid} of {delivery_id} changes the"
                               f" product paths {', '.join(changed)}, which no such record writes" + resume)
@@ -391,13 +473,47 @@ def integration_line_findings(root: Path, delivery_id: str, reviewed: str, stops
     return errors
 
 
+def merge_evidence_findings(root: Path, delivery_id: str, merge: str, seal: str, seal_message: str, product: str,
+                            story: str, reviewed_items: dict, reverted: bool) -> list[str]:
+    """Why one Item integration on the line does not merge a reviewed Story's own evidenced product.
+
+    The Story must be one the reviewed package holds, and not cancelled there
+    unless a cancellation revert names this merge. The merge's own tree must
+    hold the integrated Item and the evidence that integrate-item checked
+    for the product tip its seal names, so each integration of a Story, as
+    a reopen yields several, carries its own.
+    """
+    listed = reviewed_items.get(story)
+    if listed is None:
+        return [f"merges {story}, which the reviewed package of {delivery_id} does not hold"]
+    item_path, reviewed_props = listed
+    if reviewed_props.get("status") == "cancelled" and not reverted:
+        return [f"merges {story}, which the reviewed package cancelled, and no cancellation revert names it"]
+    found = {"merge": merge, "seal": seal, "evidence": trailer(seal_message, "Reviewed-Tip") or "",
+             "product": product}
+    if parents(root, seal) != [found["evidence"]]:
+        return [f"merges a seal of {story} that is not the exact child of its Item evidence"]
+    try:
+        item_props = tree_note(root, merge, item_path)[0]
+    except (RuntimeError, ValueError) as exc:
+        return [f"holds no readable Item record of {story}: {exc}"]
+    if item_props.get("status") != "integrated":
+        return [f"holds {story} as {item_props.get('status') or 'without a status'}, not integrated"]
+    return [f"lacks its own evidence for {story}: {strip_code(problem)}"
+            for problem in evidence_findings(root, merge, delivery_id, story, item_path, item_props, found)]
+
+
 def record_binding_findings(root: Path, delivery_id: str, chain: dict, stops: list[str]) -> list[str]:
     """Every way the PR record, its intent and its published Review carry more than their verbs write.
 
-    The record's tree must be the one open-pr computes from its intent; the
-    intent's tree is its Review's; the Review changes no product path; it
-    reviewed the Integration its note names;
-    and the reviewed Integration line holds no product bytes no step owns.
+    The notes open-pr authors on the intent, the Review's PR URL and the
+    Delivery's awaiting_merge status, must hold exactly the bytes it writes;
+    every other path the record changes is a projection it re-renders, which
+    a later package release may render differently, so it may only be a
+    non-product path under the workspace docs. The intent's tree is its
+    Review's; the Review changes no product path; it reviewed the Integration
+    its note names; and the reviewed Integration line holds no product bytes
+    no step owns.
     """
     resume = recovery(f"close this PR; /deliver {delivery_id} records the PR again on the reviewed Integration")
     record, intent, review, reviewed = (chain[key] for key in ("record", "intent", "review", "reviewed_integration"))
@@ -408,14 +524,17 @@ def record_binding_findings(root: Path, delivery_id: str, chain: dict, stops: li
     try:
         url, _number = canonical_github_pr(str(tree_note(root, record, f"{package}/delivery-review.md")[0]
                                                .get("pull_request_url", "")))
-        expected = delivery_git.pr_record_tree(root, intent, package, url)
+        replacements, _projections = delivery_git.pr_record_replacements(root, intent, package, url)
         reviewed_note = tree_note(root, review, f"{package}/delivery-review.md")[0]
     except (RuntimeError, ValueError) as exc:
         return [f"DELIVERY_COORDINATION_CORRUPT: the PR record of {delivery_id} cannot be recomputed: {exc}" + resume]
-    if expected != tree_of(root, record):
-        changed = sorted(tree_delta(root, expected, record))
+    held = blobs(root, record, replacements)
+    wrong = sorted(path for path, text in replacements.items() if held.get(path) != f"100644 {blob_oid(root, text)}")
+    wrong += sorted(path for path in tree_delta(root, intent, record)
+                    if path not in replacements and is_product_path(path))
+    if wrong:
         errors.append(f"DELIVERY_COORDINATION_CORRUPT: the PR record {record} of {delivery_id} is not the tree open-pr"
-                      f" writes on its intent; it differs at {', '.join(changed)}" + resume)
+                      f" writes on its intent; it differs at {', '.join(wrong)}" + resume)
     if tree_of(root, intent) != tree_of(root, review):
         errors.append(f"DELIVERY_COORDINATION_CORRUPT: the PR intent {intent} of {delivery_id} changes the tree of"
                       f" its published Review, which an intent never does" + resume)
@@ -476,12 +595,72 @@ def pr_record_chain(root: Path, head: str, delivery_id: str, url: str,
     return chain, errors + record_binding_findings(root, delivery_id, chain, stops)
 
 
+def blob_oid(root: Path, text: str) -> str:
+    """The id of the blob that holds *text* as exact UTF-8 bytes, written nowhere."""
+    hashed = delivery_git.git_with_input(root, ["hash-object", "--stdin"], text)
+    if hashed.returncode:
+        raise RuntimeError(hashed.stderr.strip() or "cannot hash a recomputed note")
+    return hashed.stdout.strip()
+
+
+def target_before_merge(root: Path, record: str, target: str) -> str:
+    """The target-side parent of the first commit on *target*'s first-parent line that holds *record*.
+
+    That is the target as it was before it merged the record. A record on the
+    line itself, as a fast-forward leaves it, has no such parent, so "" lets
+    the proof walk the whole line.
+    """
+    line = run_git(root, "rev-list", "--first-parent", target, "--not", record, "--").split()
+    low, high = 0, len(line)
+    # The line runs newest first, and every commit that holds the record precedes every one that does not.
+    while low < high:
+        middle = (low + high) // 2
+        if is_ancestor(root, record, line[middle]):
+            low = middle + 1
+        else:
+            high = middle
+    if low == 0:
+        return ""
+    lineage = parents(root, line[low - 1])
+    before = lineage[0] if lineage else ""
+    return "" if not before or is_ancestor(root, record, before) else before
+
+
+def proof_stops(root: Path, delivery_id: str, head: str, target: str, fence: str) -> tuple[list[str], list[str]]:
+    """Where the Integration line proof of *head* stops, and the drift that keeps the Fence target out of it.
+
+    The proof stops at the target, or, once the target holds *head*, at the
+    target as it was before the merge, so a merged line is still walked. The
+    Fence target is a stop only when that target holds it; a Fence target
+    the target never had could hide any commit below it. A head the target
+    holds on its own first-parent line, as a fast-forward leaves it, has no
+    target before the merge, so its Fence target must be the head's own.
+    """
+    merged = bool(target) and is_ancestor(root, head, target)
+    base = target_before_merge(root, head, target) if merged else target
+    stops = {base} if base else set()
+    anchor = base or (head if merged else "")
+    drift = []
+    if fence and anchor and is_ancestor(root, fence, anchor):
+        stops.add(fence)
+    elif fence:
+        drift.append(f"DELIVERY_TARGET_DRIFT: the Fence target {fence} of {delivery_id} is not in the target history"
+                     " its recorded PR head is proven against"
+                     + recovery(f"run refresh-target through /deliver {delivery_id} against the Delivery's target"))
+    return sorted(stops), drift
+
+
 def recorded_head_findings(root: Path, remote: str, delivery_id: str, head: str, url: str) -> list[str]:
-    """Everything that keeps *head* from being the PR record the coordinator wrote for *url*."""
+    """Everything that keeps *head* from being the PR record the coordinator wrote for *url*.
+
+    merge-pr runs it before its provider call and, with verify-merge, after
+    the provider merged, when the proof walks the line against the target
+    as it was before that merge.
+    """
     _branch, target = delivery_git.fetch_target(root, remote)
-    stops = sorted({oid for oid in (target, fence_target(root, remote)) if oid})
+    stops, drift = proof_stops(root, delivery_id, head, target, fence_target(root, remote))
     _chain, errors = pr_record_chain(root, head, delivery_id, url, stops)
-    return errors
+    return drift + errors
 
 
 def item_integration(root: Path, head: str, delivery_id: str, story: str) -> dict | None:
@@ -518,13 +697,19 @@ def item_findings(root: Path, head: str, delivery_id: str, story: str, item_path
     found = item_integration(root, head, delivery_id, story)
     if found is None:
         return [f"DELIVERY_ITEM_NOT_READY: the PR head holds no exact integration of {story} of {delivery_id}" + resume]
+    return [error + resume for error in evidence_findings(root, head, delivery_id, story, item_path, item_props, found)]
+
+
+def evidence_findings(root: Path, head: str, delivery_id: str, story: str, item_path: str, item_props: dict,
+                      found: dict) -> list[str]:
+    """Why the Item evidence in *head*'s tree does not bind the integration *found* as integrate-item checks it."""
     directory = item_path.rsplit("/", 1)[0]
     errors = []
     try:
         review, review_body = tree_note(root, head, f"{directory}/code-review.md")
         verification, verification_body = tree_note(root, head, f"{directory}/verification.md")
     except (RuntimeError, ValueError) as exc:
-        return [f"DELIVERY_ITEM_NOT_READY: the evidence of {story} of {delivery_id} cannot be read: {exc}" + resume]
+        return [f"DELIVERY_ITEM_NOT_READY: the evidence of {story} of {delivery_id} cannot be read: {exc}"]
     product = found["product"]
     evidence_parents = run_git(root, "show", "-s", "--format=%P", found["evidence"]).split()
     if evidence_parents != [product]:
@@ -549,7 +734,7 @@ def item_findings(root: Path, head: str, delivery_id: str, story: str, item_path
     for oid in (found["seal"], product):
         if not is_ancestor(root, oid, head):
             errors.append(f"DELIVERY_ITEM_NOT_READY: the PR head does not contain the Item tip {oid} of {story}")
-    return [error + resume for error in errors]
+    return errors
 
 
 @contextlib.contextmanager
@@ -611,7 +796,9 @@ def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base:
                 " Integration head can merge Delivery work"
                 + recovery(f"close this PR and continue through /deliver {delivery_id}")]
     fence = state.get("fence_target", "")
-    chain, errors = pr_record_chain(root, head, delivery_id, url, sorted({oid for oid in (base_tip, fence) if oid}))
+    # A Fence target the base lacks is reported below as drift, so only its stops are taken here.
+    stops, _drift = proof_stops(root, delivery_id, head, base_tip, fence)
+    chain, errors = pr_record_chain(root, head, delivery_id, url, stops)
     if not chain:
         return errors
     directory = package_directory(root, head, delivery_id)
@@ -662,23 +849,51 @@ def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base:
     return errors
 
 
+def delivery_target_tips(root: Path, remote: str, state: dict) -> dict[str, str]:
+    """The remote tip of the target branch each open Delivery's package names, where that branch exists."""
+    tips = {}
+    for delivery_id, integration in sorted(state["integrations"].items()):
+        directory = package_directory(root, integration, delivery_id)
+        try:
+            branch = tree_note(root, integration, f"{directory}/delivery.md")[0].get("target_branch") if directory else None
+            if isinstance(branch, str) and branch and listed_refs(root, remote, f"refs/heads/{branch}"):
+                tips[delivery_id] = remote_branch_tip(root, remote, branch)
+        except (RuntimeError, ValueError):
+            continue
+    return tips
+
+
 def check_pull_request(project_root: Path, *, head: str, base: str, url: str, head_ref: str = "",
-                       remote: str = "origin") -> dict:
-    """The closure check one pull request runs: unmanaged PRs pass, managed PRs must be closure-ready."""
+                       remote: str = "origin", target: str = "") -> dict:
+    """The closure check one pull request runs: unmanaged PRs pass, managed PRs must be closure-ready.
+
+    A CI checkout is a detached commit with no remote HEAD and no current
+    branch, so nothing here guesses the target from them: the workflow names
+    the repository's default branch as *target*, the base stands in without
+    one, and each open Delivery's package names its own target branch.
+    """
     root = delivery_git.main_worktree(project_root.resolve())
     canonical, _number = canonical_github_pr(url)
     if not delivery_git.OID_RE.fullmatch(head) or not has_object(root, head):
         raise RuntimeError("DELIVERY_INPUT_INVALID: the PR head must be an exact commit this checkout holds")
     base_tip = remote_branch_tip(root, remote, base)
-    _target_branch, target_tip = delivery_git.fetch_target(root, remote)
+    target_tip = remote_branch_tip(root, remote, target) if target and target != base else base_tip
     state = coordination_state(root, remote)
+    targets = tuple(sorted(set(delivery_target_tips(root, remote, state).values())))
+    # A base that shares no history with the head, as an orphan pages branch, compares trees directly.
+    pr_paths = changed_paths(root, base_tip, head)
+    if pr_paths is None:
+        pr_paths = tree_delta(root, base_tip, head)
     claimed_paths = changed_paths(root, target_tip, head)
-    classified = classify(root, remote, head, base_tip, claimed_paths, head_ref, state, target_tip)
+    if claimed_paths is None:
+        claimed_paths = pr_paths
+    classified = classify(root, remote, head, base_tip, claimed_paths, head_ref, state, target_tip,
+                          pr_paths=pr_paths, targets=targets)
     result = {"ok": True, "managed": classified["managed"], "reasons": classified["reasons"],
               "observations": [{"kind": "provider", "target": "pull_request_head", "value": head},
                                {"kind": "ref", "target": "closure/classification",
                                 "value": "managed" if classified["managed"] else "not_managed"}],
-              "findings": gate_change_findings(changed_paths(root, base_tip, head), base)}
+              "findings": gate_change_findings(pr_paths, base)}
     if not classified["managed"]:
         return result
     candidates = sorted({*classified["deliveries"],
@@ -853,7 +1068,8 @@ def audit_delivery(root: Path, delivery_id: str, target: str, state: dict, remot
     receipts = writer_receipts(root, delivery_id, state)
     record = delivery_compile.merged_pr_record(root, delivery_id, target)
     if record is not None:
-        unproven = merged_record_findings(root, delivery_id, record, integration, target, state)
+        # A Delivery whose Integration ref is gone, as verify-merge drops it after its proof, is not proven again.
+        unproven = merged_record_findings(root, delivery_id, record, integration, target, state) if integration else []
         if unproven:
             return {"delivery": delivery_id, "outcome": "unproven_record_merge", "record": record,
                     "evidence": unproven, "leftovers": [f"Slot {ref.removeprefix('refs/heads/')}" for ref in slots],
@@ -914,9 +1130,9 @@ def merged_record_findings(root: Path, delivery_id: str, record: str, integratio
         canonical, _number = canonical_github_pr(url)
     except (RuntimeError, ValueError) as exc:
         return [f"the merged PR record {record} of {delivery_id} names no PR: {exc}"]
-    stops = sorted({oid for oid in (target, state.get("fence_target", "")) if oid})
+    stops, drift = proof_stops(root, delivery_id, record, target, state.get("fence_target", ""))
     _chain, errors = pr_record_chain(root, record, delivery_id, canonical, stops)
-    return errors
+    return drift + errors
 
 
 def audit(project_root: Path, delivery_id: str | None = None, remote: str = "origin") -> dict:
@@ -1006,11 +1222,12 @@ def protection_status(project_root: Path, branch: str | None = None, remote: str
                       provider=None) -> dict:
     """Report, read-only, whether the provider requires the closure check on the target branch.
 
-    Each property is configured, not_configured or unknown. Readable branch
-    rules decide a property they do not show as not_configured, as does a
-    branch GitHub reports as not protected; a property the provider hides
-    from a token without admin rights, such as ruleset bypass actors, is
-    unknown. A check required by name only is not_configured. The report
+    Each property is configured, not_configured or unknown. A property
+    neither source shows is not_configured only when the branch rules and the
+    classic protection are both readable, as for a branch GitHub reports as
+    not protected; a property the provider hides from a token without admin
+    rights, such as classic protection or ruleset bypass actors, is unknown,
+    as is a workflows rule whose repository id cannot be read. A check required by name only is not_configured. The report
     never refuses anything and never claims a guarantee no CLI check has.
     """
     root = project_root.resolve()
@@ -1026,11 +1243,20 @@ def protection_status(project_root: Path, branch: str | None = None, remote: str
     repository_id = (provider.repository_id() if provider is not None
                      and any(rule.get("type") == "workflows" for rule in rules or []) else None)
     required = closure_requirements(rules, classic, repository_id)
-    # Anyone who can read the repository can read its branch rules; classic protection may stay hidden.
-    readable = rules is not None
+    # A rule is absent only when both sources answered; GitHub hides classic protection from a token
+    # without admin rights, and only its "Branch not protected" answer reads as readable and empty.
+    readable = rules is not None and classic is not None
     reasons = {}
     closure_context = _state(required["pinned_ruleset"] or required["classic"], readable)
-    if closure_context != "configured" and required["by_name"]:
+    unresolved = repository_id is None and any(
+        rule.get("type") == "workflows" and any(isinstance(workflow, dict) and workflow.get("path") == CLOSURE_WORKFLOW
+                                                for workflow in (rule.get("parameters") or {}).get("workflows") or [])
+        for rule in rules or [])
+    if closure_context != "configured" and unresolved:
+        closure_context = "unknown"
+        reasons["closure_context_required"] = (
+            f"a workflows rule requires {CLOSURE_WORKFLOW}, but the repository id it must name cannot be read")
+    elif closure_context != "configured" and required["by_name"]:
         closure_context = "not_configured"
         reasons["closure_context_required"] = (
             "the delivery-closure check is required by name only, which a commit status or a same-name job can"

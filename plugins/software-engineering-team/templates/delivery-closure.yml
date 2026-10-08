@@ -32,7 +32,8 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: >-
           python3 .github/agentrof/vault-gate.pyz delivery-closure --project-root .
           --pr-url "$PR_URL" --head "$PR_HEAD_SHA" --head-ref "$PR_HEAD_REF"
-          --base "$PR_BASE_REF"
+          --base "$PR_BASE_REF" --target "$DEFAULT_BRANCH"

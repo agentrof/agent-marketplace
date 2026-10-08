@@ -1446,9 +1446,10 @@ def pr_record_replacements(root: Path, intent: str, package: str, url: str) -> t
 
     Only the Review's pull_request_url and source_hash, and a reviewed
     Delivery's awaiting_merge status, change; projections are derived only
-    with that status. The closure check recomputes the record's tree from
-    these and Git objects alone, so the PR head carries nothing the
-    coordinator did not write.
+    with that status. The closure check compares the record's notes with
+    these, read from Git objects alone, so the PR head carries nothing the
+    coordinator did not write; the projections it re-renders are only
+    required to stay outside the product.
     """
     from delivery_compile import split_note, frontmatter, content_hash, pr_recorded_props
     canonical_url, _number = canonical_github_pr(url)
@@ -1477,12 +1478,6 @@ def pr_record_candidate(root: Path, intent: str, package: str, delivery_id: str,
          "URL-Hash": pr_url_hash(canonical_url)},
         delivery_projections=projections,
     )
-
-
-def pr_record_tree(root: Path, intent: str, package: str, url: str) -> str:
-    """The tree of the PR record that records *url* on *intent*, written without a commit or a Git identity."""
-    replacements, projections = pr_record_replacements(root, intent, package, url)
-    return replacements_tree(root, intent, replacements, delivery_projections=projections)
 
 
 def record_pr_remote(project_root: Path, delivery_id: str, url: str,
@@ -5379,7 +5374,7 @@ def main(argv=None) -> int:
     reconcile = sub.add_parser("reconcile"); reconcile.add_argument("--project-root", default="."); reconcile.add_argument("--delivery", required=True); reconcile.add_argument("--remote", default="origin"); reconcile.set_defaults(func="reconcile")
     board = sub.add_parser("board"); board.add_argument("--project-root", default="."); board.add_argument("--delivery", required=True); board.add_argument("--remote", default="origin"); board.set_defaults(func="board")
     closure_audit = sub.add_parser("closure-audit"); closure_audit.add_argument("--project-root", default="."); closure_scope = closure_audit.add_mutually_exclusive_group(required=True); closure_scope.add_argument("--delivery"); closure_scope.add_argument("--all", action="store_true"); closure_audit.add_argument("--remote", default="origin"); closure_audit.set_defaults(func="closure-audit")
-    closure_check = sub.add_parser("closure-check"); closure_check.add_argument("--project-root", default="."); closure_check.add_argument("--pr-url", required=True); closure_check.add_argument("--head", required=True); closure_check.add_argument("--head-ref", default=""); closure_check.add_argument("--base", required=True); closure_check.add_argument("--remote", default="origin"); closure_check.set_defaults(func="closure-check")
+    closure_check = sub.add_parser("closure-check"); closure_check.add_argument("--project-root", default="."); closure_check.add_argument("--pr-url", required=True); closure_check.add_argument("--head", required=True); closure_check.add_argument("--head-ref", default=""); closure_check.add_argument("--base", required=True); closure_check.add_argument("--target", default=""); closure_check.add_argument("--remote", default="origin"); closure_check.set_defaults(func="closure-check")
     protection = sub.add_parser("protection-status"); protection.add_argument("--project-root", default="."); protection.add_argument("--branch"); protection.add_argument("--remote", default="origin"); protection.set_defaults(func="protection-status")
     locate = sub.add_parser("locate"); locate.add_argument("--delivery", required=True); locate.add_argument("--story"); locate.add_argument("--slot"); locate.set_defaults(func="names")
     args = parser.parse_args(argv)
@@ -5474,7 +5469,8 @@ def main(argv=None) -> int:
             elif args.func == "closure-check":
                 from delivery_closure import check_pull_request
                 result = check_pull_request(Path(args.project_root), head=args.head, base=args.base,
-                                            url=args.pr_url, head_ref=args.head_ref, remote=args.remote)
+                                            url=args.pr_url, head_ref=args.head_ref, remote=args.remote,
+                                            target=args.target)
             elif args.func == "protection-status":
                 from delivery_closure import protection_status
                 result = protection_status(Path(args.project_root), args.branch, args.remote)

@@ -512,39 +512,328 @@ class DeliveryClosureTests(unittest.TestCase):
                          [("DELIVERY_CLOSURE_GATE_CHANGED", "warning", [".github/workflows/delivery-closure.yml"])])
 
 
+    # Round-2 forgeries: a consistent Review, intent and record rebuilt over a forged reviewed Integration.
+
+    def blob(self, project: Path, content: str) -> tuple[str, str]:
+        oid = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=project, input=content, check=True,
+                             capture_output=True, text=True).stdout.strip()
+        return "100644", oid
+
+    def tree_with(self, project: Path, commit: str, changes: dict) -> str:
+        """The tree of *commit* with each path set to its (mode, blob), or removed for None."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        index = Path(temporary.name) / "index"
+        env = {**os.environ, "GIT_INDEX_FILE": str(index)}
+        subprocess.run(["git", "read-tree", commit], cwd=project, env=env, check=True)
+        for path, entry in changes.items():
+            arguments = (["--force-remove", "--", path] if entry is None
+                         else ["--add", "--cacheinfo", f"{entry[0]},{entry[1]},{path}"])
+            subprocess.run(["git", "update-index", *arguments], cwd=project, env=env, check=True)
+        return subprocess.run(["git", "write-tree"], cwd=project, env=env, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    @staticmethod
+    def commit_tree(project: Path, tree: str, parents: list[str], message: str) -> str:
+        arguments = [argument for parent in parents for argument in ("-p", parent)]
+        return subprocess.run(["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit-tree",
+                               tree, *arguments], cwd=project, input=message, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    @staticmethod
+    def retrailer(message: str, **values: str) -> str:
+        for key, value in values.items():
+            message = re.sub(rf"(?m)^Agentrof-{key.replace('_', '-')}: .*$", f"Agentrof-{key.replace('_', '-')}: {value}",
+                             message)
+        return message
+
+    def chain(self, project: Path, record: str) -> dict:
+        message = delivery_git.commit_message
+        intent = delivery_git.trailer(message(project, record), "Intent")
+        review = delivery_git.trailer(message(project, intent), "Review-Head")
+        return {"record": record, "intent": intent, "review": review,
+                "reviewed": delivery_git.trailer(message(project, review), "Reviewed-Integration")}
+
+    def review_on(self, project: Path, chain: dict, reviewed: str) -> str:
+        """A Review, intent and PR record over *reviewed* that bind each other exactly as the verbs would."""
+        package = delivery_closure.package_directory(project, chain["record"], "DLV-001")
+        review_path = f"{package}/delivery-review.md"
+        changes = {path: self.entry(project, chain["review"], path) for path in delivery_git.git_paths(
+            project, "diff", "--no-renames", "--name-only", "-z", chain["reviewed"], chain["review"])}
+        props, body = delivery_git.split_remote_note(project, chain["review"], review_path, delivery_compile.split_note)
+        props["reviewed_commit"] = props["reviewed_integration_commit"] = reviewed
+        props["approval_hash"] = delivery_compile.content_hash(props, body,
+                                                               exclude=delivery_compile.MUTABLE | {"approval_hash"})
+        props["source_hash"] = delivery_compile.content_hash(
+            props, body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
+        changes[review_path] = self.blob(project, delivery_compile.frontmatter(props, body))
+        tree = self.tree_with(project, reviewed, changes)
+        message = delivery_git.commit_message
+        review = self.commit_tree(project, tree, [reviewed], self.retrailer(
+            message(project, chain["review"]), Reviewed_Integration=reviewed, Approval_Hash=props["approval_hash"]))
+        intent = self.commit_tree(project, tree, [review],
+                                  self.retrailer(message(project, chain["intent"]), Review_Head=review))
+        return delivery_git.pr_record_candidate(project, intent, package, "DLV-001", URL)
+
+    def entry(self, project: Path, commit: str, path: str) -> tuple[str, str] | None:
+        listed = git(project, "ls-tree", commit, "--", path)
+        if not listed:
+            return None
+        mode, _kind, oid = listed.split("\t", 1)[0].split()
+        return mode, oid
+
+    def item_merge(self, project: Path, first: str, story: str, files: dict) -> str:
+        """A product, evidence commit, seal and Item integration of *story* on *first*, with no evidence notes."""
+        tree = self.tree_with(project, first, files)
+        product = self.commit_tree(project, tree, [first], "Implement\n\nAgentrof-Delivery: DLV-001\n")
+        evidence = self.commit_tree(project, tree, [product], f"Update Item {story}\n")
+        trailers = (f"Agentrof-Record: item-integration-v1\nAgentrof-Protocol: 1\nAgentrof-Delivery: DLV-001\n"
+                    f"Agentrof-Story: {story}\nAgentrof-Item-Plan-Hash: none\n")
+        seal = self.commit_tree(project, tree, [evidence], f"Seal Item {story} for DLV-001\n\n{trailers}"
+                                f"Agentrof-Reviewed-Tip: {evidence}\nAgentrof-Product-Tip: {product}\n"
+                                f"Agentrof-Integration-Parent: {first}\n")
+        return self.commit_tree(project, tree, [first, seal], f"Integrate Item {story} for DLV-001\n\n{trailers}"
+                                f"Agentrof-Reviewed-Tip: {seal}\nAgentrof-Integration-Parent: {first}\n")
+
+    def refused_everywhere(self, project: Path, record: str, provider, expected: str) -> None:
+        """The forged record fails the check with *expected*, merge-pr refuses it and the audit never closes."""
+        git(project, "push", "-q", "--force", "origin", f"{record}:refs/heads/{INTEGRATION}")
+        checked = self.check(project, record)
+        self.assertFalse(checked["ok"])
+        self.assertIn(expected, " ".join(checked["errors"]))
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            with self.assertRaisesRegex(RuntimeError, "merge-pr refuses a PR head the coordinator did not write"):
+                delivery_git.merge_pr(project, "DLV-001")
+        self.assertEqual(self.outcome(project)["outcome"], "awaiting_merge")
+        self.assertNotIn("src/evil.py", git(project, "ls-tree", "-r", "--name-only", "origin/main"))
+
+    def test_an_item_integration_of_a_story_the_package_lacks_fails_closure(self):
+        project, _docs, _product, head, provider = self.recorded()
+        chain = self.chain(project, head)
+        merge = self.item_merge(project, chain["reviewed"], "GHOST-01", {"src/evil.py": self.blob(project, "EVIL\n")})
+        self.refused_everywhere(project, self.review_on(project, chain, merge), provider,
+                                f"the Item integration {merge} of DLV-001 merges GHOST-01, which the reviewed package"
+                                " of DLV-001 does not hold")
+
+    def test_an_earlier_unevidenced_integration_of_a_reviewed_story_fails_closure(self):
+        """Only the latest integration of a Story was evidence-checked; each one is now."""
+        project, _docs, _product, head, provider = self.recorded()
+        chain = self.chain(project, head)
+        first, seal = git(project, "show", "-s", "--format=%P", chain["reviewed"]).split()
+        evil = self.blob(project, "EVIL\n")
+        forged = self.item_merge(project, first, "AUTH-01", {"src/evil.py": evil})
+        remade = self.commit_tree(project, self.tree_with(project, chain["reviewed"], {"src/evil.py": evil}),
+                                  [forged, seal], self.retrailer(delivery_git.commit_message(project, chain["reviewed"]),
+                                                                 Integration_Parent=forged))
+        self.refused_everywhere(project, self.review_on(project, chain, remade), provider,
+                                f"the Item integration {forged} of DLV-001 holds AUTH-01 as")
+
+    def test_an_integration_of_a_story_cancelled_without_its_revert_fails_closure(self):
+        project, _docs, _product, head, provider = self.recorded()
+        chain = self.chain(project, head)
+        package = delivery_closure.package_directory(project, head, "DLV-001")
+        item_path = f"{package}/items/auth-01/item.md"
+        props, body = delivery_git.split_remote_note(project, chain["reviewed"], item_path, delivery_compile.split_note)
+        props["status"] = "cancelled"
+        cancelled = self.commit_tree(
+            project, self.tree_with(project, chain["reviewed"],
+                                    {item_path: self.blob(project, delivery_compile.frontmatter(props, body))}),
+            [chain["reviewed"]], "Cancel AUTH-01\n\nAgentrof-Record: item-cancelled-v1\nAgentrof-Protocol: 1\n"
+                                 "Agentrof-Delivery: DLV-001\nAgentrof-Story: AUTH-01\n")
+        record = self.review_on(project, chain, cancelled)
+        git(project, "push", "-q", "--force", "origin", f"{record}:refs/heads/{INTEGRATION}")
+        errors = " ".join(self.check(project, record)["errors"])
+        self.assertIn(f"the Item integration {chain['reviewed']} of DLV-001 merges AUTH-01, which the reviewed"
+                      " package cancelled, and no cancellation revert names it", errors)
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            with self.assertRaisesRegex(RuntimeError, "merge-pr refuses a PR head the coordinator did not write"):
+                delivery_git.merge_pr(project, "DLV-001")
+
+    def test_a_provider_merged_forged_line_is_proven_against_the_target_before_the_merge(self):
+        """The line walk stops at the target as it was before the merge, never at the target that holds it."""
+        project, _docs, _product, head, provider = self.recorded()
+        chain = self.chain(project, head)
+        slipped = self.commit_tree(
+            project, self.tree_with(project, chain["reviewed"], {"src/evil.py": self.blob(project, "EVIL\n")}),
+            [chain["reviewed"]], "Claim\n\nAgentrof-Record: claims-established-v1\nAgentrof-Protocol: 1\n"
+                                 "Agentrof-Delivery: DLV-001\n")
+        record = self.review_on(project, chain, slipped)
+        git(project, "push", "-q", "--force", "origin", f"{record}:refs/heads/{INTEGRATION}")
+        provider(project).merge_commit(URL, record)
+        expected = f"the claims_established_v1 record {slipped} of DLV-001 changes the product paths src/evil.py"
+        audited = delivery_closure.audit(project, "DLV-001")
+        outcome = audited["deliveries"][0]
+        self.assertEqual((audited["ok"], outcome["outcome"]), (False, "unproven_record_merge"))
+        self.assertIn(expected, " ".join(outcome["evidence"]))
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            with self.assertRaisesRegex(RuntimeError, re.escape(expected)):
+                delivery_git.merge_pr(project, "DLV-001", verify_only=True)
+        self.assertEqual(self.outcome(project)["outcome"], "unproven_record_merge")
+
+    def test_a_fence_target_the_target_lacks_is_drift_and_hides_nothing(self):
+        project, _docs, _product, head, provider = self.recorded()
+        chain = self.chain(project, head)
+        plain = self.commit_tree(
+            project, self.tree_with(project, chain["reviewed"], {"src/evil.py": self.blob(project, "EVIL\n")}),
+            [chain["reviewed"]], "Plain product change\n")
+        fence = git(project, "ls-remote", "origin", "refs/heads/agentrof/fence").split()[0]
+        forged_fence = self.commit_tree(project, fence + "^{tree}", [fence],
+                                        self.retrailer(delivery_git.commit_message(project, fence), Target=plain))
+        git(project, "push", "-q", "--force", "origin", f"{forged_fence}:refs/heads/agentrof/fence")
+        record = self.review_on(project, chain, plain)
+        git(project, "push", "-q", "--force", "origin", f"{record}:refs/heads/{INTEGRATION}")
+        self.assertIn(f"the Integration commit {plain} is not a control record of DLV-001",
+                      " ".join(self.check(project, record)["errors"]))
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            with self.assertRaisesRegex(RuntimeError, f"DELIVERY_TARGET_DRIFT: the Fence target {plain} of DLV-001"):
+                delivery_git.merge_pr(project, "DLV-001")
+        self.assertNotIn("src/evil.py", git(project, "ls-tree", "-r", "--name-only", "origin/main"))
+
+    def test_a_later_projection_rendering_neither_corrupts_the_record_nor_reopens_a_closed_delivery(self):
+        """A later package release may render the vault projections differently than the one that wrote them."""
+        project, _docs, _product, head, provider = self.recorded()
+        render_map = delivery_compile.render_map
+
+        def later_release(docs: Path, *args, **kwargs):
+            result = render_map(docs, *args, **kwargs)
+            for path in (Path(docs) / "maps").rglob("*.md"):
+                path.write_text(path.read_text(encoding="utf-8") + "\n<!-- a later rendering -->\n", encoding="utf-8")
+            return result
+
+        with mock.patch.object(delivery_compile, "render_map", later_release):
+            checked = self.check(project, head)
+            self.assertEqual((checked["ok"], checked.get("errors")), (True, []), checked)
+            with mock.patch("delivery_provider.GitHubProvider", provider):
+                delivery_git.merge_pr(project, "DLV-001")
+            self.assertEqual(self.outcome(project)["outcome"], "closed")
+        # A historical closed Delivery is not walked again by the audit.
+        with mock.patch.object(delivery_closure, "pr_record_chain", side_effect=AssertionError("walked")):
+            audited = delivery_closure.audit(project)
+        self.assertEqual((audited["ok"], [item["outcome"] for item in audited["deliveries"]]), (True, ["closed"]))
+
+    def test_the_line_changes_read_in_one_call_match_each_commits_own_diff(self):
+        project, _docs, _product, head, _provider = self.recorded()
+        main = git(project, "rev-parse", "origin/main")
+        singles = [oid for oid, lineage, _message in delivery_closure.line_commits(project, head, [main])
+                   if len(lineage) == 1]
+        self.assertGreater(len(singles), 3)
+        self.assertEqual(delivery_closure.single_parent_deltas(project, singles),
+                         {oid: delivery_closure.tree_delta(project, oid + "^", oid) for oid in singles})
+
+    def test_the_closure_check_runs_in_a_detached_ci_checkout_without_a_remote_head(self):
+        """actions/checkout fetches every branch and checks out one commit: no origin/HEAD, no current branch."""
+        project, _docs, _product, head, _provider = self.recorded()
+        main = git(project, "rev-parse", "origin/main")
+        feature = self.forge(project, main, lambda view: (view / "README.md").write_text("fixture\nmore\n",
+                                                                                         encoding="utf-8"),
+                             amend=False, message="Document more")
+        self.push_branch(project, "feature/docs", feature)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        ci = Path(temporary.name) / "ci"
+        init_repository(ci, initial_branch="main")
+        git(ci, "remote", "add", "origin", str(project / "remote.git"))
+        git(ci, "fetch", "-q", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
+        git(ci, "checkout", "-q", "--force", main)
+        with self.assertRaises(RuntimeError):
+            git(ci, "symbolic-ref", "refs/remotes/origin/HEAD")
+        self.assertEqual(git(ci, "branch", "--show-current"), "")
+        # Without the workflow's target the base stands in; with it, the default branch it names.
+        for target in ({}, {"target": "main"}):
+            with self.subTest(**target):
+                unmanaged = delivery_closure.check_pull_request(ci, head=feature, base="main", url=URL,
+                                                                head_ref="feature/docs", **target)
+                self.assertEqual((unmanaged["ok"], unmanaged["managed"]), (True, False), unmanaged)
+                managed = delivery_closure.check_pull_request(ci, head=head, base="main", url=URL,
+                                                              head_ref=INTEGRATION, **target)
+                self.assertEqual((managed["ok"], managed["managed"], managed.get("errors")), (True, True, []), managed)
+
+    def test_a_pr_into_a_base_without_shared_history_is_classified_on_its_own_changes(self):
+        """An orphan branch such as a pages site shares no merge base with the Delivery target."""
+        project, _docs = self.pre_start()
+        page = self.blob(project, "<html>\n")
+        empty = subprocess.run(["git", "mktree"], cwd=project, input="", check=True, capture_output=True,
+                               text=True).stdout.strip()
+        pages = self.commit_tree(project, self.tree_with(project, empty, {"index.html": page}), [], "Pages\n")
+        edit = self.commit_tree(project, self.tree_with(project, pages, {"index.html": self.blob(project, "<p>\n")}),
+                                [pages], "Edit the page\n")
+        self.push_branch(project, "pages", pages)
+        self.push_branch(project, "pages-edit", edit)
+        checked = self.check(project, edit, base="pages", head_ref="pages-edit")
+        self.assertEqual((checked["ok"], checked["managed"]), (True, False), checked)
+
+    def test_a_partial_hand_merge_is_named_by_the_audit_and_never_proves_a_merge(self):
+        """The audit names the Item paths the target holds and the ones it lacks, as a warning only."""
+        project, _docs = self.pre_start()
+        start = git(project, "rev-parse", "origin/main")
+
+        def item(view: Path) -> None:
+            (view / "lib").mkdir(exist_ok=True)
+            (view / "lib" / "a.py").write_text("a = 1\n", encoding="utf-8")
+            (view / "lib" / "b.py").write_text("b = 1\n", encoding="utf-8")
+
+        product = self.forge(project, start, item, amend=False, message="Item product")
+
+        def copy(*names: str):
+            def write(view: Path) -> None:
+                (view / "lib").mkdir(exist_ok=True)
+                for name in names:
+                    (view / "lib" / name).write_text(f"{name[0]} = 1\n", encoding="utf-8")
+            return write
+
+        with mock.patch.object(delivery_closure, "product_tips", return_value={product}), \
+                mock.patch.object(delivery_closure, "product_start", return_value=start):
+            for names, expected in ((("a.py",), f"product tip {product} at lib/a.py but not at lib/b.py, which a"
+                                                " partial hand merge leaves"),
+                                    (("a.py", "b.py"), "at lib/a.py, lib/b.py, which an independent change can"
+                                                       " also write")):
+                with self.subTest(names=names):
+                    self.on_target(project, copy(*names), "Copy the Item by hand")
+                    audited = delivery_closure.audit(project, "DLV-001")
+                    self.assertEqual((audited["ok"], audited["deliveries"][0]["outcome"]), (True, "open"))
+                    findings = delivery_result.from_raw("closure-audit", audited)["findings"]
+                    self.assertEqual([(finding["code"], finding["severity"]) for finding in findings],
+                                     [("DELIVERY_EXTERNAL_MERGE", "warning")])
+                    self.assertIn(expected, findings[0]["message"])
+                    git(project, "push", "-q", "--force", "origin", f"{start}:refs/heads/main")
+
 
 @integration
-class ExternalEvidenceTests(unittest.TestCase):
-    """Product bytes on the target, read from a plain repository with the Item's tips given."""
+class ExactBytesClassificationTests(unittest.TestCase):
+    """The exact-bytes reason, read from a plain repository with one Item product tip given."""
 
-    def commit(self, root: Path, files: dict[str, str], message: str) -> str:
+    def commit(self, root: Path, files: dict, message: str) -> str:
         for name, content in files.items():
-            (root / name).write_text(content, encoding="utf-8")
+            if content is None:
+                (root / name).unlink()
+            else:
+                (root / name).write_text(content, encoding="utf-8")
         git(root, "add", "-A")
         git(root, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-qm", message)
         return git(root, "rev-parse", "HEAD")
 
-    def test_a_partial_hand_merge_names_the_paths_the_target_holds_and_never_proves_a_merge(self):
+    def test_an_item_deletion_counts_only_for_a_pr_that_deletes_the_path_itself(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             init_repository(root, initial_branch="main")
-            start = self.commit(root, {"a.py": "a = 0\n", "b.py": "b = 0\n", "c.py": "c = 1\n"}, "Start")
-            product = self.commit(root, {"a.py": "a = 1\n", "b.py": "b = 1\n", "c.py": "c = 2\n"}, "Item")
-            git(root, "checkout", "-q", start)
-            # c.py already held the Item's bytes on the Fence target, so it proves nothing.
-            fence = self.commit(root, {"c.py": "c = 2\n"}, "Same c")
-            partial = self.commit(root, {"a.py": "a = 1\n"}, "Copy a by hand")
-            full = self.commit(root, {"b.py": "b = 1\n"}, "Copy b by hand")
+            old = self.commit(root, {"x.py": "x = 0\n"}, "Before the file")
+            start = self.commit(root, {"f.py": "f = 0\n"}, "Add the file")
+            product = self.commit(root, {"f.py": None}, "The Item deletes the file")
+            git(root, "checkout", "-q", "-b", "feature/old", old)
+            unrelated = self.commit(root, {"x.py": "x = 1\n"}, "Unrelated work from before the file")
+            git(root, "checkout", "-q", "-b", "feature/delete", start)
+            deleting = self.commit(root, {"f.py": None}, "Delete the file")
+            state = {"integrations": {"DLV-001": product}, "items": {}, "slots": {}, "fence_target": ""}
+            reason = f"it carries the exact product bytes of the Item product tip {product} of DLV-001"
             with mock.patch.object(delivery_closure, "product_tips", return_value={product}), \
                     mock.patch.object(delivery_closure, "product_start", return_value=start):
-                evidence, signs = delivery_closure.external_product_merge(root, "DLV-001", partial, "", [], fence)
-                self.assertEqual(evidence, [])
-                self.assertEqual(len(signs), 1)
-                self.assertIn(f"product tip {product} at a.py but not at b.py, which a partial hand merge"
-                              " leaves", signs[0])
-                evidence, signs = delivery_closure.external_product_merge(root, "DLV-001", full, "", [], fence)
-                self.assertEqual(evidence, [])
-                self.assertIn("at a.py, b.py, which an independent change can also write", signs[0])
+                for head, managed in ((unrelated, False), (deleting, True)):
+                    with self.subTest(managed=managed):
+                        paths = delivery_closure.changed_paths(root, start, head)
+                        classified = delivery_closure.classify(root, "origin", head, start, paths, "", state)
+                        self.assertEqual((classified["managed"], reason in classified["reasons"]),
+                                         (managed, managed), classified)
+
 
 
 class ClosureTextTests(unittest.TestCase):
@@ -568,6 +857,9 @@ class ClosureTextTests(unittest.TestCase):
         self.assertIn(f"    name: {delivery_closure.CLOSURE_CONTEXT}\n", template)
         self.assertIn('test "$(git rev-parse FETCH_HEAD)" = "$PR_HEAD_SHA"', template)
         self.assertIn("python3 .github/agentrof/vault-gate.pyz delivery-closure", template)
+        # A detached checkout has no remote HEAD, so the workflow names the default branch as the target.
+        self.assertIn("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}", template)
+        self.assertIn('--target "$DEFAULT_BRANCH"', template)
         self.assertNotIn("pull_request:\n", template)
         lines = template.splitlines()
         for number, line in enumerate(lines):
@@ -626,13 +918,14 @@ class ClosureTextTests(unittest.TestCase):
         self.assertIn("skill-content/deliver/data/delivery-control-record-contract.json", data)
         arguments = vault_gate.build_parser().parse_args([
             "delivery-closure", "--project-root", ".", "--pr-url", URL, "--head", "a" * 40,
-            "--head-ref", "x; rm -rf /", "--base", "main"])
+            "--head-ref", "x; rm -rf /", "--base", "main", "--target", "main"])
         with mock.patch.object(vault_gate.subprocess, "run",
                                return_value=subprocess.CompletedProcess([], 1)) as run:
             self.assertEqual(arguments.func(arguments), 1)
         command = run.call_args.args[0]
         self.assertEqual(command[1:3], [str(PACKAGE.resolve() / "scripts" / "delivery_git.py"), "closure-check"])
         self.assertEqual(command[command.index("--head-ref") + 1], "x; rm -rf /")
+        self.assertEqual(command[command.index("--target") + 1], "main")
         self.assertNotIn("shell", run.call_args.kwargs)
 
     def test_closure_finding_codes_are_declared_by_the_result_contract(self):

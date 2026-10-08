@@ -942,7 +942,9 @@ a retarget runs it again: a pull request no open Delivery manages passes, and
 a managed one passes only as its Delivery's recorded PR head with every
 closure precondition met, including a PR record, intent and Review that carry
 exactly what their verbs write and an Integration line whose every product
-change an Item, target merge or cancellation owns. `merge-pr` refuses the same
+change an Item, target merge or cancellation owns, where each Item integration
+merges a Story of the reviewed package with its own evidence. A merged record
+is proven against the target as it was before the merge. `merge-pr` refuses the same
 unbound head. `protection-status` reports, read-only, whether a ruleset on the
 target branch requires that check from the GitHub Actions app or requires the
 closure workflow, requires a pull request and has no bypass actors; a check

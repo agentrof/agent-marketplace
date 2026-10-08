@@ -176,13 +176,13 @@
       "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
     ,
     "scripts/delivery_closure.py":
-      "14563f81ed558589becb4325d1af75b578b4b3402d45052c1aad15c39eb67230"
+      "6f62ddb075a01a682d5af41cf489b018ea4835fc5ce9e0d6e1bf521c908b1f40"
     ,
     "scripts/delivery_compile.py":
       "6d0cbef39a03a7915abc4253cbb32156e17da6bbd971ec0939fef493c9c582f6"
     ,
     "scripts/delivery_git.py":
-      "e1051295fd5ddc25bbce08f7fd989d9fbcbb92add71629c9cf1a0e009875a66a"
+      "33c2faf42d7062f701a6d9cf8a129083df73973720620fe2c6342a726ffb2721"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
@@ -284,7 +284,7 @@
       "3bd52e5d5159562c8b44a21791c433f04721e81fee3b9932c9fb176d85ebe8cb"
     ,
     "scripts/vault_gate.py":
-      "0a680099cf681481f3e6386bb9c317fa82348c466ae6889bc61f073ca866b3fc"
+      "5874e6fed717df6c29ad5d6888c8985690fca14ed83458b1f0e77af298e8da81"
     ,
     "scripts/vault_hook.py":
       "f1400bcead8488e477d55a83ec20fa96e3aaf959b35720c934283fc2e5a35692"
@@ -761,7 +761,7 @@
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
-      "961bf50e1837085904c34742da369485bc8661a5d9b4410a424325688715149c"
+      "6cd24ab78654abb6f4559337ea11f846cf5b54a350813ede10c478bdd7d4b4bb"
     ,
     "skill-content/setup/references/windows-long-paths.md":
       "f6ce03aee49421cf7fd313388af3a9c9e2eb74f3e20a8019be0d4703cfca5705"
@@ -1013,7 +1013,7 @@
       "0d05078ab3c81a50c20b8a08ce2f1bef6c8fe7b01d7c6230e122e1b140a49cc7"
     ,
     "templates/delivery-closure.yml":
-      "be75ec57ba6800ec0295e505858b06a3d70c28807acac5d9cd14028f5badd90a"
+      "95b17a41a98cce16ca195a869a018eb94cfba4c13516d60f87d3272633baca0c"
     ,
     "templates/gitignore":
       "fa6da40c9313474f7d39f430d2311c2a6d646dfbceb5df566b454af6052d6a8e"

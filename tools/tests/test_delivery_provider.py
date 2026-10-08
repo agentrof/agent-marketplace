@@ -323,13 +323,22 @@ class ProtectionStatusTests(unittest.TestCase):
         bypassed = self.report({self.RULES: [self.CONTEXT_RULE, self.PULL_REQUEST_RULE],
                                 self.RULESET: {"id": 7, "bypass_actors": [{"actor_type": "RepositoryRole"}]}})
         self.assertEqual((bypassed["status"], bypassed["properties"]["no_bypass"]), ("not_configured", "not_configured"))
-        for classic in (self.NOT_PROTECTED, self.FORBIDDEN):
-            with self.subTest(classic=str(classic)):
-                unprotected = self.report({self.RULES: [], self.CLASSIC: classic})
-                self.assertEqual(unprotected["status"], "not_configured")
-                self.assertEqual(unprotected["properties"]["closure_context_required"], "not_configured")
-                self.assertEqual(delivery_result.from_raw("protection-status", unprotected)["findings"][0]["severity"],
-                                 "warning")
+        unprotected = self.report({self.RULES: [], self.CLASSIC: self.NOT_PROTECTED})
+        self.assertEqual(unprotected["status"], "not_configured")
+        self.assertEqual(set(unprotected["properties"].values()), {"not_configured"})
+        self.assertEqual(delivery_result.from_raw("protection-status", unprotected)["findings"][0]["severity"],
+                         "warning")
+
+    def test_hidden_classic_protection_or_repository_id_reports_unknown(self):
+        """A token without admin rights sees neither classic protection nor, at times, the repository id."""
+        hidden = self.report({self.RULES: [], self.CLASSIC: self.FORBIDDEN})
+        self.assertEqual((hidden["status"], set(hidden["properties"].values())), ("unknown", {"unknown"}))
+        workflows = {"type": "workflows", "ruleset_id": 7, "parameters": {"workflows": [
+            {"path": ".github/workflows/delivery-closure.yml", "repository_id": 41, "ref": "main"}]}}
+        unread = self.report({self.RULES: [workflows, self.PULL_REQUEST_RULE], self.CLASSIC: self.NOT_PROTECTED,
+                              "repos/agentrof/example": self.FORBIDDEN})
+        self.assertEqual((unread["status"], unread["properties"]["closure_context_required"]), ("unknown", "unknown"))
+        self.assertIn("the repository id it must name cannot be read", unread["reasons"]["closure_context_required"])
 
     def test_unreadable_branch_rules_or_bypass_actors_report_unknown(self):
         for answers in ({}, {self.RULES: self.FORBIDDEN, self.CLASSIC: self.NOT_PROTECTED}):

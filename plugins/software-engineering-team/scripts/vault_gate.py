@@ -364,7 +364,7 @@ def closure_check(args, root: Path) -> int:
         sys.executable, str(root / "scripts" / "delivery_git.py"), "closure-check",
         "--project-root", str(args.project_root.resolve()), "--pr-url", args.pr_url,
         "--head", args.head, "--head-ref", args.head_ref, "--base", args.base,
-        "--remote", args.remote,
+        "--target", args.target, "--remote", args.remote,
     ]
     return subprocess.run(command, check=False).returncode
 
@@ -448,6 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
     closure.add_argument("--head", required=True)
     closure.add_argument("--head-ref", default="")
     closure.add_argument("--base", required=True)
+    closure.add_argument("--target", default="")
     closure.add_argument("--remote", default="origin")
     closure.set_defaults(func=cmd_delivery_closure)
     install = sub.add_parser("install")

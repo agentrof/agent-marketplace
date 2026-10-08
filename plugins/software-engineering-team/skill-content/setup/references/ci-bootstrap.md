@@ -82,21 +82,25 @@ edit runs it, because a job skipped by its `if:` condition reports success to
 a required check. It has read-only `contents` permission, checks out the
 event's `github.sha`, the base branch tip that holds the workflow, with full
 history, fetches `refs/pull/<number>/head`, verifies that it is the event's
-head commit, and runs the base branch's `vault-gate.pyz delivery-closure`.
+head commit, and runs the base branch's `vault-gate.pyz delivery-closure`
+with the repository's default branch as the Delivery target, as the detached
+checkout has no remote HEAD and no current branch to name it.
 Event values reach the steps only through `env:`, and the pull request's own
 files are read as Git data and never run. The check passes a pull request no
 open Delivery manages. A pull request is managed when its head ref is an
 `agentrof/` ref, when its head holds commits that only an open Delivery's
 Integration or Item refs reach and its base lacks, when it changes a path under
 a path claim of a not cancelled Item of an open Delivery, compared from its
-merge base with the Delivery target, or when it carries the exact product bytes
-of such an Item that its base lacks; labels and other branch names never decide
+merge base with the Delivery target, or when it writes the exact product bytes
+of such an Item that its base lacks at paths it changes itself; labels and other branch names never decide
 it, and a promotion between branches that holds only target commits is not
 managed. A managed pull request passes only as the recorded PR head of its
 Delivery with every closure precondition met: the PR record, its intent and
 its published Review carry exactly what their verbs write, and each commit on
 the reviewed Integration line is a control record whose product change is its
-Item's, its target merge's or its cancellation's. Each failure names the step
+Item's, its target merge's or its cancellation's, and every Item integration
+on that line merges a Story of the reviewed package with its own approved code
+review and passed verification. Each failure names the step
 that owns its recovery; a merged Delivery's claims hold until `verify-merge`
 drops its refs, and the check names that step.
 

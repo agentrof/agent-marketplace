@@ -819,18 +819,25 @@ The implementer's write scope, under every switch value, comes from the same
 published record, never from a checkout's draft of a plan revision:
 `task_inputs.py` reads the Item record of the Integration tip on the
 Delivery's remote (`--remote`, default `origin`), the source of truth, and
-fetches that commit only when the checkout lacks it. Only when the remote
-cannot be reached does it read the newest by ancestry of the remote's tracking
-ref of the Integration and the Item worktree's `integration_base_commit`,
-taking each only as a record commit of the Delivery's Integration line. That
-offline scope can be stale, and `push-item` remains the gate that checks the
-Item against the remote. A checkout with no remote keeps its own record only
-while it holds no published commit of the Delivery, such as an Item
-worktree's `integration_base_commit`. The scope stays `unresolved`, naming the
-reason, when the checkout's remotes lack the Delivery's remote, when that
-remote holds no Integration of the Delivery, or when the remote cannot be
-reached, or is missing, and no local commit is a record commit of the
-Delivery's Integration line. While a planning
+fetches that commit only when the checkout lacks it. A checkout whose remotes
+lack the Delivery's remote reads nothing locally: its scope stays
+`unresolved` and names `--remote`. Only when the Delivery's remote is there
+but cannot be reached, or the checkout has no remote at all, does it read the
+newest by ancestry of the remote's tracking ref of the Integration and the
+Item worktree's `integration_base_commit`, taking each only as a record commit
+of the Delivery's Integration line and only while the two agree by ancestry.
+That offline check is structural: it cannot detect a forged commit that
+carries the record trailers on the Delivery's line, and the offline scope can
+be stale, so `push-item`, which checks the Item against the remote, remains
+the gate. An offline scope carries the constraint `offline: claims read from
+<commit>; <cause>`, naming the remote's error. A checkout with no remote keeps
+its own record only while it holds no published commit of the Delivery, such
+as an Item worktree's `integration_base_commit`. The scope stays `unresolved`,
+naming the reason, when the checkout's remotes lack the Delivery's remote,
+when that remote holds no Integration of the Delivery, when the tracking ref
+and the Item worktree's base diverge, or when the remote cannot be reached, or
+is missing, and no local commit is a record commit of the Delivery's
+Integration line. While a planning
 task checks for a held plan-revision barrier, it fetches a Fence or
 Integration commit only when the checkout lacks it.
 
@@ -857,7 +864,9 @@ refuse that change, by the claims of the published Item record at the Item's
 taken, as `push-item` checks it, with `DELIVERY_PROVISIONAL_CLAIM_PENDING` until the approved plan
 publishes the path and the writer converges on it, a merge that keeps the
 provisional commit, and `integrate-item` takes only what `push-item`
-published. `finish-plan-revision` and `abort-plan-revision` release every live
+published. Under this switch `freeze` and the manifest therefore need the
+Delivery's remote, and refuse one they cannot read the Item ref and
+Integration from with `DELIVERY_PUBLISHED_CLAIMS_UNREADABLE`. `finish-plan-revision` and `abort-plan-revision` release every live
 claim of the barrier in the barrier's own atomic push with a
 `provisional-claim-release-v1` record that names the claim record it ends in
 `Claim-Record`, so a claim already void stays void: `promoted` when the published Item

@@ -4327,6 +4327,26 @@ class DeliveryGitTests(unittest.TestCase):
                              ("DELIVERY_INPUT_INVALID", refusal.strip("^$")))
 
     @integration
+    def test_freeze_under_the_switch_names_an_unreadable_delivery_remote(self):
+        """#464: at provisional_claims during_plan_revision freeze and the reader manifest read the Item
+        ref and Integration from the Delivery's remote, so one they cannot read is refused with a stable
+        code, never a plain error."""
+        project, worktree, _item, _active = self.provisional_item()
+        with self.provisional_switch():
+            delivery_git.begin_plan_revision(project, "DLV-001")
+            delivery_git.provisional_claim(project, "DLV-001", "AUTH-01", ["src/verify.py"])
+            self.commit_provisional_change(worktree)
+            current = delivery_verification.candidate(worktree, "DLV-001", "AUTH-01", allow_evidence=True)
+            url = delivery_git.run_git(project, "remote", "get-url", "origin")
+            delivery_git.run_git(project, "remote", "set-url", "origin", url + "-gone")
+            for refusal in (lambda: delivery_verification.freeze(worktree, "DLV-001", "AUTH-01", fresh=True),
+                            lambda: delivery_verification.require_published_claims(worktree, current)):
+                code, message = self.refused_finding(refusal)
+                self.assertEqual(code, "DELIVERY_PUBLISHED_CLAIMS_UNREADABLE")
+                self.assertTrue(message.startswith("the published Item record cannot be read from origin: "),
+                                message)
+
+    @integration
     def test_freeze_takes_the_published_claims_while_other_candidate_reads_keep_working(self):
         """#464: the verification candidate, which regression-run, regression-selection and assertion-map
         read, accepts a provisional commit; freeze refuses it by the claims of the Item record its

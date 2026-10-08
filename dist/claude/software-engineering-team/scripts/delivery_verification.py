@@ -605,7 +605,8 @@ def require_published_claims(root: Path, current: dict, remote: str = "origin") 
             item.relative_to(root).as_posix(), delivery.split_note)[0]
         integration = delivery_git.require_commit(root, remote, refs["integration"], tips[refs["integration"]])
     except RuntimeError as exc:
-        raise RuntimeError(f"the published Item record cannot be read from {remote}: {exc}") from exc
+        raise RuntimeError(f"DELIVERY_PUBLISHED_CLAIMS_UNREADABLE: the published Item record cannot be read"
+                           f" from {remote}: {exc}") from exc
     delivery_git.converged_integration(root, before, {"integration_base_commit": current["integration_base_commit"]},
                                        current["product_commit"], integration)
     try:

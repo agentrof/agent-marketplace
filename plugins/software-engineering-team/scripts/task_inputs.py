@@ -857,8 +857,9 @@ def working_inventory(root: Path, command: list[str], *, unborn: bool = False,
     return records
 
 
-def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, str | None]:
-    """The selected Item record as the Delivery's Integration publishes it, with the Delivery id.
+def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, str | None, str | None]:
+    """The selected Item record as the Delivery's Integration publishes it, with the Delivery id and,
+    when a local commit stood in for the remote, the constraint that names it.
 
     A checkout's record can be a draft of a plan revision not yet approved, so
     a published record grants the claims, never the draft. The Delivery's
@@ -867,16 +868,19 @@ def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, 
     cannot be asked does the newest published Integration commit this checkout
     holds stand in, the remote's tracking ref of the Integration or the
     integration_base_commit the Item worktree last converged on, each taken
-    only as a record commit of the Delivery's Integration line. That offline
-    record can be stale; push-item still checks the Item against the remote. A
-    checkout with no remote that holds no published commit of the Delivery
-    keeps its own record: (None, None). Where no published record can be read,
-    ValueError names why.
+    only as a record commit of the Delivery's Integration line and only while
+    the two agree by ancestry. That offline check is structural: a forged
+    commit that carries the record trailers on the Delivery's line passes it,
+    and the offline record can be stale, so push-item, which checks the Item
+    against the remote, remains the gate. A checkout with no remote that holds
+    no published commit of the Delivery keeps its own record: (None, None,
+    None). A checkout whose remotes lack *remote*, or where no published record
+    can be read, raises ValueError naming why.
     """
     import delivery_git
     # Without its own repository, git would answer for an enclosing one and its remote.
     if not (project / ".git").exists():
-        return None, None
+        return None, None, None
     remotes = subprocess.run(["git", "-C", str(project), "remote"], capture_output=True, encoding="utf-8")
     if remotes.returncode:
         raise ValueError("the checkout's remotes cannot be read")
@@ -886,39 +890,42 @@ def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, 
         delivery = item_delivery(project, item)
     except ValueError:
         if not names:
-            return None, None
+            return None, None, None
         raise
     if not names:
         if not local_integration_commits(project, item, delivery, remote):
-            return None, None
+            return None, None, None
         oid = newest_local_integration_commit(project, item, delivery, remote)
         if oid is None:
             raise ValueError(f"this checkout has no remote and no commit it holds for {delivery} is a published"
                              f" Integration record of {delivery}; add the Delivery's remote")
-        return local_record(project, oid, item, split_note), delivery
+        return (local_record(project, oid, item, split_note), delivery,
+                offline_constraint(oid, "this checkout has no remote"))
+    if remote not in names:
+        raise ValueError(f"the checkout has no remote {remote}; name the Delivery's remote with --remote")
     ref = delivery_git.canonical_refs(delivery)["integration"]
-    offline = None
-    if remote in names:
+    try:
+        tip = delivery_git.remote_ref_oids(project, remote, [ref])[ref]
+    except RuntimeError as exc:
+        offline = exc
+    else:
+        if not tip:
+            raise ValueError(f"{delivery} has no Integration on {remote}")
         try:
-            tip = delivery_git.remote_ref_oids(project, remote, [ref])[ref]
+            return delivery_git.split_remote_note(
+                project, delivery_git.require_commit(project, remote, ref, tip), item, split_note)[0], delivery, None
         except RuntimeError as exc:
-            offline = exc
-        else:
-            if not tip:
-                raise ValueError(f"{delivery} has no Integration on {remote}")
-            try:
-                return delivery_git.split_remote_note(
-                    project, delivery_git.require_commit(project, remote, ref, tip), item, split_note)[0], delivery
-            except RuntimeError as exc:
-                raise ValueError(f"the published record of the selected Item cannot be read: {exc}") from exc
+            raise ValueError(f"the published record of the selected Item cannot be read: {exc}") from exc
     oid = newest_local_integration_commit(project, item, delivery, remote)
     if oid is not None:
-        return local_record(project, oid, item, split_note), delivery
-    if offline is None:
-        raise ValueError(f"no published record of the selected Item is in this checkout and it has no remote"
-                         f" {remote}; name the Delivery's remote with --remote")
+        return local_record(project, oid, item, split_note), delivery, offline_constraint(oid, f"{remote}: {offline}")
     raise ValueError(f"the published record of the selected Item cannot be read: no published Integration"
                      f" commit of {delivery} is in this checkout and {remote} cannot provide one: {offline}")
+
+
+def offline_constraint(oid: str, cause: str) -> str:
+    """The scope constraint naming the local commit whose record stood in for the remote, and why."""
+    return " ".join(f"offline: claims read from {oid}; {cause}".split())
 
 
 def item_delivery(project: Path, item: str) -> str:
@@ -945,18 +952,22 @@ def local_record(project: Path, oid: str, item: str, split_note) -> dict:
 
 def newest_local_integration_commit(project: Path, item: str, delivery: str, remote: str) -> str | None:
     """The newest, by ancestry, of the published Integration commits of *delivery* this checkout holds,
-    or None. A commit that is no record commit of the Delivery's Integration line is left out, and
-    two that diverge leave no newest one, so the checkout cannot tell which line is published."""
+    or None. The tracking ref and the Item worktree's base must agree by ancestry wherever both name a
+    commit this checkout holds, since two that diverge leave the checkout unable to tell which line is
+    published. A commit that is no record commit of the Delivery's Integration line is left out."""
     import delivery_git
-    found = [oid for oid in local_integration_commits(project, item, delivery, remote)
-             if delivery_git.delivery_integration_commit(project, oid, delivery)]
-    newest = found[0] if found else None
-    for oid in found[1:]:
-        if delivery_git.descends(project, newest, oid):
-            newest = oid
-        elif not delivery_git.descends(project, oid, newest):
+    named = [oid for oid in local_integration_commits(project, item, delivery, remote)
+             if not subprocess.run(["git", "-C", str(project), "cat-file", "-e", oid + "^{commit}"],
+                                   capture_output=True).returncode]
+    for first, second in zip(named, named[1:]):
+        if not (delivery_git.descends(project, first, second) or delivery_git.descends(project, second, first)):
             raise ValueError(f"the published Integration commits of {delivery} in this checkout diverge:"
-                             f" {newest} and {oid}; reach the Delivery's remote {remote}")
+                             f" {first} and {second}; reach the Delivery's remote {remote}")
+    newest = None
+    for oid in named:
+        if delivery_git.delivery_integration_commit(project, oid, delivery) and (
+                newest is None or delivery_git.descends(project, newest, oid)):
+            newest = oid
     return newest
 
 
@@ -1075,7 +1086,7 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
         item = items[0]
         props = properties(item)
         try:
-            published, delivery = published_item(project, item, remote)
+            published, delivery, offline = published_item(project, item, remote)
         except ValueError as exc:
             result["reason"] = str(exc)
             return result
@@ -1113,6 +1124,8 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
         sources = [item]
         result["excluded_subtrees"] = ["workspace/docs", ".git", ".agentrof"]
         result["constraints"].append("approved Item plan, current writer receipt, and completed/cancelled readers remain mandatory")
+        if offline:
+            result["constraints"].append(offline)
         import delivery_git
         provisional_on = (delivery_git.PROVISIONAL_SWITCH, delivery_git.PROVISIONAL_VALUE) in chosen
         if delivery is not None and provisional_on and not lane:

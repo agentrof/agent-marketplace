@@ -387,10 +387,81 @@ class TaskInputTests(unittest.TestCase):
                 subprocess.run(["git", "-C", str(root), "update-ref", "-d", ref], check=True)
             default = task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
             self.assertEqual((default["status"], default["reason"]), (
-                "unresolved", "no published record of the selected Item is in this checkout and it has no remote "
-                              "origin; name the Delivery's remote with --remote"))
+                "unresolved", "the checkout has no remote origin; name the Delivery's remote with --remote"))
             named = task_scope(root, "deliver", "backend-developer", "create", inputs=[item], remote="upstream")
             self.assertEqual([target["path"] for target in named["allowed_write_area"]], ["src/auth.py"])
+
+    @integration
+    def test_item_claims_name_the_delivery_remote_before_reading_a_local_record(self):
+        """#464: a checkout whose remotes lack the named remote is no offline checkout, so an older local
+        record never stands in for the Delivery's reachable remote: the scope names --remote, and the
+        Delivery's remote resolves its newer record."""
+        import delivery_git
+        with tempfile.TemporaryDirectory() as raw:
+            root, item, _remote, published = self.published_item_project(raw, "upstream")
+            record = {"Record": "execution-plan-published-v1", "Protocol": "1", "Delivery": "DLV-001"}
+            newer = self.integration_commit(root, item, published, ["src/newer.py"], record)
+            subprocess.run(["git", "-C", str(root), "push", "-q", "upstream",
+                            f"{newer}:{delivery_git.canonical_refs('DLV-001')['integration']}"],
+                           check=True, capture_output=True)
+            converged = delivery_git.worktree_paths(root, "DLV-001", "AUTH-01")["item"] / item
+            converged.parent.mkdir(parents=True)
+            converged.write_text(f"---\ntype: delivery-item\nintegration_base_commit: {published}\n---\n",
+                                 encoding="utf-8")
+            default = task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
+            self.assertEqual((default["status"], default["reason"], default["allowed_write_area"]), (
+                "unresolved", "the checkout has no remote origin; name the Delivery's remote with --remote", []))
+            named = task_scope(root, "deliver", "backend-developer", "create", inputs=[item], remote="upstream")
+            self.assertEqual([target["path"] for target in named["allowed_write_area"]], ["src/newer.py"])
+            self.assertFalse(any(text.startswith("offline:") for text in named["constraints"]))
+
+    @integration
+    def test_item_claims_offline_are_structural_named_and_need_agreeing_local_records(self):
+        """#464: offline, the record check is structural only: a forged commit carrying the Delivery's
+        record trailers on its Integration line grants its claims, which push-item, checking the remote,
+        still refuses. The scope names the commit it read and the remote's error, and the tracking ref and
+        the Item worktree's base must agree by ancestry, a record commit or not, before either stands in."""
+        import delivery_git
+        with tempfile.TemporaryDirectory() as raw:
+            root, item, remote, published = self.published_item_project(raw)
+            tracking = "refs/remotes/origin/" + delivery_git.short_refs("DLV-001")["integration"]
+            record = {"Record": "execution-plan-published-v1", "Protocol": "1", "Delivery": "DLV-001"}
+            forged = self.integration_commit(root, item, published, ["src/auth.py", "anything/else.py"], record)
+            subprocess.run(["git", "-C", str(root), "update-ref", tracking, forged], check=True)
+            subprocess.run(["git", "-C", str(root), "remote", "set-url", "origin", str(remote) + "-gone"], check=True)
+
+            def scope():
+                return task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
+
+            offline = scope()
+            self.assertEqual([target["path"] for target in offline["allowed_write_area"]],
+                             ["anything/else.py", "src/auth.py"])
+            named = [text for text in offline["constraints"] if text.startswith("offline:")]
+            self.assertEqual(len(named), 1, offline["constraints"])
+            self.assertTrue(named[0].startswith(f"offline: claims read from {forged}; origin: "), named[0])
+            self.assertNotIn("\n", named[0])
+            # The Item worktree's base names another line: a sibling record commit, or a commit that is
+            # no record at all, leaves the checkout unable to tell which line is published.
+            converged = delivery_git.worktree_paths(root, "DLV-001", "AUTH-01")["item"] / item
+            converged.parent.mkdir(parents=True)
+            sibling = self.integration_commit(root, item, published, ["src/sibling.py"], record)
+            unrecorded = self.integration_commit(root, item, published, ["src/sibling.py"], {})
+            for base, tip in ((sibling, forged), (unrecorded, published), (unrecorded, forged)):
+                with self.subTest(base=base, tip=tip):
+                    subprocess.run(["git", "-C", str(root), "update-ref", tracking, tip], check=True)
+                    converged.write_text(f"---\ntype: delivery-item\nintegration_base_commit: {base}\n---\n",
+                                         encoding="utf-8")
+                    diverged = scope()
+                    if tip == published:
+                        # The base descends from the tracking ref but is no record commit: the older
+                        # tracking ref stands in, and the base grants nothing.
+                        self.assertEqual([target["path"] for target in diverged["allowed_write_area"]],
+                                         ["src/auth.py"])
+                        continue
+                    self.assertEqual((diverged["status"], diverged["allowed_write_area"]), ("unresolved", []))
+                    self.assertEqual(diverged["reason"], (
+                        f"the published Integration commits of DLV-001 in this checkout diverge: {tip} and "
+                        f"{base}; reach the Delivery's remote origin"))
 
     def test_item_claims_exclude_the_authority_roots_with_their_case_folded(self):
         """#464: a claim under Workspace/docs, .Agentrof or .GIT reaches the same directory on a file system

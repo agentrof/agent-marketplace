@@ -71,7 +71,9 @@ record of the Integration commit the Item converged on, its
 `integration_base_commit`, so an edit of the worktree's own Item record grants
 nothing. That base must be an Integration commit the Item has taken, as
 `push-item` checks it against the remote Item ref and Integration; any other
-base is refused with the `push-item` message. Other reads of the candidate, such as `regression-selection`,
+base is refused with the `push-item` message. Under this switch `freeze` and
+the manifest need the Delivery's remote: one they cannot read the Item ref and
+Integration from is refused with `DELIVERY_PUBLISHED_CLAIMS_UNREADABLE`. Other reads of the candidate, such as `regression-selection`,
 `regression-run` and `assertion-map`, still work on a provisional commit. Each
 verb that reads the claims takes `--remote` for a Delivery remote other than
 `origin`.

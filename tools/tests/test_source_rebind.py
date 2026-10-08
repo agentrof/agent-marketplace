@@ -90,6 +90,15 @@ EVICTION_ROWS = {
                    " [[solution-design/engagements/fixture-eviction\\|fixture-eviction]] | decided |"),
 }
 
+AUDIT = "solution-design/decisions/fixture-audit"
+AUDIT_ROWS = {
+    "engagements": f"| fixture-audit | Status: approved 2026-03-01 | [[{AUDIT}\\|SD-003]] |",
+    "target": f"- Cache reads are audited ([[{AUDIT}\\|SD-003]]).",
+    "transition": f"3. Add the read audit ([[{AUDIT}\\|SD-003]]); precondition: the session cache.",
+    "components": (f"| cache audit | build | [[{AUDIT}\\|SD-003]] |"
+                   " [[solution-design/engagements/fixture-audit\\|fixture-audit]] | decided |"),
+}
+
 
 def quiet(function, *args, **kwargs):
     output = io.StringIO()
@@ -118,6 +127,7 @@ class SourceRebindTests(unittest.TestCase):
         mocks.enter_context(mock.patch.object(compiler, "validate_experience_ref"))
         with contextlib.redirect_stdout(io.StringIO()):
             self.fixture.approve_verification_contract()
+        self.added_rows: list[dict] = []
         self.write_landscape(CACHE_ROWS)
         self.write_engagement("fixture-cache")
         self.write_decision("Entries expire after ten minutes.")
@@ -302,24 +312,44 @@ class SourceRebindTests(unittest.TestCase):
         self.revise_solution(rule, extra)
         self.revise()
 
+    def fold_in(self, decision: str = EVICTION, alias: str = "SD-002", rows: dict = EVICTION_ROWS,
+                **switches: str) -> None:
+        """A Solution revision that only adds a decision, its engagement and its landscape rows."""
+        if switches or not self.added_rows:
+            self.switch_on(**switches)
+        slug = decision.rsplit("/", 1)[1]
+        name = slug.removeprefix("fixture-")
+        (self.docs / f"{decision}.md").write_text(
+            DECISION_TEXT.format(rule=f"The {name} rule holds.", extra=f"aliases:\n  - {alias}\n")
+            .replace("Fixture cache", f"Fixture {name}").replace("SOL-CACHE-00", f"SOL-{name.upper()}-00"),
+            encoding="utf-8")
+        self.write_engagement(slug)
+        self.added_rows.append(rows)
+        self.write_landscape(CACHE_ROWS, *self.added_rows)
+        self.commit(f"Solution revision: the {name} decision folded into the landscape")
+        self.pin_solution()
+        self.revise()
+
     def epic_rounds(self, slug: str) -> list[str]:
         return sorted(path.name for path in (self.docs / "backlog/epics" / slug / "reviews").glob("*.md"))
 
     # Tests.
 
     def test_a_solution_revision_no_story_cites_reuses_every_epic_review(self):
-        self.rebind_revision()
+        self.fold_in()
         receipt = self.record()
         self.assertEqual([(row["id"], row["disposition"]) for row in receipt["epics"]],
                          [("EP-001", "reused"), ("EP-002", "reused")])
         change, = receipt["binding_changes"]
-        self.assertEqual((change["stage"], change["changed_documents"], change["changed_ids"]),
-                         ("solution-design", [f"{DECISION}.md"], ["SOL-CACHE-001"]))
+        self.assertEqual((change["stage"], change["changed_documents"]),
+                         ("solution-design", [f"{EVICTION}.md", "solution-design/engagements/fixture-eviction.md",
+                                              "solution-design/landscape.md"]))
+        self.assertIn("SOL-EVICTION-001", change["changed_ids"])
         self.assertEqual(receipt["root_scope"]["cited_stories"], [])
         manifest = backlog_review_inputs.manifest(self.docs)
         self.assertEqual(manifest["source_rebind"], rebind.VALUE)
-        self.assertIn(f"{DECISION}.md", manifest["paths"])
-        self.assertIn("SOL-CACHE-001", manifest["check"]["source_rebind"]["source_diff"][0]["diff"])
+        self.assertIn(f"{EVICTION}.md", manifest["paths"])
+        self.assertIn("SOL-EVICTION-001", manifest["check"]["source_rebind"]["source_diff"][0]["diff"])
         self.assertTrue(all(row["read"] == "summary"
                             for row in manifest["check"]["backlog_graph"]["stories"].values()))
         with self.assertRaisesRegex(backlog_review_inputs.InputError, "reuses its approved review"):
@@ -339,7 +369,7 @@ class SourceRebindTests(unittest.TestCase):
         self.assertEqual((chain.aliases, chain.impacted), ({}, frozenset()))
 
     def test_a_changed_story_reviews_only_its_epic(self):
-        self.rebind_revision()
+        self.fold_in()
         story = self.docs / "backlog/epics" / SECOND / "stories/bl-001/story.md"
         story.write_text(story.read_text(encoding="utf-8").replace(
             "Administrative bulk operations remain outside this slice.",
@@ -369,7 +399,7 @@ class SourceRebindTests(unittest.TestCase):
         self.assertEqual(row["disposition"], "reviewed")
         self.assertIn(f"backlog/epics/{FIRST}/stories/auth-01/story.md: cites SOL-CACHE-001",
                       row["impacted_by"])
-        self.assertEqual(receipt["root_scope"]["cited_stories"], ["AUTH-01"])
+        self.assertIn("AUTH-01", receipt["root_scope"]["cited_stories"])
 
     def test_a_reused_review_that_quotes_a_changed_document_is_impacted(self):
         self.cite_in_predecessor(
@@ -389,7 +419,7 @@ class SourceRebindTests(unittest.TestCase):
         self.assertIn(f"{target}.md: inbound {DECISION}", row["impacted_by"])
 
     def test_a_root_reader_finding_moves_an_epic_to_review(self):
-        self.rebind_revision()
+        self.fold_in()
         receipt = self.record("EP-001")
         row = next(row for row in receipt["epics"] if row["id"] == "EP-001")
         self.assertEqual((row["disposition"], row["impacted_by"]), ("reviewed", [
@@ -461,15 +491,14 @@ class SourceRebindTests(unittest.TestCase):
             self.plan()
 
     def test_two_rebinds_chain_and_a_crlf_receipt_still_replays(self):
-        self.rebind_revision()
+        self.fold_in()
         receipt = self.record()
         self.complete_root(3, keep_compiled=True)
         self.assertEqual(self.apply(receipt)[0], 0)
         self.commit("First source rebind")
         middle = self.package_hash()
         self.predecessor = self.head()
-        self.revise_solution("Entries expire after two minutes.")
-        self.revise()
+        self.fold_in(AUDIT, "SD-003", AUDIT_ROWS)
         receipt = self.record()
         self.complete_root(4, keep_compiled=True)
         code, output = self.apply(receipt)
@@ -498,7 +527,7 @@ class SourceRebindTests(unittest.TestCase):
             backlog_migration.pin_chain(self.docs, self.before_hash, self.package_hash())
 
     def test_a_sealed_receipt_replays_only_from_its_exact_git_evidence(self):
-        self.rebind_revision()
+        self.fold_in()
         receipt = self.record()
         self.complete_root(3, keep_compiled=True)
         self.assertEqual(self.apply(receipt)[0], 0)
@@ -550,7 +579,7 @@ class SourceRebindTests(unittest.TestCase):
     def test_delivery_keeps_its_execution_approval_across_a_rebind(self):
         root = self.approved_delivery()
         preserved = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
-        self.rebind_revision()
+        self.fold_in()
         receipt = self.record()
         self.complete_root(3, keep_compiled=True)
         self.assertEqual(self.apply(receipt)[0], 0)
@@ -576,15 +605,20 @@ class SourceRebindTests(unittest.TestCase):
         self.assertIn("Delivery backlog_package_hash is stale against the approved backlog", errors)
 
 
-    def assert_epic_impact_reaches_delivery(self, *epics: str) -> None:
+    def assert_epic_impact_reaches_delivery(self, *epics: str, edit: bool = False) -> None:
         """EP-001 is impacted as a whole: its story is read in full and its Delivery Item refused."""
         self.approved_delivery()
-        self.rebind_revision()
+        if edit:
+            self.rebind_revision()
+        else:
+            self.fold_in()
         receipt = self.record(*epics)
         self.assertIn(f"backlog/epics/{FIRST}/stories/auth-01/story.md: epic impacted",
                       next(row for row in receipt["epics"] if row["id"] == "EP-001")["impacted_by"])
         self.assertIn("AUTH-01", receipt["root_scope"]["cited_stories"])
         self.review_epic(FIRST, 3)
+        if edit:
+            self.review_epic(SECOND, 2)
         manifest = backlog_review_inputs.manifest(self.docs, epic="EP-001")
         self.assertEqual(manifest["check"]["backlog_graph"]["stories"]["AUTH-01"]["read"], "full")
         self.complete_root(3, keep_compiled=True)
@@ -601,7 +635,7 @@ class SourceRebindTests(unittest.TestCase):
     def test_a_reused_review_citation_refuses_its_delivery_items_and_reads_their_stories(self):
         self.cite_in_predecessor(self.docs / "backlog/epics" / FIRST / "reviews/round-2-epic-review.md",
                                  f"AUTH-01 relies on [[{DECISION}|Fixture cache]].", review=True)
-        self.assert_epic_impact_reaches_delivery()
+        self.assert_epic_impact_reaches_delivery(edit=True)
 
     def test_a_decision_status_change_impacts_its_citing_stories(self):
         story = self.docs / "backlog/epics" / FIRST / "stories/auth-01/story.md"
@@ -638,30 +672,21 @@ class SourceRebindTests(unittest.TestCase):
             self.plan()
 
     def test_a_landscape_update_for_a_new_decision_reuses_every_unrelated_epic(self):
-        self.switch_on()
-        path = self.docs / f"{EVICTION}.md"
-        path.write_text(DECISION_TEXT.format(rule="Idle sessions are evicted first.",
-                                             extra="aliases:\n  - SD-002\n")
-                        .replace("Fixture cache", "Fixture eviction").replace("SOL-CACHE-00", "SOL-EVICT-00"),
-                        encoding="utf-8")
-        self.write_engagement("fixture-eviction")
-        self.write_landscape(CACHE_ROWS, EVICTION_ROWS)
-        self.commit("Solution revision: an eviction decision folded into the landscape")
-        self.pin_solution()
-        self.revise()
+        self.fold_in()
         receipt = self.plan()
+        self.assertEqual([(row["id"], row["disposition"]) for row in receipt["epics"]],
+                         [("EP-001", "reused"), ("EP-002", "reused")])
         change, = receipt["binding_changes"]
         self.assertEqual(change["changed_documents"], [
-            f"{EVICTION}.md", "solution-design/engagements/fixture-eviction.md", rebind.LANDSCAPE])
+            f"{EVICTION}.md", "solution-design/engagements/fixture-eviction.md", "solution-design/landscape.md"])
         self.assertEqual(change["changed_rows"], [
             "Components / cache eviction", "Summary / fixture-eviction",
             "Target / Idle sessions are evicted first ([[solution-design/decisions/fixture-eviction\\|SD-002]]).",
             "Transition / Add idle eviction ([[solution-design/decisions/fixture-eviction\\|SD-002]]);"
             " precondition: the session cache."])
-        self.assertEqual([(row["id"], row["disposition"]) for row in receipt["epics"]],
-                         [("EP-001", "reused"), ("EP-002", "reused")])
+        self.assertTrue(rebind.mechanical(receipt))
 
-    def test_a_changed_landscape_row_impacts_only_the_stories_citing_its_decision(self):
+    def test_a_modified_landscape_row_reviews_every_story_the_landscape_constrains(self):
         story = self.docs / "backlog/epics" / SECOND / "stories/bl-001/story.md"
         self.cite_in_predecessor(story, f"Billing lookups use [[{DECISION}|the session cache]].")
         self.switch_on()
@@ -673,20 +698,24 @@ class SourceRebindTests(unittest.TestCase):
         receipt = self.plan()
         change, = receipt["binding_changes"]
         self.assertEqual((change["changed_documents"], change["changed_rows"]),
-                         ([rebind.LANDSCAPE], ["Components / session cache"]))
+                         (["solution-design/landscape.md"], ["Components / session cache"]))
         epics = {row["id"]: row for row in receipt["epics"]}
-        self.assertEqual(epics["EP-001"]["disposition"], "reused")
+        self.assertIn(f"backlog/epics/{FIRST}/stories/auth-01/story.md: cites solution-design/landscape",
+                      epics["EP-001"]["impacted_by"])
         self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: cites {DECISION}",
                       epics["EP-002"]["impacted_by"])
+        self.assertFalse(change["additions_only"])
+        self.assertFalse(rebind.mechanical(receipt))
         with self.subTest(case="a landscape change outside its rows"):
-            props, body = compiler.parse_front_matter(self.docs / rebind.LANDSCAPE)
+            props, body = compiler.parse_front_matter(self.docs / "solution-design/landscape.md")
             self.assertIsNone(rebind.landscape_delta(
                 compiler.front_matter(props, body),
                 compiler.front_matter(props, body.replace("Nothing built yet.", "A cache runs."))))
 
     def test_the_source_gate_approves_only_a_mechanical_receipt(self):
-        self.rebind_revision(dependent_rebind_gate="with_source")
+        self.fold_in(dependent_rebind_gate="with_source")
         receipt = self.record()
+        self.assertEqual({row["disposition"] for row in receipt["epics"]}, {"reused"})
         code, output = quiet(rebind.command, SimpleNamespace(
             docs=str(self.docs), command="plan-source-rebind", source_commit=self.predecessor, review_epic=[]))
         self.assertEqual((code, json.loads(output)["mechanical"]), (0, True))
@@ -696,9 +725,9 @@ class SourceRebindTests(unittest.TestCase):
         self.assertEqual(rebind.receipts(self.docs)[0]["owner_approval"], receipt["owner_approval"])
 
     def test_a_receipt_that_is_not_mechanical_takes_the_ordinary_approval(self):
-        self.rebind_revision(dependent_rebind_gate="with_source")
+        self.fold_in(dependent_rebind_gate="with_source")
         receipt = self.record("EP-001")
-        self.assertFalse(rebind.mechanical(receipt))
+        self.assertEqual(receipt["reader_epics"], ["EP-001"])
         self.review_epic(FIRST, 3)
         self.complete_root(3, keep_compiled=True)
         code, output = self.apply(receipt, "EP-001", source_gate=True)
@@ -708,16 +737,16 @@ class SourceRebindTests(unittest.TestCase):
         self.assertEqual(code, 0, output)
 
     def test_the_source_gate_needs_the_with_source_value(self):
-        self.rebind_revision()
+        self.fold_in()
         receipt = self.record()
-        self.assertTrue(rebind.mechanical(receipt))
+        self.assertEqual({row["disposition"] for row in receipt["epics"]}, {"reused"})
         self.complete_root(3, keep_compiled=True)
         code, output = self.apply(receipt, source_gate=True)
         self.assertEqual(code, 1, output)
         self.assertIn("--source-gate needs dependent_rebind_gate with_source", output)
 
     def test_plain_approve_refuses_a_source_rebind_round_even_with_its_receipt_file(self):
-        self.rebind_revision()
+        self.fold_in()
         receipt = self.record()
         self.complete_root(3, keep_compiled=True)
         path = rebind.receipt_path(self.docs, receipt["owner_approval"])
@@ -729,7 +758,7 @@ class SourceRebindTests(unittest.TestCase):
         self.assertEqual(compiler.parse_front_matter(self.docs / "backlog/backlog.md")[0]["status"], "draft")
 
     def test_the_pin_chain_skips_malformed_and_uncommitted_receipt_files(self):
-        self.rebind_revision()
+        self.fold_in()
         receipt = self.record()
         self.complete_root(3, keep_compiled=True)
         self.assertEqual(self.apply(receipt)[0], 0)
@@ -739,6 +768,8 @@ class SourceRebindTests(unittest.TestCase):
         (migrations / "broken.json").write_text("{", encoding="utf-8")
         stray = self.docs / rebind.RECEIPTS / ("f" * 64 + ".json")
         stray.write_text("{}", encoding="utf-8")
+        chain = backlog_migration.pin_chain(self.docs, self.before_hash, self.package_hash())
+        self.assertEqual((chain.aliases, chain.impacted), ({}, frozenset()))
         skipped = []
         chain = backlog_migration.pin_chain(self.docs, self.before_hash, self.package_hash(), skipped)
         self.assertEqual((chain.aliases, chain.impacted), ({}, frozenset()))
@@ -814,6 +845,133 @@ class SourceRebindTests(unittest.TestCase):
         row = next(row for row in receipt["epics"] if row["id"] == "EP-002")
         self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: implements REQ-001", row["impacted_by"])
 
+    def test_an_edited_decision_the_landscape_indexes_reviews_every_story_it_constrains(self):
+        self.rebind_revision()
+        receipt = self.plan()
+        change, = receipt["binding_changes"]
+        self.assertEqual(change["changed_documents"], [f"{DECISION}.md"])
+        for row in receipt["epics"]:
+            self.assertEqual(row["disposition"], "reviewed")
+        self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: closure",
+                      next(row for row in receipt["epics"] if row["id"] == "EP-002")["impacted_by"])
+        self.assertFalse(change["additions_only"])
+        self.assertFalse(rebind.mechanical(receipt))
+
+    def test_a_superseded_decision_repointed_in_the_landscape_is_never_mechanical(self):
+        self.switch_on(dependent_rebind_gate="with_source")
+        new = "solution-design/decisions/fixture-cache-memcached"
+        (self.docs / f"{new}.md").write_text(
+            DECISION_TEXT.format(rule="Entries expire after one minute.", extra="aliases:\n  - SD-002\n")
+            .replace("redis", "memcached").replace("Fixture cache", "Fixture cache memcached")
+            .replace("SOL-CACHE-00", "SOL-MEMC-00"), encoding="utf-8")
+        old = self.docs / f"{DECISION}.md"
+        old.write_text(old.read_text(encoding="utf-8").replace("status: accepted", "status: superseded")
+                       .replace("status/accepted", "status/superseded")
+                       .replace("tags:", f'superseded_by: "[[{new}]]"\ntags:'), encoding="utf-8")
+        self.write_landscape({key: value.replace(DECISION + "\\|SD-001", new + "\\|SD-002")
+                              for key, value in CACHE_ROWS.items()})
+        self.commit("Supersede the session cache decision")
+        self.pin_solution()
+        self.revise()
+        receipt = self.record()
+        change, = receipt["binding_changes"]
+        self.assertIn("Components / session cache", change["changed_rows"])
+        for row in receipt["epics"]:
+            self.assertEqual(row["disposition"], "reviewed", row)
+        story = f"backlog/epics/{SECOND}/stories/bl-001/story.md"
+        self.assertIn(f"{story}: cites solution-design/landscape",
+                      next(row for row in receipt["epics"] if row["id"] == "EP-002")["impacted_by"])
+        self.assertEqual(receipt["root_scope"]["cited_stories"], ["AUTH-01", "BL-001"])
+        self.assertFalse(change["additions_only"])
+        self.complete_root(3, keep_compiled=True)
+        code, output = self.apply(receipt, source_gate=True)
+        self.assertEqual(code, 1, output)
+        self.assertIn("the receipt is not mechanical", output)
+
+    def test_a_rejected_decision_reaches_a_story_citing_only_the_landscape_and_its_delivery(self):
+        self.approved_delivery()
+        self.switch_on()
+        path = self.docs / f"{DECISION}.md"
+        path.write_text(path.read_text(encoding="utf-8").replace("status: accepted", "status: rejected")
+                        .replace("status/accepted", "status/rejected"), encoding="utf-8")
+        landscape = self.docs / "solution-design/landscape.md"
+        landscape.write_text(landscape.read_text(encoding="utf-8").replace(
+            "| session cache | buy |", "| session cache | rejected |"), encoding="utf-8")
+        self.commit("Reject the session cache decision")
+        self.pin_solution()
+        self.revise()
+        story = self.docs / "backlog/epics" / FIRST / "stories/auth-01/story.md"
+        self.assertNotIn(DECISION, story.read_text(encoding="utf-8"))
+        receipt = self.record()
+        row = next(row for row in receipt["epics"] if row["id"] == "EP-001")
+        self.assertEqual(row["disposition"], "reviewed")
+        self.assertIn(f"backlog/epics/{FIRST}/stories/auth-01/story.md: cites solution-design/landscape",
+                      row["impacted_by"])
+        self.review_epic(FIRST, 3)
+        self.review_epic(SECOND, 2)
+        self.complete_root(3, keep_compiled=True)
+        code, output = self.apply(receipt)
+        self.assertEqual(code, 0, output)
+        self.commit("Approved source rebind")
+        code, output = self.delivery_check()
+        self.assertEqual(code, 1, output)
+        self.assertIn("Story AUTH-01 is impacted by a source rebind", output)
+
+    def test_a_design_system_page_override_reuses_every_epic(self):
+        first, second = "sha256:" + "d" * 64, "sha256:" + "e" * 64
+        master = self.docs / "design-system/MASTER.md"
+        props, body = compiler.parse_front_matter(master)
+        props.update(status="approved", revision=1, baseline_hash=first)
+        master.write_text(compiler.front_matter(props, body), encoding="utf-8")
+        self.commit("Design System revision 1 approved")
+        self.receipts[bindings.DESIGN] = first
+        root = self.docs / "backlog/backlog.md"
+        root_props, root_body = compiler.parse_front_matter(root)
+        root_props["input_bindings"] = [f"design-system|{bindings.DESIGN}|{first}"
+                                        if value.startswith("design-system|") else value
+                                        for value in root_props["input_bindings"]]
+        root.write_text(compiler.front_matter(root_props, root_body), encoding="utf-8")
+        self.cite_in_predecessor(self.docs / "backlog/epics" / SECOND / "stories/bl-001/story.md",
+                                 "Billing copy is unchanged.")
+        self.switch_on()
+        page = self.docs / "design-system/pages/admin-reports.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text("---\ntype: page-override\ntitle: Admin reports\n---\n\n# Admin reports\n\n"
+                        "Dense tables.\n", encoding="utf-8")
+        props, body = compiler.parse_front_matter(master)
+        props.update(revision=2, supersedes_hash=first, baseline_hash=second)
+        master.write_text(compiler.front_matter(props, body), encoding="utf-8")
+        self.commit("Design System revision 2: an admin page override only")
+        self.receipts[bindings.DESIGN] = second
+        self.revise()
+        receipt = self.plan()
+        change, = (change for change in receipt["binding_changes"] if change["stage"] == "design-system")
+        self.assertEqual(change["changed_documents"], ["design-system/pages/admin-reports.md"])
+        self.assertEqual({row["disposition"] for row in receipt["epics"]}, {"reused"})
+
+    def test_an_experience_revision_of_anchor_stamps_only_changes_no_document(self):
+        folder = self.docs / "experience-design/experiences/checkout"
+        folder.mkdir(parents=True, exist_ok=True)
+        anchor = folder / "experience.md"
+        anchor.write_text("---\ntype: experience\nstatus: approved\nrevision: 1\napproval_revision: 1\n"
+                          "registry_hash: sha256:" + "1" * 64 + "\ntags:\n  - status/approved\n"
+                          "  - doc/experience\n---\n\n# Checkout\n\nPay by card.\n", encoding="utf-8")
+        self.commit("Experience revision 1")
+        before = self.head()
+        anchor.write_text(anchor.read_text(encoding="utf-8").replace("revision: 1\n", "revision: 2\n")
+                          .replace("1" * 64, "3" * 64).replace("  - doc/experience\n", ""), encoding="utf-8")
+        self.commit("Experience revision 2: its approval stamps only")
+        prefix = rebind.docs_prefix(self.project, self.docs)
+        changed, _texts, _others = rebind.package_diff(
+            self.project, prefix, f"{prefix}/experience-design/experiences/checkout", before, self.head())
+        self.assertEqual(changed, [])
+        anchor.write_text(anchor.read_text(encoding="utf-8").replace("Pay by card.", "Pay by invoice."),
+                          encoding="utf-8")
+        self.commit("Experience revision 3: an authored change")
+        changed, _texts, _others = rebind.package_diff(
+            self.project, prefix, f"{prefix}/experience-design/experiences/checkout", before, self.head())
+        self.assertEqual(changed, ["experience-design/experiences/checkout/experience.md"])
+
     # Helpers that rewrite the approved predecessor.
 
     def cite_in_predecessor(self, path: Path, line: str, *, review: bool = False) -> None:
@@ -885,7 +1043,7 @@ class SourceRebindUnitTests(unittest.TestCase):
             init_repository(project, initial_branch="main")
             docs = project / "workspace/docs"
             ledger = docs / "experience-design/_ledger/application-revisions.json"
-            landscape = docs / rebind.LANDSCAPE
+            landscape = docs / "solution-design/landscape.md"
             ledger.parent.mkdir(parents=True)
             landscape.parent.mkdir(parents=True)
             commits, rows, previous = [], [], "sha256:" + "0" * 64
@@ -916,6 +1074,28 @@ class SourceRebindUnitTests(unittest.TestCase):
                 ("a", "application@r1"), ("b", "application@r2"), ("d", "checkout@r2"))],
                 [commits[0], commits[1], commits[1]])
             self.assertIsNone(rebind.receipt_commit(project, anchor, hashes["d"], "checkout@r1"))
+
+    def test_a_reordered_transition_counts_the_whole_landscape(self):
+        head = ("---\ntitle: L\npackage_hash: x\n---\n# L\n\n## Summary\n\ntext\n\n## Current\n\nnone\n\n"
+                "## Target\n\n## Transition\n\n")
+        first, second = "- Introduce cache ([[d/a\\|SD-001]]).\n", "- Add eviction ([[d/b\\|SD-002]]).\n"
+        before = head + first + second + "\n## Components\n"
+        self.assertIsNone(rebind.landscape_delta(before, head + second + first + "\n## Components\n"))
+        added = rebind.landscape_delta(before, head + first + "- Add audit ([[d/c\\|SD-003]]).\n" + second
+                                       + "\n## Components\n")
+        self.assertEqual((added["links"], added["added_only"]), (["d/c"], True))
+
+    def test_a_malformed_application_ledger_holds_nothing(self):
+        for packages in (5, "checkout@r1", {"result_ref": "checkout@r1"}):
+            data = json.dumps({"revisions": [{"previous_application_hash": "sha256:" + "0" * 64,
+                                              "application_hash": "sha256:" + "1" * 64,
+                                              "packages": packages}]}).encode()
+            with self.subTest(packages=packages):
+                self.assertFalse(rebind.ledger_holds(data, "checkout@r1", "sha256:" + "1" * 64))
+                self.assertFalse(rebind.ledger_holds(data, "application@r1", "sha256:" + "1" * 64))
+        for value in (b"[]", b'{"revisions": 5}', b'{"revisions": [5]}', b"\xff"):
+            with self.subTest(ledger=value):
+                self.assertFalse(rebind.ledger_holds(value, "application@r1", "sha256:" + "1" * 64))
 
     def test_citations_respect_identifier_and_link_boundaries(self):
         links, ids = ["solution-design/decisions/cache"], ["SOL-CACHE-001"]

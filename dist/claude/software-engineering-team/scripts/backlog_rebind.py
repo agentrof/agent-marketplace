@@ -103,20 +103,39 @@ def content_hash(text: str) -> str:
     return byte_hash(content_form(text).encode("utf-8"))
 
 
-def upstream_form(text: str, *, anchor: bool) -> str:
+def anchor_stamps(path: str) -> frozenset[str]:
+    """The fields an anchor note's own stage compiler writes as lifecycle, beyond the shared stamps."""
+    if path.endswith("design-system/MASTER.md"):
+        import design_system_compile
+        return frozenset(design_system_compile.MACHINE_FIELDS) | {"revision"}
+    if re.search(r"(?:^|/)experience-design/experiences/[^/]+/experience\.md$", path):
+        import experience_compile
+        return experience_compile.REBIND_KEYS - {"input_bindings"}
+    return frozenset()
+
+
+def upstream_form(text: str, *, anchor: bool, stamps: frozenset[str] = frozenset()) -> str:
     """An upstream document without what its approval writes, in comparable form.
 
-    Only a package anchor note loses its status and status tags; an authored
-    note's status, such as a decision's, is content.
+    Only a package anchor note loses its status, status tags and the ``stamps``
+    its stage compiler writes; an authored note's status, such as a
+    decision's, is content.
     """
     text = lf(text)
     lines = text.split("\n")
-    stamped = UPSTREAM_LIFECYCLE_KEYS if anchor else UPSTREAM_LIFECYCLE_KEYS - {"status"}
+    stamped = UPSTREAM_LIFECYCLE_KEYS | stamps if anchor else UPSTREAM_LIFECYCLE_KEYS - {"status"}
     if lines and lines[0] == "---" and "---" in lines[1:]:
         end = lines.index("---", 1)
-        kept = [line for line in lines[1:end]
-                if line.partition(":")[0].strip() not in stamped
-                and not (anchor and re.match(r"^\s*-\s*[\"']?status/[a-z0-9-]+[\"']?\s*$", line))]
+        kept, block = [], False
+        for line in lines[1:end]:
+            # A stripped top-level key takes its list or block lines with it.
+            if block and (line[:1].isspace() or line.startswith("-")):
+                continue
+            stripped = line.partition(":")[0].strip() in stamped
+            block = stripped and not line[:1].isspace()
+            if stripped or (anchor and re.match(r"^\s*-\s*[\"']?status/[a-z0-9-]+[\"']?\s*$", line)):
+                continue
+            kept.append(line)
         lines = ["---", *kept, *lines[end:]]
     return backlog.without_generated_relations("\n".join(lines).rstrip() + "\n")
 
@@ -131,7 +150,8 @@ def landscape_units(text: str) -> tuple[str, dict[tuple[str, ...], str]] | None:
     """The landscape's rows and list items by section and key, and everything else.
 
     A Components or Engagements row is keyed by its first cell, a Target delta
-    or Transition step by its text. None when one section repeats a key.
+    or Transition step by its text, in document order. None when one section
+    repeats a key.
     """
     form = upstream_form(text, anchor=True)
     rest, units, h2, h3 = [], {}, "", ""
@@ -162,17 +182,24 @@ def landscape_units(text: str) -> tuple[str, dict[tuple[str, ...], str]] | None:
 
 def landscape_delta(old: str | None, new: str | None) -> dict | None:
     """The changed landscape rows and the links and ids they carry, or None when
-    the landscape changed outside its rows and must count as one changed document."""
+    the landscape changed outside its rows, or reordered rows or steps both
+    versions hold, and must count as one changed document.
+
+    ``added_only`` says every changed row is new: the landscape gained rows
+    and kept every existing one byte for byte.
+    """
     if old is None or new is None:
         return None
     before, after = landscape_units(old), landscape_units(new)
-    if before is None or after is None or before[0] != after[0]:
+    if before is None or after is None or before[0] != after[0] \
+            or [key for key in before[1] if key in after[1]] != [key for key in after[1] if key in before[1]]:
         return None
-    rows, links, ids = [], set(), set()
+    rows, links, ids, added_only = [], set(), set(), True
     for key in sorted(set(before[1]) | set(after[1])):
         a, b = before[1].get(key), after[1].get(key)
         if a == b:
             continue
+        added_only = added_only and a is None
         rows.append(" / ".join(part for part in (key[0], key[1], key[3]) if part))
         for target, alias in link_parts(a or "") | link_parts(b or ""):
             links.add(target)
@@ -180,7 +207,7 @@ def landscape_delta(old: str | None, new: str | None) -> dict | None:
                 ids.add(alias)
         if SOURCE_ROW_ID.match(key[3]):
             ids.add(key[3])
-    return {"rows": rows, "links": sorted(links), "ids": sorted(ids)}
+    return {"rows": rows, "links": sorted(links), "ids": sorted(ids), "added_only": added_only}
 
 
 def note_names(text: str | None) -> set[str]:
@@ -273,7 +300,8 @@ def ledger_holds(data: bytes, reference: str, digest: str) -> bool:
     except (UnicodeError, json.JSONDecodeError):
         return False
     rows = value.get("revisions") if isinstance(value, dict) else None
-    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows) \
+            or not all(isinstance(row.get("packages") or [], list) for row in rows):
         return False
     previous = application.GENESIS_APPLICATION_HASH
     for row in rows:
@@ -284,7 +312,7 @@ def ledger_holds(data: bytes, reference: str, digest: str) -> bool:
         return any(row.get("application_hash") == digest for row in rows)
     return any(isinstance(package, dict) and package.get("result_ref") == reference
                and package.get("package_hash") == digest
-               for row in rows for package in row.get("packages") or [] if isinstance(row.get("packages"), list))
+               for row in rows for package in row.get("packages") or [])
 
 
 def anchor_holds(data: bytes, anchor: str, reference: str, digest: str) -> bool:
@@ -373,8 +401,9 @@ def package_diff(project: Path, prefix: str, folder: str, before: str | None, af
         a, b = (lf(data.decode("utf-8")) if (data := files.get(path)) is not None else None
                 for files in (files_old, files_new))
         anchor = ANCHOR_NOTE.fullmatch(path[strip:]) is not None
-        if (a is None) != (b is None) or (a is not None and upstream_form(a, anchor=anchor)
-                                          != upstream_form(b, anchor=anchor)):
+        stamps = anchor_stamps(path[strip:]) if anchor else frozenset()
+        if (a is None) != (b is None) or (a is not None and upstream_form(a, anchor=anchor, stamps=stamps)
+                                          != upstream_form(b, anchor=anchor, stamps=stamps)):
             changed.append(path[strip:])
             texts[path[strip:]] = (a, b)
     return changed, texts, others
@@ -483,7 +512,7 @@ def cites(text: str, links: list[str], ids: list[str]) -> list[str]:
 
 
 def closure_scope(docs: Path, present: list[str], deleted: dict[str, str], links: list[str],
-                  ids: list[str]) -> tuple[list[str], list[str]]:
+                  ids: list[str], *, barrier: bool) -> tuple[list[str], list[str]]:
     """The relation closure of the changed sources, and every graph gap that could hide an edge
     between them and the backlog.
 
@@ -494,9 +523,11 @@ def closure_scope(docs: Path, present: list[str], deleted: dict[str, str], links
     import task_inputs
     api = task_inputs.closure_api()
     try:
-        # The landscape indexes every decision: a note constrained by it depends
-        # on the rows it cites, so an unchanged landscape passes no change on.
-        raw = task_inputs.closure_raw(api, docs, present, deleted, {"barrier_paths": [LANDSCAPE]})
+        # The landscape indexes every decision. When the sources only gained
+        # notes and rows, a note constrained by it depends on no changed one,
+        # so the landscape passes no change on; any other change passes on.
+        raw = task_inputs.closure_raw(api, docs, present, deleted,
+                                      {"barrier_paths": [LANDSCAPE]} if barrier else None)
         rows = {key: raw[key] for key in ("closure", "changed", "graph_gaps")}
         closure = sorted({task_inputs.docs_relative(task_inputs.row_path(row)) for row in rows["closure"]})
     except (KeyError, TypeError, ValueError) as exc:
@@ -559,8 +590,10 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
     requirement_changed = requirement["before"] != requirement["after"]
 
     # documents: every changed source document; targets: what a backlog note
-    # depends on when it cites it, which narrows a landscape to its changed rows.
-    changes, documents, targets, ids, upstream_texts = [], set(), set(), set(), {}
+    # depends on when it cites it, which narrows a landscape to its changed rows
+    # while the sources only gain notes and rows. edits: an existing source
+    # document changed, so the landscape counts whole and passes changes on.
+    changes, documents, targets, ids, upstream_texts, edits = [], set(), set(), set(), {}, False
     for key in sorted(after_rows):
         old_ref, old_hash = before_rows.get(key, (None, None))
         new_ref, new_hash = after_rows[key]
@@ -585,14 +618,16 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
                                 " document changed" + (f" (changed files: {', '.join(others)})" if others
                                                        else "") + f"; {STANDARD}")
         upstream_texts.update(texts)
-        changed_ids, rows = set(), []
+        changed_ids, rows, additions = set(), [], True
         for path in changed:
             delta = landscape_delta(*texts[path]) if path == LANDSCAPE else None
             if delta is not None:
                 rows = delta["rows"]
                 targets.update(link + ".md" for link in delta["links"])
                 changed_ids |= set(delta["ids"])
+                additions = additions and delta["added_only"]
                 continue
+            additions = additions and texts[path][0] is None
             targets.add(path)
             old_rows, new_rows = source_rows(texts[path][0] or ""), source_rows(texts[path][1] or "")
             changed_ids |= {row for row in set(old_rows) | set(new_rows)
@@ -602,14 +637,18 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
                   "before_commit": before_commit, "after_commit": after_commit,
                   "changed_documents": changed, "changed_ids": sorted(changed_ids),
                   "changed_rows": rows, "changed_files": others}
+        if stage == "solution-design":
+            change["additions_only"] = additions
         if old_ref is not None and old_ref != new_ref:
             change["before_ref"] = old_ref
         changes.append(change)
+        edits = edits or not additions
         documents.update(changed)
         ids |= changed_ids
     if not changes and not requirement_changed:
         raise RebindRefused(f"the revision rebinds no source; {STANDARD}")
     if requirement_changed:
+        edits = edits or old_text is not None
         for path, text in ((old_path, old_text), (new_path, new_text)):
             if path is not None:
                 documents.add(path)
@@ -622,6 +661,8 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
                 upstream_texts[old_path] = (old_text, None)
             if new_path is not None:
                 upstream_texts[new_path] = (None, new_text)
+    if edits and LANDSCAPE in documents:
+        targets.add(LANDSCAPE)
     links = sorted(path[:-3] for path in targets)
     changed_ids = sorted(ids)
 
@@ -675,7 +716,7 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
         present = [path for path in sorted(targets) if (docs / path).is_file()]
         deleted = {path: texts[0] for path, texts in upstream_texts.items()
                    if texts[1] is None and texts[0] is not None}
-        closure, gaps = closure_scope(docs, present, deleted, links, changed_ids)
+        closure, gaps = closure_scope(docs, present, deleted, links, changed_ids, barrier=not edits)
         if gaps:
             raise RebindRefused("the relation graph has gaps between the backlog and the changed sources: "
                                 + ", ".join(gaps) + f"; {STANDARD}")
@@ -1133,8 +1174,10 @@ def record_root_review(args) -> int:
 
 def mechanical(receipt: dict) -> bool:
     """Whether a source gate may approve the receipt: it reuses every epic's approved
-    review, cites no story, moves no Requirement and carries no root reader finding."""
+    review, cites no story, moves no Requirement, carries no root reader finding
+    and its Solution change only adds notes and landscape rows."""
     return (all(row["disposition"] == "reused" for row in receipt["epics"])
+            and all(change.get("additions_only", True) for change in receipt["binding_changes"])
             and not receipt["root_scope"]["cited_stories"]
             and receipt["requirement"]["before"] == receipt["requirement"]["after"]
             and not receipt["reader_epics"])
@@ -1149,8 +1192,8 @@ def source_gate_findings(docs: Path, receipt: dict) -> list[str]:
         findings.append("--source-gate needs dependent_rebind_gate with_source in the approved Process Policy")
     if not mechanical(receipt):
         findings.append("the receipt is not mechanical: it reviews an epic, cites a story, moves the"
-                        " Requirement or carries a root reader finding; the owner approves its hash"
-                        " through the ordinary backlog approval")
+                        " Requirement, carries a root reader finding or edits an existing Solution note"
+                        " or landscape row; the owner approves its hash through the ordinary backlog approval")
     return findings
 
 

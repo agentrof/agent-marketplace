@@ -181,7 +181,8 @@ At process switch `source_rebind` `receipt_when_unchanged`,
 `plan-source-rebind --source-commit <approved-commit>` derives the
 `backlog-source-rebind-v1` receipt of a revision whose root changes only its
 bindings, Requirement and lifecycle fields: each changed binding with its
-before and after approval commits, changed documents and row ids, every
+before and after approval commits, changed documents and row ids (a Solution
+binding also says whether it only adds notes and landscape rows), every
 story, test plan and epic note's content hash, and each epic as `reviewed`
 with its reasons or `reused` with its approved review. `owner_approval` is
 the hash of the receipt without that field and the sealed

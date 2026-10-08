@@ -21,8 +21,7 @@ from pathlib import Path
 import delivery_compile
 import delivery_git
 from delivery_git import (
-    canonical_github_pr, canonical_refs, commit_message, is_ancestor, run_git,
-    split_remote_note, trailer,
+    canonical_github_pr, canonical_refs, run_git, split_remote_note, trailer,
 )
 
 
@@ -79,9 +78,194 @@ def delivery_trailer_lines(message: str, delivery_id: str) -> bool:
     return any(line.strip() == f"Agentrof-Delivery: {delivery_id}" for line in message.splitlines())
 
 
+class ObjectReader:
+    """One long-lived `git cat-file --batch` that reads objects by exact id, each once.
+
+    *replace* keeps Git's replace refs as the command it stands in for reads
+    them. Objects are immutable by id, so a read is cached for the reader's
+    life; a name Git cannot resolve, or that is not an exact id or an exact
+    id and path, returns None and the caller asks Git the way it always did.
+    """
+
+    def __init__(self, root: Path, replace: bool):
+        self.process = subprocess.Popen(["git", *(() if replace else ("--no-replace-objects",)), "cat-file", "--batch"],
+                                        cwd=root, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        stderr=subprocess.DEVNULL)
+        self.objects: dict[str, tuple[str, str, bytes] | None] = {}
+        self.trees: dict[str, list[tuple[str, str, str]]] = {}
+
+    def close(self) -> None:
+        with contextlib.suppress(OSError):
+            self.process.stdin.close()
+        self.process.wait()
+        self.process.stdout.close()
+
+    def read(self, name: str) -> tuple[str, str, bytes] | None:
+        """The id, type and bytes of *name*, an exact id or an exact id, a colon and a path."""
+        oid, colon, path = name.partition(":")
+        if (not delivery_git.OID_RE.fullmatch(oid) or "\n" in path or "\r" in path
+                or (colon and (not path or path.startswith("/")))):
+            return None
+        if name not in self.objects:
+            self.process.stdin.write(name.encode("utf-8") + b"\n")
+            self.process.stdin.flush()
+            header = self.process.stdout.readline().split()
+            found = None
+            if len(header) == 3 and header[2].isdigit():
+                data = self.process.stdout.read(int(header[2]) + 1)[:-1]
+                found = (header[0].decode("ascii"), header[1].decode("ascii"), data)
+            elif not header:
+                raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: the Git object reader stopped")
+            self.objects[name] = found
+        return self.objects[name]
+
+    def commit(self, oid: str) -> tuple[str, list[str], bytes, bool] | None:
+        """A commit's tree, parents, raw message and whether its header names another encoding."""
+        found = self.read(oid)
+        if found is None or found[1] != "commit":
+            return None
+        header, _blank, message = found[2].partition(b"\n\n")
+        fields = [line.partition(b" ")[::2] for line in header.split(b"\n")]
+        tree = next((value.decode("ascii") for key, value in fields if key == b"tree"), "")
+        lineage = [value.decode("ascii") for key, value in fields if key == b"parent"]
+        return tree, lineage, message, any(key == b"encoding" for key, _value in fields)
+
+    def tree(self, oid: str) -> list[tuple[str, str, str]] | None:
+        """A tree's entries in Git's order, each as its six-digit mode, id and name."""
+        if oid not in self.trees:
+            found = self.read(oid)
+            if found is None or found[1] != "tree":
+                return None
+            entries, data, size, at = [], found[2], len(oid) // 2, 0
+            while at < len(data):
+                space, null = data.index(b" ", at), data.index(b"\0", at)
+                entries.append((f"{int(data[at:space], 8):06o}", data[null + 1:null + 1 + size].hex(),
+                                data[space + 1:null].decode("utf-8")))
+                at = null + 1 + size
+            self.trees[oid] = entries
+        return self.trees[oid]
+
+    def entry(self, commit: str, path: str) -> tuple[str, str] | None | bool:
+        """The mode and id *path* has in *commit*, None where it has nothing, False when unreadable."""
+        found = self.commit(commit)
+        if found is None:
+            return False
+        mode, oid = "040000", found[0]
+        for part in path.split("/"):
+            if mode != "040000":
+                return None
+            entries = self.tree(oid)
+            if entries is None:
+                return False
+            mode, oid = next(((mode, oid) for mode, oid, name in entries if name == part), ("", ""))
+            if not oid:
+                return None
+        return mode, oid
+
+    def listing(self, commit: str, prefix: str) -> list[str] | None:
+        """Every non-tree path under the directory *prefix* of *commit*, as `ls-tree -r` lists it."""
+        top = self.entry(commit, prefix)
+        if top is False:
+            return None
+        if top is None or top[0] != "040000":
+            return []
+        paths: list[str] = []
+
+        def walk(oid: str, base: str) -> bool:
+            entries = self.tree(oid)
+            if entries is None:
+                return False
+            for mode, child, name in entries:
+                if mode == "040000":
+                    if not walk(child, f"{base}/{name}"):
+                        return False
+                else:
+                    paths.append(f"{base}/{name}")
+            return True
+
+        return paths if walk(top[1], prefix) else None
+
+
+# The readers and per-object answers of one closure audit; None outside it.
+_SESSION: dict | None = None
+
+
+@contextlib.contextmanager
+def reading_session(root: Path):
+    """Share one object reader per replace mode and every per-commit answer across one audit's Deliveries.
+
+    A shallow or grafted history keeps parents a raw commit object does not
+    show, so it reads every object the way it always did.
+    """
+    global _SESSION
+    shallow, grafts = (run_git(root, "rev-parse", "--is-shallow-repository", "--git-path", "info/grafts")
+                       .splitlines() + ["", ""])[:2]
+    if _SESSION is not None or shallow != "false" or (root / grafts).exists():
+        yield
+        return
+    _SESSION = {"root": root, "plain": ObjectReader(root, True), "raw": ObjectReader(root, False), "memo": {}}
+    try:
+        yield
+    finally:
+        session, _SESSION = _SESSION, None
+        session["plain"].close()
+        session["raw"].close()
+
+
+def reader(root: Path, kind: str) -> ObjectReader | None:
+    return _SESSION[kind] if _SESSION is not None and _SESSION["root"] == root else None
+
+
+def memoized(root: Path, key: tuple, compute):
+    """*compute*'s answer for *key*, once per audit; keys name exact ids only, so an answer never goes stale."""
+    if _SESSION is None or _SESSION["root"] != root or not all(
+            delivery_git.OID_RE.fullmatch(part) for part in key[1:] if isinstance(part, str)):
+        return compute()
+    memo = _SESSION["memo"]
+    if key not in memo:
+        memo[key] = compute()
+    return memo[key]
+
+
+def text_output(data: bytes) -> str:
+    """Bytes as a text-mode Git pipe returns them: strict UTF-8, universal newlines, stripped."""
+    return data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def commit_message(root: Path, oid: str) -> str:
+    plain = reader(root, "plain")
+    found = plain.commit(oid) if plain else None
+    if found is None or found[3]:
+        return delivery_git.commit_message(root, oid)
+    return text_output(found[2])
+
+
 def has_object(root: Path, oid: str) -> bool:
+    plain = reader(root, "plain")
+    if plain and plain.commit(oid) is not None:
+        return True
     return subprocess.run(["git", "cat-file", "-e", oid + "^{commit}"], cwd=root,
                           capture_output=True, check=False).returncode == 0
+
+
+def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    """Whether *ancestor* is *descendant* or one of its ancestors.
+
+    Within an audit a commit a few parent steps below *descendant* is proven
+    so from the parents themselves; every other answer is Git's.
+    """
+    plain = reader(root, "plain")
+    if plain and delivery_git.OID_RE.fullmatch(ancestor):
+        frontier = [descendant]
+        for _step in range(4):
+            if ancestor in frontier:
+                return True
+            found = [plain.commit(oid) for oid in frontier]
+            if any(entry is None for entry in found):
+                break
+            frontier = [parent for entry in found for parent in entry[1]]
+    return memoized(root, ("is_ancestor", ancestor, descendant),
+                    lambda: delivery_git.is_ancestor(root, ancestor, descendant))
 
 
 def ensure_object(root: Path, remote: str, oid: str, ref: str) -> None:
@@ -139,6 +323,11 @@ def fence_target(root: Path, remote: str) -> str:
 
 
 def tree_paths(root: Path, commit: str, prefix: str) -> list[str]:
+    plain = reader(root, "plain")
+    # A pathspec magic or wildcard character is Git's to match.
+    listed = plain.listing(commit, prefix) if plain and not re.search(r"[*?\[\\]|^:", prefix) else None
+    if listed is not None:
+        return listed
     return delivery_git.git_paths(root, "ls-tree", "-r", "-z", "--name-only", commit, "--", prefix + "/")
 
 
@@ -153,7 +342,17 @@ def package_directory(root: Path, commit: str, delivery_id: str) -> str | None:
 
 
 def tree_note(root: Path, commit: str, relative: str) -> tuple[dict, str]:
-    return split_remote_note(root, commit, relative, delivery_compile.split_note)
+    plain = reader(root, "plain")
+    found = plain.read(f"{commit}:{relative}") if plain else None
+    if found is None or found[1] != "blob":
+        return split_remote_note(root, commit, relative, delivery_compile.split_note)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", suffix=".md", delete=False) as temporary:
+        temporary.write(text_output(found[2]))
+        written = Path(temporary.name)
+    try:
+        return delivery_compile.split_note(written)
+    finally:
+        written.unlink(missing_ok=True)
 
 
 def tree_items(root: Path, commit: str, directory: str) -> dict[str, tuple[str, dict]]:
@@ -180,6 +379,10 @@ def claims_cover(path: str, claims) -> bool:
 
 def merge_base(root: Path, first: str, second: str) -> str | None:
     """The merge base of two commits, or None when their histories share no commit, as an orphan branch's."""
+    return memoized(root, ("merge_base", first, second), lambda: git_merge_base(root, first, second))
+
+
+def git_merge_base(root: Path, first: str, second: str) -> str | None:
     result = subprocess.run(["git", "merge-base", first, second], cwd=root, encoding="utf-8",
                             capture_output=True, check=False)
     if result.returncode == 1 and not result.stdout.strip() and not result.stderr.strip():
@@ -207,8 +410,52 @@ def is_product_path(path: str) -> bool:
 
 
 def tree_delta(root: Path, before: str, after: str) -> list[str]:
-    return delivery_git.git_paths(root, "--no-replace-objects", "diff", "--no-renames", "--name-only", "-z",
-                                  before, after)
+    return list(memoized(root, ("tree_delta", before, after), lambda: delivery_git.git_paths(
+        root, "--no-replace-objects", "diff", "--no-renames", "--name-only", "-z", before, after)))
+
+
+def prefetch_deltas(root: Path, pairs) -> None:
+    """Read the tree_delta of every (before, after) commit pair in one `git diff-tree --stdin` within an audit.
+
+    Git lists each pair under its *after* id. A pair Git cannot read, or a
+    path that spells a listed id and so makes the output ambiguous, leaves
+    every pair to tree_delta's own Git call.
+    """
+    if _SESSION is None or _SESSION["root"] != root:
+        return
+    memo = _SESSION["memo"]
+    pending = list(dict.fromkeys(
+        (before, after) for before, after in pairs
+        if delivery_git.OID_RE.fullmatch(before or "") and delivery_git.OID_RE.fullmatch(after or "")
+        and ("tree_delta", before, after) not in memo))
+    if not pending:
+        return
+    listed = subprocess.run(["git", "--no-replace-objects", "diff-tree", "--stdin", "--always", "-r", "-z",
+                             "--no-renames", "--name-only"], cwd=root,
+                            input="".join(f"{after} {before}\n" for before, after in pending).encode("ascii"),
+                            capture_output=True, check=False)
+    if listed.returncode:
+        return
+    deltas: list[list[str]] = []
+    expected = iter(pending)
+    upcoming = next(expected, None)
+    try:
+        for token in listed.stdout.split(b"\0"):
+            name = token.decode("utf-8")
+            if name and upcoming is not None and name == upcoming[1]:
+                deltas.append([])
+                upcoming = next(expected, None)
+            elif name and deltas:
+                deltas[-1].append(name)
+            elif name:
+                return
+    except UnicodeDecodeError:
+        return
+    ids = {oid for pair in pending for oid in pair}
+    if len(deltas) != len(pending) or any(path in ids for paths in deltas for path in paths):
+        return
+    for pair, paths in zip(pending, deltas):
+        memo[("tree_delta", *pair)] = paths
 
 
 def blobs(root: Path, commit: str, paths) -> dict[str, str]:
@@ -216,6 +463,12 @@ def blobs(root: Path, commit: str, paths) -> dict[str, str]:
     paths = sorted(set(paths))
     if not paths:
         return {}
+    raw = reader(root, "raw")
+    entries = {path: raw.entry(commit, path) for path in paths} if raw else {}
+    if raw and False not in entries.values():
+        # `ls-tree -r` lists what a path names, never a directory itself.
+        return {path: f"{entry[0]} {entry[1]}" for path, entry in entries.items()
+                if entry and entry[0] != "040000"}
     listing = subprocess.run(["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-r", "-z", commit,
                               "--", *paths], cwd=root, capture_output=True, check=False)
     if listing.returncode:
@@ -313,11 +566,15 @@ def recovery(step: str) -> str:
 
 
 def parents(root: Path, oid: str) -> list[str]:
-    return run_git(root, "show", "-s", "--format=%P", oid).split()
+    plain = reader(root, "plain")
+    found = plain.commit(oid) if plain else None
+    return list(found[1]) if found else run_git(root, "show", "-s", "--format=%P", oid).split()
 
 
 def tree_of(root: Path, oid: str) -> str:
-    return run_git(root, "rev-parse", oid + "^{tree}")
+    plain = reader(root, "plain")
+    found = plain.commit(oid) if plain else None
+    return found[0] if found else run_git(root, "rev-parse", oid + "^{tree}")
 
 
 def merge_delta_findings(root: Path, merge: str, first: str, second: str) -> list[str]:
@@ -331,7 +588,8 @@ def merge_delta_findings(root: Path, merge: str, first: str, second: str) -> lis
     if not changed:
         return []
     try:
-        base = delivery_git.unique_merge_base(root, first, second)
+        base = memoized(root, ("unique_merge_base", first, second),
+                        lambda: delivery_git.unique_merge_base(root, first, second))
     except RuntimeError as exc:
         return [f"its merge base is not unique: {exc}"]
     merged, ours, theirs, common = (blobs(root, oid, changed) for oid in (merge, first, second, base))
@@ -342,8 +600,12 @@ def merge_delta_findings(root: Path, merge: str, first: str, second: str) -> lis
 def line_commits(root: Path, head: str, stops: list[str]) -> list[tuple[str, list[str], str]]:
     """The first-parent line from *head* back to *stops*, oldest first, with each commit's parents and message.
 
-    One Git call reads the whole line.
+    One Git call reads the whole line, once per audit.
     """
+    return memoized(root, ("line_commits", head, *stops), lambda: read_line_commits(root, head, stops))
+
+
+def read_line_commits(root: Path, head: str, stops: list[str]) -> list[tuple[str, list[str], str]]:
     listed = subprocess.run(["git", "--no-replace-objects", "-c", "log.showSignature=false", "log", "--no-color",
                              "--first-parent", "-z", "--format=%H %P%n%B", head,
                              *(("--not", *stops) if stops else ()), "--"],
@@ -358,6 +620,19 @@ def line_commits(root: Path, head: str, stops: list[str]) -> list[tuple[str, lis
             oid, *lineage = header.split()
             commits.append((oid, lineage, message.strip()))
     return list(reversed(commits))
+
+
+def line_delta_pairs(root: Path, commits: list[tuple[str, list[str], str]]) -> list[tuple[str, str]]:
+    """The commit pairs whose tree_delta integration_line_findings reads for the merges of a line."""
+    pairs = []
+    for oid, lineage, message in commits:
+        if len(lineage) != 2:
+            continue
+        pairs.append((lineage[0], oid))
+        if trailer(message, "Record") == "item-integration-v1":
+            with contextlib.suppress(RuntimeError, UnicodeDecodeError):
+                pairs.append((trailer(commit_message(root, lineage[1]), "Product-Tip") or "", lineage[1]))
+    return pairs
 
 
 def single_parent_deltas(root: Path, commits: list[str]) -> dict[str, list[str]]:
@@ -406,6 +681,7 @@ def integration_line_findings(root: Path, delivery_id: str, reviewed: str, stops
     resume = recovery(f"rebuild the Integration through /deliver {delivery_id}; only coordinator records may"
                       " change it")
     commits = line_commits(root, reviewed, stops)
+    prefetch_deltas(root, line_delta_pairs(root, commits))
     deltas = single_parent_deltas(root, [oid for oid, lineage, _message in commits if len(lineage) == 1])
     package = package_directory(root, reviewed, delivery_id)
     reviewed_items = tree_items(root, reviewed, package) if package else {}
@@ -544,6 +820,12 @@ def record_binding_findings(root: Path, delivery_id: str, chain: dict, stops: li
         reviewed_note = tree_note(root, review, f"{package}/delivery-review.md")[0]
     except (RuntimeError, ValueError) as exc:
         return [f"DELIVERY_COORDINATION_CORRUPT: the PR record of {delivery_id} cannot be recomputed: {exc}" + resume]
+    if _SESSION is not None:
+        try:
+            line = line_commits(root, reviewed, stops)
+        except RuntimeError:
+            line = []
+        prefetch_deltas(root, [(intent, record), (reviewed, review), *line_delta_pairs(root, line)])
     held = blobs(root, record, replacements)
     wrong = sorted(path for path, text in replacements.items() if held.get(path) != f"100644 {blob_oid(root, text)}")
     wrong += sorted(path for path in tree_delta(root, intent, record)
@@ -580,9 +862,6 @@ def pr_record_chain(root: Path, head: str, delivery_id: str, url: str,
     errors: list[str] = []
     resume = recovery(f"/deliver {delivery_id} runs open-pr, which records this PR on the reviewed Integration head")
 
-    def parents(oid: str) -> list[str]:
-        return run_git(root, "show", "-s", "--format=%P", oid).split()
-
     message = commit_message(root, head)
     if record_kind(message) != "pr_url_recorded_v1" or trailer(message, "Delivery") != delivery_id:
         return chain, [f"DELIVERY_CLOSURE_INCOMPLETE: the PR head {head} is not the PR record of {delivery_id}" + resume]
@@ -590,19 +869,19 @@ def pr_record_chain(root: Path, head: str, delivery_id: str, url: str,
         errors.append(f"DELIVERY_PR_HEAD_BASE_MISMATCH: the PR record of {delivery_id} binds another PR than {url}"
                       + recovery(f"merge only the PR that the record names, through merge-pr in /deliver {delivery_id}"))
     intent = trailer(message, "Intent") or ""
-    if parents(head) != [intent]:
+    if parents(root, head) != [intent]:
         return chain, errors + [f"DELIVERY_COORDINATION_CORRUPT: the PR record of {delivery_id} is not the exact child"
                                 " of the intent it names" + resume]
     intent_message = commit_message(root, intent)
     review = trailer(intent_message, "Review-Head") or ""
     if (record_kind(intent_message) not in PR_INTENT_RECORDS or trailer(intent_message, "Delivery") != delivery_id
-            or parents(intent) != [review]):
+            or parents(root, intent) != [review]):
         return chain, errors + [f"DELIVERY_COORDINATION_CORRUPT: the PR intent of {delivery_id} is not the exact child"
                                 " of its published Review" + resume]
     review_message = commit_message(root, review)
     reviewed = trailer(review_message, "Reviewed-Integration") or ""
     if (record_kind(review_message) != "delivery_review_published_v1"
-            or trailer(review_message, "Delivery") != delivery_id or parents(review) != [reviewed]):
+            or trailer(review_message, "Delivery") != delivery_id or parents(root, review) != [reviewed]):
         return chain, errors + [f"DELIVERY_REVIEW_STALE: the PR intent of {delivery_id} does not follow its published"
                                 " Delivery Review" + recovery(f"approve and publish the Delivery Review again in"
                                                               f" /deliver {delivery_id}, then open-pr")]
@@ -652,9 +931,32 @@ def own_line_stop(root: Path, delivery_id: str, head: str, stop: str) -> bool:
     line = run_git(root, "rev-list", "--first-parent", head, "--not", stop, "--").split()
     if (parents(root, line[-1])[:1] if line else [head]) != [stop]:
         return False
+    if not delivery_in_history(root, delivery_id, stop):
+        return False
     listed = run_git(root, "rev-list", "--first-parent", "--fixed-strings", f"--grep=Agentrof-Delivery: {delivery_id}",
                      stop, "--")
     return any(delivery_trailer_lines(commit_message(root, oid), delivery_id) for oid in listed.split())
+
+
+def delivery_in_history(root: Path, delivery_id: str, stop: str) -> bool:
+    """Whether any commit *stop* holds may carry this Delivery's trailer line; True outside an audit.
+
+    An audit scans each commit's history once for all Deliveries: a later
+    stop lists only the commits no earlier stop held, so the Deliveries
+    found so far cover every commit any scanned stop holds.
+    """
+    if _SESSION is None or _SESSION["root"] != root or not delivery_git.OID_RE.fullmatch(stop):
+        return True
+    scan = _SESSION["memo"].setdefault("delivery_commits", {"stops": [], "found": set()})
+    if stop not in scan["stops"]:
+        listed = run_git(root, "rev-list", "--fixed-strings", "--grep=Agentrof-Delivery: ", stop,
+                         "--not", *scan["stops"], "--")
+        for oid in listed.split():
+            scan["found"].update(line.strip().removeprefix("Agentrof-Delivery: ")
+                                 for line in commit_message(root, oid).splitlines()
+                                 if line.strip().startswith("Agentrof-Delivery: "))
+        scan["stops"].append(stop)
+    return delivery_id in scan["found"]
 
 
 def proof_stops(root: Path, delivery_id: str, head: str, target: str, fence: str) -> tuple[list[str], list[str]]:
@@ -722,14 +1024,14 @@ def item_integration(root: Path, head: str, delivery_id: str, story: str) -> dic
                      f"--grep=Agentrof-Story: {story}", head, "--")
     for merge in listed.split():
         message = commit_message(root, merge)
-        merge_parents = run_git(root, "show", "-s", "--format=%P", merge).split()
+        merge_parents = parents(root, merge)
         seal = trailer(message, "Reviewed-Tip") or ""
         if (trailer(message, "Story") != story or len(merge_parents) != 2 or merge_parents[1] != seal):
             continue
         seal_message = commit_message(root, seal)
         evidence = trailer(seal_message, "Reviewed-Tip") or ""
         product = trailer(seal_message, "Product-Tip") or ""
-        if run_git(root, "show", "-s", "--format=%P", seal).split() != [evidence]:
+        if parents(root, seal) != [evidence]:
             return None
         return {"merge": merge, "seal": seal, "evidence": evidence, "product": product}
     return None
@@ -763,7 +1065,7 @@ def evidence_findings(root: Path, head: str, delivery_id: str, story: str, item_
     except (RuntimeError, ValueError) as exc:
         return [f"DELIVERY_ITEM_NOT_READY: the evidence of {story} of {delivery_id} cannot be read: {exc}"]
     product = found["product"]
-    evidence_parents = run_git(root, "show", "-s", "--format=%P", found["evidence"]).split()
+    evidence_parents = parents(root, found["evidence"])
     if evidence_parents != [product]:
         errors.append(f"DELIVERY_ITEM_NOT_READY: the evidence of {story} of {delivery_id} is not the exact child of its"
                       " product tip")
@@ -1213,32 +1515,33 @@ def audit(project_root: Path, delivery_id: str | None = None, remote: str = "ori
     results, errors, findings = [], [], []
     # One Delivery's unreadable state never hides the others from --all; --delivery fails closed.
     tolerated = delivery_compile.MergeStateUnknown if delivery_id else (RuntimeError, ValueError)
-    for identifier in deliveries:
-        try:
-            outcome = audit_delivery(root, identifier, target, state, remote, branch)
-        except tolerated as exc:
-            errors.append(f"DELIVERY_COORDINATION_CORRUPT: {identifier}: {exc}")
-            continue
-        results.append(outcome)
-        if outcome.get("readiness"):
-            findings.append({"code": "DELIVERY_CLOSURE_INCOMPLETE", "severity": "blocker", "refs": [identifier],
-                             "paths": [], "next_entry": f"/deliver {identifier}",
-                             "message": f"{identifier} is awaiting_merge, but its recorded PR head cannot close it: "
-                                        + "; ".join(outcome["readiness"])})
-        if outcome.get("signs"):
-            findings.append({"code": "DELIVERY_EXTERNAL_MERGE", "severity": "warning", "refs": [identifier],
-                             "paths": [], "next_entry": f"/deliver {identifier}",
-                             "message": f"{identifier} is {outcome['outcome']}, and "
-                                        + "; ".join(outcome["signs"]) + "; this alone proves no external merge,"
-                                        f" so the project owner checks it in /deliver {identifier}"})
-        details = "; ".join(outcome.get("evidence", []) + outcome.get("leftovers", []))
-        message = f"{identifier} is {outcome['outcome']}: {details}; recovery: {outcome.get('recovery')}"
-        if outcome["outcome"] in {"external_product_merge", "unproven_record_merge"}:
-            findings.append({"code": "DELIVERY_EXTERNAL_MERGE", "severity": "blocker", "refs": [identifier],
-                             "paths": [], "message": message, "next_entry": outcome["next_entry"]})
-        elif outcome["outcome"] == "merged_cleanup_pending":
-            findings.append({"code": "DELIVERY_CLOSURE_INCOMPLETE", "severity": "blocker", "refs": [identifier],
-                             "paths": [], "message": message, "next_entry": outcome["next_entry"]})
+    with reading_session(root):
+        for identifier in deliveries:
+            try:
+                outcome = audit_delivery(root, identifier, target, state, remote, branch)
+            except tolerated as exc:
+                errors.append(f"DELIVERY_COORDINATION_CORRUPT: {identifier}: {exc}")
+                continue
+            results.append(outcome)
+            if outcome.get("readiness"):
+                findings.append({"code": "DELIVERY_CLOSURE_INCOMPLETE", "severity": "blocker", "refs": [identifier],
+                                 "paths": [], "next_entry": f"/deliver {identifier}",
+                                 "message": f"{identifier} is awaiting_merge, but its recorded PR head cannot close"
+                                            " it: " + "; ".join(outcome["readiness"])})
+            if outcome.get("signs"):
+                findings.append({"code": "DELIVERY_EXTERNAL_MERGE", "severity": "warning", "refs": [identifier],
+                                 "paths": [], "next_entry": f"/deliver {identifier}",
+                                 "message": f"{identifier} is {outcome['outcome']}, and "
+                                            + "; ".join(outcome["signs"]) + "; this alone proves no external merge,"
+                                            f" so the project owner checks it in /deliver {identifier}"})
+            details = "; ".join(outcome.get("evidence", []) + outcome.get("leftovers", []))
+            message = f"{identifier} is {outcome['outcome']}: {details}; recovery: {outcome.get('recovery')}"
+            if outcome["outcome"] in {"external_product_merge", "unproven_record_merge"}:
+                findings.append({"code": "DELIVERY_EXTERNAL_MERGE", "severity": "blocker", "refs": [identifier],
+                                 "paths": [], "message": message, "next_entry": outcome["next_entry"]})
+            elif outcome["outcome"] == "merged_cleanup_pending":
+                findings.append({"code": "DELIVERY_CLOSURE_INCOMPLETE", "severity": "blocker", "refs": [identifier],
+                                 "paths": [], "message": message, "next_entry": outcome["next_entry"]})
     blocked = any(finding["severity"] == "blocker" for finding in findings)
     return {"ok": not errors and not blocked, "deliveries": results, "errors": errors, "findings": findings,
             "observations": [{"kind": "ref", "target": f"closure/{item['delivery']}", "value": item["outcome"]}

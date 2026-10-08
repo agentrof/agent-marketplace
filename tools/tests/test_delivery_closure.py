@@ -38,6 +38,9 @@ except ModuleNotFoundError:  # run as a script from tools/tests
 URL = "https://github.com/agentrof/example/pull/17"
 INTEGRATION = "agentrof/deliveries/dlv-001"
 TEMPLATE = PACKAGE / "templates" / "delivery-closure.yml"
+# The audit of one closed Delivery: 33 Git processes for the remote reads and its whole proof, with
+# headroom; one process per object read spawned 70.
+AUDIT_GIT_PROCESS_BUDGET = 36
 
 
 def git(project: Path, *args: str) -> str:
@@ -689,6 +692,25 @@ class DeliveryClosureTests(unittest.TestCase):
                 delivery_git.merge_pr(project, "DLV-001")
         self.assertNotIn("src/evil.py", git(project, "ls-tree", "-r", "--name-only", "origin/main"))
 
+    def test_the_audit_of_a_closed_delivery_spawns_a_bounded_number_of_git_processes(self):
+        """Every proof still runs; objects come from one batched reader per replace mode, read once per audit."""
+        project, _docs, _product, _head, provider = self.recorded()
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            delivery_git.merge_pr(project, "DLV-001")
+        spawned: list = []
+        popen = subprocess.Popen
+
+        class Counted(popen):
+            def __init__(self, args, *rest, **options):
+                spawned.append(args)
+                super().__init__(args, *rest, **options)
+
+        with mock.patch.object(subprocess, "Popen", Counted):
+            audited = delivery_closure.audit(project)
+        self.assertEqual([item["outcome"] for item in audited["deliveries"]], ["closed"])
+        self.assertEqual(sum("cat-file" in args and "--batch" in args for args in spawned), 2)
+        self.assertLessEqual(len(spawned), AUDIT_GIT_PROCESS_BUDGET, [" ".join(args[1:4]) for args in spawned])
+
     def test_a_later_projection_rendering_neither_corrupts_the_record_nor_reopens_a_closed_delivery(self):
         """A later package release may render the vault projections differently than the one that wrote them."""
         project, _docs, _product, head, provider = self.recorded()
@@ -1029,6 +1051,81 @@ class ExactBytesClassificationTests(unittest.TestCase):
 
 
 
+@integration
+class AuditReaderTests(unittest.TestCase):
+    """The audit's batched object reads and tree deltas answer exactly as the Git commands they stand in for."""
+
+    def test_the_audit_reader_answers_as_the_git_commands_it_replaces(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            init_repository(root, initial_branch="main")
+            environment = {**os.environ, "GIT_INDEX_FILE": str(root / ".git" / "fixture-index"),
+                           "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
+                           "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"}
+
+            def run(*args: str, data: bytes = b"") -> str:
+                return subprocess.run(["git", *args], cwd=root, env=environment, input=data, capture_output=True,
+                                      check=True).stdout.decode("utf-8").strip()
+
+            def commit(entries: dict, removed: tuple = (), message: str = "State\n") -> str:
+                for path in removed:
+                    run("update-index", "--force-remove", "--", path)
+                for path, (mode, content) in entries.items():
+                    oid = content if mode == "160000" else run("hash-object", "-w", "--stdin", data=content)
+                    run("update-index", "--add", "--cacheinfo", f"{mode},{oid},{path}")
+                parents = [arg for oid in commits[-1:] for arg in ("-p", oid)]
+                return run("commit-tree", run("write-tree"), *parents, data=message.encode("utf-8"))
+
+            commits: list[str] = []
+            note = b"---\r\nstatus: approved\r\n---\r\nBody\r\n"
+            commits.append(commit({"a": ("100644", b"1\n"), "a-b": ("100644", b"1\n"), "d/e/f": ("100644", b"x\n"),
+                                   "sp ace": ("100644", b"y\n"), "\u00fcn\u00ef": ("100644", b"z\n"),
+                                   "n.md": ("100644", note), "x[1]/y": ("100644", b"1\n")},
+                                  message="First\r\n\r\nAgentrof-Delivery: DLV-001\r\n"))
+            # A file becomes a directory, a mode changes, a symbolic link and a submodule appear.
+            commits.append(commit({"a/x": ("100644", b"2\n"), "a-b": ("100755", b"1\n"), "link": ("120000", b"t"),
+                                   "sub": ("160000", commits[0])}, removed=("a",)))
+            # A directory becomes a file, and a submodule becomes a file.
+            commits.append(commit({"d": ("100644", b"d\n"), "sub": ("100644", b"s\n"), "a": ("100644", b"3\n")},
+                                  removed=("d/e/f", "sub", "a/x")))
+            paths = ["a", "a-b", "a/x", "d", "d/e", "d/e/f", "sp ace", "\u00fcn\u00ef", "n.md", "x[1]/y", "link",
+                     "sub", "missing", "a-b/c"]
+            prefixes = ["a", "d", "d/e", "x[1]", "missing", "a-b"]
+
+            def answers() -> dict:
+                found = {}
+                for oid in commits:
+                    found[oid] = (delivery_closure.commit_message(root, oid), delivery_closure.parents(root, oid),
+                                  delivery_closure.tree_of(root, oid), delivery_closure.blobs(root, oid, paths),
+                                  [delivery_closure.tree_paths(root, oid, prefix) for prefix in prefixes],
+                                  delivery_closure.tree_note(root, oid, "n.md"),
+                                  delivery_closure.has_object(root, oid))
+                    for other in commits:
+                        found[oid, other] = delivery_closure.tree_delta(root, oid, other)
+                        found["ancestor", oid, other] = delivery_closure.is_ancestor(root, oid, other)
+                return found
+
+            expected = answers()
+            spawned: list = []
+            popen = subprocess.Popen
+
+            class Counted(popen):
+                def __init__(self, args, *rest, **options):
+                    spawned.append(args)
+                    super().__init__(args, *rest, **options)
+
+            with delivery_closure.reading_session(root), mock.patch.object(subprocess, "Popen", Counted):
+                delivery_closure.prefetch_deltas(root, [(first, second) for first in commits for second in commits])
+                self.assertEqual(answers(), expected)
+            # One diff-tree reads every delta; only ancestry the parents cannot prove and a wildcard prefix,
+            # which Git matches, ask Git again.
+            self.assertEqual(sum("diff-tree" in args for args in spawned), 1, spawned)
+            self.assertTrue(all("merge-base" in args or "diff-tree" in args or args[-1] == "x[1]/"
+                                for args in spawned), spawned)
+            self.assertIn("a/x", expected[commits[0], commits[1]])
+            self.assertIn("d/e/f", expected[commits[1], commits[2]])
+
+
 class ClosureTextTests(unittest.TestCase):
     """The instruction and template surfaces of the closure check, read as shipped."""
 
@@ -1196,6 +1293,15 @@ class ClosureTextTests(unittest.TestCase):
                                "only required to be non-product paths"):
                     self.assertIn(phrase, text)
                 self.assertNotIn("may also protect", text)
+                # Deletion and force-push rules alone let a writer create refs or fast-forward forged notes.
+                for phrase in ("restricts creations", "restricts updates", "restricts deletions",
+                               "blocks non-fast-forward pushes",
+                               "only the accounts that run the coordinator as bypass actors",
+                               "`merge-pr` and `verify-merge` delete the Integration and Item refs",
+                               "`integrate-item`, `pause-item` and `cancel-delivery` delete Slot refs",
+                               "`refresh-target` re-issues Item claims", "non-fast-forward updates",
+                               "`--force-with-lease`"):
+                    self.assertIn(phrase, text)
         bootstrap = self.text(PACKAGE / "skill-content/setup/references/ci-bootstrap.md")
         self.assertIn("A property reads `not_configured` only when both the branch rules and the classic branch"
                       " protection are readable", bootstrap)

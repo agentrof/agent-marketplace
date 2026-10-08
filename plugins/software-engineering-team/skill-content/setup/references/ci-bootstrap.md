@@ -143,9 +143,17 @@ bind each other, the reviewed package and the product; it does not prove who
 wrote a Review, a code review or a verification. Anyone who can push the
 `agentrof/` refs can write consistent notes that pass, so protecting them is
 part of the required setup: the owner installs a ruleset that targets
-`refs/heads/agentrof/**` and restricts deletions and blocks force pushes, with
-only the accounts that run the coordinator as bypass actors, since
-`verify-merge`, `integrate-item` and `cancel-delivery` delete these refs. A PR
+`refs/heads/agentrof/**` and restricts creations, restricts updates, restricts
+deletions and blocks non-fast-forward pushes, with only the accounts that run
+the coordinator as bypass actors. A writer limited by deletion and force-push
+rules alone can still create these refs or fast-forward an Integration onto
+consistent forged notes. The coordinator needs the bypass because it creates
+every `agentrof/` ref, `merge-pr` and `verify-merge` delete the Integration and
+Item refs of a proven merge, `integrate-item`, `pause-item` and
+`cancel-delivery` delete Slot refs, as do `start-item`, `reopen-item` and
+`takeover-item` when the target moves during activation, `refresh-target`
+re-issues Item claims on the refreshed Integration as non-fast-forward
+updates, and every atomic push carries `--force-with-lease`. A PR
 record's paths other than the notes `open-pr` authors, such as the vault
 projections it re-renders, are only required to be non-product paths under
 `workspace/docs/`.

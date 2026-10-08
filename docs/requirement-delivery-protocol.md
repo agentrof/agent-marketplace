@@ -962,9 +962,18 @@ refuses execution approval.
 Closure proves that the records have the coordinator's shape and bind each
 other, the reviewed package and the product; it does not prove who wrote a
 Review, a code review or a verification. Anyone who can push the `agentrof/`
-refs can write consistent notes that pass, so a ruleset that protects
-`refs/heads/agentrof/**` from deletion and force pushes, with only the accounts
-that run the coordinator as bypass actors, is part of the required setup. A PR
+refs can write consistent notes that pass, so a ruleset on
+`refs/heads/agentrof/**` that restricts creations, restricts updates, restricts
+deletions and blocks non-fast-forward pushes, with only the accounts that run
+the coordinator as bypass actors, is part of the required setup. Deletion and
+force-push rules alone still let a writer create these refs or fast-forward an
+Integration onto consistent forged notes. The coordinator needs the bypass: it
+creates every `agentrof/` ref, `merge-pr` and `verify-merge` delete the
+Integration and Item refs of a proven merge, `integrate-item`, `pause-item` and
+`cancel-delivery` delete Slot refs, as do `start-item`, `reopen-item` and
+`takeover-item` when the target moves during activation, `refresh-target`
+re-issues Item claims on the refreshed Integration as non-fast-forward
+updates, and every atomic push carries `--force-with-lease`. A PR
 record's paths other than the notes `open-pr` authors are only required to be
 non-product paths under `workspace/docs/`.
 

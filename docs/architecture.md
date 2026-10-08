@@ -169,8 +169,7 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     and backlog state must bind the new application receipt before a new
     handoff. An already-created Delivery continues to verify its exact pinned,
     approved backlog and Story/Test Plan hashes instead of being invalidated by
-    an unrelated later application revision; a backlog rebind to it carries
-    that pin only through the source-rebind receipt of invariant 14. Retiring the final process keeps
+    an unrelated later application revision. Retiring the final process keeps
     the application receipt sequence alive with an empty artifact inventory and
     no process receipts; a later process can join through the next application
     revision. Reviewers provide fidelity and usability advice; approval uses a
@@ -180,7 +179,9 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     recoverable only by an atomic exact-set rebind from its hash-verified old
     plan to a fresh plan that binds the predecessor hash, current inputs and
     application receipt; the rebind preserves authored child-record and
-    artifact bytes plus approved ledgers, and resets review to `draft`.
+    artifact bytes plus approved ledgers, and resets review to `draft`. A
+    backlog rebind to a later application receipt carries a Delivery's pin
+    only through the source-rebind receipt of invariant 14.
 27. Every official compiler mutation that writes authored Markdown produces
     an immediately legal per-write Vault result. After deterministic generated
     views are rendered, the same tree passes both its scoped Vault gate and its

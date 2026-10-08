@@ -90,8 +90,7 @@ drift blocks start, resume, reopen and takeover until a new execution plan is
 approved. Re-approval refreshes every Item's Story and
 Test Plan pins and the Delivery's backlog and Definition of Done pins from the
 current approved sources. Switch `source_rebind`: at `receipt_when_unchanged`,
-a backlog pin that a source-rebind receipt carries forward needs no new
-execution approval, as
+a source-rebind receipt carries a backlog pin forward without re-approval, as
 `skill-content/execution-plan/references/switch-source_rebind-receipt_when_unchanged.md`
 defines. A sealed Item keeps the Operation bindings its
 evidence was produced against unless the approval names it with `--reopen`;

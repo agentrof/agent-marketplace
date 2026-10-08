@@ -44,6 +44,51 @@ DECISION_TEXT = ("---\ntype: decision\ntitle: Fixture cache\nstatus: accepted\n"
                  "selected_technology: redis\ntags:\n  - doc/decision\n  - status/accepted\n"
                  "{extra}---\n\n# Fixture cache\n\n| id | rule |\n|---|---|\n"
                  "| SOL-CACHE-001 | {rule} |\n| SOL-CACHE-002 | Entries never outlive a session. |\n")
+EVICTION = "solution-design/decisions/fixture-eviction"
+# A landscape as the solution flow keeps it (landscape-docs.md): the Engagements
+# index, Target deltas, Transition steps and Components rows cite decisions.
+LANDSCAPE_BODY = """# Solution Landscape
+
+## Summary
+
+Approved solution boundary.
+
+| slug | status | decisions |
+|---|---|---|
+{engagements}
+
+## Current
+
+Nothing built yet.
+
+## Target
+
+{target}
+
+## Transition
+
+{transition}
+
+## Components
+
+| component | verdict | decision | engagement | status |
+|---|---|---|---|---|
+{components}
+"""
+CACHE_ROWS = {
+    "engagements": f"| fixture-cache | Status: approved 2026-01-05 | [[{DECISION}\\|SD-001]] |",
+    "target": f"- Session lookups read through a cache ([[{DECISION}\\|SD-001]]).",
+    "transition": f"1. Introduce the session cache ([[{DECISION}\\|SD-001]]); precondition: none.",
+    "components": (f"| session cache | buy | [[{DECISION}\\|SD-001]] |"
+                   " [[solution-design/engagements/fixture-cache\\|fixture-cache]] | decided |"),
+}
+EVICTION_ROWS = {
+    "engagements": f"| fixture-eviction | Status: approved 2026-02-01 | [[{EVICTION}\\|SD-002]] |",
+    "target": f"- Idle sessions are evicted first ([[{EVICTION}\\|SD-002]]).",
+    "transition": f"2. Add idle eviction ([[{EVICTION}\\|SD-002]]); precondition: the session cache.",
+    "components": (f"| cache eviction | build | [[{EVICTION}\\|SD-002]] |"
+                   " [[solution-design/engagements/fixture-eviction\\|fixture-eviction]] | decided |"),
+}
 
 
 def quiet(function, *args, **kwargs):
@@ -73,6 +118,8 @@ class SourceRebindTests(unittest.TestCase):
         mocks.enter_context(mock.patch.object(compiler, "validate_experience_ref"))
         with contextlib.redirect_stdout(io.StringIO()):
             self.fixture.approve_verification_contract()
+        self.write_landscape(CACHE_ROWS)
+        self.write_engagement("fixture-cache")
         self.write_decision("Entries expire after ten minutes.")
         self.requirement()
         self.commit("Approved sources")
@@ -109,6 +156,30 @@ class SourceRebindTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(DECISION_TEXT.format(rule=rule, extra=extra), encoding="utf-8")
 
+    def write_landscape(self, *row_sets: dict) -> None:
+        landscape = self.docs / "solution-design/landscape.md"
+        props, _body = compiler.parse_front_matter(landscape)
+        landscape.write_text(compiler.front_matter(props, LANDSCAPE_BODY.format(**{
+            key: "\n".join(rows[key] for rows in row_sets) for key in CACHE_ROWS})), encoding="utf-8")
+
+    def write_engagement(self, slug: str) -> None:
+        path = self.docs / f"solution-design/engagements/{slug}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"---\ntype: engagement\ntitle: {slug}\n---\n\n# {slug}\n\n## Summary\n\n"
+                        "Status: approved 2026-01-05\n", encoding="utf-8")
+
+    def write_ledger(self, *rows: tuple[str, list[tuple[str, str]]]) -> None:
+        """Write the Experience application ledger: one (application hash, packages) row per revision."""
+        ledger, previous, revisions = self.docs / "experience-design/_ledger/application-revisions.json", \
+            "sha256:" + "0" * 64, []
+        for number, (application, packages) in enumerate(rows, start=1):
+            revisions.append({"application_revision": number, "previous_application_hash": previous,
+                              "application_hash": application,
+                              "packages": [{"result_ref": ref, "package_hash": value} for ref, value in packages]})
+            previous = application
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text(json.dumps({"schema_version": 3, "revisions": revisions}), encoding="utf-8")
+
     def pin_solution(self) -> None:
         """Approve the Solution package at its current content, as its compiler would."""
         landscape = self.docs / "solution-design/landscape.md"
@@ -138,10 +209,10 @@ class SourceRebindTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             requirement_compile.approve_requirement(path)
 
-    def revise(self) -> None:
+    def revise(self, refs: list[str] | None = None) -> None:
         code, output = quiet(compiler.begin_revision, SimpleNamespace(
             docs=str(self.docs), delivery_snapshot="", planning_mode="requirement",
-            requirement_ref="REQ-001", absent_input=[], input_ref=list(REFS)))
+            requirement_ref="REQ-001", absent_input=[], input_ref=list(refs or REFS)))
         self.assertEqual(code, 0, output)
 
     def add_second_epic(self) -> None:
@@ -197,10 +268,12 @@ class SourceRebindTests(unittest.TestCase):
             props, complete + ("\n" + compiler.NAV_MARKER + nav[1] if len(nav) == 2 else "")),
             encoding="utf-8")
 
-    def switch_on(self) -> None:
+    def switch_on(self, **others: str) -> None:
         exists = process_policy.path_for(self.docs).exists()
         for argv in (["begin-revision" if exists else "init"],
-                     ["set", "--switch", rebind.SWITCH, "--value", rebind.VALUE], ["approve"]):
+                     ["set", "--switch", rebind.SWITCH, "--value", rebind.VALUE],
+                     *(["set", "--switch", key, "--value", value] for key, value in others.items()),
+                     ["approve"]):
             code, output = quiet(process_policy.main, [argv[0], "--docs", str(self.docs), *argv[1:]])
             self.assertEqual(code, 0, output)
 
@@ -218,13 +291,14 @@ class SourceRebindTests(unittest.TestCase):
         self.assertEqual(code, 0, output)
         return json.loads(output)["receipt"]
 
-    def apply(self, receipt: dict, *epics: str) -> tuple[int, str]:
+    def apply(self, receipt: dict, *epics: str, source_gate: bool = False) -> tuple[int, str]:
         return quiet(rebind.command, SimpleNamespace(
             docs=str(self.docs), command="apply-source-rebind", source_commit=self.predecessor,
-            review_epic=list(epics), approve_receipt=receipt["owner_approval"]))
+            review_epic=list(epics), approve_receipt=receipt["owner_approval"], source_gate=source_gate))
 
-    def rebind_revision(self, rule: str = "Entries expire after five minutes.", extra: str = "") -> None:
-        self.switch_on()
+    def rebind_revision(self, rule: str = "Entries expire after five minutes.", extra: str = "",
+                        **switches: str) -> None:
+        self.switch_on(**switches)
         self.revise_solution(rule, extra)
         self.revise()
 
@@ -318,8 +392,10 @@ class SourceRebindTests(unittest.TestCase):
         self.rebind_revision()
         receipt = self.record("EP-001")
         row = next(row for row in receipt["epics"] if row["id"] == "EP-001")
-        self.assertEqual((row["disposition"], row["impacted_by"]),
-                         ("reviewed", [f"backlog/epics/{FIRST}/epic.md: root reader finding"]))
+        self.assertEqual((row["disposition"], row["impacted_by"]), ("reviewed", [
+            f"backlog/epics/{FIRST}/epic.md: root reader finding",
+            f"backlog/epics/{FIRST}/stories/auth-01/story.md: epic impacted",
+            f"backlog/epics/{FIRST}/stories/auth-01/test-plan.md: epic impacted"]))
         self.assertEqual(rebind.reader_scope_epics(compiler.parse_front_matter(
             self.docs / "backlog/reviews/round-3-backlog-review.md")[1]), ["EP-001"])
 
@@ -412,6 +488,12 @@ class SourceRebindTests(unittest.TestCase):
         duplicate["owner_approval"] = rebind.approval_hash(duplicate)
         (files[0].parent / (duplicate["owner_approval"][7:] + ".json")).write_bytes(
             backlog_migration.encoded(duplicate))
+        skipped = []
+        self.assertIsNotNone(backlog_migration.pin_chain(self.docs, self.before_hash, self.package_hash(),
+                                                         skipped))
+        self.assertEqual([note.split(":", 1)[0] for note in skipped],
+                         [f"{rebind.RECEIPTS}/{duplicate['owner_approval'][7:]}.json"])
+        self.commit("A second receipt for the same step")
         with self.assertRaisesRegex(ValueError, "ambiguous"):
             backlog_migration.pin_chain(self.docs, self.before_hash, self.package_hash())
 
@@ -441,7 +523,8 @@ class SourceRebindTests(unittest.TestCase):
         path.write_bytes(backlog_migration.encoded(stale))
         self.assertIsNone(backlog_migration.pin_chain(self.docs, self.before_hash, self.package_hash()))
 
-    def test_delivery_keeps_its_execution_approval_across_a_rebind(self):
+    def approved_delivery(self) -> Path:
+        """An execution-approved Delivery of AUTH-01 on the approved predecessor."""
         with contextlib.redirect_stdout(io.StringIO()):
             self.fixture.approve_dod()
         args = SimpleNamespace(docs=str(self.docs), id=None, slug="cache", goal="Cache lookups",
@@ -459,6 +542,13 @@ class SourceRebindTests(unittest.TestCase):
         code, output = quiet(delivery_compile.approve_execution, approval)
         self.assertEqual(code, 0, output)
         self.commit("Approved execution")
+        return root
+
+    def delivery_check(self) -> tuple[int, str]:
+        return quiet(delivery_compile.check_delivery, SimpleNamespace(docs=str(self.docs), delivery="DLV-001"))
+
+    def test_delivery_keeps_its_execution_approval_across_a_rebind(self):
+        root = self.approved_delivery()
         preserved = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
         self.rebind_revision()
         receipt = self.record()
@@ -475,7 +565,7 @@ class SourceRebindTests(unittest.TestCase):
                             "impacted_by": [f"backlog/epics/{FIRST}/stories/auth-01/story.md: closure"]}
                            if row["id"] == "EP-001" else row for row in sealed["epics"]]
         sealed["epics"][0].pop("reused_review", None)
-        with mock.patch.object(rebind, "receipts", return_value=[sealed]), \
+        with mock.patch.object(rebind, "committed_receipts", return_value=([sealed], [])), \
                 mock.patch.object(rebind, "replay"):
             errors = delivery_compile.delivery_source_findings(
                 self.docs, root, delivery_compile.split_note(root / "delivery.md")[0])[1]
@@ -484,6 +574,245 @@ class SourceRebindTests(unittest.TestCase):
         errors = delivery_compile.delivery_source_findings(
             self.docs, root, delivery_compile.split_note(root / "delivery.md")[0])[1]
         self.assertIn("Delivery backlog_package_hash is stale against the approved backlog", errors)
+
+
+    def assert_epic_impact_reaches_delivery(self, *epics: str) -> None:
+        """EP-001 is impacted as a whole: its story is read in full and its Delivery Item refused."""
+        self.approved_delivery()
+        self.rebind_revision()
+        receipt = self.record(*epics)
+        self.assertIn(f"backlog/epics/{FIRST}/stories/auth-01/story.md: epic impacted",
+                      next(row for row in receipt["epics"] if row["id"] == "EP-001")["impacted_by"])
+        self.assertIn("AUTH-01", receipt["root_scope"]["cited_stories"])
+        self.review_epic(FIRST, 3)
+        manifest = backlog_review_inputs.manifest(self.docs, epic="EP-001")
+        self.assertEqual(manifest["check"]["backlog_graph"]["stories"]["AUTH-01"]["read"], "full")
+        self.complete_root(3, keep_compiled=True)
+        code, output = self.apply(receipt, *epics)
+        self.assertEqual(code, 0, output)
+        self.commit("Approved source rebind")
+        code, output = self.delivery_check()
+        self.assertEqual(code, 1, output)
+        self.assertIn("Story AUTH-01 is impacted by a source rebind", output)
+
+    def test_a_root_reader_finding_refuses_its_delivery_items_and_reads_their_stories(self):
+        self.assert_epic_impact_reaches_delivery("EP-001")
+
+    def test_a_reused_review_citation_refuses_its_delivery_items_and_reads_their_stories(self):
+        self.cite_in_predecessor(self.docs / "backlog/epics" / FIRST / "reviews/round-2-epic-review.md",
+                                 f"AUTH-01 relies on [[{DECISION}|Fixture cache]].", review=True)
+        self.assert_epic_impact_reaches_delivery()
+
+    def test_a_decision_status_change_impacts_its_citing_stories(self):
+        story = self.docs / "backlog/epics" / FIRST / "stories/auth-01/story.md"
+        self.cite_in_predecessor(story, f"Sessions follow [[{DECISION}|Fixture cache]].")
+        self.switch_on()
+        path = self.docs / f"{DECISION}.md"
+        path.write_text(path.read_text(encoding="utf-8").replace("status: accepted", "status: rejected")
+                        .replace("status/accepted", "status/rejected"), encoding="utf-8")
+        self.commit("Rejected the decision")
+        self.pin_solution()
+        self.revise()
+        receipt = self.plan()
+        self.assertEqual(receipt["binding_changes"][0]["changed_documents"], [f"{DECISION}.md"])
+        row = next(row for row in receipt["epics"] if row["id"] == "EP-001")
+        self.assertIn(f"backlog/epics/{FIRST}/stories/auth-01/story.md: cites {DECISION}", row["impacted_by"])
+
+    def test_a_revision_that_changes_no_authored_document_is_refused(self):
+        application = "experience-design|application@"
+        self.write_ledger(("sha256:" + "1" * 64, []), (bindings.digest("9"), []))
+        artifact = self.docs / "experience-design/artifacts/index.html"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text("<main>app</main>\n", encoding="utf-8")
+        self.commit("Experience application revision 2")
+        self.switch_on()
+        self.write_ledger(("sha256:" + "1" * 64, []), (bindings.digest("9"), []), (bindings.digest("3"), []))
+        artifact.write_text("<main>edited app</main>\n", encoding="utf-8")
+        self.commit("Experience application revision 3: a prototype edit only")
+        self.receipts["application@r3"] = bindings.digest("3")
+        self.revise([ref if ref != bindings.APPLICATION else "application@r3" for ref in REFS])
+        self.assertTrue(any(value.startswith(application + "r3") for value in compiler.values(
+            compiler.parse_front_matter(self.docs / "backlog/backlog.md")[0], "input_bindings")))
+        with self.assertRaisesRegex(ValueError, "no authored document changed .changed files:"
+                                                " experience-design/artifacts/index.html"):
+            self.plan()
+
+    def test_a_landscape_update_for_a_new_decision_reuses_every_unrelated_epic(self):
+        self.switch_on()
+        path = self.docs / f"{EVICTION}.md"
+        path.write_text(DECISION_TEXT.format(rule="Idle sessions are evicted first.",
+                                             extra="aliases:\n  - SD-002\n")
+                        .replace("Fixture cache", "Fixture eviction").replace("SOL-CACHE-00", "SOL-EVICT-00"),
+                        encoding="utf-8")
+        self.write_engagement("fixture-eviction")
+        self.write_landscape(CACHE_ROWS, EVICTION_ROWS)
+        self.commit("Solution revision: an eviction decision folded into the landscape")
+        self.pin_solution()
+        self.revise()
+        receipt = self.plan()
+        change, = receipt["binding_changes"]
+        self.assertEqual(change["changed_documents"], [
+            f"{EVICTION}.md", "solution-design/engagements/fixture-eviction.md", rebind.LANDSCAPE])
+        self.assertEqual(change["changed_rows"], [
+            "Components / cache eviction", "Summary / fixture-eviction",
+            "Target / Idle sessions are evicted first ([[solution-design/decisions/fixture-eviction\\|SD-002]]).",
+            "Transition / Add idle eviction ([[solution-design/decisions/fixture-eviction\\|SD-002]]);"
+            " precondition: the session cache."])
+        self.assertEqual([(row["id"], row["disposition"]) for row in receipt["epics"]],
+                         [("EP-001", "reused"), ("EP-002", "reused")])
+
+    def test_a_changed_landscape_row_impacts_only_the_stories_citing_its_decision(self):
+        story = self.docs / "backlog/epics" / SECOND / "stories/bl-001/story.md"
+        self.cite_in_predecessor(story, f"Billing lookups use [[{DECISION}|the session cache]].")
+        self.switch_on()
+        self.write_landscape(dict(CACHE_ROWS, components=CACHE_ROWS["components"].replace(
+            "| decided |", "| adopted |")))
+        self.commit("Solution revision: the session cache is adopted")
+        self.pin_solution()
+        self.revise()
+        receipt = self.plan()
+        change, = receipt["binding_changes"]
+        self.assertEqual((change["changed_documents"], change["changed_rows"]),
+                         ([rebind.LANDSCAPE], ["Components / session cache"]))
+        epics = {row["id"]: row for row in receipt["epics"]}
+        self.assertEqual(epics["EP-001"]["disposition"], "reused")
+        self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: cites {DECISION}",
+                      epics["EP-002"]["impacted_by"])
+        with self.subTest(case="a landscape change outside its rows"):
+            props, body = compiler.parse_front_matter(self.docs / rebind.LANDSCAPE)
+            self.assertIsNone(rebind.landscape_delta(
+                compiler.front_matter(props, body),
+                compiler.front_matter(props, body.replace("Nothing built yet.", "A cache runs."))))
+
+    def test_the_source_gate_approves_only_a_mechanical_receipt(self):
+        self.rebind_revision(dependent_rebind_gate="with_source")
+        receipt = self.record()
+        code, output = quiet(rebind.command, SimpleNamespace(
+            docs=str(self.docs), command="plan-source-rebind", source_commit=self.predecessor, review_epic=[]))
+        self.assertEqual((code, json.loads(output)["mechanical"]), (0, True))
+        self.complete_root(3, keep_compiled=True)
+        code, output = self.apply(receipt, source_gate=True)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(rebind.receipts(self.docs)[0]["owner_approval"], receipt["owner_approval"])
+
+    def test_a_receipt_that_is_not_mechanical_takes_the_ordinary_approval(self):
+        self.rebind_revision(dependent_rebind_gate="with_source")
+        receipt = self.record("EP-001")
+        self.assertFalse(rebind.mechanical(receipt))
+        self.review_epic(FIRST, 3)
+        self.complete_root(3, keep_compiled=True)
+        code, output = self.apply(receipt, "EP-001", source_gate=True)
+        self.assertEqual(code, 1, output)
+        self.assertIn("the receipt is not mechanical", output)
+        code, output = self.apply(receipt, "EP-001")
+        self.assertEqual(code, 0, output)
+
+    def test_the_source_gate_needs_the_with_source_value(self):
+        self.rebind_revision()
+        receipt = self.record()
+        self.assertTrue(rebind.mechanical(receipt))
+        self.complete_root(3, keep_compiled=True)
+        code, output = self.apply(receipt, source_gate=True)
+        self.assertEqual(code, 1, output)
+        self.assertIn("--source-gate needs dependent_rebind_gate with_source", output)
+
+    def test_plain_approve_refuses_a_source_rebind_round_even_with_its_receipt_file(self):
+        self.rebind_revision()
+        receipt = self.record()
+        self.complete_root(3, keep_compiled=True)
+        path = rebind.receipt_path(self.docs, receipt["owner_approval"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(backlog_migration.encoded(receipt))
+        code, output = quiet(compiler.approve, SimpleNamespace(docs=str(self.docs)))
+        self.assertEqual(code, 1, output)
+        self.assertIn("approved only by apply-source-rebind", output)
+        self.assertEqual(compiler.parse_front_matter(self.docs / "backlog/backlog.md")[0]["status"], "draft")
+
+    def test_the_pin_chain_skips_malformed_and_uncommitted_receipt_files(self):
+        self.rebind_revision()
+        receipt = self.record()
+        self.complete_root(3, keep_compiled=True)
+        self.assertEqual(self.apply(receipt)[0], 0)
+        self.commit("Approved source rebind")
+        migrations = self.docs / backlog_migration.RECEIPTS
+        migrations.mkdir(parents=True, exist_ok=True)
+        (migrations / "broken.json").write_text("{", encoding="utf-8")
+        stray = self.docs / rebind.RECEIPTS / ("f" * 64 + ".json")
+        stray.write_text("{}", encoding="utf-8")
+        skipped = []
+        chain = backlog_migration.pin_chain(self.docs, self.before_hash, self.package_hash(), skipped)
+        self.assertEqual((chain.aliases, chain.impacted), ({}, frozenset()))
+        self.assertEqual([note.split(":", 1)[0] for note in skipped],
+                         [f"{backlog_migration.RECEIPTS}/broken.json", f"{rebind.RECEIPTS}/{stray.name}"])
+
+    def test_an_edit_below_the_navigation_marker_is_impacted(self):
+        self.rebind_revision()
+        story = self.docs / "backlog/epics" / SECOND / "stories/bl-001/story.md"
+        text = story.read_text(encoding="utf-8")
+        self.assertIn(compiler.NAV_MARKER, text)
+        story.write_text(text.rstrip() + "\n\nRefunds are now in scope.\n", encoding="utf-8")
+        row = next(row for row in self.plan()["epics"] if row["id"] == "EP-002")
+        self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: changed", row["impacted_by"])
+
+    def test_the_aliases_of_a_changed_decision_are_changed_ids(self):
+        self.write_decision("Entries expire after ten minutes.", "aliases:\n  - SD-001\n")
+        self.commit("Decision alias")
+        self.pin_solution()
+        root = self.docs / "backlog/backlog.md"
+        props, body = compiler.parse_front_matter(root)
+        props["input_bindings"] = [f"solution-design|{SOLUTION}|{self.receipts[SOLUTION]}"
+                                   if value.startswith("solution-design|") else value
+                                   for value in props["input_bindings"]]
+        root.write_text(compiler.front_matter(props, body), encoding="utf-8")
+        plan = self.docs / "backlog/epics" / FIRST / "stories/auth-01/test-plan.md"
+        self.cite_in_predecessor(plan, "Scenarios assume the cache decision SD-001.")
+        self.switch_on()
+        path = self.docs / f"{DECISION}.md"
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "# Fixture cache\n", "# Fixture cache\n\nCached entries are shared across tenants.\n"),
+            encoding="utf-8")
+        self.commit("Revised the decision's prose")
+        self.pin_solution()
+        self.revise()
+        receipt = self.plan()
+        self.assertEqual(receipt["binding_changes"][0]["changed_ids"], ["SD-001"])
+        row = next(row for row in receipt["epics"] if row["id"] == "EP-001")
+        self.assertIn(f"backlog/epics/{FIRST}/stories/auth-01/test-plan.md: cites SD-001", row["impacted_by"])
+
+    def test_an_added_source_family_counts_every_document_as_changed(self):
+        package = self.docs / "experience-design/experiences/checkout"
+        package.mkdir(parents=True, exist_ok=True)
+        (package / "experience.md").write_text("---\ntype: experience\nstatus: approved\n---\n\n# Checkout\n",
+                                               encoding="utf-8")
+        (package / "flow.md").write_text("---\ntype: flow\n---\n\n| id | step |\n|---|---|\n"
+                                         "| EXP-CHK-001 | Pay by card. |\n", encoding="utf-8")
+        self.write_ledger((bindings.digest("9"), [("checkout@r1", bindings.digest("c"))]))
+        self.commit("Checkout Experience approved")
+        story = self.docs / "backlog/epics" / SECOND / "stories/bl-001/story.md"
+        self.cite_in_predecessor(story, "Billing follows EXP-CHK-001.")
+        self.switch_on()
+        self.receipts["checkout@r1"] = bindings.digest("c")
+        self.revise([*REFS, "checkout@r1"])
+        receipt = self.plan()
+        change, = receipt["binding_changes"]
+        self.assertEqual((change["before_hash"], change["before_commit"]), (None, None))
+        self.assertNotIn("before_ref", change)
+        self.assertTrue({"experience-design/experiences/checkout/experience.md",
+                         "experience-design/experiences/checkout/flow.md"} <= set(change["changed_documents"]))
+        self.assertIn("EXP-CHK-001", change["changed_ids"])
+        row = next(row for row in receipt["epics"] if row["id"] == "EP-002")
+        self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: cites EXP-CHK-001", row["impacted_by"])
+
+    def test_a_story_that_implements_a_changed_requirement_is_impacted(self):
+        story = self.docs / "backlog/epics" / SECOND / "stories/bl-001/story.md"
+        self.assertEqual(compiler.parse_front_matter(story)[0]["implements"],
+                         ["[[requirements/req-001-cache-rules|REQ-001]]"])
+        self.rebind_revision()
+        with mock.patch.object(rebind, "requirement_hash",
+                               side_effect=["sha256:" + "a" * 64, "sha256:" + "b" * 64]):
+            receipt = self.plan()
+        row = next(row for row in receipt["epics"] if row["id"] == "EP-002")
+        self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: implements REQ-001", row["impacted_by"])
 
     # Helpers that rewrite the approved predecessor.
 
@@ -530,13 +859,63 @@ class SourceRebindTests(unittest.TestCase):
 
 
 class SourceRebindUnitTests(unittest.TestCase):
-    def test_content_form_ignores_lifecycle_line_endings_and_navigation(self):
+    def test_content_form_ignores_lifecycle_and_line_endings_but_not_navigation(self):
         text = ("---\ntype: story\nstatus: planned\napproved_at_utc: x\nsource_hash: y\ntags:\n"
                 "  - status/planned\n  - doc/story\n---\n\n# Story\n\nBody.\n\n"
                 + compiler.NAV_MARKER + "\n- [[maps/backlog|Backlog map]]\n")
         moved = text.replace("status: planned", "status: approved").replace("source_hash: y", "source_hash: z")
         self.assertEqual(rebind.content_hash(text), rebind.content_hash(moved.replace("\n", "\r\n")))
         self.assertNotEqual(rebind.content_hash(text), rebind.content_hash(text.replace("Body.", "Edited.")))
+        # Every byte the approval stamp covers counts, the navigation zone included.
+        self.assertNotEqual(rebind.content_hash(text), rebind.content_hash(text + "Refunds are in scope.\n"))
+
+    def test_a_relation_edge_is_its_key_and_target(self):
+        before = "---\ntype: decision\nrelated_to:\n  - \"[[backlog/epics/a/epic|A]]\"\n---\n\n# D\n"
+        after = before.replace("related_to:", "governs:")
+        self.assertEqual(rebind.relation_targets(before), {("related_to", "backlog/epics/a/epic")})
+        self.assertEqual(rebind.relation_targets(before) ^ rebind.relation_targets(after),
+                         {("related_to", "backlog/epics/a/epic"), ("governs", "backlog/epics/a/epic")})
+
+    @integration
+    def test_the_approval_of_a_source_hash_is_its_oldest_committed_anchor(self):
+        from tools.tests.git_fixture import init_repository, temporary_directory
+        hashes = {name: "sha256:" + name * 64 for name in "abcde"}
+        with temporary_directory() as temporary:
+            project = Path(temporary)
+            init_repository(project, initial_branch="main")
+            docs = project / "workspace/docs"
+            ledger = docs / "experience-design/_ledger/application-revisions.json"
+            landscape = docs / rebind.LANDSCAPE
+            ledger.parent.mkdir(parents=True)
+            landscape.parent.mkdir(parents=True)
+            commits, rows, previous = [], [], "sha256:" + "0" * 64
+
+            def commit(message: str) -> str:
+                for argv in (["add", "-A"], [*GIT, "commit", "-qm", message], ["rev-parse", "HEAD"]):
+                    out = subprocess.run(["git", *argv], cwd=project, check=True, capture_output=True, text=True)
+                return out.stdout.strip()
+
+            for number, (application, package) in enumerate(
+                    ((hashes["a"], hashes["c"]), (hashes["b"], hashes["d"]), (hashes["e"], hashes["d"])), 1):
+                rows.append({"application_revision": number, "previous_application_hash": previous,
+                             "application_hash": application,
+                             "packages": [{"result_ref": "checkout@r2" if number > 1 else "checkout@r1",
+                                           "package_hash": package}]})
+                previous = application
+                ledger.write_text(json.dumps({"schema_version": 3, "revisions": rows}), encoding="utf-8")
+                landscape.write_text(f"---\ntype: landscape\npackage_hash: {hashes['abc'[number - 1]]}\n---\n\n"
+                                     f"# Landscape\n\nSupersedes {hashes['a']}.\n", encoding="utf-8")
+                commits.append(commit(f"revision {number}"))
+            # Only the hash field counts, not a later mention of the same hash.
+            _folder, anchor = rebind.source_location("workspace/docs", "solution-design", SOLUTION)
+            self.assertEqual(rebind.receipt_commit(project, anchor, hashes["a"]), commits[0])
+            self.assertEqual(rebind.receipt_commit(project, anchor, hashes["c"]), commits[2])
+            # Revision 3 repeats revision 2's hashes; each approval stays where it was.
+            _folder, anchor = rebind.source_location("workspace/docs", "experience-design", "application@r2")
+            self.assertEqual([rebind.receipt_commit(project, anchor, hashes[name], ref) for name, ref in (
+                ("a", "application@r1"), ("b", "application@r2"), ("d", "checkout@r2"))],
+                [commits[0], commits[1], commits[1]])
+            self.assertIsNone(rebind.receipt_commit(project, anchor, hashes["d"], "checkout@r1"))
 
     def test_citations_respect_identifier_and_link_boundaries(self):
         links, ids = ["solution-design/decisions/cache"], ["SOL-CACHE-001"]

@@ -12,10 +12,12 @@ governs.
 Only a revision whose backlog root differs from its approved predecessor in
 nothing but its input bindings, its Requirement and its lifecycle fields
 takes this path. Stories, test plans and epic notes may change; each change
-impacts its epic. A changed root body or another root field, an added or
-removed source family, a source whose approval Git does not hold, a relation
-graph gap that touches the backlog or a revision that rebinds no source is
-refused, and the revision takes the standard path.
+impacts its epic. A changed root body or another root field, a removed
+source family, a source whose approval Git does not hold, a binding whose
+hash moved while none of its authored documents changed (its changed files
+are named), a relation graph gap that touches the backlog or a revision that
+rebinds no source is refused, and the revision takes the standard path. A
+newly bound source family counts each of its documents as changed.
 
 ## Steps
 
@@ -35,6 +37,15 @@ refused, and the revision takes the standard path.
    reaches it, a changed upstream note adds or drops a typed edge to it, a
    dependency edge or its membership changed, or it implements a changed
    Requirement. A reused epic's approved review is impacted the same way.
+   An authored source note's status is content; only a package's anchor
+   note loses its approval stamps. A changed document's id and aliases count
+   as changed ids. The Solution landscape counts by its changed rows: a
+   Components or Engagements row, a Target delta or a Transition step names
+   its decisions and engagements as the changed targets, and a note
+   constrained by an unchanged landscape is not impacted through it; a
+   change outside those rows counts the whole landscape. An impact on an
+   epic note, its reused review or a root reader finding impacts every story
+   and test plan of that epic.
 3. Run `backlog_compile.py record-source-rebind-root-review --docs
    workspace/docs --source-commit <approved-commit>`. It writes the root
    round's structural sections, every epic in `related_to`, every
@@ -69,6 +80,13 @@ refused, and the revision takes the standard path.
    reviewed epic has an approved round of this revision and each reused
    epic's latest review is its approved review byte for byte. Plain
    `approve` refuses a round with a `Source Rebind` section.
+7. When the Process Policy also selects `dependent_rebind_gate`
+   `with_source` and the source gate approved this backlog rebind, a
+   receipt that `plan-source-rebind` reports `mechanical` (every epic
+   reused, no cited story, no Requirement change, no root reader finding)
+   needs no second owner gate: run step 6 with the planned hash and
+   `--source-gate`, which refuses any other receipt. Every other receipt
+   goes to the owner as step 6 describes.
 
 Commit the approved backlog and the sealed receipt together. The receipt
 stays tracked evidence: a Delivery that pinned the predecessor proves its

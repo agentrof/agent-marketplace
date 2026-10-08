@@ -218,40 +218,56 @@ class PinChain(NamedTuple):
     impacted: frozenset[str]
 
 
-def pin_chain(docs: Path, old_hash: str, new_hash: str) -> PinChain | None:
+def pin_chain(docs: Path, old_hash: str, new_hash: str,
+              skipped: list[str] | None = None) -> PinChain | None:
     """Prove the pinned package hash reaches the current one through retained receipts.
 
     This is the one helper every consumer of a backlog pin calls. Each hop is
-    a schema migration or a sealed source rebind, replayed from its committed
-    predecessor; the last hop proves the current postimage and every earlier
-    one its committed approval. None means no receipt chain joins the two
-    hashes, and two receipts that leave one hash make the chain ambiguous.
+    a schema migration or a sealed source rebind that HEAD holds, replayed
+    from its committed predecessor; the last hop proves the current
+    postimage and every earlier one its committed approval. A receipt file
+    that is malformed, or a source rebind that HEAD does not hold, is left
+    out and named in ``skipped``. None means no receipt chain joins the two
+    hashes, and two chains that join them are ambiguous.
     """
     if old_hash == new_hash:
         return PinChain({}, frozenset())
     import backlog_rebind
 
+    notes = skipped if skipped is not None else []
     hops = []
     directory = docs / RECEIPTS
     for path in sorted(directory.glob("*.json")) if directory.exists() else []:
-        safe_path(docs, path.relative_to(docs).as_posix())
-        receipt = json.loads(path.read_text(encoding="utf-8"))
+        name = path.relative_to(docs).as_posix()
+        try:
+            safe_path(docs, name)
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            notes.append(f"{name}: {exc}")
+            continue
         if isinstance(receipt, dict):
             hops.append(("migration", receipt))
-    hops += [("rebind", receipt) for receipt in backlog_rebind.receipts(docs)
-             if receipt.get("after_package_hash")]
-    chain, current, seen = [], old_hash, {old_hash}
-    while current != new_hash:
-        following = [hop for hop in hops if hop[1].get("before_package_hash") == current]
-        if not following:
-            return None
-        if len(following) > 1:
-            raise ValueError("backlog pin receipt chain is ambiguous")
-        chain.append(following[0])
-        current = following[0][1].get("after_package_hash")
-        if not isinstance(current, str) or current in seen:
-            raise ValueError("backlog pin receipt chain does not reach the current package")
-        seen.add(current)
+    rebinds, rebind_notes = backlog_rebind.committed_receipts(docs)
+    notes.extend(rebind_notes)
+    hops += [("rebind", receipt) for receipt in rebinds]
+    chains = []
+
+    def walk(current: str, path: list, seen: set) -> None:
+        if current == new_hash:
+            chains.append(list(path))
+            return
+        for hop in hops:
+            following = hop[1].get("after_package_hash")
+            if hop[1].get("before_package_hash") == current and isinstance(following, str) \
+                    and following not in seen:
+                walk(following, [*path, hop], seen | {following})
+
+    walk(old_hash, [], {old_hash})
+    if not chains:
+        return None
+    if len(chains) > 1:
+        raise ValueError("backlog pin receipt chain is ambiguous")
+    chain = chains[0]
     aliases: dict[str, tuple[str, str]] = {}
     impacted: set[str] = set()
     for index, (kind, receipt) in enumerate(chain):

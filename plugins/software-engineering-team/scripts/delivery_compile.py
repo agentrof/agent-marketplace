@@ -638,14 +638,16 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
     migration_pins, rebind_impacted = {}, frozenset()
     if delivery_props.get("backlog_package_hash") != backlog_snapshot["backlog_package_hash"]:
         import backlog_migration
-        chain = None
+        chain, skipped = None, []
         try:
             chain = backlog_migration.pin_chain(
-                docs, delivery_props.get("backlog_package_hash"), backlog_snapshot["backlog_package_hash"])
+                docs, delivery_props.get("backlog_package_hash"), backlog_snapshot["backlog_package_hash"],
+                skipped)
         except (OSError, ValueError, KeyError, RuntimeError) as exc:
             errors.append(f"Delivery backlog pin receipt is invalid: {exc}")
         if chain is None:
             errors.append("Delivery backlog_package_hash is stale against the approved backlog")
+            errors.extend(f"Delivery backlog pin receipt skipped: {note}" for note in skipped)
         else:
             migration_pins, rebind_impacted = chain.aliases, chain.impacted
     for key in DOD_SOURCE_FIELDS:

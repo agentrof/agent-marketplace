@@ -764,13 +764,17 @@ def closure_from(snap: dict, changed: list[str], policy: dict) -> dict:
     # change, not what it depends on: it joins one hop, never transitively.
     for rel in list(frontier):
         frontier.extend(citations.get(rel, ()))
+    # A barrier note (an index such as the Solution landscape) joins the
+    # closure but passes the change to its dependents only when it changed.
+    barriers = set(policy.get("barrier_paths", ())) - set(change_set)
     members = set()
     while frontier:
         rel = frontier.pop()
         if rel in members:
             continue
         members.add(rel)
-        frontier.extend(dependents.get(rel, ()))
+        if rel not in barriers:
+            frontier.extend(dependents.get(rel, ()))
     pending = [rel for rel in change_set if rel in notes]
     seen = set()
     while pending:

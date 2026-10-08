@@ -573,7 +573,8 @@ SAFETY_RULES = {
     },
     "source_rebind": {
         f"{SKILLS}/backlog-plan/references/switch-source_rebind-receipt_when_unchanged.md": (
-            "A changed root body or another root field, an added or",
+            "A changed root body or another root field, a removed",
+            "needs no second owner gate: run step 6 with the planned hash and",
             "No reader runs for a `reused` epic, and its manifest is refused",
             "Each such finding moves that epic to review",
             "After the owner approves that exact hash",

@@ -46,8 +46,16 @@ UPSTREAM_LIFECYCLE_KEYS = frozenset({
     "status", "approved_at", "approved_at_utc", "package_hash", "package_status",
     "package_approved_at_utc", "package_contract_version", "baseline_hash", "source_hash",
 })
+# The notes a source package's approval stamps: only these lose their status
+# and status tags before two approved package states are compared.
+ANCHOR_NOTE = re.compile(r"business-analysis/[^/]+/space\.md|solution-design/landscape\.md"
+                         r"|design-system/MASTER\.md|experience-design/experiences/[^/]+/experience\.md")
+LANDSCAPE = "solution-design/landscape.md"
+# Landscape sections whose table rows and list items are compared one by one.
+LANDSCAPE_ROW_SECTIONS = frozenset({"Summary", "Target", "Transition", "Components"})
 SOURCE_ROW_ID = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$")
 WIKILINK = re.compile(r"\[\[([^\[\]\n]+)\]\]")
+LINK_PARTS = re.compile(r"\[\[([^\[\]|#\\\n]+)(?:#[^\[\]|\\\n]*)?(?:\\?\|([^\[\]\n]*))?\]\]")
 EPIC_NOTE = re.compile(r"backlog/epics/([^/]+)/epic\.md")
 STORY_NOTE = re.compile(r"backlog/epics/([^/]+)/stories/([^/]+)/story\.md")
 PLAN_NOTE = re.compile(r"backlog/epics/([^/]+)/stories/([^/]+)/test-plan\.md")
@@ -80,12 +88,13 @@ def without_navigation(body: str) -> str:
 
 
 def content_form(text: str) -> str:
-    """A backlog note without its lifecycle stamps, navigation and generated relations."""
+    """A backlog note as canonical_text reads it, without its lifecycle stamps."""
     props, body = backlog.parse_front_matter_text(lf(text))
-    stable = {key: value for key, value in props.items() if key not in LIFECYCLE_KEYS}
+    stable = {key: value for key, value in props.items()
+              if key not in LIFECYCLE_KEYS and key not in backlog.APPROVAL_FIELDS}
     if isinstance(stable.get("tags"), list):
         stable["tags"] = [tag for tag in stable["tags"] if not str(tag).startswith("status/")]
-    body = without_navigation(backlog.without_generated_relations(body))
+    body = backlog.without_generated_relations(body)
     return json.dumps(stable, sort_keys=True, ensure_ascii=False, separators=(",", ":")) \
         + "\n" + body.strip() + "\n"
 
@@ -94,17 +103,95 @@ def content_hash(text: str) -> str:
     return byte_hash(content_form(text).encode("utf-8"))
 
 
-def upstream_form(text: str) -> str:
-    """An upstream document without what its approval writes, in comparable form."""
+def upstream_form(text: str, *, anchor: bool) -> str:
+    """An upstream document without what its approval writes, in comparable form.
+
+    Only a package anchor note loses its status and status tags; an authored
+    note's status, such as a decision's, is content.
+    """
     text = lf(text)
     lines = text.split("\n")
+    stamped = UPSTREAM_LIFECYCLE_KEYS if anchor else UPSTREAM_LIFECYCLE_KEYS - {"status"}
     if lines and lines[0] == "---" and "---" in lines[1:]:
         end = lines.index("---", 1)
         kept = [line for line in lines[1:end]
-                if line.partition(":")[0].strip() not in UPSTREAM_LIFECYCLE_KEYS
-                and not re.match(r"^\s*-\s*[\"']?status/[a-z0-9-]+[\"']?\s*$", line)]
+                if line.partition(":")[0].strip() not in stamped
+                and not (anchor and re.match(r"^\s*-\s*[\"']?status/[a-z0-9-]+[\"']?\s*$", line))]
         lines = ["---", *kept, *lines[end:]]
     return backlog.without_generated_relations("\n".join(lines).rstrip() + "\n")
+
+
+def link_parts(text: str) -> set[tuple[str, str]]:
+    """The (target, alias) pair of every wikilink in a text, escaped table pipes included."""
+    return {(match.group(1).strip().removesuffix(".md"), (match.group(2) or "").strip())
+            for match in LINK_PARTS.finditer(text)}
+
+
+def landscape_units(text: str) -> tuple[str, dict[tuple[str, ...], str]] | None:
+    """The landscape's rows and list items by section and key, and everything else.
+
+    A Components or Engagements row is keyed by its first cell, a Target delta
+    or Transition step by its text. None when one section repeats a key.
+    """
+    form = upstream_form(text, anchor=True)
+    rest, units, h2, h3 = [], {}, "", ""
+    for line in form.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            h2, h3 = stripped[3:].split("<!--", 1)[0].strip(), ""
+        elif stripped.startswith("### "):
+            h3 = stripped[4:].strip()
+        if h2 not in LANDSCAPE_ROW_SECTIONS or stripped.startswith("#"):
+            rest.append(stripped)
+            continue
+        if stripped.startswith("|"):
+            if re.fullmatch(r"\|[\s:|-]*", stripped):
+                continue
+            cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", stripped.strip("|"))]
+            key = (h2, h3, "row", " ".join(cells[0].split()))
+        elif (item := re.match(r"^(?:[-*+]|[0-9]+[.)])\s+(\S.*)$", stripped)):
+            key = (h2, h3, "item", " ".join(item.group(1).split()))
+        else:
+            rest.append(stripped)
+            continue
+        if key in units:
+            return None
+        units[key] = " ".join(stripped.split())
+    return "\n".join(line for line in rest if line), units
+
+
+def landscape_delta(old: str | None, new: str | None) -> dict | None:
+    """The changed landscape rows and the links and ids they carry, or None when
+    the landscape changed outside its rows and must count as one changed document."""
+    if old is None or new is None:
+        return None
+    before, after = landscape_units(old), landscape_units(new)
+    if before is None or after is None or before[0] != after[0]:
+        return None
+    rows, links, ids = [], set(), set()
+    for key in sorted(set(before[1]) | set(after[1])):
+        a, b = before[1].get(key), after[1].get(key)
+        if a == b:
+            continue
+        rows.append(" / ".join(part for part in (key[0], key[1], key[3]) if part))
+        for target, alias in link_parts(a or "") | link_parts(b or ""):
+            links.add(target)
+            if SOURCE_ROW_ID.match(alias):
+                ids.add(alias)
+        if SOURCE_ROW_ID.match(key[3]):
+            ids.add(key[3])
+    return {"rows": rows, "links": sorted(links), "ids": sorted(ids)}
+
+
+def note_names(text: str | None) -> set[str]:
+    """The id and aliases a source document's front matter declares."""
+    if not text:
+        return set()
+    props, _body = backlog.parse_front_matter_text(lf(text))
+    names = set(backlog.values(props, "aliases"))
+    if props.get("id"):
+        names.add(str(props["id"]))
+    return {name.strip() for name in names if name.strip()}
 
 
 def source_rows(text: str) -> dict[str, str]:
@@ -119,19 +206,20 @@ def source_rows(text: str) -> dict[str, str]:
     return rows
 
 
-def relation_targets(text: str) -> set[str]:
-    """The wikilink targets of a note's front matter: its typed outgoing edges."""
+def relation_targets(text: str) -> set[tuple[str, str]]:
+    """The (key, target) pairs of a note's front matter wikilinks: its typed outgoing edges."""
     text = lf(text)
     if not text.startswith("---\n"):
         return set()
-    end = text.find("\n---", 4)
-    header = text[4:end] if end > 0 else ""
-    targets = set()
-    for match in WIKILINK.finditer(header):
-        parsed = backlog.split_wikilink(match.group(0))
-        if parsed is not None and parsed[0]:
-            targets.add(parsed[0].removesuffix(".md"))
-    return targets
+    props, _body = backlog.parse_front_matter_text(text)
+    edges = set()
+    for key, value in props.items():
+        for item in value if isinstance(value, list) else [value]:
+            for match in WIKILINK.finditer(str(item)):
+                parsed = backlog.split_wikilink(match.group(0))
+                if parsed is not None and parsed[0]:
+                    edges.add((key, parsed[0].removesuffix(".md")))
+    return edges
 
 
 def require_opt_in(docs: Path) -> None:
@@ -172,14 +260,56 @@ def tree_texts(project: Path, commit: str, prefix: str) -> dict[str, str]:
             backlog.committed_tree_sources(project, commit, prefix).items() if path.endswith(".md")}
 
 
-def receipt_commit(project: Path, anchor: str, digest: str) -> str | None:
-    """The newest commit that introduced ``digest`` into ``anchor``: its approval."""
-    listing = git(project, "log", "--format=%H", "-S", digest, "HEAD", "--", anchor)
+def ledger_holds(data: bytes, reference: str, digest: str) -> bool:
+    """Whether one committed Experience application ledger records ``reference`` at ``digest``.
+
+    The ledger must parse and keep its hash chain; an application reference
+    matches a row's application hash, a package reference a row's exact
+    result_ref and package hash.
+    """
+    import experience_application_check as application
+    try:
+        value = json.loads(data.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        return False
+    rows = value.get("revisions") if isinstance(value, dict) else None
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        return False
+    previous = application.GENESIS_APPLICATION_HASH
+    for row in rows:
+        if row.get("previous_application_hash") != previous:
+            return False
+        previous = row.get("application_hash")
+    if reference.split("@", 1)[0] == "application":
+        return any(row.get("application_hash") == digest for row in rows)
+    return any(isinstance(package, dict) and package.get("result_ref") == reference
+               and package.get("package_hash") == digest
+               for row in rows for package in row.get("packages") or [] if isinstance(row.get("packages"), list))
+
+
+def anchor_holds(data: bytes, anchor: str, reference: str, digest: str) -> bool:
+    """Whether one committed anchor records ``digest`` as its approved hash field."""
+    import experience_application_check as application
+    if anchor.endswith(application.LEDGER_RELATIVE.as_posix()):
+        return ledger_holds(data, reference, digest)
+    from experience_compile import DESIGN_HASH_LINE, SOURCE_HASH_LINE
+    pattern = DESIGN_HASH_LINE if anchor.endswith("design-system/MASTER.md") else SOURCE_HASH_LINE
+    match = pattern.search(lf(data.decode("utf-8", "replace")))
+    return match is not None and match.group(1) == digest
+
+
+def receipt_commit(project: Path, anchor: str, digest: str, reference: str = "") -> str | None:
+    """The oldest commit of HEAD's history whose anchor records ``digest``: its approval.
+
+    The oldest one stays the same when later revisions repeat the hash, such
+    as an unchanged package in every later application ledger row.
+    """
+    listing = git(project, "log", "--reverse", "--format=%H", "HEAD", "--", anchor)
     if listing.returncode:
         return None
     for commit in listing.stdout.decode("ascii").split():
         blob = backlog.history_blob(project, commit, anchor)
-        if blob is not None and digest in blob.decode("utf-8", "replace"):
+        if blob is not None and anchor_holds(blob, anchor, reference, digest):
             return commit
     return None
 
@@ -220,21 +350,34 @@ def binding_rows(props: dict) -> dict[tuple[str, str], tuple[str, str]]:
     return rows
 
 
-def package_diff(project: Path, prefix: str, folder: str, before: str, after: str
-                 ) -> tuple[list[str], dict[str, tuple[str | None, str | None]]]:
-    """Changed authored documents of one package between two commits, by docs path."""
-    old, new = tree_texts(project, before, folder), tree_texts(project, after, folder)
+def package_diff(project: Path, prefix: str, folder: str, before: str | None, after: str
+                 ) -> tuple[list[str], dict[str, tuple[str | None, str | None]], list[str]]:
+    """Changed authored documents of one package between two commits, by docs path,
+    and every other changed file: artifacts and non-Markdown sources.
+
+    A package the predecessor did not bind has no before commit, and each of
+    its documents counts as changed.
+    """
+    files_old = backlog.committed_tree_sources(project, before, folder) if before else {}
+    files_new = backlog.committed_tree_sources(project, after, folder)
     strip = len(prefix) + 1 if prefix else 0
-    changed, texts = [], {}
-    for path in sorted(set(old) | set(new)):
+    changed, texts, others = [], {}, []
+    for path in sorted(set(files_old) | set(files_new)):
         parts = path.split("/")
-        if "_generated" in parts or "_ledger" in parts or "artifacts" in parts:
+        if "_generated" in parts or "_ledger" in parts:
             continue
-        a, b = old.get(path), new.get(path)
-        if (a is None) != (b is None) or (a is not None and upstream_form(a) != upstream_form(b)):
+        if not path.endswith(".md") or "artifacts" in parts:
+            if files_old.get(path) != files_new.get(path):
+                others.append(path[strip:])
+            continue
+        a, b = (lf(data.decode("utf-8")) if (data := files.get(path)) is not None else None
+                for files in (files_old, files_new))
+        anchor = ANCHOR_NOTE.fullmatch(path[strip:]) is not None
+        if (a is None) != (b is None) or (a is not None and upstream_form(a, anchor=anchor)
+                                          != upstream_form(b, anchor=anchor)):
             changed.append(path[strip:])
             texts[path[strip:]] = (a, b)
-    return changed, texts
+    return changed, texts, others
 
 
 def requirement_text(read, ref: str) -> tuple[str | None, str | None]:
@@ -351,7 +494,9 @@ def closure_scope(docs: Path, present: list[str], deleted: dict[str, str], links
     import task_inputs
     api = task_inputs.closure_api()
     try:
-        raw = task_inputs.closure_raw(api, docs, present, deleted)
+        # The landscape indexes every decision: a note constrained by it depends
+        # on the rows it cites, so an unchanged landscape passes no change on.
+        raw = task_inputs.closure_raw(api, docs, present, deleted, {"barrier_paths": [LANDSCAPE]})
         rows = {key: raw[key] for key in ("closure", "changed", "graph_gaps")}
         closure = sorted({task_inputs.docs_relative(task_inputs.row_path(row)) for row in rows["closure"]})
     except (KeyError, TypeError, ValueError) as exc:
@@ -402,8 +547,8 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
         raise RebindRefused("the backlog root changed beyond its bindings and Requirement"
                             + (f" ({', '.join(kept)})" if kept else " (its body)") + f"; {STANDARD}")
     before_rows, after_rows = binding_rows(before_props), binding_rows(after_props)
-    if set(before_rows) != set(after_rows):
-        raise RebindRefused(f"the revision adds or removes a bound source family; {STANDARD}")
+    if set(before_rows) - set(after_rows):
+        raise RebindRefused(f"the revision removes a bound source family; {STANDARD}")
     old_requirement = str(before_props.get("requirement_ref", "") or "")
     new_requirement = str(after_props.get("requirement_ref", "") or "")
     before_read = Commit(project, prefix, predecessor)
@@ -413,35 +558,51 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
                    "after": {"ref": new_requirement, "semantic_hash": requirement_hash(new_text)}}
     requirement_changed = requirement["before"] != requirement["after"]
 
-    changes, documents, ids, upstream_texts = [], set(), set(), {}
-    for key in sorted(before_rows):
-        (old_ref, old_hash), (new_ref, new_hash) = before_rows[key], after_rows[key]
+    # documents: every changed source document; targets: what a backlog note
+    # depends on when it cites it, which narrows a landscape to its changed rows.
+    changes, documents, targets, ids, upstream_texts = [], set(), set(), set(), {}
+    for key in sorted(after_rows):
+        old_ref, old_hash = before_rows.get(key, (None, None))
+        new_ref, new_hash = after_rows[key]
         if (old_ref, old_hash) == (new_ref, new_hash):
             continue
         stage = key[0]
         folder, anchor = source_location(prefix, stage, new_ref)
-        before_commit = receipt_commit(project, anchor, old_hash)
-        after_commit = receipt_commit(project, anchor, new_hash)
-        if before_commit is None or after_commit is None:
+        before_commit = receipt_commit(project, anchor, old_hash, old_ref) if old_hash else None
+        after_commit = receipt_commit(project, anchor, new_hash, new_ref)
+        if (old_hash and before_commit is None) or after_commit is None:
             raise RebindRefused(f"no committed approval of {stage} {new_ref} holds"
-                                f" {old_hash if before_commit is None else new_hash}; {STANDARD}")
+                                f" {new_hash if after_commit is None else old_hash}; {STANDARD}")
         if live:
             import stage_package
             _receipt, errors = stage_package.verify(docs, stage, new_ref, new_hash,
                                                     require_committed=True, require_strict_current=True)
             if errors:
                 raise RebindRefused("; ".join(errors) + f"; {STANDARD}")
-        changed, texts = package_diff(project, prefix, folder, before_commit, after_commit)
+        changed, texts, others = package_diff(project, prefix, folder, before_commit, after_commit)
+        if old_hash != new_hash and not changed:
+            raise RebindRefused(f"{stage} {new_ref} moved from {old_hash} to {new_hash} but no authored"
+                                " document changed" + (f" (changed files: {', '.join(others)})" if others
+                                                       else "") + f"; {STANDARD}")
         upstream_texts.update(texts)
-        changed_ids = set()
+        changed_ids, rows = set(), []
         for path in changed:
+            delta = landscape_delta(*texts[path]) if path == LANDSCAPE else None
+            if delta is not None:
+                rows = delta["rows"]
+                targets.update(link + ".md" for link in delta["links"])
+                changed_ids |= set(delta["ids"])
+                continue
+            targets.add(path)
             old_rows, new_rows = source_rows(texts[path][0] or ""), source_rows(texts[path][1] or "")
             changed_ids |= {row for row in set(old_rows) | set(new_rows)
                             if old_rows.get(row) != new_rows.get(row)}
+            changed_ids |= note_names(texts[path][0]) | note_names(texts[path][1])
         change = {"stage": stage, "ref": new_ref, "before_hash": old_hash, "after_hash": new_hash,
                   "before_commit": before_commit, "after_commit": after_commit,
-                  "changed_documents": changed, "changed_ids": sorted(changed_ids)}
-        if old_ref != new_ref:
+                  "changed_documents": changed, "changed_ids": sorted(changed_ids),
+                  "changed_rows": rows, "changed_files": others}
+        if old_ref is not None and old_ref != new_ref:
             change["before_ref"] = old_ref
         changes.append(change)
         documents.update(changed)
@@ -452,6 +613,8 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
         for path, text in ((old_path, old_text), (new_path, new_text)):
             if path is not None:
                 documents.add(path)
+                targets.add(path)
+                ids |= note_names(text)
         if old_path == new_path and old_path is not None:
             upstream_texts[old_path] = (old_text, new_text)
         else:
@@ -459,7 +622,7 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
                 upstream_texts[old_path] = (old_text, None)
             if new_path is not None:
                 upstream_texts[new_path] = (None, new_text)
-    links = sorted(path[:-3] for path in documents)
+    links = sorted(path[:-3] for path in targets)
     changed_ids = sorted(ids)
 
     old, new = structure(before), structure(after)
@@ -491,12 +654,13 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
             for hit in cites(scan_text(text), links, changed_ids):
                 impact(path, "cites " + hit)
     if requirement_changed:
-        refs = {old_requirement, new_requirement} - {""}
+        refs = sorted({old_requirement, new_requirement} - {""})
         for path, story in new["stories"].items():
-            for ref in sorted(refs & set(story["implements"])):
-                impact(path, "implements " + ref)
+            for ref in refs:
+                if requirement_compile.implements_requirement(story["implements"], ref):
+                    impact(path, "implements " + ref)
     for path, (old_text, new_text) in sorted(upstream_texts.items()):
-        moved = relation_targets(old_text or "") ^ relation_targets(new_text or "")
+        moved = {target for _key, target in relation_targets(old_text or "") ^ relation_targets(new_text or "")}
         for target in sorted(moved):
             if target.startswith("backlog/") and target + ".md" in after:
                 impact(target + ".md", "inbound " + path[:-3])
@@ -508,7 +672,7 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
             for hit in cites(scan_text(before[review]), links, changed_ids):
                 impact(review, "cites " + hit)
     if live:
-        present = [path for path in sorted(documents) if (docs / path).is_file()]
+        present = [path for path in sorted(targets) if (docs / path).is_file()]
         deleted = {path: texts[0] for path, texts in upstream_texts.items()
                    if texts[1] is None and texts[0] is not None}
         closure, gaps = closure_scope(docs, present, deleted, links, changed_ids)
@@ -527,21 +691,33 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
     root_review = new["root_review"]
     if root_review is None or root_review == old["root_review"]:
         raise RebindRefused("open the revision's root round with begin-revision first")
+
+    def epic_notes(slug: str) -> set[str]:
+        notes = {new["epics"][slug]["path"]}
+        for story in set(new["epics"][slug]["stories"]) | {path for path, item in old["stories"].items()
+                                                           if item["epic"] == slug}:
+            notes |= {story, story[:-len("story.md")] + "test-plan.md"}
+        if reviews.get(slug) is not None:
+            notes.add(reviews[slug])
+        return notes
+
+    # An impact on the epic as a whole, through its note, its reused review or
+    # a root reader's finding, reaches every story and test plan of the epic.
+    for slug, epic in new["epics"].items():
+        if slug not in old["epics"]:
+            impact(epic["path"], "new epic")
+        elif reviews.get(slug) is None:
+            impact(epic["path"], "no approved review")
+        if any(impacted.get(path) and not (STORY_NOTE.fullmatch(path) or PLAN_NOTE.fullmatch(path))
+               for path in epic_notes(slug)):
+            for story in epic["stories"]:
+                impact(story, "epic impacted")
+                impact(new["stories"][story]["test_plan"], "epic impacted")
     epics, cited = [], set()
     for slug in sorted(new["epics"], key=lambda item: new["epics"][item]["id"]):
         epic = new["epics"][slug]
-        notes = {epic["path"]}
-        for story in set(epic["stories"]) | {path for path, item in old["stories"].items()
-                                             if item["epic"] == slug}:
-            notes |= {story, story[:-len("story.md")] + "test-plan.md"}
         review = reviews.get(slug)
-        if review is not None:
-            notes.add(review)
-        reasons = sorted({f"{path}: {reason}" for path in notes for reason in impacted.get(path, ())})
-        if slug not in old["epics"]:
-            reasons = sorted({*reasons, f"{epic['path']}: new epic"})
-        elif review is None:
-            reasons = sorted({*reasons, f"{epic['path']}: no approved review"})
+        reasons = sorted({f"{path}: {reason}" for path in epic_notes(slug) for reason in impacted.get(path, ())})
         for path in epic["stories"]:
             story = new["stories"][path]
             if impacted.get(path) or impacted.get(story["test_plan"]):
@@ -579,18 +755,25 @@ def plan(docs: Path, source_commit: str, reader_epics: list[str] | None = None,
 
 
 def source_diff(docs: Path, receipt: dict) -> list[dict]:
-    """The unified diff of every changed source document, from its before to its after commit."""
+    """The unified diff of every changed source document, from its before to its after commit,
+    and every other changed file of the package by path."""
     project = project_of(docs)
     prefix = docs_prefix(project, docs)
     result = []
     for change in receipt["binding_changes"]:
         folder, _anchor = source_location(prefix, change["stage"], change["ref"])
-        _changed, texts = package_diff(project, prefix, folder, change["before_commit"], change["after_commit"])
+        _changed, texts, _others = package_diff(project, prefix, folder, change["before_commit"],
+                                                change["after_commit"])
+        before = (change["before_commit"] or "unbound")[:12]
+        after = change["after_commit"][:12]
         for path in change["changed_documents"]:
             old, new = texts.get(path, (None, None))
             result.append({"path": path, "diff": "".join(difflib.unified_diff(
                 (old or "").splitlines(keepends=True), (new or "").splitlines(keepends=True),
-                f"{change['before_commit'][:12]}/{path}", f"{change['after_commit'][:12]}/{path}"))})
+                f"{before}/{path}", f"{after}/{path}"))})
+        for path in change["changed_files"]:
+            result.append({"path": path, "diff": f"{path} changed from {before} to {after};"
+                                                 " it is not an authored document and has no text diff\n"})
     return result
 
 
@@ -645,12 +828,13 @@ def latest_root_review(record: dict) -> dict | None:
     return backlog.latest(record["backlog_reviews"])
 
 
-def approval_findings(record: dict, docs: Path, *, approving: bool = False) -> list[str]:
+def approval_findings(record: dict, docs: Path, *, approving: bool = False,
+                      approved_receipt: str | None = None) -> list[str]:
     """Refuse a source-rebind approval its receipt replay does not prove.
 
-    The approval itself also needs the receipt file that apply-source-rebind
-    writes for the owner-approved hash; a pre-approval check replays the
-    receipt the root round names without it.
+    The approval itself needs the owner-approved hash that only
+    apply-source-rebind passes, whatever receipt file is on disk; a
+    pre-approval check replays the receipt the root round names without it.
     """
     review = latest_root_review(record)
     named = section_receipt(review["body"]) if review is not None else None
@@ -663,11 +847,11 @@ def approval_findings(record: dict, docs: Path, *, approving: bool = False) -> l
         if not digest:
             raise RebindRefused(f"{path} Source Rebind section names no receipt; rerun"
                                 " record-source-rebind-root-review")
-        file = receipt_path(docs, digest)
-        stored = load_receipt(file) if file.is_file() else None
-        if stored is None and approving:
+        if approving and approved_receipt != digest:
             raise RebindRefused("a source-rebind revision is approved only by apply-source-rebind"
                                 " --approve-receipt with the owner's receipt hash")
+        file = receipt_path(docs, digest)
+        stored = load_receipt(file) if file.is_file() else None
         if stored is not None and "after_package_hash" in stored:
             raise RebindRefused("the source-rebind receipt is already sealed by an earlier approval")
         reader_epics = stored["reader_epics"] if stored else reader_scope_epics(review["body"])
@@ -806,6 +990,35 @@ def receipts(docs: Path) -> list[dict]:
     return found
 
 
+def committed_receipts(docs: Path) -> tuple[list[dict], list[str]]:
+    """The sealed receipts whose files HEAD holds byte for byte, and why each other file is skipped."""
+    directory = docs / RECEIPTS
+    if not directory.exists():
+        return [], []
+    project = backlog.history_project(docs)
+    prefix = docs_prefix(project, docs) if project is not None else ""
+    found, skipped = [], []
+    for path in sorted(directory.glob("*.json")):
+        name = path.relative_to(docs).as_posix()
+        try:
+            backlog_migration.safe_path(docs, name)
+            blob = backlog.history_blob(project, "HEAD", f"{prefix}/{name}" if prefix else name) \
+                if project is not None else None
+            # A checkout may turn the committed line endings into CRLF.
+            if blob is None or blob.replace(b"\r\n", b"\n") != path.read_bytes().replace(b"\r\n", b"\n"):
+                raise RebindRefused("it is not committed in HEAD as it stands")
+            receipt = load_receipt(path)
+            if path.stem != receipt["owner_approval"][7:]:
+                raise RebindRefused("it is not named by its owner approval")
+            if not receipt.get("after_package_hash"):
+                raise RebindRefused("it is not sealed by an approval")
+        except (OSError, ValueError) as exc:
+            skipped.append(f"{name}: {exc}")
+            continue
+        found.append(receipt)
+    return found, skipped
+
+
 def root_review_body(record: dict, docs: Path, body: str, receipt: dict) -> str:
     """Write the root review sections the compiler proves, and the Source Rebind section."""
     root = record["backlog"]
@@ -866,8 +1079,10 @@ def root_review_body(record: dict, docs: Path, body: str, receipt: dict) -> str:
     lines = [f"Compiler [Source Rebind]: receipt {receipt['owner_approval']} from"
              f" {receipt['predecessor_commit']}", ""]
     for change in receipt["binding_changes"]:
-        lines.append(f"- {change['stage']} {change['ref']}: {change['before_hash']} -> {change['after_hash']},"
-                     f" {len(change['changed_documents'])} changed documents")
+        lines.append(f"- {change['stage']} {change['ref']}: {change['before_hash'] or 'unbound'} ->"
+                     f" {change['after_hash']}, {len(change['changed_documents'])} changed documents"
+                     + (f", {len(change['changed_files'])} changed other files" if change["changed_files"]
+                        else ""))
     for row in receipt["epics"]:
         lines.append(f"- {row['id']}: {row['disposition']}"
                      + (" (" + "; ".join(row["impacted_by"]) + ")" if row["impacted_by"] else ""))
@@ -916,6 +1131,29 @@ def record_root_review(args) -> int:
     return 0
 
 
+def mechanical(receipt: dict) -> bool:
+    """Whether a source gate may approve the receipt: it reuses every epic's approved
+    review, cites no story, moves no Requirement and carries no root reader finding."""
+    return (all(row["disposition"] == "reused" for row in receipt["epics"])
+            and not receipt["root_scope"]["cited_stories"]
+            and receipt["requirement"]["before"] == receipt["requirement"]["after"]
+            and not receipt["reader_epics"])
+
+
+def source_gate_findings(docs: Path, receipt: dict) -> list[str]:
+    """Refuse a source-gate approval of a receipt that is not mechanical."""
+    import process_policy
+    values, _snapshot = process_policy.effective_values(docs)
+    findings = []
+    if values.get("dependent_rebind_gate", {}).get("value") != "with_source":
+        findings.append("--source-gate needs dependent_rebind_gate with_source in the approved Process Policy")
+    if not mechanical(receipt):
+        findings.append("the receipt is not mechanical: it reviews an epic, cites a story, moves the"
+                        " Requirement or carries a root reader finding; the owner approves its hash"
+                        " through the ordinary backlog approval")
+    return findings
+
+
 def command(args) -> int:
     """plan-source-rebind is read-only; apply-source-rebind approves the exact owner-approved receipt."""
     docs = backlog.docs_root(args.docs)
@@ -923,12 +1161,14 @@ def command(args) -> int:
         require_opt_in(docs)
         if args.command == "plan-source-rebind":
             receipt = plan(docs, args.source_commit, list(args.review_epic or []))
-            print(json.dumps({"ok": True, "receipt": receipt}, indent=2, ensure_ascii=False))
+            print(json.dumps({"ok": True, "receipt": receipt, "mechanical": mechanical(receipt)},
+                             indent=2, ensure_ascii=False))
             return 0
         import setup_project
         with setup_project.refresh_guard(project_of(docs)):
             require_opt_in(docs)
-            receipt = apply(docs, args.source_commit, list(args.review_epic or []), args.approve_receipt)
+            receipt = apply(docs, args.source_commit, list(args.review_epic or []), args.approve_receipt,
+                            source_gate=bool(getattr(args, "source_gate", False)))
         print(json.dumps({"ok": True, "receipt": receipt}, indent=2, ensure_ascii=False))
         return 0
     except (OSError, ValueError, KeyError, RuntimeError) as exc:
@@ -936,7 +1176,8 @@ def command(args) -> int:
         return 1
 
 
-def apply(docs: Path, source_commit: str, reader_epics: list[str], approved: str) -> dict:
+def apply(docs: Path, source_commit: str, reader_epics: list[str], approved: str, *,
+          source_gate: bool = False) -> dict:
     """Write the receipt, run the ordinary atomic approval and seal the approved package hash."""
     import contextlib
     import io
@@ -955,6 +1196,8 @@ def apply(docs: Path, source_commit: str, reader_epics: list[str], approved: str
     receipt = plan(docs, source_commit, reader_epics)
     if approved != receipt["owner_approval"]:
         raise RebindRefused("owner approval must name the exact planned receipt hash")
+    if source_gate and (findings := source_gate_findings(docs, receipt)):
+        raise RebindRefused("; ".join(findings))
     if path.exists() and load_receipt(path) != receipt:
         raise RebindRefused("source-rebind receipt was changed")
     snapshot = backlog.snapshot_tree(docs)
@@ -963,7 +1206,7 @@ def apply(docs: Path, source_commit: str, reader_epics: list[str], approved: str
         atomic_file.replace_bytes(path, backlog_migration.encoded(receipt))
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            code = backlog.approve(SimpleNamespace(docs=str(docs)))
+            code = backlog.approve(SimpleNamespace(docs=str(docs), source_rebind_receipt=approved))
         if code:
             errors = json.loads(output.getvalue()).get("errors", [])
             raise RebindRefused("approval refused: " + "; ".join(errors))

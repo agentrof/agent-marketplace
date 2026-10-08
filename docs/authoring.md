@@ -192,9 +192,11 @@ below `backlog/artifacts/source-rebinds/`, runs the ordinary atomic approval
 and seals the approved package hash. Plain `approve` refuses such a round.
 
 `backlog_migration.pin_chain` is the one helper that accepts a Delivery's old
-backlog pin: it walks committed migration and source-rebind receipts from the
-pinned to the current package hash, refuses an ambiguous step, replays each
-hop from Git and returns the Test Plan aliases and the impacted notes. The
+backlog pin: it walks migration receipts and the source-rebind receipts HEAD
+holds from the pinned to the current package hash, skips a malformed or
+uncommitted file with a named diagnostic, refuses two chains that reach the
+same hash, replays each hop from Git and returns the Test Plan aliases and
+the impacted notes. The
 relation closure an approval read cannot be rebuilt later, so a later replay
 requires every reason it can rebuild from Git and accepts the recorded ones
 beyond them; the approved root review binds the receipt hash.

@@ -29,7 +29,12 @@ instead of after it.
    named in the gate as a later Experience update with its own gate, never
    approved here.
 3. Name the Requirement and backlog bindings that must advance after the
-   Experience receipts, through their normal revisions.
+   Experience receipts, through their normal revisions. When the Process
+   Policy selects `source_rebind` `receipt_when_unchanged`, the backlog
+   rebind joins the action set as a mechanical source-rebind receipt: every
+   epic keeps its approved review. Its hash binds the source's approval
+   commit, so the gate approves the mechanical rebind and the compiler
+   proves it afterwards.
 
 ## The gate
 
@@ -53,6 +58,12 @@ publication.
 3. Otherwise stop and ask the owner through the Experience Design flow's
    own gate. Never widen the approved set, and never let an authored record
    or artifact change ride on this approval.
+4. For an approved backlog rebind, run `plan-source-rebind` after the source
+   commit. While it reports `mechanical` and the root reader adds no
+   finding, run `apply-source-rebind --approve-receipt <owner_approval>
+   --source-gate` with the planned hash; the command refuses a receipt that
+   is not mechanical. Otherwise the owner approves the receipt hash through
+   the ordinary backlog approval.
 
 ## Measurement
 

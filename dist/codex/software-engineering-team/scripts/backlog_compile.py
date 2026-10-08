@@ -4276,19 +4276,21 @@ def with_policy_pin(props: dict, pin: dict) -> dict:
     return result
 
 
-def source_rebind_findings(record: dict, docs: Path, *, approving: bool = False) -> list[str]:
+def source_rebind_findings(record: dict, docs: Path, *, approving: bool = False,
+                           approved_receipt: str | None = None) -> list[str]:
     """Replay the source-rebind receipt a root round names; a round without one reads nothing."""
     review = latest(record["backlog_reviews"])
     if review is None or SOURCE_REBIND_SECTION not in headings(review["body"]):
         return []
     import backlog_rebind
 
-    return backlog_rebind.approval_findings(record, docs, approving=approving)
+    return backlog_rebind.approval_findings(record, docs, approving=approving,
+                                            approved_receipt=approved_receipt)
 
 
 def approval_preflight(docs: Path, record: dict,
-                       collect_errors: list[str], *,
-                       approving: bool = False) -> tuple[list[str], dict, dict, bool]:
+                       collect_errors: list[str], *, approving: bool = False,
+                       approved_receipt: str | None = None) -> tuple[list[str], dict, dict, bool]:
     """Run every check atomic approval runs before it writes.
 
     Returns the findings beyond the collect errors, the preserved approved
@@ -4299,7 +4301,8 @@ def approval_preflight(docs: Path, record: dict,
     if not already_approved:
         findings.extend(requirement_coverage_findings(record))
         findings.extend(light_root_review_findings(record, docs))
-        findings.extend(source_rebind_findings(record, docs, approving=approving))
+        findings.extend(source_rebind_findings(record, docs, approving=approving,
+                                               approved_receipt=approved_receipt))
     preserved, pin = {}, {}
     if not collect_errors and not findings:
         if already_approved:
@@ -4327,8 +4330,10 @@ def approve(args) -> int:
     # stale receipt data after the approval transition mutates Markdown.
     with stage_package.candidate_session(), experience_validation_session():
         record, errors = collect(docs)
-    findings, preserved, pin, already_approved = approval_preflight(docs, record, errors,
-                                                                    approving=True)
+    # Only apply-source-rebind passes the owner-approved receipt hash; the CLI has no such flag.
+    findings, preserved, pin, already_approved = approval_preflight(
+        docs, record, errors, approving=True,
+        approved_receipt=getattr(args, "source_rebind_receipt", None))
     errors = sorted(set(errors + findings))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2,
@@ -5404,6 +5409,9 @@ def main(argv=None) -> int:
                              help="an epic a root reader's finding moved to review")
         if name == "apply-source-rebind":
             command.add_argument("--approve-receipt", required=True)
+            command.add_argument("--source-gate", action="store_true",
+                                 help="the dependent_rebind_gate with_source gate approved this"
+                                      " mechanical receipt")
         import backlog_rebind
         command.set_defaults(func=backlog_rebind.record_root_review
                              if name == "record-source-rebind-root-review" else backlog_rebind.command)

@@ -224,6 +224,19 @@ class SolutionAndDesignSourceImpactTests(unittest.TestCase):
                     self.assertEqual(result["review_scope"],
                                      "source_delta" if expected == "mechanical" else "full")
 
+    def test_an_authored_status_change_is_a_changed_document(self):
+        for source_ref, (folder, anchor, key, document, _row) in self.SOURCES.items():
+            with self.subTest(source=source_ref):
+                self.setUp()
+                self.approved(source_ref, f"[[{folder}/{document[:-3]}|Rules]]")
+                path = self.docs / folder / document
+                self.write(path, path.read_text(encoding="utf-8").replace("status: approved", "status: rejected"))
+                self.write(self.docs / folder / anchor, (self.docs / folder / anchor).read_text(
+                    encoding="utf-8").replace("status: approved", "status: draft"))
+                result = self.impact(source_ref)
+                self.assertEqual((result["rebind"], result["changed_source_documents"]),
+                                 ("semantic", [document]))
+
     def test_an_unknown_source_reference_is_refused(self):
         with self.assertRaisesRegex(ValueError, "solution-design/landscape or design-system/MASTER"):
             experience_compile._source_package("operation/verification-contract")

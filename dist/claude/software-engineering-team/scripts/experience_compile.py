@@ -5541,21 +5541,27 @@ def _source_rows(text: str) -> dict[str, str]:
     return rows
 
 
-def _source_documents(text_by_path: dict[str, str],
-                      lifecycle: frozenset[str] | None = None) -> dict[str, str]:
-    """Source documents in a comparable form: lifecycle and generated parts left out."""
+def _source_documents(text_by_path: dict[str, str], lifecycle: frozenset[str] | None = None,
+                      anchor: str | None = None) -> dict[str, str]:
+    """Source documents in a comparable form: lifecycle and generated parts left out.
+
+    With an ``anchor`` only that package note loses its status and status
+    tags; every other note keeps them as content.
+    """
     import ba_compile
     lifecycle = ba_compile.LIFECYCLE_KEYS if lifecycle is None else lifecycle
     result = {}
     for relative, text in text_by_path.items():
         if relative.split("/", 1)[0] == GENERATED or not relative.endswith(".md"):
             continue
+        stamped = anchor is None or relative == anchor
+        keys = lifecycle if stamped else lifecycle - {"status"}
         lines = text.splitlines()
         if lines and lines[0] == "---" and "---" in lines[1:]:
             end = lines.index("---", 1)
             lines = ["---", *(line for line in lines[1:end]
-                              if line.partition(":")[0].strip() not in lifecycle
-                              and not ba_compile.STATUS_TAG_RE.match(line)), *lines[end:]]
+                              if line.partition(":")[0].strip() not in keys
+                              and not (stamped and ba_compile.STATUS_TAG_RE.match(line))), *lines[end:]]
         result[relative] = without_generated_relations("\n".join(lines).rstrip() + "\n")
     return result
 
@@ -5623,6 +5629,9 @@ def source_impact(root: Path, source_ref: str) -> dict:
     root's lifecycle, revision and bindings differ from HEAD.
     """
     stage, folder, anchor, pattern, lifecycle = _source_package(source_ref)
+    # A Solution or Design System note's status is content; a space's notes
+    # carry their package's lifecycle.
+    stamped = anchor if source_ref in SOURCE_PACKAGES else None
     root = root.resolve()
     top = Path(_git(root, "rev-parse", "--show-toplevel").stdout.decode().strip()).resolve()
     docs = root.parent
@@ -5630,7 +5639,7 @@ def source_impact(root: Path, source_ref: str) -> dict:
     space_rel = space_dir.relative_to(top).as_posix()
     current_source = _source_documents({
         path.relative_to(space_dir).as_posix(): path.read_text(encoding="utf-8")
-        for path in sorted(space_dir.rglob("*.md"))} if space_dir.is_dir() else {}, lifecycle)
+        for path in sorted(space_dir.rglob("*.md"))} if space_dir.is_dir() else {}, lifecycle, stamped)
     application = (root / "artifacts").relative_to(top).as_posix()
     application_changed = _changed_paths(top, application)
     results = []
@@ -5648,7 +5657,7 @@ def source_impact(root: Path, source_ref: str) -> dict:
         base = _source_commit(top, space_rel, bound[0], anchor, pattern)
         if base is None:
             raise ValueError(f"{package.name}: no commit holds {source_ref} at {bound[0]}")
-        previous = _source_documents(_tree_at(top, base, space_rel), lifecycle)
+        previous = _source_documents(_tree_at(top, base, space_rel), lifecycle, stamped)
         changed_documents = sorted(path for path in set(previous) | set(current_source)
                                    if previous.get(path) != current_source.get(path))
         changed_ids = set()

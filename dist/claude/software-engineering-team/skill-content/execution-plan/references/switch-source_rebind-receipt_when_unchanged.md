@@ -9,7 +9,7 @@ describes.
 ## What the Delivery keeps
 
 A backlog approved through `apply-source-rebind` leaves a sealed receipt
-below `backlog/artifacts/source-rebinds/`. `delivery_compile.py check` and
+below `backlog/artifacts/source-rebinds/`; only a receipt HEAD holds counts. `delivery_compile.py check` and
 every Delivery source check accept the Delivery's old backlog pin as an
 alias of the current one only when a chain of committed receipts, source
 rebinds or schema migrations, joins the pinned package hash to the current
@@ -29,8 +29,10 @@ holds:
 
 - an Item's Story or Test Plan bytes changed on the chain;
 - a receipt names an Item's Story or Test Plan as impacted by its changed
-  sources, even with unchanged bytes;
-- a receipt is uncommitted, tampered, ambiguous or does not replay;
+  sources, even with unchanged bytes, including every story of an epic
+  impacted as a whole;
+- a receipt is uncommitted, tampered, ambiguous or does not replay; the
+  Delivery check names each receipt file it skipped;
 - the Definition of Done, an Operation contract or the Process Policy moved.
 
 ## Measurement

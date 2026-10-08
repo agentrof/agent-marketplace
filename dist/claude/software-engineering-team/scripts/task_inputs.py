@@ -26,8 +26,6 @@ OWNING_FLOWS_SCOPE = "owning_flows"
 # How a declared pass kind runs: as the owning writer's generated variant, or
 # as a command of the entry itself with no role pass.
 PASS_KIND_RUNS = {"writer_variant", "entry_command"}
-PROVISIONAL_SWITCH = "provisional_claims"
-PROVISIONAL_VALUE = "during_plan_revision"
 PROVISIONAL_CONSTRAINT = ("provisional: not freezable or pushable before the approved plan publishes it;"
                           " a provisional path stays the Item's only once its writer converges on that plan")
 # The switch value whose cross-epic backlog writer writes only its given inputs.
@@ -863,14 +861,22 @@ def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, 
     """The selected Item record as the Delivery's Integration publishes it, with the Delivery id.
 
     A checkout's record can be a draft of a plan revision not yet approved, so
-    the published record grants the claims. A checkout without the remote holds
-    no Delivery refs and keeps its own record: (None, None). A remote that holds
-    no published record of the Item raises ValueError.
+    a published record grants the claims, never the draft. It is read from a
+    published Integration commit already in this checkout first: the remote's
+    tracking ref of the Integration, else the integration_base_commit the Item
+    worktree last converged on. Only without either is the remote asked. A
+    checkout with no remote at all holds no Delivery refs and keeps its own
+    record: (None, None). A checkout whose remotes do not include *remote*, or
+    where no published record can be read, raises ValueError naming why.
     """
     import delivery_git
     # Without its own repository, git would answer for an enclosing one and its remote.
-    if not (project / ".git").exists() or subprocess.run(["git", "-C", str(project), "remote", "get-url", remote],
-                      capture_output=True).returncode:
+    if not (project / ".git").exists():
+        return None, None
+    remotes = subprocess.run(["git", "-C", str(project), "remote"], capture_output=True, encoding="utf-8")
+    if remotes.returncode:
+        raise ValueError("the checkout's remotes cannot be read")
+    if not remotes.stdout.split():
         return None, None
     from ba_compile import parse_frontmatter
     from delivery_compile import split_note
@@ -880,6 +886,14 @@ def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, 
     delivery = props.get("id") if not error else None
     if not isinstance(delivery, str) or not delivery_git.DELIVERY_ID_RE.fullmatch(delivery):
         raise ValueError("the selected Item's Delivery record cannot be read")
+    for oid in local_integration_commits(project, item, delivery, remote):
+        try:
+            return delivery_git.split_remote_note(project, oid, item, split_note)[0], delivery
+        except RuntimeError:
+            continue
+    if remote not in remotes.stdout.split():
+        raise ValueError(f"no published record of the selected Item is in this checkout and it has no remote"
+                         f" {remote}; name the Delivery's remote with --remote")
     ref = delivery_git.canonical_refs(delivery)["integration"]
     try:
         tip = delivery_git.remote_ref_oids(project, remote, [ref])[ref]
@@ -888,8 +902,36 @@ def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, 
         published, _body = delivery_git.split_remote_note(
             project, delivery_git.require_commit(project, remote, ref, tip), item, split_note)
     except RuntimeError as exc:
-        raise ValueError(f"the published record of the selected Item cannot be read: {exc}") from exc
+        raise ValueError(f"the published record of the selected Item cannot be read: no published Integration"
+                         f" commit of {delivery} is in this checkout and {remote} cannot provide one: {exc}") from exc
     return published, delivery
+
+
+def local_integration_commits(project: Path, item: str, delivery: str, remote: str) -> list[str]:
+    """The published Integration commits of *delivery* this checkout already holds, newest known first."""
+    import delivery_git
+    from ba_compile import parse_frontmatter
+    found = []
+    tracking = "refs/remotes/{}/{}".format(
+        remote, delivery_git.canonical_refs(delivery)["integration"].removeprefix("refs/heads/"))
+    resolved = subprocess.run(["git", "-C", str(project), "rev-parse", "--verify", "-q", tracking + "^{commit}"],
+                              capture_output=True, encoding="utf-8")
+    if not resolved.returncode:
+        found.append(resolved.stdout.strip())
+    try:
+        story = PurePosixPath(item).parent.name.upper()
+        worktree = delivery_git.worktree_paths(delivery_git.main_worktree(project), delivery, story)["item"]
+    except (RuntimeError, ValueError):
+        return found
+    converged = worktree / item
+    if converged.is_file():
+        props, _line, error = parse_frontmatter(converged.read_text(encoding="utf-8"))
+        base = props.get("integration_base_commit") if not error else None
+        if (isinstance(base, str) and delivery_git.OID_RE.fullmatch(base) and base not in found
+                and not subprocess.run(["git", "-C", str(project), "cat-file", "-e", base + "^{commit}"],
+                                       capture_output=True).returncode):
+            found.append(base)
+    return found
 
 
 def write_scope(project: Path | None, paths: set[str], role: str | None, route: dict,
@@ -1013,13 +1055,15 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
                 return result
         targets = [{"path": path, "coverage": "path_and_descendants", "source": item}
                    for path in sorted(owned)
-                   if not any(path == root or path.startswith(root + "/")
+                   # A file system that folds case writes Workspace/docs into workspace/docs.
+                   if not any(path.casefold() == root or path.casefold().startswith(root + "/")
                               for root in ("workspace/docs", ".git", ".agentrof"))]
         sources = [item]
         result["excluded_subtrees"] = ["workspace/docs", ".git", ".agentrof"]
         result["constraints"].append("approved Item plan, current writer receipt, and completed/cancelled readers remain mandatory")
-        if delivery is not None and (PROVISIONAL_SWITCH, PROVISIONAL_VALUE) in chosen and not lane:
-            import delivery_git
+        import delivery_git
+        provisional_on = (delivery_git.PROVISIONAL_SWITCH, delivery_git.PROVISIONAL_VALUE) in chosen
+        if delivery is not None and provisional_on and not lane:
             try:
                 live = [claim for claim in delivery_git.delivery_provisional_claims(project, remote, delivery)
                         if claim["story"] == props.get("story_id") and claim["state"] == "live"]

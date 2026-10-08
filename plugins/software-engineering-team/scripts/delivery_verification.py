@@ -66,8 +66,6 @@ MISSING_GROUP = "missing"
 # pairs the check flags (#440).
 LEVEL_CHANGE_SWITCH = "level_change_map"
 ASSERTION_MAP = "assertion_map"
-PROVISIONAL_SWITCH = "provisional_claims"
-PROVISIONAL_VALUE = "during_plan_revision"
 ASSERTION_MAP_FILE = "assertion-map.json"
 ASSERTION_KINDS_PATH = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/assertion-kinds.json"
 ASSERTION_FIELDS = ("path", "code", "kind", "expected")
@@ -578,26 +576,47 @@ def candidate(root: Path, delivery_id: str, story: str, *, allow_evidence: bool 
              "changed_files": changed, "mutation_files": code, "report_paths": sorted(reports)}
     if delivery.delivery_switch_value(docs, delivery_id, LEVEL_CHANGE_SWITCH) == ASSERTION_MAP:
         value["assertion_map"] = assertion_map_check(root, value)
-    if delivery.delivery_switch_value(docs, delivery_id, PROVISIONAL_SWITCH) == PROVISIONAL_VALUE:
-        require_published_claims(root, delivery_id, story, props, changed)
     value["candidate_hash"] = digest(value)
     return value
 
 
-def require_published_claims(root: Path, delivery_id: str, story: str, props: dict, changed: list[str]) -> None:
-    """At provisional_claims during_plan_revision, refuse a candidate that changes a product path its
-    Item record does not claim, naming a provisional claim's paths as pending or orphaned, so no
-    reader starts on work that push-item would refuse."""
+def require_published_claims(root: Path, current: dict, remote: str = "origin") -> None:
+    """At provisional_claims during_plan_revision, refuse to freeze or start a reader on a candidate
+    that changes a product path the published Item record does not claim, so no reader starts on
+    work that push-item would refuse. The claims come from the Item record of the Integration
+    commit the Item converged on, never the worktree's own record, which its writer can edit.
+    Other candidate reads, such as a regression run, still work on a provisional commit."""
+    import delivery_git
+    docs = delivery.docs_root(root)
+    delivery_id, story = current["delivery"], current["story"]
+    if delivery.delivery_switch_value(docs, delivery_id, delivery_git.PROVISIONAL_SWITCH) \
+            != delivery_git.PROVISIONAL_VALUE:
+        return
+    item = delivery.find_delivery(docs, delivery_id) / "items" / delivery.id_slug(story) / "item.md"
+    try:
+        published = delivery_git.split_remote_note(root, current["integration_base_commit"],
+                                                   item.relative_to(root).as_posix(), delivery.split_note)[0]
+    except RuntimeError as exc:
+        raise RuntimeError("the Item record that the Item's integration base publishes cannot be read: "
+                           f"{exc}") from exc
+    refuse_unpublished_paths(root, delivery_id, story, published.get("path_claims"), current["changed_files"],
+                             remote)
+
+
+def refuse_unpublished_paths(root: Path, delivery_id: str, story: str, path_claims, changed: list[str],
+                             remote: str = "origin") -> None:
+    """Refuse changed product paths that *path_claims* does not cover, naming a provisional claim's
+    paths as pending or orphaned."""
     import delivery_git
     outside = delivery_git.paths_outside_claims(
-        {path for path in changed if not path.startswith("workspace/docs/")}, props.get("path_claims"))
+        {path for path in changed if not path.startswith("workspace/docs/")}, path_claims)
     if outside:
-        raise RuntimeError(delivery_git.provisional_path_refusal(root, "origin", delivery_id, story, outside)
+        raise RuntimeError(delivery_git.provisional_path_refusal(root, remote, delivery_id, story, outside)
                            or "DELIVERY_PATH_CLAIM_EXCEEDED: the Item's product change lies outside its path"
                               " claims: " + ", ".join(outside))
 
 
-def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False) -> dict:
+def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, remote: str = "origin") -> dict:
     started = time.monotonic()
     root = root.resolve()
     with locked(root):
@@ -611,6 +630,7 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False) -> 
         current = candidate(root, delivery_id, story, allow_evidence=True)
         if current.get("assertion_map", {}).get("problems"):
             raise RuntimeError("assertion map: " + "; ".join(current["assertion_map"]["problems"]))
+        require_published_claims(root, current, remote)
         # At touched_suites the readers start only on a candidate whose touched
         # earlier suites and own Test Plan targets passed before the freeze.
         pre_handoff = None
@@ -3396,13 +3416,14 @@ def closure_read(root: Path, current: dict) -> tuple[list[str], dict]:
     return sorted(full), {"scope": scope, "views": task_inputs.vault_views(docs)}
 
 
-def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str) -> dict:
+def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, remote: str = "origin") -> dict:
     if role not in ROLES or mode not in policy()["role_modes"][role]:
         raise RuntimeError("unsupported verification role or mode")
     value = read_session(root)
     current = require_current(root, value, allow_evidence=True)
     if (current["delivery"], current["story"]) != (delivery_id, story):
         raise RuntimeError("verification session belongs to another Item")
+    require_published_claims(root, current, remote)
     previous = value.get("previous_candidate")
     delta = list(current["changed_files"])
     scope_expanded = bool(previous and (previous.get("inputs") != current["inputs"]
@@ -3519,6 +3540,9 @@ def main(argv=None) -> int:
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
     subs.choices["freeze"].add_argument("--fresh", action="store_true")
+    for name in ("freeze", "manifest"):
+        subs.choices[name].add_argument("--remote", default="origin",
+                                        help="the Delivery's Git remote, whose Integration holds its provisional claims")
     for name in ("manifest",):
         subs.choices[name].add_argument("--role", choices=ROLES, required=True)
         subs.choices[name].add_argument("--mode", required=True)
@@ -3568,7 +3592,7 @@ def main(argv=None) -> int:
     root = Path(args.worktree).resolve()
     try:
         if args.command == "freeze":
-            value = freeze(root, args.delivery, args.story, fresh=args.fresh)
+            value = freeze(root, args.delivery, args.story, fresh=args.fresh, remote=args.remote)
         elif args.command == "inspect-context":
             value = inspect_context(root, json.loads(Path(args.plan).read_text(encoding="utf-8")))
         elif args.command == "expand-context":
@@ -3606,7 +3630,7 @@ def main(argv=None) -> int:
             value = run_check(root, args.kind, fresh=args.fresh, selection_file=args.selection_file,
                               spot_file=args.spot_run_file)
         elif args.command == "manifest":
-            value = manifest(root, args.delivery, args.story, args.role, args.mode)
+            value = manifest(root, args.delivery, args.story, args.role, args.mode, args.remote)
         elif args.summary or args.run:
             value = status_summary(root, args.run)
         else:

@@ -106,7 +106,17 @@ placeholders. Story implementation ownership and QA
 contribution ownership do not transfer canonical backlog writing authority.
 Delivery implementation derives literal path-and-descendant claims from one
 selected Item and its role sequence; vault, Git, and runtime authority paths
-remain excluded and the active writer receipt is still mandatory.
+remain excluded, with their case folded, and the active writer receipt is
+still mandatory. The claims come from the Item record the Delivery's
+Integration publishes, never from the checkout's draft of a plan revision. A
+published Integration commit already in the checkout is read first: the
+remote's tracking ref of the Integration, else the `integration_base_commit`
+of the Item worktree's record. Only without either is the remote asked, so a
+checkout that holds one resolves offline. A checkout with no remote at all
+holds no Delivery refs and keeps its own record. The scope is `unresolved`,
+with the reason named, when the checkout's remotes do not include the
+Delivery's remote (pass `--remote`), when the remote holds no Integration of
+the Delivery, or when it cannot be reached and no published commit is local.
 
 Missing, ambiguous, new-document, or unsupported write scopes are explicitly
 `unresolved`, with an empty area. Resolve them through the existing owning

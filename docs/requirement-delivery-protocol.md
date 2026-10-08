@@ -815,6 +815,19 @@ path below it. Vault paths keep the control, Architecture and projection rules
 instead, and a path the product tip holds exactly as the Item's
 `integration_base_commit` does is not the Item's change.
 
+The implementer's write scope, under every switch value, comes from the same
+published record, never from a checkout's draft of a plan revision:
+`task_inputs.py` reads the Item record of a published Integration commit the
+checkout already holds, the remote's tracking ref of the Integration or else
+the Item worktree's `integration_base_commit`, and asks the Delivery's remote
+(`--remote`, default `origin`) only without either. A checkout with no remote
+keeps its own record, since it holds no Delivery refs. The scope stays
+`unresolved`, naming the reason, when the checkout's remotes lack the
+Delivery's remote, when that remote holds no Integration of the Delivery, or
+when it cannot be reached and no published commit is local. While a planning
+task checks for a held plan-revision barrier, it fetches a Fence or
+Integration commit only when the checkout lacks it.
+
 At process switch `provisional_claims` `during_plan_revision`, a plan revision
 that adds a path to an active Item need not hold its code back. While the
 Delivery's own plan-revision barrier is held, `provisional-claim` records a
@@ -824,7 +837,7 @@ Item tip, Slot and writer epoch it was recorded with, and the sorted path list
 its `Claims-Hash` binds. It refuses with `DELIVERY_PROVISIONAL_CLAIM_REFUSED`
 a path that is not in the checkout's draft `path_claims` of the Item or that
 its published plan already claims, a path under `workspace/docs`, `.git` or
-`.agentrof`, a path that overlaps, as written or with its case folded, a
+`.agentrof` with its case folded, a path that overlaps, as written or with its case folded, a
 published or draft claim of another open Item or another Item's live
 provisional claim, an Item that is not active, runs parallel lanes or whose
 verified writer receipt this host lacks, and a Delivery without the value.
@@ -832,18 +845,24 @@ The claim is live only while that barrier is held and the Item keeps the tip
 lineage, Slot and writer it recorded; validity is derived at every read and
 never stored, so a takeover voids it. The implementer's write scope adds the
 live provisional paths, and its Item writer commits the change in the Item
-worktree. `freeze`, the verification candidate and `push-item` refuse that
-change with `DELIVERY_PROVISIONAL_CLAIM_PENDING` until the approved plan
+worktree. `freeze`, a verification reader's task manifest and `push-item`
+refuse that change, by the claims of the published Item record at the Item's
+`integration_base_commit`, with `DELIVERY_PROVISIONAL_CLAIM_PENDING` until the approved plan
 publishes the path and the writer converges on it, a merge that keeps the
 provisional commit, and `integrate-item` takes only what `push-item`
 published. `finish-plan-revision` and `abort-plan-revision` release every live
 claim of the barrier in the barrier's own atomic push with a
-`provisional-claim-release-v1` record: `promoted` when the published Item
+`provisional-claim-release-v1` record that names the claim record it ends in
+`Claim-Record`, so a claim already void stays void: `promoted` when the published Item
 record claims every path, `orphaned` when the approval dropped or moved one,
 and `withdrawn` at abort or through `withdraw-provisional-claim`. A change to
 an orphaned, withdrawn or void path is refused with
 `DELIVERY_PROVISIONAL_CLAIM_ORPHANED` by name, and its writer reverts or
-reworks it. A live claim's paths count as claimed for `refresh-target`.
+reworks it. A live claim's paths, and a promoted claim's paths until the Item
+ref claims them, count as claimed for `refresh-target`, as written or with
+their case folded. Every reader checks each record again as the verb wrote it
+and stops with `DELIVERY_COORDINATION_CORRUPT` on one that fails, such as a
+hand-pushed record.
 `block-item` and `pause-item` need a clean Item worktree, so provisional
 commits are flushed with the plan or reverted first. Delivery `status` lists
 each claim's Story, paths, epoch and state, and `approve-review` fills a line

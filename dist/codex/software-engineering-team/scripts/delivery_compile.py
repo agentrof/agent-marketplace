@@ -86,8 +86,6 @@ FOLLOW_UP_COLUMNS = ("finding", "severity", "file", "description", "owner_role",
 # Each compiler-owned block starts at its marker line, after any authored text.
 ITEM_FOLLOW_UPS = "Open code review follow-ups, copied by approve-item-evidence:"
 DELIVERY_FOLLOW_UPS = "Open code review follow-ups of the integrated Items, listed by approve-review:"
-PROVISIONAL_SWITCH = "provisional_claims"
-PROVISIONAL_VALUE = "during_plan_revision"
 PROVISIONAL_WORK = "Items that started work under a provisional claim before its plan approval, listed by approve-review:"
 CALIBRATION_COLUMNS = ("finding", "claimed_severity", "calibrated_severity", "reason")
 ITEM_CALIBRATION = ("Severity calibration of the open critical and major claims,"
@@ -2790,8 +2788,10 @@ def bundle(args) -> int:
 
 def provisional_work(docs: Path, delivery_id: str) -> bool:
     """Whether the Delivery runs provisional_claims at during_plan_revision; a value that cannot be read records none."""
+    import delivery_git
     try:
-        return delivery_switch_value(docs, delivery_id, PROVISIONAL_SWITCH) == PROVISIONAL_VALUE
+        return (delivery_switch_value(docs, delivery_id, delivery_git.PROVISIONAL_SWITCH)
+                == delivery_git.PROVISIONAL_VALUE)
     except (KeyError, ValueError):
         return False
 
@@ -2809,12 +2809,15 @@ def status(args) -> int:
     # The owner sees which Items started code under a provisional claim, and where each claim stands.
     if provisional_work(docs, args.delivery):
         import delivery_git
+        remote = getattr(args, "remote", "origin")
         try:
             project = delivery_git.main_worktree(docs)
-            # A checkout without the remote holds no Delivery refs, so it holds no claim either.
-            claims = (delivery_git.delivery_provisional_claims(project, "origin", args.delivery)
-                      if subprocess.run(["git", "-C", str(project), "remote", "get-url", "origin"],
-                                        capture_output=True).returncode == 0 else [])
+            remotes = delivery_git.run_git(project, "remote").split()
+            # A checkout without any remote holds no Delivery refs, so it holds no claim either;
+            # one whose remotes lack the named one cannot tell, and says so.
+            if remotes and remote not in remotes:
+                raise RuntimeError(f"the checkout has no remote {remote}; name the Delivery's remote with --remote")
+            claims = delivery_git.delivery_provisional_claims(project, remote, args.delivery) if remotes else []
         except (OSError, RuntimeError) as exc:
             claims = []
             errors.append(f"provisional claims cannot be read: {exc}")
@@ -3238,7 +3241,7 @@ def approve_review(args) -> int:
         try:
             claims = delivery_git.provisional_claims(root, reviewed_integration, args.delivery)
             listed = "; ".join(f"{claim['story']}: {', '.join(claim['paths'])} "
-                               f"({claim['disposition'] or 'unreleased'})" for claim in claims) or "none"
+                               f"({claim['disposition'] or 'void'})" for claim in claims) or "none"
         except RuntimeError:
             # The approval binds the reviewed Integration by its OID; a checkout that has not
             # fetched it cannot list its records, and says so instead of listing none.
@@ -3309,6 +3312,9 @@ def main(argv=None) -> int:
     sub.choices["approve-execution"].add_argument(
         "--remote", default="origin",
         help="the Git remote whose local remote-tracking refs hold the target and Integration branches")
+    sub.choices["status"].add_argument(
+        "--remote", default="origin",
+        help="the Delivery's Git remote, whose Integration holds its provisional claims")
     sub.add_parser("render").set_defaults(func=render)
     plan_check = sub.add_parser("check-plan")
     plan_check.add_argument("--delivery", required=True)

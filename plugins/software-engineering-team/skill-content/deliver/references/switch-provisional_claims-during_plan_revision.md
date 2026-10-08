@@ -37,8 +37,8 @@ tree change, in one atomic push leased on the Integration. It refuses with
   receipt for it;
 - the Item runs `parallel_lanes_v1`, whose lane scopes a provisional claim
   cannot extend;
-- a path is not a normalized repository path, or lies under `workspace/docs`,
-  `.git` or `.agentrof`;
+- a path is not a normalized repository path, or lies, with its case folded,
+  under `workspace/docs`, `.git` or `.agentrof`;
 - a path is not in the checkout's draft `path_claims` of that Item, or the
   published plan already claims it;
 - a path overlaps, as written or with its case folded, a claim the published
@@ -49,8 +49,13 @@ tree change, in one atomic push leased on the Integration. It refuses with
   claim the complete set. The same claim again returns the recorded one.
 
 Response loss follows the transaction rule of every coordinator verb: after
-`DELIVERY_TRANSACTION_UNCERTAIN`, read the refs again, then run the same claim,
-which returns the record that landed.
+`DELIVERY_TRANSACTION_UNCERTAIN`, read the refs again, then run the same claim
+or withdrawal, which returns the record that landed as `reused`.
+
+Every reader of the records checks each one again as the verb wrote it: its
+protocol, an unchanged Integration tree, and its paths by the rules above. A
+record that fails, such as one pushed by hand, stops the read with
+`DELIVERY_COORDINATION_CORRUPT` and grants nothing.
 
 ## What a claim lets the writer do
 
@@ -58,9 +63,16 @@ The implementer's task, derived with `task_inputs.py --entry deliver`, adds
 each live provisional path of its Item to the write scope as a path and its
 descendants, with the constraint that it is not freezable or pushable before
 the approved plan publishes it. The writer commits the change in the Item
-worktree. `freeze` and the verification candidate refuse it with
-`DELIVERY_PROVISIONAL_CLAIM_PENDING`, and `push-item` refuses it the same way,
-so the readers never start on it and `integrate-item` never sees it.
+worktree. `freeze` and a reader's task manifest (`delivery_verification.py
+manifest`) refuse it with `DELIVERY_PROVISIONAL_CLAIM_PENDING`, and
+`push-item` refuses it the same way, so the readers never start on it and
+`integrate-item` never sees it. They read the Item's claims from the Item
+record of the Integration commit the Item converged on, its
+`integration_base_commit`, so an edit of the worktree's own Item record grants
+nothing. Other reads of the candidate, such as `regression-selection`,
+`regression-run` and `assertion-map`, still work on a provisional commit. Each
+verb that reads the claims takes `--remote` for a Delivery remote other than
+`origin`.
 
 `block-item` and `pause-item` need a clean Item worktree, so flush the
 provisional commits there with the plan, or revert them, before either verb.
@@ -74,7 +86,8 @@ holds its Slot, and no takeover elected another writer. Otherwise it is void.
 
 `finish-plan-revision` and `abort-plan-revision` release every live claim of
 the barrier in the same atomic push as the barrier, one
-`provisional-claim-release-v1` record each:
+`provisional-claim-release-v1` record each, which names the claim record it
+ends in `Claim-Record`; a claim that was already void stays void:
 
 - `promoted`, at finish, when the published Item record claims every path. The
   writer converges the Item on that Integration; the convergence is a merge,
@@ -88,13 +101,15 @@ path with `DELIVERY_PROVISIONAL_CLAIM_ORPHANED` and name each path. The writer
 reverts or reworks that change in the Item worktree; nothing rewrites it
 automatically. `cancel-delivery` already waits for the barrier to end.
 
-While a claim is live, `refresh-target` counts its paths as claimed and
-refuses a target that changes them with `DELIVERY_TARGET_SOURCE_VIOLATION`.
+While a claim is live, and once promoted until the Item ref claims its paths,
+`refresh-target` counts its paths as claimed, as written or with their case
+folded, and refuses a target that changes them with
+`DELIVERY_TARGET_SOURCE_VIOLATION`.
 
 ## What the owner sees
 
-`delivery_compile.py status --delivery DLV-###` lists each provisional claim
+`delivery_compile.py status --delivery DLV-### [--remote <remote>]` lists each provisional claim
 with its Story, paths, barrier epoch and state: `live`, `promoted`,
 `orphaned`, `withdrawn` or `void`. `approve-review` fills a line in the
 Delivery Review's Deviations that lists the Items that started work under a
-provisional claim and how each claim ended.
+provisional claim and how each claim ended, `void` for one no release ended.

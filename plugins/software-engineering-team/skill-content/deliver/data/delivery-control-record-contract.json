@@ -23,7 +23,7 @@
     "item_cancelled_v1": ["Delivery", "Story", "Disposition", "Previous-Tip", "Barrier-Epoch", "Cancellation-Intent-Hash"],
     "item_integration_v1": ["Delivery", "Story", "Item-Plan-Hash", "Reviewed-Tip", "Product-Tip", "Integration-Parent"],
     "provisional_claim_v1": ["Delivery", "Story", "Barrier-Epoch", "Writer-Epoch", "Slot", "Item-Tip", "Claims-Hash"],
-    "provisional_claim_release_v1": ["Delivery", "Story", "Barrier-Epoch", "Disposition"],
+    "provisional_claim_release_v1": ["Delivery", "Story", "Barrier-Epoch", "Claim-Record", "Disposition"],
     "cancellation_intent_v1": ["Delivery", "Scope-Hash", "Target", "Cancellation-Intent", "Cancellation-Intent-Hash"],
     "delivery_barrier_v1": ["Delivery", "Barrier-Kind", "Barrier-Epoch", "Cancellation-Intent-Hash", "Upgrade-Contract"],
     "cancellation_revert_v1": ["Delivery", "Story", "Previous-Tip", "Barrier-Epoch"],

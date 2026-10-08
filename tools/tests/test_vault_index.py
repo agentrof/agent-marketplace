@@ -903,8 +903,11 @@ class VaultIndexTests(unittest.TestCase):
         identities = vault_index.sidecar_identities
         def reusing(path):
             # A file system that reuses a freed inode at once reports the recreated sidecars with the
-            # identities and sizes of the removed ones.
+            # identities and sizes of the removed ones. Only POSIX holds the WAL against that; an NTFS
+            # file ID changes when its record is reused, so Windows sees real identities.
             now = identities(path)
+            if os.name == "nt":
+                return now
             first = seen.setdefault("first", now)
             return {sidecar: first[sidecar] if identity is not None and first[sidecar] is not None else identity
                     for sidecar, identity in now.items()}

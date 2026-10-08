@@ -18,7 +18,7 @@
     {
       "id": "merge",
       "default": "allowed",
-      "description": "Merging a pull request the flow opened, once its required checks pass."
+      "description": "The flow's own merge step on its recorded PR head, once its required checks pass; never a provider or Git merge of another head."
     },
     {
       "id": "release",

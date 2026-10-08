@@ -235,5 +235,82 @@ class DeliveryProviderTests(unittest.TestCase):
                                      [(code, message)])
 
 
+class ProtectionStatusTests(unittest.TestCase):
+    """The read-only repository protection report over GitHub's rules, rulesets and classic protection."""
+
+    CONTEXT_RULE = {"type": "required_status_checks", "ruleset_id": 7,
+                    "parameters": {"required_status_checks": [{"context": "delivery-closure"}]}}
+
+    @staticmethod
+    def provider() -> delivery_provider.GitHubProvider:
+        provider = object.__new__(delivery_provider.GitHubProvider)
+        provider.root, provider.remote, provider.repository = Path("."), "origin", "agentrof/example"
+        return provider
+
+    def report(self, answers: dict) -> dict:
+        """Run protection_status with each gh api path answered from *answers*, a refusal otherwise."""
+        import delivery_closure
+
+        def gh(_root, *args, input_text=None):
+            self.assertEqual(args[0], "api")
+            value = answers.get(args[1])
+            if value is None:
+                raise delivery_provider.ProviderError("gh: Not Found (HTTP 404)")
+            return json.dumps(value)
+
+        with patch.object(delivery_provider, "run_gh", side_effect=gh):
+            return delivery_closure.protection_status(Path("."), "main", provider=self.provider())
+
+    def test_a_ruleset_requiring_the_check_without_bypass_actors_is_configured(self):
+        report = self.report({
+            "repos/agentrof/example/rules/branches/main": [self.CONTEXT_RULE, {"type": "pull_request", "ruleset_id": 7}],
+            "repos/agentrof/example/rulesets/7": {"id": 7, "bypass_actors": []},
+        })
+        self.assertEqual((report["ok"], report["status"]), (True, "configured"))
+        self.assertEqual(set(report["properties"].values()), {"configured"})
+        finding = delivery_result.from_raw("protection-status", report)["findings"][0]
+        self.assertEqual((finding["code"], finding["severity"]), ("DELIVERY_PROTECTION_STATUS", "info"))
+        self.assertIn("no command of this package can", finding["message"])
+
+    def test_bypass_actors_or_a_missing_rule_are_not_configured(self):
+        bypassed = self.report({
+            "repos/agentrof/example/rules/branches/main": [self.CONTEXT_RULE, {"type": "pull_request", "ruleset_id": 7}],
+            "repos/agentrof/example/rulesets/7": {"id": 7, "bypass_actors": [{"actor_type": "RepositoryRole"}]},
+        })
+        self.assertEqual((bypassed["status"], bypassed["properties"]["no_bypass"]), ("not_configured", "not_configured"))
+        unprotected = self.report({"repos/agentrof/example/rules/branches/main": [],
+                                   "repos/agentrof/example/branches/main/protection": {}})
+        self.assertEqual(unprotected["status"], "not_configured")
+        self.assertEqual(unprotected["properties"]["closure_context_required"], "not_configured")
+        self.assertEqual(delivery_result.from_raw("protection-status", unprotected)["findings"][0]["severity"],
+                         "warning")
+
+    def test_unreadable_rules_403_or_404_report_unknown(self):
+        for answers in ({}, {"repos/agentrof/example/rules/branches/main": []},
+                        {"repos/agentrof/example/rules/branches/main": [self.CONTEXT_RULE]}):
+            with self.subTest(answers=sorted(answers)):
+                report = self.report(answers)
+                self.assertEqual((report["ok"], report["status"]), (True, "unknown"))
+        hidden = self.report({"repos/agentrof/example/rules/branches/main": [self.CONTEXT_RULE],
+                              "repos/agentrof/example/rulesets/7": {"id": 7}})
+        self.assertEqual((hidden["properties"]["closure_context_required"], hidden["properties"]["no_bypass"]),
+                         ("configured", "unknown"))
+
+    def test_classic_protection_counts_with_admin_enforcement(self):
+        report = self.report({
+            "repos/agentrof/example/rules/branches/main": [],
+            "repos/agentrof/example/branches/main/protection": {
+                "required_status_checks": {"contexts": ["delivery-closure"]},
+                "required_pull_request_reviews": {"required_approving_review_count": 1},
+                "enforce_admins": {"enabled": True}},
+        })
+        self.assertEqual(report["status"], "configured")
+
+    def test_branch_names_are_one_encoded_path_segment(self):
+        with patch.object(delivery_provider, "run_gh", return_value="[]") as gh:
+            self.assertEqual(self.provider().branch_rules("release/2026"), [])
+        self.assertEqual(gh.call_args.args[1:], ("api", "repos/agentrof/example/rules/branches/release%2F2026"))
+
+
 if __name__ == "__main__":
     unittest.main()

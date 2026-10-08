@@ -914,6 +914,32 @@ ref, the proof alone decides. `open-pr` still reports the recorded PR,
 target history when the ref is gone, and the release of a plan revision or
 upgrade barrier still runs, because the project Fence must not stay barred.
 
+### Closure audit and repository check
+
+A Delivery is complete only when `closure-audit` returns `closed`: the target
+holds the merge of its recorded PR head and no Integration ref, integrated
+Item ref, Slot or writer receipt of the Delivery stays. `closure-audit
+--delivery DLV-###` or `--all` only reads, and reports each Delivery as
+`closed`, `merged_cleanup_pending` (recovery `verify-merge`), `awaiting_merge`
+with whatever keeps its recorded head from closing it, `open`, or
+`external_product_merge` when the Delivery's product reached the target
+without the recorded-head merge. An external merge is never reported as
+merged; the project owner decides its recovery, and a Slot is still released
+only by `integrate-item` or `cancel-delivery`. Planning runs `closure-audit
+--all` before the scope handoff and shows every incomplete prior closure with
+its recovery. Broad delegation, time pressure and an autopilot grant never
+waive evidence, integration, the PR record or closure.
+
+The opt-in `delivery-closure` workflow runs `closure-check` from the base
+branch on every pull request: a pull request no open Delivery manages passes,
+and a managed one passes only as its Delivery's recorded PR head with every
+closure precondition met. `protection-status` reports, read-only, whether a
+ruleset on the target branch requires that check, requires a pull request and
+has no bypass actors. Only such an owner-installed ruleset with no bypass
+actors can stop a direct provider merge, an admin bypass or an owner push; no
+command of the package can, and neither the report nor a missing ruleset or
+workflow refuses execution approval.
+
 ## Target changes, recovery and cancellation
 
 A disjoint target advance may be merged into Integration by the controlled

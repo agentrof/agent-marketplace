@@ -310,6 +310,25 @@ project Fence stays. A shallow clone or a failed Git query makes `status` and
 `check` fail with an explicit finding.
 Provider create/merge calls are adapter-owned and must
 requery the intent and reviewed Integration head before any external mutation.
+Closure: merge only through `merge-pr` on the recorded PR head; never merge
+the Delivery PR, its Integration or an Item branch through the provider or Git
+directly. Report a Delivery complete only when `closure-audit` returns
+`closed`: the target holds the recorded-head merge and no Integration ref,
+integrated Item ref, Slot or writer receipt of the Delivery stays.
+`closure-audit --delivery DLV-###` or `--all` only reads, and names each
+outcome with its recovery: `closed`; `merged_cleanup_pending`, recovered by
+`verify-merge`; `awaiting_merge`, with whatever keeps its recorded head from
+closing it; `open`; or `external_product_merge`, where the Delivery's product
+reached the target without the recorded-head merge, which is never reported as
+merged and whose recovery the project owner decides. Broad delegation, time
+pressure and an autopilot grant authorize running this flow as prescribed and
+never waive evidence, integration, the PR record or closure. A quality
+exception the flow permits is accepted only at its explicit gate, with the
+named rule, its bounded scope, the approval's provenance and the remaining
+obligations recorded. The opt-in `delivery-closure` workflow runs
+`closure-check` on every pull request and `protection-status` reports,
+read-only, whether a ruleset requires it, as
+`skill-content/setup/references/ci-bootstrap.md` describes.
 Before Item work starts, `/deliver DLV-###` may run the internal
 `refresh-target` coordinator. A disjoint target advance becomes one
 `target-refresh-v1` Integration child. Compiler-owned map and relation

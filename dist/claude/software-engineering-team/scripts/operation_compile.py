@@ -650,6 +650,21 @@ def render_ci(args) -> int:
     return 0
 
 
+def render_closure_ci(args) -> int:
+    """Materialize the opt-in Delivery closure workflow.
+
+    It reads no contract value, so the template is written as it ships: its
+    GitHub expressions are the workflow's own, not package placeholders.
+    """
+    template_path = Path(args.template).resolve() if args.template else (
+        Path(__file__).resolve().parents[1] / "templates" / "delivery-closure.yml"
+    )
+    output = Path(args.output).resolve()
+    atomic_text(output, template_path.read_text(encoding="utf-8"))
+    print(json.dumps({"output": str(output)}, sort_keys=True))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -665,6 +680,9 @@ def main(argv: list[str] | None = None) -> int:
     render_ci_parser.add_argument("--output", required=True)
     render_ci_parser.add_argument("--template")
     render_ci_parser.add_argument("--include-environment", action="store_true")
+    render_closure_parser = sub.add_parser("render-closure-ci")
+    render_closure_parser.add_argument("--output", required=True)
+    render_closure_parser.add_argument("--template")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -675,6 +693,8 @@ def main(argv: list[str] | None = None) -> int:
             return approve(args)
         if args.command == "render-ci":
             return render_ci(args)
+        if args.command == "render-closure-ci":
+            return render_closure_ci(args)
         value, errors = check_contract(docs_root(args.docs), args.kind)
         print(json.dumps({"ok": not errors, "receipt": value, "errors": errors},
                          ensure_ascii=False, sort_keys=True))

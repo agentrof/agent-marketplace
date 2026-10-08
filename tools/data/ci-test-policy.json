@@ -100,6 +100,7 @@
     {
       "paths": [
         "plugins/software-engineering-team/scripts/delivery_compile.py",
+        "plugins/software-engineering-team/scripts/delivery_closure.py",
         "plugins/software-engineering-team/scripts/delivery_git.py",
         "plugins/software-engineering-team/scripts/delivery_governance.py",
         "plugins/software-engineering-team/scripts/delivery_provider.py",
@@ -249,6 +250,7 @@
     },
     "delivery": {
       "tests": [
+        "tools.tests.test_delivery_closure.*",
         "tools.tests.test_delivery_compile.*",
         "tools.tests.test_delivery_git.*",
         "tools.tests.test_delivery_provider.*",
@@ -634,6 +636,7 @@
     "tools.tests.test_context_pack",
     "tools.tests.test_counts",
     "tools.tests.test_default_equivalence",
+    "tools.tests.test_delivery_closure",
     "tools.tests.test_delivery_compile",
     "tools.tests.test_delivery_git",
     "tools.tests.test_delivery_path",

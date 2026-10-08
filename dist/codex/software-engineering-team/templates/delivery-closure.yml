@@ -1,0 +1,37 @@
+# Opt-in Delivery closure check, materialized by operation_compile.py render-closure-ci.
+# It runs the base branch's portable gate and reads the pull request head only as Git data.
+name: delivery-closure
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  delivery-closure:
+    name: delivery-closure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+      - name: Fetch the pull request head as data
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags origin "refs/pull/$PR_NUMBER/head"
+          test "$(git rev-parse FETCH_HEAD)" = "$PR_HEAD_SHA"
+      - name: Check Delivery closure
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: >-
+          python3 .github/agentrof/vault-gate.pyz delivery-closure --project-root .
+          --pr-url "$PR_URL" --head "$PR_HEAD_SHA" --head-ref "$PR_HEAD_REF"
+          --base "$PR_BASE_REF"

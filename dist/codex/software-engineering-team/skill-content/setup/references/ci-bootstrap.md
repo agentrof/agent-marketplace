@@ -65,6 +65,37 @@ Custom workflows and external CI that run these checks need equivalent
 history. Existing committed workflows need the same checkout setting;
 changing the packaged template does not edit them.
 
+## Delivery closure check
+
+The packaged `templates/delivery-closure.yml` is an opt-in workflow that
+`operation_compile.py render-closure-ci --output
+.github/workflows/delivery-closure.yml` writes as it ships; the project then
+commits it and pushes it to the target branch. Setup and refresh never write
+or edit a committed workflow, and execution approval never requires this one.
+It runs on `pull_request_target` for `opened`, `synchronize` and `reopened`
+with read-only `contents` permission, checks out the base with full history,
+fetches `refs/pull/<number>/head`, verifies that it is the event's head
+commit, and runs the base branch's `vault-gate.pyz delivery-closure`. Event
+values reach the steps only through `env:`, and the pull request's own files
+are read as Git data and never run. The check passes a pull request no open
+Delivery manages. A pull request is managed when its head ref is an
+`agentrof/` ref, when its head holds commits of an open Delivery's
+Integration or Item refs that the base lacks, or when it changes a path under
+a path claim of a non-terminal Item of an open Delivery; labels and other
+branch names never decide it. A managed pull request passes only as the
+recorded PR head of its Delivery with every closure precondition met, and
+each failure names the step that owns its recovery.
+
+A green check prevents nothing by itself. Only an owner-installed ruleset on
+the target branch that requires the `delivery-closure` check, with no bypass
+actors, can stop a direct provider merge, an admin bypass or an owner push;
+no command of this package can. The owner may also protect `agentrof/**`
+from deletion and force pushes. `delivery_git.py protection-status` reads the
+provider's rules read-only and reports whether the check is required, whether
+a pull request is required and whether the ruleset has no bypass actors, each
+`configured`, `not_configured` or `unknown`; a token that cannot read a rule
+or its bypass actors gets `unknown`. The report never refuses anything.
+
 The Delivery activation materializer, `operation_compile.py render-ci`, reads
 the approved Verification and, when required, Environment Contracts. It
 substitutes the test command and renders optional dependency-audit and

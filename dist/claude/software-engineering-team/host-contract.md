@@ -306,6 +306,13 @@
     `scope_or_rule` or as the never class they touch.
   - Stop only when every remaining task waits on a queued question, then end
     with the queued list of `autopilot.py report`.
+- A grant, broad delegation or time pressure authorizes running the
+  prescribed flow and never waives its evidence, integration, PR record or
+  closure. The `merge` class takes only the flow's own `merge-pr` on the
+  recorded PR head, never a provider or Git merge of another head, and a
+  Delivery is complete only when `closure-audit` returns `closed`. A quality
+  exception is taken only at its explicit flow gate, never under a grant
+  alone.
 - When `check` reports the grant inactive, expired or completed, ask through
   `AskUserQuestion` again, queued questions first. Roles never ask the user
   and never read the grant.

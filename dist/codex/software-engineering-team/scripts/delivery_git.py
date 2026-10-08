@@ -2204,18 +2204,43 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
             "refs": short_refs(delivery_id)}
 
 
+FENCE_HOLD_RECOVERY = {
+    "Mode": "finish or abort the transition that holds the Fence: finish-source-handoff or abort-source-handoff,"
+            " apply-governance, or finish-upgrade or abort-upgrade",
+    "Barrier-Kind": "finish-plan-revision or abort-plan-revision, or finish-upgrade or abort-upgrade, of the"
+                    " Delivery that began the barrier, or finish its cancellation",
+    "Source-Intent": "finish-source-handoff or abort-source-handoff",
+    "Target-Update-Intent": "apply-target-update, or reauthorize-target-update for a stale carrier",
+}
+
+
+def fence_holder_recovery(holder: str) -> str:
+    """The step that releases one Delivery or Slot ref that holds the Fence."""
+    match = re.fullmatch(r"agentrof/deliveries/(dlv-[0-9]{3,})", holder)
+    if match:
+        delivery_id = match.group(1).upper()
+        return (f"{holder} (recovery: closure-audit --delivery {delivery_id} names its outcome; merge-pr merges"
+                f" its recorded PR, verify-merge drops the refs of a proven merge, or /deliver {delivery_id}"
+                " finishes or cancels it)")
+    return (f"{holder} (recovery: the Delivery whose Item it holds, which closure-audit --all names, finishes"
+            " the Item with integrate-item or cancels it with cancel-delivery; each releases the Slot atomically)")
+
+
 def require_fence_takeover(values: dict[str, str], listed, governance_hash) -> None:
     """Refuse to take over a Fence that is not idle and open, that a Delivery or Slot ref in the
-    ls-remote output *listed* returns holds, or that lacks the approved *governance_hash*."""
-    busy = [f"{key} {values[key]}" for key, idle in (
+    ls-remote output *listed* returns holds, or that lacks the approved *governance_hash*.
+    Each refusal names the step that releases what holds the Fence."""
+    busy = [key for key, idle in (
         ("Mode", "open"), ("Barrier-Kind", "none"), ("Source-Intent", "none"), ("Target-Update-Intent", "none"),
     ) if values[key] != idle]
     if busy:
         raise RuntimeError("DELIVERY_REF_COLLISION: reservation requires an idle open Fence, not one with "
-                           + ", ".join(busy))
+                           + ", ".join(f"{key} {values[key]}" for key in busy) + "; recovery: "
+                           + "; ".join(FENCE_HOLD_RECOVERY[key] for key in busy))
     holders = sorted(line.partition("\t")[2].removeprefix("refs/heads/") for line in listed().splitlines())
     if holders:
-        raise RuntimeError("DELIVERY_REF_COLLISION: another Delivery or Slot holds the Fence: " + ", ".join(holders))
+        raise RuntimeError("DELIVERY_REF_COLLISION: another Delivery or Slot holds the Fence: "
+                           + ", ".join(fence_holder_recovery(holder) for holder in holders))
     if values["Governance-Hash"] != governance_hash():
         raise RuntimeError("DELIVERY_FENCE_GOVERNANCE: the Fence does not carry the approved Governance; "
                            "apply it with apply-governance before reserving")
@@ -5311,6 +5336,9 @@ def main(argv=None) -> int:
     verify = sub.add_parser("verify-merge"); verify.add_argument("--project-root", default="."); verify.add_argument("--delivery", required=True); verify.add_argument("--remote", default="origin"); verify.set_defaults(func="verify-merge")
     reconcile = sub.add_parser("reconcile"); reconcile.add_argument("--project-root", default="."); reconcile.add_argument("--delivery", required=True); reconcile.add_argument("--remote", default="origin"); reconcile.set_defaults(func="reconcile")
     board = sub.add_parser("board"); board.add_argument("--project-root", default="."); board.add_argument("--delivery", required=True); board.add_argument("--remote", default="origin"); board.set_defaults(func="board")
+    closure_audit = sub.add_parser("closure-audit"); closure_audit.add_argument("--project-root", default="."); closure_scope = closure_audit.add_mutually_exclusive_group(required=True); closure_scope.add_argument("--delivery"); closure_scope.add_argument("--all", action="store_true"); closure_audit.add_argument("--remote", default="origin"); closure_audit.set_defaults(func="closure-audit")
+    closure_check = sub.add_parser("closure-check"); closure_check.add_argument("--project-root", default="."); closure_check.add_argument("--pr-url", required=True); closure_check.add_argument("--head", required=True); closure_check.add_argument("--head-ref", default=""); closure_check.add_argument("--base", required=True); closure_check.add_argument("--remote", default="origin"); closure_check.set_defaults(func="closure-check")
+    protection = sub.add_parser("protection-status"); protection.add_argument("--project-root", default="."); protection.add_argument("--branch"); protection.add_argument("--remote", default="origin"); protection.set_defaults(func="protection-status")
     locate = sub.add_parser("locate"); locate.add_argument("--delivery", required=True); locate.add_argument("--story"); locate.add_argument("--slot"); locate.set_defaults(func="names")
     args = parser.parse_args(argv)
     try:
@@ -5398,6 +5426,16 @@ def main(argv=None) -> int:
                 result = invalidate_delivery_review(Path(args.project_root), args.delivery, args.finding_code, args.finding_hash, args.remote)
             elif args.func == "cancel":
                 result = cancel_delivery(Path(args.project_root), args.delivery, args.reason, args.remote)
+            elif args.func == "closure-audit":
+                from delivery_closure import audit
+                result = audit(Path(args.project_root), None if args.all else args.delivery, args.remote)
+            elif args.func == "closure-check":
+                from delivery_closure import check_pull_request
+                result = check_pull_request(Path(args.project_root), head=args.head, base=args.base,
+                                            url=args.pr_url, head_ref=args.head_ref, remote=args.remote)
+            elif args.func == "protection-status":
+                from delivery_closure import protection_status
+                result = protection_status(Path(args.project_root), args.branch, args.remote)
             elif args.func == "reconcile":
                 result = preflight(Path(args.project_root), args.delivery, None, None)
             elif args.func == "board":

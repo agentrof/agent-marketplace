@@ -32,11 +32,14 @@ Read `flows/delivery-planning.md` completely before creating the proposal.
    Requirement or Experience application binding is not current; show the
    finding and route to the remedy it names. Otherwise show goal, observable
    outcome, exclusions, dependencies and conflicts.
-3. After the user approves scope, run `approve-scope`; only the later Git
+3. Before the scope decision, run `delivery_git.py closure-audit --all` and
+   show every prior Delivery whose closure is incomplete, with the recovery
+   step the audit names, as `flows/delivery-planning.md` states.
+4. After the user approves scope, run `approve-scope`; only the later Git
    coordinator may publish the package and reserve the Delivery. It repeats
    the binding check, since a binding can change after the proposal; show any
    finding and route to the remedy it names before approving again.
-4. If the Definition of Done is absent, route through `/configure DOD` and
+5. If the Definition of Done is absent, route through `/configure DOD` and
    return to the original goal after the protected documentation handoff.
 
 There is no duration, cadence, estimate, velocity or release field. A Delivery

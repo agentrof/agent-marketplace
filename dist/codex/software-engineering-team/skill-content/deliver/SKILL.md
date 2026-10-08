@@ -24,6 +24,22 @@ Read `flows/delivery-execution.md` completely before changing Delivery state.
 Use `/deliver DLV-###` for the exact Delivery and `/deliver DLV-### status`
 for its derived semantic state. An ID is required; `start-item` and other Git
 verbs are internal coordinator operations and are not public entry syntax.
+`/deliver DLV-### status` also runs `closure-audit --delivery DLV-###` and
+shows its outcome and recovery beside the semantic state.
+
+## Closure
+
+Merge only through `merge-pr` on the recorded PR head; never merge the
+Delivery PR, its Integration or an Item branch through the provider or Git
+directly. Report a Delivery complete only when `closure-audit` returns
+`closed`. Any other outcome is reported as it is, with the recovery the audit
+names: `merged_cleanup_pending` needs `verify-merge`, and
+`external_product_merge` is never a merge and goes to the project owner.
+Broad delegation, time pressure and an autopilot grant authorize running the
+flow as prescribed and never waive evidence, integration, the PR record or
+closure. A quality exception the flow permits is accepted only at its
+explicit gate, with the named rule, its bounded scope, the approval's
+provenance and the remaining obligations recorded.
 
 ## Boundary
 

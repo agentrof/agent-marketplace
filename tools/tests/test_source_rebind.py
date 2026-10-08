@@ -29,6 +29,7 @@ import delivery_compile  # noqa: E402
 import process_policy  # noqa: E402
 import requirement_compile  # noqa: E402
 import stage_package  # noqa: E402
+import vault_check  # noqa: E402
 from tools.tests import test_backlog_requirement_bindings as bindings  # noqa: E402
 from tools.tests.backlog_fixture import (  # noqa: E402
     CONSTRAINT, CRITERION, DESIGN, EXPERIENCE, _author_story, _complete_review_body)
@@ -165,6 +166,12 @@ class SourceRebindTests(unittest.TestCase):
         path = self.docs / f"{DECISION}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(DECISION_TEXT.format(rule=rule, extra=extra), encoding="utf-8")
+        self.render_decisions()
+
+    def render_decisions(self) -> None:
+        """Render the policy's decision log, as a Solution revision commits it."""
+        code, output = quiet(vault_check.main, ["render-decisions", "--vault", str(self.docs)])
+        self.assertEqual(code, 0, output)
 
     def write_landscape(self, *row_sets: dict) -> None:
         landscape = self.docs / "solution-design/landscape.md"
@@ -326,6 +333,7 @@ class SourceRebindTests(unittest.TestCase):
         self.write_engagement(slug)
         self.added_rows.append(rows)
         self.write_landscape(CACHE_ROWS, *self.added_rows)
+        self.render_decisions()
         self.commit(f"Solution revision: the {name} decision folded into the landscape")
         self.pin_solution()
         self.revise()
@@ -673,6 +681,10 @@ class SourceRebindTests(unittest.TestCase):
 
     def test_a_landscape_update_for_a_new_decision_reuses_every_unrelated_epic(self):
         self.fold_in()
+        log = "solution-design/decision-log.md"
+        prefix = self.docs.relative_to(self.project).as_posix()
+        self.assertNotEqual(self.git("show", f"{self.predecessor}:{prefix}/{log}"),
+                            (self.docs / log).read_text(encoding="utf-8").strip())
         receipt = self.plan()
         self.assertEqual([(row["id"], row["disposition"]) for row in receipt["epics"]],
                          [("EP-001", "reused"), ("EP-002", "reused")])
@@ -844,6 +856,18 @@ class SourceRebindTests(unittest.TestCase):
             receipt = self.plan()
         row = next(row for row in receipt["epics"] if row["id"] == "EP-002")
         self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: implements REQ-001", row["impacted_by"])
+
+    def test_a_requirement_change_beside_an_additive_solution_keeps_the_landscape_barrier(self):
+        self.fold_in()
+        with mock.patch.object(rebind, "requirement_hash",
+                               side_effect=["sha256:" + "a" * 64, "sha256:" + "b" * 64]):
+            receipt = self.plan()
+        change, = receipt["binding_changes"]
+        self.assertTrue(change["additions_only"])
+        epics = {row["id"]: row for row in receipt["epics"]}
+        self.assertEqual((epics["EP-001"]["disposition"], epics["EP-001"]["impacted_by"]), ("reused", []))
+        self.assertIn(f"backlog/epics/{SECOND}/stories/bl-001/story.md: implements REQ-001",
+                      epics["EP-002"]["impacted_by"])
 
     def test_an_edited_decision_the_landscape_indexes_reviews_every_story_it_constrains(self):
         self.rebind_revision()
@@ -1084,6 +1108,20 @@ class SourceRebindUnitTests(unittest.TestCase):
         added = rebind.landscape_delta(before, head + first + "- Add audit ([[d/c\\|SD-003]]).\n" + second
                                        + "\n## Components\n")
         self.assertEqual((added["links"], added["added_only"]), (["d/c"], True))
+
+    def test_a_new_numbered_transition_step_renumbers_no_other_step(self):
+        head = ("---\ntitle: L\npackage_hash: x\n---\n# L\n\n## Summary\n\ntext\n\n## Current\n\nnone\n\n"
+                "## Target\n\n## Transition\n\n")
+        first, second = "Introduce cache ([[d/a\\|SD-001]]).\n", "Add eviction ([[d/b\\|SD-002]]).\n"
+        before = head + "1. " + first + "2. " + second + "\n## Components\n"
+        added = rebind.landscape_delta(before, head + "1. " + first + "2. Add audit ([[d/c\\|SD-003]]).\n"
+                                       + "3. " + second + "\n## Components\n")
+        self.assertEqual((added["rows"], added["links"], added["added_only"]),
+                         (["Transition / Add audit ([[d/c\\|SD-003]])."], ["d/c"], True))
+        self.assertIsNone(rebind.landscape_delta(before, head + "1. " + second + "2. " + first
+                                                 + "\n## Components\n"))
+        edited = rebind.landscape_delta(before, before.replace("Add eviction", "Add idle eviction"))
+        self.assertFalse(edited["added_only"])
 
     def test_a_malformed_application_ledger_holds_nothing(self):
         for packages in (5, "checkout@r1", {"result_ref": "checkout@r1"}):

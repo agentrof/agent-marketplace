@@ -169,14 +169,18 @@ def landscape_units(text: str) -> tuple[str, dict[tuple[str, ...], str]] | None:
                 continue
             cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", stripped.strip("|"))]
             key = (h2, h3, "row", " ".join(cells[0].split()))
-        elif (item := re.match(r"^(?:[-*+]|[0-9]+[.)])\s+(\S.*)$", stripped)):
-            key = (h2, h3, "item", " ".join(item.group(1).split()))
+            value = " ".join(stripped.split())
+        elif (item := re.match(r"^(?:[-*+]|([0-9]+[.)]))\s+(\S.*)$", stripped)):
+            key = (h2, h3, "item", " ".join(item.group(2).split()))
+            # A step's number follows its position, which the key order
+            # compares, so inserting a step renumbers no other one.
+            value = key[3] if item.group(1) else " ".join(stripped.split())
         else:
             rest.append(stripped)
             continue
         if key in units:
             return None
-        units[key] = " ".join(stripped.split())
+        units[key] = value
     return "\n".join(line for line in rest if line), units
 
 
@@ -384,15 +388,18 @@ def package_diff(project: Path, prefix: str, folder: str, before: str | None, af
     and every other changed file: artifacts and non-Markdown sources.
 
     A package the predecessor did not bind has no before commit, and each of
-    its documents counts as changed.
+    its documents counts as changed. A view the vault policy lists as generated
+    is neither: the notes it renders from carry its change.
     """
+    import vault_check
+    generated = set(vault_check.load_policy(vault_check.DEFAULT_POLICY).get("generated_views", []))
     files_old = backlog.committed_tree_sources(project, before, folder) if before else {}
     files_new = backlog.committed_tree_sources(project, after, folder)
     strip = len(prefix) + 1 if prefix else 0
     changed, texts, others = [], {}, []
     for path in sorted(set(files_old) | set(files_new)):
         parts = path.split("/")
-        if "_generated" in parts or "_ledger" in parts:
+        if "_generated" in parts or "_ledger" in parts or path[strip:] in generated:
             continue
         if not path.endswith(".md") or "artifacts" in parts:
             if files_old.get(path) != files_new.get(path):
@@ -523,9 +530,9 @@ def closure_scope(docs: Path, present: list[str], deleted: dict[str, str], links
     import task_inputs
     api = task_inputs.closure_api()
     try:
-        # The landscape indexes every decision. When the sources only gained
+        # The landscape indexes every decision. When the Solution only gained
         # notes and rows, a note constrained by it depends on no changed one,
-        # so the landscape passes no change on; any other change passes on.
+        # so the landscape passes no change on; any Solution edit passes on.
         raw = task_inputs.closure_raw(api, docs, present, deleted,
                                       {"barrier_paths": [LANDSCAPE]} if barrier else None)
         rows = {key: raw[key] for key in ("closure", "changed", "graph_gaps")}
@@ -591,8 +598,9 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
 
     # documents: every changed source document; targets: what a backlog note
     # depends on when it cites it, which narrows a landscape to its changed rows
-    # while the sources only gain notes and rows. edits: an existing source
-    # document changed, so the landscape counts whole and passes changes on.
+    # while the Solution only gains notes and rows. edits: an existing Solution
+    # document changed, so the landscape counts whole and passes changes on;
+    # other sources reach the backlog through their own targets and closure.
     changes, documents, targets, ids, upstream_texts, edits = [], set(), set(), set(), {}, False
     for key in sorted(after_rows):
         old_ref, old_hash = before_rows.get(key, (None, None))
@@ -642,13 +650,12 @@ def derive(docs: Path, project: Path, predecessor: str, before_bytes: dict[str, 
         if old_ref is not None and old_ref != new_ref:
             change["before_ref"] = old_ref
         changes.append(change)
-        edits = edits or not additions
+        edits = edits or (stage == "solution-design" and not additions)
         documents.update(changed)
         ids |= changed_ids
     if not changes and not requirement_changed:
         raise RebindRefused(f"the revision rebinds no source; {STANDARD}")
     if requirement_changed:
-        edits = edits or old_text is not None
         for path, text in ((old_path, old_text), (new_path, new_text)):
             if path is not None:
                 documents.add(path)

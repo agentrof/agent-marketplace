@@ -900,6 +900,14 @@ class VaultIndexTests(unittest.TestCase):
         published = listing()
         self.assertFalse({"index.db-wal", "index.db-shm"} & set(published))
         connect, sidecars = sqlite3.connect, vault_index.published_sidecars
+        identities = vault_index.sidecar_identities
+        def reusing(path):
+            # A file system that reuses a freed inode at once reports the recreated sidecars with the
+            # identities and sizes of the removed ones.
+            now = identities(path)
+            first = seen.setdefault("first", now)
+            return {sidecar: first[sidecar] if identity is not None and first[sidecar] is not None else identity
+                    for sidecar, identity in now.items()}
         seams = {
             # The last writer closes after the sidecar check and before the read-only open.
             "open": lambda close: mock.patch.object(vault_index.sqlite3, "connect",
@@ -913,11 +921,11 @@ class VaultIndexTests(unittest.TestCase):
                 writer = connect(cache)
                 writer.execute("SELECT count(*) FROM meta").fetchone()
                 self.assertTrue({"index.db-wal", "index.db-shm"} <= set(listing()))
-                pending = [writer]
+                pending, seen = [writer], {}
                 def close():
                     if pending:
                         pending.pop().close()
-                with patch(close):
+                with patch(close), mock.patch.object(vault_index, "sidecar_identities", reusing):
                     index, status = vault_query.refresh(self.docs, cache, persist=False)
                 self.stores.append(index.store)
                 self.assertFalse(pending)
@@ -936,6 +944,46 @@ class VaultIndexTests(unittest.TestCase):
         self.assertNotIn(None, before.values())
         vault_index.remove_created_sidecars(cache, {path: ("earlier",) for path in before})
         self.assertEqual(vault_index.sidecar_identities(cache), before)
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "needs POSIX file modes that bind the reading process")
+    def test_no_write_read_of_a_database_it_cannot_write_never_opens_it_in_place(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, first = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        def listing():
+            return sorted(path.name for path in cache.parent.iterdir())
+        published = listing()
+        connect = sqlite3.connect
+        writer = connect(cache)
+        self.addCleanup(writer.close)
+        writer.execute("SELECT count(*) FROM meta").fetchone()
+        os.chmod(cache, 0o444)
+        self.addCleanup(os.chmod, cache, 0o644)
+        pending = [writer]
+        def opening(target, *args, **kwargs):
+            # The last writer closes before a read-only open, which would recreate sidecars this
+            # process could not remove.
+            if str(target).startswith("file:") and pending:
+                pending.pop().close()
+            return connect(target, *args, **kwargs)
+        with mock.patch.object(vault_index.sqlite3, "connect", opening):
+            index, status = vault_query.refresh(self.docs, cache, persist=False)
+        self.stores.append(index.store)
+        self.assertEqual(index["catalog"]["documents"]["requirements/a.md"]["title"], "A")
+        self.assertEqual(status["served"], "in_memory_compile")
+        self.assertIn("cannot write the database", status["fallback"])
+        index.store.close()
+        if pending:
+            pending.pop().close()
+        self.assertEqual(listing(), published)
+        os.chmod(cache, 0o644)
+        self.write("requirements/a.md", note("requirement", "A", body="Changed."))
+        data, status = self.load()
+        data.store.close()
+        # No read-only sidecar is left to block the next writer.
+        self.assertGreater(status["generation"], first["generation"])
 
     @integration
     def test_a_lease_less_connection_on_recreated_sidecars_cannot_revert_a_later_generation(self):

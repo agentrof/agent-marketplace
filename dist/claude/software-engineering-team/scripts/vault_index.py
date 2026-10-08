@@ -1097,7 +1097,8 @@ def open_published(cache, *, write_free=False):
     The connection holds one read transaction, so it keeps serving the
     generation it opened while writers publish later ones. With ``write_free``
     no file is created: the cache is read in place only while both WAL
-    sidecars exist, else from a verified in-memory snapshot.
+    sidecars exist and this process can write the database, else from a
+    verified in-memory snapshot.
     """
     cache = Path(cache)
     try:
@@ -1106,10 +1107,15 @@ def open_published(cache, *, write_free=False):
             return None, None
     except (OSError, ValueError) as exc:
         return None, f"published cache refused: {exc}"
-    lease = connection = raw = sidecars = None
+    lease = connection = raw = sidecars = held = None
     try:
-        if write_free and not published_sidecars(cache):
+        # A read-only open can recreate sidecars a closing writer removed, and only a read-write connection
+        # removes them; one this process cannot write would leave them read-only for every later writer.
+        writable = not write_free or os.access(cache, os.W_OK)
+        if write_free and (not writable or not published_sidecars(cache)):
             raw = published_snapshot(cache)
+            if raw is None and not writable:
+                raise ValueError("this process cannot write the database to remove sidecars its open may create")
             if raw is None and not published_sidecars(cache):
                 raise ValueError("its write-ahead log has no shared-memory file"
                                  if hasattr(sqlite3.Connection, "deserialize") else
@@ -1118,6 +1124,7 @@ def open_published(cache, *, write_free=False):
             if cache.with_name(".readers").exists():
                 lease = DatabaseLease(cache, read_only=True)
             if write_free:
+                held = hold_wal(cache)
                 sidecars = sidecar_identities(cache)
                 if None in sidecars.values():
                     raise ValueError(SIDECAR_RACES[0])
@@ -1132,13 +1139,13 @@ def open_published(cache, *, write_free=False):
         # Once this read holds the shared memory, a closing writer can no longer remove the sidecars;
         # before that, one may have removed them and this read-only open created new ones.
         after = sidecar_identities(cache) if sidecars is not None else None
-        if after is not None and (None in after.values() or replaced_sidecars(sidecars, after)):
+        if after is not None and (None in after.values() or replaced_sidecars(sidecars, after, held)):
             connection.close()
             connection = None
             if lease is not None:
                 lease.close()
                 lease = None
-            remove_created_sidecars(cache, sidecars)
+            remove_created_sidecars(cache, sidecars, held)
             raise ValueError(SIDECAR_RACES[1])
     except BaseException as exc:
         if connection is not None:
@@ -1148,7 +1155,29 @@ def open_published(cache, *, write_free=False):
         if not isinstance(exc, (OSError, ValueError, sqlite3.Error)):
             raise
         return None, f"published cache cannot be read in place: {exc}"
+    finally:
+        if held is not None:
+            os.close(held)
     return (connection, lease), None
+
+
+def hold_wal(cache):
+    """A read-only descriptor on the existing WAL, or None where there is none or holding one is unsafe.
+
+    While it is open the file system cannot hand the WAL's inode to a file created later, so a WAL a
+    closing writer removed and the read-only open recreated always differs from the held one. Only the
+    WAL is held: SQLite keeps its POSIX locks on the shared-memory file, and closing any descriptor of
+    that file drops every lock this process holds on it. SQLite takes no lock on the WAL itself. Windows
+    is skipped because os.open shares no delete access, so the closing writer could not remove the WAL;
+    an NTFS file ID carries a sequence number that changes when its record is reused, so the identity
+    comparison alone already tells a recreated WAL apart there.
+    """
+    if os.name == "nt":
+        return None
+    try:
+        return os.open(str(cache) + "-wal", os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        return None
 
 
 def sidecar_identities(cache):
@@ -1165,14 +1194,20 @@ def sidecar_identities(cache):
     return identities
 
 
-def replaced_sidecars(before, after):
+def replaced_sidecars(before, after, held=None):
     """The sidecars in ``after`` that are not the files ``before`` saw. Nothing here truncates a WAL,
-    so one that shrank to empty was recreated even where the file system reused its inode number."""
-    return {path for path, identity in after.items() if identity is not None and (
+    so one that shrank to empty was recreated even where the file system reused its inode number.
+    With ``held`` from hold_wal, a WAL that is no longer the held file was recreated as well."""
+    replaced = {path for path, identity in after.items() if identity is not None and (
         before[path] is None or identity[:2] != before[path][:2] or (before[path][2] and not identity[2]))}
+    if held is not None:
+        wal, info = next(path for path in after if str(path).endswith("-wal")), os.fstat(held)
+        if after[wal] is not None and (info.st_nlink == 0 or after[wal][:2] != (info.st_dev, info.st_ino)):
+            replaced.add(wal)
+    return replaced
 
 
-def remove_created_sidecars(cache, before):
+def remove_created_sidecars(cache, before, held=None):
     """Let SQLite remove the empty WAL sidecars a read-only open created, only while no reader or writer
     session holds the database; otherwise they belong to that session and stay."""
     try:
@@ -1182,7 +1217,7 @@ def remove_created_sidecars(cache, before):
     try:
         now = sidecar_identities(cache)
         wal = Path(str(cache) + "-wal")
-        if not replaced_sidecars(before, now) or (now[wal] is not None and now[wal][2]):
+        if not replaced_sidecars(before, now, held) or (now[wal] is not None and now[wal][2]):
             # Nothing new, or committed frames that are never this read's; leave the pair to the next writer.
             return
         check_database_files(cache)

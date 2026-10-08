@@ -47,7 +47,9 @@ newly bound source family counts each of its documents as changed.
    change outside those rows or an edit to an existing source note passes
    the change through the landscape to every note it constrains, and a
    Solution change that edits an existing note or row is never mechanical.
-   An impact on an epic note, its reused review or a root reader finding
+   A story that names the decisions it depends on in constrained_by, rather
+   than only the landscape, is impacted by those decisions alone, so its
+   epic stays reusable when an unrelated decision is edited. An impact on an epic note, its reused review or a root reader finding
    impacts every story and test plan of that epic.
 3. Run `backlog_compile.py record-source-rebind-root-review --docs
    workspace/docs --source-commit <approved-commit>`. It writes the root

@@ -441,6 +441,76 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertEqual(failed["exit_code"], 1)
         self.assertEqual(verification.read_session(self.root)["raw_evidence"]["test"]["exit_code"], 1)
 
+    def test_reexecuted_checks_preserve_each_attempt_output_and_successful_cache(self):
+        self.identity.stop()
+        original = subprocess.run
+        outcome = {}
+        executions = []
+
+        def approved_command(command, *args, **kwargs):
+            if command == self.command:
+                executions.append(kwargs["cwd"])
+                return subprocess.CompletedProcess(command, outcome["exit_code"], outcome["output"])
+            return original(command, *args, **kwargs)
+
+        for partitioned in (False, True):
+            with self.subTest(partitioned=partitioned):
+                if partitioned:
+                    docs = delivery.docs_root(self.root)
+                    for arguments in (("init",), ("set", "--switch", "test_engines", "--value", "partitioned"),
+                                      ("approve",)):
+                        output = io.StringIO()
+                        with contextlib.redirect_stdout(output):
+                            code = delivery.process_policy.main([arguments[0], "--docs", str(docs), *arguments[1:]])
+                        self.assertEqual(code, 0, output.getvalue())
+                    path = docs / "operation/verification-contract.md"
+                    contract, body = delivery.split_note(path)
+                    contract.update(test_partition_command=self.command, test_engines=["engine-a"],
+                                    test_groups=["first", "second"])
+                    body += "\n## Test Partitions\n\n| partition | groups | profile |\n|---|---|---|\n" \
+                            "| first | first | isolated |\n| second | second | isolated |\n"
+                    self.write(path.relative_to(self.root), delivery.frontmatter(contract, body))
+                    self.note("workspace/docs/operation/environment-contract.md", {
+                        "type": "environment-contract", "status": "approved", "test_engines": ["engine-a"]})
+                    self.commit()
+                self.freeze()
+                retained = []
+                with mock.patch.object(verification.subprocess, "run", side_effect=approved_command):
+                    for fresh in (True, False):
+                        with self.subTest(fresh=fresh):
+                            before = len(executions)
+                            outcome.update(exit_code=1, output=b"first failure\n")
+                            first = verification.run_check(self.root, "test", fresh=True)
+                            first_records = [first, *first.get("partitions", [])]
+                            saved = [(record, verification.raw_output_path(self.root, record["output_file"]).read_bytes())
+                                     for record in first_records]
+                            outcome.update(exit_code=0, output=b"second success\n")
+                            second = verification.run_check(self.root, "test", fresh=fresh)
+                            second_records = [second, *second.get("partitions", [])]
+                            self.assertEqual((first["exit_code"], second["exit_code"]), (1, 0))
+                            self.assertTrue(first["candidate_intact"] and second["candidate_intact"])
+                            self.assertFalse(first["reused"] or second["reused"])
+                            self.assertEqual(first["identity"], second["identity"])
+                            self.assertNotEqual(first["evidence_hash"], second["evidence_hash"])
+                            self.assertEqual(len(first_records), 3 if partitioned else 1)
+                            self.assertEqual(len(second_records), len(first_records))
+                            paths = [record["output_file"] for record in [*first_records, *second_records]]
+                            retained.extend(saved)
+                            retained.extend((record, verification.raw_output_path(self.root, record["output_file"]).read_bytes())
+                                            for record in second_records)
+                            for record, expected in retained:
+                                raw = verification.raw_output_path(self.root, record["output_file"]).read_bytes()
+                                self.assertEqual(raw, expected)
+                                self.assertEqual(hashlib.sha256(raw).hexdigest(), record["output_sha256"])
+                            self.assertEqual(len(paths), len(set(paths)))
+                            self.assertIn(b"first failure\n", saved[0][1])
+                            self.assertIn(b"second success\n", retained[-1][1])
+                            reused = verification.run_check(self.root, "test")
+                            self.assertTrue(reused["reused"])
+                            self.assertEqual({**second, "reused": True}, reused)
+                            self.assertEqual(len(executions) - before, 4 if partitioned else 2)
+                self.settle()
+
     def status(self, *arguments):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):

@@ -1,0 +1,6 @@
+{
+  "summary": "Preserve each verification command attempt's aggregate and partition output while retaining successful evidence reuse.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

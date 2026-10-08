@@ -1462,7 +1462,38 @@ def post(payload: dict) -> int:
         code = post_target(file_path, batches)
         if code:
             return code
+    sync_vault_index(project_vault, paths)
     return 0
+
+
+def sync_vault_index(root: Path, paths) -> None:
+    """A disposable cache failure cannot grant or replace source validation.
+
+    The sync is a hint that runs synchronously: a busy writer lock skips it,
+    a missing or incompatible cache compiles here, and any index failure
+    leaves reconciliation to the next query without changing the hook result.
+    """
+    if not root.is_dir() or not paths:
+        return
+    try:
+        import vault_index
+        import vault_query
+        settings, artifact = vault_index.scope()
+        relatives = []
+        for value in paths:
+            path = Path(value)
+            path = path if path.is_absolute() else root / path
+            try:
+                relatives.append(path.relative_to(root).as_posix())
+            except ValueError:
+                continue
+        if not any(vault_index.eligible(relative, settings, artifact) for relative in relatives):
+            return
+        result = vault_query.locked_refresh(root, vault_query.default_cache(root), wait=False)
+        if result is not None:
+            result[0].store.close()
+    except Exception as exc:
+        print("vault index requires reconciliation before reading: " + str(exc), file=sys.stderr)
 
 
 def changed_target_findings(paths: list[str]) -> dict[tuple[Path, str], list]:
@@ -4152,6 +4183,7 @@ def shell_verify(payload: dict) -> int:
                 integrity_error += "; project-local vault root is unbound"
                 root_value = str(expected_vault)
     retain_guard_state = False
+    synced = None
     try:
         if (
             recovery_state is not None
@@ -4522,6 +4554,7 @@ def shell_verify(payload: dict) -> int:
                 ))
         if config_violation:
             return deny(config_violation)
+        synced = [root / key for key in changed]
         return 0
     except Exception:
         retain_guard_state = True
@@ -4530,6 +4563,8 @@ def shell_verify(payload: dict) -> int:
         if not retain_guard_state:
             cleanup_guard_state(path, recovery)
             release_experience_writer_lock(project, payload)
+        if synced is not None:
+            sync_vault_index(root, synced)
 
 
 def main() -> int:

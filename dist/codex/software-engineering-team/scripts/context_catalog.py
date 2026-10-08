@@ -3,16 +3,52 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import fnmatch
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 
 import ba_compile
 
 
+class SourceChangedError(ValueError):
+    """A source's bytes differ from the bytes an index or address was built from."""
+
+
+class SourceMissingError(SourceChangedError):
+    """A source an index or address names is no longer a file inside its declared root."""
+
+
 def digest(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def contained(target: Path, root: Path, root_identity=None) -> str | None:
+    """``target`` relative to ``root``, or None outside it.
+
+    A directory is matched by file identity, so another spelling of the same
+    root (case or Unicode form on a case-insensitive volume) still contains it.
+    """
+    try:
+        return target.relative_to(root).as_posix()
+    except ValueError:
+        pass
+    if root_identity is None:
+        try:
+            info = os.stat(root)
+        except OSError:
+            return None
+        root_identity = info.st_dev, info.st_ino
+    for parent in target.parents:
+        try:
+            info = os.stat(parent)
+        except OSError:
+            continue
+        if (info.st_dev, info.st_ino) == root_identity:
+            return target.relative_to(parent).as_posix()
+    return None
 
 
 def safe_file(root: Path, relative: str) -> Path:
@@ -20,8 +56,10 @@ def safe_file(root: Path, relative: str) -> Path:
     if path.is_absolute() or not path.parts or ".." in path.parts or "\\" in relative:
         raise ValueError("source must be a relative path inside its declared root")
     result = root / path
-    if not result.resolve().is_relative_to(root.resolve()) or not result.is_file():
-        raise ValueError(f"source is missing or escapes its declared root: {relative}")
+    if contained(result.resolve(), root.resolve()) is None:
+        raise ValueError(f"source escapes its declared root: {relative}")
+    if not result.is_file():
+        raise SourceMissingError(f"source is missing: {relative}")
     return result
 
 
@@ -47,7 +85,7 @@ def record_aliases(props: dict, relative: str) -> list[str]:
     return sorted({item for item in aliases if isinstance(item, str) and item})
 
 
-def catalog(vault) -> dict:
+def catalog(vault, *, include_receipts: bool = True) -> dict:
     """Build addresses from authored source, without trusting a stale registry's text."""
     documents, units, aliases = {}, {}, defaultdict(set)
 
@@ -62,7 +100,7 @@ def catalog(vault) -> dict:
         raw = path.read_bytes()
         text = raw.decode("utf-8")
         if text.splitlines() != note.lines:
-            raise ValueError(f"source changed while indexing: {relative}")
+            raise SourceChangedError(f"source changed while indexing: {relative}")
         lines = text.splitlines(keepends=True)
         props, start, error = ba_compile.parse_frontmatter(text)
         if error:
@@ -220,18 +258,96 @@ def catalog(vault) -> dict:
                     aliases[name].discard(rows[0]["unit_id"])
     result = {"documents": documents, "units": units,
               "aliases": {key: sorted(value) for key, value in sorted(aliases.items())}}
-    add_receipts(vault.root, result)
+    if include_receipts:
+        add_receipts(vault.root, result)
     return result
 
 
-def add_receipts(root: Path, data: dict) -> None:
+def receipt_paths(root: Path, *, candidates=None) -> set[Path]:
+    patterns = (
+        "system-architecture/_ledger/records/*/*.json",
+        "experience-design/experiences/*/_ledger/records/*/*.json",
+        "experience-design/**/application-revisions.json",
+        "experience-design/**/package-revisions.json",
+        "experience-design/**/_generated/registry.json",
+        "experience-design/_generated/application-registry.json",
+    )
+    if candidates is None:
+        # A glob spells literal components as the pattern does; a case-insensitive volume may list them
+        # in another case, and every inventory names files as their directories list them.
+        listings = {}
+        def same(left, right):
+            try:
+                return os.path.samefile(left, right)
+            except OSError:
+                return False
+        def listed(path):
+            spelled = root
+            for part in path.relative_to(root).parts:
+                if spelled not in listings:
+                    try:
+                        names = sorted(os.listdir(spelled))
+                    except OSError:
+                        names = []
+                    folded = defaultdict(list)
+                    for name in names:
+                        folded[name.casefold()].append(name)
+                    listings[spelled] = set(names), folded
+                names, folded = listings[spelled]
+                if part not in names:
+                    part = next((name for name in folded.get(part.casefold(), ())
+                                 if same(spelled / name, spelled / part)), part)
+                spelled = spelled / part
+            return spelled
+        return {listed(path) for pattern in patterns for path in root.glob(pattern)}
+    # Match the already confined inventory without descending into excluded
+    # artifact trees, as the glob above would on this file system.
+    return {path for path in candidates if any(globbed(root, path, pattern) for pattern in patterns)}
+
+
+def globbed(root: Path, path: Path, pattern: str) -> bool:
+    """Whether ``root.glob(pattern)`` reports this file on the running file system.
+
+    Wildcard components match the listed spelling with the platform's case rule;
+    literal ones match whatever the file system's own lookup finds, so a
+    case-insensitive volume matches another case of the same file.
+    """
+    parts = path.relative_to(root).parts
+    wanted = pattern.split("/")
+    def spell(i, j):
+        if i == len(wanted):
+            return [] if j == len(parts) else None
+        if wanted[i] == "**":
+            for k in range(j, len(parts) + 1):
+                rest = spell(i + 1, k)
+                if rest is not None:
+                    return [*parts[j:k], *rest]
+            return None
+        if j == len(parts):
+            return None
+        if any(char in wanted[i] for char in "*?["):
+            if not fnmatch.fnmatchcase(os.path.normcase(parts[j]), os.path.normcase(wanted[i])):
+                return None
+            spelled = parts[j]
+        elif parts[j].casefold() == wanted[i].casefold():
+            spelled = wanted[i]
+        else:
+            return None
+        rest = spell(i + 1, j + 1)
+        return None if rest is None else [spelled, *rest]
+    spelled = spell(0, 0)
+    if spelled is None:
+        return False
+    try:
+        return os.path.samefile(root.joinpath(*spelled), path)
+    except OSError:
+        return False
+
+
+def add_receipts(root: Path, data: dict, *, paths=None) -> None:
     """Exact immutable record/package receipts, without upgrading a pinned revision."""
-    paths = set(root.glob("system-architecture/_ledger/records/*/*.json"))
-    paths.update(root.glob("experience-design/experiences/*/_ledger/records/*/*.json"))
-    paths.update(root.glob("experience-design/**/application-revisions.json"))
-    paths.update(root.glob("experience-design/**/package-revisions.json"))
-    paths.update(root.glob("experience-design/**/_generated/registry.json"))
-    paths.update(root.glob("experience-design/_generated/application-registry.json"))
+    if paths is None:
+        paths = receipt_paths(root)
     for path in sorted(paths):
         relative = path.relative_to(root).as_posix()
         raw = safe_file(root, relative).read_bytes()
@@ -288,28 +404,41 @@ def resolve(data: dict, reference: str) -> list[dict]:
     return [data["units"][unit] for unit in ids]
 
 
-def unit_content(root: Path, unit: dict) -> bytes:
-    """Verify the source and complete logical unit before addressing a fragment."""
-    source_root = root.parents[1] if unit.get("source_root") == "project" else root
-    if unit.get("git_revision"):
-        from context_history import git_source
-        relative = unit["path"] if unit.get("source_root") == "project" else "workspace/docs/" + unit["path"]
-        raw = git_source(root.parents[1], relative, unit["git_revision"])
-    else:
-        raw = safe_file(source_root, unit["path"]).read_bytes()
-    if digest(raw) != unit["source_hash"]:
-        raise ValueError(f"stale source: {unit['path']}")
+def unit_content(root: Path, unit: dict, *, sources: dict | None = None) -> bytes:
+    """Verify the source and complete logical unit before addressing a fragment.
+
+    ``sources`` lets one caller verify, decode and split each source once for many units.
+    """
+    key = (unit.get("source_root"), unit["path"], unit.get("git_revision"), unit["source_hash"])
+    source = sources.get(key) if sources is not None else None
+    if source is None:
+        source_root = root.parents[1] if unit.get("source_root") == "project" else root
+        if unit.get("git_revision"):
+            from context_history import git_source
+            relative = unit["path"] if unit.get("source_root") == "project" else "workspace/docs/" + unit["path"]
+            raw = git_source(root.parents[1], relative, unit["git_revision"])
+        else:
+            raw = safe_file(source_root, unit["path"]).read_bytes()
+        if digest(raw) != unit["source_hash"]:
+            raise SourceChangedError(f"stale source: {unit['path']}")
+        source = {"raw": raw}
+        if sources is not None:
+            sources[key] = source
     if "json_pointer" in unit:
-        value = json.loads(raw)
+        if "value" not in source:
+            source["value"] = json.loads(source["raw"])
+        value = source["value"]
         for part in unit["json_pointer"]:
             value = value[part]
         content = json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
     else:
-        lines = raw.decode("utf-8").splitlines(keepends=True)
+        if "lines" not in source:
+            source["lines"] = source["raw"].decode("utf-8").splitlines(keepends=True)
+        lines = source["lines"]
         content = "\n".join("".join(lines[a - 1:b]) for a, b in unit["ranges"]).encode("utf-8")
     expected = unit.get("parent_content_hash", unit["content_hash"])
     if digest(content) != expected:
-        raise ValueError(f"stale unit: {unit['unit_id']}")
+        raise SourceChangedError(f"stale unit: {unit['unit_id']}")
     if "byte_range" in unit:
         begin, end = unit["byte_range"]
         if not (type(begin) is int and type(end) is int and 0 <= begin < end <= len(content)):
@@ -317,9 +446,9 @@ def unit_content(root: Path, unit: dict) -> bytes:
         content = content[begin:end]
         content.decode("utf-8")
         if digest(content) != unit["content_hash"]:
-            raise ValueError("stale fragment")
+            raise SourceChangedError("stale fragment")
     if len(content) != unit["bytes"]:
-        raise ValueError("stale unit byte count")
+        raise SourceChangedError("stale unit byte count")
     return content
 
 

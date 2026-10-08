@@ -560,10 +560,8 @@ def scan_note(root: Path, path: Path, marker_prefix: str,
     return note
 
 
-def build_vault(root: Path, policy: dict, files: VaultFileView | None = None,
-                reuse: dict | None = None) -> Vault:
-    """Scan the vault. ``reuse`` maps a rel to a Note the caller has proven
-    byte-identical to the file (a hash-checked cache); it is not rescanned."""
+def build_vault(root: Path, policy: dict, files: VaultFileView | None = None) -> Vault:
+    """Scan the vault."""
     root = root.absolute()
     files = files or VaultFileView(root)
     vault = Vault(root=root, policy=policy, files=files)
@@ -578,14 +576,19 @@ def build_vault(root: Path, policy: dict, files: VaultFileView | None = None,
         vault.index.add(rel)
         if (path.suffix == ".md" and rel.split("/")[0] != ".obsidian"
                 and not is_artifact_location(policy, rel)):
-            vault.notes[rel] = ((reuse or {}).get(rel)
-                                or scan_note(root, path, marker_prefix, files))
+            vault.notes[rel] = scan_note(root, path, marker_prefix, files)
+    index_inbound(vault)
+    return vault
+
+
+def index_inbound(vault: Vault) -> None:
+    """Rebuild ``vault.inbound`` from the links of the vault's notes."""
+    vault.inbound.clear()
     for note in vault.notes.values():
         targets = [t for (_, _, t, _, _, _) in note.wikilinks if t]
         targets.extend(t for (_, t) in note.fm_targets if t)
         for target in targets:
             vault.inbound.setdefault(f"{target}.md", set()).add(note.rel)
-    return vault
 
 
 def authored(vault: Vault) -> list[Note]:
@@ -1327,7 +1330,7 @@ def canonical_scope_for_note(note: Note) -> str | None:
     return None
 
 
-def relation_identity_owners(vault: Vault) -> dict[str, str]:
+def relation_identity_owners(vault: Vault, *, registry_paths=None) -> dict[str, str]:
     owners: dict[str, str] = {}
     for note in authored(vault):
         aliases = note.fm.get("aliases")
@@ -1361,10 +1364,12 @@ def relation_identity_owners(vault: Vault) -> dict[str, str]:
             owners.setdefault("design-system/MASTER", note.rel)
     ba_root = vault.root / "business-analysis"
     if vault.files.is_dir(ba_root):
-        for registry_path in sorted(vault.files.glob(ba_root, "*/_generated/registry.json")):
+        paths = vault.files.glob(ba_root, "*/_generated/registry.json") if registry_paths is None else registry_paths
+        for registry_path in sorted(paths):
             try:
                 registry = json.loads(vault.files.read_text(registry_path, encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            except (OSError, ValueError):
+                # Undecodable bytes are as malformed as invalid JSON; neither names an owner.
                 continue
             space = registry_path.parents[1].name
             for ident, info in (registry.get("ids") or {}).items():
@@ -1375,9 +1380,10 @@ def relation_identity_owners(vault: Vault) -> dict[str, str]:
     return owners
 
 
-def relation_edges(vault: Vault) -> list[RelationEdge]:
+def relation_edges(vault: Vault, *, identity_owners=None) -> list[RelationEdge]:
     edges: list[RelationEdge] = []
     keys = relation_specs(vault.policy)
+    owners = relation_identity_owners(vault) if identity_owners is None else identity_owners
     for note in authored(vault):
         for key in sorted(keys):
             values = note.fm.get(key)
@@ -1388,7 +1394,7 @@ def relation_edges(vault: Vault) -> list[RelationEdge]:
                     target, _anchor, alias = split_wikilink(value[2:-2])
                     target_rel = f"{target}.md"
                 elif isinstance(value, str):
-                    target_rel = relation_identity_owners(vault).get(value, "")
+                    target_rel = owners.get(value, "")
                     alias = value
                 else:
                     continue

@@ -212,7 +212,8 @@
         "tools.tests.test_calculation_examples.*",
         "tools.tests.test_project_context.*",
         "tools.tests.test_approval_history.*",
-        "tools.tests.test_python_entry.*"
+        "tools.tests.test_python_entry.*",
+        "tools.tests.test_vault_index.*"
       ]
     },
     "documentation": {
@@ -382,7 +383,11 @@
         "tools.tests.test_python_entry.PythonEntryTests.test_exit_none_and_text_match_interpreter_semantics",
         "tools.tests.test_python_entry.PythonEntryTests.test_native_lanes_register_each_entry_case_explicitly",
         "tools.tests.test_python_entry.PythonEntryTests.test_script_cannot_evade_the_unit_process_boundary",
-        "tools.tests.test_python_entry.PythonEntryTests.test_state_and_imports_are_restored_even_when_the_entry_raises"
+        "tools.tests.test_python_entry.PythonEntryTests.test_state_and_imports_are_restored_even_when_the_entry_raises",
+        "tools.tests.test_vault_index.VaultIndexTests.test_excluded_link_targets_regraph_their_owner_when_they_change",
+        "tools.tests.test_vault_index.VaultIndexTests.test_another_spelling_of_the_checkout_keeps_its_binding",
+        "tools.tests.test_vault_index.VaultIndexTests.test_task_input_closure_through_the_index_equals_the_reparse",
+        "tools.tests.test_vault_index.VaultIndexTests.test_case_variant_receipt_names_close_over_the_paths_the_reparse_reads"
       ]
     },
     "macos": {
@@ -512,7 +517,43 @@
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_windows_readonly_files_are_cleared_before_recovery",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_windows_readonly_parent_file_is_replaced_during_recovery",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_workspace_symlink_swap_restores_local_protected_state",
-        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_writer_consumers_accept_only_the_required_no_bytecode_flag"
+        "tools.tests.test_vault_hook.VaultHookShellContractTests.test_writer_consumers_accept_only_the_required_no_bytecode_flag",
+        "tools.tests.test_vault_index.VaultIndexTests.test_a_database_lost_after_recovery_replaced_it_never_reissues_its_generation",
+        "tools.tests.test_vault_index.VaultIndexTests.test_a_failed_first_build_leaves_no_database_and_an_uninitialized_one_is_named",
+        "tools.tests.test_vault_index.VaultIndexTests.test_a_lease_less_connection_on_recreated_sidecars_cannot_revert_a_later_generation",
+        "tools.tests.test_vault_index.VaultIndexTests.test_a_no_write_read_retries_a_sidecar_race_once_before_compiling_from_sources",
+        "tools.tests.test_vault_index.VaultIndexTests.test_borrowed_mapping_iterators_keep_their_reader_alive",
+        "tools.tests.test_vault_index.VaultIndexTests.test_cache_files_being_unlinked_count_as_absent_and_are_captured_again",
+        "tools.tests.test_vault_index.VaultIndexTests.test_context_reads_hash_sources_once_and_unchanged_reads_skip_the_writer_lock",
+        "tools.tests.test_vault_index.VaultIndexTests.test_database_sidecars_refuse_aliases_before_opening",
+        "tools.tests.test_vault_index.VaultIndexTests.test_duplicate_registry_ids_resolve_to_the_first_registry_in_path_order",
+        "tools.tests.test_vault_index.VaultIndexTests.test_each_git_worktree_owns_its_own_index",
+        "tools.tests.test_vault_index.VaultIndexTests.test_every_writer_sweeps_interrupted_generation_floor_writes",
+        "tools.tests.test_vault_index.VaultIndexTests.test_every_writer_sweeps_interrupted_recovery_and_ended_copy_folders",
+        "tools.tests.test_vault_index.VaultIndexTests.test_failed_corrupt_recovery_preserves_the_previous_files",
+        "tools.tests.test_vault_index.VaultIndexTests.test_failed_rebuild_keeps_published_generation_and_reader_snapshot",
+        "tools.tests.test_vault_index.VaultIndexTests.test_index_check_coexists_with_a_live_reader_without_cache_writes",
+        "tools.tests.test_vault_index.VaultIndexTests.test_inspection_copies_without_the_writer_lock_and_recovery_sweeps_candidates",
+        "tools.tests.test_vault_index.VaultIndexTests.test_link_and_relative_spellings_bind_one_checkout",
+        "tools.tests.test_vault_index.VaultIndexTests.test_moved_checkout_rebuilds_its_own_cache",
+        "tools.tests.test_vault_index.VaultIndexTests.test_no_write_read_removes_only_the_sidecars_its_open_created_after_a_writer_closed",
+        "tools.tests.test_vault_index.VaultIndexTests.test_no_write_read_reports_why_it_compiled_from_sources",
+        "tools.tests.test_vault_index.VaultIndexTests.test_no_write_reads_serve_the_warm_cache_in_place_and_reconcile_edits_in_memory",
+        "tools.tests.test_vault_index.VaultIndexTests.test_physically_corrupt_cache_is_recompiled_without_losing_capsules",
+        "tools.tests.test_vault_index.VaultIndexTests.test_post_write_sync_never_waits_on_the_writer_or_fails_the_hook",
+        "tools.tests.test_vault_index.VaultIndexTests.test_publication_lease_waits_report_busy_and_compilation_leaves_snapshot_copies_free",
+        "tools.tests.test_vault_index.VaultIndexTests.test_published_reads_name_the_drive_path_and_release_their_lease_on_any_failure",
+        "tools.tests.test_vault_index.VaultIndexTests.test_query_corruption_recovery_is_bounded_to_one_retry",
+        "tools.tests.test_vault_index.VaultIndexTests.test_reader_finalization_releases_lease_during_snapshot_lock",
+        "tools.tests.test_vault_index.VaultIndexTests.test_readonly_existing_database_uses_source_derived_memory_fallback",
+        "tools.tests.test_vault_index.VaultIndexTests.test_recovery_keeps_generation_above_an_unreadable_database",
+        "tools.tests.test_vault_index.VaultIndexTests.test_recovery_waits_for_process_readers_and_resumes_after_close",
+        "tools.tests.test_vault_index.VaultIndexTests.test_resolver_rebuilds_a_cache_found_corrupt_while_resolving",
+        "tools.tests.test_vault_index.VaultIndexTests.test_section_search_recovers_corruption_detected_during_the_query",
+        "tools.tests.test_vault_index.VaultIndexTests.test_shared_and_exclusive_leases_use_the_one_file_lock",
+        "tools.tests.test_vault_index.VaultIndexTests.test_snapshot_copy_retries_a_concurrent_last_reader_checkpoint",
+        "tools.tests.test_vault_index.VaultIndexTests.test_snapshot_reads_hold_the_readers_lease_so_recovery_waits_and_release_it_on_any_failure",
+        "tools.tests.test_vault_query.VaultQueryTest.test_parallel_queries_rebuild_without_a_race"
       ],
       "depends_on": [
         "platform"
@@ -667,6 +708,7 @@
     "tools.tests.test_vault_gate",
     "tools.tests.test_vault_hook",
     "tools.tests.test_vault_hook_git_sync",
+    "tools.tests.test_vault_index",
     "tools.tests.test_vault_query",
     "tools.tests.test_writer_line_endings"
   ],

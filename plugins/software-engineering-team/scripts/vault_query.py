@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""Query the docs vault through a disposable cached index.
+"""Query the docs vault through a disposable checkout-local SQLite index.
 
-The index is one human-readable JSON file under the project runtime scratch
-(``.agentrof/agent-marketplace/.runtime/vault-index/index.json``). It holds
-every relation tier impact_closure reads, the approval proofs and the scanned
-notes. Every query checks the vault's files first: an unstamped file whose size
-and mtime are unchanged keeps its cached hash, every stamped note is rehashed
-so an approval proof never rests on file metadata, changed files are
-rescanned, and the relation graph is recomputed from the cached notes. Deleting the file loses nothing; the next query rebuilds it.
+The index lives at ``.agentrof/agent-marketplace/.runtime/vault-index/index.db``.
+It contains eligible Markdown and JSON outside all artifact subtrees. Queries
+reconcile source changes and use indexed records; source and approval checks
+remain authoritative. Deleting the cache loses no project truth.
 
 Verbs (all print JSON):
   closure --changed P...      impact closure of the changed notes
@@ -19,12 +16,16 @@ Verbs (all print JSON):
   changed-since <ref>         notes changed since a Git ref, plus stale stamps
   gaps [--reason R]           graph gaps (missing, unresolved, disagreeing)
   search <terms>              text search over the notes: ids and line anchors
+  search-sections <terms>     indexed candidate source units through FTS5
+  index ensure|sync|rebuild   source-derived cache maintenance
+  index status|check         readonly diagnostics and coverage verification
 
 Common options: --docs D (required, the project's ``workspace/docs``),
---verify (hash every file instead of trusting an unchanged size and mtime).
+--verify (accepted for compatibility; every query already hashes every eligible
+source before relying on the index).
 The cache location is fixed and never configurable: the tool writes only
 inside that ``vault-index`` folder and never a vault or other project file.
-No embeddings, no database; stdlib only.
+Python SQLite/FTS5 only; no server or embeddings.
 """
 
 from __future__ import annotations
@@ -32,28 +33,23 @@ from __future__ import annotations
 import argparse
 import errno
 import hashlib
-import os
 import json
-import re
 import subprocess
 import sys
-import time
 from collections import deque
 from pathlib import Path
 
-import atomic_file
-import file_lock
 import impact_closure
 import vault_check
 import context_catalog
+import vault_index
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = vault_index.SCHEMA_VERSION
 RUNTIME = Path(".agentrof") / "agent-marketplace" / ".runtime" / "vault-index"
-BUILDER_FILES = ("impact_closure.py", "vault_check.py", "vault_query.py", "ba_compile.py", "context_catalog.py", "context_history.py", "project_context.py")
+BUILDER_FILES = ("impact_closure.py", "vault_check.py", "vault_query.py", "ba_compile.py", "context_catalog.py", "context_history.py", "project_context.py", "vault_index.py")
 
 
 READ_ONLY_ERRORS = {errno.EACCES, errno.EPERM, errno.EROFS}
-SHARD_NAME = re.compile(r"^[0-9a-f]{64}\.json$")
 
 
 def project_docs(project: Path) -> Path:
@@ -67,7 +63,7 @@ def project_docs(project: Path) -> Path:
 
 
 def default_cache(docs: Path) -> Path:
-    """The one cache file: ``<project>/.agentrof/.../vault-index/index.json``.
+    """The one cache file: ``<project>/.agentrof/.../vault-index/index.db``.
 
     ``docs`` must be a project's ``workspace/docs`` directory, so the cache
     folder sits outside the vault; a folder that resolves elsewhere, through a
@@ -83,7 +79,7 @@ def default_cache(docs: Path) -> Path:
     if resolved != folder or resolved.is_relative_to(docs) or not resolved.is_relative_to(
             (project / ".agentrof").resolve()):
         raise ValueError(f"the vault index folder resolves outside the runtime scratch: {resolved}")
-    return folder / "index.json"
+    return folder / "index.db"
 
 
 def builder_hash() -> str:
@@ -93,210 +89,23 @@ def builder_hash() -> str:
     for name in BUILDER_FILES:
         digest.update((here / name).read_bytes())
     digest.update(vault_check.DEFAULT_POLICY.read_bytes())
+    digest.update(vault_index.POLICY.read_bytes())
     return digest.hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# Note (de)serialization as plain JSON data
-# ---------------------------------------------------------------------------
+def scan_files(docs: Path) -> dict:
+    """Every eligible source with its size, modification time and hash."""
+    return vault_index.scan_files(docs)
 
 
-def note_to_json(note) -> dict:
-    return {
-        "fm": note.fm, "fm_end": note.fm_end, "fm_error": note.fm_error,
-        "lines": note.lines, "generated": note.generated, "subtree": note.subtree,
-        "wikilinks": note.wikilinks, "mdlinks": note.mdlinks,
-        "fm_targets": note.fm_targets, "headings": note.headings,
-        "block_ids": sorted(note.block_ids)}
+def locked_refresh(docs: Path, cache: Path, *, rebuild: bool = False,
+                   repair: bool = False, failed=None, wait: bool = True):
+    return vault_index.locked_refresh(docs, cache, builder_hash(), rebuild=rebuild, repair=repair,
+                                      failed=failed, wait=wait)
 
 
-def note_from_json(root: Path, rel: str, data: dict):
-    return vault_check.Note(
-        rel=rel, path=root / rel, fm=data["fm"], fm_end=data["fm_end"],
-        fm_error=data["fm_error"], lines=data["lines"], generated=data["generated"],
-        subtree=data["subtree"], wikilinks=[tuple(i) for i in data["wikilinks"]],
-        mdlinks=[tuple(i) for i in data["mdlinks"]],
-        fm_targets=[tuple(i) for i in data["fm_targets"]],
-        headings=[tuple(i) for i in data["headings"]], block_ids=set(data["block_ids"]))
-
-
-# ---------------------------------------------------------------------------
-# Index
-# ---------------------------------------------------------------------------
-
-
-def scan_files(docs: Path, cached: dict, verify: bool = False,
-               stamped: frozenset = frozenset()) -> dict:
-    """rel -> {sha, size, mtime_ns}. A file whose size and mtime match the
-    cache keeps its cached hash; any other file (or every file, ``verify``)
-    is hashed, and the hash alone decides whether it changed."""
-    files = {}
-    for folder, dirs, names in os.walk(docs):
-        base = Path(folder)
-        rel_dir = base.relative_to(docs).as_posix()
-        if rel_dir == ".":
-            dirs[:] = [d for d in dirs if d not in {".trash", ".obsidian"}]
-        for name in names:
-            path = base / name
-            if path.is_symlink():
-                # vault_check reads a linked note like any other; the index
-                # does the same, but only for a link that stays in the vault.
-                if not path.resolve().is_relative_to(docs.resolve()):
-                    raise ValueError(f"{path.relative_to(docs).as_posix()} links outside the vault")
-            if not path.is_file():
-                continue
-            rel = path.relative_to(docs).as_posix()
-            info = path.stat()
-            entry = cached.get(rel)
-            # A stamped note is always rehashed: its approval proof must never
-            # rest on an unchanged size and mtime.
-            if (not verify and rel not in stamped and entry and entry.get("size") == info.st_size
-                    and entry.get("mtime_ns") == info.st_mtime_ns):
-                files[rel] = entry
-            else:
-                files[rel] = {"sha": hashlib.sha256(path.read_bytes()).hexdigest(),
-                              "size": info.st_size, "mtime_ns": info.st_mtime_ns}
-    return files
-
-
-def shard_dir(cache: Path) -> Path:
-    return cache.with_name(cache.stem + "-notes")
-
-
-def note_identity(note) -> tuple:
-    aliases = [a for a in (note.fm.get("aliases") or []) if isinstance(a, str)]
-    ident = note.fm.get("id")
-    ident = ident if isinstance(ident, str) and ident else (aliases[0] if aliases else "")
-    title = note.fm.get("title")
-    return ident, title if isinstance(title, str) else "", aliases
-
-
-def load_cache(cache: Path) -> dict:
-    if cache.is_symlink():
-        return {}
-    try:
-        data = json.loads(cache.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def locked_refresh(docs: Path, cache: Path, verify: bool = False) -> tuple[dict, dict]:
-    """``refresh`` under the index folder's lock, so parallel queries rebuild in turn.
-
-    The folder is created as real directories below the project root, never
-    through a link.
-    """
-    project = Path(docs).resolve().parents[1]
-    folder = atomic_file.real_directory(project, cache.parent.relative_to(project))
-    descriptor = os.open(folder / ".lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
-                         0o666)
-    try:
-        file_lock.lock(descriptor)
-        try:
-            return refresh(docs, cache, verify)
-        finally:
-            file_lock.unlock(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def refresh(docs: Path, cache: Path, verify: bool = False,
-            persist: bool = True) -> tuple[dict, dict]:
-    """Bring the cache up to the vault's current bytes: (index, what was redone).
-
-    ``index.json`` holds the graph, proofs and file hashes; each scanned note
-    sits beside it in ``index-notes/<sha>.json``, read only to rebuild.
-    """
-    started = time.perf_counter()
-    docs = docs.absolute()
-    builder = builder_hash()
-    data = load_cache(cache)
-    full = data.get("builder") != builder or data.get("docs") != str(docs)
-    if full:
-        data = {}
-    cached = data.get("files", {})
-    current = scan_files(docs, cached, verify, frozenset(data.get("proofs", {})))
-    changed = sorted(rel for rel, entry in current.items()
-                     if rel not in cached or cached[rel]["sha"] != entry["sha"])
-    removed = sorted(set(cached) - set(current))
-    status = {"path": str(cache), "full": full, "changed": changed, "removed": removed,
-              "persisted": persist}
-    if not changed and not removed and not full:
-        if current != cached and persist:  # touched, same bytes: keep the stat fast path warm
-            data["files"] = dict(sorted(current.items()))
-            atomic_file.replace_text(cache, json.dumps(data, indent=1, ensure_ascii=False) + "\n")
-        status["ms"] = round((time.perf_counter() - started) * 1000, 1)
-        return data, status
-
-    shards = shard_dir(cache)
-    reuse = {}
-    for rel, entry in current.items():
-        shard = shards / f"{entry['sha']}.json"
-        if rel.endswith(".md") and rel not in changed and shard.is_file() \
-                and not shard.is_symlink():
-            try:
-                reuse[rel] = note_from_json(docs, rel, json.loads(shard.read_text(encoding="utf-8")))
-            except (OSError, ValueError, KeyError):
-                pass  # a damaged shard is rescanned
-    vault = impact_closure.load_vault_reusing(docs, reuse)
-    authored = vault_check.authored(vault)
-    # A proof depends on the note and, for package stamps, on files below its
-    # directory: recheck every note whose directory holds a change, and every
-    # analysis note when any analysis file changed (one package hash).
-    dirty = set(changed) | set(removed)
-    dirs = {Path(rel).parent.as_posix() for rel in dirty}
-    def touched(rel: str) -> bool:
-        base = Path(rel).parent.as_posix()
-        return rel in dirty or any(d == base or d.startswith(base + "/") for d in dirs) or (
-            rel.startswith("business-analysis/")
-            and any(r.startswith("business-analysis/") for r in dirty))
-    recheck = None if full else {note.rel for note in authored if touched(note.rel)}
-    proofs = {} if full else {rel: proof for rel, proof in data.get("proofs", {}).items()
-                              if rel not in recheck and rel not in dirty}
-    proofs.update(impact_closure.proofs_for(docs, authored, recheck))
-    records = context_catalog.catalog(vault)
-    snap = impact_closure.snapshot(vault, proofs={}, records=records)
-    authored_set = set(snap["notes"])
-
-    if persist:
-        atomic_file.real_directory(cache.parent, Path(shards.name))
-        for rel, note in vault.notes.items():
-            shard = shards / f"{current[rel]['sha']}.json"
-            if rel not in reuse and not shard.is_file():
-                atomic_file.replace_text(shard, json.dumps(note_to_json(note), ensure_ascii=False))
-        live = {f"{entry['sha']}.json" for rel, entry in current.items() if rel in vault.notes}
-        for shard in shards.iterdir():
-            # Only the index's own shards are ever removed.
-            if SHARD_NAME.match(shard.name) and shard.is_file() and not shard.is_symlink() \
-                    and shard.name not in live:
-                shard.unlink(missing_ok=True)  # a parallel rebuild may have removed it
-
-    data = {
-        "schema_version": SCHEMA_VERSION,
-        "catalog": records,
-        "builder": builder,
-        "docs": str(docs),
-        "tiers": snap["tiers"],
-        "notes": {rel: {"id": note_identity(n)[0], "title": note_identity(n)[1],
-                        "type": impact_closure.note_type(n), "aliases": note_identity(n)[2],
-                        "authored": rel in authored_set}
-                  for rel, n in sorted(vault.notes.items())},
-        "proofs": dict(sorted(proofs.items())),
-        "edges": [[s, t, k, [tier for tier in impact_closure.TIERS if tier in tiers]]
-                  for (s, t, k), tiers in sorted(snap["edges"].items())],
-        "citers": snap["citers"],
-        "gaps": snap["gaps"],
-        "files": dict(sorted(current.items())),
-    }
-    for relative, kind in snap["notes"].items():
-        if relative not in data["notes"]:
-            data["notes"][relative] = {"id": "", "title": relative, "type": kind,
-                                       "aliases": [], "authored": True}
-    if persist:
-        atomic_file.replace_text(cache, json.dumps(data, indent=1, ensure_ascii=False) + "\n")
-    status["ms"] = round((time.perf_counter() - started) * 1000, 1)
-    return data, status
+def refresh(docs: Path, cache: Path, *, persist: bool = True, rebuild: bool = False):
+    return vault_index.refresh(docs, cache, builder_hash(), persist=persist, rebuild=rebuild)
 
 
 # ---------------------------------------------------------------------------
@@ -307,27 +116,33 @@ def refresh(docs: Path, cache: Path, verify: bool = False,
 class Index:
     def __init__(self, data: dict) -> None:
         self.data = data
+        self.store = getattr(data, "store", None)
 
     def resolve(self, ref: str) -> str:
+        """A graph node: a note, or a machine record an edge cites; never a generic JSON source."""
         rel = impact_closure.normalize(ref)
         for candidate in (rel, f"{rel}.md"):
             if candidate in self.data["notes"]:
                 return candidate
-        hits = self.find(ref)
+        hits = self.find(ref, graph=True)
         if len(hits) == 1:
             return hits[0]["path"]
         raise LookupError(f"'{ref}' names {len(hits)} notes; use a path"
                           + (": " + ", ".join(h["path"] for h in hits[:10]) if hits else ""))
 
-    def find(self, ref: str) -> list:
+    def find(self, ref: str, graph: bool = False) -> list:
         wanted = ref.strip().lower()
         notes = self.data["notes"]
         records = context_catalog.resolve(self.data.get("catalog", {"units": {}, "aliases": {}}), ref)
+        if graph:
+            records = [row for row in records if row["kind"] != "json"]
         if records:
             return [{"path": row["path"], "id": ref, "title": row["label"],
                      "type": self.data["catalog"]["documents"][row["path"]]["type"],
                      "unit_kind": row["kind"], "aliases": [ref], "unit_id": row["unit_id"]}
                     for row in records]
+        if self.store is not None:
+            return self.store.find_notes(wanted)
         exact = [rel for rel, n in notes.items()
                  if wanted in {n["id"].lower(), n["title"].lower(),
                                *(a.lower() for a in n["aliases"])}]
@@ -336,11 +151,16 @@ class Index:
                 for rel in sorted(hits)]
 
     def edges(self, field: int, rel: str) -> list:
+        if self.store is not None:
+            return [{"source": s, "target": t, "key": k, "tiers": tiers}
+                    for s, t, k, tiers in self.store.edges_for(rel, "source" if field == 0 else "target")]
         return [{"source": s, "target": t, "key": k, "tiers": tiers}
                 for s, t, k, tiers in sorted(self.data["edges"], key=lambda e: (e[2], e[0], e[1]))
                 if (s, t)[field] == rel]
 
     def snapshot(self) -> dict:
+        if self.store is not None:
+            return self.store.closure_snapshot()
         return {
             "notes": {rel: n["type"] for rel, n in self.data["notes"].items() if n["authored"]},
             "citers": self.data["citers"],
@@ -374,7 +194,7 @@ def q_who_cites(index: Index, args) -> dict:
 def q_path(index: Index, args) -> dict:
     start, goal = index.resolve(args.a), index.resolve(args.b)
     links: dict = {}
-    for s, t, k, tiers in index.data["edges"]:
+    for s, t, k, tiers in ([] if index.store else index.data["edges"]):
         if k == impact_closure.LIST_KEY:
             continue  # maps connect everything; membership is not a relation path
         hop = {"key": k, "tiers": tiers}
@@ -386,6 +206,17 @@ def q_path(index: Index, args) -> dict:
         rel = queue.popleft()
         if rel == goal:
             break
+        if index.store is not None:
+            # The same hop order as the full edge list: (source, target, key).
+            links[rel] = []
+            for s, t, k, tiers in index.store.edges_touching(rel):
+                if k == impact_closure.LIST_KEY:
+                    continue
+                hop = {"key": k, "tiers": tiers}
+                if s == rel:
+                    links[rel].append((t, {**hop, "direction": "out"}))
+                if t == rel:
+                    links[rel].append((s, {**hop, "direction": "in"}))
         for nxt, hop in sorted(links.get(rel, []), key=lambda item: item[0]):
             if nxt not in previous:
                 previous[nxt] = (rel, hop)
@@ -408,7 +239,8 @@ def q_find(index: Index, args) -> dict:
 def q_hash(index: Index, args) -> dict:
     rel = index.resolve(args.ref)
     entry = index.data["files"].get(rel, {})
-    proof = index.data["proofs"].get(rel)
+    proofs = index.store.fresh_proofs(only={rel}) if index.store is not None else index.data["proofs"]
+    proof = proofs.get(rel)
     return {"note": rel, "file_sha256": entry.get("sha"),
             "approval_hash": proof["approval_hash"] if proof else None,
             "scheme": proof["scheme"] if proof else None,
@@ -435,6 +267,8 @@ def q_changed_since(index: Index, args) -> dict:
 
 
 def q_gaps(index: Index, args) -> dict:
+    if index.store is not None:
+        return {"gaps": index.store.gaps_for(reason=args.reason)}
     return {"gaps": [g for g in index.data["gaps"]
                      if args.reason is None or g["reason"] == args.reason]}
 
@@ -466,12 +300,44 @@ def q_closure(index: Index, args) -> dict:
         snap, impact_closure.changed_paths(args.docs, args.changed, snap["notes"]), policy)
 
 
+def q_search_sections(index: Index, args) -> dict:
+    # A term without letters or digits tokenizes to nothing and would match no unit.
+    terms = [term for term in args.query.split() if any(char.isalnum() for char in term)]
+    if not terms:
+        return {"query": args.query, "hits": [], "truncated": False}
+    expression = " AND ".join('"' + term.replace('"', '""') + '"' for term in terms)
+    store = index.store
+    if store is None:
+        raise ValueError("indexed section search requires the SQLite source store")
+    rows = store.connection.execute(
+        "SELECT m.uid,bm25(search_text) FROM search_text JOIN search_units m ON m.rowid=search_text.rowid "
+        "WHERE search_text MATCH ? ORDER BY bm25(search_text),m.uid LIMIT ?",
+        (expression, args.limit + 1)).fetchall()
+    hits = []
+    for uid, score in rows[:args.limit]:
+        unit = store.catalog["units"][uid]
+        hits.append({"unit_id": uid, "path": unit["path"], "label": unit["label"],
+                     "kind": unit["kind"], "source_hash": unit["source_hash"],
+                     "bytes": unit["bytes"], "score": score,
+                     "historical": bool(unit.get("historical")), "approval_authority": False})
+    return {"query": args.query, "hits": hits, "truncated": len(rows) > args.limit}
+
+
+def query_data(args, cache, *, rebuild=False, repair=False, failed=None):
+    try:
+        return locked_refresh(args.docs, cache, rebuild=rebuild, repair=repair, failed=failed)
+    except OSError as exc:
+        if exc.errno not in READ_ONLY_ERRORS:
+            raise
+        return refresh(args.docs, cache, persist=False, rebuild=rebuild or repair)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--docs", type=Path, required=True)
     parser.add_argument("--verify", action="store_true",
-                        help="hash every file, ignoring the size and mtime fast path")
+                        help="accepted for compatibility; every query hashes every eligible source")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("closure")
     p.add_argument("--changed", nargs="*", default=[])
@@ -495,8 +361,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("query")
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=q_search)
+    p = sub.add_parser("search-sections")
+    p.add_argument("query")
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(func=q_search_sections)
+    p = sub.add_parser("index")
+    p.add_argument("action", choices=("ensure", "sync", "rebuild", "status", "check"))
     args = parser.parse_args(argv)
     if not args.docs.is_dir():
+        if args.command == "index":
+            print(json.dumps({"status": "needs_setup", "sources": 0}))
+            return 1
         print(f"vault_query: docs directory not found: {args.docs}", file=sys.stderr)
         return 2
     try:
@@ -504,26 +379,44 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"vault_query: {exc}", file=sys.stderr)
         return 2
-    try:
+    if args.command == "index" and args.action in {"status", "check"}:
         try:
-            data, status = locked_refresh(args.docs, cache, args.verify)
-        except OSError as exc:
-            if exc.errno not in READ_ONLY_ERRORS:
-                raise
-            # A read-only file system or sandbox: build the index in memory,
-            # reusing a warm cache read-only, and write nothing.
-            data, status = refresh(args.docs, cache, args.verify, persist=False)
+            result = vault_index.inspect_index(args.docs, cache, builder_hash(), check=args.action == "check")
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"status": "invalid", "reason": str(exc)}))
+            return 1
+        print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+        return 0 if result["status"] in {"ready", "ready_empty"} else 1
+    if hasattr(args, "limit") and args.limit <= 0:
+        parser.error("limit must be positive")
+    try:
+        data, status = query_data(args, cache, rebuild=args.command == "index" and args.action == "rebuild")
     except (OSError, ValueError) as exc:
         print(f"vault_query: {exc}", file=sys.stderr)
         return 2
     try:
-        result = args.func(Index(data), args)
-    except (LookupError, ValueError, subprocess.CalledProcessError) as exc:
+        for attempt in range(2):
+            try:
+                result = ({"status": status["state"], "generation": status["generation"],
+                           "documents": len(data["catalog"]["documents"])}
+                          if args.command == "index" else args.func(Index(data), args))
+                break
+            except vault_index.DATABASE_ERRORS as exc:
+                failure = vault_index.sqlite_failure(exc)
+                if attempt or not isinstance(failure, vault_index.CacheCorruptError):
+                    raise failure from exc
+                failed = data.store.session.identity
+                data.store.close()
+                data, status = query_data(args, cache, repair=True, failed=failed)
+                status["recovered"] = True
+        result["cache"] = status
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return 0
+    except (LookupError, ValueError, OSError, subprocess.CalledProcessError) as exc:
         print(f"vault_query: {exc}", file=sys.stderr)
         return 1
-    result["cache"] = status
-    print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
-    return 0
+    finally:
+        data.store.close()
 
 
 if __name__ == "__main__":

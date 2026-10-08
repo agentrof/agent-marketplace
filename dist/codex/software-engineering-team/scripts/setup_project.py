@@ -748,6 +748,8 @@ def restore_long_paths(root: Path, before: str | None) -> bool:
 
 
 def build_plan(args) -> dict:
+    import vault_index
+    vault_index.capabilities()
     root = git_root(Path(args.project_root).resolve())
     workspace = args.workspace
     workspace_root = root / workspace

@@ -108,14 +108,19 @@ def closure_policy(vault_policy: dict, overrides: dict | None = None) -> dict:
 
 
 def load_vault(docs: Path) -> vault_check.Vault:
-    return load_vault_reusing(docs, None)
-
-
-def load_vault_reusing(docs: Path, reuse: dict | None) -> vault_check.Vault:
-    """The vault, reusing hash-proven cached notes (see vault_query)."""
+    """The vault; a note outside the vault index's scope, such as one in an artifacts
+    directory at any depth or one linked to an excluded location, is no note, as in the index."""
+    import vault_index
     vault_policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-    return vault_check.build_vault(
-        Path(docs), vault_check.effective_policy(vault_policy, Path(docs)), reuse=reuse)
+    vault = vault_check.build_vault(Path(docs), vault_check.effective_policy(vault_policy, Path(docs)))
+    settings, artifact = vault_index.scope()
+    excluded = [rel for rel in vault.notes if not vault_index.eligible(rel, settings, artifact)
+                or vault_index.excluded_link_target(vault.root, rel)]
+    if excluded:
+        for rel in excluded:
+            del vault.notes[rel]
+        vault_check.index_inbound(vault)
+    return vault
 
 
 def normalize(rel: str) -> str:
@@ -232,22 +237,31 @@ def frontmatter_values(value):
             yield from frontmatter_values(item)
 
 
+def note_reference_names(note) -> list:
+    """An authored note's own identities, below relation identities and catalog aliases."""
+    names = []
+    ident = note.fm.get("id")
+    if isinstance(ident, str) and ident.strip():
+        names.append(ident.strip())
+    component = note.fm.get("component_id")
+    if isinstance(component, str) and component:
+        names.append(component)
+    record = note.fm.get("record_id")
+    revision = note.fm.get("revision")
+    if record and revision:
+        names.append(f"ARC:{record}@r{revision}" if str(record).startswith("CON-") else
+                     f"ARC:{note.fm.get('component_ref') or 'ROOT'}:{record}@r{revision}")
+    return names
+
+
 def reference_owners(vault, records: dict | None = None) -> dict:
     """Resolve note and source-unit identities without selecting an ambiguous owner."""
+    if records is not None and hasattr(records, "owner_lookup"):
+        return records.owner_lookup
     owners = dict(vault_check.relation_identity_owners(vault))
     for note in vault_check.authored(vault):
-        ident = note.fm.get("id")
-        if isinstance(ident, str) and ident.strip():
-            owners.setdefault(ident.strip(), note.rel)
-        component = note.fm.get("component_id")
-        if isinstance(component, str) and component:
-            owners.setdefault(component, note.rel)
-        record = note.fm.get("record_id")
-        revision = note.fm.get("revision")
-        if record and revision:
-            exact = (f"ARC:{record}@r{revision}" if str(record).startswith("CON-") else
-                     f"ARC:{note.fm.get('component_ref') or 'ROOT'}:{record}@r{revision}")
-            owners.setdefault(exact, note.rel)
+        for name in note_reference_names(note):
+            owners.setdefault(name, note.rel)
     import context_catalog
     records = context_catalog.catalog(vault) if records is None else records
     for reference, identities in records["aliases"].items():
@@ -288,7 +302,9 @@ def frontmatter_tier(vault, edges: Edges, keys, records: dict | None = None) -> 
     not (``requirement_ref``, ``verification_contract_ref``, any wikilink, id,
     alias or path); returns the reference-like values no note resolves."""
     owners = reference_owners(vault, records)
-    for edge in vault_check.relation_edges(vault):
+    # Typed relations name authored notes through relation identities only;
+    # a catalog alias such as a sealed receipt never becomes their target.
+    for edge in vault_check.relation_edges(vault, identity_owners=getattr(records, "relation_owners", None)):
         if edge.key in keys and not (edge.alias in owners and owners[edge.alias] is None):
             edges.add(edge.source, edge.target, edge.key, "frontmatter")
     unresolved = []
@@ -395,7 +411,8 @@ def navigation_tier(vault, edges: Edges) -> None:
 
 def identifiers(note) -> list:
     found = []
-    for value in [note.fm.get("id"), *(note.fm.get("aliases") or [])]:
+    aliases = note.fm.get("aliases")
+    for value in [note.fm.get("id"), *(aliases if isinstance(aliases, list) else [])]:
         if isinstance(value, str) and len(value.strip()) >= 3 and re.search(r"[0-9:-]", value):
             found.append(value.strip())
     return found
@@ -561,14 +578,16 @@ def approval_state(note) -> dict | None:
     return {"approval_hash": stamp, "scheme": None, "proven": False}
 
 
-def ba_package_proofs(docs: Path) -> dict:
-    """Notes of approved analysis spaces whose package hash still matches."""
+def ba_package_proofs(docs: Path, only=None) -> dict:
+    """Notes of approved analysis spaces whose package hash still matches (``only`` limits the spaces)."""
     import ba_compile
     proofs: dict = {}
     root = docs / "business-analysis"
     if not root.is_dir():
         return proofs
     for space in sorted(p for p in root.iterdir() if p.is_dir()):
+        if only is not None and not any(rel.startswith(f"business-analysis/{space.name}/") for rel in only):
+            continue
         overview = space / "space.md"
         if not overview.is_file():
             continue
@@ -613,7 +632,7 @@ def architecture_proofs(docs: Path, notes) -> dict:
 def proofs_for(docs: Path, notes, only=None) -> dict:
     """Approval proof per stamped note (``only`` limits the notes checked)."""
     notes = list(notes)
-    proofs = {rel: state for rel, state in ba_package_proofs(docs).items()
+    proofs = {rel: state for rel, state in ba_package_proofs(docs, only).items()
               if only is None or rel in only}
     proofs.update(architecture_proofs(docs, [note for note in notes
                                              if only is None or note.rel in only]))
@@ -661,11 +680,13 @@ def snapshot(vault, policy: dict | None = None, proofs: dict | None = None,
     }
 
 
-def earlier_relations(docs: Path, texts: dict) -> dict:
+def earlier_relations(docs: Path, texts: dict, *, vault=None, owners=None) -> dict:
     """Notes each deleted note named in its front matter, resolved in the
-    current vault: ``texts`` maps the deleted note to its earlier bytes."""
-    vault = load_vault(Path(docs).absolute())
-    owners = reference_owners(vault)
+    current vault: ``texts`` maps the deleted note to its earlier bytes. An
+    indexed caller passes its verified vault view and owner lookup."""
+    if vault is None:
+        vault = load_vault(Path(docs).absolute())
+        owners = reference_owners(vault)
     result = {}
     for rel, text in texts.items():
         props = parse_frontmatter(text)[0] or {}

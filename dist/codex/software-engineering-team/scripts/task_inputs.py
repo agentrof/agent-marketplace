@@ -114,6 +114,51 @@ def row_path(row) -> str:
     return row.get("path") if isinstance(row, dict) else row
 
 
+def closure_raw(api, docs: Path, present: list, earlier: dict) -> dict:
+    """``api.closure`` over the verified vault index when this Python has SQLite FTS5.
+
+    The result equals the reparse ``api.closure`` computes. A closure module that
+    provides only the documented ``closure`` call, a vault that is not a project's
+    own ``workspace/docs`` (which has no checkout index), a project without a
+    published index bound to it and a Python without SQLite FTS5 use that reparse.
+    """
+    def reparse():
+        return api.closure(docs, present, deleted=earlier) if earlier else api.closure(docs, present)
+    spelled = Path(docs).absolute()
+    if not hasattr(api, "closure_from") or spelled.name != "docs" or spelled.parent.name != "workspace":
+        return reparse()
+    import vault_index
+    import vault_query
+    try:
+        vault_index.capabilities()
+        root = vault_query.project_docs(spelled.parents[1])
+        cache = vault_query.default_cache(root)
+    except ValueError:
+        return reparse()
+    # Building an index costs more than one reparse, so only an existing bound cache is used.
+    if not vault_index.published_binding_matches(root, cache, vault_query.builder_hash()):
+        return reparse()
+    import project_context
+    import vault_check
+
+    def run(index):
+        snap = vault_query.Index(index).snapshot()
+        policy = api.closure_policy(vault_check.effective_policy(
+            vault_check.load_policy(vault_check.DEFAULT_POLICY), docs))
+        result = api.closure_from(snap, api.changed_paths(docs, present, snap["notes"]), policy)
+        if earlier:
+            relations = api.earlier_relations(docs, earlier, vault=index.store.vault(),
+                                              owners=index.store.catalog.owner_lookup)
+            seeds = sorted({target for targets in relations.values() for target in targets})
+            if seeds:
+                more = api.closure_from(snap, sorted({*result["changed"], *seeds}), policy)
+                more["changed"] = result["changed"]
+                result = more
+            result["deleted"] = sorted(earlier)
+        return result
+    return project_context.with_index(root.parents[1], run)
+
+
 def impact_closure(docs: Path, changed, prefix: str = "", deleted: dict | None = None) -> dict:
     """Return the closure of ``changed`` docs notes with every path under ``prefix``.
 
@@ -128,8 +173,7 @@ def impact_closure(docs: Path, changed, prefix: str = "", deleted: dict | None =
     earlier = {docs_relative(path): text for path, text in (deleted or {}).items()}
     api = closure_api()
     present = [path for path in named if path not in missing]
-    raw = (api.closure(docs, present, deleted=earlier) if earlier
-           else api.closure(docs, present))
+    raw = closure_raw(api, docs, present, earlier)
     if not isinstance(raw, dict) or any(not isinstance(raw.get(key), list) for key in CLOSURE_KEYS):
         raise ValueError(f"impact closure must return the lists {', '.join(CLOSURE_KEYS)}")
     raw = dict(raw, changed=[*raw["changed"], *missing])
@@ -1085,7 +1129,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         project_reading = json.loads(regular(project, context_plan).read_text(encoding="utf-8"))
         if (project_reading["request"]["entry"], project_reading["request"]["role"]) != (entry, role):
             raise ValueError("context plan belongs to a different entry or role")
-        project_context.validate_plan(project, project_context.load_index(project), project_reading)
+        project_context.with_index(project, lambda index: project_context.validate_plan(project, index, project_reading))
         project_files.add(context_plan)
         project_files.update(row["path"] if row.get("source_root") == "project" else
                              "workspace/docs/" + row["path"] for row in project_reading["must_read"])

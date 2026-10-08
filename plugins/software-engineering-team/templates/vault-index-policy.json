@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "extensions": [".md", ".json"],
+  "excluded_roots": [".obsidian", ".trash"],
+  "artifact_directory_policy_key": "artifact_directory_name",
+  "fts_tokenizer": "unicode61",
+  "busy_timeout_ms": 30000
+}

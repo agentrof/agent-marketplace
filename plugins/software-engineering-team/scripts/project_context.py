@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from collections import Counter, deque
+from collections import Counter, deque, ChainMap
 import copy
 import json
 from pathlib import Path
@@ -170,15 +170,28 @@ def external_sources(project: Path, data: dict, refs: list[str], policy: dict) -
             "title": Path(ref).name, "source_hash": catalog.digest(raw), "units": [identity]}
 
 
-def snapshot(data: dict, policy: dict) -> str:
+def snapshot(data: dict, policy: dict, *, store=None) -> str:
     """Membership and relations bind the plan as well as each selected source."""
     # Every graph edge and address is derived from these exact source bytes.
     # Re-serializing all parsed units here would make each small lookup pay for
     # the entire corpus again.
+    if store is not None:
+        inputs = dict(store.meta("snapshot_inputs"))
+        sources = dict(inputs["sources"])
+        overlay = data["catalog"]["documents"]
+        if isinstance(overlay, ChainMap):
+            sources.update({path: record["source_hash"] for path, record in overlay.maps[0].items()})
+        inputs.update(sources=sources, policy={key: value for key, value in policy.items() if key != "reading_state"})
+        return catalog.digest(encoded(inputs))
     files = {path: entry["sha"] for path, entry in data.get("files", {}).items()}
     sources = {path: record["source_hash"] for path, record in data["catalog"]["documents"].items()}
     return catalog.digest(encoded({"builder": data.get("builder"), "files": files,
         "sources": sources, "policy": {key: value for key, value in policy.items() if key != "reading_state"}}))
+
+
+def catalog_view(source):
+    """Invocation-local overlays leave the shared source index immutable."""
+    return {key: ChainMap({}, value) for key, value in source.items()}
 
 
 def paged_context(project: Path, source: dict, all_required: list[dict], optional: dict,
@@ -350,9 +363,10 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
         limits.update(budget)
     if any(type(value) is not int or value <= 0 for value in limits.values()):
         raise ValueError("context budgets must be positive integers")
-    data = dict(index, catalog={key: dict(value) for key, value in index["catalog"].items()})
+    store = getattr(index, "store", None)
+    data = dict(index, catalog=catalog_view(index["catalog"]))
     external_sources(project, data["catalog"], refs, policy)
-    version = snapshot(data, policy)
+    version = snapshot(data, policy, store=store) if snapshot_scope == "vault" else None
     if snapshot_scope == "vault" and not manual_sources and expected_snapshot is not None and version != expected_snapshot:
         raise ValueError("stale context snapshot; resolve the current sources again")
     profile = policy["entry_profiles"][entry]
@@ -380,8 +394,9 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
             raise ValueError(f"reference must resolve exactly once: {ref} ({len(hits)} matches)")
         include(hits[0], "requested reference: " + ref)
     outgoing = {}
-    for origin, target, key, _tiers in data.get("edges", []):
-        outgoing.setdefault(origin, []).append((target, key))
+    if store is None:
+        for origin, target, key, _tiers in data.get("edges", []):
+            outgoing.setdefault(origin, []).append((target, key))
     visited = set()
     while pending:
         current = pending.popleft()
@@ -430,7 +445,9 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
                     include(targets[0], f"{key} from {path}")
                 else:
                     unresolved.append({"source": path, "reference": reference, "key": key})
-        for target, key in ([] if current.get("historical") else outgoing.get(path, [])):
+        links = (sorted((target, key) for _origin, target, key, _tiers in store.edges_for(path))
+                 if store is not None else outgoing.get(path, []))
+        for target, key in ([] if current.get("historical") else links):
             if (target, key) in covered:
                 continue
             units = catalog.resolve(source, target)
@@ -467,13 +484,14 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
         if expected_snapshot is not None and version != expected_snapshot:
             raise ValueError("stale context snapshot; resolve the current sources again")
     seen = set(seen_units or [])
-    if seen - set(source["units"]):
+    if any(unit not in source["units"] for unit in seen):
         raise ValueError("previously returned unit no longer exists")
     ordered = [unit for unit in all_required if unit["unit_id"] not in seen]
     if offset >= len(ordered) and offset:
         raise ValueError("continuation is outside the required reading set")
     relevant_paths = {unit["path"] for unit in ordered}
-    gaps = [gap for gap in data.get("gaps", [])
+    available_gaps = store.gaps_for(relevant_paths) if store is not None else data.get("gaps", [])
+    gaps = [gap for gap in available_gaps
             if gap.get("path") in relevant_paths or gap.get("source") in relevant_paths
             or gap.get("target") in relevant_paths]
     picked, paths, source_bytes = [], set(), 0
@@ -577,9 +595,10 @@ def expand_context(project: Path, index: dict, plan: dict, *, reason: str,
 
 
 def validate_plan(project: Path, index: dict, plan: dict, *, policy: dict | None = None) -> None:
-    if index.get("files"):
+    # An index loaded in this invocation already hashed every eligible source.
+    if index.get("files") and not getattr(index, "verified_inventory", False):
         import vault_query
-        files = vault_query.scan_files(project / "workspace/docs", {}, verify=True)
+        files = vault_query.scan_files(project / "workspace/docs")
         if {p: v["sha"] for p, v in files.items()} != {p: v["sha"] for p, v in index["files"].items()}:
             raise ValueError("stale context source inventory")
     state_reuse = {}
@@ -602,7 +621,7 @@ def read_plan(project: Path, index: dict, plan: dict, *, policy: dict | None = N
     validate_plan(project, index, plan, policy=policy)
     policy = policy or json.loads(POLICY.read_text(encoding="utf-8"))
     request = request_data(project, plan, policy=policy)
-    source = {key: dict(value) for key, value in index["catalog"].items()}
+    source = catalog_view(index["catalog"])
     external_sources(project, source, request["refs"], policy)
     for unit in plan["must_read"]:
         if unit.get("git_revision") or unit.get("kind") == "fragment":
@@ -620,20 +639,40 @@ def read_plan(project: Path, index: dict, plan: dict, *, policy: dict | None = N
     return result
 
 
-def load_index(project: Path, *, no_cache: bool = False) -> dict:
+def load_index(project: Path, *, no_cache: bool = False, repair: bool = False, failed=None) -> dict:
     import vault_query
     docs = vault_query.project_docs(project)
     cache = vault_query.default_cache(docs)
+    # A no-write repair compiles the sources instead of reading the damaged cache.
     if no_cache:
-        data, _status = vault_query.refresh(docs, cache, verify=True, persist=False)
+        data, _status = vault_query.refresh(docs, cache, persist=False, rebuild=repair)
     else:
         try:
-            data, _status = vault_query.locked_refresh(docs, cache, verify=True)
+            data, _status = vault_query.locked_refresh(docs, cache, repair=repair, failed=failed)
         except OSError as exc:
             if exc.errno not in vault_query.READ_ONLY_ERRORS:
                 raise
-            data, _status = vault_query.refresh(docs, cache, verify=True, persist=False)
+            data, _status = vault_query.refresh(docs, cache, persist=False, rebuild=repair)
     return data
+
+
+def with_index(project: Path, action, *, no_cache: bool = False):
+    """Run ``action(index)``; corruption found mid-query rebuilds the cache once and retries."""
+    import vault_index
+    failed = None
+    for attempt in range(2):
+        index = load_index(project, no_cache=no_cache, repair=attempt == 1, failed=failed)
+        store = getattr(index, "store", None)
+        try:
+            return action(index)
+        except vault_index.DATABASE_ERRORS as exc:
+            failure = vault_index.sqlite_failure(exc)
+            if attempt or not isinstance(failure, vault_index.CacheCorruptError):
+                raise failure from exc
+            failed = store.session.identity if store is not None else None
+        finally:
+            if store is not None:
+                store.close()
 
 
 def task_context(project: Path, *, entry: str, role: str | None, mode: str,
@@ -655,10 +694,10 @@ def task_context(project: Path, *, entry: str, role: str | None, mode: str,
         return {"status": "needs_scope", "must_read": [],
                 "next_action": "Select source references with the owning flow or compiler, then resolve; use manual discovery if needed."}
     try:
-        return resolve_context(project, load_index(project, no_cache=no_cache or not refs), entry=entry, role=role, refs=refs,
+        return with_index(project, lambda index: resolve_context(project, index, entry=entry, role=role, refs=refs,
             purpose=policy["task_purposes"][mode], snapshot_scope="selection",
-            manual_sources=manual or None, persist_state=not no_cache)
-    except (ValueError, OSError, UnicodeError) as exc:
+            manual_sources=manual or None, persist_state=not no_cache), no_cache=no_cache or not refs)
+    except (ValueError, OSError, UnicodeError, TypeError) as exc:
         return {"status": "unavailable", "must_read": [], "reason": str(exc)[:500],
                 "next_action": "Use targeted manual reads within the project, preserve required scope and report the context finding."}
 
@@ -685,16 +724,16 @@ def main(argv=None) -> int:
     inspect.add_argument("--ref", required=True)
     inspect.add_argument("--offset", type=int, default=0)
     args = parser.parse_args(argv)
-    try:
-        project = args.project_root.resolve()
-        index = load_index(project, no_cache=args.no_cache)
+    project = args.project_root.resolve()
+
+    def run(index):
         if args.command == "resolve":
             budget = {key: getattr(args, key) for key in
                       ("max_files", "max_source_bytes", "max_metadata_bytes") if getattr(args, key) is not None}
-            result = resolve_context(project, index, entry=args.entry, role=args.role,
-                                     refs=args.refs, purpose=args.purpose, budget=budget,
-                                     persist_state=not args.no_cache)
-        elif args.command == "units":
+            return resolve_context(project, index, entry=args.entry, role=args.role,
+                                   refs=args.refs, purpose=args.purpose, budget=budget,
+                                   persist_state=not args.no_cache)
+        if args.command == "units":
             hits = catalog.resolve(index["catalog"], args.ref)
             if len(hits) != 1 or args.offset < 0:
                 raise ValueError("name exactly one source and a non-negative offset")
@@ -710,22 +749,23 @@ def main(argv=None) -> int:
                 listed.append(unit)
             if not listed and args.offset < len(identities):
                 raise ValueError("one unit's address exceeds the metadata budget")
-            result = {"units": listed, "remaining": max(0, len(identities) - args.offset - len(listed))}
-        else:
-            payload = json.loads(args.plan.read_text(encoding="utf-8"))
-            if args.command == "read" and "candidate_hash" in payload and "product_commit" in payload:
-                raise ValueError("use delivery_verification.py inspect-context for a frozen candidate manifest")
-            plan = payload.get("project_reading", payload)
-            if "request" not in plan:
-                raise ValueError("task has no resolved plan; follow its next_action before reading")
-            validate_plan(project, index, plan)
-            if args.command == "expand":
-                result = expand_context(project, index, plan, reason=args.reason, refs=args.refs,
-                                        persist_state=False if args.no_cache else None)
-            elif args.command == "read":
-                result = read_plan(project, index, plan)
-            else:
-                result = {"status": "current", "plan_hash": plan["plan_hash"]}
+            return {"units": listed, "remaining": max(0, len(identities) - args.offset - len(listed))}
+        payload = json.loads(args.plan.read_text(encoding="utf-8"))
+        if args.command == "read" and "candidate_hash" in payload and "product_commit" in payload:
+            raise ValueError("use delivery_verification.py inspect-context for a frozen candidate manifest")
+        plan = payload.get("project_reading", payload)
+        if "request" not in plan:
+            raise ValueError("task has no resolved plan; follow its next_action before reading")
+        if args.command == "read":
+            return read_plan(project, index, plan)
+        validate_plan(project, index, plan)
+        if args.command == "expand":
+            return expand_context(project, index, plan, reason=args.reason, refs=args.refs,
+                                  persist_state=False if args.no_cache else None)
+        return {"status": "current", "plan_hash": plan["plan_hash"]}
+
+    try:
+        result = with_index(project, run, no_cache=args.no_cache)
         print(encoded(result).decode("utf-8"))
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:

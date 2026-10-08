@@ -167,7 +167,7 @@
       "184a0b11e57d6f5ab407ea40c22690edc425ed2992e2978f26ec0e974d326da0"
     ,
     "scripts/context_catalog.py":
-      "bc726c9a76196d997a7bd6e1b95d3aee93b774cfb657bf931f1cc94afe8fa2b4"
+      "68eac8dafaec25b0c0a4930196c5df55cb8e46b93f574958430f8a3a933c4b16"
     ,
     "scripts/context_history.py":
       "b3c433394ad535b010d12d194eaf277208cc61068b7f41a2a233255e6bcba0c9"
@@ -191,7 +191,7 @@
       "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
     ,
     "scripts/delivery_verification.py":
-      "3ace2f0dc191754fdbce0b4b8fff0fa99c5050ab6db615c703be20728c098385"
+      "eaa79f4b352d7ee059cf75afdd8f387ae2d8b16d2fac9dff6d9535d6a4ebf1f2"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -206,7 +206,7 @@
       "99bb5ce4c91560911d0155f8ac34cc75ca05943bb0b2de3b41c5e035d6e1d28b"
     ,
     "scripts/file_lock.py":
-      "d7588927231905320708a1ea2e7fc9251dffdf6a66f4a49ff24a3f353b1cc066"
+      "c1ea21c439be664099cfba1779d9b98d1fbed9944d899f7fecd54fef57b5fc3b"
     ,
     "scripts/generate_codex_project.py":
       "50cf0dcb2b0bae7c7e81a386a900ee2954615d4ef11eb2b96d6f5879b98994ba"
@@ -221,7 +221,7 @@
       "0055612b763ed5d5549432f86d2b978d6d3ff5af243e18e8b6d558f6d8d1f659"
     ,
     "scripts/impact_closure.py":
-      "9f95e6a0874f351e9c8438af1afd22d08328e1325ea405539fd2db9f4baaca87"
+      "1af017ab5e970243c4ad8e31135e7b4c7e50417201c6dd5f8ccaba241240b58a"
     ,
     "scripts/landscape_check.py":
       "afd0b167c4f8b2d685ed4e4041a66178a706cece248d19dcb566814e0f534c43"
@@ -242,7 +242,7 @@
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
     ,
     "scripts/project_context.py":
-      "93941f346e1bf0247bf054e231fcdcb1a42b5c04e785dcc85ec6b2656285237b"
+      "bf21e9bf8c7886022a786363f9e30db7ec66dcb8f796355c6bcd012408e46fbc"
     ,
     "scripts/project_instructions.py":
       "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
@@ -263,7 +263,7 @@
       "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
     ,
     "scripts/setup_project.py":
-      "304afa2a9b5ed5951049d47206f3b3fc85620b7072a2375d28ac7a921af07b78"
+      "ddfad711127a09adbe3f84843749e3b4d3bd03f653082e5dcd1f47499299ccac"
     ,
     "scripts/stage_package.py":
       "e0d667a6012af3cc67afa787ebaa6d12a9b9bf87adc422cc70dcd4b61456427b"
@@ -272,22 +272,25 @@
       "b7f2cad266008812a38779f0b2208596e5d5fddf8fd9a47354706406f03ca655"
     ,
     "scripts/task_inputs.py":
-      "69a957ce278038383749a1514468722f2cab9174b6ea85feecdff32bbe763ebe"
+      "18326522ab2752a01ec00af8688f5dd43b498a7180100dfbf0420e5e77deb31d"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
     ,
     "scripts/vault_check.py":
-      "3d18556f7eb74fd6022f8637bf411d5388b5f889d17cd9d3570f88f2cb2cd3ba"
+      "3bd52e5d5159562c8b44a21791c433f04721e81fee3b9932c9fb176d85ebe8cb"
     ,
     "scripts/vault_gate.py":
       "3eb237e04bbd4e142e6edc14ed50d925378e4c3cc2b0c5c4278f49d4edf7f39e"
     ,
     "scripts/vault_hook.py":
-      "0f94e1c9c3b9075a3ad369cfd78876ef520253d1a975034995da41182c1fca29"
+      "f1400bcead8488e477d55a83ec20fa96e3aaf959b35720c934283fc2e5a35692"
+    ,
+    "scripts/vault_index.py":
+      "e71cc817cae308e57ae5e78804966343606c683a1830b95b4e394b5282eded1f"
     ,
     "scripts/vault_query.py":
-      "6d004efad53e91c9616e64abb77a77ebdf867c26b6bc80848b77b98543ff52a1"
+      "621e52d77c481dc6e4b3c4cc43b962c2ff697b8f30426b244d856a741d5584e2"
     ,
     "skill-content/autopilot/SKILL.md":
       "cc422eb06937e9e1a6312aaba10a922a5aedc6d0ddb0c461face9288ddcffb25"
@@ -1044,6 +1047,9 @@
     ,
     "templates/tier-map.json":
       "7520a0d1c1627d0d8c16c6b540ca3090bd889ffcdfe891bbc7e5081f04bf6c9f"
+    ,
+    "templates/vault-index-policy.json":
+      "d44d46600e86a49f6b054d6a79ce989ff8b43740357fa8c8b0cfe9b015755584"
     ,
     "templates/vault/.obsidian/app.json":
       "d81f5f2d2db5f65f24db5235301c5dffd41412e66db7202cf65f9f032cde078d"

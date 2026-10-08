@@ -179,7 +179,7 @@
       "7f6b2438fb3ca797011279ea4dccc49285f5ae7391bd0033516fc572c020ba80"
     ,
     "scripts/delivery_git.py":
-      "2b93c50b03d435dece3a566c5c3ee33ce19d8f352ab90e2dc2b5b262eb9b07b5"
+      "338c3af83ce5392b35a7506e92577c0ea203a2ef1ac4f1fac31ede1a6808a95a"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
@@ -191,7 +191,7 @@
       "9c642c227177dc4372fee3cf1a338c27a9541e9ec9cca2ae645be5f5bc0b3a18"
     ,
     "scripts/delivery_verification.py":
-      "09d92a80dfccf2809c92a40930f6e62351fadfc9cb128cc22234046b76e87f6f"
+      "7b77d553f67ec3f3abc8a56b6b1dbd96a26aab95a236edfef6c49942eb536954"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -272,7 +272,7 @@
       "b7f2cad266008812a38779f0b2208596e5d5fddf8fd9a47354706406f03ca655"
     ,
     "scripts/task_inputs.py":
-      "6c7d077f63de579618fe464b09dfb4a44d66f904f0ca65da08101dd98b5dee47"
+      "1d355144f74a6da1b7a5c6c0f65c6fbe4ad9ec282b52627f6441b2b2e95d4b0d"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -500,7 +500,7 @@
       "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
     ,
     "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
-      "827e1ad5d71f8e2ba56dafd1fc89c84cc1749b33a228960fecd0e1357cc0fe3d"
+      "a4e51582bf0f57717a6f39d02d77f96c93c3666d619cfd56ab9b4cb424adb45b"
     ,
     "skill-content/deliver/references/switch-test_engines-partitioned.md":
       "718714d0b07687b4d670499555397d5bac780a749b3dcd50736a6f3e5b0fafa7"
@@ -1043,7 +1043,7 @@
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
     ,
     "templates/task-input-contract.md":
-      "3f46cbaa8cd4bdffb7ecd246b7eea9119de5abb5abf6f8c21f5274f2b2c5f286"
+      "76f03b302e9d242bd6e4ee3edb51c2031194f7bb316fcaa05680c8bedd96ea02"
     ,
     "templates/task-input-policy.json":
       "a388f65395aa5d8b62c12b82fc2635e8efd37fac9cb28718293874af330fff69"

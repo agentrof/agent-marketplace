@@ -861,13 +861,17 @@ def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, 
     """The selected Item record as the Delivery's Integration publishes it, with the Delivery id.
 
     A checkout's record can be a draft of a plan revision not yet approved, so
-    a published record grants the claims, never the draft. It is read from a
-    published Integration commit already in this checkout first: the remote's
-    tracking ref of the Integration, else the integration_base_commit the Item
-    worktree last converged on. Only without either is the remote asked. A
-    checkout with no remote at all holds no Delivery refs and keeps its own
-    record: (None, None). A checkout whose remotes do not include *remote*, or
-    where no published record can be read, raises ValueError naming why.
+    a published record grants the claims, never the draft. The Delivery's
+    remote is the source of truth: the record is read from its Integration tip,
+    fetched only when this checkout lacks that commit. Only when the remote
+    cannot be asked does the newest published Integration commit this checkout
+    holds stand in, the remote's tracking ref of the Integration or the
+    integration_base_commit the Item worktree last converged on, each taken
+    only as a record commit of the Delivery's Integration line. That offline
+    record can be stale; push-item still checks the Item against the remote. A
+    checkout with no remote that holds no published commit of the Delivery
+    keeps its own record: (None, None). Where no published record can be read,
+    ValueError names why.
     """
     import delivery_git
     # Without its own repository, git would answer for an enclosing one and its remote.
@@ -876,39 +880,89 @@ def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, 
     remotes = subprocess.run(["git", "-C", str(project), "remote"], capture_output=True, encoding="utf-8")
     if remotes.returncode:
         raise ValueError("the checkout's remotes cannot be read")
-    if not remotes.stdout.split():
-        return None, None
-    from ba_compile import parse_frontmatter
     from delivery_compile import split_note
+    names = remotes.stdout.split()
+    try:
+        delivery = item_delivery(project, item)
+    except ValueError:
+        if not names:
+            return None, None
+        raise
+    if not names:
+        if not local_integration_commits(project, item, delivery, remote):
+            return None, None
+        oid = newest_local_integration_commit(project, item, delivery, remote)
+        if oid is None:
+            raise ValueError(f"this checkout has no remote and no commit it holds for {delivery} is a published"
+                             f" Integration record of {delivery}; add the Delivery's remote")
+        return local_record(project, oid, item, split_note), delivery
+    ref = delivery_git.canonical_refs(delivery)["integration"]
+    offline = None
+    if remote in names:
+        try:
+            tip = delivery_git.remote_ref_oids(project, remote, [ref])[ref]
+        except RuntimeError as exc:
+            offline = exc
+        else:
+            if not tip:
+                raise ValueError(f"{delivery} has no Integration on {remote}")
+            try:
+                return delivery_git.split_remote_note(
+                    project, delivery_git.require_commit(project, remote, ref, tip), item, split_note)[0], delivery
+            except RuntimeError as exc:
+                raise ValueError(f"the published record of the selected Item cannot be read: {exc}") from exc
+    oid = newest_local_integration_commit(project, item, delivery, remote)
+    if oid is not None:
+        return local_record(project, oid, item, split_note), delivery
+    if offline is None:
+        raise ValueError(f"no published record of the selected Item is in this checkout and it has no remote"
+                         f" {remote}; name the Delivery's remote with --remote")
+    raise ValueError(f"the published record of the selected Item cannot be read: no published Integration"
+                     f" commit of {delivery} is in this checkout and {remote} cannot provide one: {offline}")
+
+
+def item_delivery(project: Path, item: str) -> str:
+    """The id of the Delivery whose package holds the selected Item record."""
+    import delivery_git
+    from ba_compile import parse_frontmatter
     record = project / PurePosixPath(item).parent.parent.parent / "delivery.md"
     props, _line, error = (parse_frontmatter(record.read_text(encoding="utf-8")) if record.is_file()
                            else ({}, 0, "missing"))
     delivery = props.get("id") if not error else None
     if not isinstance(delivery, str) or not delivery_git.DELIVERY_ID_RE.fullmatch(delivery):
         raise ValueError("the selected Item's Delivery record cannot be read")
-    for oid in local_integration_commits(project, item, delivery, remote):
-        try:
-            return delivery_git.split_remote_note(project, oid, item, split_note)[0], delivery
-        except RuntimeError:
-            continue
-    if remote not in remotes.stdout.split():
-        raise ValueError(f"no published record of the selected Item is in this checkout and it has no remote"
-                         f" {remote}; name the Delivery's remote with --remote")
-    ref = delivery_git.canonical_refs(delivery)["integration"]
+    return delivery
+
+
+def local_record(project: Path, oid: str, item: str, split_note) -> dict:
+    import delivery_git
     try:
-        tip = delivery_git.remote_ref_oids(project, remote, [ref])[ref]
-        if not tip:
-            raise ValueError(f"{delivery} has no Integration on {remote}")
-        published, _body = delivery_git.split_remote_note(
-            project, delivery_git.require_commit(project, remote, ref, tip), item, split_note)
+        return delivery_git.split_remote_note(project, oid, item, split_note)[0]
     except RuntimeError as exc:
-        raise ValueError(f"the published record of the selected Item cannot be read: no published Integration"
-                         f" commit of {delivery} is in this checkout and {remote} cannot provide one: {exc}") from exc
-    return published, delivery
+        raise ValueError(f"the published Integration commit {oid} in this checkout holds no record of the"
+                         f" selected Item: {exc}") from exc
+
+
+def newest_local_integration_commit(project: Path, item: str, delivery: str, remote: str) -> str | None:
+    """The newest, by ancestry, of the published Integration commits of *delivery* this checkout holds,
+    or None. A commit that is no record commit of the Delivery's Integration line is left out, and
+    two that diverge leave no newest one, so the checkout cannot tell which line is published."""
+    import delivery_git
+    found = [oid for oid in local_integration_commits(project, item, delivery, remote)
+             if delivery_git.delivery_integration_commit(project, oid, delivery)]
+    newest = found[0] if found else None
+    for oid in found[1:]:
+        if delivery_git.descends(project, newest, oid):
+            newest = oid
+        elif not delivery_git.descends(project, oid, newest):
+            raise ValueError(f"the published Integration commits of {delivery} in this checkout diverge:"
+                             f" {newest} and {oid}; reach the Delivery's remote {remote}")
+    return newest
 
 
 def local_integration_commits(project: Path, item: str, delivery: str, remote: str) -> list[str]:
-    """The published Integration commits of *delivery* this checkout already holds, newest known first."""
+    """The commits this checkout names as published Integration commits of *delivery*, unverified:
+    the remote's tracking ref of the Integration and the Item worktree record's integration_base_commit."""
     import delivery_git
     from ba_compile import parse_frontmatter
     found = []
@@ -927,9 +981,7 @@ def local_integration_commits(project: Path, item: str, delivery: str, remote: s
     if converged.is_file():
         props, _line, error = parse_frontmatter(converged.read_text(encoding="utf-8"))
         base = props.get("integration_base_commit") if not error else None
-        if (isinstance(base, str) and delivery_git.OID_RE.fullmatch(base) and base not in found
-                and not subprocess.run(["git", "-C", str(project), "cat-file", "-e", base + "^{commit}"],
-                                       capture_output=True).returncode):
+        if isinstance(base, str) and delivery_git.OID_RE.fullmatch(base) and base not in found:
             found.append(base)
     return found
 

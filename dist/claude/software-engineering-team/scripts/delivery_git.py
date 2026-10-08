@@ -2920,7 +2920,7 @@ def refresh_target(project_root: Path, delivery_id: str,
     changed = _changed_target_paths(root, previous_target, target)
     operation_bindings = target_input_bindings(root, directory, integration_oid, target, changed)
     claimed: dict[str, str] = {}
-    item_claims: dict[str, list[str]] = {}
+    item_records: dict[str, dict] = {}
     for item_path in integration_item_paths(root, directory, integration_oid):
         story = item_path.parent.name.upper()
         item_oid = own_item_tip(root, remote, delivery_id, story)
@@ -2932,18 +2932,9 @@ def refresh_target(project_root: Path, delivery_id: str,
             if not isinstance(claim, str) or not _is_normalized_claim(claim):
                 raise RuntimeError("claimed Item has an invalid path claim")
             claimed[claim] = story
-            item_claims.setdefault(story, []).append(claim)
-    # Only provisional_claims during_plan_revision records a provisional claim. A live one
-    # reserves its paths as a published claim does, and a promoted one keeps the paths its
-    # Item ref does not claim yet until the Item converges on the approved plan.
-    reserved: set[str] = set()
-    for provisional in delivery_provisional_claims(root, remote, delivery_id, integration_oid):
-        if provisional["state"] == "live":
-            reserved.update(provisional["paths"])
-        elif provisional["state"] == "promoted":
-            own = item_claims.get(provisional["story"], [])
-            reserved.update(path for path in provisional["paths"]
-                            if not any(claim_covers(claim, path) for claim in own))
+        item_records[story] = item_props
+    reserved = provisional_target_holds(
+        root, delivery_provisional_claims(root, remote, delivery_id, integration_oid), item_records)
     from delivery_compile import _claims_overlap
     overlaps = sorted(path for path in changed if any(_claims_overlap(path, claim) for claim in claimed)
                       or any(provisional_overlap(path, claim) for claim in reserved))
@@ -4169,6 +4160,24 @@ def require_commit(root: Path, remote: str, ref: str, oid: str) -> str:
     return oid
 
 
+def delivery_integration_commit(root: Path, oid: str, delivery_id: str) -> bool:
+    """Whether *oid* is a record commit of *delivery_id*'s Integration line, as far as this checkout can tell.
+
+    Every commit of that first-parent line carries its record kind and Delivery
+    trailers, and the line starts at the Delivery's reservation. Without the
+    remote nothing proves that the remote's line still holds the commit.
+    """
+    try:
+        message = commit_message(root, oid + "^{commit}")
+        if trailer(message, "Record") is None or trailer(message, "Delivery") != delivery_id:
+            return False
+        reservations = run_git(root, "log", "--first-parent", "--format=%H", "--fixed-strings",
+                               "--grep=Agentrof-Record: delivery-reservation-v1", oid).split()
+    except RuntimeError:
+        return False
+    return any(trailer(commit_message(root, found), "Delivery") == delivery_id for found in reservations)
+
+
 def held_plan_revision_epoch(root: Path, remote: str, delivery_id: str,
                              tips: dict[str, str] | None = None) -> str | None:
     """The epoch of the plan-revision barrier the remote Fence holds for *delivery_id*, or None.
@@ -4218,7 +4227,7 @@ def provisional_claims(root: Path, tip: str, delivery_id: str) -> list[dict]:
     """Every provisional claim *delivery_id* recorded on the Integration line up to *tip*, oldest first.
 
     A release record ends the one claim record its Claim-Record names, so each
-    claim carries its disposition or None, and a claim that was void when its
+    claim carries its disposition and release record or None, and a claim that was void when its
     Story's other claim was released stays unreleased. Every record is checked
     again as the verb wrote it, so a hand-pushed record grants nothing.
     """
@@ -4248,7 +4257,7 @@ def provisional_claims(root: Path, tip: str, delivery_id: str) -> list[dict]:
             claim = next((claim for claim in claims if claim["record"] == released), None)
             if claim is None or claim["disposition"] is not None or (claim["story"], claim["epoch"]) != (story, epoch):
                 raise corrupt(oid, f"releases {released}, which is no unreleased claim of {story} in its epoch")
-            claim["disposition"] = disposition
+            claim["disposition"], claim["released_by"] = disposition, oid
             continue
         listed = next((line for line in message.splitlines() if line.startswith("[")), "")
         try:
@@ -4264,7 +4273,8 @@ def provisional_claims(root: Path, tip: str, delivery_id: str) -> list[dict]:
                                + ("; ".join(problems) or "an empty or repeated path"))
         claims.append({"record": oid, "story": story, "epoch": epoch, "paths": sorted(paths),
                        "item_tip": trailer(message, "Item-Tip"), "slot": trailer(message, "Slot"),
-                       "writer_epoch": trailer(message, "Writer-Epoch"), "disposition": None})
+                       "writer_epoch": trailer(message, "Writer-Epoch"), "disposition": None,
+                       "released_by": None})
     return claims
 
 
@@ -4307,6 +4317,34 @@ def provisional_claim_states(root: Path, remote: str, delivery_id: str, integrat
             state = "void" if reason else "live"
         states.append({**claim, "state": state, **({"reason": reason} if reason else {})})
     return states
+
+
+def provisional_target_holds(root: Path, claims: list[dict], item_records: dict[str, dict]) -> set[str]:
+    """The paths provisional claims reserve against a target refresh, beside the Item refs' own claims.
+
+    Only provisional_claims during_plan_revision records a provisional claim. A
+    live one reserves its paths as a published claim does. A promoted one keeps
+    the paths its Item ref does not claim yet only while that Item, by its
+    *item_records* entry, neither ended nor converged on an Integration commit
+    at or after the claim's release; from then on the Item ref's own claims
+    govern, also when a later revision dropped the path.
+    """
+    from delivery_compile import TERMINAL_ITEM_STATUSES
+    reserved: set[str] = set()
+    for provisional in claims:
+        if provisional["state"] == "live":
+            reserved.update(provisional["paths"])
+            continue
+        record = item_records.get(provisional["story"], {})
+        if provisional["state"] != "promoted" or record.get("status") in TERMINAL_ITEM_STATUSES:
+            continue
+        base = record.get("integration_base_commit")
+        if isinstance(base, str) and OID_RE.fullmatch(base) and descends(root, provisional["released_by"], base):
+            continue
+        own = [claim for claim in record.get("path_claims") or [] if isinstance(claim, str)]
+        reserved.update(path for path in provisional["paths"]
+                        if not any(claim_covers(claim, path) for claim in own))
+    return reserved
 
 
 def descends(root: Path, ancestor: str, descendant: str) -> bool:

@@ -69,7 +69,9 @@ manifest`) refuse it with `DELIVERY_PROVISIONAL_CLAIM_PENDING`, and
 `integrate-item` never sees it. They read the Item's claims from the Item
 record of the Integration commit the Item converged on, its
 `integration_base_commit`, so an edit of the worktree's own Item record grants
-nothing. Other reads of the candidate, such as `regression-selection`,
+nothing. That base must be an Integration commit the Item has taken, as
+`push-item` checks it against the remote Item ref and Integration; any other
+base is refused with the `push-item` message. Other reads of the candidate, such as `regression-selection`,
 `regression-run` and `assertion-map`, still work on a provisional commit. Each
 verb that reads the claims takes `--remote` for a Delivery remote other than
 `origin`.
@@ -101,10 +103,13 @@ path with `DELIVERY_PROVISIONAL_CLAIM_ORPHANED` and name each path. The writer
 reverts or reworks that change in the Item worktree; nothing rewrites it
 automatically. `cancel-delivery` already waits for the barrier to end.
 
-While a claim is live, and once promoted until the Item ref claims its paths,
-`refresh-target` counts its paths as claimed, as written or with their case
-folded, and refuses a target that changes them with
-`DELIVERY_TARGET_SOURCE_VIOLATION`.
+While a claim is live, `refresh-target` counts its paths as claimed, as
+written or with their case folded, and refuses a target that changes them with
+`DELIVERY_TARGET_SOURCE_VIOLATION`. A promoted claim's paths that the Item ref
+does not claim count the same way until the Item ref converges on an
+Integration commit at or after the claim's release, or the Item ends; from
+then on the Item ref's own claims govern, also when a later revision dropped
+a path.
 
 ## What the owner sees
 

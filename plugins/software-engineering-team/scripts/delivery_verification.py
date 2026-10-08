@@ -585,7 +585,9 @@ def require_published_claims(root: Path, current: dict, remote: str = "origin") 
     that changes a product path the published Item record does not claim, so no reader starts on
     work that push-item would refuse. The claims come from the Item record of the Integration
     commit the Item converged on, never the worktree's own record, which its writer can edit.
-    Other candidate reads, such as a regression run, still work on a provisional commit."""
+    That commit must be one the Item has taken, as push-item checks it against the remote Item
+    ref and Integration. Other candidate reads, such as a regression run, still work on a
+    provisional commit."""
     import delivery_git
     docs = delivery.docs_root(root)
     delivery_id, story = current["delivery"], current["story"]
@@ -593,6 +595,19 @@ def require_published_claims(root: Path, current: dict, remote: str = "origin") 
             != delivery_git.PROVISIONAL_VALUE:
         return
     item = delivery.find_delivery(docs, delivery_id) / "items" / delivery.id_slug(story) / "item.md"
+    refs = delivery_git.canonical_refs(delivery_id, story)
+    try:
+        tips = delivery_git.remote_ref_oids(root, remote, [refs["item"], refs["integration"]])
+        if not tips[refs["item"]] or not tips[refs["integration"]]:
+            raise RuntimeError(f"{remote} holds no Item ref of {story} or no Integration of {delivery_id}")
+        before = delivery_git.split_remote_note(
+            root, delivery_git.require_commit(root, remote, refs["item"], tips[refs["item"]]),
+            item.relative_to(root).as_posix(), delivery.split_note)[0]
+        integration = delivery_git.require_commit(root, remote, refs["integration"], tips[refs["integration"]])
+    except RuntimeError as exc:
+        raise RuntimeError(f"the published Item record cannot be read from {remote}: {exc}") from exc
+    delivery_git.converged_integration(root, before, {"integration_base_commit": current["integration_base_commit"]},
+                                       current["product_commit"], integration)
     try:
         published = delivery_git.split_remote_note(root, current["integration_base_commit"],
                                                    item.relative_to(root).as_posix(), delivery.split_note)[0]

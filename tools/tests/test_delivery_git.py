@@ -4257,6 +4257,76 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
 
     @integration
+    def test_refresh_target_ends_a_promoted_hold_once_the_item_converges_or_ends(self):
+        """#464: a promoted path stays reserved only while its Item has neither converged on an Integration
+        commit at or after the release nor ended; when a later revision drops the path and the Item converges
+        on it, the Item ref's own claims govern and refresh-target takes the target, and an ended Item holds
+        nothing."""
+        project, worktree, item, _active = self.provisional_item()
+        integration_ref = delivery_git.canonical_refs("DLV-001")["integration"]
+        package = item.parents[2]
+        relative = {name: path.relative_to(worktree).as_posix() for name, path in (
+            ("plan", package / "execution-plan.md"), ("scope", package / "delivery.md"), ("item", item))}
+        with self.provisional_switch():
+            delivery_git.begin_plan_revision(project, "DLV-001")
+            delivery_git.provisional_claim(project, "DLV-001", "AUTH-01", ["src/verify.py"])
+            self.commit_provisional_change(worktree)
+            self.publish_item_record(project, worktree, item, path_claims=["src/auth.py", "src/verify.py"])
+            delivery_git.finish_plan_revision(project, "DLV-001")
+            promoted = delivery_git.remote_oid(project, "origin", integration_ref)
+            claims = delivery_git.delivery_provisional_claims(project, "origin", "DLV-001")
+            self.assertEqual([claim["state"] for claim in claims], ["promoted"])
+            self.converge_on_integration(worktree, item, promoted, relative)
+            # A second revision drops the path before the Item ref ever claimed it.
+            delivery_git.begin_plan_revision(project, "DLV-001")
+            self.publish_item_record(project, worktree, item, path_claims=["src/auth.py"])
+            delivery_git.finish_plan_revision(project, "DLV-001")
+            dropped = delivery_git.remote_oid(project, "origin", integration_ref)
+            self.advance_target_path(project, "src/verify.py")
+            baseline = delivery_git.run_git(project, "ls-remote", "origin")
+            with self.assertRaisesRegex(RuntimeError, r"^DELIVERY_TARGET_SOURCE_VIOLATION: target changed claimed "
+                                                      r"paths src/verify\.py$"):
+                delivery_git.refresh_target(project, "DLV-001")
+            self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
+            item_ref = delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"]
+            record = delivery_git.split_remote_note(project, delivery_git.remote_oid(project, "origin", item_ref),
+                                                    relative["item"], delivery_compile.split_note)[0]
+            for status in ("cancelled", "integrated"):
+                with self.subTest(status=status):
+                    self.assertEqual(delivery_git.provisional_target_holds(
+                        project, claims, {"AUTH-01": {**record, "status": status}}), set())
+            delivery_git.run_git(worktree, "rm", "-q", "src/verify.py")
+            delivery_git.run_git(worktree, "commit", "-qm", "Revert the dropped verifier")
+            self.converge_on_integration(worktree, item, dropped, relative)
+            self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+            delivery_git.push_item(project, "DLV-001", "AUTH-01")
+            self.assertTrue(delivery_git.refresh_target(project, "DLV-001")["changed"])
+
+    @integration
+    def test_freeze_refuses_an_integration_base_the_item_has_not_taken(self):
+        """#464: freeze and the reader manifest take the published claims from the worktree's
+        integration_base_commit only when it is an Integration commit the Item has taken, as push-item
+        checks it, so moving the base onto the Item's own provisional commit grants nothing."""
+        project, worktree, item, _active = self.provisional_item()
+        with self.provisional_switch():
+            delivery_git.begin_plan_revision(project, "DLV-001")
+            delivery_git.provisional_claim(project, "DLV-001", "AUTH-01", ["src/verify.py"])
+            product = self.commit_provisional_change(worktree)
+            props, body = delivery_compile.split_note(item)
+            props["integration_base_commit"] = product
+            item.write_bytes(delivery_compile.frontmatter(props, body).encode("utf-8"))
+            delivery_git.run_git(worktree, "add", "-A")
+            delivery_git.run_git(worktree, "commit", "-qm", "Move the integration base onto the product commit")
+            refusal = "^an Item may move its integration base only forward to an Integration commit it has taken$"
+            with self.assertRaisesRegex(RuntimeError, refusal):
+                delivery_verification.freeze(worktree, "DLV-001", "AUTH-01", fresh=True)
+            current = delivery_verification.candidate(worktree, "DLV-001", "AUTH-01", allow_evidence=True)
+            with self.assertRaisesRegex(RuntimeError, refusal):
+                delivery_verification.require_published_claims(worktree, current)
+            self.assertEqual(self.refused_finding(lambda: delivery_git.push_item(project, "DLV-001", "AUTH-01")),
+                             ("DELIVERY_INPUT_INVALID", refusal.strip("^$")))
+
+    @integration
     def test_freeze_takes_the_published_claims_while_other_candidate_reads_keep_working(self):
         """#464: the verification candidate, which regression-run, regression-selection and assertion-map
         read, accepts a provisional commit; freeze refuses it by the claims of the Item record its

@@ -108,15 +108,21 @@ Delivery implementation derives literal path-and-descendant claims from one
 selected Item and its role sequence; vault, Git, and runtime authority paths
 remain excluded, with their case folded, and the active writer receipt is
 still mandatory. The claims come from the Item record the Delivery's
-Integration publishes, never from the checkout's draft of a plan revision. A
-published Integration commit already in the checkout is read first: the
-remote's tracking ref of the Integration, else the `integration_base_commit`
-of the Item worktree's record. Only without either is the remote asked, so a
-checkout that holds one resolves offline. A checkout with no remote at all
-holds no Delivery refs and keeps its own record. The scope is `unresolved`,
-with the reason named, when the checkout's remotes do not include the
-Delivery's remote (pass `--remote`), when the remote holds no Integration of
-the Delivery, or when it cannot be reached and no published commit is local.
+Integration publishes, never from the checkout's draft of a plan revision.
+The Delivery's remote is the source of truth: its Integration tip is read,
+fetched only when the checkout lacks that commit. Only when the remote cannot
+be reached does a published Integration commit already in the checkout stand
+in, the newest by ancestry of the remote's tracking ref of the Integration and
+the `integration_base_commit` of the Item worktree's record, each taken only
+as a record commit of the Delivery's Integration line. Such an offline scope
+can be stale; `push-item` still checks the Item against the remote. A
+checkout with no remote keeps its own record only while it holds no published
+commit of the Delivery; otherwise it reads that commit the same way. The scope
+is `unresolved`, with the reason named, when the checkout's remotes do not
+include the Delivery's remote (pass `--remote`), when the remote holds no
+Integration of the Delivery, or when the remote cannot be reached, or is
+missing, and no local commit is a record commit of the Delivery's Integration
+line.
 
 Missing, ambiguous, new-document, or unsupported write scopes are explicitly
 `unresolved`, with an empty area. Resolve them through the existing owning

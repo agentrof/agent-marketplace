@@ -26,6 +26,10 @@ OWNING_FLOWS_SCOPE = "owning_flows"
 # How a declared pass kind runs: as the owning writer's generated variant, or
 # as a command of the entry itself with no role pass.
 PASS_KIND_RUNS = {"writer_variant", "entry_command"}
+PROVISIONAL_SWITCH = "provisional_claims"
+PROVISIONAL_VALUE = "during_plan_revision"
+PROVISIONAL_CONSTRAINT = ("provisional: not freezable or pushable before the approved plan publishes it;"
+                          " a provisional path stays the Item's only once its writer converges on that plan")
 # The switch value whose cross-epic backlog writer writes only its given inputs.
 WRITERS_SWITCH, WRITERS_VALUE = "remediation_writers", "per_epic"
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
@@ -766,27 +770,9 @@ def plan_revision_held(project: Path, delivery: str, remote: str) -> bool:
     import delivery_git
 
     try:
-        refs = delivery_git.canonical_refs(delivery)
-        tips = delivery_git.remote_ref_oids(project, remote, [refs["fence"], refs["integration"]])
-        if not all(tips.values()):
-            return False
-        fence = delivery_git.commit_message(project, tips[refs["fence"]])
-        epoch = delivery_git.trailer(fence, "Barrier-Epoch")
-        if delivery_git.trailer(fence, "Barrier-Kind") != "plan-revision" or epoch in {None, "none"}:
-            return False
-        # The barrier's own Integration record binds its epoch to this Delivery.
-        begun = delivery_git.run_git(project, "log", "--format=%H", "--fixed-strings",
-                                     f"--grep=Agentrof-Barrier-Epoch: {epoch}",
-                                     tips[refs["integration"]])
-        for oid in begun.split():
-            record = delivery_git.commit_message(project, oid)
-            if all(delivery_git.trailer(record, key) == expected for key, expected in (
-                    ("Record", "delivery-barrier-v1"), ("Delivery", delivery),
-                    ("Barrier-Kind", "plan-revision"), ("Barrier-Epoch", epoch))):
-                return True
+        return delivery_git.held_plan_revision_epoch(project, remote, delivery) is not None
     except (RuntimeError, OSError, ValueError):
         return False
-    return False
 
 
 def switch_choices(project: Path | None, route: dict, package: Path,
@@ -873,15 +859,52 @@ def working_inventory(root: Path, command: list[str], *, unborn: bool = False,
     return records
 
 
+def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, str | None]:
+    """The selected Item record as the Delivery's Integration publishes it, with the Delivery id.
+
+    A checkout's record can be a draft of a plan revision not yet approved, so
+    the published record grants the claims. A checkout without the remote holds
+    no Delivery refs and keeps its own record: (None, None). A remote that holds
+    no published record of the Item raises ValueError.
+    """
+    import delivery_git
+    # Without its own repository, git would answer for an enclosing one and its remote.
+    if not (project / ".git").exists() or subprocess.run(["git", "-C", str(project), "remote", "get-url", remote],
+                      capture_output=True).returncode:
+        return None, None
+    from ba_compile import parse_frontmatter
+    from delivery_compile import split_note
+    record = project / PurePosixPath(item).parent.parent.parent / "delivery.md"
+    props, _line, error = (parse_frontmatter(record.read_text(encoding="utf-8")) if record.is_file()
+                           else ({}, 0, "missing"))
+    delivery = props.get("id") if not error else None
+    if not isinstance(delivery, str) or not delivery_git.DELIVERY_ID_RE.fullmatch(delivery):
+        raise ValueError("the selected Item's Delivery record cannot be read")
+    ref = delivery_git.canonical_refs(delivery)["integration"]
+    try:
+        tip = delivery_git.remote_ref_oids(project, remote, [ref])[ref]
+        if not tip:
+            raise ValueError(f"{delivery} has no Integration on {remote}")
+        published, _body = delivery_git.split_remote_note(
+            project, delivery_git.require_commit(project, remote, ref, tip), item, split_note)
+    except RuntimeError as exc:
+        raise ValueError(f"the published record of the selected Item cannot be read: {exc}") from exc
+    return published, delivery
+
+
 def write_scope(project: Path | None, paths: set[str], role: str | None, route: dict,
                 read_only: bool, closure: dict | None, package: Path,
-                cross_epic: bool = False) -> dict:
+                cross_epic: bool = False, chosen: set | frozenset = frozenset(),
+                remote: str = "origin") -> dict:
     """Describe selected authoring bounds without minting writer authority.
 
     Read dependencies are not write targets. Unknown compiler selections and
     new documents stay unresolved rather than granting a whole stage directory.
     A cross-epic remediation writer, at remediation_writers per_epic, writes
-    only the backlog documents it was given as inputs.
+    only the backlog documents it was given as inputs. An implementation scope
+    comes from the Item record the Delivery's Integration publishes and, at
+    provisional_claims during_plan_revision, also takes the paths of the
+    Item's live provisional claims.
     """
     result = {"status": "read_only" if read_only else "unresolved", "allowed_write_area": [],
               "source_records": [], "writer_authority": False,
@@ -957,6 +980,13 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
             return result
         item = items[0]
         props = properties(item)
+        try:
+            published, delivery = published_item(project, item, remote)
+        except ValueError as exc:
+            result["reason"] = str(exc)
+            return result
+        if published is not None:
+            props = published
         claims = props.get("path_claims")
         roles = props.get("role_sequence")
         if (props.get("type") != "delivery-item" or not isinstance(roles, list)
@@ -988,6 +1018,20 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
         sources = [item]
         result["excluded_subtrees"] = ["workspace/docs", ".git", ".agentrof"]
         result["constraints"].append("approved Item plan, current writer receipt, and completed/cancelled readers remain mandatory")
+        if delivery is not None and (PROVISIONAL_SWITCH, PROVISIONAL_VALUE) in chosen and not lane:
+            import delivery_git
+            try:
+                live = [claim for claim in delivery_git.delivery_provisional_claims(project, remote, delivery)
+                        if claim["story"] == props.get("story_id") and claim["state"] == "live"]
+            except RuntimeError as exc:
+                result["reason"] = f"the Item's provisional claims cannot be read: {exc}"
+                return result
+            provisional = sorted({path for claim in live for path in claim["paths"]} - {
+                target["path"] for target in targets})
+            if provisional:
+                targets.extend({"path": path, "coverage": "path_and_descendants", "source": item}
+                               for path in provisional)
+                result["constraints"].append(PROVISIONAL_CONSTRAINT)
         if lane:
             result["constraints"].append("parallel lane: write only this lane scope; the other lanes of the Item write theirs concurrently and the coordinator alone commits")
     if targets:
@@ -1203,7 +1247,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
                   and (WRITERS_SWITCH, WRITERS_VALUE) in chosen)
     scope = write_scope(project, set(inputs or []) | ({"workspace/docs/" + path for path in closure["paths"]}
                                                     if closure else set()),
-                        role, route, read_only, closure, package, cross_epic)
+                        role, route, read_only, closure, package, cross_epic, chosen, remote)
     if documents:
         scope.update(status="resolved", source_records=documents,
                      allowed_write_area=[{"path": path, "coverage": "exact_file", "source": path}

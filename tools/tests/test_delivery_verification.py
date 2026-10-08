@@ -1906,6 +1906,35 @@ print(sys.argv[1])
             verification.validate_evidence(item, review, qa)
 
 
+class ProvisionalClaimFreezeTests(unittest.TestCase):
+    """At provisional_claims during_plan_revision the candidate refuses a product path its Item record does
+    not claim before any reader starts, naming a provisional claim's path as pending or orphaned (#464)."""
+
+    def test_the_candidate_refuses_product_paths_its_item_record_does_not_claim(self):
+        import delivery_git
+        root = Path(tempfile.gettempdir()) / "provisional-candidate-never-read"
+        props = {"path_claims": ["src/auth.py"]}
+        pending = "DELIVERY_PROVISIONAL_CLAIM_PENDING: the Item's product change writes provisionally claimed paths"
+        asked = []
+
+        def refusal(checked_root, remote, delivery_id, story, outside):
+            asked.append((checked_root, remote, delivery_id, story, outside))
+            return pending if outside == ["src/verify.py"] else None
+
+        with mock.patch.object(delivery_git, "provisional_path_refusal", side_effect=refusal):
+            verification.require_published_claims(root, "DLV-001", "AUTH-01", props,
+                                                  ["src/auth.py", "workspace/docs/delivery/x.md"])
+            self.assertEqual(asked, [])
+            with self.assertRaisesRegex(RuntimeError, "^" + re.escape(pending) + "$"):
+                verification.require_published_claims(root, "DLV-001", "AUTH-01", props,
+                                                      ["src/auth.py", "src/verify.py"])
+            with self.assertRaisesRegex(RuntimeError, "^DELIVERY_PATH_CLAIM_EXCEEDED: the Item's product change "
+                                                      "lies outside its path claims: README.md$"):
+                verification.require_published_claims(root, "DLV-001", "AUTH-01", props, ["README.md"])
+        self.assertEqual(asked, [(root, "origin", "DLV-001", "AUTH-01", ["src/verify.py"]),
+                                 (root, "origin", "DLV-001", "AUTH-01", ["README.md"])])
+
+
 class FrozenContextReadingTests(unittest.TestCase):
     """Real source/plan validation with only candidate/session transport replaced."""
 

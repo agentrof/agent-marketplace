@@ -66,6 +66,8 @@ MISSING_GROUP = "missing"
 # pairs the check flags (#440).
 LEVEL_CHANGE_SWITCH = "level_change_map"
 ASSERTION_MAP = "assertion_map"
+PROVISIONAL_SWITCH = "provisional_claims"
+PROVISIONAL_VALUE = "during_plan_revision"
 ASSERTION_MAP_FILE = "assertion-map.json"
 ASSERTION_KINDS_PATH = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/assertion-kinds.json"
 ASSERTION_FIELDS = ("path", "code", "kind", "expected")
@@ -576,8 +578,23 @@ def candidate(root: Path, delivery_id: str, story: str, *, allow_evidence: bool 
              "changed_files": changed, "mutation_files": code, "report_paths": sorted(reports)}
     if delivery.delivery_switch_value(docs, delivery_id, LEVEL_CHANGE_SWITCH) == ASSERTION_MAP:
         value["assertion_map"] = assertion_map_check(root, value)
+    if delivery.delivery_switch_value(docs, delivery_id, PROVISIONAL_SWITCH) == PROVISIONAL_VALUE:
+        require_published_claims(root, delivery_id, story, props, changed)
     value["candidate_hash"] = digest(value)
     return value
+
+
+def require_published_claims(root: Path, delivery_id: str, story: str, props: dict, changed: list[str]) -> None:
+    """At provisional_claims during_plan_revision, refuse a candidate that changes a product path its
+    Item record does not claim, naming a provisional claim's paths as pending or orphaned, so no
+    reader starts on work that push-item would refuse."""
+    import delivery_git
+    outside = delivery_git.paths_outside_claims(
+        {path for path in changed if not path.startswith("workspace/docs/")}, props.get("path_claims"))
+    if outside:
+        raise RuntimeError(delivery_git.provisional_path_refusal(root, "origin", delivery_id, story, outside)
+                           or "DELIVERY_PATH_CLAIM_EXCEEDED: the Item's product change lies outside its path"
+                              " claims: " + ", ".join(outside))
 
 
 def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False) -> dict:

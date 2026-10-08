@@ -80,6 +80,12 @@ Integration's, and a pinned Operation contract that is neither the
 Integration's approved revision nor a later one; take the Delivery package and
 the Operation contracts from the Integration, then revise inside
 `begin-plan-revision`.
+Switch `provisional_claims`: at `during_plan_revision`, while its own
+plan-revision barrier is held the coordinator records a provisional claim of a
+path the draft adds to an active Item, and `finish-plan-revision` or
+`abort-plan-revision` promotes, orphans or withdraws it, as
+`skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md`
+defines.
 
 Every executable Item binds the current approved Verification Contract during
 approval. Set `runtime_required: true` only when the Item genuinely needs a

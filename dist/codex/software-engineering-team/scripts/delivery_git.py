@@ -706,11 +706,12 @@ def git_with_input(root: Path, args: list[str], data: str,
 def commit_tree(root: Path, base: str, paths: list[str], subject: str,
                 trailers: dict[str, str], *, delivery_projections: bool = False,
                 operation_bindings: dict[str, dict] | None = None,
-                blobs: dict[str, str] | None = None) -> str:
+                blobs: dict[str, str] | None = None, body: str | None = None) -> str:
     """Create an unreferenced candidate tree from *base* plus exact paths.
 
     *blobs* maps further paths to the existing blob each one carries, whatever
-    the checkout holds there.
+    the checkout holds there. *body* is a paragraph between the subject and the
+    trailers, for a record whose value is a list a trailer cannot repeat.
     """
     trailers = _normalise_control_trailers(trailers)
     with tempfile.TemporaryDirectory(prefix="agentrof-index-") as temporary:
@@ -735,7 +736,7 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
             projected = write_delivery_projection_tree(root, env, tree.stdout.strip(), operation_bindings)
         else:
             projected = tree.stdout.strip()
-        message = subject + "\n\n" + "\n".join(
+        message = subject + "\n\n" + (body + "\n\n" if body else "") + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
         commit = git_with_input(root, ["commit-tree", projected, "-p", base], message, env)
@@ -2930,6 +2931,11 @@ def refresh_target(project_root: Path, delivery_id: str,
             if not isinstance(claim, str) or not _is_normalized_claim(claim):
                 raise RuntimeError("claimed Item has an invalid path claim")
             claimed[claim] = story
+    # Only provisional_claims during_plan_revision records a provisional claim, and a live
+    # one reserves its paths as a published claim does.
+    for provisional in delivery_provisional_claims(root, remote, delivery_id, integration_oid):
+        if provisional["state"] == "live":
+            claimed.update(dict.fromkeys(provisional["paths"], provisional["story"]))
     from delivery_compile import _claims_overlap
     overlaps = sorted(path for path in changed if any(_claims_overlap(path, claim) for claim in claimed))
     if overlaps:
@@ -3359,9 +3365,22 @@ def _barrier_transition(project_root: Path, kind: str, action: str,
     fence_candidate = _fence_child(root, fence_oid, values, f"Release {kind} barrier")
     updates = [(fence_ref, fence_oid, fence_candidate)]
     integration_candidate = None
+    released = []
     if integration_ref:
+        # Each live provisional claim of the barrier ends in the same transaction as the barrier.
+        base = integration_oid
+        if kind == "plan-revision":
+            from delivery_compile import docs_root, find_delivery
+            directory = find_delivery(docs_root(root), delivery_id)
+            released = provisional_dispositions(root, remote, delivery_id, directory, integration_oid,
+                                                barrier_epoch, action) if directory is not None else []
+        for story, disposition in released:
+            base = commit_tree(
+                root, base, [], f"Release provisional claim {story} for {delivery_id}",
+                {"Record": "provisional-claim-release-v1", "Protocol": "1", "Delivery": delivery_id,
+                 "Story": story, "Barrier-Epoch": barrier_epoch, "Disposition": disposition})
         integration_candidate = commit_tree(
-            root, integration_oid, [], f"Release {kind} barrier for {delivery_id}",
+            root, base, [], f"Release {kind} barrier for {delivery_id}",
              {"Record": "delivery-barrier-release-v1", "Protocol": "1", "Delivery": delivery_id,
              "Barrier-Kind": kind, "Barrier-Epoch": barrier_epoch,
              "Barrier-OID": integration_oid, "Target": values.get("Target", "none"),
@@ -3370,8 +3389,12 @@ def _barrier_transition(project_root: Path, kind: str, action: str,
         )
         updates.append((integration_ref, integration_oid, integration_candidate))
     atomic_push(root, remote, updates)
-    return {"ok": True, "action": action, "barrier_kind": kind,
-            "fence": fence_candidate, "integration": integration_candidate}
+    result = {"ok": True, "action": action, "barrier_kind": kind,
+              "fence": fence_candidate, "integration": integration_candidate}
+    if released:
+        result["provisional_claims"] = [{"story": story, "disposition": disposition}
+                                        for story, disposition in released]
+    return result
 
 
 def begin_plan_revision(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
@@ -4064,14 +4087,16 @@ def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, 
                            "and its converged Integration")
 
 
-def require_item_path_claims(root: Path, before: str, after: str, relative_item: str) -> None:
+def require_item_path_claims(root: Path, before: str, after: str, relative_item: str,
+                             provisional=None) -> None:
     """Refuse a committed product or test path outside the Item's path claims.
 
     A claim covers its exact path and every path below it. Vault paths keep their
     own rules instead: the Delivery controls, the claimed Architecture delta and
     the compiler projections. A path the product tip holds exactly as the Item's
     recorded integration base holds it is not the Item's change; its writer took
-    it with that Integration.
+    it with that Integration. *provisional* names the refusal of paths a
+    provisional claim covers, as require_paths_within_claims takes it.
     """
     props = item_control_note(root, after, relative_item)[2]
 
@@ -4084,19 +4109,416 @@ def require_item_path_claims(root: Path, before: str, after: str, relative_item:
     base = props.get("integration_base_commit")
     if changed and isinstance(base, str) and OID_RE.fullmatch(base):
         changed &= product_paths(base)
-    require_paths_within_claims(changed, props.get("path_claims"))
+    require_paths_within_claims(changed, props.get("path_claims"), provisional)
 
 
-def require_paths_within_claims(changed: set[str], path_claims) -> None:
-    """Refuse a changed product path that no normalized path claim covers, by its exact path or a parent."""
+def paths_outside_claims(changed, path_claims) -> list[str]:
+    """The changed paths that no normalized path claim covers, by its exact path or a parent."""
     from delivery_compile import _is_normalized_claim
     claims = [claim for claim in path_claims or []
               if isinstance(claim, str) and _is_normalized_claim(claim)]
-    outside = sorted(path for path in changed
-                     if not any(path == claim or path.startswith(claim + "/") for claim in claims))
+    return sorted(path for path in changed if not any(claim_covers(claim, path) for claim in claims))
+
+
+def claim_covers(claim: str, path: str) -> bool:
+    return path == claim or path.startswith(claim + "/")
+
+
+def require_paths_within_claims(changed: set[str], path_claims, provisional=None) -> None:
+    """Refuse a changed product path that no normalized path claim covers, by its exact path or a parent.
+
+    *provisional*, given the paths outside, returns the refusal of those a
+    provisional claim of the Item covers, which names why they are not yet,
+    or no longer, the Item's to publish, or None.
+    """
+    outside = paths_outside_claims(changed, path_claims)
     if outside:
+        refusal = provisional(outside) if provisional is not None else None
+        if refusal:
+            raise RuntimeError(refusal)
         raise RuntimeError("DELIVERY_PATH_CLAIM_EXCEEDED: the Item's product change lies outside its path claims: "
                            + ", ".join(outside))
+
+
+PROVISIONAL_SWITCH = "provisional_claims"
+PROVISIONAL_VALUE = "during_plan_revision"
+PROVISIONAL_RECORD = "provisional-claim-v1"
+PROVISIONAL_RELEASE = "provisional-claim-release-v1"
+PROVISIONAL_DISPOSITIONS = ("promoted", "orphaned", "withdrawn")
+# The roots no implementation write scope reaches, as task_inputs.py excludes them.
+PROVISIONAL_EXCLUDED_ROOTS = ("workspace/docs", ".git", ".agentrof")
+# The Integration records that elect an Item's writer.
+WRITER_ELECTION_RECORDS = ("item-start-authorized-v1", "item-takeover-v1", "item-reopen-authorized-v1")
+
+
+def require_commit(root: Path, remote: str, ref: str, oid: str) -> str:
+    """Return *oid*, fetching *ref* first when this checkout lacks the commit another host wrote."""
+    if subprocess.run(["git", "cat-file", "-e", oid + "^{commit}"], cwd=root,
+                      capture_output=True, check=False).returncode:
+        run_git(root, "fetch", "--no-tags", remote, ref)
+    return oid
+
+
+def held_plan_revision_epoch(root: Path, remote: str, delivery_id: str,
+                             tips: dict[str, str] | None = None) -> str | None:
+    """The epoch of the plan-revision barrier the remote Fence holds for *delivery_id*, or None.
+
+    The Fence names no Delivery: the barrier's own Integration record binds its
+    epoch to the Delivery that began it.
+    """
+    refs = canonical_refs(delivery_id)
+    tips = tips if tips is not None else remote_ref_oids(root, remote, [refs["fence"], refs["integration"]])
+    fence, integration = tips.get(refs["fence"]), tips.get(refs["integration"])
+    if not fence or not integration:
+        return None
+    message = commit_message(root, require_commit(root, remote, refs["fence"], fence))
+    epoch = trailer(message, "Barrier-Epoch")
+    if trailer(message, "Barrier-Kind") != "plan-revision" or epoch in {None, "none"}:
+        return None
+    begun = run_git(root, "log", "--format=%H", "--fixed-strings", f"--grep=Agentrof-Barrier-Epoch: {epoch}",
+                    require_commit(root, remote, refs["integration"], integration))
+    for oid in begun.split():
+        record = commit_message(root, oid)
+        if all(trailer(record, key) == expected for key, expected in (
+                ("Record", "delivery-barrier-v1"), ("Delivery", delivery_id),
+                ("Barrier-Kind", "plan-revision"), ("Barrier-Epoch", epoch))):
+            return epoch
+    return None
+
+
+def provisional_paths_hash(paths: list[str]) -> str:
+    return "sha256:" + hashlib.sha256(json.dumps(sorted(paths)).encode("utf-8")).hexdigest()
+
+
+def provisional_claims(root: Path, tip: str, delivery_id: str) -> list[dict]:
+    """Every provisional claim *delivery_id* recorded on the Integration line up to *tip*, oldest first.
+
+    A release record ends the unreleased claim of its Story and barrier epoch
+    that precedes it, so each claim carries its disposition or None.
+    """
+    oids = run_git(root, "log", "--first-parent", "--reverse", "--format=%H", "--fixed-strings",
+                   "--grep=Agentrof-Record: provisional-claim", tip).split()
+    claims: list[dict] = []
+    for oid in oids:
+        message = commit_message(root, oid)
+        record, story, epoch = (trailer(message, key) for key in ("Record", "Story", "Barrier-Epoch"))
+        if trailer(message, "Delivery") != delivery_id or record not in {PROVISIONAL_RECORD, PROVISIONAL_RELEASE}:
+            continue
+        if record == PROVISIONAL_RELEASE:
+            for claim in claims:
+                if (claim["story"], claim["epoch"], claim["disposition"]) == (story, epoch, None):
+                    claim["disposition"] = trailer(message, "Disposition")
+            continue
+        listed = next((line for line in message.splitlines() if line.startswith("[")), "")
+        try:
+            paths = json.loads(listed)
+        except json.JSONDecodeError:
+            paths = None
+        if (not isinstance(paths, list) or not all(isinstance(path, str) for path in paths)
+                or provisional_paths_hash(paths) != trailer(message, "Claims-Hash")):
+            raise RuntimeError(f"DELIVERY_COORDINATION_CORRUPT: provisional claim record {oid} does not hold "
+                               "the path list its Claims-Hash binds")
+        claims.append({"record": oid, "story": story, "epoch": epoch, "paths": sorted(paths),
+                       "item_tip": trailer(message, "Item-Tip"), "slot": trailer(message, "Slot"),
+                       "writer_epoch": trailer(message, "Writer-Epoch"), "disposition": None})
+    return claims
+
+
+def current_writer_epoch(root: Path, integration: str, delivery_id: str, story: str) -> str | None:
+    """The Writer-Epoch of the newest Integration record that elected *story*'s writer, or None."""
+    oids = run_git(root, "log", "--first-parent", "--format=%H", "--fixed-strings",
+                   f"--grep=Agentrof-Story: {story}", integration).split()
+    for oid in oids:
+        message = commit_message(root, oid)
+        if (trailer(message, "Delivery") == delivery_id and trailer(message, "Story") == story
+                and trailer(message, "Record") in WRITER_ELECTION_RECORDS):
+            return trailer(message, "Writer-Epoch")
+    return None
+
+
+def provisional_claim_states(root: Path, remote: str, delivery_id: str, integration: str,
+                             claims: list[dict], held_epoch: str | None) -> list[dict]:
+    """Each claim with its state: its release disposition, or live while the barrier it was recorded
+    under is still held by this Delivery and the Item keeps the tip lineage, Slot and writer it
+    was recorded with, else void. Validity is derived here and never stored."""
+    unreleased = sorted({claim["story"] for claim in claims if claim["disposition"] is None})
+    tips = remote_ref_oids(root, remote, [canonical_refs(delivery_id, story)["item"] for story in unreleased]) \
+        if unreleased else {}
+    slots = remote_slot_oids(root, remote) if unreleased else {}
+    writers = {story: current_writer_epoch(root, integration, delivery_id, story) for story in unreleased}
+    states = []
+    for claim in claims:
+        state, reason = claim["disposition"], None
+        if state is None:
+            item_ref = canonical_refs(delivery_id, claim["story"])["item"]
+            tip = tips.get(item_ref, "")
+            if claim["epoch"] != held_epoch:
+                reason = "its plan-revision barrier is no longer held"
+            elif not tip or not descends(root, claim["item_tip"], require_commit(root, remote, item_ref, tip)):
+                reason = "the Item ref left the tip it was recorded on"
+            elif slots.get(claim["slot"]) != tip:
+                reason = "the Item no longer holds the Slot it was recorded with"
+            elif writers.get(claim["story"]) != claim["writer_epoch"]:
+                reason = "another writer took the Item over"
+            state = "void" if reason else "live"
+        states.append({**claim, "state": state, **({"reason": reason} if reason else {})})
+    return states
+
+
+def descends(root: Path, ancestor: str, descendant: str) -> bool:
+    """Whether *descendant* holds *ancestor* in its history; an object no fetched history holds does not."""
+    try:
+        return is_ancestor(root, ancestor, descendant)
+    except RuntimeError:
+        return False
+
+
+def delivery_provisional_claims(root: Path, remote: str, delivery_id: str,
+                                integration: str | None = None) -> list[dict]:
+    """Every provisional claim of *delivery_id* with its derived state, from the remote Integration,
+    or from the Integration tip *integration* a caller already read. A Delivery that recorded
+    none reads nothing else."""
+    refs = canonical_refs(delivery_id)
+    if integration is None:
+        integration = remote_ref_oids(root, remote, [refs["integration"]])[refs["integration"]]
+        if not integration:
+            return []
+    claims = provisional_claims(root, require_commit(root, remote, refs["integration"], integration), delivery_id)
+    if not claims:
+        return []
+    return provisional_claim_states(root, remote, delivery_id, integration, claims,
+                                    held_plan_revision_epoch(root, remote, delivery_id))
+
+
+def provisional_path_refusal(root: Path, remote: str, delivery_id: str, story: str,
+                             outside: list[str]) -> str | None:
+    """The refusal of product paths outside an Item's claims that one of its provisional claims covers.
+
+    A live or promoted claim waits for the published plan the writer converges
+    on; an orphaned, withdrawn or void one never becomes the Item's, so its
+    writer reverts or reworks that change. Paths no provisional claim covers
+    are left to the claim rule, which refuses them as exceeded.
+    """
+    claims = [claim for claim in delivery_provisional_claims(root, remote, delivery_id) if claim["story"] == story]
+    covered: dict[str, str] = {}
+    for path in outside:
+        state = next((claim["state"] for claim in reversed(claims)
+                      if any(claim_covers(claimed, path) for claimed in claim["paths"])), None)
+        if state is not None:
+            covered[path] = state
+    ended = {path: state for path, state in covered.items() if state not in {"live", "promoted"}}
+    if ended:
+        return ("DELIVERY_PROVISIONAL_CLAIM_ORPHANED: the Item's product change writes paths whose provisional "
+                "claim ended without a published claim: "
+                + ", ".join(f"{path} ({state})" for path, state in sorted(ended.items()))
+                + "; revert or rework that change in the Item worktree, or revise the plan to claim them")
+    if covered:
+        return ("DELIVERY_PROVISIONAL_CLAIM_PENDING: the Item's product change writes provisionally claimed "
+                "paths that its published plan does not grant yet: " + ", ".join(sorted(covered))
+                + "; approve and publish the revised execution plan and converge the Item on that "
+                "Integration before freeze or push-item")
+    return None
+
+
+def require_provisional_switch(docs: Path, delivery_id: str) -> None:
+    from delivery_compile import delivery_switch_value
+    try:
+        value = delivery_switch_value(docs, delivery_id, PROVISIONAL_SWITCH)
+    except (KeyError, ValueError) as exc:
+        raise RuntimeError(f"DELIVERY_PROVISIONAL_CLAIM_REFUSED: the Delivery's {PROVISIONAL_SWITCH} value "
+                           f"cannot be read: {exc}") from exc
+    if value != PROVISIONAL_VALUE:
+        raise RuntimeError(f"DELIVERY_PROVISIONAL_CLAIM_REFUSED: {delivery_id} runs switch {PROVISIONAL_SWITCH} "
+                           f"at {value}; only {PROVISIONAL_VALUE} records provisional claims")
+
+
+def provisional_overlap(first: str, second: str) -> bool:
+    """Whether two claims overlap as written or on a file system that folds case."""
+    from delivery_compile import _claims_overlap
+    return _claims_overlap(first, second) or _claims_overlap(first.casefold(), second.casefold())
+
+
+def provisional_claim(project_root: Path, delivery_id: str, story_id: str, paths: list[str],
+                      remote: str = "origin") -> dict:
+    """Record, on the Integration line, a provisional claim of paths the plan revision adds to an active Item.
+
+    The claim lets the Item's writer commit the change in its worktree while the
+    revision runs. Nothing freezes, reviews, pushes or integrates it before the
+    approved plan publishes the paths, and its validity is derived from the
+    barrier, the Item and its writer at every read.
+    """
+    validate_delivery_id(delivery_id)
+    validate_story_id(story_id)
+    root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
+    from delivery_compile import (TERMINAL_ITEM_STATUSES, _is_normalized_claim, docs_root, find_delivery,
+                                  implementation_schedule, split_note)
+
+    def refused(cause: str) -> RuntimeError:
+        return RuntimeError(f"DELIVERY_PROVISIONAL_CLAIM_REFUSED: {cause}")
+
+    docs = docs_root(root)
+    directory = find_delivery(docs, delivery_id)
+    if directory is None:
+        raise RuntimeError("Delivery package not found")
+    require_provisional_switch(docs, delivery_id)
+    refs = canonical_refs(delivery_id, story_id)
+    tips = remote_ref_oids(root, remote, [refs["fence"], refs["integration"], refs["item"]])
+    epoch = held_plan_revision_epoch(root, remote, delivery_id, tips)
+    if epoch is None:
+        raise refused(f"the Fence holds no plan-revision barrier that {delivery_id} began; "
+                      "run begin-plan-revision first")
+    integration_oid = require_commit(root, remote, refs["integration"], tips[refs["integration"]])
+    item_oid = tips[refs["item"]]
+    if not item_oid or trailer(commit_message(root, require_commit(root, remote, refs["item"], item_oid)),
+                               "Delivery") != delivery_id:
+        raise refused(f"{story_id} has no Item ref of {delivery_id}")
+    relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
+    live, _body = split_remote_note(root, item_oid, relative_item, split_note)
+    if live.get("status") != "active":
+        raise refused(f"{story_id} is not active: its Item ref records {live.get('status')}")
+    slot = next((key for key, oid in remote_slot_oids(root, remote).items() if oid == item_oid), None)
+    if slot is None:
+        raise refused(f"{story_id} holds no Slot at its Item tip")
+    try:
+        receipt = active_writer_receipt(root, delivery_id, story_id, item_oid, f"refs/heads/agentrof/slots/{slot}")
+    except RuntimeError as exc:
+        raise refused(f"this host holds no verified writer receipt of {story_id}: {exc}") from exc
+    published, _body = split_remote_note(root, integration_oid, relative_item, split_note)
+    try:
+        schedule = implementation_schedule(published)
+    except ValueError as exc:
+        raise refused(f"{story_id} declares an unsupported implementation_schedule: {exc}") from exc
+    if schedule == "parallel_lanes_v1":
+        raise refused(f"{story_id} runs parallel lanes, whose lane scopes a provisional claim cannot extend; "
+                      "wait for the approved plan")
+    draft_path = directory / "items" / story_key(story_id) / "item.md"
+    if not draft_path.is_file():
+        raise refused(f"the checkout holds no draft Item record of {story_id}")
+    draft = split_note(draft_path)[0].get("path_claims") or []
+    requested = list(paths)
+    if not requested:
+        raise refused("name at least one path")
+    if len(set(requested)) != len(requested):
+        raise refused("a path is named twice")
+    granted = [claim for claim in published.get("path_claims") or [] if isinstance(claim, str)]
+    for path in requested:
+        if not _is_normalized_claim(path):
+            raise refused(f"{path!r} is not a normalized repository path")
+        if any(claim_covers(root_path, path) for root_path in PROVISIONAL_EXCLUDED_ROOTS):
+            raise refused(f"{path} lies under {', '.join(PROVISIONAL_EXCLUDED_ROOTS)}, which no implementation "
+                          "write scope reaches")
+        if path not in draft:
+            raise refused(f"{path} is not in the checkout's draft path claims of {story_id}")
+        if any(claim_covers(claim, path) for claim in granted):
+            raise refused(f"{path} is already claimed by the published plan of {story_id}")
+    for item_path in integration_item_paths(root, directory, integration_oid):
+        other = item_path.parent.name.upper()
+        if other == story_id.upper():
+            continue
+        props, _ = split_remote_note(root, integration_oid, rel_posix(root, item_path), split_note)
+        if props.get("status") in TERMINAL_ITEM_STATUSES:
+            continue
+        for claim in props.get("path_claims") or []:
+            if isinstance(claim, str) and any(provisional_overlap(path, claim) for path in requested):
+                raise refused(f"the published plan gives {claim} to {props.get('story_id', other)}, which overlaps "
+                              + ", ".join(requested))
+    for item_path in sorted(directory.glob("items/*/item.md")):
+        props = split_note(item_path)[0]
+        if props.get("story_id") == story_id or props.get("status") in TERMINAL_ITEM_STATUSES:
+            continue
+        for claim in props.get("path_claims") or []:
+            if isinstance(claim, str) and any(provisional_overlap(path, claim) for path in requested):
+                raise refused(f"the draft plan gives {claim} to {props.get('story_id')}, which overlaps "
+                              + ", ".join(requested))
+    claims = provisional_claim_states(root, remote, delivery_id, integration_oid,
+                                      provisional_claims(root, integration_oid, delivery_id), epoch)
+    for claim in claims:
+        if claim["state"] != "live":
+            continue
+        if claim["story"] == story_id:
+            if claim["paths"] == sorted(requested):
+                return {"ok": True, "delivery": delivery_id, "story": story_id, "paths": claim["paths"],
+                        "barrier_epoch": epoch, "record": claim["record"], "integration": integration_oid,
+                        "reused": True}
+            raise refused(f"{story_id} already holds a live provisional claim of {', '.join(claim['paths'])}; "
+                          "withdraw it, then claim the complete set")
+        clash = sorted({claimed for claimed in claim["paths"]
+                        if any(provisional_overlap(path, claimed) for path in requested)})
+        if clash:
+            raise refused(f"{claim['story']} holds a live provisional claim of {', '.join(clash)}, which overlaps "
+                          + ", ".join(requested))
+    listed = json.dumps(sorted(requested))
+    candidate = commit_tree(
+        root, integration_oid, [], f"Provisionally claim {story_id} for {delivery_id}",
+        {"Record": "provisional-claim-v1", "Protocol": "1", "Delivery": delivery_id, "Story": story_id,
+         "Barrier-Epoch": epoch, "Writer-Epoch": str(receipt["writer_epoch"]), "Slot": slot,
+         "Item-Tip": item_oid, "Claims-Hash": provisional_paths_hash(requested)},
+        body=listed)
+    atomic_push(root, remote, [(refs["integration"], integration_oid, candidate)])
+    return {"ok": True, "delivery": delivery_id, "story": story_id, "paths": sorted(requested),
+            "barrier_epoch": epoch, "record": candidate, "integration": candidate}
+
+
+def withdraw_provisional_claim(project_root: Path, delivery_id: str, story_id: str,
+                               remote: str = "origin") -> dict:
+    """Release an Item's live provisional claim before its plan revision ends."""
+    validate_delivery_id(delivery_id)
+    validate_story_id(story_id)
+    root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
+    from delivery_compile import docs_root
+    require_provisional_switch(docs_root(root), delivery_id)
+    refs = canonical_refs(delivery_id)
+    tips = remote_ref_oids(root, remote, [refs["fence"], refs["integration"]])
+    epoch = held_plan_revision_epoch(root, remote, delivery_id, tips)
+    if epoch is None:
+        raise RuntimeError(f"DELIVERY_PROVISIONAL_CLAIM_REFUSED: the Fence holds no plan-revision barrier that "
+                           f"{delivery_id} began")
+    integration_oid = require_commit(root, remote, refs["integration"], tips[refs["integration"]])
+    claims = provisional_claim_states(root, remote, delivery_id, integration_oid,
+                                      provisional_claims(root, integration_oid, delivery_id), epoch)
+    if not any(claim["story"] == story_id and claim["state"] == "live" for claim in claims):
+        raise RuntimeError(f"DELIVERY_PROVISIONAL_CLAIM_REFUSED: {story_id} holds no live provisional claim")
+    candidate = commit_tree(
+        root, integration_oid, [], f"Release provisional claim {story_id} for {delivery_id}",
+        {"Record": "provisional-claim-release-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Story": story_id, "Barrier-Epoch": epoch, "Disposition": "withdrawn"})
+    atomic_push(root, remote, [(refs["integration"], integration_oid, candidate)])
+    return {"ok": True, "delivery": delivery_id, "story": story_id, "disposition": "withdrawn",
+            "barrier_epoch": epoch, "integration": candidate}
+
+
+def provisional_dispositions(root: Path, remote: str, delivery_id: str, directory: Path,
+                             integration: str, epoch: str, action: str) -> list[tuple[str, str]]:
+    """The Story and disposition of each live provisional claim the end of barrier *epoch* releases.
+
+    An abort withdraws every claim. A finish promotes a claim whose paths the
+    published Item record now claims, and orphans one the approval dropped or
+    moved.
+    """
+    claims = [claim for claim in provisional_claims(root, integration, delivery_id)
+              if claim["epoch"] == epoch and claim["disposition"] is None]
+    if not claims:
+        return []
+    from delivery_compile import split_note
+    released = []
+    for claim in provisional_claim_states(root, remote, delivery_id, integration, claims, epoch):
+        if claim["state"] != "live":
+            continue
+        disposition = "withdrawn"
+        if action == "finish":
+            relative = rel_posix(root, directory / "items" / story_key(claim["story"]) / "item.md")
+            try:
+                published = split_remote_note(root, integration, relative, split_note)[0]
+            except RuntimeError:
+                # The approved plan dropped the Item, and with it every path of the claim.
+                published = {}
+            granted = [value for value in published.get("path_claims") or [] if isinstance(value, str)]
+            covered = all(any(claim_covers(value, path) for value in granted) for path in claim["paths"])
+            disposition = "promoted" if covered else "orphaned"
+        released.append((claim["story"], disposition))
+    return released
 
 
 def require_current_activation_target(root: Path, remote: str, delivery_id: str,
@@ -4876,7 +5298,8 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     run_git(root, "fetch", "--no-tags", remote, refs["integration"])
     require_item_publication_controls(root, item_oid, product_tip, relative_delivery, relative_item,
                                       integration_oid)
-    require_item_path_claims(root, item_oid, product_tip, relative_item)
+    require_item_path_claims(root, item_oid, product_tip, relative_item, lambda outside: provisional_path_refusal(
+        root, remote, delivery_id, story_id, outside))
     pending = worktree_pending_paths(root, worktree)
     allowed_pending = {relative_review, relative_verification}
     if not pending.issubset(allowed_pending):
@@ -5298,6 +5721,8 @@ def main(argv=None) -> int:
     pause = sub.add_parser("pause-item"); pause.add_argument("--project-root", default="."); pause.add_argument("--delivery", required=True); pause.add_argument("--story", required=True); pause.add_argument("--remote", default="origin"); pause.set_defaults(func="pause")
     resume = sub.add_parser("resume-item"); resume.add_argument("--project-root", default="."); resume.add_argument("--delivery", required=True); resume.add_argument("--story", required=True); resume.add_argument("--remote", default="origin"); resume.set_defaults(func="resume")
     takeover = sub.add_parser("takeover-item"); takeover.add_argument("--project-root", default="."); takeover.add_argument("--delivery", required=True); takeover.add_argument("--story", required=True); takeover.add_argument("--remote", default="origin"); takeover.add_argument("--confirm", action="store_true"); takeover.set_defaults(func="takeover")
+    provisional = sub.add_parser("provisional-claim"); provisional.add_argument("--project-root", default="."); provisional.add_argument("--delivery", required=True); provisional.add_argument("--story", required=True); provisional.add_argument("--path", action="append", required=True); provisional.add_argument("--remote", default="origin"); provisional.set_defaults(func="provisional-claim")
+    withdraw = sub.add_parser("withdraw-provisional-claim"); withdraw.add_argument("--project-root", default="."); withdraw.add_argument("--delivery", required=True); withdraw.add_argument("--story", required=True); withdraw.add_argument("--remote", default="origin"); withdraw.set_defaults(func="withdraw-provisional-claim")
     lanes = sub.add_parser("lane-status"); lanes.add_argument("--project-root", default="."); lanes.add_argument("--delivery", required=True); lanes.add_argument("--story", required=True); lanes.add_argument("--remote", default="origin"); lanes.set_defaults(func="lane-status")
     push_item_parser = sub.add_parser("push-item"); push_item_parser.add_argument("--project-root", default="."); push_item_parser.add_argument("--delivery", required=True); push_item_parser.add_argument("--story", required=True); push_item_parser.add_argument("--remote", default="origin"); push_item_parser.set_defaults(func="push-item")
     integrate = sub.add_parser("integrate-item"); integrate.add_argument("--project-root", default="."); integrate.add_argument("--delivery", required=True); integrate.add_argument("--story", required=True); integrate.add_argument("--remote", default="origin"); integrate.set_defaults(func="integrate")
@@ -5376,6 +5801,10 @@ def main(argv=None) -> int:
                 result = resume_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "takeover":
                 result = takeover_item(Path(args.project_root), args.delivery, args.story, args.remote, confirm=args.confirm)
+            elif args.func == "provisional-claim":
+                result = provisional_claim(Path(args.project_root), args.delivery, args.story, args.path, args.remote)
+            elif args.func == "withdraw-provisional-claim":
+                result = withdraw_provisional_claim(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "lane-status":
                 result = lane_status(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "push-item":

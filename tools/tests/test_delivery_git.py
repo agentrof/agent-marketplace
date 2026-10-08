@@ -3891,6 +3891,236 @@ class DeliveryGitTests(unittest.TestCase):
                     delivery_git.push_item(project, "DLV-001", "AUTH-01")
                 self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
 
+    @contextlib.contextmanager
+    def provisional_switch(self):
+        """Run DLV-001 at provisional_claims during_plan_revision, as the policy it pinned would."""
+        original = delivery_compile.delivery_switch_value
+
+        def value(docs, delivery_id, switch):
+            return "during_plan_revision" if switch == "provisional_claims" else original(docs, delivery_id, switch)
+
+        with mock.patch.object(delivery_compile, "delivery_switch_value", value):
+            yield
+
+    def provisional_item(self, draft_claims=("src/auth.py", "src/verify.py")):
+        """An active stamped Item under a held plan revision whose checkout draft adds *draft_claims*."""
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        draft = project / item.relative_to(worktree)
+        props, body = delivery_compile.split_note(draft)
+        props["path_claims"] = list(draft_claims)
+        delivery_compile.atomic_text(draft, delivery_compile.frontmatter(props, body))
+        return project, worktree, item, active
+
+    def publish_item_record(self, project, worktree, item, *, projections=True, **fields):
+        """Publish the Item record with *fields* on the Integration, as an approved plan revision does."""
+        ref = delivery_git.canonical_refs("DLV-001")["integration"]
+        relative = item.relative_to(worktree).as_posix()
+        base = delivery_git.remote_oid(project, "origin", ref)
+        props, body = delivery_git.split_remote_note(project, base, relative, delivery_compile.split_note)
+        props.update(fields)
+        props["source_hash"] = delivery_compile.content_hash(props, body)
+        (project / relative).write_bytes(delivery_compile.frontmatter(props, body).encode("utf-8"))
+        published = delivery_git.commit_tree(project, base, [relative], "Publish execution plan", {},
+                                             delivery_projections=projections)
+        delivery_git.atomic_push(project, "origin", [(ref, base, published)])
+        return published
+
+    def commit_provisional_change(self, worktree) -> str:
+        (worktree / "src").mkdir(exist_ok=True)
+        (worktree / "src/verify.py").write_text("def verify():\n    return True\n", encoding="utf-8")
+        delivery_git.run_git(worktree, "add", "src/verify.py")
+        delivery_git.run_git(worktree, "commit", "-qm", "Fix the verifier under a provisional claim")
+        return delivery_git.run_git(worktree, "rev-parse", "HEAD")
+
+    def delivery_status(self, project) -> dict:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            delivery_compile.status(type("Args", (), {"docs": str(project / "workspace/docs"), "delivery": "DLV-001"}))
+        return json.loads(output.getvalue())
+
+    @integration
+    def test_a_provisional_claim_lets_the_writer_commit_before_approval_and_publish_only_after_it(self):
+        """#464: under the held plan revision the writer commits an added path at once; freeze and
+        push-item refuse it as pending until the approved plan publishes it, and once the writer
+        converges on that plan the same provisional commit is pushed, never rewritten."""
+        project, worktree, item, _active = self.provisional_item()
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
+        with self.provisional_switch():
+            begun = delivery_git.begin_plan_revision(project, "DLV-001")
+            before = delivery_git.remote_oid(project, "origin", refs["integration"])
+            claimed = delivery_git.provisional_claim(project, "DLV-001", "AUTH-01", ["src/verify.py"])
+            record = claimed["record"]
+            self.assertEqual(delivery_git.run_git(project, "rev-parse", record + "^"), before)
+            self.assertEqual(delivery_git.run_git(project, "rev-parse", record + "^{tree}"),
+                             delivery_git.run_git(project, "rev-parse", before + "^{tree}"))
+            message = delivery_git.commit_message(project, record)
+            self.assertEqual(message.splitlines()[0], "Provisionally claim AUTH-01 for DLV-001")
+            self.assertEqual(delivery_git.trailer(message, "Barrier-Epoch"), begun["barrier_epoch"])
+            self.assertIn('["src/verify.py"]', message.splitlines())
+            # A retry after a lost response returns the record that landed.
+            self.assertTrue(delivery_git.provisional_claim(project, "DLV-001", "AUTH-01", ["src/verify.py"])["reused"])
+            self.assertEqual(self.delivery_status(project)["provisional_claims"], [
+                {"story": "AUTH-01", "paths": ["src/verify.py"], "barrier_epoch": begun["barrier_epoch"],
+                 "state": "live"}])
+            provisional = self.commit_provisional_change(worktree)
+            pending = ("DELIVERY_PROVISIONAL_CLAIM_PENDING",
+                       "the Item's product change writes provisionally claimed paths that its published plan does "
+                       "not grant yet: src/verify.py; approve and publish the revised execution plan and converge "
+                       "the Item on that Integration before freeze or push-item")
+            self.assertEqual(self.refused_finding(lambda: delivery_verification.freeze(
+                worktree, "DLV-001", "AUTH-01", fresh=True)), pending)
+            baseline = delivery_git.run_git(project, "ls-remote", "origin")
+            self.assertEqual(self.refused_finding(lambda: delivery_git.push_item(project, "DLV-001", "AUTH-01")),
+                             pending)
+            self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
+            self.publish_item_record(project, worktree, item, path_claims=["src/auth.py", "src/verify.py"])
+            finished = delivery_git.finish_plan_revision(project, "DLV-001")
+            self.assertEqual(finished["provisional_claims"], [{"story": "AUTH-01", "disposition": "promoted"}])
+            self.assertEqual(self.delivery_status(project)["provisional_claims"][0]["state"], "promoted")
+            integration = delivery_git.remote_oid(project, "origin", refs["integration"])
+            package = item.parents[2]
+            relative = {name: path.relative_to(worktree).as_posix() for name, path in (
+                ("plan", package / "execution-plan.md"), ("scope", package / "delivery.md"), ("item", item))}
+            self.converge_on_integration(worktree, item, integration, relative)
+            self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+            pushed = delivery_git.push_item(project, "DLV-001", "AUTH-01")
+            self.assertTrue(delivery_git.is_ancestor(project, provisional, pushed["product_tip"]))
+            self.assertEqual(delivery_git.run_git(project, "show", f"{pushed['item']}:src/verify.py"),
+                             "def verify():\n    return True")
+            # The owner reads in the Delivery Review which Items started provisional work.
+            tip = delivery_git.remote_oid(project, "origin", refs["integration"])
+            review = type("Args", (), {"docs": str(project / "workspace/docs"), "delivery": "DLV-001",
+                                       "reviewed_commit": tip, "reviewed_integration_commit": tip})
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(delivery_compile.approve_review(review), 0)
+            directory = delivery_compile.find_delivery(project / "workspace/docs", "DLV-001")
+            deviations = delivery_compile.section_bodies(
+                delivery_compile.split_note(directory / "delivery-review.md")[1])["Deviations"]
+            self.assertTrue(deviations.endswith(delivery_compile.PROVISIONAL_WORK + " AUTH-01: src/verify.py (promoted)."),
+                            deviations)
+
+    @integration
+    def test_a_provisional_claim_that_ends_without_a_published_claim_is_refused_by_name(self):
+        """An abort withdraws a live claim, an approval that drops the path orphans it and a takeover
+        voids it; freeze and push-item then refuse the change as orphaned, naming each path."""
+        for ending in ("abort", "dropped", "takeover"):
+            with self.subTest(ending=ending):
+                project, worktree, item, _active = self.provisional_item()
+                with self.provisional_switch():
+                    delivery_git.begin_plan_revision(project, "DLV-001")
+                    delivery_git.provisional_claim(project, "DLV-001", "AUTH-01", ["src/verify.py"])
+                    if ending == "abort":
+                        released = delivery_git.abort_plan_revision(project, "DLV-001")
+                        state = "withdrawn"
+                        self.assertEqual(released["provisional_claims"],
+                                         [{"story": "AUTH-01", "disposition": "withdrawn"}])
+                    elif ending == "dropped":
+                        self.publish_item_record(project, worktree, item, path_claims=["src/auth.py"])
+                        released = delivery_git.finish_plan_revision(project, "DLV-001")
+                        state = "orphaned"
+                        self.assertEqual(released["provisional_claims"],
+                                         [{"story": "AUTH-01", "disposition": "orphaned"}])
+                    else:
+                        item_ref = delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"]
+                        delivery_git.run_git(worktree, "reset", "-q", "--hard",
+                                             delivery_git.remote_oid(project, "origin", item_ref))
+                        delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+                        state = "void"
+                        self.assertEqual(self.refused_finding(lambda: delivery_git.withdraw_provisional_claim(
+                            project, "DLV-001", "AUTH-01")), ("DELIVERY_PROVISIONAL_CLAIM_REFUSED",
+                                                             "AUTH-01 holds no live provisional claim"))
+                    self.assertEqual(self.delivery_status(project)["provisional_claims"][0]["state"], state)
+                    self.commit_provisional_change(worktree)
+                    orphaned = ("DELIVERY_PROVISIONAL_CLAIM_ORPHANED",
+                                "the Item's product change writes paths whose provisional claim ended without a "
+                                f"published claim: src/verify.py ({state}); revert or rework that change in the Item "
+                                "worktree, or revise the plan to claim them")
+                    self.assertEqual(self.refused_finding(lambda: delivery_verification.freeze(
+                        worktree, "DLV-001", "AUTH-01", fresh=True)), orphaned)
+                    self.assertEqual(self.refused_finding(
+                        lambda: delivery_git.push_item(project, "DLV-001", "AUTH-01")), orphaned)
+
+    @integration
+    def test_a_provisional_claim_refuses_what_the_revision_does_not_add_to_the_item_alone(self):
+        """Every refusal names its cause and changes no ref: the switch, the barrier, the path's form and
+        root, a path the draft does not add, another Item's published or draft claim, lanes, and a
+        concurrent coordinator that moved the Integration first."""
+        project, worktree, item, _active = self.provisional_item(
+            ("src/auth.py", "src/verify.py", "src/Shared/x.py", "lib", "workspace/docs/x.md", "src/./y.py"))
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
+
+        def refused(paths, cause):
+            baseline = delivery_git.run_git(project, "ls-remote", "origin")
+            self.assertEqual(self.refused_finding(lambda: delivery_git.provisional_claim(
+                project, "DLV-001", "AUTH-01", paths)), ("DELIVERY_PROVISIONAL_CLAIM_REFUSED", cause))
+            self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
+
+        refused(["src/verify.py"], "DLV-001 runs switch provisional_claims at after_approval; only "
+                                   "during_plan_revision records provisional claims")
+        with self.provisional_switch():
+            refused(["src/verify.py"], "the Fence holds no plan-revision barrier that DLV-001 began; "
+                                       "run begin-plan-revision first")
+            delivery_git.begin_plan_revision(project, "DLV-001")
+            refused(["src/./y.py"], "'src/./y.py' is not a normalized repository path")
+            refused(["/src/verify.py"], "'/src/verify.py' is not a normalized repository path")
+            refused(["workspace/docs/x.md"], "workspace/docs/x.md lies under workspace/docs, .git, .agentrof, "
+                                             "which no implementation write scope reaches")
+            refused(["src/other.py"], "src/other.py is not in the checkout's draft path claims of AUTH-01")
+            refused(["src/auth.py"], "src/auth.py is already claimed by the published plan of AUTH-01")
+            refused(["src/verify.py", "src/verify.py"], "a path is named twice")
+            other = item.relative_to(worktree).parent.parent / "other-01" / "item.md"
+            (project / other).parent.mkdir()
+            (project / other).write_text("---\ntype: delivery-item\nstory_id: OTHER-01\nstatus: in_scope\n"
+                                         "path_claims:\n  - src/shared\n  - lib/core.py\n---\n\n# Other\n",
+                                         encoding="utf-8")
+            refused(["lib"], "the draft plan gives lib/core.py to OTHER-01, which overlaps lib")
+            base = delivery_git.remote_oid(project, "origin", refs["integration"])
+            published = delivery_git.commit_tree(project, base, [other.as_posix()], "Publish another Item", {})
+            delivery_git.atomic_push(project, "origin", [(refs["integration"], base, published)])
+            refused(["src/Shared/x.py"], "the published plan gives src/shared to OTHER-01, which overlaps "
+                                         "src/Shared/x.py")
+            (project / other).unlink()
+            # A concurrent coordinator moves the Integration between the read and the push.
+            push = delivery_git.atomic_push
+
+            def concurrent(root, remote, updates):
+                ref, leased, _candidate = updates[0]
+                moved = delivery_git.commit_tree(root, leased, [], "Concurrent record", {})
+                push(root, remote, [(ref, leased, moved)])
+                push(root, remote, updates)
+
+            with mock.patch.object(delivery_git, "atomic_push", concurrent):
+                code, _message = self.refused_finding(lambda: delivery_git.provisional_claim(
+                    project, "DLV-001", "AUTH-01", ["src/verify.py"]))
+            self.assertEqual(code, "DELIVERY_LEASE_LOST")
+            self.assertEqual(delivery_git.provisional_claims(
+                project, delivery_git.remote_oid(project, "origin", refs["integration"]), "DLV-001"), [])
+            self.publish_item_record(project, worktree, item, projections=False,
+                                     implementation_schedule="parallel_lanes_v1")
+            refused(["src/verify.py"], "AUTH-01 runs parallel lanes, whose lane scopes a provisional claim "
+                                       "cannot extend; wait for the approved plan")
+
+    @integration
+    def test_a_live_provisional_claim_holds_its_paths_against_a_target_refresh(self):
+        """refresh-target counts a live provisional path as claimed, and a withdrawn one no longer."""
+        project, worktree, item, _active = self.provisional_item()
+        with self.provisional_switch():
+            delivery_git.begin_plan_revision(project, "DLV-001")
+            delivery_git.provisional_claim(project, "DLV-001", "AUTH-01", ["src/verify.py"])
+            target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+            (project / "src").mkdir(exist_ok=True)
+            (project / "src/verify.py").write_text("target = True\n", encoding="utf-8")
+            advanced = delivery_git.commit_tree(project, target, ["src/verify.py"], "Change the verifier", {})
+            delivery_git.atomic_push(project, "origin", [("refs/heads/main", target, advanced)])
+            baseline = delivery_git.run_git(project, "ls-remote", "origin")
+            with self.assertRaisesRegex(RuntimeError, r"^DELIVERY_TARGET_SOURCE_VIOLATION: target changed claimed "
+                                                      r"paths src/verify\.py$"):
+                delivery_git.refresh_target(project, "DLV-001")
+            self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
+            withdrawn = delivery_git.withdraw_provisional_claim(project, "DLV-001", "AUTH-01")
+            self.assertEqual(withdrawn["disposition"], "withdrawn")
+            self.assertTrue(delivery_git.refresh_target(project, "DLV-001")["changed"])
+
     def governance_target_handoff(self, project, docs, extra_paths=()):
         args = type("Args", (), {"docs": str(docs)})
         self.assertEqual(delivery_governance.begin_revision(args), 0)

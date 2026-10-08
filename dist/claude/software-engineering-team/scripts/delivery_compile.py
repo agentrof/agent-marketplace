@@ -86,6 +86,9 @@ FOLLOW_UP_COLUMNS = ("finding", "severity", "file", "description", "owner_role",
 # Each compiler-owned block starts at its marker line, after any authored text.
 ITEM_FOLLOW_UPS = "Open code review follow-ups, copied by approve-item-evidence:"
 DELIVERY_FOLLOW_UPS = "Open code review follow-ups of the integrated Items, listed by approve-review:"
+PROVISIONAL_SWITCH = "provisional_claims"
+PROVISIONAL_VALUE = "during_plan_revision"
+PROVISIONAL_WORK = "Items that started work under a provisional claim before its plan approval, listed by approve-review:"
 CALIBRATION_COLUMNS = ("finding", "claimed_severity", "calibrated_severity", "reason")
 ITEM_CALIBRATION = ("Severity calibration of the open critical and major claims,"
                     " recorded by approve-item-evidence:")
@@ -2785,6 +2788,14 @@ def bundle(args) -> int:
     print(json.dumps({"ok": True, **result}, indent=2, sort_keys=True)); return 0
 
 
+def provisional_work(docs: Path, delivery_id: str) -> bool:
+    """Whether the Delivery runs provisional_claims at during_plan_revision; a value that cannot be read records none."""
+    try:
+        return delivery_switch_value(docs, delivery_id, PROVISIONAL_SWITCH) == PROVISIONAL_VALUE
+    except (KeyError, ValueError):
+        return False
+
+
 def status(args) -> int:
     docs = docs_root(args.docs)
     root = find_delivery(docs, args.delivery)
@@ -2794,9 +2805,27 @@ def status(args) -> int:
     result = {"ok": unknown is None, "id": props.get("id"), "status": state, "path": str(root),
               "execution_plan": (root / "execution-plan.md").exists(),
               "items": sorted(path.parent.name.upper() for path in root.glob("items/*/item.md"))}
-    if unknown is not None:
-        result["errors"] = [unknown]
-    print(json.dumps(result, indent=2)); return 0 if unknown is None else 1
+    errors = [unknown] if unknown is not None else []
+    # The owner sees which Items started code under a provisional claim, and where each claim stands.
+    if provisional_work(docs, args.delivery):
+        import delivery_git
+        try:
+            project = delivery_git.main_worktree(docs)
+            # A checkout without the remote holds no Delivery refs, so it holds no claim either.
+            claims = (delivery_git.delivery_provisional_claims(project, "origin", args.delivery)
+                      if subprocess.run(["git", "-C", str(project), "remote", "get-url", "origin"],
+                                        capture_output=True).returncode == 0 else [])
+        except (OSError, RuntimeError) as exc:
+            claims = []
+            errors.append(f"provisional claims cannot be read: {exc}")
+        if claims:
+            result["provisional_claims"] = [{"story": claim["story"], "paths": claim["paths"],
+                                             "barrier_epoch": claim["epoch"], "state": claim["state"]}
+                                            for claim in claims]
+    if errors:
+        result["ok"] = False
+        result["errors"] = errors
+    print(json.dumps(result, indent=2)); return 0 if not errors else 1
 
 
 def render(args) -> int:
@@ -3204,6 +3233,18 @@ def approve_review(args) -> int:
         review_body = with_compiler_block(
             review_body, "Lessons and Follow-up", DELIVERY_FOLLOW_UPS,
             table_block(DELIVERY_FOLLOW_UPS, ("item", *FOLLOW_UP_COLUMNS), delivery_follow_ups(root)))
+    if provisional_work(docs, args.delivery):
+        import delivery_git
+        try:
+            claims = delivery_git.provisional_claims(root, reviewed_integration, args.delivery)
+            listed = "; ".join(f"{claim['story']}: {', '.join(claim['paths'])} "
+                               f"({claim['disposition'] or 'unreleased'})" for claim in claims) or "none"
+        except RuntimeError:
+            # The approval binds the reviewed Integration by its OID; a checkout that has not
+            # fetched it cannot list its records, and says so instead of listing none.
+            listed = "unknown, the reviewed Integration commit is not in this checkout"
+        review_body = with_compiler_block(review_body, "Deviations", PROVISIONAL_WORK,
+                                          f"{PROVISIONAL_WORK} {listed}.")
     review_props["approval_hash"] = content_hash(review_props, review_body, exclude=MUTABLE | {"approval_hash"})
     review_props["source_hash"] = content_hash(review_props, review_body)
     atomic_text(review_path, frontmatter(review_props, review_body))

@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "e5b28daa2b13f7b38d64a7301e1642f69c075f6a97f2e40817db64b314cac3a1"
+      "e983a7a272b42fa913ea7ce2f0f131be11539ac2ca7ec778040140fa3680ddfd"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -119,7 +119,7 @@
       "fe5af168a850e2d931b241616ac88095c092780acd4b786bec108c88ba5ed36d"
     ,
     "flows/execution-planning.md":
-      "8c9b273367fd5cb895c109f9ac29a531ad1072c82ee1093fb987a64df464463c"
+      "4732f88b8a4fcb669d75500b90c1c77679ac7de5405674f02cdf34b809f0db43"
     ,
     "flows/experience-design.md":
       "c964a5acf445e6bed890365402d24888188cd2c4ee21dc5d169cfeea622bb512"
@@ -176,10 +176,10 @@
       "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
     ,
     "scripts/delivery_compile.py":
-      "6d0cbef39a03a7915abc4253cbb32156e17da6bbd971ec0939fef493c9c582f6"
+      "8340dce1e451f09dcebf355ae25d1853b6d05310776392270d88a21f2fab2c2f"
     ,
     "scripts/delivery_git.py":
-      "43df8dfa0226e7d45f0b4d69672193ebda0b7e079c365328b83bed497efac80e"
+      "fb16e4014c12d68ee4968e5bcf8f2cd3e299073c23e73b1e229b5da4b5495522"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
@@ -188,10 +188,10 @@
       "ff5d20f83641ebd8aed44c106c00012326a7d210f1c30a64633fac169e23e37d"
     ,
     "scripts/delivery_result.py":
-      "7d3b42c356ad753245757cf40a3679e3a374e40ed99acdc77c2387ecb0ce1007"
+      "9c642c227177dc4372fee3cf1a338c27a9541e9ec9cca2ae645be5f5bc0b3a18"
     ,
     "scripts/delivery_verification.py":
-      "eaa79f4b352d7ee059cf75afdd8f387ae2d8b16d2fac9dff6d9535d6a4ebf1f2"
+      "167d6b66dd9d3e32a83f61a144ad8698e0d2a07ecd97ea82b1e8241da1a006ce"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -275,7 +275,7 @@
       "b7f2cad266008812a38779f0b2208596e5d5fddf8fd9a47354706406f03ca655"
     ,
     "scripts/task_inputs.py":
-      "18326522ab2752a01ec00af8688f5dd43b498a7180100dfbf0420e5e77deb31d"
+      "5728c613748a8ce8281264cce8c82900c93d1b2306981c8286bbd829e43aa51b"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -431,7 +431,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "b7ced240c89e9c2a230d9c2cd4f668babfc4ab00f135b6efe328112b4492cf2d"
+      "6ebbf8076b80259648e2e2cd200ccf305f95ceb7f7c8e09bcfcf2599087f98e9"
     ,
     "skill-content/configure/data/step-budgets.json":
       "c63c5e90e1726b573c681f28008aa627575600f2d81dc8f8c0851b768e1b04fc"
@@ -440,7 +440,7 @@
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "62fb477f374146db4a02e2a9c4ef454bcf71c881bf39035c92ec2bdff2f9e23d"
+      "ef9077b6eef7aacd2926603f9ecfcab1c45d9d32d2d20bdd6ac6168d5d93506c"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -455,7 +455,7 @@
       "363444381c22a9a1453172f615690be2cacb2bac7c6cb90fde0ab11dc12eac53"
     ,
     "skill-content/deliver/data/delivery-control-record-contract.json":
-      "035df8a2dd36543054ebf7138a94cb5a0f4bd75e7138dbd69852ea32985b430c"
+      "236c5175ca95e8fbb272c4599a012da7c251f58968824740b55c0eae7fae37bc"
     ,
     "skill-content/deliver/data/delivery-document-contract.json":
       "3622f51af1377ecd8f7d189dde601b708fe51db5342490faf54d8821b1c60984"
@@ -470,7 +470,7 @@
       "4b47d51cd4c24d0aa448c2ccd5aef23c48da807c226543b2868f8b0c86e6e731"
     ,
     "skill-content/deliver/data/delivery-result-contract.json":
-      "fdc4f0102291b4c87ab213b034f2d51c8037bfdd640e85d21d9ace8c387b1980"
+      "bc624d781759d531febc56b15c97a97b384c907cb87648698c612cf3d5b8c05c"
     ,
     "skill-content/deliver/data/delivery-verification-policy.json":
       "a0e4d9344a90c4fd222491b55953017c3e8b5f245c8d041dd69f405adf13e236"
@@ -501,6 +501,9 @@
     ,
     "skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md":
       "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
+    ,
+    "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
+      "a2a35f2098723edaec9f8d760851a3092fa899acd0f379ac1c95bc41e4bd2667"
     ,
     "skill-content/deliver/references/switch-test_engines-partitioned.md":
       "718714d0b07687b4d670499555397d5bac780a749b3dcd50736a6f3e5b0fafa7"

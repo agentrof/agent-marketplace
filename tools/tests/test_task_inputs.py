@@ -48,13 +48,13 @@ def instruction_paths(project, entry, role, skills=None, catalog=None):
     return required, hashed
 
 
-def task_scope(project, entry, role, mode, inputs=(), closure=None, catalog=None):
+def task_scope(project, entry, role, mode, inputs=(), closure=None, catalog=None, chosen=frozenset()):
     """The write scope task_inputs.manifest derives for a task, without its Git reads."""
     catalog = catalog or task_inputs.catalog()
     paths = set(inputs) | ({"workspace/docs/" + path for path in closure["paths"]} if closure else set())
     return task_inputs.write_scope(project, paths, role, catalog["entries"][entry],
                                    task_inputs.read_only_task(catalog, entry, role, mode), closure,
-                                   task_inputs.PACKAGE)
+                                   task_inputs.PACKAGE, chosen=chosen)
 
 
 class TaskInputTests(unittest.TestCase):
@@ -201,6 +201,54 @@ class TaskInputTests(unittest.TestCase):
             self.assertEqual(task_inputs.manifest(**kwargs)["write_scope"]["status"], "unresolved")
             with self.assertRaisesRegex(ValueError, "stale"):
                 task_inputs.manifest(**kwargs, expected_hash=result["source_hash"])
+
+    @integration
+    def test_item_claims_come_from_the_published_record_and_live_provisional_claims(self):
+        """A checkout's Item record can be a plan revision's unapproved draft, so the implementer's scope
+        takes the claims of the record the Delivery's Integration publishes. At provisional_claims
+        during_plan_revision it adds the Item's live provisional paths, and nothing without one (#464)."""
+        import delivery_git
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve() / "project"
+            root.mkdir()
+            self.make_project(root)
+            package = "workspace/docs/delivery/deliveries/dlv-001-auth"
+            self.note(root, package + "/delivery.md", "delivery", "delivery_coordinator", "id: DLV-001\n")
+            claims = "story_id: AUTH-01\nrole_sequence:\n  - backend_developer\n  - code_reviewer\n  - qa_engineer\n"
+            item = self.note(root, package + "/items/auth-01/item.md", "delivery-item", "backend_developer",
+                             claims + "path_claims:\n  - src/auth.py\n")
+            self.commit(root)
+            remote = Path(raw).resolve() / "remote.git"
+            subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "remote", "add", "origin", str(remote)], check=True)
+            ref = delivery_git.canonical_refs("DLV-001")["integration"]
+            subprocess.run(["git", "-C", str(root), "push", "-q", "origin", "HEAD:" + ref], check=True,
+                           capture_output=True)
+            # The plan revision's draft adds a path no approval published.
+            self.note(root, item, "delivery-item", "backend_developer",
+                      claims + "path_claims:\n  - src/auth.py\n  - src/verify.py\n")
+            on = {("provisional_claims", "during_plan_revision")}
+
+            def area(chosen=frozenset()):
+                scope = task_scope(root, "deliver", "backend-developer", "create", inputs=[item], chosen=chosen)
+                return [target["path"] for target in scope["allowed_write_area"]], scope["constraints"]
+
+            self.assertEqual(area(), (["src/auth.py"], area()[1]))
+            self.assertEqual(area(on), area())
+            live = {"story": "AUTH-01", "paths": ["src/verify.py"], "state": "live"}
+            for claims_read, expected in (([live], ["src/auth.py", "src/verify.py"]),
+                                          ([{**live, "state": "void"}], ["src/auth.py"]),
+                                          ([{**live, "story": "OTHER-01"}], ["src/auth.py"])):
+                with self.subTest(claims=claims_read), mock.patch.object(
+                        delivery_git, "delivery_provisional_claims", return_value=claims_read):
+                    paths, constraints = area(on)
+                    self.assertEqual(paths, expected)
+                    self.assertEqual(task_inputs.PROVISIONAL_CONSTRAINT in constraints, len(expected) == 2)
+                    self.assertEqual(area(), (["src/auth.py"], area()[1]))
+            subprocess.run(["git", "-C", str(root), "push", "-q", "origin", ":" + ref], check=True,
+                           capture_output=True)
+            scope = task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
+            self.assertEqual((scope["status"], scope["reason"]), ("unresolved", "DLV-001 has no Integration on origin"))
 
     def test_lane_roles_bind_only_their_lane_scope_while_the_architect_keeps_every_claim(self):
         with tempfile.TemporaryDirectory() as raw:

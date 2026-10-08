@@ -985,6 +985,29 @@ class VaultIndexTests(unittest.TestCase):
         # No read-only sidecar is left to block the next writer.
         self.assertGreater(status["generation"], first["generation"])
 
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "needs POSIX file modes that bind the reading process")
+    def test_no_write_read_in_a_folder_it_cannot_write_serves_existing_sidecars_in_place(self):
+        self.write("requirements/a.md", note("requirement", "A"))
+        data, _ = self.load()
+        data.store.close()
+        cache = vault_query.default_cache(self.docs)
+        writer = sqlite3.connect(cache)
+        self.addCleanup(writer.close)
+        writer.execute("SELECT count(*) FROM meta").fetchone()
+        listing = sorted(path.name for path in cache.parent.iterdir())
+        os.chmod(cache, 0o444)
+        self.addCleanup(os.chmod, cache, 0o644)
+        os.chmod(cache.parent, 0o555)
+        self.addCleanup(os.chmod, cache.parent, 0o755)
+        index, status = vault_query.refresh(self.docs, cache, persist=False)
+        self.stores.append(index.store)
+        self.assertEqual(index["catalog"]["documents"]["requirements/a.md"]["title"], "A")
+        # The open cannot create sidecars there, so the existing pair is read in place.
+        self.assertEqual((status["served"], status.get("fallback")), ("published_cache", None))
+        index.store.close()
+        self.assertEqual(sorted(path.name for path in cache.parent.iterdir()), listing)
+
     @integration
     def test_a_lease_less_connection_on_recreated_sidecars_cannot_revert_a_later_generation(self):
         self.write("requirements/a.md", note("requirement", "A"))

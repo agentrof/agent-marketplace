@@ -1111,7 +1111,8 @@ def open_published(cache, *, write_free=False):
     try:
         # A read-only open can recreate sidecars a closing writer removed, and only a read-write connection
         # removes them; one this process cannot write would leave them read-only for every later writer.
-        writable = not write_free or os.access(cache, os.W_OK)
+        # A folder this process cannot write (a read-only mount) cannot receive new sidecars at all.
+        writable = not write_free or os.access(cache, os.W_OK) or not os.access(cache.parent, os.W_OK)
         if write_free and (not writable or not published_sidecars(cache)):
             raw = published_snapshot(cache)
             if raw is None and not writable:

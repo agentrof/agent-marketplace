@@ -98,8 +98,11 @@ REVIEW_SEVERITY_ORDER = ("critical", "major")
 # record and a hash of a few guessable values would check a guess of a credential.
 COMMAND_VARIABLES = ("HOME", "LANG", "PATH", "TZ")
 COMMAND_VARIABLE_PREFIXES = ("AGENTROF_", "LC_")
-# The runner sets these for every command it runs.
-RUNNER_VARIABLES = ("AGENTROF_MUTATION_FILES", "AGENTROF_VERIFICATION_SCRATCH")
+# The runner sets these for every command it runs. The Delivery and Item ids
+# come from the frozen candidate, so a reader whose shell exports nothing runs
+# an approved command that reads them like the coordinator's shell does.
+RUNNER_VARIABLES = ("AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID", "AGENTROF_MUTATION_FILES",
+                    "AGENTROF_VERIFICATION_SCRATCH")
 # The runner's per-run inputs: an identity binds the data each carries, so it
 # names neither the variable nor its path. A partitioned test run hands each
 # partition its own file and engine, which its record names, never the identity.
@@ -734,8 +737,10 @@ def raw_output_path(root: Path, relative: str) -> Path:
     return safe_runtime_path(root, path, file_only=True)
 
 
-def command_environment(root: Path, *, diagnostic: bool = False) -> dict:
+def command_environment(root: Path, current: dict, *, diagnostic: bool = False) -> dict:
     environment = dict(os.environ)
+    environment["AGENTROF_DELIVERY_ID"] = current["delivery"]
+    environment["AGENTROF_ITEM_ID"] = current["story"]
     environment["AGENTROF_MUTATION_FILES"] = str(session_path(root).parent / "mutation-files.json")
     for name in SELECTION_VARIABLES:
         environment.pop(name, None)
@@ -992,7 +997,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         directory = (root / workdir).resolve()
         if directory != root and root not in directory.parents:
             raise RuntimeError("verification command workdir must remain inside the Item worktree")
-        environment = command_environment(root, diagnostic=kind == "diagnostic_test")
+        environment = command_environment(root, current, diagnostic=kind == "diagnostic_test")
         selection = diagnostic_selection(root, selection_file, current) if selection_file is not None else None
         selection_bytes = None
         if selection is not None:
@@ -2408,8 +2413,8 @@ def runtime_needs_cleanup(session: dict) -> bool:
     return bool(state.get("active") or state.get("cleanup_required") or state.get("pending"))
 
 
-def runtime_environment_identity(root: Path) -> dict:
-    return environment_identity(root, command_environment(root))
+def runtime_environment_identity(root: Path, current: dict) -> dict:
+    return environment_identity(root, command_environment(root, current))
 
 
 def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
@@ -2471,7 +2476,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 raise RuntimeError("runtime checkout changed" + (f" ({difference})" if difference else "")
                                    + "; only teardown is allowed before a new verification session")
             bound_session = session["session_id"]
-            environment_identity = runtime_environment_identity(root)
+            environment_identity = runtime_environment_identity(root, current)
             # Persist before launching: a failed/interrupted up may still leave
             # real services behind, so only a successful down permits settlement.
             if state.get("pending"):
@@ -2485,7 +2490,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
         # suffix; project command bytes remain the approved contract's bytes.
         command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
-        completed = subprocess.run(command, cwd=workdir, env=command_environment(root), shell=True,
+        completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         with locked(root):
             session = read_session(root)
@@ -3109,7 +3114,7 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
         contract = verification_contract(root)
         contract_variables(contract)
         shared = write_pre_handoff_selection(root, derived)
-        environment = command_environment(root, diagnostic=derived["kind"] == "diagnostic_test")
+        environment = command_environment(root, current, diagnostic=derived["kind"] == "diagnostic_test")
         selections: dict[Path, tuple[bytes, list[int]]] = {}
         if derived["kind"] == "diagnostic_test":
             selector = safe_runtime_path(root, session_path(root).parent / "pre-handoff-tests.json", file_only=True)

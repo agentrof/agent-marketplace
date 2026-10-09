@@ -845,7 +845,57 @@ def literal_test_id(identifier) -> bool:
             and not any(ord(character) < 32 or ord(character) == 127 for character in identifier))
 
 
-def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
+FINDING_DIAGNOSTIC_SCOPE = "finding_diagnostic"
+
+
+def test_id_in_file(identifier: str, path: str) -> bool:
+    """Whether a test id names a test in *path*, as a path::name or a dotted module.name id."""
+    module = PurePosixPath(path).with_suffix("").as_posix().replace("/", ".")
+    return identifier.startswith(path + "::") or bool(module) and identifier.startswith(module + ".")
+
+
+def finding_controls(entries, current: dict, findings: list[dict]) -> list[dict]:
+    """The negative-control tests open findings prescribe, checked as diagnostic data.
+
+    Each entry names an open inherited finding and test ids the finding lists
+    in negative_control_test_ids; each id lies in a test file the Item itself
+    changed. Such a run is finding-scoped diagnostic evidence only: it never
+    serves an acceptance check, so no Test Plan scenario has to bind the ids.
+    """
+    if not isinstance(entries, list):
+        raise RuntimeError("finding_controls must be a list of {finding_id, test_ids}")
+    open_findings = {finding["id"]: finding for finding in findings
+                     if isinstance(finding, dict) and finding.get("status") != "resolved"}
+    changed = set(current["changed_files"])
+    seen = set()
+    rows = []
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"finding_id", "test_ids"}:
+            raise RuntimeError("finding_controls entries declare only finding_id and test_ids")
+        finding = open_findings.get(entry["finding_id"])
+        if finding is None:
+            raise RuntimeError(f"finding_controls names {entry['finding_id']!r}, which is no open inherited finding")
+        identifiers = entry["test_ids"]
+        if (not isinstance(identifiers, list) or not identifiers
+                or any(not literal_test_id(identifier) for identifier in identifiers)
+                or len(set(identifiers)) != len(identifiers)):
+            raise RuntimeError("finding control test IDs must be unique nonempty literal identifiers")
+        prescribed = set(finding.get("negative_control_test_ids") or [])
+        stray = sorted(set(identifiers) - prescribed)
+        if stray:
+            raise RuntimeError(f"finding {finding['id']} prescribes no negative control " + ", ".join(stray))
+        outside = sorted(identifier for identifier in identifiers
+                         if not any(test_id_in_file(identifier, path) for path in changed))
+        if outside:
+            raise RuntimeError("finding control tests must lie in test files the Item changed: " + ", ".join(outside))
+        if finding["id"] in seen:
+            raise RuntimeError(f"finding_controls names {finding['id']} more than once")
+        seen.add(finding["id"])
+        rows.append({"finding_id": finding["id"], "test_ids": sorted(identifiers)})
+    return sorted(rows, key=lambda row: row["finding_id"])
+
+
+def diagnostic_selection(root: Path, path: Path, current: dict, findings: list[dict] | None = None) -> dict:
     """Treat focused test identifiers as data, never command arguments or code."""
     path = path if path.is_absolute() else root / path
     try:
@@ -857,16 +907,22 @@ def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
     path = raw_output_path(root, relative)
     value = json.loads(path.read_text(encoding="utf-8"))
     fields = {"schema_version", "candidate_hash", "failed_test_ids", "affected_test_ids"}
-    if (not isinstance(value, dict) or set(value) != fields or type(value.get("schema_version")) is not int or value["schema_version"] != 1
+    if (not isinstance(value, dict) or set(value) - {"finding_controls"} != fields
+            or type(value.get("schema_version")) is not int or value["schema_version"] != 1
             or value.get("candidate_hash") != current["candidate_hash"]):
-        raise RuntimeError("diagnostic selection must bind this candidate and declare only schema_version, candidate_hash, failed_test_ids and affected_test_ids")
+        raise RuntimeError("diagnostic selection must bind this candidate and declare only schema_version, candidate_hash, failed_test_ids and affected_test_ids, with optional finding_controls")
     for name in ("failed_test_ids", "affected_test_ids"):
         identifiers = value[name]
         if (not isinstance(identifiers, list) or any(not literal_test_id(identifier) for identifier in identifiers)
                 or len(set(identifiers)) != len(identifiers)):
             raise RuntimeError("diagnostic test IDs must be unique nonempty literal identifiers, without option prefixes or control characters")
         value[name] = sorted(identifiers)
-    value["selected_test_ids"] = sorted(set(value["failed_test_ids"]) | set(value["affected_test_ids"]))
+    controls = finding_controls(value.pop("finding_controls", []), current, findings or [])
+    control_ids = sorted({identifier for row in controls for identifier in row["test_ids"]})
+    if controls:
+        value.update(finding_controls=controls, finding_control_test_ids=control_ids,
+                     evidence_scope=FINDING_DIAGNOSTIC_SCOPE)
+    value["selected_test_ids"] = sorted(set(value["failed_test_ids"]) | set(value["affected_test_ids"]) | set(control_ids))
     if not value["selected_test_ids"]:
         raise RuntimeError("diagnostic selection must include at least one failed or affected test ID")
     return value
@@ -993,7 +1049,9 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         if directory != root and root not in directory.parents:
             raise RuntimeError("verification command workdir must remain inside the Item worktree")
         environment = command_environment(root, diagnostic=kind == "diagnostic_test")
-        selection = diagnostic_selection(root, selection_file, current) if selection_file is not None else None
+        inherited = session.get("unresolved_findings", [])
+        selection = (diagnostic_selection(root, selection_file, current, inherited)
+                     if selection_file is not None else None)
         selection_bytes = None
         if selection is not None:
             input_generation = source_file_generation(selection_file)
@@ -1078,7 +1136,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
     if selection is not None:
         try:
             selector = safe_runtime_path(root, Path(environment["AGENTROF_DIAGNOSTIC_TESTS"]), file_only=True)
-            selection_intact = (diagnostic_selection(root, selection_file, current) == selection
+            selection_intact = (diagnostic_selection(root, selection_file, current, inherited) == selection
                                 and selector.read_bytes() == selection_bytes
                                 and source_file_generation(selection_file) == input_generation
                                 and source_file_generation(selector) == selector_generation)
@@ -1109,6 +1167,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             record["checkout_difference"] = difference
         if selection is not None:
             record["diagnostic_selection"] = selection
+            if "evidence_scope" in selection:
+                record["evidence_scope"] = selection["evidence_scope"]
         if selection_intact is not None:
             record["selection_intact"] = selection_intact
         if group_report is not None:
@@ -2009,6 +2069,12 @@ def check_findings(findings: object) -> None:
             or finding.get("status") not in {"open", "resolved"} for finding in findings)
             or len({finding["id"] for finding in findings}) != len(findings)):
         raise RuntimeError("findings require unique stable IDs, severity, verification and open/resolved status")
+    for finding in findings:
+        controls = finding.get("negative_control_test_ids")
+        if controls is not None and (not isinstance(controls, list) or not controls
+                                     or any(not literal_test_id(identifier) for identifier in controls)
+                                     or len(set(controls)) != len(controls)):
+            raise RuntimeError(f"finding {finding['id']} negative_control_test_ids must list unique literal test IDs")
     allowed_severities = {value.casefold() for value in policy()["blocking_severities"] + policy()["nonblocking_severities"]}
     if any(finding["severity"].casefold() not in allowed_severities for finding in findings):
         raise RuntimeError("finding severity is not declared in the verification policy")
@@ -3479,6 +3545,10 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                                        "command": "run --kind diagnostic_test --selection-file <scratch-selection.json>",
                                        "selection": {"schema_version": 1, "candidate_hash": current["candidate_hash"],
                                                      "failed_test_ids": [], "affected_test_ids": []},
+                                       "finding_controls": "Optional [{finding_id, test_ids}]: run the negative"
+                                                           " controls an open finding lists in"
+                                                           " negative_control_test_ids, from test files the Item"
+                                                           " changed; recorded as finding_diagnostic evidence only",
                                        "environment_variable": "AGENTROF_DIAGNOSTIC_TESTS",
                                        "terminal_evidence": False},
               "execution_note": "Commands run in private clones containing tracked files only. Approved commands must provision dependencies or use a fixed external environment; ignored dependencies are never copied. The clone is not an operating-system sandbox for trusted commands with absolute paths.",
@@ -3514,7 +3584,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     return result
 
 
-RUN_SUMMARY_FIELDS = ("exit_code", "candidate_intact", "selection_intact", "reused_pre_handoff", "duration_seconds",
+RUN_SUMMARY_FIELDS = ("exit_code", "candidate_intact", "selection_intact", "evidence_scope", "reused_pre_handoff", "duration_seconds",
                       "completed_at", "evidence_hash", "environment_hash", "checkout_difference", "earlier_stories",
                       "output_file")
 

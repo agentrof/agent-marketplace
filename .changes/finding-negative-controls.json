@@ -1,0 +1,6 @@
+{
+  "summary": "Let an open review finding name its negative-control tests and let QA's diagnostic run them from the Item's changed test files as finding-scoped diagnostic evidence, without a mid-Delivery Test Plan revision; acceptance and Test Plan selection are unchanged.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

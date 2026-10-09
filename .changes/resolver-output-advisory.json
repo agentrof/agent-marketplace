@@ -1,0 +1,6 @@
+{
+  "summary": "Roles treat context resolver output as a ranked starting point, not a mandatory reading list; unread suggestions are never findings.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

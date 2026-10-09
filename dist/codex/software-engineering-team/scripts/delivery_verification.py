@@ -3328,7 +3328,7 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
             raise RuntimeError("manual context source differs from the frozen candidate")
         manual.append({**obligation, "candidate_hash": current["candidate_hash"],
             "product_commit": current["product_commit"], "disposition": "requires_frozen_inspect",
-            "next_action": "Use delivery_verification.py inspect --path <path> to read this source from the bound candidate before completing its obligation."})
+            "next_action": "When the task needs this source, read it from the bound candidate with delivery_verification.py inspect --path <path>."})
     units = {}
     for row in plan["must_read"]:
         unit = addresses[row["unit_id"]]

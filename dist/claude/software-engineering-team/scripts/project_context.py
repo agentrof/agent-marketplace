@@ -140,7 +140,7 @@ def manual_units(project: Path, paths: list[str]) -> list[dict]:
         result.append({"unit_id": relative + "::manual", "path": relative, "kind": "manual",
             "source_root": "project", "source_hash": catalog.digest(raw), "source_bytes": len(raw),
             "bytes": 0, "authority": "selected_evidence",
-            "next_action": "Read the selected evidence manually; its source hash remains an owning-task obligation."})
+            "next_action": "Read the selected evidence manually when the task needs it; check its source hash before relying on it."})
     return result
 
 

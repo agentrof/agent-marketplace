@@ -62,8 +62,9 @@ manual search and reads, report the failure, and preserve the original scope.
 Agent-initiated and parent-directed manual discovery remain allowed whenever
 context is insufficient or appears wrong. Record extra sources and reasons and
 rebind added evidence before relying on it. The plan guides reading order and
-granularity; every owning-flow review obligation remains. Skill selection is
-unchanged. Return `context_findings` to the parent for observed failures and
+granularity; every owning-flow review obligation remains. Its units are a
+ranked starting point, never a reading obligation, as the constitution's
+Vault first section states. Skill selection is unchanged. Return `context_findings` to the parent for observed failures and
 recurring friction, including impact, recovery, and a fix and verification case
 when known. The parent uses `issue-report` to offer an anonymous report and
 obtains explicit user approval of its exact payload before any GitHub write.

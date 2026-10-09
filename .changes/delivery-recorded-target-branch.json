@@ -1,6 +1,0 @@
-{
-  "summary": "Target each Delivery at the branch its record names instead of the remote's default branch, so a Delivery on another branch reserves, merges and audits as closed without a manual origin/HEAD change; open Deliveries share one target branch, and a new Delivery defaults to the remote's default branch.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

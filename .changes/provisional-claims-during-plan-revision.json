@@ -1,6 +1,0 @@
-{
-  "summary": "Let an active Item's writer start a path its plan revision adds under a provisional claim, behind process switch provisional_claims, and take an implementer's write scope from the published Item record.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

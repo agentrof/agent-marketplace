@@ -1,6 +1,0 @@
-{
-  "summary": "Reject architecture stamps outside declared affected component claims before sealing records, matching publication validation.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

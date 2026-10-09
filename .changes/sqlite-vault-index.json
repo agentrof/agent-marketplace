@@ -1,6 +1,0 @@
-{
-  "summary": "Replace the vault JSON cache with a checkout-local SQLite and FTS5 index while preserving bounded source reading and approval bindings.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

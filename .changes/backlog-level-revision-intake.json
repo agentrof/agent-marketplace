@@ -1,6 +1,0 @@
-{
-  "summary": "Allow intact approved backlogs with legacy scenario-level prose to open a repair revision while keeping validation and approval strict.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

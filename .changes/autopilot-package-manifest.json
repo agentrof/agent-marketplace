@@ -1,6 +1,0 @@
-{
-  "summary": "Recognize nested packaged autopilot writers against the package-root manifest while retaining direct-command and content-integrity guards.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

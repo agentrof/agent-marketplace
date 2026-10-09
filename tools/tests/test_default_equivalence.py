@@ -227,6 +227,10 @@ SHIPPED_ADDITIONS = {
     "scripts/backlog_migration.py": (
         72, "#450: the closed schema receipt replay used by backlog and Delivery compilers;"
             " every task hashes package scripts, while no default-path step applies a migration."),
+    "scripts/backlog_rebind.py": (
+        72, "#463: the source-rebind receipt planner and replay, which the backlog compiler and"
+            " Delivery's pin chain import; every task hashes package scripts, while no"
+            " default-path step plans or replays a source rebind."),
     "scripts/delivery_closure.py": (
         72, "#461: the read-only Delivery closure audit, pull request closure check and protection"
             " report, a package script every task binds with the other package scripts; no"

@@ -98,7 +98,7 @@
       "a980d74e7460071f12237b8432d43e819f523374238679c98cec1abb98ed6fd9"
     ,
     "flows/backlog-planning.md":
-      "430314fb940473fcfc32bc34c2fe0f64c1cc9e231fb6120ed50a7ba9b4ebf27c"
+      "d77eb8e4d6086766a9462eff3c31abb02f36efd50f9eaa718e3800e638d555ac"
     ,
     "flows/business-analysis.md":
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
@@ -113,13 +113,13 @@
       "4d8eb69023a0724ec9e280e0e880d60c410f62444df9826d011c7c032448670d"
     ,
     "flows/design-system.md":
-      "0cdb9c2d79894b9ea10ce3dd19a8c2f0b07e04362f1c9ddd85c8c0653bbcf9e1"
+      "cb39724ec8500861f6614fd98607094340d4d2508036839a620c9a637990f4a2"
     ,
     "flows/design.md":
       "fe5af168a850e2d931b241616ac88095c092780acd4b786bec108c88ba5ed36d"
     ,
     "flows/execution-planning.md":
-      "8c9b273367fd5cb895c109f9ac29a531ad1072c82ee1093fb987a64df464463c"
+      "0d4ba4533da9420bdf123ef6230f16301a9665e9b48fb455664fb14bc24c9be1"
     ,
     "flows/experience-design.md":
       "c964a5acf445e6bed890365402d24888188cd2c4ee21dc5d169cfeea622bb512"
@@ -131,7 +131,7 @@
       "7528573f9fa14f3fc724d7a12972ad3b548409d1085a95c2c2e2024b4a46d04c"
     ,
     "flows/solution-design.md":
-      "1dce921d0908235e7b03c0ac926e3177b925b60481cc807df2ef36cc23bd82d8"
+      "8e84b0aff71e5da4c399d17abcc944ccf97f84b4429844e58bd9635b674f7f64"
     ,
     "hooks/hooks.json":
       "f6056501a31710a1c702f64ae0f5bd38c62240d40224b46844eed13467c31e96"
@@ -155,16 +155,19 @@
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
     ,
     "scripts/backlog_compile.py":
-      "688a38d046ba37f79860c411d31720847ee2000ac2fc64b7869d92ef63327a7d"
+      "5c6088a2e9865c1e4e7b955746d842d2a18e88cf8d7ea030169b3b05b73b6629"
     ,
     "scripts/backlog_input_policy.py":
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
     ,
     "scripts/backlog_migration.py":
-      "ec1e6b0f5b4b3c5942e8af73c2998bc9122de4399733bdfa30fd78863794fadc"
+      "17bd222aec9cc63532efba42afddbcc0d94796e5e5a62224e150a735d11d8b8b"
+    ,
+    "scripts/backlog_rebind.py":
+      "15ffafe9b656bec133ba7f922af00dfb42edf531ed892d233b2e3ab9f2aed188"
     ,
     "scripts/backlog_review_inputs.py":
-      "184a0b11e57d6f5ab407ea40c22690edc425ed2992e2978f26ec0e974d326da0"
+      "6a25487c02dd2a90ccee891fa37c3234a0ec1a2a0f7663e0d51cf80d573d9534"
     ,
     "scripts/context_catalog.py":
       "68eac8dafaec25b0c0a4930196c5df55cb8e46b93f574958430f8a3a933c4b16"
@@ -179,7 +182,7 @@
       "fdcf4af8aeaef6b888541297a3263c5879dc23dd15a0cafeba1cc3337c4b81bc"
     ,
     "scripts/delivery_compile.py":
-      "6d0cbef39a03a7915abc4253cbb32156e17da6bbd971ec0939fef493c9c582f6"
+      "f83123f86400bb219d76eb57cacbc8346158ae714858f449bf64fcb0fa8779d1"
     ,
     "scripts/delivery_git.py":
       "33c2faf42d7062f701a6d9cf8a129083df73973720620fe2c6342a726ffb2721"
@@ -203,7 +206,7 @@
       "ca3f446000c03fd4e87be8591d17845278ef666de4f25bc796e5e136eba5860f"
     ,
     "scripts/experience_compile.py":
-      "b40fe7f6eb02415df1baea2c0785c6354cfab6def32a712a944fb6ced4ddc56a"
+      "5c2c3eea7b9b6a3960ab7f7b3b13fbc8fe11d9e793cb1c665dfa75d49b561273"
     ,
     "scripts/file_issue.py":
       "99bb5ce4c91560911d0155f8ac34cc75ca05943bb0b2de3b41c5e035d6e1d28b"
@@ -224,7 +227,7 @@
       "bd3bc6d9c4043f4bf68a33ca76332b7e5a7911f1e14ea691f8bc2dd0920f0dd3"
     ,
     "scripts/impact_closure.py":
-      "1af017ab5e970243c4ad8e31135e7b4c7e50417201c6dd5f8ccaba241240b58a"
+      "b1c63f0fcb55129b1d373694b6f359d76dd6cbbe0937340d2f072e1c2f298a2e"
     ,
     "scripts/landscape_check.py":
       "afd0b167c4f8b2d685ed4e4041a66178a706cece248d19dcb566814e0f534c43"
@@ -278,7 +281,7 @@
       "b7f2cad266008812a38779f0b2208596e5d5fddf8fd9a47354706406f03ca655"
     ,
     "scripts/task_inputs.py":
-      "18326522ab2752a01ec00af8688f5dd43b498a7180100dfbf0420e5e77deb31d"
+      "c786f4284273a434b7e5bee26d351b95dbf32cf81f4c23b53c2c32b850ba85af"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -290,7 +293,7 @@
       "5874e6fed717df6c29ad5d6888c8985690fca14ed83458b1f0e77af298e8da81"
     ,
     "scripts/vault_hook.py":
-      "f1400bcead8488e477d55a83ec20fa96e3aaf959b35720c934283fc2e5a35692"
+      "341ed2885a177f596ed7ff2e13c0c7297ab6d26c046e90447202667d8e6aa349"
     ,
     "scripts/vault_index.py":
       "e71cc817cae308e57ae5e78804966343606c683a1830b95b4e394b5282eded1f"
@@ -343,6 +346,9 @@
     "skill-content/backlog-plan/references/switch-root_review_scope-revision_delta.md":
       "f8d577ac73eaad621c16580a22d7eb2d1d604635918bf51c7ffa44489d2a3230"
     ,
+    "skill-content/backlog-plan/references/switch-source_rebind-receipt_when_unchanged.md":
+      "f819a517d5a0950ac566d9f6ec8a2041fa8d95b0965fca6805f622f9ae50dc6f"
+    ,
     "skill-content/business-analysis/SKILL.md":
       "2847ac9940f93cac7fb9d045dcba0b7bdcff5162f40949fece8161de6c7d195c"
     ,
@@ -350,7 +356,7 @@
       "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936"
     ,
     "skill-content/business-analysis/references/switch-dependent_rebind_gate-with_source.md":
-      "cdcafebd77ca6621f29bc06b908af6454985f89c3df7580b16d4d3328ccde783"
+      "fd7def8a4eeddae350f92e164b78006736817d8a22c89b4e1358d65b4d959616"
     ,
     "skill-content/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md":
       "95c085c1aa2b5fa1f98074250468c469d014216d4361a8017a647d3125246a93"
@@ -434,7 +440,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "b7ced240c89e9c2a230d9c2cd4f668babfc4ab00f135b6efe328112b4492cf2d"
+      "b7c69eca41b6c3f61ad160ad0a006571dbde290d6fbc5ced837855c709ae4fe0"
     ,
     "skill-content/configure/data/step-budgets.json":
       "c63c5e90e1726b573c681f28008aa627575600f2d81dc8f8c0851b768e1b04fc"
@@ -558,6 +564,9 @@
     ,
     "skill-content/execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md":
       "de0d35734aa0f3af259cd6027e3fd691855d596ffdc8514de67a87dfdc3b69a9"
+    ,
+    "skill-content/execution-plan/references/switch-source_rebind-receipt_when_unchanged.md":
+      "96b378464c1c0b2ff8da6414487e4434e432376a3473659c2abb6d661bef9d25"
     ,
     "skill-content/experience-design/SKILL.md":
       "721a37f9c549e35afe63f9a4c3f871c11b179e176734fa020b09c41aa20b6698"

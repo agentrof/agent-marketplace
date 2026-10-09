@@ -149,7 +149,8 @@
     },
     {
       "paths": [
-        "plugins/software-engineering-team/scripts/backlog_compile.py"
+        "plugins/software-engineering-team/scripts/backlog_compile.py",
+        "plugins/software-engineering-team/scripts/backlog_rebind.py"
       ],
       "groups": [
         "backlog"
@@ -294,7 +295,8 @@
         "tools.tests.test_backlog_pending_review_policy.*",
         "tools.tests.test_backlog_pre_approval.*",
         "tools.tests.test_backlog_upstream_transition.*",
-        "tools.tests.test_light_backlog_path.*"
+        "tools.tests.test_light_backlog_path.*",
+        "tools.tests.test_source_rebind.*"
       ],
       "depends_on": [
         "delivery"
@@ -699,6 +701,7 @@
     "tools.tests.test_solution_topology",
     "tools.tests.test_source_decision_gate",
     "tools.tests.test_source_impact",
+    "tools.tests.test_source_rebind",
     "tools.tests.test_step_timing",
     "tools.tests.test_story_size_budget",
     "tools.tests.test_task_inputs",

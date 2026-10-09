@@ -4,9 +4,10 @@ These are the instructions of process switch `dependent_rebind_gate` at
 `with_source`. A task binds this file only when the project's Process Policy
 selects that value; at the default, `separate`, an approved Experience
 package that a source approval makes stale is found while bindings are
-refreshed and gets its own scope gate. Every task of the Business Analysis
-and Experience Design flows binds it, and only the orchestrating entry asks
-the owner.
+refreshed and gets its own scope gate. Every task of the Business Analysis,
+Solution Design, Design System and Experience Design flows binds it, and only
+the orchestrating entry asks the owner. A source is a Business Analysis
+space, the Solution landscape or the Design System MASTER.
 
 The Experience Design rule stays: the owner approves the complete action set
 before any lifecycle mutation. This value shows that set in the source gate
@@ -16,7 +17,8 @@ instead of after it.
 
 1. With the source change drafted in the working tree, run
    `experience_compile.py source-impact --root workspace/docs/experience-design
-   --source-ref business-analysis/<space>/space`. It lists every approved
+   --source-ref <source>`, where `<source>` is `business-analysis/<space>/space`,
+   `solution-design/landscape` or `design-system/MASTER`. It lists every approved
    Experience package that binds the source's current receipt, the changed
    source rows and documents, the package notes that cite them, and per
    package `rebind`: `mechanical` when no note cites a changed row or
@@ -27,7 +29,12 @@ instead of after it.
    named in the gate as a later Experience update with its own gate, never
    approved here.
 3. Name the Requirement and backlog bindings that must advance after the
-   Experience receipts, through their normal revisions.
+   Experience receipts, through their normal revisions. When the Process
+   Policy selects `source_rebind` `receipt_when_unchanged`, the backlog
+   rebind joins the action set as a mechanical source-rebind receipt: every
+   epic keeps its approved review. Its hash binds the source's approval
+   commit, so the gate approves the mechanical rebind and the compiler
+   proves it afterwards.
 
 ## The gate
 
@@ -51,6 +58,12 @@ publication.
 3. Otherwise stop and ask the owner through the Experience Design flow's
    own gate. Never widen the approved set, and never let an authored record
    or artifact change ride on this approval.
+4. For an approved backlog rebind, run `plan-source-rebind` after the source
+   commit. While it reports `mechanical` and the root reader adds no
+   finding, run `apply-source-rebind --approve-receipt <owner_approval>
+   --source-gate` with the planned hash; the command refuses a receipt that
+   is not mechanical. Otherwise the owner approves the receipt hash through
+   the ordinary backlog approval.
 
 ## Measurement
 

@@ -1295,6 +1295,10 @@ def pre_target(written: dict) -> int:
             "backlog/_generated files are compiler-owned; run"
             " backlog_compile.py check --render"
         )
+    if rel.startswith(("backlog/artifacts/source-rebinds/", "backlog/artifacts/schema-migrations/")):
+        return deny(
+            "backlog receipts are compiler-owned; run backlog_compile.py"
+            " apply-source-rebind or apply-schema-migration")
     if rel.startswith(("maps/_relations/", "maps/_navigation/")):
         return deny(
             "inverse relation catalogs are compiler-owned; run"

@@ -384,16 +384,33 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
             owning_epics = matches
         else:
             owning_epics = epics
+        # A source-rebind revision's readers read its impact and the source diff;
+        # every other revision reads no rebind state.
+        rebind = None
+        root_round = backlog.latest(record["backlog_reviews"])
+        if (not writer and root_round is not None
+                and backlog.SOURCE_REBIND_SECTION in backlog.headings(root_round["body"])):
+            import backlog_rebind
+            try:
+                rebind = backlog_rebind.review_scope(docs, record)
+            except ValueError as exc:
+                raise InputError(str(exc)) from exc
+        if rebind is not None and epic is not None and owning_epics[0]["id"] in rebind["reused"]:
+            raise InputError(f"{owning_epics[0]['id']} reuses its approved review by the source rebind"
+                             " receipt; no reader reviews it")
         delta = (revision_delta(record, docs, root_scope["parameters"].get(DELTA_LIMIT),
-                                full_root_reason) if delta_requested else None)
-        closure_scope = impact_scope(record, docs) if impact and not writer else None
+                                full_root_reason) if delta_requested and rebind is None else None)
+        closure_scope = impact_scope(record, docs) if impact and not writer and rebind is None else None
         closure_read = closure_scope is not None and closure_scope["read"] == "closure"
         # The impact closure generalizes the revision delta; it governs when both are on.
         delta_read = delta is not None and delta["read"] == "delta" and not closure_read
-        narrow = delta_read or closure_read
+        narrow = delta_read or closure_read or rebind is not None
         primary = {record["backlog"]["path"]}
         selected_stories = {story["id"] for item in owning_epics for story in item["stories"]}
-        if closure_read:
+        if rebind is not None:
+            selected_stories &= {story["id"] for story in record["stories"]
+                                 if {story["path"], story["test_plan"]} & rebind["impacted"]}
+        elif closure_read:
             selected_stories &= set(closure_scope.pop("stories"))
         elif delta_read:
             selected_stories &= set(delta["changed"]) | set(delta["neighbours"])
@@ -553,6 +570,11 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                     context_hop if path == record["backlog"]["path"] else 0)
         # A delta holds its changed stories and their direct neighbours; every
         # other edge is in the compiler's graph.
+        if rebind is not None:
+            # A changed source document is read as it is now; its diff is in check.
+            for path in rebind["receipt"]["root_scope"]["source_diff_paths"]:
+                if (docs / path).is_file():
+                    include(path, "source rebind diff", LEAF_HOP)
         if closure_read:
             # A closure note outside the scope's stories is read, not expanded.
             for path in closure_scope.pop("reads"):
@@ -646,6 +668,14 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                                budget) if panels or narrow else {}
         if narrow:
             check["backlog_graph"] = backlog_graph(record, docs, selected_stories)
+        if rebind is not None:
+            receipt = rebind["receipt"]
+            check["source_rebind"] = {
+                "receipt": receipt["owner_approval"], "binding_changes": receipt["binding_changes"],
+                "requirement": receipt["requirement"],
+                "epics": [{key: row[key] for key in ("id", "disposition", "impacted_by")}
+                          for row in receipt["epics"]],
+                "source_diff": rebind["source_diff"]}
         if budget is not None:
             check["story_size"] = backlog.story_size_report(
                 record, docs, budget, {story["id"] for item in owning_epics
@@ -689,6 +719,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     if delta is not None:
         result[ROOT_SWITCH] = ROOT_VALUE
         result["revision_delta"] = delta
+    if rebind is not None:
+        result[REBIND_SWITCH] = REBIND_VALUE
     # Naming the value makes a switch change stale every manifest it derived.
     if panels:
         result[PANEL_SWITCH] = PANEL_VALUE
@@ -722,6 +754,8 @@ LEVELS_VALUE = "concurrent_when_independent"
 ROOT_SWITCH = "root_review_scope"
 ROOT_VALUE = "revision_delta"
 DELTA_LIMIT = "max_delta_share_percent"
+REBIND_SWITCH = "source_rebind"
+REBIND_VALUE = "receipt_when_unchanged"
 RECORD_SWITCH = "review_scope_record"
 RECORD_VALUE = "both_scopes"
 SCOPE_BUDGET = "transitive_source_bytes"

@@ -100,6 +100,15 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     Test Plan pins only when deterministic receipt replay proves the complete
     current postimage from a committed, hash-verified predecessor; execution
     approval and every other binding remain unchanged.
+    At process switch `source_rebind` `receipt_when_unchanged`, a revision
+    whose root differs from its approved predecessor only in its bindings,
+    Requirement and lifecycle fields reviews only the epics its receipt names
+    as impacted by the changed sources; every other epic keeps its approved
+    review byte for byte, one scoped root reader stays, and the owner approves
+    the exact receipt hash. Every later check rebuilds the receipt from Git,
+    and a Delivery accepts a chain of migration and source-rebind receipts as
+    its backlog pin while every Item's Story and Test Plan stay byte-identical
+    and unimpacted, also after the switch returns to its default.
 15. File names are stable slugs; membership is path-derived. A story does not
     duplicate its epic relationship in front matter.
 16. Authored titles are direct, natural phrases in the configured output
@@ -170,7 +179,9 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     recoverable only by an atomic exact-set rebind from its hash-verified old
     plan to a fresh plan that binds the predecessor hash, current inputs and
     application receipt; the rebind preserves authored child-record and
-    artifact bytes plus approved ledgers, and resets review to `draft`.
+    artifact bytes plus approved ledgers, and resets review to `draft`. A
+    backlog rebind to a later application receipt carries a Delivery's pin
+    only through the source-rebind receipt of invariant 14.
 27. Every official compiler mutation that writes authored Markdown produces
     an immediately legal per-write Vault result. After deterministic generated
     views are rendered, the same tree passes both its scoped Vault gate and its

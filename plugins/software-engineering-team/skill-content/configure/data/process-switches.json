@@ -632,9 +632,9 @@
       }
     },
     "dependent_rebind_gate": {
-      "summary": "Whether the owner gate that approves a change to an approved business-analysis package also shows and approves the mechanical rebinds of the Experience packages it makes stale, or each stale package is found after the approval and gets its own scope gate.",
+      "summary": "Whether the owner gate that approves a change to an approved business-analysis, Solution Design or Design System package also shows and approves the mechanical rebinds of the Experience packages it makes stale, or each stale package is found after the approval and gets its own scope gate.",
       "issue": 402,
-      "flows": ["business-analysis", "experience-design"],
+      "flows": ["business-analysis", "experience-design", "solution-design", "design-system"],
       "values": [
         {
           "id": "separate",
@@ -1053,6 +1053,30 @@
       "promotion": {
         "unit": "At least 3 Deliveries consuming migrated backlog approvals.",
         "threshold": "Zero changed product decisions or lost approval evidence, zero extra execution approvals, and median migration time at most 40% of a reviewed revision, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "source_rebind": {
+      "summary": "Whether a backlog revision that only rebinds its upstream sources reviews every epic again, or reuses the approved review of each epic the changed sources leave unimpacted, through an owner-approved source-rebind receipt that a Delivery also accepts as its backlog pin.",
+      "issue": 463,
+      "flows": [
+        "backlog-planning",
+        "execution-planning"
+      ],
+      "values": [
+        {
+          "id": "reviewed_revision",
+          "tradeoffs": "Every revision reviews every epic again with a full reader, and a Delivery whose backlog pin moved takes a new execution approval, its publication and the convergence of every active Item, even when no story, test plan or epic note changed and no note cites a changed source."
+        },
+        {
+          "id": "receipt_when_unchanged",
+          "tradeoffs": "A revision whose root changes only its bindings and Requirement plans a receipt from the approved predecessor: a note is impacted when its bytes changed, it cites a changed source document or row, the relation closure of a changed source reaches it, a changed upstream note adds or drops an edge to it, or a dependency edge or membership around it changed. Only impacted epics get a fresh round, scoped to their impacted stories and the source diff; one scoped root reader judges the source diff, and its finding of an uncited dependence moves that epic to review. The owner approves the exact receipt hash, and a Delivery keeps its execution approval while every Item's Story and Test Plan stay byte-identical and unimpacted. Fewer reader passes and no execution re-approval, while a story that depends on a changed rule without citing it or reaching it through the relation graph relies on the root reader."
+        }
+      ],
+      "default": "reviewed_revision",
+      "metric": "Per source-rebind revision: epic and root reader passes, wall clock from begin-revision to approval, epics reused and reviewed, root reader findings that moved an epic to review, and Delivery execution re-approvals avoided, against reviewed revisions of the same size.",
+      "promotion": {
+        "unit": "At least 3 Deliveries whose backlog pin a source-rebind receipt carried forward, each with its revision replayed as a frozen reviewed revision.",
+        "threshold": "Every critical and major finding of the reviewed replay also found or made moot, zero defects found after merge in a reused epic that trace to a changed source, and a median begin-revision-to-approval wall clock at most 50% of comparable reviewed revisions, with every shared quality guard holding and the owner's approval."
       }
     }
   }

@@ -518,6 +518,54 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
             code = verification.main(["--worktree", str(self.root), "status", *arguments])
         return code, json.loads(output.getvalue())
 
+    def test_permission_preflight_names_every_command_qa_runs_before_the_first_round(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = verification.main(["--worktree", str(self.root), "permission-preflight",
+                                      "--delivery", "DLV-001", "--story", "AUTH-01"])
+        plain = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual([row["purpose"] for row in plain["commands"]], ["full_test_suite"])
+        prefix = verification.cli_form(self.root)
+        self.assertIn(str(Path(verification.__file__).resolve()), prefix)
+        self.assertEqual(plain["commands"][0]["command"], prefix + " run --kind test")
+        self.assertEqual(plain["allow_rules"]["command_prefixes"], [prefix + " run", prefix + " environment"])
+        self.assertIn("blocked_by_permission", plain["next_action"])
+        contract_path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(contract_path)
+        contract.update(diagnostic_test_command="make diagnose", mutation_disposition="required",
+                        live_groups=["lifecycle", "restart"])
+        self.write(contract_path.relative_to(self.root), delivery.frontmatter(contract, body))
+        props, item_body = delivery.split_note(self.root / self.item_path)
+        self.write(self.item_path, delivery.frontmatter({**props, "runtime_required": True}, item_body))
+        full = verification.permission_preflight(self.root, "DLV-001", "AUTH-01")
+        self.assertEqual([row["purpose"] for row in full["commands"]],
+                         ["full_test_suite", "diagnostic_test", "mutation", "live_test:lifecycle", "live_test:restart",
+                          "environment:up", "environment:seed", "environment:logs", "environment:url",
+                          "environment:down"])
+        self.assertIn(prefix + " run --kind live_test --group restart", full["allow_rules"]["exact_commands"])
+
+    def test_a_permission_refused_command_is_recorded_and_never_passes_final_qa(self):
+        self.freeze()
+        blocked = [{"command": "run --kind live_test --group restart", "reason": "host permission check refused it",
+                    "outcome": "blocked_by_permission"}]
+        verification.register_result(self.root, self.result())
+        final = self.result("qa_engineer", "qa_final")
+        final["blocked_commands"] = blocked
+        with self.assertRaisesRegex(RuntimeError, "cannot leave a blocked_by_permission command unrun"):
+            verification.register_result(self.root, final)
+        diagnostic = self.result("qa_engineer", "qa_diagnostic")
+        for rows in ([{**blocked[0], "outcome": "skipped"}], [{"command": "run"}], "run", [{**blocked[0], "reason": " "}]):
+            with self.subTest(rows=rows), self.assertRaisesRegex(RuntimeError, "blocked_commands"):
+                verification.register_result(self.root, {**diagnostic, "blocked_commands": rows})
+        verification.register_result(self.root, {**diagnostic, "blocked_commands": blocked})
+        code, summary = self.status("--summary")
+        self.assertEqual(code, 0)
+        self.assertEqual(summary["blocked_by_permission"], [{**blocked[0], "role": "qa_engineer"}])
+        verification.resume_qa(self.root)
+        _code, resumed = self.status("--summary")
+        self.assertEqual(resumed["blocked_by_permission"], [])
+
     def test_status_summary_prints_run_outcomes_without_the_session_bindings(self):
         frozen = self.freeze()
         raw = verification.run_check(self.root, "test")

@@ -17,6 +17,11 @@ executes the approved adapter; the adapter reads `AGENTROF_DIAGNOSTIC_TESTS`
 as JSON and passes identifiers through its test runner's argument-list API.
 The final suite still requires separate `run --kind test` evidence.
 
+When the host refuses a verification command, never stop silently: list it in
+the result's `blocked_commands` as `{command, reason, outcome:
+blocked_by_permission}` and settle as `qa_diagnostic` or a failed result, so
+the owner can allow it and QA reruns it on the same candidate.
+
 The manifest's `result_interface` provides the exact JSON fields to return.
 Every final check needs `passed: true` and an independent `evidence` assessment.
 The full-suite check also needs the approved command, zero exit code,

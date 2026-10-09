@@ -3433,6 +3433,29 @@ def closure_read(root: Path, current: dict) -> tuple[list[str], dict]:
     return sorted(full), {"scope": scope, "views": task_inputs.vault_views(docs)}
 
 
+FINDING_SUMMARY_FIELDS = ("id", "role", "severity", "calibrated_severity", "status", "file")
+
+
+def finding_summary(finding: dict) -> dict:
+    """One line per inherited finding; the full record stays in the manifest's findings file."""
+    value = {key: finding[key] for key in FINDING_SUMMARY_FIELDS if key in finding}
+    text = str(finding.get("title") or finding.get("description") or finding.get("verification") or "")
+    line = text.strip().splitlines()[0] if text.strip() else ""
+    value["title"] = line if len(line) <= 160 else line[:157] + "..."
+    return value
+
+
+def reader_attachment(root: Path, name: str, data, use: str) -> dict:
+    """Write bulky manifest data beside the session and return its path and hash.
+
+    The CLI binds staleness through the frozen session, never through this copy,
+    so a reader opens the file only when it needs the full data."""
+    path = safe_runtime_path(root, session_path(root).parent / "manifest" / name, file_only=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_file.replace_text(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return {"path": str(path), "sha256": digest(data), "entries": len(data), "use": use}
+
+
 def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, remote: str = "origin") -> dict:
     if role not in ROLES or mode not in policy()["role_modes"][role]:
         raise RuntimeError("unsupported verification role or mode")
@@ -3465,10 +3488,21 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
         checks["mutation_whole_changed_files"]["files"] = current["mutation_files"]
     if "fresh_runtime" in checks:
         checks["fresh_runtime"]["event_hashes"] = []
+    unresolved = value.get("unresolved_findings", [])
+    bound = {key: item for key, item in current.items() if key != "source_observations"}
     result = {"schema_version": 1, "role": role, "mode": mode, "session_id": value["session_id"],
-              **current, "required_checks": list(checks),
+              **bound, "required_checks": list(checks),
+              "source_observations_file": reader_attachment(
+                  root, "source-observations.json", current["source_observations"],
+                  "The CLI checks this snapshot itself; readers never open it."),
               "full_read": sorted(set(current["inputs"]) | set(current["changed_files"])),
-              "repair_delta": delta, "scope_expanded": scope_expanded, "unresolved_findings": value.get("unresolved_findings", []),
+              # A delta equal to the whole change names it instead of repeating every path.
+              "repair_delta": "changed_files" if delta == current["changed_files"] else delta,
+              "scope_expanded": scope_expanded,
+              "unresolved_findings": [finding_summary(finding) for finding in unresolved],
+              "unresolved_findings_file": reader_attachment(
+                  root, "unresolved-findings.json", unresolved,
+                  "Full records of the one-line unresolved_findings; read only to carry a finding forward."),
               "read_interface": {"inspect": "inspect --path <repository-relative-path> [--base]", "diff": "diff [--path <repository-relative-path>]"},
               "review_passes": policy()["review_checks"], "allowed_writes": [str(session_path(root).parent / "scratch")],
               "mutation_scope_file": str(session_path(root).parent / "mutation-files.json"),

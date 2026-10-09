@@ -752,6 +752,56 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
                                                           " the full test suite does$"):
                     verification.validate(self.root, "DLV-001", "AUTH-01")
 
+    def test_reader_manifest_stays_small_and_references_its_bulky_data(self):
+        for index in range(2500):
+            self.write(f"vendor/lib/module_{index:04d}.js", f"export const v{index} = {index};\n")
+        self.commit()
+        base = verification.git(self.root, "rev-parse", "HEAD")
+        props, body = delivery.split_note(self.root / self.item_path)
+        self.write(self.item_path, delivery.frontmatter({**props, "integration_base_commit": base}, body))
+        for index in range(200):
+            self.write(f"src/feature/component_{index:03d}.py", f"value_{index} = {index}\n")
+        self.commit()
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [{"id": f"CR-{index}", "severity": "minor", "status": "open",
+                               "file": f"src/feature/component_{index:03d}.py",
+                               "verification": "Rerun the targeted check",
+                               "description": f"Finding {index} headline\n" + "Detail. " * 300}
+                              for index in range(1, 71)]
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        self.write("src/feature/component_000.py", "value_0 = -1\n")
+        self.commit()
+        frozen = self.freeze()
+        manifest = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")
+        size = len(json.dumps({"ok": True, **manifest}, indent=2).encode())
+        self.assertLess(size, 64 * 1024, f"reader manifest is {size} bytes")
+        self.assertNotIn("source_observations", manifest)
+        observations = manifest["source_observations_file"]
+        self.assertEqual(json.loads(Path(observations["path"]).read_text()),
+                         frozen["candidate"]["source_observations"])
+        self.assertEqual(observations["sha256"], verification.digest(frozen["candidate"]["source_observations"]))
+        self.assertGreater(observations["entries"], 2700)
+        self.assertEqual(manifest["candidate_hash"], frozen["candidate"]["candidate_hash"])
+        self.assertEqual(manifest["repair_delta"], ["src/feature/component_000.py"])
+        summary = manifest["unresolved_findings"][0]
+        self.assertEqual(summary, {"id": "CR-1", "role": "code_reviewer", "severity": "minor", "status": "open",
+                                   "file": "src/feature/component_001.py", "title": "Finding 1 headline"})
+        full = json.loads(Path(manifest["unresolved_findings_file"]["path"]).read_text())
+        self.assertEqual(full, frozen["unresolved_findings"])
+        self.assertEqual(manifest["unresolved_findings_file"]["sha256"], verification.digest(full))
+        # The CLI still refuses a stale snapshot, whatever the reader's copy says.
+        self.write("vendor/lib/module_0000.js", "export const v0 = -1;\n")
+        self.commit()
+        with self.assertRaisesRegex(RuntimeError, "verification candidate or source bindings changed"):
+            verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")
+
+    def test_repair_delta_names_changed_files_when_the_whole_change_is_new(self):
+        self.freeze()
+        manifest = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_initial")
+        self.assertEqual(manifest["repair_delta"], "changed_files")
+
     def test_repair_preserves_finding_ids_and_requires_explicit_resolution(self):
         self.freeze()
         failed = self.result(verdict="failed")
@@ -1931,8 +1981,9 @@ print(sys.argv[1])
         self.write("src/product.py", "value = 3\n")
         self.commit()
         self.freeze()
-        unresolved = {finding["id"]: finding for finding in verification.manifest(
-            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["unresolved_findings"]}
+        attached = verification.manifest(
+            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["unresolved_findings_file"]
+        unresolved = {finding["id"]: finding for finding in json.loads(Path(attached["path"]).read_text())}
         self.assertEqual(sorted(unresolved), ["CR-1", "CR-2"])
         self.assertEqual((unresolved["CR-1"]["severity"], unresolved["CR-1"]["calibrated_severity"]),
                          ("major", "major"))

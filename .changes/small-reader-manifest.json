@@ -1,0 +1,6 @@
+{
+  "summary": "Keep the Delivery reader manifest small: source observations and full unresolved findings move to referenced files with their hashes, findings stay inline as one-line summaries and an unchanged repair delta names the changed files instead of repeating them.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -55,8 +55,8 @@ finding is open, the Item needs no further review cycle.
 Before a code review result with an open CRITICAL or MAJOR claim is registered,
 one fresh, read-only calibration reader checks every such claim that no earlier
 calibration ruled. Calibration is skipped when the result has none. A claim that
-the manifest's `unresolved_findings` marks with `calibrated_severity` was ruled
-in an earlier cycle and keeps that ruling.
+the manifest's `unresolved_findings` summary marks with `calibrated_severity`
+was ruled in an earlier cycle and keeps that ruling.
 
 1. Spawn a fresh `code-reviewer` on its own tier, neither an implementation
    writer nor the reviewer that returned the claims. Give it each claim as

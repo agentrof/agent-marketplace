@@ -1175,7 +1175,18 @@ def binding_findings(tree: Path, delivery_id: str) -> list[str]:
     """
     docs = delivery_compile.docs_root(tree)
     _root, findings = delivery_compile.delivery_findings(docs, delivery_id)
-    return [f"DELIVERY_CLOSURE_INCOMPLETE: {finding}" for finding in findings]
+    return [f"DELIVERY_CLOSURE_INCOMPLETE: {repository_relative(tree, finding)}" for finding in findings]
+
+
+def repository_relative(tree: Path, finding: str) -> str:
+    """*finding* with every path under the disposable *tree* named relative to the checkout.
+
+    The compiler names absolute paths, and the tree is gone before anyone reads them.
+    """
+    for base in sorted({str(tree), str(tree.resolve())}, key=len, reverse=True):
+        finding = re.sub(re.escape(base + os.sep) + r"(\S+)",
+                         lambda match: match.group(1).replace(os.sep, "/"), finding)
+    return finding
 
 
 def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base: str, base_tip: str,

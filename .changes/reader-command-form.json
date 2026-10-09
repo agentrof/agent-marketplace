@@ -1,0 +1,6 @@
+{
+  "summary": "The verification reader manifest carries command_form, the literal allowed invocation, and the active-reader refusal names that form and where files are read instead.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

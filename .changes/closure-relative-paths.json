@@ -1,0 +1,6 @@
+{
+  "summary": "Name repository-relative paths in Delivery closure-check findings instead of paths inside the deleted disposable worktree.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

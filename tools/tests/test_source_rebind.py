@@ -646,7 +646,10 @@ class SourceRebindTests(unittest.TestCase):
         findings = self.closure_bindings()
         self.assertEqual(len(findings), 1, findings)
         self.assertTrue(findings[0].startswith("DELIVERY_CLOSURE_INCOMPLETE: "), findings)
-        self.assertIn("items/auth-01/item.md Story AUTH-01 is impacted by a source rebind", findings[0])
+        item = (self.docs / "delivery").relative_to(self.project).as_posix()
+        self.assertRegex(findings[0], rf"^DELIVERY_CLOSURE_INCOMPLETE: {item}/deliveries/[^/ ]+/items/auth-01/item\.md"
+                                      r" Story AUTH-01 is impacted by a source rebind")
+        self.assertNotIn("delivery-closure-", findings[0])
 
     def test_a_root_reader_finding_refuses_its_delivery_items_and_reads_their_stories(self):
         self.assert_epic_impact_reaches_delivery("EP-001")

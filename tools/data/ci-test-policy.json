@@ -215,7 +215,8 @@
         "tools.tests.test_project_context.*",
         "tools.tests.test_approval_history.*",
         "tools.tests.test_python_entry.*",
-        "tools.tests.test_vault_index.*"
+        "tools.tests.test_vault_index.*",
+        "tools.tests.test_resolver_reading_rule.*"
       ]
     },
     "documentation": {
@@ -686,6 +687,7 @@
     "tools.tests.test_requirement_compile",
     "tools.tests.test_requirement_flow",
     "tools.tests.test_requirement_review_contract",
+    "tools.tests.test_resolver_reading_rule",
     "tools.tests.test_review_loop",
     "tools.tests.test_review_manifest_scope",
     "tools.tests.test_review_panels",

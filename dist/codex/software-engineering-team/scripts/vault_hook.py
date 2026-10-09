@@ -2130,10 +2130,228 @@ def valid_git_experience_sync_result(payload: dict, project: Path,
         return False
 
 
+# While verification readers hold an Item, only writes that can change the
+# frozen candidate or its verification session are refused. Shell intent is
+# not fully parseable, so a command passes only when every simple command in
+# it is a known read-only form or stays wholly outside the protected roots.
+READ_ONLY_COMMANDS = {"cat", "head", "tail", "ls", "wc", "grep", "rg", "jq", "ps", "date", "find",
+                      "git", "docker", "gh", "cd"}
+READ_ONLY_GIT = {"diff", "log", "show", "status", "rev-parse", "ls-files", "cat-file"}
+READ_ONLY_DOCKER = {("ps",), ("inspect",), ("logs",), ("images",), ("volume", "ls"), ("volume", "inspect")}
+READ_ONLY_GH = {("issue", "view"), ("issue", "list"), ("pr", "view"), ("pr", "list"), ("pr", "checks")}
+FIND_WRITE_ACTIONS = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
+# Commands that run text or stdin as another command defeat argument inspection.
+INDIRECT_COMMANDS = {"xargs", "eval", "exec", "source", ".", "parallel", "sh", "bash", "zsh", "dash",
+                     "ksh", "fish", "csh", "tcsh", "sudo", "doas", "su"}
+SHELL_SEPARATORS = {";", "&&", "||", "|", "&", "|&"}
+SHELL_REDIRECTS = {">", ">>", ">|", "&>", "&>>", "<", ">&", "<&"}
+
+
+def _shell_words(command: str) -> list[tuple[str, bool]] | None:
+    """Split one POSIX command into (word, is_operator); refuse expansions and subshells."""
+    words: list[tuple[str, bool]] = []
+    current: list[str] = []
+    started = False
+    quote = ""
+    index = 0
+
+    def flush() -> None:
+        nonlocal current, started
+        if started:
+            words.append(("".join(current), False))
+        current, started = [], False
+
+    while index < len(command):
+        char = command[index]
+        if quote == "'":
+            if char == "'":
+                quote = ""
+            else:
+                current.append(char)
+        elif quote == '"':
+            if char == '"':
+                quote = ""
+            elif char in "$`":
+                return None
+            elif char == "\\" and index + 1 < len(command) and command[index + 1] in '"\\':
+                index += 1
+                current.append(command[index])
+            else:
+                current.append(char)
+        elif char in "'\"":
+            quote, started = char, True
+        elif char == "\\":
+            if index + 1 >= len(command) or command[index + 1] in "\n\r":
+                return None
+            index += 1
+            current.append(command[index])
+            started = True
+        elif char in " \t":
+            flush()
+        elif char in "$`(){}\n\r":
+            return None
+        elif char in ";&|<>":
+            # A file descriptor number written against its redirect is not a word.
+            if char in "<>" and started and "".join(current).isdigit():
+                current, started = [], False
+            flush()
+            end = index
+            while end < len(command) and command[end] in ";&|<>":
+                end += 1
+            operator = command[index:end]
+            if operator not in SHELL_SEPARATORS | SHELL_REDIRECTS:
+                return None
+            words.append((operator, True))
+            index = end
+            continue
+        else:
+            current.append(char)
+            started = True
+        index += 1
+    if quote:
+        return None
+    flush()
+    return words
+
+
+def _touches(path: Path, roots: list[Path], scratch: Path) -> bool:
+    """A path inside, equal to or above a protected root, scratch excepted."""
+    candidates = {Path(os.path.normpath(path))}
+    with contextlib.suppress(OSError, RuntimeError):
+        candidates.add(path.resolve())
+    for candidate in candidates:
+        if _path_within(candidate, scratch):
+            continue
+        if any(_path_within(candidate, root) or _path_within(root, candidate) for root in roots):
+            return True
+    return False
+
+
+def _word_touches(word: str, cwds: list[Path], roots: list[Path], scratch: Path) -> bool:
+    values = [word]
+    if word.startswith("-") and "=" in word:
+        values.append(word.split("=", 1)[1])
+    for value in values:
+        if any(str(root) in value for root in roots):
+            return True
+        if "*" in value or "?" in value or "[" in value:
+            prefix = re.split(r"[*?\[]", value, maxsplit=1)[0]
+            value = prefix[:prefix.rfind("/") + 1] or "."
+        value = os.path.expanduser(value) if value.startswith("~") else value
+        if any(_touches(cwd / value, roots, scratch) for cwd in cwds):
+            return True
+    return False
+
+
+def _read_only_command(words: list[str]) -> bool:
+    name, args = words[0], words[1:]
+    if name not in READ_ONLY_COMMANDS:
+        return False
+    if name == "git":
+        while args and args[0] in {"-C", "--no-pager", "-P"}:
+            args = args[2:] if args[0] == "-C" else args[1:]
+        return bool(args) and args[0] in READ_ONLY_GIT \
+            and not any(arg.startswith(("--output", "--ext-diff")) for arg in args)
+    if name == "rg":
+        return not any(arg == "--pre" or arg.startswith("--pre=") for arg in args)
+    if name == "find":
+        return not FIND_WRITE_ACTIONS.intersection(args)
+    if name == "date":
+        return all(arg.startswith("+") or arg in {"-u", "-R", "--utc", "--rfc-2822"}
+                   or arg.startswith(("-I", "--iso-8601", "--rfc-3339")) for arg in args)
+    if name == "docker":
+        return tuple(args[:1]) in READ_ONLY_DOCKER or tuple(args[:2]) in READ_ONLY_DOCKER
+    if name == "gh":
+        return tuple(args[:2]) in READ_ONLY_GH
+    return True
+
+
+def _inside(path: Path, roots: list[Path], scratch: Path) -> bool:
+    return not _path_within(path, scratch) and any(_path_within(path, root) for root in roots)
+
+
+def shell_outside_verification(payload: dict, roots: list[Path], scratch: Path) -> bool:
+    """True when a POSIX shell command cannot write to the protected roots."""
+    if sys.platform == "win32" or payload.get("raw_tool_name") == "PowerShell" \
+            or payload.get("shell_family", "posix") != "posix":
+        return False
+    command, error = canonical_shell_command(payload.get("tool_input", {}))
+    words = None if error else _shell_words(command)
+    if not words:
+        return False
+    cwds = [Path(str(payload.get("cwd") or ".")).resolve()]
+    segment: list[str] = []
+    piped = False
+    index = 0
+    while True:
+        word, operator = words[index] if index < len(words) else (";", True)
+        if operator and word in SHELL_REDIRECTS:
+            index += 1
+            if index >= len(words) or words[index][1]:
+                return False
+            target = words[index][0]
+            index += 1
+            if word in {"<", "<&"} or word == ">&" and target.isdigit() or target == "/dev/null":
+                continue
+            if _word_touches(target, cwds, roots, scratch):
+                return False
+            continue
+        if not operator:
+            segment.append(word)
+            index += 1
+            continue
+        assignments = []
+        while segment and SHELL_ASSIGNMENT_RE.fullmatch(segment[0]):
+            assignments.append(segment.pop(0))
+        if not segment:
+            return False
+        sanctioned = all(SANCTIONED_SHELL_ASSIGNMENTS.get(item.split("=", 1)[0]) == item.split("=", 1)[1]
+                         for item in assignments)
+        if segment[0] == "cd" and not assignments:
+            if len(segment) > 2 or segment[1:] == ["-"]:
+                return False
+            target = os.path.expanduser(segment[1] if len(segment) == 2 else "~")
+            moved = [(cwd / target).resolve() for cwd in cwds]
+            # A failed cd keeps the old directory unless && stops the chain.
+            cwds = moved if word == "&&" else cwds + moved if word == ";" else cwds
+        elif sanctioned and "/" not in segment[0] and _read_only_command(segment):
+            pass
+        elif piped or os.path.basename(segment[0]) in INDIRECT_COMMANDS \
+                or any(_inside(cwd, roots, scratch) for cwd in cwds) \
+                or any(_word_touches(item.split("=", 1)[1], cwds, roots, scratch) for item in assignments) \
+                or any(_word_touches(item, cwds, roots, scratch) for item in segment):
+            return False
+        if index >= len(words):
+            return True
+        piped = word in {"|", "|&"}
+        segment = []
+        index += 1
+
+
+def verification_scope(project: Path) -> tuple[list[Path], Path]:
+    """The Item worktree and its verification session directory, and the reader scratch."""
+    from delivery_verification import session_path
+    session = session_path(project).parent
+    return [project, session], session / "scratch"
+
+
+def readers_active_message(message: str, roots: list[Path], scratch: Path) -> str:
+    if not message.startswith("DELIVERY_VERIFICATION_READERS_ACTIVE"):
+        return message
+    return (message + ". Allowed meanwhile: the bound delivery_verification.py command;"
+            " read-only commands (git diff/log/show/status/rev-parse/ls-files/cat-file, grep, rg, jq,"
+            " cat, head, tail, ls, wc, date, ps, docker ps/inspect/logs/images/volume ls|inspect,"
+            " gh issue|pr view/list, gh pr checks, find without -delete or -exec);"
+            " other commands whose working directory and every path argument stay outside "
+            + " and ".join(str(root) for root in roots)
+            + "; Edit and Write outside them, or under " + str(scratch))
+
+
 def delivery_reader_barrier(payload: dict) -> int:
-    """Only the bound verification CLI may coordinate active readers."""
+    """Readers freeze only the Item worktree and its verification session."""
     from delivery_verification import guard_write
     project = shell_project(payload).resolve()
+    paths = None
     if payload.get("tool_name") == "Bash":
         parsed = trusted_python_script_tokens(payload)
         if parsed is not None:
@@ -2147,26 +2365,38 @@ def delivery_reader_barrier(payload: dict) -> int:
                                     "expand-context", "diff", "environment",
                                     "wait"}):
                 return 0
-        paths = None
-    else:
+    elif payload.get("file_targets") and not payload.get("patch_parse_error"):
         cwd = Path(str(payload.get("cwd") or project))
         paths = [Path(str(target.get("file_path", "")))
                  for target in payload.get("file_targets", [])]
         paths = [path if path.is_absolute() else cwd / path for path in paths]
     try:
-        guard_write(project, paths)
-        # File tools may address another Item by an absolute path while their
-        # caller remains in the main checkout. Its readers own that target too.
-        if paths:
-            by_project: dict[Path, list[Path]] = {}
-            for path in paths:
-                target_project = shell_project({"cwd": str(path.parent)}).resolve()
-                if target_project != project:
-                    by_project.setdefault(target_project, []).append(path)
-            for target_project, target_paths in by_project.items():
+        if paths is None:
+            try:
+                guard_write(project, None)
+            except RuntimeError:
+                roots, scratch = verification_scope(project)
+                if payload.get("tool_name") == "Bash" and shell_outside_verification(payload, roots, scratch):
+                    return 0
+                raise
+            return 0
+        # A file tool may address another Item by an absolute path while its
+        # caller stays in the main checkout; that Item's readers own it too.
+        by_project: dict[Path, list[Path]] = {project: []}
+        for path in paths:
+            by_project.setdefault(shell_project({"cwd": str(path.parent)}).resolve(), [])
+        for target_project in by_project:
+            roots, scratch = verification_scope(target_project)
+            by_project[target_project] = [path for path in paths if _inside(path, roots, scratch)
+                                          or _inside(path.resolve(), roots, scratch)]
+        for target_project, target_paths in by_project.items():
+            if target_paths:
                 guard_write(target_project, target_paths)
     except (OSError, RuntimeError, ValueError) as exc:
-        return deny(str(exc))
+        message = str(exc)
+        with contextlib.suppress(OSError, RuntimeError, ValueError):
+            message = readers_active_message(message, *verification_scope(project))
+        return deny(message)
     return 0
 
 

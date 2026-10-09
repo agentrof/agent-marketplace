@@ -1061,7 +1061,8 @@ def recorded_head_findings(root: Path, remote: str, delivery_id: str, head: str,
     the provider merged, when the proof walks the line against the target
     as it was before that merge.
     """
-    _branch, target = delivery_git.fetch_target(root, remote)
+    _branch, target = delivery_git.fetch_target(
+        root, remote, recorded=delivery_git.recorded_target_branch(root, delivery_id))
     stops, drift = proof_stops(root, delivery_id, head, target, fence_target(root, remote))
     _chain, errors = pr_record_chain(root, head, delivery_id, url, stops)
     return drift + errors
@@ -1564,6 +1565,16 @@ def merged_record_findings(root: Path, delivery_id: str, record: str, integratio
     return drift + errors
 
 
+def recorded_branch(root: Path, delivery_id: str, state: dict) -> str | None:
+    """The target branch *delivery_id* records: in its Integration, else in its local package."""
+    integration = state["integrations"].get(delivery_id, "")
+    directory = package_directory(root, integration, delivery_id) if integration else None
+    if directory:
+        return delivery_git.checked_target_branch(tree_note(root, integration, f"{directory}/delivery.md")[0]
+                                                  .get("target_branch"))
+    return delivery_git.recorded_target_branch(root, delivery_id)
+
+
 def audit(project_root: Path, delivery_id: str | None = None, remote: str = "origin") -> dict:
     """Read every named Delivery's closure outcome; nothing is deleted, released or merged."""
     root = delivery_git.main_worktree(project_root.resolve())
@@ -1574,16 +1585,22 @@ def audit(project_root: Path, delivery_id: str | None = None, remote: str = "ori
     except RuntimeError:
         # A project without the remote has no published Delivery to audit yet.
         return {"ok": True, "deliveries": [], "errors": [], "findings": [], "observations": []}
-    branch, target = delivery_git.fetch_target(root, remote)
+    branch, target = delivery_git.fetch_target(root, remote, recorded=None)
     state = coordination_state(root, remote)
     deliveries = [delivery_id] if delivery_id else known_deliveries(root, target, state)
+    targets = {branch: (branch, target)}
     results, errors, findings = [], [], []
     # One Delivery's unreadable state never hides the others from --all; --delivery fails closed.
     tolerated = delivery_compile.MergeStateUnknown if delivery_id else (RuntimeError, ValueError)
     with reading_session(root):
         for identifier in deliveries:
             try:
-                outcome = audit_delivery(root, identifier, target, state, remote, branch)
+                # Each Delivery is audited on the branch it records; the default answers without one.
+                recorded = recorded_branch(root, identifier, state) or branch
+                if recorded not in targets:
+                    targets[recorded] = delivery_git.fetch_target(root, remote, recorded=recorded)
+                own_branch, own_target = targets[recorded]
+                outcome = audit_delivery(root, identifier, own_target, state, remote, own_branch)
             except tolerated as exc:
                 errors.append(f"DELIVERY_COORDINATION_CORRUPT: {identifier}: {exc}")
                 continue
@@ -1661,7 +1678,12 @@ def protection_status(project_root: Path, branch: str | None = None, remote: str
     never refuses anything and never claims a guarantee no CLI check has.
     """
     root = project_root.resolve()
-    branch = branch or delivery_git.resolve_target_branch(root, remote)
+    if not branch:
+        try:
+            recorded = delivery_git.open_target_branch(root, remote)
+        except RuntimeError:
+            recorded = None
+        branch = delivery_git.resolve_target_branch(root, remote, recorded=recorded)
     if provider is None:
         from delivery_provider import GitHubProvider, ProviderError
         try:

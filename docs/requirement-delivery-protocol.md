@@ -222,6 +222,17 @@ binds the goal, exact Story set, dependency facts, Definition of Done and
 target branch. The Git coordinator then reserves the Delivery by atomically
 creating its Integration ref with the project Fence lease.
 
+The target branch defaults to the remote's default branch, else the current
+branch, else `main`. Every coordinator verb, the closure audit and the
+execution approval checks then read the branch the Delivery records, where the
+remote holds it; only without one does `refs/remotes/<remote>/HEAD`, else the
+current branch, answer. The project Fence names one target, so every open
+Delivery shares one target branch: reservation refuses a Delivery whose branch
+differs from an open Delivery's with `DELIVERY_TARGET_SPLIT`, and Fence-level
+verbs such as a source, governance or upgrade handoff use that shared branch.
+A recorded name Git cannot read as a branch refuses with
+`DELIVERY_TARGET_INVALID`.
+
 When the project has a Process Policy, scope approval also pins its path,
 revision and source hash in `delivery.md`, inside the scope hash, so every
 Delivery names the process switch values it ran under. Without a policy

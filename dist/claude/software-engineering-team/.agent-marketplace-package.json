@@ -179,13 +179,13 @@
       "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
     ,
     "scripts/delivery_closure.py":
-      "28e1ea4626b3c56dbcc7a0dd008a9ff3ed493934f14c1b07ea9f9d45a1494bf7"
+      "fa98ebad8c096991bc6b33a1f8dbfc4b26536edd72ce7cd5f8839082f34a057b"
     ,
     "scripts/delivery_compile.py":
-      "9b6fa49c8f95d0c46ec8a3ea370e153ed63fcaccd569f04166b9948b5b7e1744"
+      "82e46ae1a80647c7b9ca6ec3f0709b26e35163c09efaad120c40ee3eb8bd4c3a"
     ,
     "scripts/delivery_git.py":
-      "83a5c5afe92712535936563fce93732bc040ec95c86892e9d9471a6f102b3789"
+      "983da24fe1514d5cead29a7e61c047ba7c3c74be1ee57ebaeff9eecb77a71e79"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
@@ -194,7 +194,7 @@
       "6332887c15451a8695e6c911a6e3073d691b049d092f4f06d399b1777dc8a506"
     ,
     "scripts/delivery_result.py":
-      "f64f4e42aa3967cfe4087bd6212d9eb8000a3b6fba552d04bb800798058bf3f2"
+      "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
       "fe70083f5af7e9f9b85736b33469bf5ce87c6e24049f28d99ff52c8156cba5b2"
@@ -293,7 +293,7 @@
       "5874e6fed717df6c29ad5d6888c8985690fca14ed83458b1f0e77af298e8da81"
     ,
     "scripts/vault_hook.py":
-      "341ed2885a177f596ed7ff2e13c0c7297ab6d26c046e90447202667d8e6aa349"
+      "56035e9202c0680d6a3c64715037ff544eb0ecffc78a622d92f1dbf897025b80"
     ,
     "scripts/vault_index.py":
       "e71cc817cae308e57ae5e78804966343606c683a1830b95b4e394b5282eded1f"
@@ -479,7 +479,7 @@
       "4b47d51cd4c24d0aa448c2ccd5aef23c48da807c226543b2868f8b0c86e6e731"
     ,
     "skill-content/deliver/data/delivery-result-contract.json":
-      "5eb49b5f0588a1ef39db0d2ce4d6259936035c2da91eb32c5dd79c5325875419"
+      "ab8ef657afa5d92b173b1ace78d40af5d3d1eadb31b47e3dd59f3d22bffefb7b"
     ,
     "skill-content/deliver/data/delivery-verification-policy.json":
       "a0e4d9344a90c4fd222491b55953017c3e8b5f245c8d041dd69f405adf13e236"
@@ -776,7 +776,7 @@
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
-      "b74c3fe08dc4f4667e9c8d1e4d8109a13ede1affc92c0b364c2a44b53464bc3c"
+      "598c71d4a7c4d0b72d8a57d2bc18898292583a7c692d3d227d0e12a50218a39b"
     ,
     "skill-content/setup/references/windows-long-paths.md":
       "f6ce03aee49421cf7fd313388af3a9c9e2eb74f3e20a8019be0d4703cfca5705"

@@ -165,6 +165,10 @@ EXPECTED = {key: sorted([
 MIGRATION = "backlog-plan/references/switch-backlog_schema_migration-receipt_only.md"
 EXPECTED = {key: sorted([*value, MIGRATION]) if key.startswith("backlog-plan:") else value
             for key, value in EXPECTED.items()}
+# provisional_claims binds its reference to every task of the entries whose flows own it.
+PROVISIONAL = "deliver/references/switch-provisional_claims-during_plan_revision.md"
+EXPECTED = {key: sorted([*value, PROVISIONAL]) if key.split(":")[0] in ("deliver", "execution-plan") else value
+            for key, value in EXPECTED.items()}
 # source_rebind binds its backlog-plan reference to backlog-plan tasks and its
 # execution-plan reference to execution-plan tasks.
 REBIND = "references/switch-source_rebind-receipt_when_unchanged.md"

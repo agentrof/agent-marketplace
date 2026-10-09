@@ -106,7 +106,28 @@ placeholders. Story implementation ownership and QA
 contribution ownership do not transfer canonical backlog writing authority.
 Delivery implementation derives literal path-and-descendant claims from one
 selected Item and its role sequence; vault, Git, and runtime authority paths
-remain excluded and the active writer receipt is still mandatory.
+remain excluded, with their case folded, and the active writer receipt is
+still mandatory. The claims come from the Item record the Delivery's
+Integration publishes, never from the checkout's draft of a plan revision.
+The Delivery's remote is the source of truth: its Integration tip is read,
+fetched only when the checkout lacks that commit. A checkout whose remotes do
+not include the Delivery's remote reads nothing locally. Only when that remote
+cannot be reached, or the checkout has no remote at all, does a published
+Integration commit already in the checkout stand in, the newest by ancestry of
+the remote's tracking ref of the Integration and the `integration_base_commit`
+of the Item worktree's record, each taken only as a record commit of the
+Delivery's Integration line and only while the two agree by ancestry. That
+offline check is structural and cannot detect a forged commit carrying the
+record trailers, and the scope can be stale, so `push-item`, which checks the
+Item against the remote, remains the gate. Such a scope carries the
+constraint `offline: claims read from <commit>; <cause>`, naming the remote's
+error. A checkout with no remote keeps its own record only while it holds no
+published commit of the Delivery; otherwise it reads that commit the same way.
+The scope is `unresolved`, with the reason named, when the checkout's remotes
+do not include the Delivery's remote (pass `--remote`), when the remote holds
+no Integration of the Delivery, when the tracking ref and the Item worktree's
+base diverge, or when the remote cannot be reached, or is missing, and no
+local commit is a record commit of the Delivery's Integration line.
 
 Missing, ambiguous, new-document, or unsupported write scopes are explicitly
 `unresolved`, with an empty area. Resolve them through the existing owning

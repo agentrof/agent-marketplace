@@ -70,6 +70,12 @@ its own scratch clone and no delegated lane switches the main checkout's
 branch, as
 `skill-content/deliver/references/switch-lane_isolation-scratch_clone.md`
 defines.
+Switch `provisional_claims`: at `during_plan_revision`, an active Item's
+writer commits a path its plan revision adds under a provisional claim, which
+freeze, `push-item` and integration refuse until the approved plan publishes
+the path, as
+`skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md`
+defines.
 
 ## Parallel verification
 

@@ -31,6 +31,8 @@ DELIVERIES = (delivery_compile.delivery_root(Path("workspace") / "docs") / "deli
 PRODUCT_EXCLUDED_ROOT = "workspace/docs/"
 PR_INTENT_RECORDS = {"pr_creation_intent_v1", "pr_adoption_intent_v1"}
 TARGET_MERGE_RECORDS = {"target_refresh_v1", "upgrade_target_merge_v1"}
+# Provisional claim records reserve paths during a plan revision; they change no tree and grant no claim.
+PROVISIONAL_RECORDS = {"provisional_claim_v1", "provisional_claim_release_v1"}
 OUTCOMES = ("closed", "merged_cleanup_pending", "awaiting_merge", "open", "external_product_merge",
             "unproven_record_merge")
 PROTECTION_STATES = ("configured", "not_configured", "unknown")
@@ -496,6 +498,19 @@ def holds_item_bytes(root: Path, item: dict[str, str | None], commit: str) -> li
     return sorted(path for path, blob in item.items() if held.get(path) == blob)
 
 
+def live_provisional_claims(root: Path, remote: str, delivery_id: str, integration: str) -> list[dict]:
+    """The provisional claims of *delivery_id* that are live at its Integration tip *integration*.
+
+    A claim is live only while its plan-revision barrier, Item tip, Slot and
+    writer hold, as delivery_git derives it; a record that fails its checks
+    raises DELIVERY_COORDINATION_CORRUPT and grants nothing.
+    """
+    if not integration:
+        return []
+    return [claim for claim in delivery_git.delivery_provisional_claims(root, remote, delivery_id, integration)
+            if claim["state"] == "live"]
+
+
 def classify(root: Path, remote: str, head: str, base_tip: str, paths: list[str],
              head_ref: str = "", state: dict | None = None, target_tip: str = "", *,
              pr_paths: list[str] | None = None, targets: tuple[str, ...] = (),
@@ -505,8 +520,13 @@ def classify(root: Path, remote: str, head: str, base_tip: str, paths: list[str]
     A pull request is managed when its head ref is an Agentrof ref, when its
     head holds commits the base lacks that only an open Delivery's Integration
     or Item refs reach, when a path it changes lies under a path claim of a
-    not cancelled Item of an open Delivery, or when it writes the exact
-    product bytes of such an Item that its base lacks. Commits the base, the
+    not cancelled Item of an open Delivery or under a live provisional claim
+    of such a Delivery, which reserves that path for its Item while the plan
+    revision runs, or when it writes the exact product bytes of such an Item
+    that its base lacks. A provisional claim is never a path claim: once it
+    is promoted the published Item record claims the path, and an orphaned,
+    withdrawn or void one reserves nothing. Provisional claim records that fail
+    their reader manage the PR, so the Delivery's check names them. Commits the base, the
     Fence target or a Delivery target (*target_tip* and *targets*) already
     hold are no Delivery's own, so a promotion between other branches is not
     managed for them; *paths* are what the head changes against its merge
@@ -550,6 +570,21 @@ def classify(root: Path, remote: str, head: str, base_tip: str, paths: list[str]
                 if claimed:
                     reasons.append(f"it changes {', '.join(claimed)} under a path claim of {story} of {delivery_id}")
                     deliveries.add(delivery_id)
+        try:
+            live = live_provisional_claims(root, remote, delivery_id, integration)
+        except RuntimeError:
+            # An unreadable record set hides which paths are reserved, so the PR is checked against the Delivery.
+            reasons.append(f"the provisional claim records of {delivery_id} cannot be read, so any path it changes"
+                           " may be reserved")
+            deliveries.add(delivery_id)
+            live = []
+        for claim in live:
+            claimed = sorted(path for path in (delivery_paths or {}).get(delivery_id, paths)
+                             if claims_cover(path, claim["paths"]))
+            if claimed:
+                reasons.append(f"it changes {', '.join(claimed)} under a live provisional claim of {claim['story']}"
+                               f" of {delivery_id}")
+                deliveries.add(delivery_id)
         for product in sorted(product_tips(root, delivery_id, integration, items)):
             start = product_start(root, product, delivery_id)
             item = item_product_blobs(root, product, start) if start else {}
@@ -672,7 +707,10 @@ def integration_line_findings(root: Path, delivery_id: str, reviewed: str, stops
     record of this Delivery. A record changes no product path, except an Item
     integration, whose product delta must be its sealed Item's own, a target
     merge, whose delta must come from a target commit, and a cancellation
-    revert, which must restore what the Item merge it names replaced. Every
+    revert, which must restore what the Item merge it names replaced. A
+    provisional claim record or its release changes no path at all and must
+    hold as the provisional claim reader checks it; it is never an Item
+    integration and never a claim. Every
     Item integration, not only a Story's latest, must merge a Story of the
     reviewed package, which a cancelled Story stays only with the revert that
     names that merge, and must carry in its own tree the approved code review
@@ -743,6 +781,12 @@ def integration_line_findings(root: Path, delivery_id: str, reviewed: str, stops
                 errors.append(f"DELIVERY_COORDINATION_CORRUPT: the cancellation revert {oid} of {delivery_id} leaves"
                               f" {', '.join(kept)} as the reverted Item merge wrote them" + resume)
             continue
+        elif len(lineage) == 1 and kind in PROVISIONAL_RECORDS:
+            if deltas[oid]:
+                errors.append(f"DELIVERY_COORDINATION_CORRUPT: the {kind} record {oid} of {delivery_id} changes"
+                              f" {', '.join(sorted(deltas[oid]))}, which a provisional claim record never writes"
+                              + resume)
+            continue
         elif len(lineage) == 1:
             changed = sorted(path for path in deltas[oid] if is_product_path(path))
             if changed:
@@ -757,6 +801,12 @@ def integration_line_findings(root: Path, delivery_id: str, reviewed: str, stops
         if wrong:
             errors.append(f"DELIVERY_COORDINATION_CORRUPT: the {kind} merge {oid} of {delivery_id} writes"
                           f" {', '.join(wrong)} other than its merged side had them" + resume)
+    if any(trailer(message, "Record") in {delivery_git.PROVISIONAL_RECORD, delivery_git.PROVISIONAL_RELEASE}
+           for _oid, _lineage, message in commits):
+        try:
+            delivery_git.provisional_claims(root, reviewed, delivery_id)
+        except RuntimeError as exc:
+            errors.append(str(exc) + resume)
     return errors
 
 
@@ -1135,6 +1185,7 @@ def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base:
     pins in a disposable worktree; the audit reads Git objects alone.
     """
     integration = state["integrations"].get(delivery_id)
+    live = provisional_findings(root, remote, delivery_id, integration or "")
     if integration != head:
         try:
             merged = bool(integration) and delivery_compile.merged_pr_record(root, delivery_id, base_tip) == integration
@@ -1145,7 +1196,7 @@ def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base:
                     " claims" + recovery(f"verify-merge {delivery_id} drops its Integration and integrated Item refs;"
                                          " then re-run this check")]
         where = f"the Integration tip {integration}" if integration else "no Integration ref"
-        return [f"DELIVERY_PR_HEAD_BASE_MISMATCH: the PR head {head} is not the recorded Integration head of"
+        return live + [f"DELIVERY_PR_HEAD_BASE_MISMATCH: the PR head {head} is not the recorded Integration head of"
                 f" {delivery_id}, which has {where}; only the Delivery PR that open-pr records on the reviewed"
                 " Integration head can merge Delivery work"
                 + recovery(f"close this PR and continue through /deliver {delivery_id}")]
@@ -1153,7 +1204,7 @@ def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base:
     # A Fence target the base lacks is reported below as drift, so only the other findings are taken here.
     stops, located = proof_stops(root, delivery_id, head, base_tip, fence)
     chain, errors = pr_record_chain(root, head, delivery_id, url, stops)
-    errors = [finding for finding in located if not finding.startswith("DELIVERY_TARGET_DRIFT")] + errors
+    errors = live + [finding for finding in located if not finding.startswith("DELIVERY_TARGET_DRIFT")] + errors
     if not chain:
         return errors
     directory = package_directory(root, head, delivery_id)
@@ -1202,6 +1253,20 @@ def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base:
         with materialized(root, head) as tree:
             errors.extend(binding_findings(tree, delivery_id))
     return errors
+
+
+def provisional_findings(root: Path, remote: str, delivery_id: str, integration: str) -> list[str]:
+    """A finding for each live provisional claim of *delivery_id*, which keeps it from closing."""
+    try:
+        live = live_provisional_claims(root, remote, delivery_id, integration)
+    except RuntimeError as exc:
+        return [str(exc) + recovery(f"the project owner decides in /deliver {delivery_id}; only the coordinator's"
+                                    " provisional-claim verbs write these records")]
+    return [f"DELIVERY_CLOSURE_INCOMPLETE: {claim['story']} of {delivery_id} holds a live provisional claim of"
+            f" {', '.join(claim['paths'])}" + recovery(
+                f"end the plan revision in /deliver {delivery_id}: finish-plan-revision promotes or orphans the"
+                " claim, abort-plan-revision or withdraw-provisional-claim withdraws it")
+            for claim in live]
 
 
 def delivery_target_tips(root: Path, remote: str, state: dict) -> dict[str, str]:

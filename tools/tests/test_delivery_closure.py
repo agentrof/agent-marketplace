@@ -652,6 +652,54 @@ class DeliveryClosureTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "merge-pr refuses a PR head the coordinator did not write"):
                 delivery_git.merge_pr(project, "DLV-001")
 
+    def provisional_on(self, project: Path, base: str, *, paths=("src/verify.py",), blobs=None, **values) -> str:
+        """A provisional claim record on *base* as a hand push writes it; *blobs* make it change the tree."""
+        trailers = {"Record": "provisional-claim-v1", "Protocol": "1", "Delivery": "DLV-001", "Story": "AUTH-01",
+                    "Barrier-Epoch": "none", "Writer-Epoch": "1", "Slot": "001", "Item-Tip": base,
+                    "Claims-Hash": delivery_git.provisional_paths_hash(list(paths)), **values}
+        return delivery_git.commit_tree(project, base, [], "Provisionally claim AUTH-01 for DLV-001", trailers,
+                                        blobs=blobs, body=json.dumps(sorted(paths)))
+
+    def test_a_provisional_record_that_changes_a_path_fails_closure_and_merge_pr(self):
+        """#464: a provisional claim record changes no path at all, neither a product path nor a vault note."""
+        for path in ("src/evil.py", "workspace/docs/forged.md"):
+            with self.subTest(path=path):
+                project, _docs, _product, head, provider = self.recorded()
+                chain = self.chain(project, head)
+                forged = self.provisional_on(project, chain["reviewed"],
+                                             blobs={path: self.blob(project, "EVIL\n")[1]})
+                self.refused_everywhere(project, self.review_on(project, chain, forged), provider,
+                                        f"DELIVERY_COORDINATION_CORRUPT: the provisional_claim_v1 record {forged} of"
+                                        f" DLV-001 changes {path}, which a provisional claim record never writes")
+
+    def test_a_provisional_record_the_reader_refuses_is_a_finding_and_audit_all_reports_it(self):
+        """#464: a tree-neutral provisional record that fails the provisional claim reader, such as a tampered
+        Claims-Hash or a release of no claim, fails closure as a finding; nothing crashes."""
+        cases = {
+            "tampered hash": (lambda project, base: self.provisional_on(
+                project, base, **{"Claims-Hash": delivery_git.provisional_paths_hash(["src/other.py"])}),
+                "does not hold the path list its Claims-Hash binds"),
+            "unpaired release": (lambda project, base: delivery_git.commit_tree(
+                project, base, [], "Release provisional claim AUTH-01 for DLV-001",
+                {"Record": "provisional-claim-release-v1", "Protocol": "1", "Delivery": "DLV-001", "Story": "AUTH-01",
+                 "Barrier-Epoch": "none", "Claim-Record": base, "Disposition": "promoted"}),
+                "which is no unreleased claim of AUTH-01 in its epoch"),
+        }
+        for label, (write, expected) in cases.items():
+            with self.subTest(label=label):
+                project, _docs, _product, head, provider = self.recorded()
+                chain = self.chain(project, head)
+                forged = write(project, chain["reviewed"])
+                expected_text = f"DELIVERY_COORDINATION_CORRUPT: provisional claim record {forged} "
+                self.refused_everywhere(project, self.review_on(project, chain, forged), provider, expected_text)
+                checked = self.check(project, delivery_git.remote_oid(project, "origin", "refs/heads/" + INTEGRATION))
+                self.assertIn(expected, " ".join(checked["errors"]))
+                audited = delivery_closure.audit(project)
+                self.assertEqual((audited["ok"], audited["errors"]), (False, []), audited)
+                outcome = audited["deliveries"][0]
+                self.assertEqual(outcome["outcome"], "awaiting_merge")
+                self.assertIn(expected_text, " ".join(outcome["readiness"]))
+
     def test_a_provider_merged_forged_line_is_proven_against_the_target_before_the_merge(self):
         """The line walk stops at the target as it was before the merge, never at the target that holds it."""
         project, _docs, _product, head, provider = self.recorded()
@@ -1011,6 +1059,96 @@ class DeliveryClosureTests(unittest.TestCase):
         self.assertNotEqual(self.outcome(project)["outcome"], "closed")
         self.assertIn(f"the Integration commit {plain} is not a control record of DLV-001", " ".join(
             delivery_closure.recorded_head_findings(project, "origin", "DLV-001", record, URL)))
+
+    def provisional(self) -> tuple[Path, Path, Path]:
+        """#464: the stamped Item under a held plan revision, with a live provisional claim of src/verify.py."""
+        project, worktree, item, _active = self.case.provisional_item()
+        self.addCleanup(self.case.doCleanups)
+        switch = self.case.provisional_switch()
+        switch.__enter__()
+        self.addCleanup(switch.__exit__, None, None, None)
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        delivery_git.provisional_claim(project, "DLV-001", "AUTH-01", ["src/verify.py"])
+        return project, worktree, item
+
+    def test_a_promoted_provisional_claim_closes_through_the_canonical_flow(self):
+        """The approved revision publishes the path, finish promotes the claim and the Item integrates the
+        provisional commit; the recorded head carries both provisional records and still closes."""
+        project, worktree, item = self.provisional()
+        self.case.commit_provisional_change(worktree)
+        docs = project / "workspace/docs"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(
+                type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        finished = delivery_git.finish_plan_revision(project, "DLV-001")
+        self.assertEqual(finished["provisional_claims"], [{"story": "AUTH-01", "disposition": "promoted"}])
+        package = item.parents[2]
+        relative = {name: path.relative_to(worktree).as_posix() for name, path in (
+            ("plan", package / "execution-plan.md"), ("scope", package / "delivery.md"), ("item", item))}
+        integration = delivery_git.remote_oid(project, "origin", "refs/heads/" + INTEGRATION)
+        self.case.converge_on_integration(worktree, item, integration, relative)
+        self.assertEqual(self.case.approve_item_evidence(str(worktree)), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")["integration"]
+        review = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "reviewed_commit": integrated,
+                                   "reviewed_integration_commit": integrated})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_review(review), 0)
+        delivery_git.publish_delivery_review(project, "DLV-001")
+        delivery_git.prepare_pr_creation(project, "DLV-001")
+        provider = self.case.fake_provider_type({})
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            delivery_git.open_pr(project, "DLV-001")
+        head = delivery_git.remote_oid(project, "origin", "refs/heads/" + INTEGRATION)
+        records = git(project, "log", "--first-parent", "--format=%(trailers:key=Agentrof-Record,valueonly)", head)
+        self.assertIn("provisional-claim-v1", records.split())
+        self.assertIn("provisional-claim-release-v1", records.split())
+        checked = self.check(project, head)
+        self.assertEqual((checked["ok"], checked["managed"], checked.get("errors")), (True, True, []), checked)
+        audited = delivery_closure.audit(project)
+        self.assertEqual((audited["ok"], audited["errors"]), (True, []), audited)
+        self.assertEqual([(item["outcome"], item.get("readiness")) for item in audited["deliveries"]],
+                         [("awaiting_merge", [])])
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            delivery_git.merge_pr(project, "DLV-001")
+        audited = delivery_closure.audit(project)
+        self.assertEqual((audited["ok"], audited["errors"], [item["outcome"] for item in audited["deliveries"]]),
+                         (True, [], ["closed"]), audited)
+        self.assertEqual(git(project, "show", "origin/main:src/verify.py"), "def verify():\n    return True")
+
+    def test_a_live_provisional_claim_blocks_closure_and_manages_a_pr_that_changes_its_path(self):
+        """A live claim reserves its path for the Item: the Delivery cannot close while it holds, and an
+        unrelated PR that changes the path is managed until the claim ends."""
+        project, _worktree, _item = self.provisional()
+        head = delivery_git.remote_oid(project, "origin", "refs/heads/" + INTEGRATION)
+        checked = self.check(project, head)
+        self.assertEqual((checked["ok"], checked["managed"]), (False, True))
+        self.assertIn("DELIVERY_CLOSURE_INCOMPLETE: AUTH-01 of DLV-001 holds a live provisional claim of src/verify.py"
+                      "; recovery: end the plan revision in /deliver DLV-001: finish-plan-revision promotes or"
+                      " orphans the claim, abort-plan-revision or withdraw-provisional-claim withdraws it",
+                      checked["errors"])
+
+        def verifier(view: Path) -> None:
+            (view / "src").mkdir(exist_ok=True)
+            (view / "src" / "verify.py").write_text("def verify():\n    return False\n", encoding="utf-8")
+
+        base = git(project, "rev-parse", "origin/main")
+        unrelated = self.on_target(project, verifier, "Change the verifier directly")
+        git(project, "push", "-q", "--force", "origin", f"{base}:refs/heads/main")
+        checked = self.check(project, unrelated, head_ref="feature/verifier")
+        self.assertEqual((checked["managed"], checked["ok"]), (True, False), checked)
+        self.assertIn("it changes src/verify.py under a live provisional claim of AUTH-01 of DLV-001",
+                      checked["reasons"])
+        self.assertIn("holds a live provisional claim of src/verify.py", " ".join(checked["errors"]))
+        audited = delivery_closure.audit(project)
+        self.assertEqual((audited["ok"], audited["errors"], [item["outcome"] for item in audited["deliveries"]]),
+                         (True, [], ["open"]), audited)
+        delivery_git.withdraw_provisional_claim(project, "DLV-001", "AUTH-01")
+        checked = self.check(project, unrelated, head_ref="feature/verifier")
+        self.assertEqual((checked["managed"], checked["ok"]), (False, True), checked)
+        delivery_git.abort_plan_revision(project, "DLV-001")
+        self.assertEqual(delivery_closure.audit(project)["errors"], [])
 
 
 @integration

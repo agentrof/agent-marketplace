@@ -358,6 +358,18 @@ assertions only count or check existence, or that drops an expected value, for
 the code reviewer, as
 `deliver/references/switch-level_change_map-assertion_map.md` defines.
 
+When an active Item may write a path its plan revision adds is process switch
+`provisional_claims`. At `after_approval`, the default, its writer writes the
+path only after the revised plan is approved and published and the Item
+converged on it. At `during_plan_revision`, while the Delivery holds its
+plan-revision barrier, the coordinator records a provisional claim of a path
+the draft adds, refused when another Item claims an overlapping path, and the
+writer commits the change at once; freeze, `push-item` and integration refuse
+it until the approved plan publishes the path, and the revision's end
+promotes, orphans or withdraws the claim, as
+`deliver/references/switch-provisional_claims-during_plan_revision.md`
+defines.
+
 How QA's final test run uses the test environment is process switch
 `test_engines`. At `single`, the default, it runs the approved test command
 once under the Item's environment lock. At `partitioned`, where the

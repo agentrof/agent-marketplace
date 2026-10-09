@@ -1032,6 +1032,31 @@
         "threshold": "No weakened or vacuous expectation found after the code review of a converted scenario that the check did not flag, and a median wall clock from the conversion to the first passing full test run under 30 minutes, with every shared quality guard holding and the owner's approval."
       }
     },
+    "provisional_claims": {
+      "summary": "Whether an active Item's writer waits for the plan revision that adds a path to its claims before writing that path, or starts the change at once under a provisional claim recorded with the plan-revision barrier, which no freeze, review or handoff accepts until the approved plan publishes the path.",
+      "issue": 464,
+      "flows": [
+        "delivery-execution",
+        "execution-planning"
+      ],
+      "values": [
+        {
+          "id": "after_approval",
+          "tradeoffs": "A path the Item's plan revision adds is written only after the revised plan is approved and published and the writer converged on it, so the code waits for the whole source and plan chain. Today's behaviour and the baseline the switch is measured against: in one measured project, a fix that needed one boolean Test Plan field and one unclaimed verifier module had no line of code one hour after the owner's decision, while the revision chain was still running."
+        },
+        {
+          "id": "during_plan_revision",
+          "tradeoffs": "While its own plan-revision barrier is held, the coordinator records a provisional claim of paths the checkout's draft adds to an active Item's path claims, refused when another Item claims or provisionally claims an overlapping path, and the writer commits the change in the Item worktree at once; freeze, the reviews, push-item and integration refuse that change until the approved plan publishes the path and the writer converges on it, and an approval that drops or moves the path leaves the work orphaned for the writer to revert. The code moves off the revision's critical path without integrating anything early, while the writer may write code an approval later discards, and every host must run a package that knows the records before a Delivery pins this value."
+        }
+      ],
+      "default": "after_approval",
+      "reference_scope": "owning_flows",
+      "metric": "Per plan revision that adds a path to an active Item: the minutes from the barrier's begin to the first commit on the added path, the minutes from the revision's publication to the Item's push, and the provisional claims promoted, orphaned, withdrawn and voided.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with a plan revision that adds a path to an active Item.",
+        "threshold": "A median of at least 30 minutes from the barrier's begin to the Item's push saved against after_approval, zero provisional changes frozen, reviewed, pushed or integrated before publication and at most 1 orphaned claim, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "backlog_schema_migration": {
       "summary": "Whether a package schema repair uses the reviewed backlog revision or an owner-approved deterministic migration receipt.",
       "issue": 450,

@@ -237,8 +237,8 @@ the switches that flow owns: `code_review_panel`, `context_pack`,
 `execution_planning`, `implementation_schedule`, `item_cost_report`,
 `item_qa_tier`, `item_review_scale`, `lane_isolation`, `lane_table`,
 `level_change_map`, `own_target_reuse`, `owner_gates`,
-`pre_handoff_regression`, `qa_gate_order`, `review_loop`, `review_scope`,
-`step_budgets`, `step_timing`, `test_engines`
+`pre_handoff_regression`, `provisional_claims`, `qa_gate_order`,
+`review_loop`, `review_scope`, `step_budgets`, `step_timing`, `test_engines`
 and `test_group_report`. A switch no
 Delivery flow owns, such as
 `mechanical_pass_tier`, is no part of the pin: inside a Delivery it is read
@@ -255,7 +255,10 @@ revisions they make, `approve-execution`, `publish-execution-plan` and
 plan-revision barrier is held, a task of `/delivery-plan`, `/execution-plan`
 or `/configure` inside the Delivery binds the approved policy that the next
 approval pins, while its implementation tasks wait for that approval; a later
-policy revision that sets the values back is the other way out. In those
+policy revision that sets the values back is the other way out. A path the
+revision adds to an active Item waits for that approval too, unless the
+Delivery pinned process switch `provisional_claims` at `during_plan_revision`,
+described with the Item push below. In those
 phases `refresh-target` treats the policy as a pinned input, like the
 Definition of Done: it refuses with `DELIVERY_TARGET_SOURCE_VIOLATION` a
 target whose policy differs from the Integration's pin, including one created
@@ -812,6 +815,91 @@ path below it. Vault paths keep the control, Architecture and projection rules
 instead, and a path the product tip holds exactly as the Item's
 `integration_base_commit` does is not the Item's change.
 
+The implementer's write scope, under every switch value, comes from the same
+published record, never from a checkout's draft of a plan revision:
+`task_inputs.py` reads the Item record of the Integration tip on the
+Delivery's remote (`--remote`, default `origin`), the source of truth, and
+fetches that commit only when the checkout lacks it. A checkout whose remotes
+lack the Delivery's remote reads nothing locally: its scope stays
+`unresolved` and names `--remote`. Only when the Delivery's remote is there
+but cannot be reached, or the checkout has no remote at all, does it read the
+newest by ancestry of the remote's tracking ref of the Integration and the
+Item worktree's `integration_base_commit`, taking each only as a record commit
+of the Delivery's Integration line and only while the two agree by ancestry.
+That offline check is structural: it cannot detect a forged commit that
+carries the record trailers on the Delivery's line, and the offline scope can
+be stale, so `push-item`, which checks the Item against the remote, remains
+the gate. An offline scope carries the constraint `offline: claims read from
+<commit>; <cause>`, naming the remote's error. A checkout with no remote keeps
+its own record only while it holds no published commit of the Delivery, such
+as an Item worktree's `integration_base_commit`. The scope stays `unresolved`,
+naming the reason, when the checkout's remotes lack the Delivery's remote,
+when that remote holds no Integration of the Delivery, when the tracking ref
+and the Item worktree's base diverge, or when the remote cannot be reached, or
+is missing, and no local commit is a record commit of the Delivery's
+Integration line. While a planning
+task checks for a held plan-revision barrier, it fetches a Fence or
+Integration commit only when the checkout lacks it.
+
+At process switch `provisional_claims` `during_plan_revision`, a plan revision
+that adds a path to an active Item need not hold its code back. While the
+Delivery's own plan-revision barrier is held, `provisional-claim` records a
+`provisional-claim-v1` record, with no tree change, on the Integration line in
+one atomic push leased on the Integration: the Story, the barrier epoch, the
+Item tip, Slot and writer epoch it was recorded with, and the sorted path list
+its `Claims-Hash` binds. It refuses with `DELIVERY_PROVISIONAL_CLAIM_REFUSED`
+a path that is not in the checkout's draft `path_claims` of the Item or that
+its published plan already claims, a path under `workspace/docs`, `.git` or
+`.agentrof` with its case folded, a path that overlaps, as written or with its case folded, a
+published or draft claim of another open Item or another Item's live
+provisional claim, an Item that is not active, runs parallel lanes or whose
+verified writer receipt this host lacks, and a Delivery without the value.
+The claim is live only while that barrier is held and the Item keeps the tip
+lineage, Slot and writer it recorded; validity is derived at every read and
+never stored, so a takeover voids it. The implementer's write scope adds the
+live provisional paths, and its Item writer commits the change in the Item
+worktree. `freeze`, a verification reader's task manifest and `push-item`
+refuse that change, by the claims of the published Item record at the Item's
+`integration_base_commit`, which must be an Integration commit the Item has
+taken, as `push-item` checks it, with `DELIVERY_PROVISIONAL_CLAIM_PENDING` until the approved plan
+publishes the path and the writer converges on it, a merge that keeps the
+provisional commit, and `integrate-item` takes only what `push-item`
+published. Under this switch `freeze` and the manifest therefore need the
+Delivery's remote, and refuse one they cannot read the Item ref and
+Integration from with `DELIVERY_PUBLISHED_CLAIMS_UNREADABLE`. `finish-plan-revision` and `abort-plan-revision` release every live
+claim of the barrier in the barrier's own atomic push with a
+`provisional-claim-release-v1` record that names the claim record it ends in
+`Claim-Record`, so a claim already void stays void: `promoted` when the published Item
+record claims every path, `orphaned` when the approval dropped or moved one,
+and `withdrawn` at abort or through `withdraw-provisional-claim`. A change to
+an orphaned, withdrawn or void path is refused with
+`DELIVERY_PROVISIONAL_CLAIM_ORPHANED` by name, and its writer reverts or
+reworks it. A live claim's paths count as claimed for `refresh-target`, as
+written or with their case folded, and so do a promoted claim's paths the Item
+ref does not claim, until the Item ref converges on an Integration commit at
+or after the claim's release or the Item ends; then the Item ref's own claims
+govern. Every reader checks each record again as the verb wrote it
+and stops with `DELIVERY_COORDINATION_CORRUPT` on one that fails, such as a
+hand-pushed record.
+For closure a provisional claim is never a path claim. While it is live,
+`closure-check` manages a pull request that changes one of its paths, as the
+path is reserved for the Item, and fails the Delivery's own closure with
+`DELIVERY_CLOSURE_INCOMPLETE` naming `finish-plan-revision`,
+`abort-plan-revision` or `withdraw-provisional-claim` as the recovery; a
+promoted path is managed through the published Item record that claims it, and
+an orphaned, withdrawn or void claim reserves nothing. On the reviewed
+Integration line both records must change no path at all and pass the same
+record check, so a recorded head that carries them closes when everything
+else is canonical; while an open Delivery's Integration carries a record that
+fails that check, `closure-check` manages every pull request and fails it with
+`DELIVERY_COORDINATION_CORRUPT`.
+`block-item` and `pause-item` need a clean Item worktree, so provisional
+commits are flushed with the plan or reverted first. Delivery `status` lists
+each claim's Story, paths, epoch and state, and `approve-review` fills a line
+in the Review's Deviations naming the Items that started provisional work.
+Every host must run a package that knows these records before a Delivery pins
+the value, since an older package reads neither record.
+
 Integration reads the Item, Code Review and Verification records from the
 remote Item tip, not from the primary worktree. It accepts an Item only when
 those records are approved/current and bind the exact direct product/test
@@ -942,7 +1030,8 @@ a retarget runs it again: a pull request no open Delivery manages passes, and
 a managed one passes only as its Delivery's recorded PR head with every
 closure precondition met, including a PR record, intent and Review that carry
 exactly what their verbs write and an Integration line whose every product
-change an Item, target merge or cancellation owns, where each Item integration
+change an Item, target merge or cancellation owns and whose provisional claim
+records change no path, where each Item integration
 merges a Story of the reviewed package and its own tree holds evidence notes
 bound to the product tip its seal names, and each cancellation revert restores
 every product path its Item merge changed. A merged record is proven against

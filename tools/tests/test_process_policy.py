@@ -533,6 +533,7 @@ RELEASED_DEFAULTS = {
     "own_target_reuse": "off",
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
+    "provisional_claims": "after_approval",
     "qa_gate_order": "plan_first",
     "reader_waves": "as_slots_free",
     "rebind_review_scope": "full",
@@ -824,6 +825,14 @@ SAFETY_RULES = {
             "Name every assertion of the Then on both sides, at least one each",
             "A complete entry is flagged, never refused",
             "a mislabeled kind that hides a weakened assertion is a major finding",
+        ),
+    },
+    "provisional_claims": {
+        f"{SKILLS}/deliver/references/switch-provisional_claims-during_plan_revision.md": (
+            "nothing provisional is frozen, reviewed, pushed or integrated before the approved plan publishes the path",
+            "a path is not in the checkout's draft `path_claims` of that Item, or the published plan already claims it",
+            "derived at every read and never stored",
+            "The writer reverts or reworks that change in the Item worktree; nothing rewrites it automatically",
         ),
     },
     "requirement_fact_check": {
@@ -1268,7 +1277,7 @@ class MeasuredBaselineTests(unittest.TestCase):
                                  "dependent_rebind_gate", "epic_review_cadence",
                                  "execution_planning", "item_qa_tier", "level_change_map", "own_target_reuse",
                                  "owner_gates",
-                                 "pre_handoff_regression", "qa_gate_order", "reader_waves",
+                                 "pre_handoff_regression", "provisional_claims", "qa_gate_order", "reader_waves",
                                  "rebind_review_scope", "remediation_bookkeeping",
                                  "remediation_writers", "requirement_fact_check", "review_scope",
                                  "review_scope_record",

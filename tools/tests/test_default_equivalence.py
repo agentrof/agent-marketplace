@@ -198,6 +198,11 @@ BACKLOG_TASK_GOLDEN = {
     },
 }
 
+# #464 makes an implementer's write scope come from the Item record the
+# Delivery's Integration publishes instead of the checkout's draft. The golden
+# implementer run needs no EXPECTED_DIFFERENCES entry for it: its fixture
+# project has no Git remote, so it holds no Delivery refs and task_inputs.py
+# keeps reading the checkout's own record, exactly as e47dbe0 does.
 MANIFEST_GOLDEN = {
     "entry:without_switch_files":
         "sha256:e0ca7b6f1cf42fd533887f93ac2591a4ba5de7ee44756e95eaadbe69614fc7de",

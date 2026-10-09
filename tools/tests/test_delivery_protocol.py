@@ -64,6 +64,8 @@ COORDINATOR_COMMANDS = {
     "quiesce-delivery",
     "finish-plan-revision",
     "abort-plan-revision",
+    "provisional-claim",
+    "withdraw-provisional-claim",
     "quiesce-upgrade",
     "upgrade-target-merge",
     "finish-upgrade",

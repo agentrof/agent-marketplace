@@ -26,6 +26,8 @@ OWNING_FLOWS_SCOPE = "owning_flows"
 # How a declared pass kind runs: as the owning writer's generated variant, or
 # as a command of the entry itself with no role pass.
 PASS_KIND_RUNS = {"writer_variant", "entry_command"}
+PROVISIONAL_CONSTRAINT = ("provisional: not freezable or pushable before the approved plan publishes it;"
+                          " a provisional path stays the Item's only once its writer converges on that plan")
 # The switch value whose cross-epic backlog writer writes only its given inputs.
 WRITERS_SWITCH, WRITERS_VALUE = "remediation_writers", "per_epic"
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
@@ -768,27 +770,9 @@ def plan_revision_held(project: Path, delivery: str, remote: str) -> bool:
     import delivery_git
 
     try:
-        refs = delivery_git.canonical_refs(delivery)
-        tips = delivery_git.remote_ref_oids(project, remote, [refs["fence"], refs["integration"]])
-        if not all(tips.values()):
-            return False
-        fence = delivery_git.commit_message(project, tips[refs["fence"]])
-        epoch = delivery_git.trailer(fence, "Barrier-Epoch")
-        if delivery_git.trailer(fence, "Barrier-Kind") != "plan-revision" or epoch in {None, "none"}:
-            return False
-        # The barrier's own Integration record binds its epoch to this Delivery.
-        begun = delivery_git.run_git(project, "log", "--format=%H", "--fixed-strings",
-                                     f"--grep=Agentrof-Barrier-Epoch: {epoch}",
-                                     tips[refs["integration"]])
-        for oid in begun.split():
-            record = delivery_git.commit_message(project, oid)
-            if all(delivery_git.trailer(record, key) == expected for key, expected in (
-                    ("Record", "delivery-barrier-v1"), ("Delivery", delivery),
-                    ("Barrier-Kind", "plan-revision"), ("Barrier-Epoch", epoch))):
-                return True
+        return delivery_git.held_plan_revision_epoch(project, remote, delivery) is not None
     except (RuntimeError, OSError, ValueError):
         return False
-    return False
 
 
 def switch_choices(project: Path | None, route: dict, package: Path,
@@ -875,15 +859,159 @@ def working_inventory(root: Path, command: list[str], *, unborn: bool = False,
     return records
 
 
+def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, str | None, str | None]:
+    """The selected Item record as the Delivery's Integration publishes it, with the Delivery id and,
+    when a local commit stood in for the remote, the constraint that names it.
+
+    A checkout's record can be a draft of a plan revision not yet approved, so
+    a published record grants the claims, never the draft. The Delivery's
+    remote is the source of truth: the record is read from its Integration tip,
+    fetched only when this checkout lacks that commit. Only when the remote
+    cannot be asked does the newest published Integration commit this checkout
+    holds stand in, the remote's tracking ref of the Integration or the
+    integration_base_commit the Item worktree last converged on, each taken
+    only as a record commit of the Delivery's Integration line and only while
+    the two agree by ancestry. That offline check is structural: a forged
+    commit that carries the record trailers on the Delivery's line passes it,
+    and the offline record can be stale, so push-item, which checks the Item
+    against the remote, remains the gate. A checkout with no remote that holds
+    no published commit of the Delivery keeps its own record: (None, None,
+    None). A checkout whose remotes lack *remote*, or where no published record
+    can be read, raises ValueError naming why.
+    """
+    import delivery_git
+    # Without its own repository, git would answer for an enclosing one and its remote.
+    if not (project / ".git").exists():
+        return None, None, None
+    remotes = subprocess.run(["git", "-C", str(project), "remote"], capture_output=True, encoding="utf-8")
+    if remotes.returncode:
+        raise ValueError("the checkout's remotes cannot be read")
+    from delivery_compile import split_note
+    names = remotes.stdout.split()
+    try:
+        delivery = item_delivery(project, item)
+    except ValueError:
+        if not names:
+            return None, None, None
+        raise
+    if not names:
+        if not local_integration_commits(project, item, delivery, remote):
+            return None, None, None
+        oid = newest_local_integration_commit(project, item, delivery, remote)
+        if oid is None:
+            raise ValueError(f"this checkout has no remote and no commit it holds for {delivery} is a published"
+                             f" Integration record of {delivery}; add the Delivery's remote")
+        return (local_record(project, oid, item, split_note), delivery,
+                offline_constraint(oid, "this checkout has no remote"))
+    if remote not in names:
+        raise ValueError(f"the checkout has no remote {remote}; name the Delivery's remote with --remote")
+    ref = delivery_git.canonical_refs(delivery)["integration"]
+    try:
+        tip = delivery_git.remote_ref_oids(project, remote, [ref])[ref]
+    except RuntimeError as exc:
+        offline = exc
+    else:
+        if not tip:
+            raise ValueError(f"{delivery} has no Integration on {remote}")
+        try:
+            return delivery_git.split_remote_note(
+                project, delivery_git.require_commit(project, remote, ref, tip), item, split_note)[0], delivery, None
+        except RuntimeError as exc:
+            raise ValueError(f"the published record of the selected Item cannot be read: {exc}") from exc
+    oid = newest_local_integration_commit(project, item, delivery, remote)
+    if oid is not None:
+        return local_record(project, oid, item, split_note), delivery, offline_constraint(oid, f"{remote}: {offline}")
+    raise ValueError(f"the published record of the selected Item cannot be read: no published Integration"
+                     f" commit of {delivery} is in this checkout and {remote} cannot provide one: {offline}")
+
+
+def offline_constraint(oid: str, cause: str) -> str:
+    """The scope constraint naming the local commit whose record stood in for the remote, and why."""
+    return " ".join(f"offline: claims read from {oid}; {cause}".split())
+
+
+def item_delivery(project: Path, item: str) -> str:
+    """The id of the Delivery whose package holds the selected Item record."""
+    import delivery_git
+    from ba_compile import parse_frontmatter
+    record = project / PurePosixPath(item).parent.parent.parent / "delivery.md"
+    props, _line, error = (parse_frontmatter(record.read_text(encoding="utf-8")) if record.is_file()
+                           else ({}, 0, "missing"))
+    delivery = props.get("id") if not error else None
+    if not isinstance(delivery, str) or not delivery_git.DELIVERY_ID_RE.fullmatch(delivery):
+        raise ValueError("the selected Item's Delivery record cannot be read")
+    return delivery
+
+
+def local_record(project: Path, oid: str, item: str, split_note) -> dict:
+    import delivery_git
+    try:
+        return delivery_git.split_remote_note(project, oid, item, split_note)[0]
+    except RuntimeError as exc:
+        raise ValueError(f"the published Integration commit {oid} in this checkout holds no record of the"
+                         f" selected Item: {exc}") from exc
+
+
+def newest_local_integration_commit(project: Path, item: str, delivery: str, remote: str) -> str | None:
+    """The newest, by ancestry, of the published Integration commits of *delivery* this checkout holds,
+    or None. The tracking ref and the Item worktree's base must agree by ancestry wherever both name a
+    commit this checkout holds, since two that diverge leave the checkout unable to tell which line is
+    published. A commit that is no record commit of the Delivery's Integration line is left out."""
+    import delivery_git
+    named = [oid for oid in local_integration_commits(project, item, delivery, remote)
+             if not subprocess.run(["git", "-C", str(project), "cat-file", "-e", oid + "^{commit}"],
+                                   capture_output=True).returncode]
+    for first, second in zip(named, named[1:]):
+        if not (delivery_git.descends(project, first, second) or delivery_git.descends(project, second, first)):
+            raise ValueError(f"the published Integration commits of {delivery} in this checkout diverge:"
+                             f" {first} and {second}; reach the Delivery's remote {remote}")
+    newest = None
+    for oid in named:
+        if delivery_git.delivery_integration_commit(project, oid, delivery) and (
+                newest is None or delivery_git.descends(project, newest, oid)):
+            newest = oid
+    return newest
+
+
+def local_integration_commits(project: Path, item: str, delivery: str, remote: str) -> list[str]:
+    """The commits this checkout names as published Integration commits of *delivery*, unverified:
+    the remote's tracking ref of the Integration and the Item worktree record's integration_base_commit."""
+    import delivery_git
+    from ba_compile import parse_frontmatter
+    found = []
+    tracking = "refs/remotes/{}/{}".format(
+        remote, delivery_git.canonical_refs(delivery)["integration"].removeprefix("refs/heads/"))
+    resolved = subprocess.run(["git", "-C", str(project), "rev-parse", "--verify", "-q", tracking + "^{commit}"],
+                              capture_output=True, encoding="utf-8")
+    if not resolved.returncode:
+        found.append(resolved.stdout.strip())
+    try:
+        story = PurePosixPath(item).parent.name.upper()
+        worktree = delivery_git.worktree_paths(delivery_git.main_worktree(project), delivery, story)["item"]
+    except (RuntimeError, ValueError):
+        return found
+    converged = worktree / item
+    if converged.is_file():
+        props, _line, error = parse_frontmatter(converged.read_text(encoding="utf-8"))
+        base = props.get("integration_base_commit") if not error else None
+        if isinstance(base, str) and delivery_git.OID_RE.fullmatch(base) and base not in found:
+            found.append(base)
+    return found
+
+
 def write_scope(project: Path | None, paths: set[str], role: str | None, route: dict,
                 read_only: bool, closure: dict | None, package: Path,
-                cross_epic: bool = False) -> dict:
+                cross_epic: bool = False, chosen: set | frozenset = frozenset(),
+                remote: str = "origin") -> dict:
     """Describe selected authoring bounds without minting writer authority.
 
     Read dependencies are not write targets. Unknown compiler selections and
     new documents stay unresolved rather than granting a whole stage directory.
     A cross-epic remediation writer, at remediation_writers per_epic, writes
-    only the backlog documents it was given as inputs.
+    only the backlog documents it was given as inputs. An implementation scope
+    comes from the Item record the Delivery's Integration publishes and, at
+    provisional_claims during_plan_revision, also takes the paths of the
+    Item's live provisional claims.
     """
     result = {"status": "read_only" if read_only else "unresolved", "allowed_write_area": [],
               "source_records": [], "writer_authority": False,
@@ -959,6 +1087,13 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
             return result
         item = items[0]
         props = properties(item)
+        try:
+            published, delivery, offline = published_item(project, item, remote)
+        except ValueError as exc:
+            result["reason"] = str(exc)
+            return result
+        if published is not None:
+            props = published
         claims = props.get("path_claims")
         roles = props.get("role_sequence")
         if (props.get("type") != "delivery-item" or not isinstance(roles, list)
@@ -985,11 +1120,29 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
                 return result
         targets = [{"path": path, "coverage": "path_and_descendants", "source": item}
                    for path in sorted(owned)
-                   if not any(path == root or path.startswith(root + "/")
+                   # A file system that folds case writes Workspace/docs into workspace/docs.
+                   if not any(path.casefold() == root or path.casefold().startswith(root + "/")
                               for root in ("workspace/docs", ".git", ".agentrof"))]
         sources = [item]
         result["excluded_subtrees"] = ["workspace/docs", ".git", ".agentrof"]
         result["constraints"].append("approved Item plan, current writer receipt, and completed/cancelled readers remain mandatory")
+        if offline:
+            result["constraints"].append(offline)
+        import delivery_git
+        provisional_on = (delivery_git.PROVISIONAL_SWITCH, delivery_git.PROVISIONAL_VALUE) in chosen
+        if delivery is not None and provisional_on and not lane:
+            try:
+                live = [claim for claim in delivery_git.delivery_provisional_claims(project, remote, delivery)
+                        if claim["story"] == props.get("story_id") and claim["state"] == "live"]
+            except RuntimeError as exc:
+                result["reason"] = f"the Item's provisional claims cannot be read: {exc}"
+                return result
+            provisional = sorted({path for claim in live for path in claim["paths"]} - {
+                target["path"] for target in targets})
+            if provisional:
+                targets.extend({"path": path, "coverage": "path_and_descendants", "source": item}
+                               for path in provisional)
+                result["constraints"].append(PROVISIONAL_CONSTRAINT)
         if lane:
             result["constraints"].append("parallel lane: write only this lane scope; the other lanes of the Item write theirs concurrently and the coordinator alone commits")
     if targets:
@@ -1205,7 +1358,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
                   and (WRITERS_SWITCH, WRITERS_VALUE) in chosen)
     scope = write_scope(project, set(inputs or []) | ({"workspace/docs/" + path for path in closure["paths"]}
                                                     if closure else set()),
-                        role, route, read_only, closure, package, cross_epic)
+                        role, route, read_only, closure, package, cross_epic, chosen, remote)
     if documents:
         scope.update(status="resolved", source_records=documents,
                      allowed_write_area=[{"path": path, "coverage": "exact_file", "source": path}

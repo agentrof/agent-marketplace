@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import secrets
+import shlex
 import stat
 import time
 from pathlib import Path, PurePosixPath
@@ -2058,6 +2059,9 @@ def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dic
             environment = require_raw_evidence(root, value, checks)
             if current["runtime_required"]:
                 require_runtime_evidence(root, value, checks["fresh_runtime"], environment)
+    if check_blocked_commands(result) and verdict == "passed" and mode != "qa_diagnostic":
+        raise RuntimeError(f"a final passed result cannot leave a {BLOCKED_BY_PERMISSION} command unrun;"
+                           " settle as a diagnostic or failed result, and resume once the owner allows it")
     findings = result.get("findings", [])
     check_findings(findings)
     blocking_severities = {severity.casefold() for severity in policy()["blocking_severities"]}
@@ -3474,7 +3478,8 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
               "mutation_scope_file": str(session_path(root).parent / "mutation-files.json"),
               "result_interface": {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
                                    "role": role, "mode": mode, "verdict": "passed|failed|cancelled",
-                                   "report": "Independent findings and conclusion", "checks": checks, "findings": []},
+                                   "report": "Independent findings and conclusion", "checks": checks, "findings": [],
+                                   "blocked_commands": []},
               "diagnostic_interface": {"available": bool(contract.get("diagnostic_test_command")),
                                        "command": "run --kind diagnostic_test --selection-file <scratch-selection.json>",
                                        "selection": {"schema_version": 1, "candidate_hash": current["candidate_hash"],
@@ -3530,6 +3535,64 @@ def run_summary(root: Path, record: dict) -> dict:
     return value
 
 
+BLOCKED_BY_PERMISSION = "blocked_by_permission"
+
+
+def cli_form(root: Path, *verb: str) -> str:
+    """One literal invocation of this packaged CLI, as a host permission rule matches it."""
+    arguments = [sys.executable, "-B", str(Path(__file__).resolve()), "--worktree", str(root.resolve()), *verb]
+    return subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
+
+
+def permission_preflight(root: Path, delivery_id: str, story: str) -> dict:
+    """The exact commands the QA reader runs for this Item, for the owner to allow before the first QA round.
+
+    Permission rules belong to the owner, so the package only names the
+    command forms and the host rules that admit them; it never edits them.
+    """
+    root = root.resolve()
+    contract, _ = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+    item = item_record(root, delivery_id, story)
+    forms = [("full_test_suite", cli_form(root, "run", "--kind", "test"))]
+    if contract.get("diagnostic_test_command"):
+        forms.append(("diagnostic_test", cli_form(root, "run", "--kind", "diagnostic_test", "--selection-file")
+                      + " <scratch-selection.json>"))
+    if contract.get("mutation_disposition") == "required":
+        forms.append(("mutation", cli_form(root, "run", "--kind", "mutation")))
+    if contract.get("dependency_audit_disposition") == "required":
+        forms.append(("dependency_audit", cli_form(root, "run", "--kind", "dependency_audit")))
+    groups = contract.get("live_groups")
+    for group in groups if isinstance(groups, list) else []:
+        forms.append((f"live_test:{group}", cli_form(root, "run", "--kind", "live_test", "--group", str(group))))
+    if item.get("runtime_required"):
+        for verb in ("up", "seed", "logs", "url", "down"):
+            forms.append((f"environment:{verb}", cli_form(root, "environment", "--verb", verb)))
+    prefix = cli_form(root)
+    return {"delivery": delivery_id, "story": story,
+            "commands": [{"purpose": purpose, "command": command} for purpose, command in forms],
+            "allow_rules": {"command_prefixes": [f"{prefix} run", f"{prefix} environment"],
+                            "exact_commands": [command for _, command in forms]},
+            "next_action": ("Before the first QA round, show the owner these commands and ask them to allow them"
+                            " once in the host's permission settings, as a prefix rule per command_prefixes entry"
+                            " or one rule per exact command; the package never edits those settings."
+                            " A QA reader whose command the host refuses records it in blocked_commands with"
+                            f" outcome {BLOCKED_BY_PERMISSION}; once the owner allows it, resume-qa reruns it on"
+                            " the same candidate.")}
+
+
+def check_blocked_commands(result: dict) -> list[dict]:
+    """A reader's commands the host refused, each named as blocked_by_permission rather than left unrun."""
+    blocked = result.get("blocked_commands", [])
+    if (not isinstance(blocked, list) or any(
+            not isinstance(row, dict) or set(row) != {"command", "outcome", "reason"}
+            or row["outcome"] != BLOCKED_BY_PERMISSION
+            or not all(isinstance(row[key], str) and row[key].strip() for key in ("command", "reason"))
+            for row in blocked)):
+        raise RuntimeError("blocked_commands entries declare only command, reason and outcome"
+                           f" {BLOCKED_BY_PERMISSION}")
+    return blocked
+
+
 def status_summary(root: Path, run: str | None = None) -> dict:
     """The session's identity, readers and run outcomes; `run` narrows the runs to one kind."""
     session = read_session(root)
@@ -3545,6 +3608,8 @@ def status_summary(root: Path, run: str | None = None) -> dict:
             "candidate_hash": current["candidate_hash"], "product_commit": current["product_commit"],
             "workers": {role: worker["state"] for role, worker in session["workers"].items()},
             "unresolved_findings": len(session.get("unresolved_findings", [])),
+            BLOCKED_BY_PERMISSION: [{**row, "role": role} for role, worker in session["workers"].items()
+                                    for row in worker.get("result", {}).get("blocked_commands", [])],
             "metrics": session["metrics"], "runs": {kind: run_summary(root, record) for kind, record in runs.items()}}
 
 
@@ -3552,7 +3617,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", required=True)
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map"):
+    for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map",
+                 "permission-preflight"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
@@ -3633,6 +3699,8 @@ def main(argv=None) -> int:
             value = regression_selection(root, args.delivery, args.story)
         elif args.command == "regression-run":
             value = regression_run(root, args.delivery, args.story)
+        elif args.command == "permission-preflight":
+            value = permission_preflight(root, args.delivery, args.story)
         elif args.command == "assertion-map":
             value = assertion_map_status(root, args.delivery, args.story)
         elif args.command == "inspect":

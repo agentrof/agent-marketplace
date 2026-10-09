@@ -186,6 +186,15 @@ change-level tier the Verification Contract declares, and the Delivery runs
 its integration tier once before its pull request, as
 `skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md`
 defines.
+Before an Item's first QA round, run `permission-preflight --delivery <id>
+--story <id>` and show the owner its `commands` and `allow_rules`: the exact
+packaged forms QA runs, live groups and runtime verbs included. The owner
+allows them once in the host's permission settings; the package never edits
+them. A QA reader whose command the host refuses lists it in
+`blocked_commands` with outcome `blocked_by_permission` and settles as a
+diagnostic or failed result, never a passed final one. `status --summary`
+shows those rows; ask the owner at once, then `resume-qa` reruns only the
+blocked commands on the same candidate.
 For failed or affected tests first, an optional approved
 `diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
 <scratch-selection.json>`. Copy the selector schema from the QA manifest,

@@ -12,7 +12,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 
 class ProviderError(RuntimeError):
@@ -205,6 +205,44 @@ class GitHubProvider:
         if not isinstance(value, dict) or value.get("html_url") != url:
             raise ProviderError("DELIVERY_PR_UNCERTAIN: GitHub did not confirm the PR body update")
         return {"url": url}
+
+    def _read_api(self, path: str, shape: type, absent: str | None = None):
+        """Return one read-only REST answer of *shape*, or None when GitHub does not show it.
+
+        A 403, a 404, a missing gh and every other refusal read as unreadable:
+        a token without admin rights sees no classic protection and no ruleset
+        bypass actors. Only a 404 whose message is *absent* reads as an empty
+        answer, as GitHub says "Branch not protected" for a readable branch
+        that has no classic protection.
+        """
+        try:
+            value = json.loads(run_gh(self.root, "api", f"repos/{self.repository}{path}") or "null")
+        except ProviderError as exc:
+            message = str(exc)
+            return shape() if absent and f"{absent} (HTTP 404)" in message else None
+        except json.JSONDecodeError:
+            return None
+        return value if isinstance(value, shape) else None
+
+    def repository_id(self) -> int | None:
+        """The numeric id of the repository, which a workflows rule names, or None when it cannot be read."""
+        value = self._read_api("", dict)
+        identifier = (value or {}).get("id")
+        return identifier if isinstance(identifier, int) and not isinstance(identifier, bool) else None
+
+    def branch_rules(self, branch: str) -> list | None:
+        """The ruleset rules in force on *branch*, or None when they cannot be read."""
+        rules = self._read_api(f"/rules/branches/{quote(branch, safe='')}", list)
+        return None if rules is None or any(not isinstance(rule, dict) for rule in rules) else rules
+
+    def ruleset(self, ruleset_id: int) -> dict | None:
+        """One repository ruleset, or None when it cannot be read."""
+        return self._read_api(f"/rulesets/{int(ruleset_id)}", dict)
+
+    def branch_protection(self, branch: str) -> dict | None:
+        """The classic branch protection of *branch*, or None when it cannot be read."""
+        return self._read_api(f"/branches/{quote(branch, safe='')}/protection", dict,
+                              absent="Branch not protected")
 
     def make_ready(self, url: str) -> dict:
         run_gh(self.root, "pr", "ready", url)

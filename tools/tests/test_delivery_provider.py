@@ -235,5 +235,140 @@ class DeliveryProviderTests(unittest.TestCase):
                                      [(code, message)])
 
 
+class ProtectionStatusTests(unittest.TestCase):
+    """The read-only repository protection report over GitHub's rules, rulesets and classic protection."""
+
+    RULES = "repos/agentrof/example/rules/branches/main"
+    RULESET = "repos/agentrof/example/rulesets/7"
+    CLASSIC = "repos/agentrof/example/branches/main/protection"
+    CONTEXT_RULE = {"type": "required_status_checks", "ruleset_id": 7,
+                    "parameters": {"required_status_checks": [{"context": "delivery-closure",
+                                                               "integration_id": 15368}]}}
+    NAME_RULE = {"type": "required_status_checks", "ruleset_id": 7,
+                 "parameters": {"required_status_checks": [{"context": "delivery-closure"}]}}
+    PULL_REQUEST_RULE = {"type": "pull_request", "ruleset_id": 7}
+    NOT_PROTECTED = delivery_provider.ProviderError("gh: Branch not protected (HTTP 404)")
+    FORBIDDEN = delivery_provider.ProviderError("gh: Resource not accessible by integration (HTTP 403)")
+
+    @staticmethod
+    def provider() -> delivery_provider.GitHubProvider:
+        provider = object.__new__(delivery_provider.GitHubProvider)
+        provider.root, provider.remote, provider.repository = Path("."), "origin", "agentrof/example"
+        return provider
+
+    def report(self, answers: dict) -> dict:
+        """Run protection_status with each gh api path answered from *answers*, a 404 otherwise.
+
+        An answer that is an exception is raised as gh's refusal for that path.
+        """
+        import delivery_closure
+
+        def gh(_root, *args, input_text=None):
+            self.assertEqual(args[0], "api")
+            value = answers.get(args[1])
+            if value is None:
+                raise delivery_provider.ProviderError("gh: Not Found (HTTP 404)")
+            if isinstance(value, Exception):
+                raise value
+            return json.dumps(value)
+
+        with patch.object(delivery_provider, "run_gh", side_effect=gh):
+            report = delivery_closure.protection_status(Path("."), "main", provider=self.provider())
+        for value in (report["status"], *report["properties"].values()):
+            self.assertIn(value, delivery_closure.PROTECTION_STATES)
+        return report
+
+    def test_a_ruleset_requiring_the_actions_check_without_bypass_actors_is_configured(self):
+        report = self.report({self.RULES: [self.CONTEXT_RULE, self.PULL_REQUEST_RULE],
+                              self.RULESET: {"id": 7, "bypass_actors": []}, self.CLASSIC: self.NOT_PROTECTED})
+        self.assertEqual((report["ok"], report["status"]), (True, "configured"))
+        self.assertEqual(set(report["properties"].values()), {"configured"})
+        finding = delivery_result.from_raw("protection-status", report)["findings"][0]
+        self.assertEqual((finding["code"], finding["severity"]), ("DELIVERY_PROTECTION_STATUS", "info"))
+        self.assertIn("no command of this package can", finding["message"])
+
+    def test_a_check_required_by_name_only_is_not_configured_with_its_reason(self):
+        """A commit status or a same-name job meets a check that names no app."""
+        for rules in ([self.NAME_RULE, self.PULL_REQUEST_RULE],
+                      [{"type": "required_status_checks", "ruleset_id": 7, "parameters": {
+                          "required_status_checks": [{"context": "delivery-closure", "integration_id": 99}]}},
+                       self.PULL_REQUEST_RULE]):
+            with self.subTest(rules=rules[0]["parameters"]):
+                report = self.report({self.RULES: rules, self.RULESET: {"id": 7, "bypass_actors": []},
+                                      self.CLASSIC: self.NOT_PROTECTED})
+                self.assertEqual((report["status"], report["properties"]["closure_context_required"]),
+                                 ("not_configured", "not_configured"))
+                self.assertIn("a commit status or a same-name job", report["reasons"]["closure_context_required"])
+                self.assertIn("required by name only",
+                              delivery_result.from_raw("protection-status", report)["findings"][0]["message"])
+        classic = self.report({self.RULES: [], self.CLASSIC: {
+            "required_status_checks": {"contexts": ["delivery-closure"]},
+            "required_pull_request_reviews": {"required_approving_review_count": 1},
+            "enforce_admins": {"enabled": True}}})
+        self.assertEqual(classic["properties"]["closure_context_required"], "not_configured")
+
+    def test_a_workflows_rule_counts_only_for_this_repositorys_closure_workflow(self):
+        def workflows(repository_id: int) -> dict:
+            return {"type": "workflows", "ruleset_id": 7, "parameters": {"workflows": [
+                {"path": ".github/workflows/delivery-closure.yml", "repository_id": repository_id, "ref": "main"}]}}
+
+        for repository_id, expected in ((41, "configured"), (42, "not_configured")):
+            with self.subTest(repository_id=repository_id):
+                report = self.report({self.RULES: [workflows(repository_id), self.PULL_REQUEST_RULE],
+                                      self.RULESET: {"id": 7, "bypass_actors": []},
+                                      "repos/agentrof/example": {"id": 41}, self.CLASSIC: self.NOT_PROTECTED})
+                self.assertEqual(report["properties"]["closure_context_required"], expected)
+
+    def test_bypass_actors_or_a_missing_rule_are_not_configured(self):
+        bypassed = self.report({self.RULES: [self.CONTEXT_RULE, self.PULL_REQUEST_RULE],
+                                self.RULESET: {"id": 7, "bypass_actors": [{"actor_type": "RepositoryRole"}]}})
+        self.assertEqual((bypassed["status"], bypassed["properties"]["no_bypass"]), ("not_configured", "not_configured"))
+        unprotected = self.report({self.RULES: [], self.CLASSIC: self.NOT_PROTECTED})
+        self.assertEqual(unprotected["status"], "not_configured")
+        self.assertEqual(set(unprotected["properties"].values()), {"not_configured"})
+        self.assertEqual(delivery_result.from_raw("protection-status", unprotected)["findings"][0]["severity"],
+                         "warning")
+
+    def test_hidden_classic_protection_or_repository_id_reports_unknown(self):
+        """A token without admin rights sees neither classic protection nor, at times, the repository id."""
+        hidden = self.report({self.RULES: [], self.CLASSIC: self.FORBIDDEN})
+        self.assertEqual((hidden["status"], set(hidden["properties"].values())), ("unknown", {"unknown"}))
+        workflows = {"type": "workflows", "ruleset_id": 7, "parameters": {"workflows": [
+            {"path": ".github/workflows/delivery-closure.yml", "repository_id": 41, "ref": "main"}]}}
+        unread = self.report({self.RULES: [workflows, self.PULL_REQUEST_RULE], self.CLASSIC: self.NOT_PROTECTED,
+                              "repos/agentrof/example": self.FORBIDDEN})
+        self.assertEqual((unread["status"], unread["properties"]["closure_context_required"]), ("unknown", "unknown"))
+        self.assertIn("the repository id it must name cannot be read", unread["reasons"]["closure_context_required"])
+
+    def test_unreadable_branch_rules_or_bypass_actors_report_unknown(self):
+        for answers in ({}, {self.RULES: self.FORBIDDEN, self.CLASSIC: self.NOT_PROTECTED}):
+            with self.subTest(answers=sorted(answers)):
+                report = self.report(answers)
+                self.assertEqual((report["ok"], report["status"]), (True, "unknown"))
+        hidden = self.report({self.RULES: [self.CONTEXT_RULE], self.RULESET: {"id": 7}})
+        self.assertEqual((hidden["properties"]["closure_context_required"], hidden["properties"]["no_bypass"]),
+                         ("configured", "unknown"))
+
+    def test_classic_protection_counts_when_pinned_to_actions_with_admin_enforcement(self):
+        report = self.report({self.RULES: [], self.CLASSIC: {
+            "required_status_checks": {"checks": [{"context": "delivery-closure", "app_id": 15368}]},
+            "required_pull_request_reviews": {"required_approving_review_count": 1},
+            "enforce_admins": {"enabled": True}}})
+        self.assertEqual(report["status"], "configured")
+
+    def test_only_branch_not_protected_reads_as_absent_classic_protection(self):
+        """GitHub answers 404 both for a readable unprotected branch and for a hidden protection."""
+        for refusal, expected in ((self.NOT_PROTECTED, {}), (self.FORBIDDEN, None),
+                                  (delivery_provider.ProviderError("gh: Not Found (HTTP 404)"), None)):
+            with self.subTest(refusal=str(refusal)):
+                with patch.object(delivery_provider, "run_gh", side_effect=refusal):
+                    self.assertEqual(self.provider().branch_protection("main"), expected)
+
+    def test_branch_names_are_one_encoded_path_segment(self):
+        with patch.object(delivery_provider, "run_gh", return_value="[]") as gh:
+            self.assertEqual(self.provider().branch_rules("release/2026"), [])
+        self.assertEqual(gh.call_args.args[1:], ("api", "repos/agentrof/example/rules/branches/release%2F2026"))
+
+
 if __name__ == "__main__":
     unittest.main()

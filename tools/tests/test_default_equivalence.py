@@ -231,6 +231,10 @@ SHIPPED_ADDITIONS = {
         72, "#463: the source-rebind receipt planner and replay, which the backlog compiler and"
             " Delivery's pin chain import; every task hashes package scripts, while no"
             " default-path step plans or replays a source rebind."),
+    "scripts/delivery_closure.py": (
+        72, "#461: the read-only Delivery closure audit, pull request closure check and protection"
+            " report, a package script every task binds with the other package scripts; no"
+            " default-path compiler or coordinator output changes."),
     "scripts/context_history.py": (
         72, "#441: exact bound document history is resolved by package code"
     ),

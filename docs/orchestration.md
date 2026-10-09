@@ -561,7 +561,11 @@ remaining task waits on a queued question. Roles are unaffected: they never
 ask the user and never read the grant.
 
 Classes are data in `skill-content/autopilot/data/autopilot-policy.json`.
-`choice`, `approval_gate` and `merge` are allowed by default. `release` and
+`choice`, `approval_gate` and `merge` are allowed by default. `merge` is only
+the flow's own merge step on its recorded PR head, never a provider or Git
+merge of another head; no grant waives evidence, integration, the PR record or
+Delivery closure, and a Delivery is complete only when `closure-audit` returns
+`closed`. `release` and
 `phase_start` are excluded by default, and a grant may allow them.
 `credentials`, `security_settings`, `spending`, `destructive` and
 `scope_or_rule`, which holds every decision a flow asks at once, are never

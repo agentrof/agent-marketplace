@@ -45,6 +45,13 @@ names, followed by one verb:
 - `complete --evidence "<what shows the goal is reached>"`: ends the grant.
 - `off`: revokes the grant and prints the report. `report`: the report alone.
 
+A grant authorizes running the flows as prescribed and never waives what a
+flow requires: no grant, broad delegation or time pressure waives evidence,
+integration, the PR record or Delivery closure. The `merge` class takes only
+the flow's own merge step on its recorded PR head, never a provider or Git
+merge of another head, and a Delivery is complete only when its
+`closure-audit` returns `closed`.
+
 Each class is `allowed` or `excluded` by default, or `never`, which no grant
 can allow. The classes, goal kinds, default duration, default goal cap and
 maximum duration are data in `data/autopilot-policy.json`. Under a grant,

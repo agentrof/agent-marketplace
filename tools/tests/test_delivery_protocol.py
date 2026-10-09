@@ -90,6 +90,9 @@ COORDINATOR_COMMANDS = {
     "verify-merge",
     "reconcile",
     "board",
+    "closure-audit",
+    "closure-check",
+    "protection-status",
     "locate",
 }
 

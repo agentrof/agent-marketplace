@@ -174,6 +174,45 @@ class PortableVaultGateTests(unittest.TestCase):
             ]
         self.assertEqual(missing, [])
 
+    def test_archive_runs_the_closure_check_of_a_pull_request_from_its_own_scripts(self):
+        """The installed archive carries the Delivery closure check and passes a pull request no
+        open Delivery manages, reading its head as Git data (#461)."""
+        with tempfile.TemporaryDirectory() as temporary:
+            project, remote = Path(temporary) / "project", Path(temporary) / "remote.git"
+            init_repository(remote, bare=True)
+            init_repository(project, initial_branch="main")
+            gate = self.setup_project(project)
+            with zipfile.ZipFile(gate) as archive:
+                entries = set(archive.namelist())
+            self.assertTrue({"scripts/delivery_closure.py", "scripts/delivery_git.py",
+                             "skill-content/deliver/data/delivery-control-record-contract.json"} <= entries)
+
+            def git(*args: str) -> str:
+                return subprocess.run(["git", "-C", str(project), "-c", "user.email=test@example.com",
+                                       "-c", "user.name=Test", *args],
+                                      capture_output=True, text=True, check=True).stdout.strip()
+
+            git("add", "-A")
+            git("commit", "-qm", "Set up the project")
+            git("remote", "add", "origin", str(remote))
+            git("push", "-q", "origin", "main")
+            git("switch", "-q", "-c", "feature/readme")
+            (project / "README.md").write_text("A change no Delivery claims\n", encoding="utf-8")
+            git("add", "README.md")
+            git("commit", "-qm", "Change the README")
+            head = git("rev-parse", "HEAD")
+            git("switch", "-q", "main")
+            result = subprocess.run(
+                [sys.executable, str(gate), "delivery-closure", "--project-root", str(project),
+                 "--pr-url", "https://github.com/agentrof/example/pull/3", "--head", head,
+                 "--head-ref", "feature/readme", "--base", "main"],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            envelope = json.loads(result.stdout)
+            self.assertEqual((envelope["ok"], envelope["operation"]), (True, "closure-check"))
+            self.assertIn({"kind": "ref", "target": "closure/classification", "value": "not_managed"},
+                          envelope["observations"])
+
 
 if __name__ == "__main__":
     unittest.main()

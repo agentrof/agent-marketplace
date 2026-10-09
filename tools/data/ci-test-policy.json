@@ -100,6 +100,7 @@
     {
       "paths": [
         "plugins/software-engineering-team/scripts/delivery_compile.py",
+        "plugins/software-engineering-team/scripts/delivery_closure.py",
         "plugins/software-engineering-team/scripts/delivery_git.py",
         "plugins/software-engineering-team/scripts/delivery_governance.py",
         "plugins/software-engineering-team/scripts/delivery_provider.py",
@@ -249,6 +250,7 @@
     },
     "delivery": {
       "tests": [
+        "tools.tests.test_delivery_closure.*",
         "tools.tests.test_delivery_compile.*",
         "tools.tests.test_delivery_git.*",
         "tools.tests.test_delivery_provider.*",
@@ -553,7 +555,8 @@
         "tools.tests.test_vault_index.VaultIndexTests.test_shared_and_exclusive_leases_use_the_one_file_lock",
         "tools.tests.test_vault_index.VaultIndexTests.test_snapshot_copy_retries_a_concurrent_last_reader_checkpoint",
         "tools.tests.test_vault_index.VaultIndexTests.test_snapshot_reads_hold_the_readers_lease_so_recovery_waits_and_release_it_on_any_failure",
-        "tools.tests.test_vault_query.VaultQueryTest.test_parallel_queries_rebuild_without_a_race"
+        "tools.tests.test_vault_query.VaultQueryTest.test_parallel_queries_rebuild_without_a_race",
+        "tools.tests.test_vault_query.VaultQueryTest.test_windows_namespace_spellings_keep_cache_containment_during_creation"
       ],
       "depends_on": [
         "platform"
@@ -634,6 +637,7 @@
     "tools.tests.test_context_pack",
     "tools.tests.test_counts",
     "tools.tests.test_default_equivalence",
+    "tools.tests.test_delivery_closure",
     "tools.tests.test_delivery_compile",
     "tools.tests.test_delivery_git",
     "tools.tests.test_delivery_path",

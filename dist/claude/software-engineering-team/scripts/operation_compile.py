@@ -650,6 +650,47 @@ def render_ci(args) -> int:
     return 0
 
 
+CLOSURE_GATE = Path(".github") / "agentrof" / "vault-gate.pyz"
+
+
+def require_closure_gate(project_root: Path) -> None:
+    """Refuse unless the project's tracked portable gate carries the delivery-closure subcommand.
+
+    The workflow runs the base branch's archive, so an archive installed
+    before the subcommand existed would fail every pull request.
+    """
+    import zipfile
+
+    archive_path = project_root / CLOSURE_GATE
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            names = set(archive.namelist())
+            entry = archive.read("__main__.py").decode("utf-8") if "__main__.py" in names else ""
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError(f"{CLOSURE_GATE.as_posix()} cannot be read ({exc}); install it with vault_gate.py install"
+                         " and commit it with the workflow") from exc
+    if "scripts/delivery_closure.py" not in names or '"delivery-closure"' not in entry:
+        raise ValueError(f"{CLOSURE_GATE.as_posix()} has no delivery-closure subcommand; reinstall it with"
+                         " vault_gate.py install and commit it in the same commit as the workflow")
+
+
+def render_closure_ci(args) -> int:
+    """Materialize the opt-in Delivery closure workflow.
+
+    It reads no contract value, so the template is written as it ships: its
+    GitHub expressions are the workflow's own, not package placeholders. It
+    refuses while the project's tracked gate lacks the closure subcommand.
+    """
+    template_path = Path(args.template).resolve() if args.template else (
+        Path(__file__).resolve().parents[1] / "templates" / "delivery-closure.yml"
+    )
+    require_closure_gate(Path(args.project_root).resolve())
+    output = Path(args.output).resolve()
+    atomic_text(output, template_path.read_text(encoding="utf-8"))
+    print(json.dumps({"output": str(output)}, sort_keys=True))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -665,6 +706,10 @@ def main(argv: list[str] | None = None) -> int:
     render_ci_parser.add_argument("--output", required=True)
     render_ci_parser.add_argument("--template")
     render_ci_parser.add_argument("--include-environment", action="store_true")
+    render_closure_parser = sub.add_parser("render-closure-ci")
+    render_closure_parser.add_argument("--output", required=True)
+    render_closure_parser.add_argument("--template")
+    render_closure_parser.add_argument("--project-root", default=".")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -675,6 +720,8 @@ def main(argv: list[str] | None = None) -> int:
             return approve(args)
         if args.command == "render-ci":
             return render_ci(args)
+        if args.command == "render-closure-ci":
+            return render_closure_ci(args)
         value, errors = check_contract(docs_root(args.docs), args.kind)
         print(json.dumps({"ok": not errors, "receipt": value, "errors": errors},
                          ensure_ascii=False, sort_keys=True))

@@ -1,0 +1,6 @@
+{
+  "summary": "Preserve verification command outputs across attempts and accept equivalent Windows runtime path spellings without relaxing cache containment.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

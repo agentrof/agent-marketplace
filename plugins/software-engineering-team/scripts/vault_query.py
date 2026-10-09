@@ -37,7 +37,7 @@ import json
 import subprocess
 import sys
 from collections import deque
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
 
 import impact_closure
 import vault_check
@@ -62,6 +62,18 @@ def project_docs(project: Path) -> Path:
     return project / "workspace/docs"
 
 
+def comparison_path(path: PurePath) -> PurePath:
+    """Compare recognized Windows namespace spellings without changing filesystem paths."""
+    if isinstance(path, PureWindowsPath):
+        drive = path.drive
+        if drive.casefold().startswith("\\\\?\\unc\\"):
+            return PureWindowsPath("\\\\" + str(path)[8:])
+        if (len(drive) == 6 and drive.startswith("\\\\?\\")
+                and drive[4] in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" and drive[5] == ":"):
+            return PureWindowsPath(str(path)[4:])
+    return path
+
+
 def default_cache(docs: Path) -> Path:
     """The one cache file: ``<project>/.agentrof/.../vault-index/index.db``.
 
@@ -76,8 +88,9 @@ def default_cache(docs: Path) -> Path:
     project = docs.parents[1]
     folder = project / RUNTIME
     resolved = folder.resolve()
-    if resolved != folder or resolved.is_relative_to(docs) or not resolved.is_relative_to(
-            (project / ".agentrof").resolve()):
+    comparison = comparison_path(resolved)
+    if (comparison != comparison_path(folder) or comparison.is_relative_to(comparison_path(docs))
+            or not comparison.is_relative_to(comparison_path((project / ".agentrof").resolve()))):
         raise ValueError(f"the vault index folder resolves outside the runtime scratch: {resolved}")
     return folder / "index.db"
 

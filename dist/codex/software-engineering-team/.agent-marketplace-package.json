@@ -104,13 +104,13 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "e983a7a272b42fa913ea7ce2f0f131be11539ac2ca7ec778040140fa3680ddfd"
+      "70661640404a1e01348d78c2ec25dbfce59b339515e63feb7027bc82229252a3"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
     ,
     "flows/delivery-planning.md":
-      "04cac62339dc9cabf0a2765ec1007f1c23181a06ee6ab79856b02308af94c4fe"
+      "4d8eb69023a0724ec9e280e0e880d60c410f62444df9826d011c7c032448670d"
     ,
     "flows/design-system.md":
       "0cdb9c2d79894b9ea10ce3dd19a8c2f0b07e04362f1c9ddd85c8c0653bbcf9e1"
@@ -137,7 +137,7 @@
       "6907f6c826873e160a411f49ef34e346b7bbf4db046f50b46528184ace2d604a"
     ,
     "host-contract.md":
-      "c886d973682ab5a5b192cecfc3460c462751704d7b7c9588ece1a15ad2d0b37f"
+      "d2e285d750d02a87d2e312491a79c0f575c144980d1400ea0e09096105a71b42"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -175,23 +175,26 @@
     "scripts/context_pack.py":
       "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
     ,
+    "scripts/delivery_closure.py":
+      "fdcf4af8aeaef6b888541297a3263c5879dc23dd15a0cafeba1cc3337c4b81bc"
+    ,
     "scripts/delivery_compile.py":
       "7f6b2438fb3ca797011279ea4dccc49285f5ae7391bd0033516fc572c020ba80"
     ,
     "scripts/delivery_git.py":
-      "338c3af83ce5392b35a7506e92577c0ea203a2ef1ac4f1fac31ede1a6808a95a"
+      "83a5c5afe92712535936563fce93732bc040ec95c86892e9d9471a6f102b3789"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
     ,
     "scripts/delivery_provider.py":
-      "ff5d20f83641ebd8aed44c106c00012326a7d210f1c30a64633fac169e23e37d"
+      "6332887c15451a8695e6c911a6e3073d691b049d092f4f06d399b1777dc8a506"
     ,
     "scripts/delivery_result.py":
-      "8149f2c18a0dd8e592a78d22b7f97e7fdc148550491bcb7ff3824241f55334c9"
+      "f64f4e42aa3967cfe4087bd6212d9eb8000a3b6fba552d04bb800798058bf3f2"
     ,
     "scripts/delivery_verification.py":
-      "b6bff1f2b9d1b5e6f9f9273ed3dd1140e8b007390bcfa12012dae1e1155086cf"
+      "fe70083f5af7e9f9b85736b33469bf5ce87c6e24049f28d99ff52c8156cba5b2"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -233,7 +236,7 @@
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/operation_compile.py":
-      "8e6cb6c0a022d4de986d84633c7e7ade778b28f6526a7347eefacb408b4bc8b7"
+      "3fb6df9e647e942c52eb6651826b11f096e59d8acd454832fe6e6e7a6c54a478"
     ,
     "scripts/process_policy.py":
       "673e45268b8b1f8161ecb4f1d26a9d5c970049015022e804a70c84b7da87828a"
@@ -281,7 +284,7 @@
       "3bd52e5d5159562c8b44a21791c433f04721e81fee3b9932c9fb176d85ebe8cb"
     ,
     "scripts/vault_gate.py":
-      "3eb237e04bbd4e142e6edc14ed50d925378e4c3cc2b0c5c4278f49d4edf7f39e"
+      "5874e6fed717df6c29ad5d6888c8985690fca14ed83458b1f0e77af298e8da81"
     ,
     "scripts/vault_hook.py":
       "f1400bcead8488e477d55a83ec20fa96e3aaf959b35720c934283fc2e5a35692"
@@ -290,13 +293,13 @@
       "e71cc817cae308e57ae5e78804966343606c683a1830b95b4e394b5282eded1f"
     ,
     "scripts/vault_query.py":
-      "621e52d77c481dc6e4b3c4cc43b962c2ff697b8f30426b244d856a741d5584e2"
+      "2278dfc155f1c18d13262f1a6aff22893c17f8ee4791594ba4059448a9801138"
     ,
     "skill-content/autopilot/SKILL.md":
-      "cc422eb06937e9e1a6312aaba10a922a5aedc6d0ddb0c461face9288ddcffb25"
+      "36ddb80ca6049e0db1573fefd299090907566fa2c1353e5451e4a71d82b6362f"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
-      "e5ed2a98a3d59276df3a5f6f182495f516a7dbb6a76201b93568adce5c36fb9a"
+      "d63a6ad7930086ea018b4825ead12fd58f53317d32bf3cac08750d131ad23a2d"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
       "dca3c3a687918cb8554042c279b1fd868b4fdd17e2ce45f136ed2b181e9d9413"
@@ -446,7 +449,7 @@
       "d9cd3b9a72a9831caa012d32f02553e4fe39976859b9e3d02bd3c8ab624b2c81"
     ,
     "skill-content/deliver/SKILL.md":
-      "a19dc712bd6e286adcabf5d67a7640cabe652a2f971da5a092b719d7a5a726bd"
+      "a64b55510cc9df7995f9fdfff650257c6a1305c15a0f0a6fa58dcf61e879a470"
     ,
     "skill-content/deliver/data/assertion-kinds.json":
       "363444381c22a9a1453172f615690be2cacb2bac7c6cb90fde0ab11dc12eac53"
@@ -467,7 +470,7 @@
       "4b47d51cd4c24d0aa448c2ccd5aef23c48da807c226543b2868f8b0c86e6e731"
     ,
     "skill-content/deliver/data/delivery-result-contract.json":
-      "59ce3962df30f3c6bae5a82cbd2ed6963cc79c76851f943aedb40b40a234d950"
+      "5eb49b5f0588a1ef39db0d2ce4d6259936035c2da91eb32c5dd79c5325875419"
     ,
     "skill-content/deliver/data/delivery-verification-policy.json":
       "a0e4d9344a90c4fd222491b55953017c3e8b5f245c8d041dd69f405adf13e236"
@@ -509,7 +512,7 @@
       "8bc78970e33ae960d0f02dcf92c512396897e8f62d7ef7de2beae7cda2f04044"
     ,
     "skill-content/delivery-plan/SKILL.md":
-      "bd1020b0afede9f2e7f28c47e49f9d28548ecc51d2ec84158c98a5dc360702fa"
+      "a91d0e03cf11bc2b4613d9769554306ddc988d2c90c121a8d0183a3e38c802a2"
     ,
     "skill-content/delivery-plan/references/switch-delivery_path-light_when_eligible.md":
       "ad333a9d7dd2c15d0f1b4ac9630686386bc9cd0a6751ffce060147ed42799798"
@@ -761,7 +764,7 @@
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
-      "afceebbbe2c0cd68d41f17109e2185023a728542c6bf205166b5e6bb1e4d2df8"
+      "de3b42105cc1e0fe0b6fff34df75c793ffa80d81916a57192e4fb8343481ce9f"
     ,
     "skill-content/setup/references/windows-long-paths.md":
       "f6ce03aee49421cf7fd313388af3a9c9e2eb74f3e20a8019be0d4703cfca5705"
@@ -1011,6 +1014,9 @@
     ,
     "templates/ci-tests.yml":
       "0d05078ab3c81a50c20b8a08ce2f1bef6c8fe7b01d7c6230e122e1b140a49cc7"
+    ,
+    "templates/delivery-closure.yml":
+      "95b17a41a98cce16ca195a869a018eb94cfba4c13516d60f87d3272633baca0c"
     ,
     "templates/gitignore":
       "fa6da40c9313474f7d39f430d2311c2a6d646dfbceb5df566b454af6052d6a8e"

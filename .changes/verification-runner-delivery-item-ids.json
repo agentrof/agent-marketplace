@@ -1,0 +1,6 @@
+{
+  "summary": "Delivery verification commands receive the frozen candidate's Delivery and Item ids in AGENTROF_DELIVERY_ID and AGENTROF_ITEM_ID, so a reader whose shell exports nothing runs an approved command that needs them.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

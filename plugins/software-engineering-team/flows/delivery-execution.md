@@ -202,7 +202,9 @@ test command or revise the Operation Contract through its normal approval.
 Diagnostic command evidence never satisfies the final full-suite gate.
 Commands run in an independent scratch checkout of the frozen product commit,
 with no shared Git objects or mutable working files. The runner exposes an
-output directory through `AGENTROF_VERIFICATION_SCRATCH`. Provision dependencies through
+output directory through `AGENTROF_VERIFICATION_SCRATCH` and the candidate's
+Delivery and Item ids through `AGENTROF_DELIVERY_ID` and `AGENTROF_ITEM_ID`,
+whatever the caller's shell exports. Provision dependencies through
 approved commands and environment, never by borrowing the writer's ignored
 files. Tests and mutation cannot temporarily edit the reviewer's source.
 The runner stores raw output under ignored runtime and binds it to the

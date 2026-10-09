@@ -881,6 +881,18 @@ or after the claim's release or the Item ends; then the Item ref's own claims
 govern. Every reader checks each record again as the verb wrote it
 and stops with `DELIVERY_COORDINATION_CORRUPT` on one that fails, such as a
 hand-pushed record.
+For closure a provisional claim is never a path claim. While it is live,
+`closure-check` manages a pull request that changes one of its paths, as the
+path is reserved for the Item, and fails the Delivery's own closure with
+`DELIVERY_CLOSURE_INCOMPLETE` naming `finish-plan-revision`,
+`abort-plan-revision` or `withdraw-provisional-claim` as the recovery; a
+promoted path is managed through the published Item record that claims it, and
+an orphaned, withdrawn or void claim reserves nothing. On the reviewed
+Integration line both records must change no path at all and pass the same
+record check, so a recorded head that carries them closes when everything
+else is canonical; while an open Delivery's Integration carries a record that
+fails that check, `closure-check` manages every pull request and fails it with
+`DELIVERY_COORDINATION_CORRUPT`.
 `block-item` and `pause-item` need a clean Item worktree, so provisional
 commits are flushed with the plan or reverted first. Delivery `status` lists
 each claim's Story, paths, epoch and state, and `approve-review` fills a line
@@ -1018,7 +1030,8 @@ a retarget runs it again: a pull request no open Delivery manages passes, and
 a managed one passes only as its Delivery's recorded PR head with every
 closure precondition met, including a PR record, intent and Review that carry
 exactly what their verbs write and an Integration line whose every product
-change an Item, target merge or cancellation owns, where each Item integration
+change an Item, target merge or cancellation owns and whose provisional claim
+records change no path, where each Item integration
 merges a Story of the reviewed package and its own tree holds evidence notes
 bound to the product tip its seal names, and each cancellation revert restores
 every product path its Item merge changed. A merged record is proven against

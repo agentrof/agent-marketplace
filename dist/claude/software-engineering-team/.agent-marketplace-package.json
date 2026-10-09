@@ -176,7 +176,7 @@
       "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
     ,
     "scripts/delivery_closure.py":
-      "fdcf4af8aeaef6b888541297a3263c5879dc23dd15a0cafeba1cc3337c4b81bc"
+      "28e1ea4626b3c56dbcc7a0dd008a9ff3ed493934f14c1b07ea9f9d45a1494bf7"
     ,
     "scripts/delivery_compile.py":
       "7f6b2438fb3ca797011279ea4dccc49285f5ae7391bd0033516fc572c020ba80"
@@ -506,7 +506,7 @@
       "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
     ,
     "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
-      "76c1744d9886c5851c61f4e5f29bc22034968297ab84b25e145ad34aef7cfc32"
+      "c23b324300ea70379a61bafdc1faa0ab5886de392f89e7f9a54771ecb9bc9830"
     ,
     "skill-content/deliver/references/switch-test_engines-partitioned.md":
       "718714d0b07687b4d670499555397d5bac780a749b3dcd50736a6f3e5b0fafa7"
@@ -767,7 +767,7 @@
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
-      "de3b42105cc1e0fe0b6fff34df75c793ffa80d81916a57192e4fb8343481ce9f"
+      "b74c3fe08dc4f4667e9c8d1e4d8109a13ede1affc92c0b364c2a44b53464bc3c"
     ,
     "skill-content/setup/references/windows-long-paths.md":
       "f6ce03aee49421cf7fd313388af3a9c9e2eb74f3e20a8019be0d4703cfca5705"

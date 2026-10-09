@@ -90,7 +90,8 @@ files are read as Git data and never run. The check passes a pull request no
 open Delivery manages. A pull request is managed when its head ref is an
 `agentrof/` ref, when its head holds commits that only an open Delivery's
 Integration or Item refs reach and its base lacks, when it changes a path under
-a path claim of a not cancelled Item of an open Delivery, among the paths it
+a path claim of a not cancelled Item of an open Delivery, or under a live
+provisional claim of an open Delivery, among the paths it
 changes against its own base, compared from its merge base with that
 Delivery's own target branch, or when it writes the exact product bytes
 of such an Item that its base lacks at paths it changes itself; labels and other branch names never decide

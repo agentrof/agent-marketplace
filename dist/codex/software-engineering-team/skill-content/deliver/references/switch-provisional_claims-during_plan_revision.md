@@ -113,6 +113,22 @@ Integration commit at or after the claim's release, or the Item ends; from
 then on the Item ref's own claims govern, also when a later revision dropped
 a path.
 
+## What closure reads
+
+A provisional claim is never a path claim. While it is live, the
+`delivery-closure` check manages a pull request that changes one of its paths,
+as written or with its case folded, since the path is reserved for the Item,
+and the Delivery itself cannot close: `closure-check` reports
+`DELIVERY_CLOSURE_INCOMPLETE` with the recovery `finish-plan-revision`,
+`abort-plan-revision` or `withdraw-provisional-claim`. A promoted path is
+claimed by the published Item record; an orphaned, withdrawn or void claim
+reserves nothing. Both records change no path on the Integration line, so a
+recorded PR head that carries them closes when everything else is canonical.
+A record that changes a path or fails the record checks above is
+`DELIVERY_COORDINATION_CORRUPT` there, and while the Integration carries one
+the check manages every pull request and fails it with that finding, since it
+cannot tell which paths are reserved.
+
 ## What the owner sees
 
 `delivery_compile.py status --delivery DLV-### [--remote <remote>]` lists each provisional claim

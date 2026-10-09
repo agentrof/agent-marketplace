@@ -1,0 +1,6 @@
+{
+  "summary": "While verification readers are active, the vault hook refuses only writes that can reach the Item worktree under verification or its verification session: read-only commands, commands that stay wholly outside those directories, and Edit or Write elsewhere proceed, and the refusal names these allowed forms.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

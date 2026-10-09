@@ -25,6 +25,7 @@ import backlog_compile as compiler  # noqa: E402
 import backlog_migration  # noqa: E402
 import backlog_rebind as rebind  # noqa: E402
 import backlog_review_inputs  # noqa: E402
+import delivery_closure  # noqa: E402
 import delivery_compile  # noqa: E402
 import process_policy  # noqa: E402
 import requirement_compile  # noqa: E402
@@ -584,6 +585,11 @@ class SourceRebindTests(unittest.TestCase):
     def delivery_check(self) -> tuple[int, str]:
         return quiet(delivery_compile.check_delivery, SimpleNamespace(docs=str(self.docs), delivery="DLV-001"))
 
+    def closure_bindings(self) -> list[str]:
+        """The #461 closure check's binding findings for DLV-001 on the committed head, read as a detached tree."""
+        with delivery_closure.materialized(self.project, self.head()) as tree:
+            return delivery_closure.binding_findings(tree, "DLV-001")
+
     def test_delivery_keeps_its_execution_approval_across_a_rebind(self):
         root = self.approved_delivery()
         preserved = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
@@ -596,6 +602,7 @@ class SourceRebindTests(unittest.TestCase):
         code, output = quiet(delivery_compile.check_delivery, check)
         self.assertEqual(code, 0, output)
         self.assertEqual({path: path.read_bytes() for path in preserved}, preserved)
+        self.assertEqual(self.closure_bindings(), [])
         path = next((self.docs / rebind.RECEIPTS).glob("*.json"))
         sealed = json.loads(path.read_text(encoding="utf-8"))
         sealed["epics"] = [{**row, "disposition": "reviewed",
@@ -636,6 +643,10 @@ class SourceRebindTests(unittest.TestCase):
         code, output = self.delivery_check()
         self.assertEqual(code, 1, output)
         self.assertIn("Story AUTH-01 is impacted by a source rebind", output)
+        findings = self.closure_bindings()
+        self.assertEqual(len(findings), 1, findings)
+        self.assertTrue(findings[0].startswith("DELIVERY_CLOSURE_INCOMPLETE: "), findings)
+        self.assertIn("items/auth-01/item.md Story AUTH-01 is impacted by a source rebind", findings[0])
 
     def test_a_root_reader_finding_refuses_its_delivery_items_and_reads_their_stories(self):
         self.assert_epic_impact_reaches_delivery("EP-001")

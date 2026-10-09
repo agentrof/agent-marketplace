@@ -1,0 +1,6 @@
+{
+  "summary": "Report a Delivery complete only from a read-only closure audit, add an opt-in pull request closure check and a read-only repository protection report, and state that no delegation or autopilot grant waives closure.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

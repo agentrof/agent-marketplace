@@ -1559,12 +1559,13 @@ class DeliveryGitTests(unittest.TestCase):
                 with self.subTest(code=code, message=message):
                     self.assertEqual(self.merge_pr_findings(project, provider_type), [(code, message)])
                     self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
-            # A fast-forward puts the reviewed head itself on the target: no merge commit binds it.
+            # A fast-forward puts the reviewed head itself on the target: no merge commit binds it, and no
+            # target before the merge bounds the proof of its line.
             delivery_git.atomic_push(project, "origin", [("refs/heads/main", target, integration)])
-            self.assertEqual(self.merge_pr_findings(project, provider({**merged, "merge": integration})), [
-                ("DELIVERY_MERGE_POLICY_INVALID",
-                 "provider merge is not an exact two-parent merge of the reviewed Integration"),
-            ])
+            [(code, message)] = self.merge_pr_findings(project, provider({**merged, "merge": integration}))
+            self.assertEqual(code, "DELIVERY_COORDINATION_CORRUPT")
+            self.assertIn("the target holds the recorded PR head of DLV-001 on its own first-parent line, as a"
+                          " fast-forward leaves it", message)
         finally:
             remove_temporary(temporary)
 
@@ -3099,14 +3100,17 @@ class DeliveryGitTests(unittest.TestCase):
         _ref, idle, values = delivery_git._fence_context(project, "origin")
         for fence, held, finding in (
             ({"Mode": "governance"}, {}, ("DELIVERY_REF_COLLISION",
-                                          "reservation requires an idle open Fence, not one with Mode governance")),
+                                          "reservation requires an idle open Fence, not one with Mode governance"
+                                          "; recovery: " + delivery_git.FENCE_HOLD_RECOVERY["Mode"])),
             ({"Governance-Hash": "sha256:" + "2" * 64}, {},
              ("DELIVERY_FENCE_GOVERNANCE", "the Fence does not carry the approved Governance; "
                                            "apply it with apply-governance before reserving")),
             ({}, {other: first["integration"]},
-             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/deliveries/dlv-001")),
+             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: "
+                                        + delivery_git.fence_holder_recovery("agentrof/deliveries/dlv-001"))),
             ({}, {"refs/heads/agentrof/slots/001": first["target"]},
-             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/slots/001")),
+             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: "
+                                        + delivery_git.fence_holder_recovery("agentrof/slots/001"))),
         ):
             with self.subTest(finding=finding[1]):
                 held = dict(held)
@@ -6871,17 +6875,28 @@ class DeliveryGitDecisionTests(unittest.TestCase):
             raise AssertionError("a busy Fence is refused before the remote is listed")
 
         busy = "reservation requires an idle open Fence, not one with "
+        recovery = delivery_git.FENCE_HOLD_RECOVERY
+        held = "another Delivery or Slot holds the Fence: "
         for fence, listed, finding in (
-            ({"Mode": "governance"}, unlisted, ("DELIVERY_REF_COLLISION", busy + "Mode governance")),
+            ({"Mode": "governance"}, unlisted,
+             ("DELIVERY_REF_COLLISION", busy + "Mode governance; recovery: " + recovery["Mode"])),
             ({"Barrier-Kind": "plan-revision", "Barrier-Epoch": "e" * 22}, unlisted,
-             ("DELIVERY_REF_COLLISION", busy + "Barrier-Kind plan-revision")),
-            ({"Source-Intent": intent}, unlisted, ("DELIVERY_REF_COLLISION", busy + "Source-Intent " + intent)),
+             ("DELIVERY_REF_COLLISION", busy + "Barrier-Kind plan-revision; recovery: " + recovery["Barrier-Kind"])),
+            ({"Source-Intent": intent}, unlisted, ("DELIVERY_REF_COLLISION", busy + "Source-Intent " + intent
+                                                   + "; recovery: " + recovery["Source-Intent"])),
             ({"Target-Update-Intent": intent}, unlisted,
-             ("DELIVERY_REF_COLLISION", busy + "Target-Update-Intent " + intent)),
+             ("DELIVERY_REF_COLLISION", busy + "Target-Update-Intent " + intent
+              + "; recovery: " + recovery["Target-Update-Intent"])),
             ({}, lambda: "a" * 40 + "\trefs/heads/agentrof/deliveries/dlv-001",
-             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/deliveries/dlv-001")),
+             ("DELIVERY_REF_COLLISION", held + "agentrof/deliveries/dlv-001 (recovery: closure-audit --delivery"
+                                               " DLV-001 names its outcome; merge-pr merges its recorded PR,"
+                                               " verify-merge drops the refs of a proven merge, or /deliver DLV-001"
+                                               " finishes or cancels it)")),
             ({}, lambda: "a" * 40 + "\trefs/heads/agentrof/slots/001",
-             ("DELIVERY_REF_COLLISION", "another Delivery or Slot holds the Fence: agentrof/slots/001")),
+             ("DELIVERY_REF_COLLISION", held + "agentrof/slots/001 (recovery: the Delivery whose Item it holds,"
+                                               " which closure-audit --all names, finishes the Item with"
+                                               " integrate-item or cancels it with cancel-delivery; each releases"
+                                               " the Slot atomically)")),
             ({"Governance-Hash": "sha256:" + "2" * 64}, lambda: "",
              ("DELIVERY_FENCE_GOVERNANCE", "the Fence does not carry the approved Governance; "
                                            "apply it with apply-governance before reserving")),

@@ -1251,6 +1251,24 @@ class ContractTests(unittest.TestCase):
                                  "stop only when every remaining task waits on a queued question"):
                     self.assertIn(fragment.lower(), section)
 
+    def test_no_grant_or_delegation_waives_quality_or_delivery_closure(self):
+        """A broad delegation or an autopilot merge grant authorizes the flow's own steps only: the
+        merge class is merge-pr on the recorded PR head, and closure stays the closure audit's (#461)."""
+        merge = next(entry for entry in POLICY["classes"] if entry["id"] == "merge")
+        self.assertEqual(merge["description"], "The flow's own merge step on its recorded PR head, once its"
+                                               " required checks pass; never a provider or Git merge of another head.")
+        documents = {"skill": ENTRY / "SKILL.md", "orchestration": ROOT / "docs/orchestration.md",
+                     **{host: ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md"
+                        for host in ("claude", "codex")}}
+        for name, path in documents.items():
+            with self.subTest(document=name):
+                text = " ".join(path.read_text(encoding="utf-8").split())
+                if name in ("claude", "codex"):
+                    text = text.split("## Autopilot", 1)[1]
+                self.assertIn("never a provider or Git merge of another head", text)
+                self.assertIn("`closure-audit` returns `closed`", text)
+                self.assertRegex(text, r"waives? (its )?evidence, integration, (the )?PR record or (Delivery )?closure")
+
     def test_the_procedure_records_a_decision_before_it_applies_it(self):
         for host in ("claude", "codex"):
             with self.subTest(host=host):

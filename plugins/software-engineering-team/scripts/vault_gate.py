@@ -23,6 +23,7 @@ COMPILER_SCRIPTS = (
     "design_system_compile.py", "backlog_compile.py",
     "requirement_compile.py", "requirement_route.py", "stage_package.py",
     "operation_compile.py", "delivery_governance.py", "marketplace_paths.py",
+    "delivery_closure.py",
 )
 DATA_PATHS = (
     "skill-content/obsidian-vault/data",
@@ -353,6 +354,30 @@ def cmd_check(args) -> int:
     return 0 if result["ok"] else 1
 
 
+def closure_check(args, root: Path) -> int:
+    """Run the Delivery closure check of one pull request with the scripts under *root*.
+
+    The scripts are the base branch's archive, never the pull request's, and
+    every pull request value arrives as an argument, never as shell text.
+    """
+    command = [
+        sys.executable, str(root / "scripts" / "delivery_git.py"), "closure-check",
+        "--project-root", str(args.project_root.resolve()), "--pr-url", args.pr_url,
+        "--head", args.head, "--head-ref", args.head_ref, "--base", args.base,
+        "--target", args.target, "--remote", args.remote,
+    ]
+    return subprocess.run(command, check=False).returncode
+
+
+def cmd_delivery_closure(args) -> int:
+    if Path(sys.argv[0]).suffix == ".pyz":
+        with tempfile.TemporaryDirectory(prefix="vault-gate-") as temporary:
+            with zipfile.ZipFile(sys.argv[0]) as archive:
+                archive.extractall(temporary)
+            return closure_check(args, Path(temporary))
+    return closure_check(args, package_root())
+
+
 def cmd_install(args) -> int:
     root = package_root()
     destination = (
@@ -417,6 +442,15 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--project-root", type=Path, required=True)
     check.add_argument("--json", action="store_true")
     check.set_defaults(func=cmd_check)
+    closure = sub.add_parser("delivery-closure")
+    closure.add_argument("--project-root", type=Path, required=True)
+    closure.add_argument("--pr-url", required=True)
+    closure.add_argument("--head", required=True)
+    closure.add_argument("--head-ref", default="")
+    closure.add_argument("--base", required=True)
+    closure.add_argument("--target", default="")
+    closure.add_argument("--remote", default="origin")
+    closure.set_defaults(func=cmd_delivery_closure)
     install = sub.add_parser("install")
     install.add_argument("--project-root", type=Path, required=True)
     install.set_defaults(func=cmd_install)

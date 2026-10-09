@@ -55,6 +55,12 @@ delta, as
 `skill-content/challenge-review/references/switch-review_scope-impact_closure.md`
 defines.
 
+Before the scope handoff, run `delivery_git.py closure-audit --all` and show
+every Delivery whose outcome is not `closed` or `open`, and every readiness
+finding of an `awaiting_merge` one, such as a mismatched PR head, draft
+required evidence or a leftover Slot, each with the recovery step the audit
+names. The audit only reads; reservation keeps its own refusals.
+
 The proposal is disposable until reservation. A declined or interrupted
 proposal leaves the target checkout, refs and authored vault unchanged. After
 reservation, the Delivery ID, goal-derived slug and scope hash are immutable.

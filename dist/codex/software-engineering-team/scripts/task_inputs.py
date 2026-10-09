@@ -116,7 +116,7 @@ def row_path(row) -> str:
     return row.get("path") if isinstance(row, dict) else row
 
 
-def closure_raw(api, docs: Path, present: list, earlier: dict) -> dict:
+def closure_raw(api, docs: Path, present: list, earlier: dict, overrides: dict | None = None) -> dict:
     """``api.closure`` over the verified vault index when this Python has SQLite FTS5.
 
     The result equals the reparse ``api.closure`` computes. A closure module that
@@ -125,7 +125,9 @@ def closure_raw(api, docs: Path, present: list, earlier: dict) -> dict:
     published index bound to it and a Python without SQLite FTS5 use that reparse.
     """
     def reparse():
-        return api.closure(docs, present, deleted=earlier) if earlier else api.closure(docs, present)
+        options = {"policy": overrides} if overrides else {}
+        return api.closure(docs, present, deleted=earlier, **options) if earlier \
+            else api.closure(docs, present, **options)
     spelled = Path(docs).absolute()
     if not hasattr(api, "closure_from") or spelled.name != "docs" or spelled.parent.name != "workspace":
         return reparse()
@@ -146,7 +148,7 @@ def closure_raw(api, docs: Path, present: list, earlier: dict) -> dict:
     def run(index):
         snap = vault_query.Index(index).snapshot()
         policy = api.closure_policy(vault_check.effective_policy(
-            vault_check.load_policy(vault_check.DEFAULT_POLICY), docs))
+            vault_check.load_policy(vault_check.DEFAULT_POLICY), docs), overrides)
         result = api.closure_from(snap, api.changed_paths(docs, present, snap["notes"]), policy)
         if earlier:
             relations = api.earlier_relations(docs, earlier, vault=index.store.vault(),

@@ -95,7 +95,11 @@ the target branch; record it there, then run `refresh-target`. A later hash
 drift blocks start, resume, reopen and takeover until a new execution plan is
 approved. Re-approval refreshes every Item's Story and
 Test Plan pins and the Delivery's backlog and Definition of Done pins from the
-current approved sources. A sealed Item keeps the Operation bindings its
+current approved sources. Switch `source_rebind`: at `receipt_when_unchanged`,
+a source-rebind receipt carries a backlog pin forward; an Item it names as
+impacted is approved again, as
+`skill-content/execution-plan/references/switch-source_rebind-receipt_when_unchanged.md`
+defines. A sealed Item keeps the Operation bindings its
 evidence was produced against unless the approval names it with `--reopen`;
 that Item is rebound to the current contracts, stays integrated, and can then
 be reopened. Publication keeps a sealed Item's review and verification records

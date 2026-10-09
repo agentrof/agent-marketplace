@@ -550,6 +550,7 @@ RELEASED_DEFAULTS = {
     "review_scope_record": "off",
     "root_review_scope": "full",
     "source_decision_gate": "two_gates",
+    "source_rebind": "reviewed_revision",
     "step_budgets": "off",
     "step_timing": "off",
     "story_size_budget": "off",
@@ -569,6 +570,21 @@ SAFETY_RULES = {
             "No writer or reader pass and no new root review is needed",
             "Story, Operation, DoD, policy, topology and all other pins remain strict",
             "A content edit after migration invalidates that binding",
+        ),
+    },
+    "source_rebind": {
+        f"{SKILLS}/backlog-plan/references/switch-source_rebind-receipt_when_unchanged.md": (
+            "A changed root body or another root field, a removed",
+            "needs no second owner gate: run step 6 with the planned hash and",
+            "No reader runs for a `reused` epic, and its manifest is refused",
+            "Each such finding moves that epic to review",
+            "After the owner approves that exact hash",
+            "Plain `approve` refuses a round with a `Source Rebind` section",
+        ),
+        f"{SKILLS}/execution-plan/references/switch-source_rebind-receipt_when_unchanged.md": (
+            "Each hop is replayed from Git",
+            "a receipt names an Item's Story or Test Plan as impacted by its changed sources",
+            "a receipt is uncommitted, tampered, ambiguous or does not replay",
         ),
     },
     "review_scope": {

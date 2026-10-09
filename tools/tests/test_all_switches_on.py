@@ -119,7 +119,8 @@ EXPECTED = {key: sorted([*value, CALCULATION, ONE_GATE])
 # dependent_rebind_gate binds its reference to every task of its owning flows' entries.
 REBIND_GATE = "business-analysis/references/switch-dependent_rebind_gate-with_source.md"
 EXPECTED = {key: sorted([*value, REBIND_GATE])
-            if key.split(":")[0] in ("business-analysis", "experience-design") else value
+            if key.split(":")[0] in ("business-analysis", "design-system", "experience-design",
+                                     "solution-design") else value
             for key, value in EXPECTED.items()}
 # rebind_review_scope binds its reference to the tasks that select experience-modeling.
 SCOPED = "experience-modeling/references/switch-rebind_review_scope-source_delta.md"
@@ -167,6 +168,12 @@ EXPECTED = {key: sorted([*value, MIGRATION]) if key.startswith("backlog-plan:") 
 # provisional_claims binds its reference to every task of the entries whose flows own it.
 PROVISIONAL = "deliver/references/switch-provisional_claims-during_plan_revision.md"
 EXPECTED = {key: sorted([*value, PROVISIONAL]) if key.split(":")[0] in ("deliver", "execution-plan") else value
+            for key, value in EXPECTED.items()}
+# source_rebind binds its backlog-plan reference to backlog-plan tasks and its
+# execution-plan reference to execution-plan tasks.
+REBIND = "references/switch-source_rebind-receipt_when_unchanged.md"
+EXPECTED = {key: sorted([*value, key.split(":")[0] + "/" + REBIND])
+            if key.split(":")[0] in ("backlog-plan", "execution-plan") else value
             for key, value in EXPECTED.items()}
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")

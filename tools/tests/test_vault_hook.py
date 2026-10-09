@@ -116,6 +116,17 @@ class VaultHookPrototypeTests(unittest.TestCase):
             self.assertEqual(build.call_count, 1)
             self.assertEqual(output.getvalue(), expected.getvalue())
 
+    def test_backlog_receipts_are_compiler_owned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary).resolve() / "workspace/docs"
+            for folder in ("source-rebinds", "schema-migrations"):
+                target = {"file_path": str(docs / f"backlog/artifacts/{folder}/{'a' * 64}.json"),
+                          "content": "{}"}
+                output = io.StringIO()
+                with redirect_stderr(output):
+                    self.assertEqual(self.hook.pre_target(target), 2)
+                self.assertIn("backlog receipts are compiler-owned", output.getvalue())
+
     def test_patch_overlay_resolves_added_notes_and_rejects_deleted_inbound_without_copy(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary).resolve()

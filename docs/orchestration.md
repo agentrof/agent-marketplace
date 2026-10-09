@@ -211,7 +211,8 @@ back to two gates, as
 defines.
 
 Which owner gate approves the Experience rebinds a source approval makes
-necessary is process switch `dependent_rebind_gate`. At `separate`, the
+necessary, of a Business Analysis space, the Solution landscape or the Design
+System MASTER, is process switch `dependent_rebind_gate`. At `separate`, the
 default, binding refresh finds the stale Experience package after the source
 approval and opens its own scope gate. At `with_source`,
 `experience_compile.py source-impact` lists the stale packages before the
@@ -451,6 +452,22 @@ and its execution plan only while deterministic receipt replay proves its old
 backlog and Test Plan pins against the complete current postimage. Every other
 binding stays strict. The instructions live in
 `backlog-plan/references/switch-backlog_schema_migration-receipt_only.md`.
+
+Whether a backlog revision that only rebinds its upstream sources reviews
+every epic again is process switch `source_rebind`. At `reviewed_revision`,
+the default, it does, and a Delivery whose backlog pin moved approves its
+execution again. At `receipt_when_unchanged`, a revision whose root changes
+only its bindings and Requirement plans a receipt from the approved
+predecessor; an epic is reviewed only when a note of it is impacted, by a
+content change, a citation of a changed source document or row, the relation
+closure of a changed source, a changed inbound edge from a changed upstream
+note, a changed dependency edge or membership, and every other epic keeps its
+approved review. One scoped root reader judges the source diff, the owner
+approves the exact receipt hash, and a Delivery keeps its execution approval
+while receipt replay proves its pin and none of its Items is impacted. The
+instructions live in
+`backlog-plan/references/switch-source_rebind-receipt_when_unchanged.md` and
+`execution-plan/references/switch-source_rebind-receipt_when_unchanged.md`.
 
 At what level a Test Plan scenario has to run is process switch `test_levels`.
 A scenario may state `level`, `unit`, `fixture` or `live`, which

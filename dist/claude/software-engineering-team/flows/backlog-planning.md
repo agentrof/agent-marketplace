@@ -329,12 +329,12 @@ An entry in `advisories` names an empty last section, or an untouched Delivery N
 story approved before the compiler read that section above the navigation; it never fails the check,
 and the Product Owner fills the section whenever that story is revised.
 
-Switch `root_review_scope`: at `revision_delta`, the root reader of a backlog revision reads in full
-only the revision's delta, as
+Switch `root_review_scope`: at `revision_delta`, the root reader reads in full only the delta, as
 `skill-content/backlog-plan/references/switch-root_review_scope-revision_delta.md` defines.
-Switch `backlog_path`: at `light_when_eligible`, an eligible revision's story delta takes one reader
-and the compiler writes its root review, as
+Switch `backlog_path`: at `light_when_eligible`, an eligible delta has one reader, no root reader, as
 `skill-content/backlog-plan/references/switch-backlog_path-light_when_eligible.md` defines.
+Switch `source_rebind`: at `receipt_when_unchanged`, a receipt names the epics to review again, as
+`skill-content/backlog-plan/references/switch-source_rebind-receipt_when_unchanged.md` defines.
 
 Only after every epic package and review is green, run `backlog_review_inputs.py --docs
 <workspace>/docs --root`. Invoke one fresh `backlog-reviewer` with that manifest: the root backlog,

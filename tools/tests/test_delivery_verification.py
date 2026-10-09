@@ -260,6 +260,23 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertFalse(raw["candidate_intact"])
         self.assertFalse(verification.run_check(self.root, "diagnostic_test", selection_file=selector)["reused"])
 
+    def test_the_manifest_and_the_active_reader_refusal_name_the_one_allowed_command_form(self):
+        """A reader told only that writes wait loses its run to refused shell calls, so the manifest carries the
+        literal invocation and the refusal names its form and where files are read instead."""
+        self.freeze()
+        form = verification.manifest(self.root, "DLV-001", "AUTH-01", "qa_engineer", "qa_final")["command_form"]
+        self.assertTrue(form.startswith(verification.command_form(self.root) + " "), form)
+        tokens = (shlex.split(form) if os.name != "nt" else form.split())[:5]
+        self.assertEqual(Path(tokens[2]).name, "delivery_verification.py")
+        self.assertEqual(tokens[1], "-B")
+        self.assertEqual(tokens[3:5], ["--worktree", str(self.root)])
+        with self.assertRaises(RuntimeError) as refused:
+            verification.guard_write(self.root, [self.root / "src/product.py"])
+        message = str(refused.exception)
+        self.assertTrue(message.startswith("DELIVERY_VERIFICATION_READERS_ACTIVE: "), message)
+        for part in ("command_form", "no pipe, redirect, variable or prefix", "Read tool", "allowed_writes"):
+            self.assertIn(part, message)
+
     def test_frozen_manifest_defaults_to_resolver_and_batches_exact_candidate_text(self):
         self.freeze()
         for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_final")):

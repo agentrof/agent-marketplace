@@ -87,6 +87,9 @@ DLV-### --story <story>` before invoking the two readers. The resulting
 candidate and session identities bind all source and instruction inputs.
 Generate each role's `manifest` with `--role code_reviewer|qa_engineer` and
 `--mode review_initial|review_repair|qa_diagnostic|qa_final`.
+Put the manifest's `command_form` verbatim into every reader prompt: while
+readers are active, Bash admits only that one direct invocation followed by a
+verb, and readers read files with the host's Read tool.
 Every verification manifest includes the default `project_reading` plan. Start
 with `inspect-context --plan <saved verification manifest>` to batch-read its
 units from the frozen Git candidate. Preserve all `full_read` obligations and

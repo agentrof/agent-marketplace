@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import secrets
+import shlex
 import stat
 import time
 from pathlib import Path, PurePosixPath
@@ -457,7 +458,17 @@ def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
         raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
                            + describe_environment_holder(holder or {})
                            + f"; writes to the Item worktree wait until {wait}")
-    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing")
+    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing."
+                       " Until then Bash runs only the reader manifest's command_form, one direct"
+                       " `<python> [-B] <bound delivery_verification.py> --worktree <worktree> <verb> ...` with no"
+                       " pipe, redirect, variable or prefix but PYTHONDONTWRITEBYTECODE=1; read files with the host's"
+                       " Read tool or the CLI's inspect, inspect-context and diff, and write only under allowed_writes")
+
+
+def command_form(root: Path) -> str:
+    """The literal invocation a reader's Bash call starts with while readers are active; a verb follows it."""
+    arguments = [sys.executable, "-B", str(Path(__file__).resolve()), "--worktree", str(root.resolve())]
+    return subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
 
 
 def instruction_identity() -> str:
@@ -3472,6 +3483,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
               "read_interface": {"inspect": "inspect --path <repository-relative-path> [--base]", "diff": "diff [--path <repository-relative-path>]"},
               "review_passes": policy()["review_checks"], "allowed_writes": [str(session_path(root).parent / "scratch")],
               "mutation_scope_file": str(session_path(root).parent / "mutation-files.json"),
+              "command_form": command_form(root) + " <verb> ...",
               "result_interface": {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
                                    "role": role, "mode": mode, "verdict": "passed|failed|cancelled",
                                    "report": "Independent findings and conclusion", "checks": checks, "findings": []},

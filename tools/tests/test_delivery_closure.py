@@ -133,6 +133,44 @@ class DeliveryClosureTests(unittest.TestCase):
         finally:
             git(project, "worktree", "remove", "--force", str(view))
 
+    def point_remote_head(self, project: Path, branch: str, oid: str) -> None:
+        """Make *branch* the remote's default branch, as a fetch by Git 2.48 or later then records it."""
+        self.push_branch(project, branch, oid)
+        git(project / "remote.git", "symbolic-ref", "HEAD", f"refs/heads/{branch}")
+        git(project, "fetch", "-q", "origin")
+        git(project, "remote", "set-head", "origin", branch)
+
+    def test_the_audit_reads_each_delivery_on_the_branch_it_records_whatever_origin_head_names(self):
+        project, _docs, _product, head, provider = self.recorded()
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            delivery_git.merge_pr(project, "DLV-001")
+        tip = git(project, "rev-parse", "refs/remotes/origin/main")
+        # The remote's default branch lacks the merge the Delivery's recorded main holds (#473).
+        self.point_remote_head(project, "trunk", tip + "~1")
+        self.assertEqual(delivery_git.resolve_target_branch(project, "origin", recorded=None), "trunk")
+        self.assertEqual(self.outcome(project)["outcome"], "closed")
+        audited = delivery_closure.audit(project)
+        self.assertEqual([(item["delivery"], item["outcome"]) for item in audited["deliveries"]],
+                         [("DLV-001", "closed")])
+
+    def test_a_recorded_target_branch_answers_only_where_the_remote_holds_it(self):
+        project, _docs, _product, _head, _provider = self.recorded()
+        main = git(project, "rev-parse", "refs/remotes/origin/main")
+        self.point_remote_head(project, "trunk", main)
+        resolve = delivery_git.resolve_target_branch
+        self.assertEqual([resolve(project, "origin", recorded=value) for value in (None, "main", "absent")],
+                         ["trunk", "main", "trunk"])
+        # A branch the remote holds before any fetch tracks it answers the remote reads only.
+        self.push_branch(project, "release", main)
+        git(project, "update-ref", "-d", "refs/remotes/origin/release")
+        self.assertEqual(resolve(project, "origin", recorded="release"), "trunk")
+        self.assertEqual(delivery_git.resolve_target(project, "origin", recorded="release"), ("release", main))
+        self.assertEqual(delivery_git.open_target_branch(project, "origin"), "main")
+        self.assertEqual(delivery_git.open_target_branch(project, "origin", "main"), "main")
+        with self.assertRaisesRegex(RuntimeError, "^DELIVERY_TARGET_SPLIT: .*main, release"):
+            delivery_git.open_target_branch(project, "origin", "release")
+        self.assertEqual(delivery_compile.initial_target_branch(project / "workspace" / "docs"), "trunk")
+
     def test_the_canonical_flow_passes_closure_proves_its_merge_and_leaves_no_slot(self):
         project, _docs, _product, head, provider = self.recorded()
         checked = self.check(project, head)
@@ -1149,6 +1187,25 @@ class DeliveryClosureTests(unittest.TestCase):
         self.assertEqual((checked["managed"], checked["ok"]), (False, True), checked)
         delivery_git.abort_plan_revision(project, "DLV-001")
         self.assertEqual(delivery_closure.audit(project)["errors"], [])
+
+
+class TargetBranchNameTests(unittest.TestCase):
+    def test_a_recorded_target_branch_must_be_a_name_git_reads_as_a_branch(self):
+        for value in (None, ""):
+            self.assertIsNone(delivery_git.checked_target_branch(value))
+        for value in ("main", "release/2026.10", "team_a/next-1"):
+            self.assertEqual(delivery_git.checked_target_branch(value), value)
+        for value in ("-x", "a:b", "a..b", "a b", "x.lock", "a/", "a//b", "a/.b", "*", 7):
+            with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, "^DELIVERY_TARGET_INVALID: "):
+                delivery_git.checked_target_branch(value)
+
+    def test_a_new_delivery_outside_a_checkout_targets_main(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace" / "docs"
+            docs.mkdir(parents=True)
+            if any((parent / ".git").exists() for parent in docs.parents):
+                self.skipTest("the temporary directory lies inside a Git checkout")
+            self.assertEqual(delivery_compile.initial_target_branch(docs), "main")
 
 
 @integration

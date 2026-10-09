@@ -2022,7 +2022,8 @@ def approved_git_sync_authority(project: Path) -> tuple[str, str]:
     values["Barrier-Kind"] = delivery_git.trailer(message, "Barrier-Kind") or "none"
     values["Barrier-Epoch"] = delivery_git.trailer(message, "Barrier-Epoch") or "none"
     delivery_git._validate_fence_values(values)
-    branch = delivery_git.resolve_target_branch(project, "origin")
+    branch = delivery_git.resolve_target_branch(
+        project, "origin", recorded=delivery_git.open_target_branch(project, "origin"))
     target = git_sync_remote_oid(project, executable, "refs/heads/" + branch)
     if values["Mode"] != "open" or values["Target"] != target:
         raise ValueError("approved Git target has not completed its handoff")

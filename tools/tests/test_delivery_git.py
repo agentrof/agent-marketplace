@@ -811,11 +811,14 @@ class DeliveryGitTests(unittest.TestCase):
             ("DELIVERY_ITEM_SLOT_MISSING", "remote ref is absent: refs/heads/agentrof/slots/001",
              lambda: delivery_git.remote_oid(root, "origin", refs["slot"])),
             ("DELIVERY_FENCE_MODE", "writer readiness requires an open Fence",
-             lambda: delivery_git.require_target_ancestry(root, "origin", fence("upgrade", target), target)),
+             lambda: delivery_git.require_target_ancestry(root, "origin", fence("upgrade", target), target,
+                                                          delivery_id="DLV-001")),
             ("DELIVERY_TARGET_DRIFT", "target advanced; refresh the Delivery before Item activation",
-             lambda: delivery_git.require_target_ancestry(root, "origin", fence("open", base), target)),
+             lambda: delivery_git.require_target_ancestry(root, "origin", fence("open", base), target,
+                                                          delivery_id="DLV-001")),
             ("DELIVERY_TARGET_CONVERGENCE_REQUIRED", "Integration does not contain the current target",
-             lambda: delivery_git.require_target_ancestry(root, "origin", fence("open", target), base)),
+             lambda: delivery_git.require_target_ancestry(root, "origin", fence("open", target), base,
+                                                          delivery_id="DLV-001")),
             ("DELIVERY_WORKTREE_UNSAFE", f"Item worktree is missing: {missing}",
              lambda: delivery_git.worktree_is_clean_and_at(root, missing, target)),
             ("DELIVERY_LOCAL_REF_DIVERGED", "Item worktree HEAD differs from the remote Item tip",
@@ -1071,7 +1074,7 @@ class DeliveryGitTests(unittest.TestCase):
             ("apply-governance", lambda: delivery_git.apply_governance(project)),
             ("begin-source-handoff", lambda: delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)),
             ("writer readiness", lambda: delivery_git.require_target_ancestry(
-                project, "origin", delivery_git.commit_message(project, v1), target)),
+                project, "origin", delivery_git.commit_message(project, v1), target, delivery_id="DLV-001")),
         ):
             with self.subTest(reader=reader):
                 self.assertEqual(self.refused_finding(refusal), (
@@ -1085,7 +1088,7 @@ class DeliveryGitTests(unittest.TestCase):
         for reader, refusal in (
             ("apply-governance", lambda: delivery_git.apply_governance(project)),
             ("writer readiness", lambda: delivery_git.require_target_ancestry(
-                project, "origin", delivery_git.commit_message(project, corrupt), target)),
+                project, "origin", delivery_git.commit_message(project, corrupt), target, delivery_id="DLV-001")),
         ):
             with self.subTest(reader=reader, record="project-fence-v3"):
                 self.assertEqual(self.refused_finding(refusal),
@@ -3015,12 +3018,39 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.run_git(project, "push", "-q")
         return project, docs
 
-    def scope_delivery(self, docs: Path, delivery: str, slug: str, story: str) -> None:
+    def scope_delivery(self, docs: Path, delivery: str, slug: str, story: str, target_branch: str = "main") -> None:
         """Create *delivery* for one Story and approve its scope."""
         init = type("Args", (), {"docs": str(docs), "id": delivery, "slug": slug, "goal": f"Deliver {story}",
-                                 "outcome": None, "target_branch": "main", "story": [story]})
+                                 "outcome": None, "target_branch": target_branch, "story": [story]})
         self.assertEqual(delivery_compile.init_delivery(init), 0)
         self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": delivery})), 0)
+
+    @integration
+    def test_reservation_cuts_the_recorded_target_and_open_deliveries_share_it(self):
+        """A Delivery targets the branch its record names, not the one origin/HEAD names, and the
+        project Fence names one target, so a Delivery on another branch is not reserved while one
+        is open (#473)."""
+        project, docs = self.two_story_project()
+        delivery_git.run_git(project, "push", "-q", "origin", "HEAD:refs/heads/release")
+        release = delivery_git.run_git(project, "rev-parse", "HEAD")
+        self.scope_delivery(docs, "DLV-001", "auth", "AUTH-01", target_branch="release")
+        delivery_git.run_git(project, "add", "workspace/docs")
+        delivery_git.run_git(project, "commit", "-qm", "scope")
+        delivery_git.run_git(project, "push", "-q")
+        delivery_git.run_git(project, "remote", "set-head", "origin", "main")
+        self.assertNotEqual(delivery_git.run_git(project, "rev-parse", "origin/main"), release)
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        self.assertEqual((reserved["target_branch"], reserved["target"]), ("release", release))
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", reserved["integration"] + "^@"), release)
+        self.assertEqual(delivery_git.preflight(project, "DLV-001")["target_branch"], "release")
+        self.assertEqual(delivery_git.open_target_branch(project, "origin"), "release")
+
+        self.scope_delivery(docs, "DLV-002", "session", "AUTH-02", target_branch="main")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        code, message = self.refused_finding(lambda: delivery_git.reserve_delivery(project, "DLV-002"))
+        self.assertEqual(code, "DELIVERY_TARGET_SPLIT")
+        self.assertIn("main, release", message)
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
 
     @integration
     def test_the_next_delivery_reserves_on_a_child_of_the_fence_a_merged_one_left(self):
@@ -4462,7 +4492,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_governance.approve(args), 0)
         desired = delivery_governance.status(docs)[0]["governance_hash"]
         delivery_git.begin_applying_governance(project, desired)
-        _branch, baseline = delivery_git.resolve_target(project, "origin")
+        _branch, baseline = delivery_git.resolve_target(project, "origin", recorded=None)
         candidate = delivery_git.commit_tree(project, baseline,
             [governance.relative_to(project).as_posix(), *extra_paths], "Publish Governance", {},
             delivery_projections=True)
@@ -7472,6 +7502,7 @@ class DeliveryGitDecisionTests(unittest.TestCase):
                     mock.patch.object(delivery_compile, "docs_root", return_value=docs), \
                     mock.patch.object(delivery_compile, "delivery_findings", return_value=(directory, [])) as portable, \
                     mock.patch.object(delivery_compile, "split_note", return_value=({"status": status}, "")), \
+                    mock.patch.object(delivery_git, "open_target_branch", return_value=None) as shared, \
                     mock.patch.object(delivery_git, "resolve_target", return_value=("main", "a" * 40)), \
                     mock.patch.object(delivery_git, "remote_has_ref", return_value=False) as exists, \
                     mock.patch.object(delivery_git, "package_paths", return_value=["package.md"]), \
@@ -7482,6 +7513,7 @@ class DeliveryGitDecisionTests(unittest.TestCase):
                 result = delivery_git.reserve_delivery(root, "DLV-001")
                 refs = delivery_git.canonical_refs("DLV-001")
                 portable.assert_called_once_with(docs, "DLV-001")
+                shared.assert_called_once_with(root, "origin", None)
                 self.assertEqual(exists.call_args_list, [mock.call(root, "origin", refs["integration"]),
                                                         mock.call(root, "origin", refs["fence"])])
                 push.assert_called_once_with(root, "origin", [(refs["fence"], "", "c" * 40),

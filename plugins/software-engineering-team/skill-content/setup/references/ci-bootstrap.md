@@ -21,12 +21,14 @@ refuses a job skipped by its `if:` condition and a green commit status, which
 reports no conclusion
 ([agentrof/agent-marketplace#229](https://github.com/agentrof/agent-marketplace/issues/229)).
 
-The check reads committed trees with local Git and never fetches. GitHub runs a
+The check reads committed trees with local Git and never fetches. The target
+is the branch the Delivery records, where its remote-tracking ref exists, else
+the default branch that `refs/remotes/<remote>/HEAD` names. GitHub runs a
 `pull_request` workflow from the PR merge commit, so it counts in the target
 branch's remote-tracking ref or in the Delivery Integration's. GitHub runs a
 `pull_request_target` workflow from the default branch, so it counts only in
-the target's, which is the default branch whenever
-`refs/remotes/<remote>/HEAD` names it. Without a remote-tracking target, `HEAD`
+the default branch's remote-tracking ref: the target's when the Delivery
+targets the default branch. Without a remote-tracking target, `HEAD`
 stands in; outside a Git checkout, the working tree does. A written but
 uncommitted workflow, or one not yet pushed and fetched, does not count.
 

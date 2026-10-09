@@ -249,6 +249,19 @@ def delivery_path(docs: Path, identifier: str, slug: str) -> Path:
     return delivery_root(docs) / "deliveries" / f"{id_slug(identifier)}-{slug}"
 
 
+def package_target_branch(docs: Path, identifier: str) -> str | None:
+    """The target branch the local package of Delivery *identifier* records, or None without one."""
+    from delivery_git import checked_target_branch
+    directory = find_delivery(docs, identifier)
+    if directory is None:
+        return None
+    try:
+        props, _ = split_note(directory / "delivery.md")
+    except (OSError, ValueError):
+        return None
+    return checked_target_branch(props.get("target_branch"))
+
+
 def find_delivery(docs: Path, identifier: str) -> Path | None:
     for directory in delivery_dirs(docs):
         path = directory / "delivery.md"
@@ -808,6 +821,18 @@ def begin_dod_revision(args) -> int:
     return 0
 
 
+def initial_target_branch(docs: Path) -> str:
+    """The branch a new Delivery targets unless told: the remote's default, else the current one, else main."""
+    checkout = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), None)
+    if checkout is not None:
+        from delivery_git import resolve_target_branch
+        try:
+            return resolve_target_branch(checkout, "origin", recorded=None)
+        except RuntimeError:
+            pass
+    return "main"
+
+
 def init_delivery(args) -> int:
     docs = docs_root(args.docs)
     identifier = args.id or next_delivery_id(docs)
@@ -822,6 +847,12 @@ def init_delivery(args) -> int:
     if root.exists():
         print(json.dumps({"ok": False, "errors": [f"Delivery already exists: {root}"]}))
         return 1
+    from delivery_git import checked_target_branch
+    try:
+        target_branch = checked_target_branch(args.target_branch) or initial_target_branch(docs)
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}))
+        return 2
     stories = list(args.story or [])
     # One read-only candidate snapshot serves the strict read and the handoff check.
     with stage_package.candidate_session():
@@ -846,7 +877,8 @@ def init_delivery(args) -> int:
             errors = handoff_binding_findings(
                 docs, {story: sources[story]["story_path"] for story in stories})
         # Under switch delivery_path, the proposal reports whether it may take the light path.
-        light = (light_path_state(docs, {story: sources[story] for story in stories}, None, budget)
+        light = (light_path_state(docs, {story: sources[story] for story in stories}, None, budget,
+                                  branch=target_branch)
                  if not errors and policy_delivery_path(docs) == LIGHT_WHEN_ELIGIBLE else None)
     if errors:
         delivery_result.write_line(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
@@ -858,7 +890,7 @@ def init_delivery(args) -> int:
     props = {"type": "delivery", "id": identifier, "title": f"Delivery scope for {goal}",
              "status": "scope_proposed", "owner_role": "product_owner", "goal": args.goal,
              "derives_from": item_links, "definition_of_done": dod_link,
-             "target_branch": args.target_branch, "revision": 1,
+             "target_branch": target_branch, "revision": 1,
              **backlog_snapshot, **dod_snapshot,
              "aliases": [identifier], "tags": ["doc/delivery", "status/scope-proposed"]}
     body = body_for("delivery", props["title"], {
@@ -1055,6 +1087,11 @@ def delivery_findings(docs: Path, identifier: str, *,
     if props.get("type") != "delivery": errors.append("delivery.md type must be delivery")
     if not DELIVERY_ID_RE.fullmatch(str(props.get("id", ""))): errors.append("invalid Delivery id")
     if props.get("status") not in STATUSES: errors.append("invalid Delivery status")
+    from delivery_git import checked_target_branch
+    try:
+        checked_target_branch(props.get("target_branch"))
+    except RuntimeError as exc:
+        errors.append(str(exc))
     errors.extend(f"delivery.md missing section: {name}" for name in sorted(set(SECTIONS["delivery"]) - sections(body)))
     dod = delivery_root(docs) / "definition-of-done.md"
     if not dod.exists(): errors.append("approved Definition of Done is required")
@@ -1907,7 +1944,8 @@ def pull_request_workflow_findings(docs: Path, delivery: str, remote: str = "ori
     Integration head and the target, and a pull_request_target workflow from the
     default branch alone. So a pull_request trigger counts in the target's or the
     Integration's remote-tracking ref, and a pull_request_target trigger only in
-    the target's. Integration alone would not do: reservation cuts it from the
+    the default branch's, the target's unless the Delivery records another
+    branch. Integration alone would not do: reservation cuts it from the
     target before this approval, so a workflow merged into the target afterwards
     is in the merge commit before a target refresh brings it into Integration.
     HEAD stands in for a target that has no remote-tracking ref. Only local refs
@@ -1927,9 +1965,9 @@ def pull_request_workflow_findings(docs: Path, delivery: str, remote: str = "ori
         trees = [(str(workflows), texts, PULL_REQUEST_EVENTS)]
         where, remedy = f"is in {workflows} outside a Git checkout", ""
     else:
-        from delivery_git import resolve_target_branch, short_refs
+        from delivery_git import default_target_branch, resolve_target_branch, short_refs
         try:
-            branch = resolve_target_branch(checkout, remote)
+            branch = resolve_target_branch(checkout, remote, recorded=package_target_branch(docs, delivery))
         except RuntimeError:
             branch = ""
         target = f"refs/remotes/{remote}/{branch}"
@@ -1937,7 +1975,19 @@ def pull_request_workflow_findings(docs: Path, delivery: str, remote: str = "ori
         remedy = f", commit it, push it to {branch} on {remote} and fetch"
         if texts is None:
             target, texts, remedy = "HEAD", committed_workflows(checkout, "HEAD") or [], ", then commit it"
-        trees = [(target, texts, PULL_REQUEST_EVENTS)]
+        try:
+            default = default_target_branch(checkout, remote)
+        except RuntimeError:
+            default = ""
+        if not default or default == branch:
+            trees = [(target, texts, PULL_REQUEST_EVENTS)]
+        else:
+            # A Delivery on another branch runs pull_request_target from the default branch alone.
+            trees = [(target, texts, {"pull_request"})]
+            default_ref = f"refs/remotes/{remote}/{default}"
+            default_texts = committed_workflows(checkout, default_ref)
+            if default_texts is not None:
+                trees.append((default_ref, default_texts, {"pull_request_target"}))
         integration = f"refs/remotes/{remote}/{short_refs(delivery)['integration']}"
         integration_texts = committed_workflows(checkout, integration)
         if integration_texts is not None:
@@ -2266,10 +2316,11 @@ def waited_for_stories(sources: dict[str, dict], items: dict[str, tuple[dict, st
     return sorted(waited - set(sources))
 
 
-def unmet_dependency_findings(docs: Path, stories: list[str], remote: str) -> list[str]:
+def unmet_dependency_findings(docs: Path, stories: list[str], remote: str, branch: str | None = None) -> list[str]:
     """Name each Story that no Delivery the target branch holds merged records integrated.
 
-    The target's remote-tracking ref answers, as current as the last fetch,
+    The target is the *branch* the Delivery records, else the remote's
+    default; its remote-tracking ref answers, as current as the last fetch,
     else HEAD; the proof is the one start-item accepts from a merged package.
     """
     if not stories:
@@ -2279,7 +2330,7 @@ def unmet_dependency_findings(docs: Path, stories: list[str], remote: str) -> li
         return [f"{story} cannot be proven delivered outside a Git checkout" for story in stories]
     from delivery_git import merged_story_owners, resolve_target_branch
     try:
-        ref = f"refs/remotes/{remote}/{resolve_target_branch(checkout, remote)}"
+        ref = f"refs/remotes/{remote}/{resolve_target_branch(checkout, remote, recorded=branch)}"
         if subprocess.run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
                           capture_output=True, check=False).returncode:
             ref = "HEAD"
@@ -2300,7 +2351,8 @@ def light_topology_hash(items: dict[str, tuple[dict, str]]) -> str:
 
 
 def light_path_state(docs: Path, sources: dict[str, dict], items: dict[str, tuple[dict, str]] | None,
-                     budget: dict | None, recorded: dict | None = None, remote: str = "origin") -> dict:
+                     budget: dict | None, recorded: dict | None = None, remote: str = "origin",
+                     branch: str | None = None) -> dict:
     """Evaluate every light-path condition on a selection and, once it exists, its Item topology.
 
     Before the topology pass there are no Items to read, so
@@ -2340,7 +2392,7 @@ def light_path_state(docs: Path, sources: dict[str, dict], items: dict[str, tupl
                         f" {receipt_text(recorded['receipts'])} that scope approval recorded")
     for problem in problems:
         fail("operation_contracts_unchanged", problem)
-    for finding in unmet_dependency_findings(docs, waited_for_stories(sources, items), remote):
+    for finding in unmet_dependency_findings(docs, waited_for_stories(sources, items), remote, branch):
         fail("dependencies_met", finding)
     if budget is None or not budget.get("limits"):
         fail("within_story_size_budget", "switch story_size_budget sets no size limit, and without an"
@@ -2376,7 +2428,12 @@ def light_path_evaluation(docs: Path, root: Path, recorded: dict | None, remote:
         return {"eligible": False, "pending": [], "receipts": [], "topology_hash": None,
                 "failed": [{"condition": DELIVERY_PATH_SWITCH, "finding": " ".join(
                     ("the approved Stories cannot be read: " + ", ".join(errors)).split())}]}
-    return light_path_state(docs, sources, items, budget, recorded, remote)
+    from delivery_git import checked_target_branch
+    try:
+        branch = checked_target_branch(split_note(root / "delivery.md")[0].get("target_branch"))
+    except RuntimeError:
+        branch = None  # delivery_findings reports a name Git cannot read as a branch
+    return light_path_state(docs, sources, items, budget, recorded, remote, branch)
 
 
 def recorded_delivery_path(body: str) -> dict | None:
@@ -2664,7 +2721,8 @@ def operation_holder(docs: Path, delivery_id: str, remote: str) -> tuple[Path, s
     from delivery_git import resolve_target_branch, short_refs
     refs = [f"refs/remotes/{remote}/{short_refs(delivery_id)['integration']}"]
     try:
-        refs.append(f"refs/remotes/{remote}/{resolve_target_branch(checkout, remote)}")
+        refs.append(f"refs/remotes/{remote}/"
+                    f"{resolve_target_branch(checkout, remote, recorded=package_target_branch(docs, delivery_id))}")
     except RuntimeError:
         pass
     for ref in (*refs, "HEAD"):
@@ -3312,7 +3370,7 @@ def main(argv=None) -> int:
     sub.choices["begin-dod-revision"].set_defaults(func=begin_dod_revision)
     sub.choices["check-dod"].set_defaults(func=check_dod_cmd)
     sub.choices["approve-dod"].set_defaults(func=approve_dod)
-    init = sub.add_parser("init"); init.add_argument("--id"); init.add_argument("--slug"); init.add_argument("--goal", required=True); init.add_argument("--outcome"); init.add_argument("--target-branch", default="main"); init.add_argument("--story", action="append"); init.set_defaults(func=init_delivery)
+    init = sub.add_parser("init"); init.add_argument("--id"); init.add_argument("--slug"); init.add_argument("--goal", required=True); init.add_argument("--outcome"); init.add_argument("--target-branch"); init.add_argument("--story", action="append"); init.set_defaults(func=init_delivery)
     for name, func in (("check", check_delivery), ("approve-scope", approve_scope), ("approve-execution", approve_execution), ("status", status)):
         cmd = sub.add_parser(name); cmd.add_argument("--delivery", required=True); cmd.set_defaults(func=func)
     sub.choices["approve-execution"].add_argument(

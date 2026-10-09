@@ -731,13 +731,13 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
         self.assert_delivery_vault_contract()
 
-    def scope_ready_for_execution(self):
+    def scope_ready_for_execution(self, target_branch="main"):
         """Return approval arguments for one scope-approved Delivery with a claimed Item."""
         self.approve_verification_contract()
         self.approve_dod()
         init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
                                       "goal": "Authenticate", "outcome": None,
-                                      "target_branch": "main", "story": ["AUTH-01"]})
+                                      "target_branch": target_branch, "story": ["AUTH-01"]})
         self.assertEqual(delivery_compile.init_delivery(init_args), 0)
         plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
         self.assertEqual(delivery_compile.approve_scope(plan_args), 0)
@@ -1111,6 +1111,47 @@ class DeliveryCompilerTests(unittest.TestCase):
                         "none is committed in refs/remotes/origin/main or "
                         "refs/remotes/origin/agentrof/deliveries/dlv-001." in error
                         for error in result["errors"]), result)
+
+    def test_a_delivery_on_another_branch_reads_pull_request_target_on_the_default_branch(self):
+        self.scope_ready_for_execution(target_branch="release")
+        self.publish()
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        base = subprocess.run(["git", "-C", str(self.root), "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+        self.git("push", "-q", "--force", "origin", f"{base}:refs/heads/main", f"{base}:refs/heads/release")
+        self.git("fetch", "-q", "origin")
+        self.git("remote", "set-head", "origin", "main")
+        workflow = self.root / ".github" / "workflows" / "tests.yml"
+        # GitHub runs pull_request from the merge into the Delivery's release branch and
+        # pull_request_target from the default branch alone (#473).
+        for trigger, branch, expected in (("on: pull_request_target\n", "release", 1),
+                                          ("on: pull_request_target\n", "main", 0),
+                                          ("on: pull_request\n", "release", 0),
+                                          ("on: pull_request\n", "main", 1)):
+            with self.subTest(trigger=trigger, branch=branch):
+                self.git("checkout", "-q", "--detach", base)
+                workflow.parent.mkdir(parents=True, exist_ok=True)
+                workflow.write_text(trigger + WORKFLOW_JOBS, encoding="utf-8")
+                self.commit_workflows()
+                other = "main" if branch == "release" else "release"
+                self.git("push", "-q", "--force", "origin", f"HEAD:refs/heads/{branch}", f"{base}:refs/heads/{other}")
+                self.git("fetch", "-q", "origin")
+                findings = delivery_compile.pull_request_workflow_findings(self.docs, "DLV-001")
+                self.assertEqual(len(findings), expected, findings)
+                if expected:
+                    self.assertIn("refs/remotes/origin/release", findings[0])
+                    self.assertIn("push it to release on origin", findings[0])
+
+    def test_a_recorded_target_branch_git_cannot_read_is_a_package_finding(self):
+        self.scope_ready_for_execution()
+        delivery = delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md"
+        props, body = delivery_compile.split_note(delivery)
+        self.assertEqual(delivery_compile.delivery_findings(self.docs, "DLV-001")[1], [])
+        props["target_branch"] = "main:refs/heads/other"
+        delivery_compile.atomic_text(delivery, delivery_compile.frontmatter(props, body))
+        _directory, findings = delivery_compile.delivery_findings(self.docs, "DLV-001")
+        self.assertIn("DELIVERY_TARGET_INVALID: target_branch 'main:refs/heads/other' is not a branch name", findings)
 
     def test_execution_approval_reads_the_working_tree_only_outside_a_git_checkout(self):
         if any((parent / ".git").exists() for parent in self.root.parents):

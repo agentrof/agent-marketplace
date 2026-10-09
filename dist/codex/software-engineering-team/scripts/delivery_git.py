@@ -34,6 +34,8 @@ STORY_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[0-9]{2,}$")
 SLOT_RE = re.compile(r"^[0-9]{3,}$")
 EPOCH_RE = re.compile(r"^[A-Za-z0-9_-]{22}$")
 OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
+# A branch name Git accepts in a refspec, never an option, a refspec separator or a pattern.
+TARGET_BRANCH_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._/-]*")
 RECEIPT_SCHEMA_VERSION = 1
 GITHUB_PR_RE = re.compile(r"^/([^/]+)/([^/]+)/pull/([1-9][0-9]*)$")
 FENCE_MODES = {"open", "source_handoff", "governance", "upgrade"}
@@ -1196,21 +1198,99 @@ def _normalise_control_trailers(trailers: dict[str, str]) -> dict[str, str]:
     return value
 
 
-def resolve_target_branch(root: Path, remote: str) -> str:
-    """Name the target branch from local refs alone: the remote's default branch, else the current one."""
+class TargetBranchUnresolved(RuntimeError):
+    """Neither a recorded branch, the remote's default branch nor a current branch names the target."""
+
+
+def default_target_branch(root: Path, remote: str) -> str:
+    """The remote's default branch from local refs alone, else the current branch; empty when detached."""
     try:
         symbolic = run_git(root, "symbolic-ref", f"refs/remotes/{remote}/HEAD")
-        branch = symbolic.removeprefix(f"refs/remotes/{remote}/")
+        return symbolic.removeprefix(f"refs/remotes/{remote}/")
     except RuntimeError:
-        branch = run_git(root, "branch", "--show-current")
+        return run_git(root, "branch", "--show-current")
+
+
+def checked_target_branch(value) -> str | None:
+    """A recorded target branch name, None when nothing is recorded; a name Git cannot use refuses."""
+    if value is None or value == "":
+        return None
+    if (not isinstance(value, str) or not TARGET_BRANCH_RE.fullmatch(value) or ".." in value
+            or "//" in value or value.endswith((".lock", "/", ".")) or "/." in value):
+        raise RuntimeError(f"DELIVERY_TARGET_INVALID: target_branch {value!r} is not a branch name")
+    return value
+
+
+def resolve_target_branch(root: Path, remote: str, *, recorded: str | None) -> str:
+    """Name the target branch from local refs alone.
+
+    The branch a Delivery records answers where its remote-tracking ref
+    exists; otherwise the remote's default branch does, else the current one.
+    *recorded* is required so that every caller names the record it targets,
+    or None where no Delivery applies.
+    """
+    branch = default_target_branch(root, remote)
+    if recorded and recorded != branch and subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{recorded}"],
+            capture_output=True, check=False).returncode == 0:
+        return recorded
     if not branch:
-        raise RuntimeError("target branch cannot be resolved")
+        raise TargetBranchUnresolved("target branch cannot be resolved")
     return branch
 
 
-def resolve_target(root: Path, remote: str) -> tuple[str, str]:
-    branch = resolve_target_branch(root, remote)
-    remote_line = run_git(root, "ls-remote", remote, f"refs/heads/{branch}")
+def recorded_target_branch(root: Path, delivery_id: str) -> str | None:
+    """The target branch the local package of *delivery_id* records, or None without one."""
+    from delivery_compile import docs_root, find_delivery, split_note
+    directory = find_delivery(docs_root(root), delivery_id)
+    if directory is None:
+        return None
+    try:
+        props, _ = split_note(directory / "delivery.md")
+    except (OSError, ValueError):
+        return None
+    return checked_target_branch(props.get("target_branch"))
+
+
+def open_target_branch(root: Path, remote: str, recorded: str | None = None) -> str | None:
+    """The one target branch every open Delivery records, together with *recorded*, or None.
+
+    The project Fence names one target commit, so every open Delivery shares
+    one target branch; a split refuses instead of letting a Fence-level verb
+    move the target of one Delivery to another's branch.
+    """
+    from delivery_closure import ensure_object, listed_refs, package_directory, tree_note
+    branches = {recorded} if recorded else set()
+    for ref, oid in sorted(listed_refs(root, remote, "refs/heads/agentrof/deliveries/*").items()):
+        ensure_object(root, remote, oid, ref)
+        directory = package_directory(root, oid, ref.rsplit("/", 1)[1].upper())
+        if directory:
+            branch = checked_target_branch(tree_note(root, oid, f"{directory}/delivery.md")[0].get("target_branch"))
+            if branch:
+                branches.add(branch)
+    if len(branches) > 1:
+        raise RuntimeError("DELIVERY_TARGET_SPLIT: open Deliveries record the target branches "
+                           + ", ".join(sorted(branches)) + ", but the project Fence names one target; finish or"
+                           " cancel the Deliveries on one branch before a Delivery on another is reserved")
+    return next(iter(branches), None)
+
+
+def resolve_target(root: Path, remote: str, *, recorded: str | None) -> tuple[str, str]:
+    """The target branch and its remote tip; see resolve_target_branch for *recorded*."""
+    try:
+        branch = resolve_target_branch(root, remote, recorded=recorded)
+    except TargetBranchUnresolved:
+        if not recorded:
+            raise
+        branch = ""
+    if recorded and recorded != branch:
+        # The remote can hold the recorded branch before any fetch tracks it.
+        recorded_line = run_git(root, "ls-remote", remote, f"refs/heads/{recorded}")
+        if recorded_line:
+            return recorded, recorded_line.split()[0]
+        if not branch:
+            raise TargetBranchUnresolved("target branch cannot be resolved")
+    remote_line =run_git(root, "ls-remote", remote, f"refs/heads/{branch}")
     if remote_line:
         oid = remote_line.split()[0]
     else:
@@ -1262,7 +1342,7 @@ def merged_record(root: Path, remote: str, delivery_id: str) -> str | None:
     in the target history by the proof the Delivery compiler uses.
     """
     from delivery_compile import merged_pr_record
-    _branch, target = fetch_target(root, remote)
+    _branch, target = fetch_target(root, remote, recorded=recorded_target_branch(root, delivery_id))
     return merged_pr_record(root, delivery_id, target)
 
 
@@ -1564,7 +1644,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
     refuse_merged_delivery(root, delivery_id, remote)
     require_fence_record(commit_message(root, remote_oid(root, remote, refs["fence"])))
     provider = GitHubProvider(root, remote)
-    target_branch, _ = resolve_target(root, remote)
+    target_branch, _ = resolve_target(root, remote, recorded=recorded_target_branch(root, delivery_id))
     head = short_refs(delivery_id)["integration"]
     if record_name in {"delivery-review-published-v1", "pr-adoption-intent-v1"}:
         existing = provider.exact_unmerged(head, target_branch)
@@ -1692,7 +1772,8 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin", *,
     if unbound:
         raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: merge-pr refuses a PR head the coordinator did not"
                            " write as recorded: " + "; ".join(unbound))
-    target_branch, target_before = resolve_target(root, remote)
+    recorded = recorded_target_branch(root, delivery_id)
+    target_branch, target_before = resolve_target(root, remote, recorded=recorded)
     provider = GitHubProvider(root, remote)
     candidates = [item for item in provider.list_pull_requests(short_refs(delivery_id)["integration"], target_branch)
                   if str(item.get("url", "")) == canonical_url]
@@ -1732,7 +1813,7 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin", *,
     merge_oid = merge_value.get("oid") if isinstance(merge_value, dict) else merge_value
     if not isinstance(merge_oid, str) or not OID_RE.fullmatch(merge_oid):
         raise ProviderError("DELIVERY_MERGE_PROOF_INVALID: provider did not return an exact merge commit")
-    target_after = resolve_target(root, remote)[1]
+    target_after = resolve_target(root, remote, recorded=recorded)[1]
     run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{target_branch}:refs/remotes/{remote}/{target_branch}")
     try:
         run_git(root, "merge-base", "--is-ancestor", merge_oid, target_after)
@@ -2029,7 +2110,8 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
         else:
             stories[story] = {"disposition": "not_started", "tip": "none"}
         contexts[story] = context
-    target = trailer(fence_message, "Target") or resolve_target(root, remote)[1]
+    target = trailer(fence_message, "Target") or resolve_target(
+        root, remote, recorded=recorded_target_branch(root, delivery_id))[1]
     projection, intent_hash = cancellation_projection(delivery_id, scope_hash, reason, stories, target)
     barrier_epoch = epoch_token()
 
@@ -2203,7 +2285,8 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
     props, _ = split_note(delivery_path_value)
     if props.get("status") not in {"scope_approved", "execution_approved"}:
         raise RuntimeError("reserve-delivery requires scope_approved or execution_approved")
-    target_branch, target_oid = resolve_target(root, remote)
+    recorded = open_target_branch(root, remote, checked_target_branch(props.get("target_branch")))
+    target_branch, target_oid = resolve_target(root, remote, recorded=recorded)
     refs = canonical_refs(delivery_id)
     if remote_has_ref(root, remote, refs["integration"]):
         raise RuntimeError("DELIVERY_REF_COLLISION: reservation requires an absent Integration ref")
@@ -2593,8 +2676,8 @@ def _changed_target_paths(root: Path, previous_target: str, target: str) -> list
                             failure="cannot inspect target drift"))
 
 
-def fetch_target(root: Path, remote: str) -> tuple[str, str]:
-    branch, _advertised = resolve_target(root, remote)
+def fetch_target(root: Path, remote: str, *, recorded: str | None) -> tuple[str, str]:
+    branch, _advertised = resolve_target(root, remote, recorded=recorded)
     tracking = f"refs/remotes/{remote}/{branch}"
     run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{branch}:{tracking}")
     return branch, run_git(root, "rev-parse", tracking)
@@ -2679,7 +2762,7 @@ def refuse_merged_delivery(root: Path, delivery_id: str, remote: str = "origin")
     if listed:
         if not published_pr_recorded(root, remote, delivery_id, listed.split()[0], directory):
             return
-        _branch, target = fetch_target(root, remote)
+        _branch, target = fetch_target(root, remote, recorded=recorded_target_branch(root, delivery_id))
         merged = recorded_pr_merged(root, delivery_id, target)
     else:
         merged = merged_record(root, remote, delivery_id) is not None
@@ -2786,18 +2869,18 @@ def direct_update_took_no_effect(root: Path, remote: str, head: str) -> bool:
     refetched proves nothing.
     """
     try:
-        _branch, target = fetch_target(root, remote)
+        _branch, target = fetch_target(root, remote, recorded=open_target_branch(root, remote))
         return not is_ancestor(root, head, target)
     except RuntimeError:
         return False
 
 
 def require_target_ancestry(root: Path, remote: str, fence_message: str,
-                            integration_oid: str, item_oid: str | None = None) -> str:
+                            integration_oid: str, item_oid: str | None = None, *, delivery_id: str) -> str:
     require_fence_record(fence_message)
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: writer readiness requires an open Fence")
-    _branch, target = fetch_target(root, remote)
+    _branch, target = fetch_target(root, remote, recorded=recorded_target_branch(root, delivery_id))
     if trailer(fence_message, "Target") != target:
         raise RuntimeError("DELIVERY_TARGET_DRIFT: target advanced; refresh the Delivery before Item activation")
     if not is_ancestor(root, target, integration_oid):
@@ -2965,7 +3048,8 @@ def refresh_target(project_root: Path, delivery_id: str,
     previous_target = trailer(fence_message, "Target")
     if not previous_target or not OID_RE.fullmatch(previous_target):
         raise RuntimeError("DELIVERY_FENCE_CORRUPT: Fence has no valid target baseline")
-    _target_branch, target = fetch_target(root, remote)
+    recorded = recorded_target_branch(root, delivery_id)
+    _target_branch, target = fetch_target(root, remote, recorded=recorded)
     integrated = is_ancestor(root, target, integration_oid)
     if target == previous_target and integrated:
         # The Fence and the Integration are already converged, but a claim issued
@@ -3022,7 +3106,7 @@ def refresh_target(project_root: Path, delivery_id: str,
     updates.extend(refreshed_claim_updates(
         root, remote, delivery_id, directory, integration_oid, final_candidate, target))
     atomic_push(root, remote, updates)
-    _target_branch, observed_target = resolve_target(root, remote)
+    _target_branch, observed_target = resolve_target(root, remote, recorded=recorded)
     partial = observed_target != target
     return {"ok": True, "delivery": delivery_id, "changed": True, "target": target,
             "previous_target": previous_target, "paths": changed,
@@ -3061,7 +3145,7 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
     if occupied:
         raise RuntimeError("scope revision requires no active global Slot")
     previous_scope = trailer(commit_message(root, integration_oid), "Scope-Hash") or "none"
-    target_branch, target = resolve_target(root, remote)
+    target_branch, target = resolve_target(root, remote, recorded=recorded_target_branch(root, delivery_id))
     base = integration_oid
     if trailer(fence_message, "Target") and trailer(fence_message, "Target") != target:
         run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{target_branch}:refs/remotes/{remote}/{target_branch}")
@@ -3171,7 +3255,7 @@ def begin_source_handoff(project_root: Path, source_hash: str = "none",
             raise RuntimeError("DELIVERY_FENCE_MODE: source handoff requires an open Fence")
         target = values["Target"]
         if target == "none":
-            _branch, target = resolve_target(root, remote)
+            _branch, target = resolve_target(root, remote, recorded=open_target_branch(root, remote))
         values.update({"Mode": "source_handoff", "Epoch": epoch_token(), "Target": target,
                        "Source-Kind": source_kind, "Source-Intent": source_hash,
                        "Barrier-Kind": "none",
@@ -3182,7 +3266,7 @@ def begin_source_handoff(project_root: Path, source_hash: str = "none",
     except RuntimeError as exc:
         if "remote ref is absent" not in str(exc).lower() and "does not exist" not in str(exc).lower():
             raise
-        _branch, target = resolve_target(root, remote)
+        _branch, target = resolve_target(root, remote, recorded=open_target_branch(root, remote))
         values = {"Mode": "source_handoff", "Epoch": epoch_token(), "Target": target,
                   "Governance-Hash": "none", "Source-Kind": source_kind,
                   "Source-Intent": source_hash,
@@ -3267,7 +3351,7 @@ def finish_source_handoff(project_root: Path, remote: str = "origin") -> dict:
         raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
     if values["Target-Update-Intent"] == "none":
         raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: finish-source-handoff requires an authorized target-update intent")
-    _branch, target = resolve_target(root, remote)
+    _branch, target = resolve_target(root, remote, recorded=open_target_branch(root, remote))
     handoff_mode = values["Mode"]
     attempt = values["Target-Update-Attempt"]
     if attempt != "none":
@@ -3353,7 +3437,8 @@ def published_cancellation(root: Path, remote: str, delivery_id: str) -> bool:
         return False
     ref = canonical_refs(delivery_id)["integration"]
     try:
-        source = remote_ref_oids(root, remote, [ref])[ref] or fetch_target(root, remote)[1]
+        source = remote_ref_oids(root, remote, [ref])[ref] or fetch_target(
+            root, remote, recorded=recorded_target_branch(root, delivery_id))[1]
         props, _body = split_remote_note(root, source, rel_posix(root, directory / "delivery.md"), split_note)
     except RuntimeError:
         return False
@@ -3504,12 +3589,13 @@ def upgrade_target_merge(project_root: Path, delivery_id: str,
     refs = canonical_refs(delivery_id)
     integration_oid = remote_oid(root, remote, refs["integration"])
     refuse_cancelled_delivery(root, directory, integration_oid, "upgrade-target-merge")
-    _branch, target = resolve_target(root, remote)
+    recorded = recorded_target_branch(root, delivery_id)
+    _branch, target = resolve_target(root, remote, recorded=recorded)
     previous_target = values["Handoff-Target"] if values["Upgrade-Phase"] == "target_handoff" and values["Handoff-Target"] != "none" else values["Target"]
     if target == previous_target:
         return {"ok": True, "changed": False, "delivery": delivery_id,
                 "target": target, "upgrade_contract": values["Upgrade-Contract"]}
-    target_branch, _target_oid = resolve_target(root, remote)
+    target_branch, _target_oid = resolve_target(root, remote, recorded=recorded)
     run_git(root, "fetch", "--no-tags", remote,
             f"refs/heads/{target_branch}:refs/remotes/{remote}/{target_branch}")
     props, _ = split_note(directory / "delivery.md")
@@ -3665,7 +3751,7 @@ def reauthorize_target_update(project_root: Path, mode: str = "source_handoff",
         old_receipt = _validate_target_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
         if old_receipt["attempt"] != old_attempt or old_receipt["state"] != "prepared":
             raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: only an unspent prepared attempt can be reauthorized")
-        target_branch, target = resolve_target(root, remote)
+        target_branch, target = resolve_target(root, remote, recorded=open_target_branch(root, remote))
         old_base = values["Target-Carrier-Base"]
         if target == old_base:
             raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target did not advance")
@@ -3775,7 +3861,7 @@ def apply_target_update(project_root: Path, mode: str = "source_handoff",
     receipt = _validate_target_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
     if receipt["state"] == "verified":
         return {"ok": True, "mode": mode, "state": "verified", "target": values["Target"]}
-    target_branch, target_before = resolve_target(root, remote)
+    target_branch, target_before = resolve_target(root, remote, recorded=open_target_branch(root, remote))
     base = values["Target-Carrier-Base"]
     if target_before != base:
         # A direct push can be accepted by the remote while its response is
@@ -3862,7 +3948,7 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: claim-items requires an open Fence")
     refuse_cancelled_delivery(root, directory, integration_oid, "claim-items")
-    require_target_ancestry(root, remote, fence_message, integration_oid)
+    require_target_ancestry(root, remote, fence_message, integration_oid, delivery_id=delivery_id)
     marker = commit_tree(root, integration_oid, [], f"Establish claims for {delivery_id}",
                          {"Record": "claims-established-v1", "Protocol": "1", "Delivery": delivery_id,
                           "Scope-Hash": str(delivery_props.get("scope_hash", "none")),
@@ -4678,7 +4764,7 @@ def require_current_activation_target(root: Path, remote: str, delivery_id: str,
     from delivery_compile import frontmatter, content_hash
     refs = canonical_refs(delivery_id, story_id, slot)
     slot_ref = refs["slot"]
-    _target_branch, target_after = resolve_target(root, remote)
+    _target_branch, target_after = resolve_target(root, remote, recorded=recorded_target_branch(root, delivery_id))
     if target_after != target_before:
         paused_props = dict(item_props)
         paused_props["status"] = "paused"
@@ -4812,7 +4898,7 @@ def unmet_waits_for(root: Path, remote: str, delivery_id: str, integration_oid: 
     delivered = merged_story_owners(root, integration_oid, unclaimed)
     arriving = {}
     if len(delivered) < len(unclaimed):
-        _branch, target = fetch_target(root, remote)
+        _branch, target = fetch_target(root, remote, recorded=recorded_target_branch(root, delivery_id))
         arriving = merged_story_owners(root, target, [story for story in unclaimed if story not in delivered])
     waiting, undeliverable = [], []
     for story in stories:
@@ -4877,7 +4963,8 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     fence_target = trailer(fence_message, "Target")
     if not fence_target or not OID_RE.fullmatch(fence_target):
         raise RuntimeError("DELIVERY_FENCE_CORRUPT: start-item requires a valid Fence target baseline")
-    target_before = require_target_ancestry(root, remote, fence_message, integration_oid, item_oid)
+    target_before = require_target_ancestry(root, remote, fence_message, integration_oid, item_oid,
+                                            delivery_id=delivery_id)
     max_parallel = project_max_parallel(root, trailer(fence_message, "Governance-Hash") or "none")
     occupied = remote_slot_oids(root, remote)
     free = next((slot for slot in range(1, max_parallel + 1) if slot_key(slot) not in occupied), None)
@@ -5062,7 +5149,7 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
         raise RuntimeError("DELIVERY_FENCE_MODE: reopen-item requires an open Fence")
     if not is_ancestor(root, item_oid, integration_oid):
         raise RuntimeError("reopen-item requires an Item its Integration has absorbed")
-    target_before = require_target_ancestry(root, remote, fence_message, integration_oid)
+    target_before = require_target_ancestry(root, remote, fence_message, integration_oid, delivery_id=delivery_id)
     # A reopen activates the Item, so it reads the limit only while the Fence carries it.
     max_parallel = project_max_parallel(root, trailer(fence_message, "Governance-Hash") or "none")
     if any(oid == item_oid for oid in remote_slot_oids(root, remote).values()):
@@ -5328,7 +5415,8 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     item_oid = remote_oid(root, remote, refs["item"])
-    target_before = require_target_ancestry(root, remote, commit_message(root, fence_oid), integration_oid, item_oid)
+    target_before = require_target_ancestry(root, remote, commit_message(root, fence_oid), integration_oid, item_oid,
+                                            delivery_id=delivery_id)
     slots = remote_slot_oids(root, remote)
     slot = next((key for key, oid in slots.items() if oid == item_oid), None)
     if slot is None:
@@ -5826,14 +5914,13 @@ def preflight(project_root: Path, delivery_id: str, story_id: str | None = None,
     target = None
     if not errors:
         try:
-            target = run_git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-        except RuntimeError:
-            try:
-                target = run_git(root, "branch", "--show-current")
-            except RuntimeError as exc:
-                errors.append(str(exc))
+            target = resolve_target_branch(root, "origin", recorded=recorded_target_branch(anchor, delivery_id))
+        except TargetBranchUnresolved:
+            target = None
+        except RuntimeError as exc:
+            errors.append(str(exc))
     return {"ok": not errors, "errors": sorted(set(errors)), "main_worktree": str(anchor) if anchor else None,
-            "target_branch": target.removeprefix("origin/") if target else None,
+            "target_branch": target,
             "refs": refs, "worktrees": paths}
 
 

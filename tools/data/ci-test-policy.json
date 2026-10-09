@@ -268,7 +268,8 @@
         "tools.tests.test_test_group_report.*",
         "tools.tests.test_level_change_map.*",
         "tools.tests.test_test_engines.*",
-        "tools.tests.test_performance_contracts.*"
+        "tools.tests.test_performance_contracts.*",
+        "tools.tests.test_live_test_groups.*"
       ],
       "depends_on": [
         "contracts"
@@ -661,6 +662,7 @@
     "tools.tests.test_lane_table",
     "tools.tests.test_level_change_map",
     "tools.tests.test_light_backlog_path",
+    "tools.tests.test_live_test_groups",
     "tools.tests.test_living_experience_flow",
     "tools.tests.test_maintainer_protocol",
     "tools.tests.test_mechanical_pass_tier",

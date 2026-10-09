@@ -194,6 +194,16 @@ manifest's scratch directory. The runner validates the candidate binding and
 passes normalized selection data through `AGENTROF_DIAGNOSTIC_TESTS`; it never
 appends those identifiers to shell text. The compiler-owned JSON adds
 `selected_test_ids`, the sorted union of the failed and affected identifiers.
+An open inherited finding may list `negative_control_test_ids`, its
+prescribed negative controls. The selection may then add
+`finding_controls: [{finding_id, test_ids}]`: ids the finding lists, in test
+files the Item changed, with no Test Plan scenario binding them. The runner
+adds them to `selected_test_ids`, passes `finding_control_test_ids` and
+`evidence_scope: finding_diagnostic` so the adapter knows they are finding
+controls, and records the run as finding-scoped diagnostic evidence that QA
+cites when it resolves the finding. It never counts as acceptance evidence;
+Test Plan selection and approved row values are unchanged, and the backlog
+absorbs such controls at its next ordinary revision.
 Only diagnostic commands receive this environment variable; final checks,
 runtime commands and lane commands remove it, including any inherited value.
 A changed selection cannot reuse an

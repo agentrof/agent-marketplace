@@ -3875,6 +3875,29 @@ def apply_target_update(project_root: Path, mode: str = "source_handoff",
                     "target": f"refs/heads/{target_branch}",
                     "target_oid": target_before, "receipt": verified,
                     "recovered": True}
+        # A person may merge the authorized draft PR by hand. When the target
+        # holds exactly the merge commit this call would have produced (first
+        # parent the authorized base, second the authorized head), the update
+        # happened as authorized and only its local receipt is missing.
+        if carrier == "github_pr":
+            from delivery_provider import GitHubProvider
+            repository = values["Target-Repository"].removeprefix("github:")
+            number = values["Target-Carrier-Object"].removeprefix("pr:")
+            url = f"https://github.com/{repository}/pull/{number}"
+            observed = GitHubProvider(root, remote).inspect_pull_request(url)
+            merge_oid = str((observed.get("mergeCommit") or {}).get("oid") or "")
+            if (str(observed.get("state", "")).upper() == "MERGED" and merge_oid
+                    and observed.get("headRefOid") == values["Target-Carrier-Head"]
+                    and is_ancestor(root, merge_oid, target_before)):
+                commit = run_git(root, "cat-file", "-p", merge_oid)
+                parents = [line.split(" ", 1)[1] for line in commit.splitlines()
+                           if line.startswith("parent ") and " " in line]
+                if parents == [base, values["Target-Carrier-Head"]]:
+                    verified = mark_target_verified(root, mode, attempt)
+                    return {"ok": True, "mode": mode, "carrier": carrier,
+                            "pull_request_url": url, "merge_commit": merge_oid,
+                            "target": target_before, "receipt": verified,
+                            "recovered": True}
         # No external mutation was elected yet: keep the exact prepared
         # receipt so a fresh target-carrier attempt can be based safely.
         if receipt["state"] == "prepared":

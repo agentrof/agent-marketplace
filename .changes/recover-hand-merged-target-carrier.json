@@ -1,0 +1,6 @@
+{
+  "summary": "Recover a target update whose draft carrier PR was merged by hand: apply-target-update now verifies the receipt when the target holds the exact merge commit of the authorized head onto the authorized base, instead of refusing with no command left to recover.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

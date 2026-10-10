@@ -1040,6 +1040,73 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(values["Target-Update-Intent"], "none")
         finally:
             remove_temporary(temporary)
+
+    def hand_merge_pr_carrier(self, squash: bool = False) -> tuple[Path, str, str, str]:
+        """Authorize a draft PR target carrier, then merge it outside the coordinator.
+
+        A person merges the PR on the provider before apply-target-update runs: with
+        the exact merge commit the coordinator would make, or as a squash whose one
+        parent is the base.
+        """
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+        base = delivery_git.run_git(project, "rev-parse", "HEAD")
+        (project / "handoff.txt").write_text("target candidate\n", encoding="utf-8")
+        candidate = delivery_git.commit_tree(project, base, ["handoff.txt"], "Target candidate", {})
+        carrier = "refs/heads/handoff-carrier"
+        delivery_git.atomic_push(project, "origin", [(carrier, "", candidate)])
+        delivery_git.authorize_target_update(project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                                             "github_pr", carrier, "pr:17", candidate, base,
+                                             "github:agentrof/example")
+        if squash:
+            merge = delivery_git.commit_tree(project, base, ["handoff.txt"], "Squashed carrier", {})
+        else:
+            merge = delivery_git.merge_candidate(project, base, candidate, "Merge carrier PR", {})
+        delivery_git.atomic_push(project, "origin", [("refs/heads/main", base, merge)])
+        return project, base, candidate, merge
+
+    @staticmethod
+    def merged_pr_provider(head: str, merge: str):
+        """Provider double that reports the carrier PR merged by hand and refuses every write."""
+        class MergedProvider:
+            def __init__(self, root: Path, remote: str = "origin"):
+                pass
+
+            def inspect_pull_request(self, url: str) -> dict:
+                return {"url": url, "state": "MERGED", "isDraft": False,
+                        "headRefOid": head, "mergeCommit": {"oid": merge}}
+
+            def __getattr__(self, name: str):
+                raise AssertionError(f"a hand-merged carrier needs no provider call: {name}")
+        return MergedProvider
+
+    @integration
+    def test_hand_merged_pr_carrier_recovers_to_a_verified_target_update(self):
+        """The exact merge commit of the authorized head onto the authorized base proves the update."""
+        project, _base, candidate, merge = self.hand_merge_pr_carrier()
+        with mock.patch("delivery_provider.GitHubProvider", self.merged_pr_provider(candidate, merge)):
+            recovered = delivery_git.apply_target_update(project, "source_handoff")
+        self.assertTrue(recovered["recovered"])
+        self.assertEqual((recovered["merge_commit"], recovered["target"]), (merge, merge))
+        self.assertEqual(recovered["receipt"]["state"], "verified")
+        self.assertEqual(self.target_update_state(project), "verified")
+        self.assertEqual(delivery_git.finish_source_handoff(project)["mode"], "open")
+
+    @integration
+    def test_hand_merged_pr_carrier_with_another_merge_shape_still_refuses(self):
+        """A squash, or a merge PR whose head is not the authorized one, leaves the update unproven."""
+        for squash, reported_head in ((True, None), (False, "0" * 40)):
+            with self.subTest(squash=squash, reported_head=reported_head):
+                project, _base, candidate, merge = self.hand_merge_pr_carrier(squash=squash)
+                provider = self.merged_pr_provider(reported_head or candidate, merge)
+                with mock.patch("delivery_provider.GitHubProvider", provider):
+                    refusal = self.refused_finding(
+                        lambda: delivery_git.apply_target_update(project, "source_handoff"))
+                self.assertEqual(refusal, ("DELIVERY_TARGET_UPDATE_UNCERTAIN",
+                                           "target moved before authorized mutation; reauthorize target update"))
+                self.assertEqual(self.target_update_state(project), "prepared")
+
     def push_protocol_1_fence(self, project: Path, replacing: str = "") -> str:
         """Push the open Fence a protocol-1 project left on the target tip, in place of the
         Fence *replacing* names, and return it."""

@@ -1185,6 +1185,48 @@ print(sys.argv[2])
         verification.validate(self.root, "DLV-001", "AUTH-01")
 
 
+    def test_every_verification_session_of_an_item_runs_in_one_kept_runtime_checkout(self):
+        """A project environment may bind an Item instance to the checkout that created it, so a
+        new session's up must run where the last one did, re-pinned to the new candidate as a
+        fresh clone would hold it."""
+        item, body = delivery.split_note(self.root / self.item_path)
+        item.update(runtime_required=True, environment_contract_ref="operation/environment-contract")
+        self.write(self.item_path, delivery.frontmatter(item, body))
+        self.note("workspace/docs/operation/environment-contract.md", {"status": "approved", "env_command": self.command, "env_workdir": ".", "scenarios": ["baseline"], "service_catalog": []})
+        self.commit()
+        self.freeze()
+        original = subprocess.run
+        directories = []
+
+        def record(command, *args, **kwargs):
+            if isinstance(command, str) and command.startswith(self.command):
+                directories.append(Path(kwargs["cwd"]))
+                if command.endswith(" up"):
+                    (Path(kwargs["cwd"]) / "src/product.py").write_text("left by the last session")
+                    (Path(kwargs["cwd"]) / "build-output").write_text("ignored or untracked output")
+            return original(command, *args, **kwargs)
+
+        with mock.patch.object(verification.subprocess, "run", side_effect=record):
+            for verb in ("down", "up", "down"):
+                verification.run_environment(self.root, verb)
+            verification.register_result(self.root, self.result())
+            cancelled = self.result("qa_engineer", "qa_final", "cancelled")
+            cancelled["cancellation_confirmed"] = True
+            verification.register_result(self.root, cancelled)
+            self.write("src/product.py", "value = 3\n")
+            self.commit()
+            self.freeze()
+            events = [verification.run_environment(self.root, "down")]
+            self.assertFalse((directories[-1] / "build-output").exists())
+            events.append(verification.run_environment(self.root, "up"))
+        self.assertEqual(len(set(directories)), 1, directories)
+        checkout = directories[0]
+        self.assertEqual(checkout.name, verification.RUNTIME_CHECKOUT)
+        self.assertEqual(verification.git(checkout, "rev-parse", "HEAD"),
+                         verification.read_session(self.root)["candidate"]["product_commit"])
+        self.assertEqual([event["candidate_intact"] for event in events], [True, False])
+        self.assertEqual(events[0]["exit_code"], 0)
+
     def test_runtime_mutation_invalidates_evidence_but_teardown_remains_available(self):
         item, body = delivery.split_note(self.root / self.item_path)
         item.update(runtime_required=True, environment_contract_ref="operation/environment-contract")
@@ -1680,7 +1722,8 @@ print(sys.argv[1])
             events.append(verification.run_environment(self.root, verb, value))
         self.assertNotEqual(events[0]["attempt_id"], old_runtime["attempt_id"])
         self.assertTrue(all(event["candidate_intact"] for event in events))
-        self.assertEqual((old_checkout[0] / "src/product.py").read_text(), "partial runtime preparation")
+        # The retry re-pins the one kept checkout, so the failed attempt's change is gone.
+        self.assertEqual((old_checkout[0] / "src/product.py").read_text(), "value = 2\n")
         self.assertFalse(set(old_outputs) & {event["output_file"] for event in events})
         for name, content in old_outputs.items():
             self.assertEqual(verification.raw_output_path(self.root, name).read_bytes(), content)

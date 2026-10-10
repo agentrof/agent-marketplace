@@ -1,0 +1,6 @@
+{
+  "summary": "Run every QA verification session of an Item in one kept private runtime checkout, re-pinned to each session's candidate, so a project environment that binds an Item instance to its checkout accepts the next session's up.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

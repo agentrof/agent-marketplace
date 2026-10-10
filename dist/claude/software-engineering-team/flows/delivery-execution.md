@@ -248,8 +248,11 @@ exact direct-parent binding. Runtime verification is mandatory exactly when
 the approved Item declares `runtime_required: true`.
 For that Item, run the approved Environment Contract through
 `environment --verb down|up|seed|logs|url [--value <approved-identifier>]`.
-Its persistent private checkout supports the existing fresh-runtime protocol;
-return the recorded event hashes with the full per-surface runtime findings.
+Its persistent private checkout supports the existing fresh-runtime protocol.
+Every verification session of the Item uses that one checkout path, so a
+project environment that binds an Item instance to the checkout that created
+it accepts the next session's `up`; each session's first command re-pins it to
+the session's candidate with untracked and ignored files removed. Return the recorded event hashes with the full per-surface runtime findings.
 Successful down, up, seed, logs and final down are required, alongside the
 independent runtime assessment. A non-runtime Item starts no environment.
 

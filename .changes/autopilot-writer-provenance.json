@@ -1,0 +1,6 @@
+{
+  "summary": "Keep an autopilot grant or arming record the packaged writer made while an unrelated shell command was running, instead of letting that command's hook snapshot put the old state back.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

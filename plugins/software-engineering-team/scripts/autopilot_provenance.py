@@ -40,8 +40,8 @@ def record(directory: Path, name: str, data: bytes | None) -> None:
     os.chmod(path.parent, 0o700)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     try:
-        with os.fdopen(fd, "w", encoding="ascii") as handle:
-            handle.write(hashlib.sha256(data).hexdigest())
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(hashlib.sha256(data).hexdigest().encode("ascii"))
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)

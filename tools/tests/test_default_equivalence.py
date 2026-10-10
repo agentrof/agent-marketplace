@@ -240,6 +240,9 @@ SHIPPED_ADDITIONS = {
         72, "#461: the read-only Delivery closure audit, pull request closure check and protection"
             " report, a package script every task binds with the other package scripts; no"
             " default-path compiler or coordinator output changes."),
+    "scripts/autopilot_provenance.py": (
+        72, "#495: the autopilot writer marks the vault hook reads, a package script every task"
+            " binds with the other package scripts; no default-path step runs it."),
     "scripts/context_history.py": (
         72, "#441: exact bound document history is resolved by package code"
     ),

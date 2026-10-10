@@ -4346,6 +4346,53 @@ class AutopilotRuntimeGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse((self.runtime / "grant.json").exists())
 
+    def packaged_writer(self):
+        spec = importlib.util.spec_from_file_location("autopilot_writer_under_test", AUTOPILOT_SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_a_packaged_write_during_an_unrelated_long_command_stays(self):
+        writer = self.packaged_writer()
+        self.write("grant.json", self.grant(state="revoked", ended_at="2026-10-01T22:00:00Z"))
+        arming = {"armed_at": "2026-10-01T23:00:00Z", "arguments": "on --for 2h"}
+        result = self.shell_event("python3 -m unittest discover", lambda: writer.write_private(
+            self.runtime / "arming.json", arming))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads((self.runtime / "arming.json").read_text())["arguments"],
+                         "on --for 2h")
+        fresh = self.grant(id="AP-2", granted_at="2026-10-01T23:00:00Z")
+
+        def on_lands():
+            writer.mark_write(self.runtime / "arming.json", None)
+            (self.runtime / "arming.json").unlink()
+            writer.write_private(self.runtime / "grant.json", fresh)
+
+        result = self.shell_event("python3 -m unittest discover", on_lands)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads((self.runtime / "grant.json").read_text())["id"], "AP-2")
+        self.assertFalse((self.runtime / "arming.json").exists())
+
+    def test_older_packaged_bytes_put_back_by_a_command_are_restored(self):
+        writer = self.packaged_writer()
+        writer.write_private(self.runtime / "grant.json", self.grant())
+        active = (self.runtime / "grant.json").read_bytes()
+        writer.write_private(self.runtime / "grant.json",
+                             self.grant(state="revoked", ended_at="2026-10-01T22:00:00Z"))
+        ended = (self.runtime / "grant.json").read_bytes()
+        result = self.shell_event("python3 revive.py", lambda: (
+            self.runtime / "grant.json").write_bytes(active))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual((self.runtime / "grant.json").read_bytes(), ended)
+        writer.write_private(self.runtime / "arming.json", {"armed_at": "x", "arguments": "on"})
+        consumed = (self.runtime / "arming.json").read_bytes()
+        writer.mark_write(self.runtime / "arming.json", None)
+        (self.runtime / "arming.json").unlink()
+        result = self.shell_event("python3 rearm.py", lambda: (
+            self.runtime / "arming.json").write_bytes(consumed))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertFalse((self.runtime / "arming.json").exists())
+
     def test_the_packaged_autopilot_script_may_write_its_runtime(self):
         argv = [sys.executable, str(AUTOPILOT_SCRIPT), "--project-root", str(self.root), "status"]
         command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)

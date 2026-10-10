@@ -212,14 +212,24 @@ def private_dir(directory: Path) -> Path:
     return directory
 
 
+def mark_write(path: Path, data: bytes | None) -> None:
+    """Tell the vault hook a grant or arming write is this package's; see autopilot_provenance."""
+    import autopilot_provenance
+
+    if path.name in (GRANT, ARMING):
+        autopilot_provenance.record(path.parent, path.name, data)
+
+
 def write_private(path: Path, value: dict) -> None:
     import atomic_file
 
     private_dir(path.parent)
+    data = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    mark_write(path, data)
     with contextlib.suppress(FileExistsError):
         os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
     os.chmod(path, 0o600)
-    atomic_file.replace_bytes(path, (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+    atomic_file.replace_bytes(path, data)
 
 
 def append_private(path: Path, value: dict) -> None:
@@ -359,6 +369,7 @@ def move_aside(path: Path, now: datetime) -> Path:
     while target.exists():
         number += 1
         target = path.with_name(f"{stem}-{number}")
+    mark_write(path, None)
     os.replace(path, target)
     os.chmod(target, 0o600)
     return target
@@ -747,6 +758,7 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
             problem = binding_problem(arming.get("host"), arming.get("session_id"), typed=True)
             if problem:
                 raise Refusal(problem)
+            mark_write(directory / ARMING, None)
             (directory / ARMING).unlink()
         try:
             tokens = shlex.split(arming["arguments"])

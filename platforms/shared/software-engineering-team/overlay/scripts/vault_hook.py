@@ -52,6 +52,7 @@ import unicodedata
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
+import autopilot_provenance
 import vault_check
 try:
     import experience_compile
@@ -3864,7 +3865,9 @@ def autopilot_violation(before: object, writer_allowed: bool) -> str:
     A command may leave the grant and the arming record as they were, delete
     them or end the grant it held; anything else, a new or widened grant or
     an arming record, is put back as the command found it. The packaged
-    autopilot.py is the one shell writer that may change them.
+    autopilot.py is the one shell writer that may change them. A change whose
+    bytes autopilot.py or its user-prompt hook marked as their latest write
+    landed while the command ran, not through it, and stays.
     """
     if writer_allowed or not valid_autopilot_snapshot(before):
         return ""
@@ -3874,6 +3877,8 @@ def autopilot_violation(before: object, writer_allowed: bool) -> str:
     for name in AUTOPILOT_AUTHORITY:
         old, new = before["files"][name], after[name]
         if new == old or new is None:
+            continue
+        if autopilot_provenance.written_by_package(directory, name, base64.b64decode(new)):
             continue
         if name == "grant.json" and old is not None \
                 and ends_same_grant(base64.b64decode(old), base64.b64decode(new)):

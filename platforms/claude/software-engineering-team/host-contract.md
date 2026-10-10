@@ -276,9 +276,9 @@
   narrows the gap: it denies `Write` and `Edit` into
   `.agentrof/agent-marketplace/.runtime/autopilot/` and puts back what a `Bash`
   command adds to the grant or the arming record there, while a command may
-  still end the grant or delete the files. A command that overlaps a run of
-  `autopilot.py` can undo that run's write, so run `autopilot.py` on its own,
-  never in a parallel batch.
+  still end the grant or delete the files. It keeps a grant or arming record
+  whose bytes `autopilot.py` or its prompt hook marked as their latest write,
+  so a long command that overlaps an `on` no longer undoes it.
 - A grant governs only the Claude Code session whose user typed it: the hook
   records its session id, the question hook denies only that session, and
   `on`, `record` and `queue` refuse when `CLAUDE_CODE_SESSION_ID` differs.

@@ -137,7 +137,7 @@
       "f6056501a31710a1c702f64ae0f5bd38c62240d40224b46844eed13467c31e96"
     ,
     "host-contract.md":
-      "279a014dc7fae953923dd5cd45f87a51e10947710b15a585b839e322817fe374"
+      "08a90774079710b4e8d20eed3511651f91cc5594061b2d5fb72d6186f21925f0"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -150,6 +150,9 @@
     ,
     "scripts/atomic_file.py":
       "2835d96b91f37e472a73f1540aead9aa3d0a9165db4fa0f2cb457373aa629320"
+    ,
+    "scripts/autopilot_provenance.py":
+      "4f82390de86bbb0827e83e468f186424b9383684b3b8f46af6275092a251c2c1"
     ,
     "scripts/ba_compile.py":
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
@@ -293,7 +296,7 @@
       "5874e6fed717df6c29ad5d6888c8985690fca14ed83458b1f0e77af298e8da81"
     ,
     "scripts/vault_hook.py":
-      "56035e9202c0680d6a3c64715037ff544eb0ecffc78a622d92f1dbf897025b80"
+      "4b5d66e2a892b47e0e5b0e07da0a872a5eb22745f89179cb8c7c9917fdf13f13"
     ,
     "scripts/vault_index.py":
       "e71cc817cae308e57ae5e78804966343606c683a1830b95b4e394b5282eded1f"
@@ -308,7 +311,7 @@
       "d63a6ad7930086ea018b4825ead12fd58f53317d32bf3cac08750d131ad23a2d"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "dca3c3a687918cb8554042c279b1fd868b4fdd17e2ce45f136ed2b181e9d9413"
+      "260e0f24428dbefd0f78551dccd084a0146fed5bc5b6422a1b3b46f752f0eac2"
     ,
     "skill-content/backlog-plan/SKILL.md":
       "f4314b20877593f179f92b726b93dc88e82e33781603599db0af98fe43349643"

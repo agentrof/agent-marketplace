@@ -688,6 +688,13 @@ def system_zone(name: str):
         time.tzset()
 
 
+class RecoveryProcessTests(unittest.TestCase):
+    @integration
+    def test_process_liveness_query_keeps_the_current_process_alive_on_every_os(self):
+        import autopilot_recovery as recovery
+        self.assertTrue(recovery.process_alive(os.getpid()))
+
+
 @integration
 @unittest.skipIf(os.name == "nt", "time.tzset sets the system zone only on POSIX hosts")
 class TransportRecoveryTests(unittest.TestCase):

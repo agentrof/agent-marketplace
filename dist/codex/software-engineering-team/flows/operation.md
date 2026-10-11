@@ -115,7 +115,10 @@ once, `live_test_workdir` (`.` for the repository root) and `live_groups`, the
 ordered, unique group names of letters, digits, `.`, `_` and `-`. The three
 are declared together or not at all, and their approval follows the normal
 revision lifecycle. Delivery runs a group with `run --kind live_test --group
-<group>`; groups never become required checks by themselves.
+<group>`; groups never become required checks by themselves. The optional
+`live_group_run` is `per_group`, the default, or `combined`, which makes a pass
+run all selected groups in one live run whose `{group}` receives their names
+comma-separated; declare it only for a command that accepts such a list.
 
 Verification may declare an optional `diagnostic_test_command` adapter for
 failed or affected tests, with `diagnostic_test_workdir` defaulting to `.` only

@@ -68,6 +68,15 @@ class ContractTests(unittest.TestCase):
             with self.subTest(live_groups=value):
                 self.assertEqual(self.errors(**{**LIVE, "live_groups": value}), [groups])
 
+    def test_live_group_run_is_per_group_or_combined_and_only_beside_the_live_fields(self):
+        for value in ("per_group", "combined"):
+            with self.subTest(live_group_run=value):
+                self.assertEqual(self.errors(**{**LIVE, "live_group_run": value}), [])
+        self.assertEqual(self.errors(**{**LIVE, "live_group_run": "parallel"}),
+                         ["live_group_run must be one of per_group, combined"])
+        self.assertEqual(self.errors(live_group_run="combined"),
+                         ["live_group_run needs live_test_command, live_test_workdir and live_groups"])
+
     def test_the_fields_bind_the_approved_source_hash(self):
         props = operation_compile.initial_props("verification", []) | LIVE
         changed = props | {"live_groups": ["smoke"]}
@@ -123,6 +132,39 @@ class LiveRunTests(unittest.TestCase):
             code = verification.main(["--worktree", str(self.root), "run", "--kind", "live_test", "--group", "billing"])
         self.assertEqual((code, json.loads(stdout.getvalue())["identity"]["live_group"]), (0, "billing"))
         self.settle()
+
+    def test_a_combined_contract_runs_the_selected_groups_in_one_live_run(self):
+        """At live_group_run combined, --group a,b or a repeated --group substitutes the names once,
+        comma-separated in live_groups order, and keeps one record for the combined run."""
+        executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
+        self.declare(live_test_command=executable + " live.py {group}", live_test_workdir=".",
+                     live_groups=["smoke", "billing", "audit"], live_group_run="combined")
+        combined = verification.run_check(self.root, "live_test", group="billing,smoke")
+        self.assertEqual((combined["exit_code"], combined["identity"]["live_group"]), (0, "smoke,billing"))
+        self.assertEqual(combined["identity"]["command"], executable + " live.py smoke,billing")
+        self.assertIn("LIVE smoke,billing", verification.raw_output_path(self.root, combined["output_file"]).read_text())
+        evidence = verification.read_session(self.root)["raw_evidence"]
+        self.assertEqual(evidence["live_test:smoke,billing"]["evidence_hash"], combined["evidence_hash"])
+        self.assertNotIn("live_test:smoke", evidence)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = verification.main(["--worktree", str(self.root), "run", "--kind", "live_test",
+                                      "--group", "smoke", "--group", "billing"])
+        value = json.loads(stdout.getvalue())
+        self.assertEqual((code, value["reused"], value["evidence_hash"]), (0, True, combined["evidence_hash"]))
+        self.assertEqual(verification.run_check(self.root, "live_test", group="audit")["identity"]["live_group"], "audit")
+        with self.assertRaisesRegex(RuntimeError, "names each declared group once"):
+            verification.run_check(self.root, "live_test", group="smoke,smoke")
+        interface = verification.manifest(self.root, "DLV-001", "AUTH-01", "qa_engineer", "qa_final")["live_test_interface"]
+        self.assertEqual((interface["run"], interface["groups"]), ("combined", ["smoke", "billing", "audit"]))
+
+    def test_a_per_group_contract_refuses_several_groups_in_one_call(self):
+        self.declare(live_test_command="make live GROUP={group}", live_test_workdir=".", live_groups=["smoke", "billing"])
+        with self.assertRaisesRegex(RuntimeError, "one live run of several groups needs live_group_run: combined"):
+            verification.run_check(self.root, "live_test", group="smoke,billing")
+        interface = verification.manifest(self.root, "DLV-001", "AUTH-01", "qa_engineer", "qa_final")["live_test_interface"]
+        self.assertNotIn("run", interface)
+        self.assertEqual(interface["command"], "run --kind live_test --group <group>")
 
     def test_a_contract_without_live_groups_runs_none(self):
         self.declare()

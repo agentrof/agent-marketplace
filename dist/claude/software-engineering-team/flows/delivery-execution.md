@@ -174,7 +174,12 @@ it in `live_test_workdir` of the same private frozen clone, under the same
 locks, environment identity and raw-evidence recording as `run --kind test`.
 Each group keeps its own record, read with `status --run live_test:<group>`.
 Live groups never join the required checks; the Test Plan decides which ones
-a result needs, and the result cites their `evidence_hash` values.
+a result needs, and the result cites their `evidence_hash` values. A contract
+that declares `live_group_run: combined` runs every group a pass selects in
+one live run instead: QA passes them once, `--group a,b` or `--group a --group
+b`, the runner substitutes the names comma-separated in `live_groups` order
+for `{group}` and keeps one record, read with `status --run live_test:a,b`.
+Without it, several groups in one call are refused.
 Switch `qa_gate_order`: at `gate_first`, QA starts its first test command of a
 round before it plans and drafts its result, as
 `skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md`

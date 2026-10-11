@@ -955,14 +955,38 @@ def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pat
         return _run_check(root, kind, fresh=fresh, selection_file=selection_file, spot_file=spot_file, group=group)
 
 
+def live_groups_selected(group: str) -> list[str]:
+    """The live group names one run selects: a comma-separated list, as --group gives it."""
+    return [name.strip() for name in group.split(",") if name.strip()]
+
+
 def live_test_command(contract: dict, group: str) -> str:
-    """The approved live test command for one declared group of the Verification Contract."""
+    """The approved live test command for the declared groups *group* names, comma-separated.
+
+    One group substitutes its name for {group}. Several groups run as one live
+    run only when the contract declares live_group_run combined; {group} then
+    receives their names comma-separated, once, in the contract's order.
+    """
     if "live_test_command" not in contract or operation_compile.live_test_problems(contract):
         raise RuntimeError("the Verification Contract declares no valid live_test_command, live_test_workdir"
                            " and live_groups")
-    if group not in contract["live_groups"]:
-        raise RuntimeError(f"live group {group!r} is not declared in live_groups: {', '.join(contract['live_groups'])}")
-    return contract["live_test_command"].replace(operation_compile.LIVE_GROUP_PLACEHOLDER, group)
+    selected = live_groups_selected(group)
+    for name in selected:
+        if name not in contract["live_groups"]:
+            raise RuntimeError(f"live group {name!r} is not declared in live_groups: {', '.join(contract['live_groups'])}")
+    if not selected or len(selected) != len(set(selected)):
+        raise RuntimeError("run --kind live_test --group names each declared group once")
+    if len(selected) > 1 and contract.get(operation_compile.LIVE_GROUP_RUN) != "combined":
+        raise RuntimeError(f"one live run of several groups needs {operation_compile.LIVE_GROUP_RUN}: combined in the"
+                           " Verification Contract; run one group per call")
+    names = ",".join(name for name in contract["live_groups"] if name in selected)
+    return contract["live_test_command"].replace(operation_compile.LIVE_GROUP_PLACEHOLDER, names)
+
+
+def live_record_group(contract: dict, group: str) -> str:
+    """The canonical group key of a live run: its selected names in the contract's order."""
+    selected = set(live_groups_selected(group))
+    return ",".join(name for name in contract.get("live_groups") or [] if name in selected) or group
 
 
 def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
@@ -999,6 +1023,9 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             spot = spot_run_selection(root, Path(spot_file), current)
         contract, contract_body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
         command = live_test_command(contract, group) if group is not None else contract.get(kind + "_command")
+        if group is not None:
+            group = live_record_group(contract, group)
+            record_key = f"{kind}:{group}"
         if not isinstance(command, str) or not command.strip() or "{{" in command or "}}" in command:
             raise RuntimeError("approved verification command is missing or contains unresolved parameters")
         partitions = (partition_declaration(root, current["delivery"], contract, contract_body)
@@ -3503,7 +3530,12 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
               "live_test_interface": {"groups": list(contract.get("live_groups") or []),
                                       "command": "run --kind live_test --group <group>",
                                       "evidence": "Cite evidence_hash from status --run live_test:<group> in the check"
-                                                  " the Test Plan names; live groups never join required_checks"},
+                                                  " the Test Plan names; live groups never join required_checks"}
+              if contract.get(operation_compile.LIVE_GROUP_RUN) != "combined" else
+              {"groups": list(contract.get("live_groups") or []), "run": "combined",
+               "command": "run --kind live_test --group <group>,<group>,... once, with every group the pass selects",
+               "evidence": "Cite evidence_hash from status --run live_test:<groups>, the selected groups"
+                           " comma-separated in live_groups order; live groups never join required_checks"},
               "execution_note": "Commands run in private clones containing tracked files only. Approved commands must provision dependencies or use a fixed external environment; ignored dependencies are never copied. The clone is not an operating-system sandbox for trusted commands with absolute paths.",
               "next_transition": "Register independent result; owner writes reports only after both readers settle"}
     if review_scope(root, delivery_id) == CLOSURE_VALUE:
@@ -3595,7 +3627,10 @@ def main(argv=None) -> int:
     subs.add_parser("merge-panel")
     run = subs.add_parser("run")
     run.add_argument("--kind", choices=RUN_KINDS, required=True)
-    run.add_argument("--group", help="with --kind live_test: one group of the contract's live_groups")
+    run.add_argument("--group", action="append",
+                     help="with --kind live_test: a group of the contract's live_groups; repeat it or separate"
+                          " names with commas for one combined run where the contract declares live_group_run"
+                          " combined")
     run.add_argument("--selection-file", type=Path)
     run.add_argument("--spot-run-file", type=Path)
     run.add_argument("--fresh", action="store_true")
@@ -3669,7 +3704,7 @@ def main(argv=None) -> int:
             value = wait_for_release(root, args.role, args.seconds)
         elif args.command == "run":
             value = run_check(root, args.kind, fresh=args.fresh, selection_file=args.selection_file,
-                              spot_file=args.spot_run_file, group=args.group)
+                              spot_file=args.spot_run_file, group=",".join(args.group) if args.group else None)
         elif args.command == "manifest":
             value = manifest(root, args.delivery, args.story, args.role, args.mode, args.remote)
         elif args.summary or args.run:

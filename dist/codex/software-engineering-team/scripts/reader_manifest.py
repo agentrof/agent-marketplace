@@ -16,8 +16,8 @@ def compact(project: Path, value: dict) -> dict:
     if len(raw) <= budget:
         return value
     digest = "sha256:" + hashlib.sha256(raw).hexdigest()
-    directory = project.resolve() / ".agentrof/agent-marketplace/.runtime/reader-manifests"
-    from delivery_verification import safe_runtime_path
+    from delivery_verification import runtime_anchor, safe_runtime_path
+    directory = runtime_anchor(project.resolve()).resolve() / ".agentrof/agent-marketplace/.runtime/reader-manifests"
     directory = safe_runtime_path(project.resolve(), directory)
     directory.mkdir(parents=True, exist_ok=True)
     path = safe_runtime_path(project.resolve(), directory / (digest[7:] + ".json"), file_only=True)
@@ -41,4 +41,23 @@ def compact(project: Path, value: dict) -> dict:
             "count": len(item) if isinstance(item, (list, dict)) else None}
     if len(json.dumps(result, indent=2, sort_keys=True).encode("utf-8")) > budget:
         raise ValueError("reader manifest contract exceeds its configured byte budget")
+    return result
+
+
+def expand(project: Path, value: dict) -> dict:
+    reference = value.get("complete_manifest")
+    if reference is None:
+        return value
+    path = Path(reference["path"])
+    from delivery_verification import runtime_anchor, safe_runtime_path
+    directory = runtime_anchor(project.resolve()).resolve() / ".agentrof/agent-marketplace/.runtime/reader-manifests"
+    safe_runtime_path(project.resolve(), path, file_only=True)
+    if path.parent != directory or not path.is_file():
+        raise ValueError("complete reader manifest is outside its private directory")
+    raw = path.read_bytes()
+    if "sha256:" + hashlib.sha256(raw).hexdigest() != reference["sha256"]:
+        raise ValueError("complete reader manifest digest changed")
+    result = json.loads(raw)
+    if not isinstance(result, dict) or result.get("source_hash") != value.get("source_hash"):
+        raise ValueError("complete reader manifest source binding changed")
     return result

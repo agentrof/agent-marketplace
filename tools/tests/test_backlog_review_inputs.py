@@ -53,6 +53,10 @@ class ReadSessionTests(unittest.TestCase):
             self.assertEqual(result["source_hash"], value["source_hash"])
             data = Path(result["complete_manifest"]["path"]).read_bytes()
             self.assertEqual(json.loads(data), value)
+            self.assertEqual(reader_manifest.expand(project, result), value)
+            Path(result["complete_manifest"]["path"]).write_bytes(data + b" ")
+            with self.assertRaisesRegex(ValueError, "digest changed"):
+                reader_manifest.expand(project, result)
             import hashlib
             self.assertEqual(result["complete_manifest"]["sha256"], "sha256:" + hashlib.sha256(data).hexdigest())
 

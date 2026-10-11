@@ -190,7 +190,7 @@ class VaultHookPrototypeTests(unittest.TestCase):
             diagnostic_text = subprocess.list2cmdline(diagnostic) if os.name == "nt" else shlex.join(diagnostic)
             for value, expected in ((command_text, 0), (command_text + " && echo unsafe", 2),
                                     (diagnostic_text, 0), (diagnostic_text + " && echo unsafe", 2),
-                                    ("git status", 0), ("git commit -qm change", 2)):
+                                    ("git status", 2 if os.name == "nt" else 0), ("git commit -qm change", 2)):
                 with self.subTest(command=value), redirect_stderr(io.StringIO()):
                     self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(value)), expected)
             unknown_shell = shell_payload(command_text)

@@ -186,12 +186,13 @@ def quiet(call, *args) -> tuple[int, str]:
     return code, output.getvalue()
 
 
-def approve_every_switch(docs: Path) -> tuple[dict, dict]:
+def approve_every_switch(docs: Path, overrides: dict | None = None) -> tuple[dict, dict]:
     """Approve a Process Policy that sets every switch to its non-default value."""
     (docs / "maps").mkdir(parents=True)
     registry = process_policy.load_registry()
     values = {switch: next(value for value in spec["values"] if value != spec["default"])
               for switch, spec in registry.items()}
+    values.update(overrides or {})
 
     def policy(*argv: str) -> None:
         code, output = quiet(process_policy.main, [argv[0], "--docs", str(docs), *argv[1:]])
@@ -207,8 +208,37 @@ def approve_every_switch(docs: Path) -> tuple[dict, dict]:
            "--value", "50")
     policy("set", "--switch", "test_cost_budget", "--parameter", "serial_rows", "--value", str(SERIAL_ROWS))
     policy("set", "--switch", "item_review_scale", "--parameter", "changed_lines", "--value", "200")
+    if values.get("code_review_panel") == "risk_scoped":
+        policy("set", "--switch", "code_review_panel", "--parameter", "risk_paths",
+               "--value", "src/auth/*")
+        policy("set", "--switch", "code_review_panel", "--parameter", "lens_changed_lines",
+               "--value", "200")
     policy("approve")
     return registry, values
+
+
+def extra_value_bindings() -> list[tuple[str, str, set[str]]]:
+    """Exercise every additional value beside the first all-on combination."""
+    variants = []
+    catalog = task_inputs.catalog()
+    for switch, spec in process_policy.load_registry().items():
+        alternatives = [value for value in spec["values"] if value != spec["default"]]
+        for value in alternatives[1:]:
+            with tempfile.TemporaryDirectory() as temporary:
+                project = Path(temporary).resolve()
+                approve_every_switch(project / "workspace/docs", {switch: value})
+                bound = set()
+                for entry, route in sorted(catalog["entries"].items()):
+                    chosen, _inputs = task_inputs.switch_choices(
+                        project if route["project_state"] else None, route, task_inputs.PACKAGE)
+                    for role in route["roles"] or [None]:
+                        required = task_inputs.instruction_reads(
+                            catalog, task_inputs.PACKAGE, route, role,
+                            task_inputs.task_skills(catalog, entry, role, None, route), chosen)[2]
+                        bound.update(path.removeprefix("skill-content/") for path in required
+                                     if "/references/switch-" in path)
+                variants.append((switch, value, bound))
+    return variants
 
 
 class AllSwitchesOnBindingTests(unittest.TestCase):
@@ -238,7 +268,10 @@ class AllSwitchesOnBindingTests(unittest.TestCase):
         shipped = {path.relative_to(ROOT / "plugins/software-engineering-team/skill-content")
                    .as_posix() for path in (ROOT / "plugins/software-engineering-team/skill-content")
                    .glob("*/references/switch-*.md")}
-        self.assertEqual(shipped, {path for paths in bound.values() for path in paths})
+        covered = {path for paths in bound.values() for path in paths}
+        for _switch, _value, extra in extra_value_bindings():
+            covered.update(extra)
+        self.assertEqual(shipped, covered)
 
 
 @integration
@@ -269,8 +302,11 @@ class AllSwitchesOnTests(unittest.TestCase):
         return result
 
     def test_the_policy_selects_every_non_default_value(self):
-        # A switch with three values would need a run per value; every switch has two.
-        self.assertTrue(all(len(spec["values"]) == 2 for spec in self.registry.values()))
+        covered = {(switch, value) for switch, value in self.values.items()}
+        covered.update((switch, value) for switch, value, _bound in extra_value_bindings())
+        expected = {(switch, value) for switch, spec in self.registry.items()
+                    for value in spec["values"] if value != spec["default"]}
+        self.assertEqual(covered, expected)
         for switch, value in self.values.items():
             with self.subTest(switch=switch):
                 self.assertEqual(self.policy("value", "--switch", switch)["value"], value)
@@ -314,7 +350,10 @@ class AllSwitchesOnTests(unittest.TestCase):
         shipped = {path.relative_to(ROOT / "plugins/software-engineering-team/skill-content")
                    .as_posix() for path in (ROOT / "plugins/software-engineering-team/skill-content")
                    .glob("*/references/switch-*.md")}
-        self.assertEqual(shipped, {path for paths in bound.values() for path in paths})
+        covered = {path for paths in bound.values() for path in paths}
+        for _switch, _value, extra in extra_value_bindings():
+            covered.update(extra)
+        self.assertEqual(shipped, covered)
 
 
     def test_the_reading_and_timing_modules_run_with_every_switch_on(self):

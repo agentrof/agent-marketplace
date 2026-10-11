@@ -135,11 +135,17 @@ verification only.
 A live scenario may state how it affects the project's shared test
 environment, so a runner can order and parallelize scenarios:
 `environment_effect` is `builds`, `builds_shared`, `builds_fixture` (the
-scenario runs in the live run's one shared fixture-project environment),
-`reads`, `changes`, `resets` or `removes`, and only a scenario at `changes` may
-add `touches`, the names of the parts it changes, comma-separated or as nested
-bullets. Both are optional; `backlog_compile.py check` and `approve` refuse
-any other value.
+scenario runs in the live run's one shared fixture-project environment;
+`builds_fixture:<rank>`, an integer from 0 to 999, orders it there, and a
+plain `builds_fixture` ranks 50),
+`reads`, `changes`, `resets` or `removes`, and only a scenario with a
+`changes` effect may add `touches`, the names of the parts it changes,
+comma-separated or as nested bullets. A parallel test target may give each
+parameter case its own effect as a comma list, `builds_shared [core], builds
+[full]`: an item is `effect` or `effect [parameter]`, at most one item has no
+parameter, and no parameter is named twice; `touches` is allowed when any item
+is `changes`. Both fields are optional; `backlog_compile.py check` and
+`approve` refuse any other value.
 
 Only when switch `backlog_path` is at `light_when_eligible` and the backlog
 is in Requirement mode, `backlog_compile.py stub-story <epic> <slug> --docs

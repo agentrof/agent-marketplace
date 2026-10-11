@@ -177,6 +177,17 @@ REASONED_LEVELS = ("fixture", "live")
 # the live run's one shared fixture-project environment.
 ENVIRONMENT_EFFECTS = ("builds", "builds_shared", "builds_fixture", "reads", "changes", "resets", "removes")
 TOUCHING_EFFECT = "changes"
+# A parallel test target may give each parameter case its own effect:
+# `builds_shared [core], builds [full]`; an item without a bracket is the
+# target's own effect.
+# builds_fixture may carry a rank, `builds_fixture:<rank>`, an integer 0..999
+# that orders scenarios inside the shared fixture-project environment; without
+# one its rank is FIXTURE_RANK_DEFAULT.
+EFFECT_ITEM_RE = re.compile(r"^([A-Za-z_]+)(?::([^\s\[]*))?\s*(?:\[([^\]]*)\])?$")
+RANKED_EFFECT = "builds_fixture"
+FIXTURE_RANK_DEFAULT = 50
+FIXTURE_RANK_RE = re.compile(r"^[0-9]{1,3}$")
+EFFECT_ITEM_SPLIT_RE = re.compile(r",(?![^\[\]]*\])")
 TOUCH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 BACKLOG_PATH_SWITCH = "backlog_path"
 BACKLOG_PATH_VALUE = "light_when_eligible"
@@ -2206,43 +2217,90 @@ def live_environment_plan(scenarios: list[dict]) -> dict:
         target = fields.get("automation_target", "").strip()
         if not target:
             raise ValueError("a selected live scenario needs an automation target")
-        effect = fields.get("environment_effect", "changes")
-        if effect not in ENVIRONMENT_EFFECTS:
-            raise ValueError("a live execution plan needs a declared environment effect")
+        raw_effect = fields.get("environment_effect", "changes")
         if "environment_effect" not in fields:
             missing.append(row["id"])
-        item = {"target": target, "effect": effect, "touches": sorted(touch_names(fields.get("touches", ""))),
-                "scenarios": [row["id"]]}
-        if target in by_target:
-            prior = by_target[target]
-            if (prior["effect"], prior["touches"]) != (item["effect"], item["touches"]):
-                raise ValueError("one live target has conflicting environment metadata: " + target)
-            prior["scenarios"].append(row["id"])
-        else:
-            by_target[target] = item
+        errors = environment_effect_findings(fields, row["id"])
+        if errors:
+            raise ValueError("; ".join(errors))
+        for effect_item in EFFECT_ITEM_SPLIT_RE.split(raw_effect):
+            parsed = EFFECT_ITEM_RE.fullmatch(effect_item.strip())
+            effect = parsed.group(1)
+            parameter = parsed.group(3).strip() if parsed.group(3) is not None else None
+            key = (target, parameter)
+            item = {"target": target, "parameter": parameter, "effect": effect,
+                    "fixture_rank": fixture_rank(effect_item),
+                    "touches": sorted(touch_names(fields.get("touches", ""))), "scenarios": [row["id"]]}
+            if key in by_target:
+                prior = by_target[key]
+                if any(prior[name] != item[name] for name in ("effect", "touches", "fixture_rank")):
+                    raise ValueError("one live target has conflicting environment metadata: " + target)
+                prior["scenarios"].append(row["id"])
+            else:
+                by_target[key] = item
     phases = []
     for effect in ("builds", "builds_shared", "builds_fixture", "reads", "changes", "resets", "removes"):
         targets = [row for row in by_target.values() if row["effect"] == effect]
+        if effect == "builds_fixture":
+            targets.sort(key=lambda row: (row["fixture_rank"], row["target"], row["parameter"] or ""))
         if targets:
             phases.append({"effect": effect, "parallel": effect == "reads", "targets": targets,
                            "readiness_after_each": effect == "changes", "reset_before": effect == "removes",
                            "residue_check_after_each": effect == "removes"})
     return {"schema_version": 1, "phases": phases, "missing_environment_effect": sorted(missing),
             "target_count": len(by_target), "shared_environment_instances": 1 if by_target else 0}
+def fixture_rank(item: str) -> int | None:
+    """The fixture rank of one valid environment_effect item: its stated rank or the default for
+    builds_fixture, None for any other effect."""
+    match = EFFECT_ITEM_RE.fullmatch(item.strip())
+    if not match or match.group(1) != RANKED_EFFECT:
+        return None
+    return int(match.group(2)) if match.group(2) else FIXTURE_RANK_DEFAULT
 
 
 def environment_effect_findings(fields: dict[str, str], label: str) -> list[str]:
     """Refuse an environment_effect outside ENVIRONMENT_EFFECTS and a touches field that is malformed
-    or stated without environment_effect: changes."""
+    or stated without an environment_effect item that is changes. The value is one effect or a comma
+    list of `effect` and `effect [parameter]` items: at most one item without a parameter, no
+    parameter named twice."""
     errors = []
     effect = fields.get("environment_effect")
-    if effect is not None and effect not in ENVIRONMENT_EFFECTS:
-        errors.append(f"{label} environment_effect must be one of {', '.join(ENVIRONMENT_EFFECTS)},"
-                      f" not {effect or '(empty)'}")
+    effects: list[str] = []
+    plain = True
+    if effect is not None:
+        raw_items = [item.strip() for item in EFFECT_ITEM_SPLIT_RE.split(effect)]
+        plain = len(raw_items) == 1 and "[" not in raw_items[0]
+        defaults, parameters = 0, set()
+        for item in raw_items:
+            match = EFFECT_ITEM_RE.fullmatch(item)
+            if not match or match.group(1) not in ENVIRONMENT_EFFECTS:
+                errors.append(f"{label} environment_effect must be one of {', '.join(ENVIRONMENT_EFFECTS)},"
+                              f" not {item or '(empty)'}")
+                continue
+            effects.append(match.group(1))
+            rank = match.group(2)
+            if rank is not None and match.group(1) != RANKED_EFFECT:
+                errors.append(f"{label} environment_effect takes a rank only on {RANKED_EFFECT}, not {item}")
+            elif rank is not None and not FIXTURE_RANK_RE.fullmatch(rank):
+                errors.append(f"{label} environment_effect {RANKED_EFFECT} rank must be an integer from 0 to 999,"
+                              f" not {rank or '(empty)'}")
+            parameter = match.group(3)
+            if parameter is None:
+                defaults += 1
+            elif not parameter.strip():
+                errors.append(f"{label} environment_effect parameter must not be empty")
+            elif parameter.strip() in parameters:
+                errors.append(f"{label} environment_effect names parameter {parameter.strip()} twice")
+            else:
+                parameters.add(parameter.strip())
+        if defaults > 1:
+            errors.append(f"{label} environment_effect has more than one item without a parameter")
     if "touches" in fields:
         names = touch_names(fields["touches"])
-        if effect != TOUCHING_EFFECT:
-            errors.append(f"{label} touches is allowed only with environment_effect: {TOUCHING_EFFECT}")
+        if TOUCHING_EFFECT not in effects:
+            errors.append(f"{label} touches is allowed only with environment_effect: {TOUCHING_EFFECT}"
+                          if plain else
+                          f"{label} touches is allowed only when an environment_effect item is {TOUCHING_EFFECT}")
         if not names:
             errors.append(f"{label} touches must list at least one name")
         invalid = [name for name in names if not TOUCH_NAME_RE.fullmatch(name)]

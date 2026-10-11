@@ -225,11 +225,14 @@ def write_private(path: Path, value: dict) -> None:
 
     private_dir(path.parent)
     data = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    mark_write(path, data)
-    with contextlib.suppress(FileExistsError):
-        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
-    os.chmod(path, 0o600)
-    atomic_file.replace_bytes(path, data)
+    import autopilot_provenance
+    publication = (autopilot_provenance.publication(path.parent, path.name, data)
+                   if path.name in (GRANT, ARMING) else contextlib.nullcontext())
+    with publication:
+        with contextlib.suppress(FileExistsError):
+            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        os.chmod(path, 0o600)
+        atomic_file.replace_bytes(path, data)
 
 
 def append_private(path: Path, value: dict) -> None:

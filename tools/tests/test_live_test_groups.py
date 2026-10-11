@@ -139,6 +139,8 @@ class LiveRunTests(unittest.TestCase):
         executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
         self.declare(live_test_command=executable + " live.py {group}", live_test_workdir=".",
                      live_groups=["smoke", "billing", "audit"], live_group_run="combined")
+        with self.assertRaisesRegex(RuntimeError, "not declared"):
+            verification.run_check(self.root, "live_test", group="smoke,,billing")
         combined = verification.run_check(self.root, "live_test", group="billing,smoke")
         self.assertEqual((combined["exit_code"], combined["identity"]["live_group"]), (0, "smoke,billing"))
         self.assertEqual(combined["identity"]["command"], executable + " live.py smoke,billing")

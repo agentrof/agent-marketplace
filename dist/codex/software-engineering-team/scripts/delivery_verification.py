@@ -957,7 +957,7 @@ def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pat
 
 def live_groups_selected(group: str) -> list[str]:
     """The live group names one run selects: a comma-separated list, as --group gives it."""
-    return [name.strip() for name in group.split(",") if name.strip()]
+    return [name.strip() for name in group.split(",")]
 
 
 def live_test_command(contract: dict, group: str) -> str:

@@ -1204,6 +1204,8 @@ print(sys.argv[2])
                 if command.endswith(" up"):
                     (Path(kwargs["cwd"]) / "src/product.py").write_text("left by the last session")
                     (Path(kwargs["cwd"]) / "build-output").write_text("ignored or untracked output")
+                    verification.git(Path(kwargs["cwd"]), "config", "review.stale", "true")
+                    (Path(kwargs["cwd"]) / ".git/hooks/review-stale").write_text("stale hook")
             return original(command, *args, **kwargs)
 
         with mock.patch.object(verification.subprocess, "run", side_effect=record):
@@ -1218,6 +1220,8 @@ print(sys.argv[2])
             self.freeze()
             events = [verification.run_environment(self.root, "down")]
             self.assertFalse((directories[-1] / "build-output").exists())
+            self.assertFalse((directories[-1] / ".git/hooks/review-stale").exists())
+            self.assertNotIn("review.stale", verification.git(directories[-1], "config", "--list"))
             events.append(verification.run_environment(self.root, "up"))
         self.assertEqual(len(set(directories)), 1, directories)
         checkout = directories[0]

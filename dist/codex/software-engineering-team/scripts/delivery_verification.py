@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import secrets
+import shutil
 import stat
 import time
 from pathlib import Path, PurePosixPath
@@ -890,11 +891,14 @@ def clone_private_checkout(root: Path, execution_root: Path, commit: str) -> Non
 RUNTIME_CHECKOUT = "runtime"
 
 
-def repin_private_checkout(execution_root: Path, commit: str) -> None:
-    """Hold *commit* in a kept private clone exactly as a new clone would, untracked and ignored files gone."""
-    git(execution_root, "fetch", "--no-tags", "--quiet", "origin", commit)
-    git(execution_root, "checkout", "--force", "--detach", commit)
-    git(execution_root, "clean", "-ffdxq")
+def repin_private_checkout(root: Path, execution_root: Path, commit: str) -> None:
+    """Recreate private repository state while preserving the environment's checkout pathname."""
+    safe_runtime_path(root, execution_root)
+    def remove_readonly(function, path, _error):
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+        function(path)
+    shutil.rmtree(execution_root, onerror=remove_readonly)
+    clone_private_checkout(root, execution_root, commit)
 
 
 # How many paths a checkout difference names before it counts the rest.
@@ -2473,7 +2477,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 execution_root.parent.mkdir(parents=True, exist_ok=True)
                 clone_private_checkout(root, execution_root, current["product_commit"])
             elif kept and first_command and not execution_root.is_symlink():
-                repin_private_checkout(execution_root, current["product_commit"])
+                repin_private_checkout(root, execution_root, current["product_commit"])
             if execution_root.is_symlink() or (verb != "down" and git(execution_root, "rev-parse", "HEAD") != current["product_commit"]):
                 raise RuntimeError("runtime checkout no longer binds the frozen candidate")
             workdir = (execution_root / str(contract.get("env_workdir", "."))).resolve()

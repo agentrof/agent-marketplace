@@ -151,9 +151,6 @@
     "scripts/atomic_file.py":
       "2835d96b91f37e472a73f1540aead9aa3d0a9165db4fa0f2cb457373aa629320"
     ,
-    "scripts/autopilot_recovery.py":
-      "b6bdeeaf37c62ea958b040b237a8a9f8a1b003472f7650c2a3f7cd463d04b0ad"
-    ,
     "scripts/ba_compile.py":
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
     ,
@@ -292,9 +289,6 @@
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
     ,
-    "scripts/transport_recovery_host.py":
-      "ce09b658b99f436ccb0b0f65402f4c7449b3f1079cfc6f02cf882b6281ead3d6"
-    ,
     "scripts/vault_check.py":
       "3bd52e5d5159562c8b44a21791c433f04721e81fee3b9932c9fb176d85ebe8cb"
     ,
@@ -317,7 +311,13 @@
       "57ee989ae80d557a3ee2c3f5db3bee5ebab61a170845cb972b8c6df792417a69"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "b641d2c30cc9409478cfff76d4f1cb79269b85499a06a0af54956e7a913ceb39"
+      "efcd7b0a84e4bad0e56f821351f86b7dd5fc0326b55dc42122418e924701ad29"
+    ,
+    "skill-content/autopilot/scripts/autopilot_recovery.py":
+      "b6bdeeaf37c62ea958b040b237a8a9f8a1b003472f7650c2a3f7cd463d04b0ad"
+    ,
+    "skill-content/autopilot/scripts/transport_recovery_host.py":
+      "ce09b658b99f436ccb0b0f65402f4c7449b3f1079cfc6f02cf882b6281ead3d6"
     ,
     "skill-content/backlog-plan/SKILL.md":
       "f4314b20877593f179f92b726b93dc88e82e33781603599db0af98fe43349643"

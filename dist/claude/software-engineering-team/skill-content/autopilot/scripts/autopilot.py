@@ -40,6 +40,10 @@ SCRIPTS = PACKAGE / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+RECOVERY_SCRIPTS = str(Path(__file__).resolve().parent)
+if RECOVERY_SCRIPTS not in sys.path:
+    sys.path.insert(0, RECOVERY_SCRIPTS)
+
 POLICY = ENTRY / "data" / "autopilot-policy.json"
 HOOKS = PACKAGE / "hooks" / "hooks.json"
 # The build writes this provenance file into every host package it makes.

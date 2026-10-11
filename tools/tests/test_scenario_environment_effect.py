@@ -24,7 +24,7 @@ class FieldRuleTests(unittest.TestCase):
         return backlog_compile.environment_effect_findings(fields, LABEL)
 
     def test_every_declared_effect_is_accepted_and_touches_only_with_changes(self):
-        for effect in ("builds", "builds_shared", "reads", "changes", "resets", "removes"):
+        for effect in ("builds", "builds_shared", "builds_fixture", "reads", "changes", "resets", "removes"):
             with self.subTest(effect=effect):
                 self.assertEqual(self.findings(environment_effect=effect), [])
         self.assertEqual(self.findings(environment_effect="changes", touches="accounts, ledger/entries"), [])
@@ -32,10 +32,12 @@ class FieldRuleTests(unittest.TestCase):
         self.assertEqual(self.findings(), [])
 
     def test_unknown_values_and_misplaced_or_malformed_touches_are_refused(self):
-        effects = "builds, builds_shared, reads, changes, resets, removes"
+        effects = "builds, builds_shared, builds_fixture, reads, changes, resets, removes"
         cases = (
             ({"environment_effect": "writes"}, [f"{LABEL} environment_effect must be one of {effects}, not writes"]),
             ({"environment_effect": ""}, [f"{LABEL} environment_effect must be one of {effects}, not (empty)"]),
+            ({"environment_effect": "builds_fixture", "touches": "accounts"},
+             [f"{LABEL} touches is allowed only with environment_effect: changes"]),
             ({"environment_effect": "reads", "touches": "accounts"},
              [f"{LABEL} touches is allowed only with environment_effect: changes"]),
             ({"touches": "accounts"}, [f"{LABEL} touches is allowed only with environment_effect: changes"]),

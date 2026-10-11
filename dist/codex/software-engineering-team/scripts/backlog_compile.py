@@ -173,8 +173,9 @@ LEVELS = ("unit", "fixture", "live")
 REASONED_LEVELS = ("fixture", "live")
 # A live scenario may state how it affects the project's shared test
 # environment, so a runner can order and parallelize scenarios; only one that
-# changes the environment names the parts it touches.
-ENVIRONMENT_EFFECTS = ("builds", "builds_shared", "reads", "changes", "resets", "removes")
+# changes the environment names the parts it touches. builds_fixture runs in
+# the live run's one shared fixture-project environment.
+ENVIRONMENT_EFFECTS = ("builds", "builds_shared", "builds_fixture", "reads", "changes", "resets", "removes")
 TOUCHING_EFFECT = "changes"
 TOUCH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 BACKLOG_PATH_SWITCH = "backlog_path"

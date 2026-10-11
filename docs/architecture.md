@@ -57,9 +57,9 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
 12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
     scenarios; automation-required scenarios name an executable-test target.
     A scenario may state `environment_effect`, how it affects the shared
-    test environment (`builds`, `builds_shared`, `reads`, `changes`,
-    `resets` or `removes`), and, only at `changes`, the names it `touches`,
-    which `check` validates.
+    test environment (`builds`, `builds_shared`, `builds_fixture`, `reads`,
+    `changes`, `resets` or `removes`), and, only at `changes`, the names it
+    `touches`, which `check` validates.
     A scenario may state `rows`, a positive integer, and `row_split`,
     `serial`, `sharded` or `grouped`; process switch `test_cost_budget` at
     `flag_serial_rows` flags one that runs more rows serially than the

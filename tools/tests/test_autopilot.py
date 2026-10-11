@@ -704,6 +704,10 @@ class TransportRecoveryTests(unittest.TestCase):
         import types
         import uuid
         project = Project(self)
+        (project.root / "tracked.txt").write_text("before the error")
+        git(project.root, "add", "tracked.txt")
+        git(project.root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "commit", "-qm", "Track the recovery input")
         directory = project.root / ".agentrof/recovery-test"
         directory.mkdir(parents=True)
         session = str(uuid.uuid4())
@@ -734,6 +738,11 @@ class TransportRecoveryTests(unittest.TestCase):
             self.assertEqual(result[0]["state"], "needs_owner")
             self.assertEqual(recovery.heal(directory, project.root, grant, POLICY, launch), [])
         self.assertEqual(len(launched), 3)
+        removed = project.root / "tracked.txt"
+        removed.unlink()
+        timestamp = transcript.stat().st_mtime_ns + 1_000_000
+        os.utime(removed.parent, ns=(timestamp, timestamp))
+        self.assertTrue(recovery.wrote_after(project.root, transcript.stat().st_mtime_ns, transcript))
         changed = project.root / "changed.txt"
         changed.write_text("later write")
         self.assertTrue(recovery.wrote_after(project.root, transcript.stat().st_mtime_ns, transcript))

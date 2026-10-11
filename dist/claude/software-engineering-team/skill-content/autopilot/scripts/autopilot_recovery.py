@@ -115,11 +115,18 @@ def wrote_after(project, time_ns, transcript):
         path = project / os.fsdecode(raw)
         if path.absolute() == transcript.absolute():
             continue
-        if path.exists() and path.stat().st_mtime_ns > time_ns:
-            return True
+        if path.exists():
+            if path.stat().st_mtime_ns > time_ns:
+                return True
+        else:
+            parent = path.parent
+            while not parent.exists() and project in parent.parents:
+                parent = parent.parent
+            if parent.stat().st_mtime_ns > time_ns:
+                return True
     head = subprocess.run(["git", "-C", str(project), "symbolic-ref", "-q", "HEAD"],
                           capture_output=True, text=True, check=False).stdout.strip()
-    for ref in ["HEAD", *([head] if head else [])]:
+    for ref in ["HEAD", "index", *([head] if head else [])]:
         raw = subprocess.run(["git", "-C", str(project), "rev-parse", "--git-path", ref],
                              capture_output=True, text=True, check=True).stdout.strip()
         path = Path(raw) if Path(raw).is_absolute() else project / raw

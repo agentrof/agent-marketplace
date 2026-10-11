@@ -1061,8 +1061,10 @@ def live_case_report(root: Path) -> dict:
         raise RuntimeError("live case report requires schema_version 1 and groups")
     groups = value["groups"]
     for group, cases in groups.items():
-        if (not operation_compile.LIVE_GROUP_RE.fullmatch(group) or not isinstance(cases, dict)
-                or any(not literal_test_id(key) or status not in {"passed", "failed"} for key, status in cases.items())):
+        if (not isinstance(group, str) or not operation_compile.LIVE_GROUP_RE.fullmatch(group)
+                or not isinstance(cases, dict)
+                or any(not literal_test_id(key) or not isinstance(status, str) or status not in {"passed", "failed"}
+                       for key, status in cases.items())):
             raise RuntimeError("live case report requires literal test ids and passed or failed outcomes")
     return groups
 

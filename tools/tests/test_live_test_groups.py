@@ -123,6 +123,11 @@ class LiveRunTests(unittest.TestCase):
         verification.freeze(self.root, "DLV-001", "AUTH-01", fresh=True)
         verification.register_result(self.root, self.result())
         failure = self.result("qa_engineer", "qa_final", "failed")
+        report_path = verification.raw_output_path(self.root, "scratch/live-case-report.json")
+        report_path.write_text(json.dumps({"schema_version": 1, "groups": {"smoke": {"test": []}}}))
+        with self.assertRaisesRegex(RuntimeError, "literal test ids"):
+            verification.live_case_report(self.root)
+        report_path.unlink()
         failure["failed_live_cases"] = {"smoke": ["tests/live.py::test_case"]}
         with self.assertRaisesRegex(RuntimeError, "recorded live run evidence"):
             verification.register_result(self.root, failure)

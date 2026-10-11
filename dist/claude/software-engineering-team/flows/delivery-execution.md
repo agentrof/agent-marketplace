@@ -382,3 +382,10 @@ on the same frozen candidate and environment. It requires the contract's
 only its pending phases. A second attempt, a changed candidate, an expired
 record or a failed test case refuses this path. The resumed command must run
 preflight again before any pending test phase.
+
+A resumable preflight checkpoint includes `phase_evidence` for every key in
+`completed_phases`. Each entry has `file`, a path below the verification
+`scratch/` directory, and `sha256`, the digest of that phase's actual evidence
+bytes, equal to the corresponding completed-phase digest. The runner verifies
+those files before resuming. Missing or changed evidence refuses resume; a hash
+string without its phase evidence does not authorize skipping a phase.

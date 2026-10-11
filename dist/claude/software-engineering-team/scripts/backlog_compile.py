@@ -171,6 +171,12 @@ TEST_LEVELS_SWITCH = "test_levels"
 TEST_LEVELS_VALUE = "declared"
 LEVELS = ("unit", "fixture", "live")
 REASONED_LEVELS = ("fixture", "live")
+# A live scenario may state how it affects the project's shared test
+# environment, so a runner can order and parallelize scenarios; only one that
+# changes the environment names the parts it touches.
+ENVIRONMENT_EFFECTS = ("builds", "builds_shared", "reads", "changes", "resets", "removes")
+TOUCHING_EFFECT = "changes"
+TOUCH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 BACKLOG_PATH_SWITCH = "backlog_path"
 BACKLOG_PATH_VALUE = "light_when_eligible"
 LIGHT_PATH_DATA_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
@@ -2175,9 +2181,40 @@ def scenario_fields(block: str) -> tuple[dict[str, str], list[str]]:
             active = key
             continue
         nested = re.match(r"^\s{2,}-\s+(.+?)\s*$", raw)
-        if nested and active == "source_refs":
+        if nested and active in {"source_refs", "touches"}:
             fields[active] = (fields[active] + ", " + nested.group(1)).strip(", ")
     return fields, duplicates
+
+
+def touch_names(raw: str) -> list[str]:
+    """The names a scenario's touches field lists, inline or as nested bullets, comma-separated."""
+    value = raw.strip()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    return [name.strip() for name in value.split(",") if name.strip()]
+
+
+def environment_effect_findings(fields: dict[str, str], label: str) -> list[str]:
+    """Refuse an environment_effect outside ENVIRONMENT_EFFECTS and a touches field that is malformed
+    or stated without environment_effect: changes."""
+    errors = []
+    effect = fields.get("environment_effect")
+    if effect is not None and effect not in ENVIRONMENT_EFFECTS:
+        errors.append(f"{label} environment_effect must be one of {', '.join(ENVIRONMENT_EFFECTS)},"
+                      f" not {effect or '(empty)'}")
+    if "touches" in fields:
+        names = touch_names(fields["touches"])
+        if effect != TOUCHING_EFFECT:
+            errors.append(f"{label} touches is allowed only with environment_effect: {TOUCHING_EFFECT}")
+        if not names:
+            errors.append(f"{label} touches must list at least one name")
+        invalid = [name for name in names if not TOUCH_NAME_RE.fullmatch(name)]
+        if invalid:
+            errors.append(f"{label} touches names must be letters, digits, '.', '_', '/' or '-': "
+                          + ", ".join(invalid))
+        if len(names) != len(set(names)):
+            errors.append(f"{label} repeats a touches name")
+    return errors
 
 
 def source_ref_values(raw: str) -> tuple[list[str], bool]:
@@ -2250,6 +2287,7 @@ def scenario_findings(docs: Path, body: str, story_id: str,
             errors.append(f"{path} scenario {scenario_id} row_split must be one of {', '.join(ROW_SPLITS)}")
         if "level" in fields and fields["level"] not in LEVELS:
             errors.append(f"{path} scenario {scenario_id} level must be one of {', '.join(LEVELS)}")
+        errors.extend(environment_effect_findings(fields, f"{path} scenario {scenario_id}"))
         target = fields.get("automation_target", "").strip()
         if target and (target.startswith("/") or ".." in Path(target).parts
                        or any(char.isspace() for char in target)):

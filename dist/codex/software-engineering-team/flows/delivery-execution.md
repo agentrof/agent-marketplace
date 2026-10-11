@@ -382,3 +382,10 @@ runs `repair-live --delivery DLV-### --story <story>`. It runs every registered
 failed case in a private checkout of the repaired candidate. A missing, failed,
 stale or mismatched repair record refuses the next freeze. This proof is
 carried into the new session; the complete QA round still runs independently.
+
+A live adapter that reports failed cases writes `live-case-report.json` under
+`AGENTROF_VERIFICATION_SCRATCH`, with `schema_version: 1` and a `groups` object.
+Each group maps literal test ids to `passed` or `failed`. QA may name only
+recorded failed ids in `failed_live_cases`. The repair adapter writes the same
+report; every selected case must be present and passed before another freeze.
+Exit status zero without those case results is insufficient.

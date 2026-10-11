@@ -1420,7 +1420,9 @@ class CandidateTests(unittest.TestCase):
         total, more = "tests/st005/test_new.py::test_total", "tests/st005/test_more.py::test_more"
         passed, selection = self.frozen_with_own_targets([total, more], own="accept_record")
         earlier = selection["earlier_stories"][0]["automation_targets"]
-        raw = verification.run_check(self.root, "test")
+        with mock.patch.object(verification, "private_checkout_run", side_effect=AssertionError("duplicate full suite")):
+            raw = verification.run_check(self.root, "test")
+        self.assertEqual(raw["execution_mode"], "accepted_pre_handoff")
         self.assertEqual((raw["exit_code"], raw["candidate_intact"], raw["reused"]), (0, True, False))
         self.assertNotIn("own_target_reuse", raw)
         self.assertNotIn("pre_handoff_reuse", raw)

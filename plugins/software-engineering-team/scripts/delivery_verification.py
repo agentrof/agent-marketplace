@@ -1063,7 +1063,17 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             clear_group_report(scratch, groups)
     started = time.monotonic()
     partition_records = None
-    if partitions is not None:
+    accepted_full = (own_value == ACCEPT_RECORD and reuse is not None and not fresh
+                     and session["pre_handoff"].get("kind") == "test"
+                     and session["pre_handoff"].get("command") == command
+                     and session["pre_handoff"].get("workdir") == workdir
+                     and groups is None and partitions is None)
+    if accepted_full:
+        completed = subprocess.CompletedProcess(command, 0,
+            ("Accepted full-suite pre-handoff evidence " + reuse["evidence_hash"] + "\n"
+             + "".join("REUSED " + target + "\n" for target in reuse["test_ids"])).encode("utf-8"))
+        intact, difference, group_report = True, "", None
+    elif partitions is not None:
         partition_records = run_partitions(root, scratch, current, workdir, partitions, environment,
                                            reuse["test_ids"] if reuse is not None else [], groups)
         intact, difference = all(record["candidate_intact"] is True for record in partition_records), ""
@@ -1113,6 +1123,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         record = {"identity": identity, "exit_code": completed.returncode, "candidate_intact": intact,
                   "output_file": output_name, "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
                   "duration_seconds": time.monotonic() - started, "completed_at": time.time()}
+        if accepted_full:
+            record["execution_mode"] = "accepted_pre_handoff"
         if difference:
             record["checkout_difference"] = difference
         if selection is not None:
@@ -3032,7 +3044,8 @@ def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -
         resolved = isinstance(command, str) and command.strip() and "{{" not in command and "}}" not in command
         return command if resolved else None
 
-    kind = "diagnostic_test" if selected and approved("diagnostic_test") else "test"
+    accept_full = own_target_reuse(root, delivery_id) == ACCEPT_RECORD
+    kind = "diagnostic_test" if selected and approved("diagnostic_test") and not accept_full else "test"
     command = approved(kind)
     if command is None:
         raise RuntimeError("approved verification command is missing or contains unresolved parameters")

@@ -82,3 +82,10 @@ targets it reused, which the Item's verification record lists, and every
 defect found after a passing QA gate, in a later review round, in the
 Delivery Review or after merge, in an own target that gate reused. The
 registry's promotion rule judges them over at least 3 Deliveries.
+
+The pre-handoff run uses the full approved test command at this value. When its
+command, workdir, candidate and environment match, QA records the accepted full
+suite without launching the command again. Missing or stale evidence and an
+explicit fresh run still execute the suite. Partitioned or group-reported
+commands retain their own coverage checks. Live adapters run only their live
+targets and must not wrap the default suite.

@@ -46,6 +46,7 @@ class FieldRuleTests(unittest.TestCase):
              [f"{LABEL} touches names must be letters, digits, '.', '_', '/' or '-': two words"]),
             ({"environment_effect": "changes", "touches": "accounts, accounts"}, [f"{LABEL} repeats a touches name"]),
         )
+        self.assertTrue(self.findings(environment_effect="changes", touches="accounts,,ledger"))
         for fields, expected in cases:
             with self.subTest(fields=fields):
                 self.assertEqual(self.findings(**fields), expected)

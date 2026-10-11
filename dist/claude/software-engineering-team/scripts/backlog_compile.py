@@ -2192,7 +2192,7 @@ def touch_names(raw: str) -> list[str]:
     value = raw.strip()
     if value.startswith("[") and value.endswith("]"):
         value = value[1:-1]
-    return [name.strip() for name in value.split(",") if name.strip()]
+    return [name.strip() for name in value.split(",")] if value else []
 
 
 def environment_effect_findings(fields: dict[str, str], label: str) -> list[str]:

@@ -134,6 +134,11 @@ def heal(directory, project, grant, policy, launch=None):
             continue
         if child is not None:
             CHILDREN.pop(session)
+            lane.pop("active_pid", None)
+        elif lane.get("active_pid") and process_alive(lane["active_pid"]):
+            continue
+        else:
+            lane.pop("active_pid", None)
         transcript = Path(lane.get("last_output", lane["transcript"]))
         error = terminal_error(transcript, policy["transport_error_codes"])
         if error is None or error["fingerprint"] == lane.get("last_error"):
@@ -154,6 +159,8 @@ def heal(directory, project, grant, policy, launch=None):
             child = (launch or subprocess.Popen)(command, cwd=project, stdout=stream, stderr=subprocess.STDOUT,
                                                  **host.spawn_options())
         CHILDREN[session] = child
+        if isinstance(getattr(child, "pid", None), int):
+            lane["active_pid"] = child.pid
         lane.update(attempts=lane["attempts"] + 1, last_error=error["fingerprint"], last_output=str(output))
         outcomes.append({"session": session, "state": "resumed", "attempt": lane["attempts"]})
     save(directory, state)

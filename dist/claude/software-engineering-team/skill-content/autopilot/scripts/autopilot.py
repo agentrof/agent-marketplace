@@ -459,6 +459,7 @@ def option_parser() -> Parser:
     parser.add_argument("--for", dest="duration")
     parser.add_argument("--until")
     parser.add_argument("--goal")
+    parser.add_argument("--recover-transport", action="store_true")
     parser.add_argument("--allow", action="append", default=[])
     parser.add_argument("--deny", action="append", default=[])
     return parser
@@ -571,11 +572,12 @@ def grant_terms(policy: dict, options: argparse.Namespace, now: datetime, projec
         hours = policy["default_goal_cap_hours"] if goal else policy["default_duration_hours"]
         expires = now + timedelta(hours=hours)
     return {"expires_at": stamp(expires), "goal": goal,
-            "classes": grant_classes(policy, names(options.allow), names(options.deny))}
+            "classes": grant_classes(policy, names(options.allow), names(options.deny)),
+            **({"transport_recovery": True} if options.recover_transport else {})}
 
 
 def options_given(options: argparse.Namespace) -> bool:
-    return bool(options.duration or options.until or options.goal or options.allow or options.deny)
+    return bool(options.duration or options.until or options.goal or options.allow or options.deny or options.recover_transport)
 
 
 def fresh_arming(directory: Path, policy: dict, now: datetime) -> dict:
@@ -671,7 +673,10 @@ def report_payload(directory: Path, grant: dict, now: datetime | None = None) ->
     if now is not None:
         entries = [{**event, **({"age_seconds": max(0, int((now - parse_stamp(event["time"])).total_seconds()))}
                                if event["event"] == "queued" else {})} for event in entries]
+    recovery = [event for event in ledger(directory)
+                if event.get("grant") in ids and event.get("event") == "transport_recovery"]
     return {"grant": grant, "chain": ids, "entries": entries,
+            **({"transport_recovery": recovery} if recovery else {}),
             "counts": {"decisions": sum(event["event"] == "decision" for event in entries),
                        "queued": sum(event["event"] == "queued" for event in entries)}}
 
@@ -712,6 +717,9 @@ def report_lines(payload: dict) -> list[str]:
             lines.append(f"   options: {options or 'none offered'}"
                          + (f"; blocks: {entry['blocks']}" if entry.get("blocks") else "")
                          + (f"; waiting {entry['age_seconds']}s" if "age_seconds" in entry else ""))
+    for entry in payload.get("transport_recovery", []):
+        lines.append(f"transport recovery: {entry.get('state')} for {entry.get('session')}"
+                     + (f"; {entry['reason']}" if entry.get("reason") else ""))
     counts = payload["counts"]
     lines.append(f"decisions: {counts['decisions']}, queued: {counts['queued']}")
     return lines
@@ -769,6 +777,8 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
             ("for", args.duration), ("until", args.until), ("goal", args.goal)) if value]
         typed += [f"--allow {value}" for value in args.allow]
         typed += [f"--deny {value}" for value in args.deny]
+        if args.recover_transport:
+            typed.append("--recover-transport")
         armed_by = {"guard": "user_only_entry", "arguments": " ".join(["on", *typed])}
         host = args.host
     terms = grant_terms(policy, options, now, project,
@@ -793,6 +803,13 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
     if grant["replaces"]:
         lines.append(f"replaces: {grant['replaces']}")
     lines.append(f"armed by: {armed_by['guard']} with `{armed_by['arguments']}`")
+    if grant.get("transport_recovery"):
+        import autopilot_recovery
+        try:
+            pid = autopilot_recovery.start(Path(__file__), project.resolve(), grant, directory)
+            lines.append(f"transport recovery watcher: {pid}")
+        except (ImportError, OSError, ValueError) as error:
+            lines.append(f"transport recovery unavailable: {error}")
     print("\n".join(lines))
     return 0
 
@@ -1167,6 +1184,72 @@ def run_hook(argv: list[str], stdin, now: datetime) -> int:
 # ---------------------------------------------------------------------------
 
 
+
+def recovery_grant(args, now):
+    directory = state_dir(Path(args.project_root))
+    require_state(directory, "no active grant")
+    grant = active_grant(directory, now, Path(args.project_root))
+    if grant.get("transport_recovery") is not True:
+        raise Refusal("transport recovery needs a user-armed --recover-transport grant")
+    return directory, grant
+
+
+def cmd_register_recovery(args, now):
+    import autopilot_recovery
+    directory, grant = recovery_grant(args, now)
+    with locked(directory):
+        result = autopilot_recovery.register(directory, Path(args.project_root), grant,
+                                             args.session_id, args.transcript, args.role, args.pid)
+    print(json.dumps(result))
+    return 0
+
+
+def cmd_heal(args, now):
+    import autopilot_recovery
+    directory, grant = recovery_grant(args, now)
+    with locked(directory):
+        result = autopilot_recovery.heal(directory, Path(args.project_root), grant, load_policy())
+        for entry in result:
+            log(directory, now, grant, "transport_recovery", **entry)
+            if entry.get("state") == "needs_owner":
+                notify_owner("Transport recovery needs attention", entry["reason"] + ": " + entry["session"])
+    print(json.dumps({"outcomes": result}))
+    return 0
+
+
+def cmd_watch_recovery(args, now):
+    import file_lock
+    directory, grant = recovery_grant(args, now)
+    if grant["id"] != args.grant:
+        return 0
+    path = directory / "recovery-watch.lock"
+    if path.is_symlink():
+        raise Refusal("recovery watcher lock cannot be a symlink")
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    held = False
+    try:
+        if not file_lock.try_lock(descriptor):
+            return 0
+        held = True
+        while True:
+            moment = datetime.now(timezone.utc)
+            try:
+                _directory, active = recovery_grant(args, moment)
+            except Refusal:
+                return 0
+            if active["id"] != args.grant:
+                return 0
+            cmd_heal(args, moment)
+            remaining = (parse_stamp(active["expires_at"]) - moment).total_seconds()
+            if remaining <= 0:
+                return 0
+            time.sleep(min(load_policy()["transport_interval_seconds"], remaining))
+    finally:
+        if held:
+            file_lock.unlock(descriptor)
+        os.close(descriptor)
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     root.add_argument("--project-root", default=".")
@@ -1185,6 +1268,17 @@ def parser() -> argparse.ArgumentParser:
     waiting = verbs.add_parser("waiting")
     waiting.add_argument("--runnable-task", action="append", default=[])
     waiting.set_defaults(handler=cmd_waiting)
+
+    registration = verbs.add_parser("register-recovery")
+    registration.add_argument("--session-id", required=True)
+    registration.add_argument("--transcript", required=True)
+    registration.add_argument("--role", required=True)
+    registration.add_argument("--pid", type=int, required=True)
+    registration.set_defaults(handler=cmd_register_recovery)
+    verbs.add_parser("heal").set_defaults(handler=cmd_heal)
+    watcher = verbs.add_parser("watch-recovery")
+    watcher.add_argument("--grant", required=True)
+    watcher.set_defaults(handler=cmd_watch_recovery)
     record = verbs.add_parser("record")
     record.add_argument("--choice", required=True)
     record.add_argument("--reason", required=True)

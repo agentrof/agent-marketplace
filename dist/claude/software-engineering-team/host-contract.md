@@ -329,3 +329,9 @@ When all remaining work waits on queued owner decisions, call the packaged
 `autopilot.py waiting` before ending the turn. It submits one desktop notice
 per queue. Report an unavailable notification backend; never claim delivery
 when the command failed. The decision still belongs to the owner.
+
+When the user armed autopilot with `--recover-transport`, register each assigned
+resumable host session and its structured JSONL transcript with
+`autopilot.py register-recovery`. Never register another project's session,
+select the latest session implicitly or substitute a new session. A session
+whose host exposes no such transcript stays owner-resumable and is reported.

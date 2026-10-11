@@ -137,7 +137,7 @@
       "6907f6c826873e160a411f49ef34e346b7bbf4db046f50b46528184ace2d604a"
     ,
     "host-contract.md":
-      "af25d414da720a118ab904e5bb8c446b0bf396951821e3764809645931627912"
+      "b28acde8eb49784e5b12ed0d1924db9a0343f741906544df3b431287dc7c9f43"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -150,6 +150,9 @@
     ,
     "scripts/atomic_file.py":
       "2835d96b91f37e472a73f1540aead9aa3d0a9165db4fa0f2cb457373aa629320"
+    ,
+    "scripts/autopilot_recovery.py":
+      "a35e2709fe0fad86654526733ff83bca7591f3c91a59c02528b012b317c1cfaa"
     ,
     "scripts/ba_compile.py":
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
@@ -286,6 +289,9 @@
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
     ,
+    "scripts/transport_recovery_host.py":
+      "05b57df14c4d46d311129887b9a4537c68dfcc5ee96f26e54f5862cf01b8946e"
+    ,
     "scripts/vault_check.py":
       "3bd52e5d5159562c8b44a21791c433f04721e81fee3b9932c9fb176d85ebe8cb"
     ,
@@ -302,13 +308,13 @@
       "2278dfc155f1c18d13262f1a6aff22893c17f8ee4791594ba4059448a9801138"
     ,
     "skill-content/autopilot/SKILL.md":
-      "d87ad2e18c1b6b1dd834eb8fa240fb9186389f936cf8f8a660b97a56ad0d1b07"
+      "399e74c96b2c07329b7ea0d5fa102e5b4f35113589a9fbca9705d7af1bf18477"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
-      "d63a6ad7930086ea018b4825ead12fd58f53317d32bf3cac08750d131ad23a2d"
+      "57ee989ae80d557a3ee2c3f5db3bee5ebab61a170845cb972b8c6df792417a69"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "f1c4a03cf7ca8ac1aaa2edda247d545b3b2db8025c87eb1e43632885e8610913"
+      "b641d2c30cc9409478cfff76d4f1cb79269b85499a06a0af54956e7a913ceb39"
     ,
     "skill-content/backlog-plan/SKILL.md":
       "f4314b20877593f179f92b726b93dc88e82e33781603599db0af98fe43349643"

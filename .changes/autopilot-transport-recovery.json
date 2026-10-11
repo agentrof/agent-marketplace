@@ -1,0 +1,6 @@
+{
+  "summary": "Add user-armed, grant-bounded transport recovery for explicitly registered host sessions, with exact-session resume and limited retries.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

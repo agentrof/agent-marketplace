@@ -690,6 +690,56 @@ def system_zone(name: str):
 
 @integration
 @unittest.skipIf(os.name == "nt", "time.tzset sets the system zone only on POSIX hosts")
+class TransportRecoveryTests(unittest.TestCase):
+    @integration
+    def test_only_registered_terminal_transport_errors_resume_and_attempts_are_bounded(self):
+        import autopilot_recovery as recovery
+        import types
+        import uuid
+        project = Project(self)
+        directory = project.root / ".agentrof/recovery-test"
+        directory.mkdir(parents=True)
+        session = str(uuid.uuid4())
+        transcript = directory / "host.jsonl"
+        transcript.write_text(json.dumps({"type": "thread.started", "thread_id": session}) + "\n"
+                              + json.dumps({"type": "error", "message": "ENOTFOUND initial"}) + "\n")
+        grant = {"id": "grant"}
+        recovery.register(directory, project.root, grant, session, transcript, "qa_engineer", 99999999)
+        recovery.CHILDREN.clear()
+        launched = []
+        def launch(command, **kwargs):
+            launched.append(command)
+            kwargs["stdout"].write(json.dumps({"type": "error", "message": "ENOTFOUND " + str(len(launched))}).encode())
+            return types.SimpleNamespace(poll=lambda: 1)
+        host = types.SimpleNamespace(resume_command=lambda session, prompt: ["host", session, prompt],
+                                     spawn_options=lambda: {})
+        with mock.patch.dict(sys.modules, {"transport_recovery_host": host}), mock.patch.object(recovery, "process_alive", return_value=True) as alive:
+            self.assertEqual(recovery.heal(directory, project.root, grant, POLICY, launch), [])
+            alive.return_value = False
+            for expected in (1, 2, 3):
+                result = recovery.heal(directory, project.root, grant, POLICY, launch)
+                self.assertEqual(result[0]["attempt"], expected)
+            result = recovery.heal(directory, project.root, grant, POLICY, launch)
+            self.assertEqual(result[0]["state"], "needs_owner")
+            self.assertEqual(recovery.heal(directory, project.root, grant, POLICY, launch), [])
+        self.assertEqual(len(launched), 3)
+        changed = project.root / "changed.txt"
+        changed.write_text("later write")
+        self.assertTrue(recovery.wrote_after(project.root, transcript.stat().st_mtime_ns, transcript))
+        self.assertTrue(all(command[1] == session for command in launched))
+        transcript.write_text(json.dumps({"type": "assistant", "message": "ENOTFOUND is quoted text"}))
+        self.assertIsNone(recovery.terminal_error(transcript, POLICY["transport_error_codes"]))
+
+    def test_recovery_is_explicitly_armed_and_expiry_refuses_it(self):
+        import autopilot_recovery as recovery
+        project = Project(self)
+        project.assert_refused("no active grant", "heal")
+        with mock.patch.object(recovery, "start", return_value=123):
+            self.assertEqual(project.run_verb("on", "--for", "1h", "--recover-transport")[0], 0)
+        self.assertTrue(project.grant()["transport_recovery"])
+        project.assert_refused("no active grant", "heal", now=NOW + timedelta(hours=2))
+
+
 class ClockTests(unittest.TestCase):
     """--until reads the system zone across a daylight-saving change, from when the user typed it."""
 

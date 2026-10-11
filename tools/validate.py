@@ -3583,8 +3583,8 @@ def check_assertion_kinds(tree: Tree, findings: list[Finding]) -> None:
 AUTOPILOT_POLICY_RELPATH = "skill-content/autopilot/data/autopilot-policy.json"
 AUTOPILOT_SCRIPT_RELPATH = "skill-content/autopilot/scripts/autopilot.py"
 AUTOPILOT_NUMBERS = ("default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
-                     "arming_ttl_minutes")
-AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", *AUTOPILOT_NUMBERS}
+                     "arming_ttl_minutes", "transport_interval_seconds", "transport_max_attempts")
+AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", "transport_error_codes", *AUTOPILOT_NUMBERS}
 AUTOPILOT_DEFAULTS = ("allowed", "excluded", "never")
 
 
@@ -3598,6 +3598,14 @@ def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
                if isinstance(data[key], int) and not isinstance(data[key], bool) and data[key] > 0}
     problems += [f"{key} must be a positive whole number"
                  for key in AUTOPILOT_NUMBERS if key not in numbers]
+    if not 1 <= numbers.get("transport_max_attempts", 0) <= 3:
+        problems.append("transport_max_attempts must be between 1 and 3")
+    if not 1 <= numbers.get("transport_interval_seconds", 0) <= 3600:
+        problems.append("transport_interval_seconds must be between 1 and 3600")
+    codes = data.get("transport_error_codes")
+    if (not isinstance(codes, list) or not codes or any(not _nonblank(code) for code in codes)
+            or len(codes) != len(set(codes))):
+        problems.append("transport_error_codes must list unique nonempty error codes")
     maximum = numbers.get("max_duration_hours")
     problems += [f"{key} {numbers[key]} is above max_duration_hours {maximum}"
                  for key in ("default_duration_hours", "default_goal_cap_hours")

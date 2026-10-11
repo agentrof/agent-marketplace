@@ -102,3 +102,15 @@ run `autopilot.py --project-root <root> waiting`. It submits one desktop
 notification per unchanged queue; a failed submission is reported, not treated
 as delivered. With independent work left, keep working and do not call it.
 `report --json` includes each queued question's age in seconds.
+
+## Transport recovery
+
+The user may type `on --recover-transport` to arm a watcher bounded by that
+grant's lifetime. Register each supported host session with `register-recovery
+--session-id <uuid> --transcript <host-jsonl-file> --role <role> --pid <pid>`. Register only
+CLI sessions assigned to this project; a still-running host process is never resumed. The watcher reads explicit terminal transport
+errors and never treats assistant prose as an error. It refuses recovery after
+workspace writes following the error, limits attempts and preserves host
+permissions. A host session without a readable structured error transcript is
+not automatically recoverable; report it rather than guessing or selecting the
+host's latest session. `heal` performs the same one-pass check manually.

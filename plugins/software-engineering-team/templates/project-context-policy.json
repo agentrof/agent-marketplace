@@ -208,5 +208,28 @@
     "consume": "implement",
     "review": "review",
     "repair": "implement"
-  }
+  },
+  "review_advice_budgets": [
+    {
+      "max_changed_lines": 30,
+      "max_changed_files": 3,
+      "max_units": 12,
+      "max_files": 6,
+      "max_source_bytes": 18000
+    },
+    {
+      "max_changed_lines": 200,
+      "max_changed_files": 10,
+      "max_units": 24,
+      "max_files": 8,
+      "max_source_bytes": 32000
+    },
+    {
+      "max_changed_lines": 2147483647,
+      "max_changed_files": 2147483647,
+      "max_units": 48,
+      "max_files": 12,
+      "max_source_bytes": 64000
+    }
+  ]
 }

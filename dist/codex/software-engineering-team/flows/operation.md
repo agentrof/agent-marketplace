@@ -147,3 +147,9 @@ never binds the evidence. The contract check refuses a name of the runner's
 own `AGENTROF_` namespace: the runner sets those variables, and run evidence
 binds them without a declaration, a selection file the runner writes by its
 content. Add the field through the normal revision and approval lifecycle.
+
+`live_diagnostic_command`, when declared beside live groups, contains `{group}`
+once. It reads the immutable case selection from `AGENTROF_LIVE_TESTS` and
+executes exactly those literal test ids in the selected group. It uses the
+existing `live_test_workdir`; the runner never interpolates test ids into shell
+text. This command enables targeted repair proof before a new QA candidate.

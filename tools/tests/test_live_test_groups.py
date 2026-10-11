@@ -105,6 +105,46 @@ class LiveRunTests(unittest.TestCase):
         self.commit()
         self.freeze()
 
+    def test_failed_live_cases_block_freeze_until_the_repaired_candidate_passes(self):
+        executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
+        self.declare(live_test_command=executable + " live.py {group}", live_test_workdir=".",
+                     live_groups=["smoke"], live_diagnostic_command=executable + " live.py {group}")
+        self.settle()
+        self.write("live.py", "import json, os, pathlib, sys\n"
+                   "p = pathlib.Path(os.environ['AGENTROF_VERIFICATION_SCRATCH'])\n"
+                   "status = 'passed' if pathlib.Path('src/repaired.txt').exists() else 'failed'\n"
+                   "(p / 'live-case-report.json').write_text(json.dumps({'schema_version':1, 'groups':{'smoke':{'tests/live.py::test_case':status}}}))\n"
+                   "if 'AGENTROF_LIVE_TESTS' not in os.environ: sys.exit(1)\n"
+                   "selection = json.loads(pathlib.Path(os.environ['AGENTROF_LIVE_TESTS']).read_text())\n"
+                   "assert selection['selected_test_ids'] == ['tests/live.py::test_case']\n"
+                   "print('selected only failed live case')\n"
+                   "sys.exit(0 if pathlib.Path('src/repaired.txt').exists() else 1)\n")
+        self.commit()
+        verification.freeze(self.root, "DLV-001", "AUTH-01", fresh=True)
+        verification.register_result(self.root, self.result())
+        failure = self.result("qa_engineer", "qa_final", "failed")
+        failure["failed_live_cases"] = {"smoke": ["tests/live.py::test_case"]}
+        with self.assertRaisesRegex(RuntimeError, "recorded live run evidence"):
+            verification.register_result(self.root, failure)
+        verification.run_check(self.root, "live_test", group="smoke")
+        verification.register_result(self.root, failure)
+        with self.assertRaisesRegex(RuntimeError, "passing repair-live"):
+            self.freeze()
+        failed = verification.repair_live(self.root, "DLV-001", "AUTH-01")
+        self.assertEqual(failed["exit_code"], 1)
+        with self.assertRaisesRegex(RuntimeError, "passing repair-live"):
+            self.freeze()
+        self.write("src/repaired.txt", "fixed\n")
+        self.commit()
+        with self.assertRaisesRegex(RuntimeError, "passing repair-live"):
+            self.freeze()
+        passed = verification.repair_live(self.root, "DLV-001", "AUTH-01")
+        self.assertEqual(passed["exit_code"], 0)
+        self.assertIn("selected only failed live case", verification.raw_output_path(
+            self.root, passed["runs"]["smoke"]["output_file"]).read_text())
+        frozen = self.freeze()
+        self.assertEqual(frozen["live_repair"]["evidence_hash"], passed["evidence_hash"])
+
     def test_running_live_group_exposes_heartbeat_output_and_adapter_progress(self):
         executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
         self.declare(live_test_command=executable + " live.py {group}", live_test_workdir=".",

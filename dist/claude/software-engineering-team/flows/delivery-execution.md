@@ -374,3 +374,11 @@ an interrupted runner, not a failed test. An approved test adapter may write
 `test_id`, `cases_done`, `cases_total` and `failures`; the status labels these as
 adapter observations. They never satisfy a verification gate. Final outcomes
 still come only from the completed command and its recorded evidence.
+
+When an approved `live_diagnostic_command` exists, failed QA records
+`failed_live_cases` as a mapping from declared live groups to failed literal
+test ids. After both readers settle and the repair is committed, the coordinator
+runs `repair-live --delivery DLV-### --story <story>`. It runs every registered
+failed case in a private checkout of the repaired candidate. A missing, failed,
+stale or mismatched repair record refuses the next freeze. This proof is
+carried into the new session; the complete QA round still runs independently.

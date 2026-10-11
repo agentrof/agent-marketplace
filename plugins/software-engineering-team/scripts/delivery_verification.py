@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import secrets
+from shlex import quote as shlex_quote
 import stat
 import time
 from pathlib import Path, PurePosixPath
@@ -75,6 +76,8 @@ ASSERTION_FIELDS = ("path", "code", "kind", "expected")
 ENGINE_SWITCH = "test_engines"
 PARTITIONED = "partitioned"
 PARTITION_DURATIONS = "partition-durations.json"
+# What a mutation run records, at once and passed, when its scope holds no file.
+EMPTY_MUTATION_SCOPE = "scope empty, not run"
 # At process switch code_review_panel beside_official a lens panel reads the
 # frozen candidate beside the official code reviewer, and merge-panel
 # registers the one code review result from both.
@@ -1006,6 +1009,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         scratch = safe_runtime_path(root, Path(environment["AGENTROF_VERIFICATION_SCRATCH"]))
         scratch.mkdir(exist_ok=True)
         declared = environment_identity(root, environment, contract)
+        if kind == "mutation" and not current["mutation_files"]:
+            return record_empty_mutation(root, session, current, command, workdir, declared)
         reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
                           if kind == "test" else (None, None))
         own_note = None
@@ -1128,6 +1133,28 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         write_session(root, session)
         return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {}),
                 **({"own_target_reuse": own_note} if own_note else {})}
+
+
+def record_empty_mutation(root: Path, session: dict, current: dict, command: str, workdir: str,
+                          declared: dict) -> dict:
+    """Record a mutation run whose scope holds no file as passed without launching the command.
+
+    With no compiler-selected file there is no mutant to generate, so the
+    record says so, binds the approved command and environment as a run would,
+    and takes no time.
+    """
+    identity = {"candidate_hash": current["candidate_hash"], "kind": "mutation", "command": command,
+                "workdir": workdir, **declared, "execution_isolation": "private_clone_v1"}
+    output = (EMPTY_MUTATION_SCOPE + "\n").encode("utf-8")
+    output_name = f"scratch/mutation-{digest(identity).removeprefix('sha256:')}-{uuid.uuid4().hex}.log"
+    atomic_file.replace_bytes(raw_output_path(root, output_name), output)
+    record = {"identity": identity, "exit_code": 0, "candidate_intact": True, "not_run": EMPTY_MUTATION_SCOPE,
+              "output_file": output_name, "output_sha256": hashlib.sha256(output).hexdigest(),
+              "duration_seconds": 0, "completed_at": time.time()}
+    record["evidence_hash"] = digest(record)
+    session["raw_evidence"]["mutation"] = record
+    write_session(root, session)
+    return {**record, "reused": False}
 
 
 def own_target_reuse(root: Path, delivery_id: str) -> str:
@@ -3514,6 +3541,101 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     return result
 
 
+LAUNCH_PROMPTS_PATH = Path(__file__).resolve().parents[1] / "templates/reader-launch-prompts.json"
+
+
+def launch_prompt(template: list[str], fields: dict) -> str:
+    """A reader launch prompt: its template lines with every placeholder filled; a missing field refuses."""
+    try:
+        return "\n".join(line.format_map(fields) for line in template) + "\n"
+    except (KeyError, IndexError, ValueError) as exc:
+        raise RuntimeError(f"reader launch prompt template names an unknown placeholder: {exc}") from exc
+
+
+def start_pass(root: Path, delivery_id: str, story: str, *, review_mode: str | None = None,
+               qa_mode: str = "qa_final", fresh: bool = False, remote: str = "origin") -> dict:
+    """Start one verification pass of an Item: pre-handoff regression when the Delivery runs it, freeze,
+    both readers' manifests and their launch prompts. The first failing step stops the chain."""
+    root = root.resolve()
+    steps: list[dict] = []
+
+    def stopped(step: str, error: str) -> dict:
+        steps.append({"step": step, "ok": False, "error": error})
+        return {"ok": False, "failed_step": step, "errors": [f"{step}: {error}"], "steps": steps}
+
+    try:
+        regression = pre_handoff_regression(root, delivery_id)
+    except (RuntimeError, ValueError, OSError, KeyError) as exc:
+        return stopped("regression-selection", str(exc))
+    if regression == TOUCHED_SUITES:
+        try:
+            selection = regression_selection(root, delivery_id, story)
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
+            return stopped("regression-selection", str(exc))
+        steps.append({"step": "regression-selection", "ok": True, "selection_file": selection["selection_file"]})
+        try:
+            ran = regression_run(root, delivery_id, story)
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
+            return stopped("regression-run", str(exc))
+        if ran.get("exit_code") != 0 or ran.get("candidate_intact") is False:
+            return stopped("regression-run", f"exit code {ran.get('exit_code')}, candidate intact"
+                                             f" {ran.get('candidate_intact')}; read {ran.get('output_file')}")
+        steps.append({"step": "regression-run", "ok": True, "duration_seconds": ran.get("duration_seconds")})
+    else:
+        steps.extend({"step": step, "ok": True, "skipped": f"{PRE_HANDOFF_SWITCH} is {regression}"}
+                     for step in ("regression-selection", "regression-run"))
+    try:
+        frozen = freeze(root, delivery_id, story, fresh=fresh, remote=remote)
+    except (RuntimeError, ValueError, OSError, KeyError) as exc:
+        return stopped("freeze", str(exc))
+    steps.append({"step": "freeze", "ok": True, "reused": bool(frozen.get("reused"))})
+    modes = {"code_reviewer": review_mode or ("review_repair" if frozen.get("previous_candidate") else "review_initial"),
+             "qa_engineer": qa_mode}
+    directory = safe_runtime_path(root, session_path(root).parent / "pass")
+    directory.mkdir(parents=True, exist_ok=True)
+    manifests: dict[str, dict] = {}
+    paths: dict[str, str] = {}
+    for role, mode in modes.items():
+        try:
+            value = manifest(root, delivery_id, story, role, mode, remote)
+            path = safe_runtime_path(root, directory / f"manifest-{role}.json", file_only=True)
+            atomic_file.replace_text(path, json.dumps(value, indent=2) + "\n")
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
+            return stopped(f"manifest {role}", str(exc))
+        manifests[role], paths[role] = value, str(path)
+        steps.append({"step": f"manifest {role}", "ok": True, "mode": mode, "path": str(path)})
+    try:
+        templates = json.loads(LAUNCH_PROMPTS_PATH.read_text(encoding="utf-8"))["prompts"]
+        panel = manifests["code_reviewer"].get(CODE_REVIEW_PANEL)
+        common = {"delivery": delivery_id, "story": story, "session_id": frozen["session_id"],
+                  "candidate_hash": frozen["candidate"]["candidate_hash"],
+                  "constitution": str(Path(__file__).resolve().parents[1] / "constitution.md"),
+                  "runner": " ".join(subprocess.list2cmdline([part]) if os.name == "nt" else shlex_quote(part)
+                                     for part in (sys.executable, str(Path(__file__).resolve()),
+                                                  "--worktree", str(root))),
+                  "scratch": str(session_path(root).parent / "scratch")}
+        readers = [("code_reviewer", "code_reviewer", {"agent": "code-reviewer", "mode": modes["code_reviewer"],
+                                                       "register": "panel-result" if panel else "result"}),
+                   ("qa_engineer", "qa_engineer", {"agent": "qa-engineer", "mode": modes["qa_engineer"],
+                                                   "register": "result"})]
+        for assignment in (panel or {}).get("assignments", []):
+            readers.append((f"code_reviewer_lens-{assignment['id_prefix'].rstrip('-')}", "code_reviewer_lens",
+                            {"agent": "code-reviewer-lens", "mode": PANEL_LENS_MODE, "register": "panel-result",
+                             "lens": ", ".join(assignment["lens"]), "id_prefix": assignment["id_prefix"]}))
+        prompts = {}
+        for name, template, fields in readers:
+            role = "code_reviewer" if template != "qa_engineer" else "qa_engineer"
+            text = launch_prompt(templates[template], {**common, **fields, "manifest": paths[role]})
+            path = safe_runtime_path(root, directory / f"launch-{name}.md", file_only=True)
+            atomic_file.replace_text(path, text)
+            prompts[name] = {"path": str(path), "text": text}
+    except (RuntimeError, ValueError, OSError, KeyError) as exc:
+        return stopped("launch prompts", str(exc))
+    steps.append({"step": "launch prompts", "ok": True, "readers": sorted(prompts)})
+    return {"ok": True, "session_id": frozen["session_id"], "candidate_hash": frozen["candidate"]["candidate_hash"],
+            "steps": steps, "manifests": paths, "prompts": prompts}
+
+
 RUN_SUMMARY_FIELDS = ("exit_code", "candidate_intact", "selection_intact", "reused_pre_handoff", "duration_seconds",
                       "completed_at", "evidence_hash", "environment_hash", "checkout_difference", "earlier_stories",
                       "output_file")
@@ -3563,6 +3685,13 @@ def main(argv=None) -> int:
     for name in ("manifest",):
         subs.choices[name].add_argument("--role", choices=ROLES, required=True)
         subs.choices[name].add_argument("--mode", required=True)
+    start = subs.add_parser("start-pass")
+    start.add_argument("--delivery", required=True)
+    start.add_argument("--story", required=True)
+    start.add_argument("--review-mode", choices=("review_initial", "review_repair"))
+    start.add_argument("--qa-mode", choices=("qa_final", "qa_diagnostic"), default="qa_final")
+    start.add_argument("--fresh", action="store_true")
+    start.add_argument("--remote", default="origin")
     result = subs.add_parser("result")
     result.add_argument("--file", required=True)
     calibrate = subs.add_parser("calibrate")
@@ -3608,6 +3737,11 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.worktree).resolve()
     try:
+        if args.command == "start-pass":
+            value = start_pass(root, args.delivery, args.story, review_mode=args.review_mode, qa_mode=args.qa_mode,
+                               fresh=args.fresh, remote=args.remote)
+            print(json.dumps(value, indent=2))
+            return 0 if value["ok"] else 1
         if args.command == "freeze":
             value = freeze(root, args.delivery, args.story, fresh=args.fresh, remote=args.remote)
         elif args.command == "inspect-context":

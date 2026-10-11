@@ -87,6 +87,14 @@ DLV-### --story <story>` before invoking the two readers. The resulting
 candidate and session identities bind all source and instruction inputs.
 Generate each role's `manifest` with `--role code_reviewer|qa_engineer` and
 `--mode review_initial|review_repair|qa_diagnostic|qa_final`.
+`start-pass --delivery DLV-### --story <story>` chains these steps for one
+pass: at `pre_handoff_regression` `touched_suites` it runs
+`regression-selection` and `regression-run` first, then `freeze`, saves both
+manifests under the session's runtime directory, `review_repair` after an
+earlier candidate and `qa_final` unless `--review-mode` or `--qa-mode` says
+otherwise, and writes each reader's launch prompt, one per lens assignment
+included, from `templates/reader-launch-prompts.json`. It
+stops at the first failing step and names it with its error.
 Every verification manifest includes the default `project_reading` plan. Start
 with `inspect-context --plan <saved verification manifest>` to batch-read its
 units from the frozen Git candidate. Preserve all `full_read` obligations and
@@ -221,7 +229,8 @@ by every final run and runtime event of the session. They never compare it
 with their own shell, so the coordinator approves evidence QA recorded in
 another. The mutation command reads the exact
 JSON file scope through `AGENTROF_MUTATION_FILES`; no shell path interpolation
-is permitted. The QA result names the raw evidence identities and records
+is permitted. A scope that holds no file launches no command: `run --kind
+mutation` records `scope empty, not run` as a passed run with zero duration. The QA result names the raw evidence identities and records
 coverage, right-reason and all applicable final checks. A diagnostic returns
 quick findings without terminal eligibility; `resume-qa` allows final QA on
 the same unchanged candidate while preserving its independent review.
@@ -283,7 +292,13 @@ that Integration commit's Delivery controls byte for byte and record the commit
 as its `integration_base_commit`. The commit must lie on the Integration's own
 line after the Item's previous base and be contained in the product tip, and
 the Item record keeps the commit's plan-owned fields with only its own status,
-stamp and base.
+stamp and base. `delivery_git.py converge-item --delivery DLV-### --story
+<story>` converges the clean Item worktree in one step: it merges the current
+Integration, gives every Delivery control path the Integration's bytes, writes
+the Item record in that converged form, renders the relation views again with
+`vault_check.py render-relations` and commits. A conflict in any other path
+aborts the merge, leaves the worktree at its tip and names each path for a
+manual merge.
 `push-item` also rejects a product or test path outside the Item's path claims,
 which cover their paths and everything below them. Vault paths keep the
 control, Architecture and projection rules, and a path held exactly as the

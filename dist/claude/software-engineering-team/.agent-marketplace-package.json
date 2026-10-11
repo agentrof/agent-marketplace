@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "70661640404a1e01348d78c2ec25dbfce59b339515e63feb7027bc82229252a3"
+      "5ecca6ada51a0dc5c1a7ed6f3be56f3707cc4d0ef026f55934c8b628c5b98ab9"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -185,7 +185,7 @@
       "82e46ae1a80647c7b9ca6ec3f0709b26e35163c09efaad120c40ee3eb8bd4c3a"
     ,
     "scripts/delivery_git.py":
-      "983da24fe1514d5cead29a7e61c047ba7c3c74be1ee57ebaeff9eecb77a71e79"
+      "b130a28ef228ada57a066ec2ddb17f4f6b0d1effa607fe586e98b307410478e8"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
@@ -197,7 +197,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "fe70083f5af7e9f9b85736b33469bf5ce87c6e24049f28d99ff52c8156cba5b2"
+      "fc9ef43aa4ebfbbab44d3dca78ce0412e6556aeb7d758bcbee0c407030c53b5f"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -1056,6 +1056,9 @@
     ,
     "templates/project-instructions/user-context.json":
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
+    ,
+    "templates/reader-launch-prompts.json":
+      "8f0d6a42892fd7cd39ae4044106e04b5ee0f97df12b57cf74af67dfbfbf18922"
     ,
     "templates/task-input-contract.md":
       "adf4f3c92f2522f35b90706f28b659e9e18d51896b81b8b3bbe8c8a26db20a26"

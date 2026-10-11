@@ -3841,6 +3841,65 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
 
     @integration
+    def test_converge_item_takes_the_republished_integration_in_one_command(self):
+        """converge-item merges the republished Integration into the Item worktree, resolves the Item
+        record to the Integration's plan with the Item's own lifecycle, stamp and new base, commits, and
+        push-item accepts the result; a second run changes nothing."""
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        before, _ = delivery_compile.split_note(item)
+        integration, relative = self.republish_integration_plan(project, worktree, item)
+        result = delivery_git.converge_item(project, "DLV-001", "AUTH-01")
+        product = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        self.assertEqual((result["mutation_state"], result["integration"], result["item"]),
+                         ("complete", integration, product))
+        self.assertEqual(delivery_git.worktree_pending_paths(project, worktree), set())
+        self.assertEqual(delivery_git.run_git(worktree, "rev-parse", "HEAD^2"), integration)
+        published, published_body = delivery_git.split_remote_note(project, integration, relative["item"],
+                                                                    delivery_compile.split_note)
+        props, body = delivery_compile.split_note(item)
+        self.assertEqual(body, published_body)
+        self.assertEqual(props["item_plan_hash"], published["item_plan_hash"])
+        self.assertEqual(props["integration_base_commit"], integration)
+        self.assertEqual((props["status"], props["architecture_delta_hash"]),
+                         (before["status"], before["architecture_delta_hash"]))
+        self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
+        for name in ("plan", "scope"):
+            self.assertEqual(delivery_git.run_git(worktree, "rev-parse", f"HEAD:{relative[name]}"),
+                             delivery_git.run_git(worktree, "rev-parse", f"{integration}:{relative[name]}"))
+        again = delivery_git.converge_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(again["mutation_state"], "none")
+        self.assertEqual(delivery_git.run_git(worktree, "rev-parse", "HEAD"), product)
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        self.assertEqual(delivery_git.push_item(project, "DLV-001", "AUTH-01")["product_tip"], product)
+
+    @integration
+    def test_converge_item_stops_on_a_conflict_outside_the_delivery_controls(self):
+        """A conflict in a product path aborts the merge, leaves the Item worktree at its tip with
+        nothing pending and names the path, and the command line reports it as a blocker."""
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        tip = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        integration_ref = "refs/heads/agentrof/deliveries/dlv-001"
+        base = delivery_git.remote_oid(project, "origin", integration_ref)
+        (project / "src").mkdir(exist_ok=True)
+        (project / "src/auth.py").write_text("def authenticate():\n    return 'denied'\n", encoding="utf-8")
+        changed = delivery_git.commit_tree(project, base, ["src/auth.py"], "Change the product on the Integration", {})
+        delivery_git.atomic_push(project, "origin", [(integration_ref, base, changed)])
+        with self.assertRaisesRegex(RuntimeError, r"^DELIVERY_TARGET_CONVERGENCE_REQUIRED: converge-item stopped"
+                                                  r" .* resolve: src/auth\.py$"):
+            delivery_git.converge_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(delivery_git.run_git(worktree, "rev-parse", "HEAD"), tip)
+        self.assertEqual(delivery_git.worktree_pending_paths(project, worktree), set())
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_git.main(["converge-item", "--project-root", str(project),
+                                      "--delivery", "DLV-001", "--story", "AUTH-01"])
+        envelope = json.loads(output.getvalue())
+        self.assertEqual(code, 1)
+        self.assertEqual([finding["code"] for finding in envelope["findings"]],
+                         ["DELIVERY_TARGET_CONVERGENCE_REQUIRED"])
+        self.assertIn("src/auth.py", envelope["findings"][0]["message"])
+
+    @integration
     def test_push_item_refuses_before_any_ref_moves_when_its_candidate_would_change_the_worktree(self):
         """push-item republishes the Item record with LF and moves the Item worktree to that
         candidate after the push. A converged record committed with CRLF, as a text-mode write on

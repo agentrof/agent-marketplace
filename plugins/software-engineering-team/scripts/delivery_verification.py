@@ -3005,7 +3005,9 @@ def rebind_unit_run(root: Path, delivery_id: str) -> dict:
 
 def rebind_unit_refusals(root: Path, delivery_id: str) -> list[str]:
     try:
-        if delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, "regression_plan_revision") != "current_approved":
+        import process_policy
+        values, _pin = process_policy.effective_values(delivery.docs_root(root))
+        if values.get("regression_plan_revision", {}).get("value", "integrated") != "current_approved":
             return []
         selection = rebind_unit_selection(root, delivery_id)
         if not selection["selected_test_ids"]:

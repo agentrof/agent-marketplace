@@ -3564,6 +3564,8 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
         "and report context_findings with sources, impact, recovery and proposed fix to the parent. "
         "Only the parent offers an anonymous issue through issue-report after exact-payload user approval.")
     panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
+    if panel is None and role == "code_reviewer" and code_review_panel(root, current["delivery"]) == RISK_SCOPED:
+        result["lens_selection"] = lens_selection(root, current, panel_assignments())[1]
     if panel is not None:
         # Every reader of the panel pass receives this same manifest and one assignment.
         result["code_review_panel"] = {

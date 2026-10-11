@@ -368,6 +368,8 @@ class CodeReviewPanelMachineTests(unittest.TestCase):
         self.freeze()
         manifest = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_initial")
         self.assertNotIn("code_review_panel", manifest)
+        self.assertEqual(len(manifest["lens_selection"]["lenses"]), 3)
+        self.assertTrue(all(not row["joined"] for row in manifest["lens_selection"]["lenses"].values()))
         with self.assertRaisesRegex(RuntimeError, "panel-result registers a code review panel result only"):
             verification.register_panel_result(self.root, self.lens("security-isolation"))
         verification.register_result(self.root, self.official())

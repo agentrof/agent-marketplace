@@ -713,7 +713,7 @@ class TransportRecoveryTests(unittest.TestCase):
             return types.SimpleNamespace(poll=lambda: 1)
         host = types.SimpleNamespace(resume_command=lambda session, prompt: ["host", session, prompt],
                                      spawn_options=lambda: {})
-        with mock.patch.dict(sys.modules, {"transport_recovery_host": host}), mock.patch.object(recovery, "process_alive", return_value=True) as alive:
+        with mock.patch.object(recovery, "host_adapter", return_value=host), mock.patch.object(recovery, "process_alive", return_value=True) as alive:
             self.assertEqual(recovery.heal(directory, project.root, grant, POLICY, launch), [])
             alive.return_value = False
             for expected in (1, 2, 3):

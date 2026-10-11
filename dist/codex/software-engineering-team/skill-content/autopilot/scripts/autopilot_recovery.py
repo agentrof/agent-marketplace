@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,19 @@ import atomic_file
 
 CHILDREN = {}
 PROMPT = "Resume the interrupted assigned work from its current state. Preserve its scope, approvals and verification requirements."
+
+
+
+def host_adapter():
+    path = Path(__file__).with_name("transport_recovery_host.py")
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("transport recovery needs a built host adapter")
+    spec = importlib.util.spec_from_file_location("transport_recovery_host", path)
+    if spec is None or spec.loader is None:
+        raise ValueError("transport recovery host adapter is unreadable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def read_state(directory):
@@ -121,7 +135,7 @@ def process_alive(pid):
 
 
 def heal(directory, project, grant, policy, launch=None):
-    import transport_recovery_host as host
+    host = host_adapter()
     state = read_state(directory)
     outcomes = []
     for session, lane in state["lanes"].items():
@@ -168,7 +182,7 @@ def heal(directory, project, grant, policy, launch=None):
 
 
 def start(script, project, grant, directory):
-    import transport_recovery_host as host
+    host = host_adapter()
     host.resume_command(grant.get("armed_by", {}).get("session_id") or "capability-check", PROMPT)
     output = directory / "recovery-watch.log"
     with output.open("ab") as stream:

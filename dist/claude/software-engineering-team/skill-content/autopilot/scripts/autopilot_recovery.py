@@ -60,10 +60,15 @@ def register(directory, project, grant, session, transcript, role, pid):
                       and record.get("type") == "session_meta" and isinstance(record.get("payload"), dict))
     if session not in identities:
         raise ValueError("transcript does not identify the registered host session")
+    workspace_bound = False
     for record in records:
         payload = record.get("payload", record) if isinstance(record, dict) else {}
-        if isinstance(payload, dict) and payload.get("cwd") and Path(payload["cwd"]).resolve() != project.resolve():
-            raise ValueError("transcript belongs to another workspace")
+        if isinstance(payload, dict) and payload.get("cwd"):
+            if Path(payload["cwd"]).resolve() != project.resolve():
+                raise ValueError("transcript belongs to another workspace")
+            workspace_bound = True
+    if not workspace_bound:
+        raise ValueError("transcript carries no workspace binding")
     state = read_state(directory)
     old = state["lanes"].get(session)
     entry = {"grant": grant["id"], "project": str(project.resolve()), "transcript": str(path),
@@ -124,7 +129,28 @@ def wrote_after(project, time_ns, transcript):
 
 
 
+def windows_process_alive(pid):
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return ctypes.get_last_error() != 87
+    try:
+        code = wintypes.DWORD()
+        return not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value == 259
+    finally:
+        kernel.CloseHandle(handle)
+
+
 def process_alive(pid):
+    if os.name == "nt":
+        return windows_process_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

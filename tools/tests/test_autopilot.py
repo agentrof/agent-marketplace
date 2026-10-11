@@ -701,9 +701,13 @@ class TransportRecoveryTests(unittest.TestCase):
         directory.mkdir(parents=True)
         session = str(uuid.uuid4())
         transcript = directory / "host.jsonl"
-        transcript.write_text(json.dumps({"type": "thread.started", "thread_id": session}) + "\n"
+        transcript.write_text(json.dumps({"type": "thread.started", "thread_id": session, "cwd": str(project.root)}) + "\n"
                               + json.dumps({"type": "error", "message": "ENOTFOUND initial"}) + "\n")
         grant = {"id": "grant"}
+        unbound = directory / "unbound.jsonl"
+        unbound.write_text(json.dumps({"type": "thread.started", "thread_id": session}))
+        with self.assertRaisesRegex(ValueError, "no workspace binding"):
+            recovery.register(directory, project.root, grant, session, unbound, "qa_engineer", 99999999)
         recovery.register(directory, project.root, grant, session, transcript, "qa_engineer", 99999999)
         recovery.CHILDREN.clear()
         launched = []

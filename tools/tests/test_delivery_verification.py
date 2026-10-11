@@ -279,6 +279,12 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertEqual(rows, [{"finding_id": "CR-1", "test_ids": ["focused_tests.Focused.test_affected"],
                                 "candidate_hash": frozen["candidate"]["candidate_hash"], "evidence_hash": raw["evidence_hash"]}])
         self.assertEqual(verification.finding_control_history({"finding_control_bindings": rows}), rows)
+        self.assertEqual(verification.read_session(self.root)["finding_control_bindings"], rows)
+        second = copy.deepcopy(raw)
+        second["diagnostic_selection"]["finding_controls"][0]["finding_id"] = "CR-2"
+        combined = verification.finding_control_history({"finding_control_bindings": rows,
+                                                         "raw_evidence": {"diagnostic_test": second}})
+        self.assertEqual([row["finding_id"] for row in combined], ["CR-1", "CR-2"])
         recorded = raw["diagnostic_selection"]
         self.assertEqual((recorded["finding_controls"], recorded["finding_control_test_ids"], recorded["selected_test_ids"]),
                          (controls, ["focused_tests.Focused.test_affected"], ["focused_tests.Focused.test_affected"]))

@@ -1205,6 +1205,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                                              "output_sha256": hashlib.sha256(entry["output"]).hexdigest()})
         record["evidence_hash"] = digest(record)
         session["raw_evidence"][kind] = record
+        if record.get("diagnostic_selection", {}).get("finding_controls"):
+            session["finding_control_bindings"] = finding_control_history(session)
         session["metrics"]["command_seconds"] += record["duration_seconds"]
         write_session(root, session)
         return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {}),

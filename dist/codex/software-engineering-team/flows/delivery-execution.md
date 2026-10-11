@@ -353,3 +353,11 @@ lease it lost, or a remote without atomic push support, from the refetched
 refs. One whose refetched refs hold its candidate, or moved on from it, may
 have landed and reports `DELIVERY_TRANSACTION_UNCERTAIN` instead. Release
 Management is intentionally not part of this flow.
+
+With `live_environment_plan: effect_ordered_v1` in the approved Verification
+Contract, regression selection exports `live_environment_plan` to the project
+adapter. It deduplicates targets, lists special builds before the one shared
+environment, then fixtures, parallel readers, serial changes with readiness
+checks, resets and removals with reset/residue checks. Missing metadata is
+reported and executes as serial `changes`. The approved adapter must implement
+these phases and report its per-phase setup counts; it owns service commands.

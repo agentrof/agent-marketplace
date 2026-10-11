@@ -3021,7 +3021,17 @@ def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -
     command = approved(kind)
     if command is None:
         raise RuntimeError("approved verification command is missing or contains unresolved parameters")
-    return {"delivery": delivery_id, "story": story, "candidate_hash": current["candidate_hash"],
+    live_plan = None
+    if contract.get("live_environment_plan") == "effect_ordered_v1":
+        rows = []
+        for path in sorted(docs.rglob("test-plan.md")):
+            for identifier, block in scenario_blocks(delivery.split_note(path)[1]):
+                fields = scenario_fields(block)[0]
+                if fields.get("automation_target", "").strip() in selected:
+                    rows.append({"id": identifier, "fields": fields})
+        live_plan = backlog_compile.live_environment_plan(rows)
+    return {**({"live_environment_plan": live_plan} if live_plan is not None else {}),
+            "delivery": delivery_id, "story": story, "candidate_hash": current["candidate_hash"],
             "product_commit": current["product_commit"],
             "candidate_tree": git(root, "rev-parse", current["product_commit"] + "^{tree}"),
             "earlier_stories": earlier, "own_targets": own, "affected_test_ids": selected,
@@ -3037,7 +3047,9 @@ def write_pre_handoff_selection(root: Path, derived: dict) -> Path | None:
     if not derived["affected_test_ids"]:
         return None
     path = raw_output_path(root, PRE_HANDOFF_SELECTION)
-    text = json.dumps({"schema_version": 1, "candidate_hash": derived["candidate_hash"], "failed_test_ids": [],
+    text = json.dumps({**({"live_environment_plan": derived["live_environment_plan"]}
+                         if "live_environment_plan" in derived else {}),
+                       "schema_version": 1, "candidate_hash": derived["candidate_hash"], "failed_test_ids": [],
                        "affected_test_ids": derived["affected_test_ids"]}, indent=2, sort_keys=True) + "\n"
     if not path.is_file() or path.read_bytes() != text.encode("utf-8"):
         path.parent.mkdir(parents=True, exist_ok=True)

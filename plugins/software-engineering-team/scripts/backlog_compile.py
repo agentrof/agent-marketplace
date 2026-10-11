@@ -2195,6 +2195,42 @@ def touch_names(raw: str) -> list[str]:
     return [name.strip() for name in value.split(",")] if value else []
 
 
+def live_environment_plan(scenarios: list[dict]) -> dict:
+    """Normalize and deduplicate selected live rows for an effect-ordered adapter."""
+    by_target = {}
+    missing = []
+    for row in scenarios:
+        fields = row["fields"]
+        if fields.get("level") != "live" or fields.get("automation", "").lower() != "required":
+            continue
+        target = fields.get("automation_target", "").strip()
+        if not target:
+            raise ValueError("a selected live scenario needs an automation target")
+        effect = fields.get("environment_effect", "changes")
+        if effect not in ENVIRONMENT_EFFECTS:
+            raise ValueError("a live execution plan needs a declared environment effect")
+        if "environment_effect" not in fields:
+            missing.append(row["id"])
+        item = {"target": target, "effect": effect, "touches": sorted(touch_names(fields.get("touches", ""))),
+                "scenarios": [row["id"]]}
+        if target in by_target:
+            prior = by_target[target]
+            if (prior["effect"], prior["touches"]) != (item["effect"], item["touches"]):
+                raise ValueError("one live target has conflicting environment metadata: " + target)
+            prior["scenarios"].append(row["id"])
+        else:
+            by_target[target] = item
+    phases = []
+    for effect in ("builds", "builds_shared", "builds_fixture", "reads", "changes", "resets", "removes"):
+        targets = [row for row in by_target.values() if row["effect"] == effect]
+        if targets:
+            phases.append({"effect": effect, "parallel": effect == "reads", "targets": targets,
+                           "readiness_after_each": effect == "changes", "reset_before": effect == "removes",
+                           "residue_check_after_each": effect == "removes"})
+    return {"schema_version": 1, "phases": phases, "missing_environment_effect": sorted(missing),
+            "target_count": len(by_target), "shared_environment_instances": 1 if by_target else 0}
+
+
 def environment_effect_findings(fields: dict[str, str], label: str) -> list[str]:
     """Refuse an environment_effect outside ENVIRONMENT_EFFECTS and a touches field that is malformed
     or stated without environment_effect: changes."""

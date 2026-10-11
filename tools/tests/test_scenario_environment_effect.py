@@ -20,6 +20,25 @@ LABEL = "scenario ST-001-TS-001"
 
 
 class FieldRuleTests(unittest.TestCase):
+    def test_effect_plan_deduplicates_targets_and_keeps_unknown_rows_serial(self):
+        def row(identifier, target, effect=None):
+            fields = {"level": "live", "automation": "required", "automation_target": target}
+            if effect:
+                fields["environment_effect"] = effect
+            return {"id": identifier, "fields": fields}
+        plan = backlog_compile.live_environment_plan([
+            row("first", "tests::shared", "builds_shared"), row("duplicate", "tests::shared", "builds_shared"),
+            row("reader", "tests::read", "reads"), row("unknown", "tests::unknown"),
+            row("last", "tests::remove", "removes")])
+        self.assertEqual(plan["target_count"], 4)
+        self.assertEqual(plan["shared_environment_instances"], 1)
+        self.assertEqual(plan["missing_environment_effect"], ["unknown"])
+        self.assertEqual([phase["effect"] for phase in plan["phases"]], ["builds_shared", "reads", "changes", "removes"])
+        self.assertTrue(plan["phases"][1]["parallel"])
+        self.assertTrue(plan["phases"][-1]["reset_before"])
+        with self.assertRaisesRegex(ValueError, "conflicting"):
+            backlog_compile.live_environment_plan([row("a", "same", "reads"), row("b", "same", "changes")])
+
     def findings(self, **fields: str) -> list[str]:
         return backlog_compile.environment_effect_findings(fields, LABEL)
 

@@ -17,6 +17,7 @@ import stat
 import time
 from pathlib import Path, PurePosixPath
 import subprocess
+import shutil
 import sys
 import tempfile
 import uuid
@@ -698,6 +699,52 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
         atomic_file.replace_text(scope, json.dumps({"candidate_hash": current["candidate_hash"],
                                                    "scope": "whole_changed_files", "files": current["mutation_files"]}, indent=2) + "\n")
         return value
+
+
+
+def prepare_repair(root: Path) -> dict:
+    """Create an independent repair checkout without changing the frozen Item."""
+    root = root.resolve()
+    with locked(root):
+        session = read_session(root)
+        current = require_current(root, session, allow_evidence=True)
+        if delivery.delivery_switch_value(delivery.docs_root(root), current["delivery"],
+                                          "lane_isolation") != "scratch_clone":
+            raise RuntimeError("overlapping repair requires lane_isolation scratch_clone")
+        if not any(worker["state"] == "running" for worker in session["workers"].values()):
+            raise RuntimeError("overlapping repair requires a reader still running")
+        findings = {(finding.get("role", "code_reviewer"), finding["id"]): finding
+                    for finding in session.get("unresolved_findings", []) if finding.get("status") == "open"}
+        for role, worker in session["workers"].items():
+            for finding in worker.get("result", {}).get("findings", []):
+                if finding.get("status") == "open":
+                    findings[(role, finding["id"])] = {**finding, "role": role}
+        if not findings:
+            raise RuntimeError("overlapping repair requires a registered open finding")
+        existing = session.get("repair_workspace")
+        if existing is not None:
+            path = Path(existing["path"])
+            if (path.is_symlink() or not path.is_dir() or root == path.resolve()
+                    or root in path.resolve().parents
+                    or existing["candidate_hash"] != current["candidate_hash"]):
+                raise RuntimeError("recorded repair workspace is missing, unsafe or bound to another candidate")
+            return {**existing, "reused": True}
+        parent = Path(tempfile.mkdtemp(prefix="agentrof-repair-"))
+        checkout = parent / "checkout"
+        try:
+            clone_private_checkout(root, checkout, current["product_commit"])
+            branch = "repair/" + session["session_id"][:12]
+            git(checkout, "checkout", "-b", branch)
+            require_current(root, session, allow_evidence=True)
+        except BaseException:
+            shutil.rmtree(parent)
+            raise
+        record = {"path": str(checkout), "branch": branch, "session_id": session["session_id"],
+                  "candidate_hash": current["candidate_hash"], "base_commit": current["product_commit"],
+                  "findings": [findings[key] for key in sorted(findings)]}
+        session["repair_workspace"] = record
+        write_session(root, session)
+        return {**record, "reused": False}
 
 
 def require_current(root: Path, value: dict, *, allow_evidence: bool = False) -> dict:
@@ -3599,6 +3646,7 @@ def main(argv=None) -> int:
             context.add_argument("--reason", required=True)
             context.add_argument("--ref", action="append")
     subs.add_parser("resume-qa")
+    subs.add_parser("prepare-repair")
     status = subs.add_parser("status")
     status.add_argument("--summary", action="store_true")
     status.add_argument("--run", choices=("test", "mutation", "dependency_audit", "diagnostic_test", "pre_handoff"))
@@ -3641,6 +3689,8 @@ def main(argv=None) -> int:
             value = candidate_diff(root, args.path)
         elif args.command == "resume-qa":
             value = resume_qa(root)
+        elif args.command == "prepare-repair":
+            value = prepare_repair(root)
         elif args.command == "wait":
             value = wait_for_release(root, args.role, args.seconds)
         elif args.command == "run":

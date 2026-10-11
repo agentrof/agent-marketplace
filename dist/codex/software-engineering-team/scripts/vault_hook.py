@@ -2145,7 +2145,7 @@ def delivery_reader_barrier(payload: dict) -> int:
                     and args[2] in {"freeze", "result", "panel-result", "calibrate", "merge-panel", "status",
                                     "manifest", "validate", "run", "resume-qa", "inspect", "inspect-context",
                                     "expand-context", "diff", "environment",
-                                    "wait"}):
+                                    "wait", "prepare-repair"}):
                 return 0
         paths = None
     else:

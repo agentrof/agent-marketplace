@@ -118,7 +118,8 @@ defines.
 
 Invoke Code Review and QA independently through the host's native agent
 mechanism. Keep the implementation writer idle until both readers finish or
-their cancellation is confirmed. Readers return separate JSON results through
+their cancellation is confirmed, except for a private repair checkout prepared
+under `lane_isolation` `scratch_clone` for registered open findings. Readers return separate JSON results through
 `result --file <result.json>`; the existing owner alone persists canonical
 reports after the barrier. A reader registers as soon as it finishes, also
 while the other reader's verification command runs: the runner records which

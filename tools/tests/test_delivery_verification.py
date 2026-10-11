@@ -752,6 +752,31 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
                                                           " the full test suite does$"):
                     verification.validate(self.root, "DLV-001", "AUTH-01")
 
+    def test_overlapping_repair_is_isolated_and_needs_a_registered_finding(self):
+        from unittest import mock
+        self.freeze()
+        with mock.patch.object(delivery, "delivery_switch_value", return_value="scratch_clone"):
+            with self.assertRaisesRegex(RuntimeError, "registered open finding"):
+                verification.prepare_repair(self.root)
+            failed = self.result(verdict="failed")
+            failed["findings"] = [{"id": "CR-1", "severity": "major", "verification": "Run regression",
+                                   "status": "open", "file": "src/product.py"}]
+            verification.register_result(self.root, failed)
+            prepared = verification.prepare_repair(self.root)
+            checkout = Path(prepared["path"])
+            self.addCleanup(__import__("shutil").rmtree, checkout.parent)
+            self.assertNotIn(self.root, checkout.parents)
+            frozen = (self.root / "src/product.py").read_bytes()
+            (checkout / "src/product.py").write_text("value = 5\n", encoding="utf-8")
+            self.assertEqual((self.root / "src/product.py").read_bytes(), frozen)
+            self.assertEqual(verification.read_session(self.root)["workers"]["qa_engineer"]["state"], "running")
+            self.assertTrue(verification.prepare_repair(self.root)["reused"])
+            self.assertEqual((checkout / "src/product.py").read_text(), "value = 5\n")
+            self.assertEqual(prepared["findings"][0]["id"], "CR-1")
+            verification.require_current(self.root, verification.read_session(self.root))
+            with self.assertRaisesRegex(RuntimeError, "DELIVERY_VERIFICATION_READERS_ACTIVE"):
+                verification.guard_write(self.root)
+
     def test_repair_preserves_finding_ids_and_requires_explicit_resolution(self):
         self.freeze()
         failed = self.result(verdict="failed")

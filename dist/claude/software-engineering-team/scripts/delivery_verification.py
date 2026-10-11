@@ -2687,7 +2687,9 @@ def integrated_plan(root: Path, commit: str, plans: list[str], hashes: set[str])
             return None
         body = backlog_compile.parse_front_matter_text(text)[1]
         return {"test_plan": relative, "source_hash": value, "commit": holder,
-                "targets": automation_targets(body), "scenarios": scenario_records(body)}
+                "targets": automation_targets(body), "scenarios": scenario_records(body),
+                "scenario_metadata": {identifier: scenario_fields(block)[0]
+                                      for identifier, block in scenario_blocks(body)}}
 
     for relative in plans:
         path = docs / relative
@@ -2934,6 +2936,39 @@ def assertion_map_status(root: Path, delivery_id: str, story: str) -> dict:
                 for entry in check["converted_scenarios"]}}}
 
 
+
+def current_approved_regression_plan(root: Path, commit: str, story: str, closed: dict) -> tuple[dict, dict]:
+    """Read one story from the complete approved backlog at the candidate commit."""
+    docs = delivery.docs_root(root)
+    sources = backlog_compile.approved_history_sources(root, docs, commit)
+    if sources is None:
+        raise RuntimeError("current regression plans require a complete committed backlog approval")
+    matches = []
+    for path, raw in sources.items():
+        if path.name != "test-plan.md":
+            continue
+        text = raw.decode("utf-8")
+        props, body = backlog_compile.parse_front_matter_text(text)
+        if props.get("story_id") == story:
+            matches.append((path, text, body))
+    if len(matches) != 1:
+        raise RuntimeError(f"{story} requires exactly one current approved Test Plan; found {len(matches)}")
+    path, text, body = matches[0]
+    before = closed.get("scenario_metadata", closed["scenarios"])
+    after = {identifier: scenario_fields(block)[0] for identifier, block in scenario_blocks(body)}
+    delta = {identifier: {"before": before.get(identifier), "after": after.get(identifier)}
+             for identifier in sorted(set(before) | set(after))
+             if before.get(identifier) != after.get(identifier)}
+    metadata = after
+    revision = {"test_plan": path.relative_to(docs).as_posix(),
+                "source_hash": backlog_compile.digest_text(text), "commit": commit,
+                "targets": automation_targets(body), "scenarios": scenario_records(body)}
+    receipt = {"closed_commit": closed["commit"], "closed_source_hash": closed["source_hash"],
+               "current_commit": commit, "current_source_hash": revision["source_hash"],
+               "scenario_delta": delta, "scenario_metadata": metadata}
+    return revision, receipt
+
+
 def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -> dict:
     """Derive the pre-handoff regression selection of an Item's exact candidate.
 
@@ -2994,13 +3029,18 @@ def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -
             raise RuntimeError(f"{entry['label']} integrated Test Plan {entry['plan']} at {entry['recorded']},"
                                " a revision neither the candidate nor its history holds; its suite cannot be"
                                " selected")
+        plan_revision = None
+        if delivery.delivery_switch_value(docs, delivery_id, "regression_plan_revision") == "current_approved":
+            revision, plan_revision = current_approved_regression_plan(
+                root, current["product_commit"], entry["story"], revision)
         earlier.append({"delivery": entry["delivery"], "story": entry["story"], "item": entry["item"],
                         "test_plan": (docs / revision["test_plan"]).relative_to(root).as_posix(),
                         "test_plan_source_hash": revision["source_hash"], "test_plan_commit": revision["commit"],
                         "touched_claims": entry["touched"],
                         "touched_paths": sorted({path for path in changed for claim in entry["touched"]
                                                  if delivery._claims_overlap(claim, path)}),
-                        "automation_targets": sorted(set(revision["targets"]))})
+                        "automation_targets": sorted(set(revision["targets"])),
+                        **({"plan_revision": plan_revision} if plan_revision is not None else {})})
     earlier.sort(key=lambda entry: (entry["delivery"], entry["story"]))
     plan = str(item_record(root, delivery_id, story).get("test_plan_path") or "")
     own = sorted(set(plan_automation_targets(docs, plan, f"{story} of {delivery_id}")))
@@ -3116,7 +3156,11 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
             atomic_file.replace_text(selector, json.dumps(
                 {"schema_version": 1, "candidate_hash": current["candidate_hash"], "failed_test_ids": [],
                  "affected_test_ids": derived["affected_test_ids"],
-                 "selected_test_ids": derived["affected_test_ids"]}, indent=2, sort_keys=True) + "\n")
+                 "selected_test_ids": derived["affected_test_ids"],
+                 **({"regression_plans": [{"story": entry["story"], **entry["plan_revision"]}
+                                           for entry in derived["earlier_stories"] if "plan_revision" in entry]}
+                    if any("plan_revision" in entry for entry in derived["earlier_stories"]) else {})},
+                indent=2, sort_keys=True) + "\n")
             environment["AGENTROF_DIAGNOSTIC_TESTS"] = str(selector)
             # As in QA's diagnostic run, neither the selection the command
             # receives nor the one QA's diagnostic reads may change while it runs.
@@ -3148,7 +3192,9 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
             output_name = "scratch/pre-handoff-" + uuid.uuid4().hex + ".log"
             atomic_file.replace_bytes(raw_output_path(root, output_name), completed.stdout)
             record = {**{key: derived[key] for key in ("delivery", "story", "product_commit", *PRE_HANDOFF_IDENTITY)},
-                      "earlier_stories": [{"delivery": entry["delivery"], "story": entry["story"]}
+                      "earlier_stories": [{"delivery": entry["delivery"], "story": entry["story"],
+                                           **({"plan_revision": entry["plan_revision"]}
+                                              if "plan_revision" in entry else {})}
                                           for entry in derived["earlier_stories"]],
                       "exit_code": completed.returncode, "candidate_intact": intact, "output_file": output_name,
                       "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),

@@ -392,6 +392,29 @@
         "threshold": "Zero blocking findings that are regressions in an earlier story's suite after the first review round of any Item, with every shared quality guard holding and the owner's approval."
       }
     },
+    "regression_plan_revision": {
+      "summary": "Which approved Test Plan revision supplies an earlier story's regression targets and execution metadata.",
+      "issue": 525,
+      "flows": [
+        "delivery-execution"
+      ],
+      "values": [
+        {
+          "id": "integrated",
+          "tradeoffs": "Keep the Test Plan revision the closed Item accepted. Later approved revisions do not change regression selection until an Item integrates them."
+        },
+        {
+          "id": "current_approved",
+          "tradeoffs": "Use the current complete committed backlog approval for earlier stories, record the closed-to-current scenario delta and pass current scenario metadata to the diagnostic adapter. The closure evidence remains immutable; a missing or incomplete approval refuses selection."
+        }
+      ],
+      "default": "integrated",
+      "metric": "Per Delivery: interim revisions needed only to supersede regression bindings, and missing or weakened regression coverage found after selection.",
+      "promotion": {
+        "unit": "At least 3 Deliveries using current_approved.",
+        "threshold": "Fewer binding-only interim revisions and no missing regression coverage, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "own_target_reuse": {
       "summary": "Whether QA's final test run on a frozen candidate runs every own Test Plan target of the Item itself, or takes them, but for the ones QA spot-runs, from the pre-handoff regression run that passed on the same tree.",
       "issue": 383,

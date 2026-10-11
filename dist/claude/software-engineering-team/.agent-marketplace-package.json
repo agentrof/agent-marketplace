@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "70661640404a1e01348d78c2ec25dbfce59b339515e63feb7027bc82229252a3"
+      "09dc69a3667fa8ea0b7a021eeb3d8aa7c2c4b6e152b8357675087a824f7d0a80"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -182,7 +182,7 @@
       "73b210d3acdffaa912802807dbf11d47f068ba2c635d300bd051142310e05633"
     ,
     "scripts/delivery_compile.py":
-      "82e46ae1a80647c7b9ca6ec3f0709b26e35163c09efaad120c40ee3eb8bd4c3a"
+      "50bccfdfadeeec3d9165bbd09b7fb67aedcba0acfc6bb5e6c6a67cc2f73f2f00"
     ,
     "scripts/delivery_git.py":
       "983da24fe1514d5cead29a7e61c047ba7c3c74be1ee57ebaeff9eecb77a71e79"
@@ -197,7 +197,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "fe70083f5af7e9f9b85736b33469bf5ce87c6e24049f28d99ff52c8156cba5b2"
+      "d576032b4efb63c573021c199b9510290dedc3056bb6ea4327dab7803bc3399d"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -440,7 +440,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "20973b2f9cc74881c8913b36db7058d157f6f1a8dffdebf64ea3d3e66d01f2cb"
+      "5529036d397a3514e9379048fe0ef882c07e889afd4f62c218b1db0d07cdbe2a"
     ,
     "skill-content/configure/data/step-budgets.json":
       "c63c5e90e1726b573c681f28008aa627575600f2d81dc8f8c0851b768e1b04fc"
@@ -513,6 +513,9 @@
     ,
     "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
       "c23b324300ea70379a61bafdc1faa0ab5886de392f89e7f9a54771ecb9bc9830"
+    ,
+    "skill-content/deliver/references/switch-regression_plan_revision-current_approved.md":
+      "bdd2a3c96f919a905b19c5124e51c00125b252581dbbd8a868290a30d6cab759"
     ,
     "skill-content/deliver/references/switch-test_engines-partitioned.md":
       "718714d0b07687b4d670499555397d5bac780a749b3dcd50736a6f3e5b0fafa7"

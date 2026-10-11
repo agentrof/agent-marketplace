@@ -547,6 +547,57 @@ class CandidateTests(unittest.TestCase):
                     self.commit("Restore the DLV-001 Review record")
         self.assertEqual([entry["story"] for entry in self.selection()["earlier_stories"]], ["ST-001"])
 
+    def approve_current_regression_plans(self):
+        root = self.docs / "backlog/backlog.md"
+        self.note(root.relative_to(self.root).as_posix(), {"type": "backlog", "status": "approved"})
+        paths = sorted((self.docs / "backlog").rglob("*.md"))
+        for path in paths:
+            props, body = delivery.split_note(path)
+            props["status"] = "planned" if path.name == "story.md" else "approved"
+            props["approved_at_utc"] = "2026-01-01T00:00:00Z"
+            props["source_hash"] = backlog_compile.digest_text(delivery.frontmatter(props, body))
+            path.write_text(delivery.frontmatter(props, body), encoding="utf-8")
+        props, body = delivery.split_note(root)
+        props["package_hash"] = backlog_compile.package_digest(self.docs, paths)
+        root.write_text(delivery.frontmatter(props, body), encoding="utf-8")
+
+    def test_current_approved_regression_records_the_delta_and_runs_current_targets(self):
+        self.build()
+        closed_hash = self.plan_hash("ST-001")
+        policy(self.docs, "begin-revision")
+        policy(self.docs, "set", "--switch", "regression_plan_revision", "--value", "current_approved")
+        policy(self.docs, "approve")
+        self.plan("ST-001", scenario("ST-001-TS-001", "required", "tests/st001/test_api.py::test_current")
+                  + "\n- environment_effect: reads\n")
+        self.write("tests/st001/test_api.py", suite("src/api/limit.txt", "test_current", "20"))
+        self.commit("Revise the regression binding without an approval")
+        with self.assertRaisesRegex(RuntimeError, "complete committed backlog approval"):
+            self.selection()
+        self.approve_current_regression_plans()
+        approved = self.commit("Approve the current regression plans")
+        selection = self.selection()
+        entry = selection["earlier_stories"][0]
+        self.assertEqual(entry["automation_targets"], ["tests/st001/test_api.py::test_current"])
+        receipt = entry["plan_revision"]
+        self.assertEqual(receipt["closed_source_hash"], closed_hash)
+        self.assertEqual(receipt["current_commit"], approved)
+        change = receipt["scenario_delta"]["ST-001-TS-001"]
+        self.assertEqual(change["before"]["automation_target"], "tests/st001/test_api.py::test_limit")
+        self.assertEqual(change["after"]["environment_effect"], "reads")
+        result = self.run_regression()
+        self.assertEqual(result["exit_code"], 0, self.output(result))
+        self.assertIn("PASS tests/st001/test_api.py::test_current", self.output(result))
+        self.assertNotIn("test_limit", self.output(result))
+        self.assertEqual(result["earlier_stories"][0]["plan_revision"], receipt)
+        report = delivery.pre_handoff_evidence(self.root, "DLV-002", "ST-005",
+            {"raw_evidence": {"test": {"identity": {}}}}, "## Implementation Evidence\n")
+        self.assertIn("Current approved regression plan revisions:", report)
+        self.assertIn(receipt["current_source_hash"], report)
+        self.assertIn("environment_effect", report)
+        selector = verification.session_path(self.root).parent / "pre-handoff-tests.json"
+        self.assertEqual(json.loads(selector.read_text())["regression_plans"][0]["scenario_metadata"]
+                         ["ST-001-TS-001"]["environment_effect"], "reads")
+
     def test_an_earlier_story_selects_the_test_plan_revision_its_item_integrated(self):
         """A Test Plan revised or removed after an earlier Item integrated it selects the revision the Item bound."""
         self.build()

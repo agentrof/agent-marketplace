@@ -3031,6 +3031,17 @@ def pre_handoff_evidence(worktree: Path, delivery_id: str, story: str, session: 
                 reuse["evidence_hash"])) + " |"]
     block = (table_block(ITEM_PRE_HANDOFF_RUNS, PRE_HANDOFF_RUN_COLUMNS, rows) + "\n\n"
              + table_block(ITEM_REUSED_TARGETS, REUSED_TARGET_COLUMNS, reused))
+    revisions = []
+    for number, run in enumerate(history, start=1):
+        for entry in run["earlier_stories"]:
+            revision = entry.get("plan_revision")
+            if revision is not None:
+                revisions.append("| " + " | ".join(table_cell(cell) for cell in (
+                    number, entry["story"], revision["closed_source_hash"], revision["current_source_hash"],
+                    json.dumps(revision["scenario_delta"], sort_keys=True))) + " |")
+    if revisions:
+        block += "\n\n" + table_block("Current approved regression plan revisions:",
+                                     ("Run", "Story", "Closed plan", "Current plan", "Scenario delta"), revisions)
     if delivery_verification.own_target_reuse(worktree, delivery_id) == delivery_verification.SPOT_RUN:
         block += "\n\n" + table_block(ITEM_REUSED_OWN_TARGETS, REUSED_OWN_TARGET_COLUMNS, reused_own)
     return with_compiler_block(body, "Implementation Evidence", ITEM_PRE_HANDOFF_RUNS, block)

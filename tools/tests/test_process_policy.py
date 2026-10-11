@@ -533,6 +533,7 @@ RELEASED_DEFAULTS = {
     "own_target_reuse": "off",
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
+    "regression_plan_revision": "integrated",
     "provisional_claims": "after_approval",
     "qa_gate_order": "plan_first",
     "reader_waves": "as_slots_free",
@@ -563,6 +564,12 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "regression_plan_revision": {
+        f"{SKILLS}/deliver/references/switch-regression_plan_revision-current_approved.md": (
+            "The integrated Item and its acceptance evidence are never rewritten",
+            "Missing, draft, stale or ambiguous current approval refuses selection before a command starts",
+        ),
+    },
     "backlog_schema_migration": {
         f"{SKILLS}/backlog-plan/references/switch-backlog_schema_migration-receipt_only.md": (
             "source must be an ancestor of HEAD",

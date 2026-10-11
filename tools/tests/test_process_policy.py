@@ -892,6 +892,10 @@ SAFETY_RULES = {
             "Credentials or secrets that reach a client artifact or a log stay critical",
             "Neither the claiming reviewer nor the writer changes a severity",
             "QA keeps its own blocking severities",
+            "A carried finding is re-examined only when its code changed",
+            "Return it on its id with the status, severity and follow-up fields the record holds, and do not"
+            " re-examine it",
+            "The reviewer starts no test or diagnostic run in any cycle",
         ),
     },
     "review_rounds": {

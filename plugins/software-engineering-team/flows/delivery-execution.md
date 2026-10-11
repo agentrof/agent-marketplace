@@ -123,8 +123,10 @@ their cancellation is confirmed. Readers return separate JSON results through
 reports after the barrier. A reader registers as soon as it finishes, also
 while the other reader's verification command runs: the runner records which
 role runs each command, and a registration waits only for the settling
-reader's own command to exit. The code reviewer runs no command, so it
-registers its finished result at once and returns. A reader whose result is
+reader's own command to exit. The code reviewer runs no command, not even a
+diagnostic test: its manifest names the freeze record and QA's recorded runs
+as `verification_evidence` instead. It registers its finished result at once
+and returns. A reader whose result is
 refused until a step only another role takes, such as a calibration, does not
 wait for it: it returns the result unregistered for the coordinator. A
 cancelled or diagnostic result cannot approve an Item. Code, test, contract or

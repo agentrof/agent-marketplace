@@ -686,6 +686,9 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
                  "workers": {role: {"state": "running", "started_at": time.time()} for role in ROLES},
                  "metrics": {"freeze_seconds": time.monotonic() - started, "command_cache_hits": 0,
                              "command_seconds": 0.0, "model_seconds": None, "model_tokens": None}, "raw_evidence": {}}
+        controls = finding_control_history(previous)
+        if controls:
+            value["finding_control_bindings"] = controls
         if pre_handoff is not None:
             value["pre_handoff"] = pre_handoff
             value["pre_handoff_history"] = pre_handoff_history(root, previous, delivery_id, story)
@@ -852,6 +855,24 @@ def test_id_in_file(identifier: str, path: str) -> bool:
     """Whether a test id names a test in *path*, as a path::name or a dotted module.name id."""
     module = PurePosixPath(path).with_suffix("").as_posix().replace("/", ".")
     return identifier.startswith(path + "::") or bool(module) and identifier.startswith(module + ".")
+
+
+def finding_control_history(session: dict | None) -> list[dict]:
+    """Carry successful finding bindings across passes until ordinary backlog absorption."""
+    if not session:
+        return []
+    rows = list(session.get("finding_control_bindings", []))
+    known = {digest(row) for row in rows}
+    for raw in session.get("raw_evidence", {}).values():
+        if raw.get("exit_code") != 0 or raw.get("candidate_intact") is not True or raw.get("selection_intact") is not True:
+            continue
+        for binding in raw.get("diagnostic_selection", {}).get("finding_controls", []):
+            row = {**binding, "candidate_hash": raw["identity"]["candidate_hash"], "evidence_hash": raw["evidence_hash"]}
+            key = digest(row)
+            if key not in known:
+                rows.append(row)
+                known.add(key)
+    return rows
 
 
 def finding_controls(entries, current: dict, findings: list[dict]) -> list[dict]:
@@ -3553,6 +3574,8 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                                        "terminal_evidence": False},
               "execution_note": "Commands run in private clones containing tracked files only. Approved commands must provision dependencies or use a fixed external environment; ignored dependencies are never copied. The clone is not an operating-system sandbox for trusted commands with absolute paths.",
               "next_transition": "Register independent result; owner writes reports only after both readers settle"}
+    if finding_control_history(value):
+        result["finding_control_bindings"] = finding_control_history(value)
     if review_scope(root, delivery_id) == CLOSURE_VALUE:
         result["full_read"], closure = closure_read(root, current)
         result.update({CLOSURE_SWITCH: CLOSURE_VALUE, "vault_views": closure["views"],

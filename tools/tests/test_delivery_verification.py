@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 sys.path.insert(0, str(ROOT / "tools/tests"))
 import delivery_compile as delivery
+import backlog_compile
 import delivery_verification as verification
 import file_lock
 import context_catalog
@@ -274,6 +275,10 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertEqual((raw["exit_code"], raw["candidate_intact"], raw["selection_intact"]), (0, True, True))
         self.assertIn("Ran 1 test", verification.raw_output_path(self.root, raw["output_file"]).read_text())
         self.assertEqual(raw["evidence_scope"], "finding_diagnostic")
+        rows = verification.finding_control_history(verification.read_session(self.root))
+        self.assertEqual(rows, [{"finding_id": "CR-1", "test_ids": ["focused_tests.Focused.test_affected"],
+                                "candidate_hash": frozen["candidate"]["candidate_hash"], "evidence_hash": raw["evidence_hash"]}])
+        self.assertEqual(verification.finding_control_history({"finding_control_bindings": rows}), rows)
         recorded = raw["diagnostic_selection"]
         self.assertEqual((recorded["finding_controls"], recorded["finding_control_test_ids"], recorded["selected_test_ids"]),
                          (controls, ["focused_tests.Focused.test_affected"], ["focused_tests.Focused.test_affected"]))
@@ -284,6 +289,15 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
             environment=raw["identity"]["environment_hash"], raw_evidence_hash=raw["evidence_hash"])
         with self.assertRaisesRegex(RuntimeError, "same-candidate command evidence"):
             verification.register_result(self.root, result)
+
+        self.note("workspace/docs/delivery/deliveries/dlv-000/delivery.md", {"id": "DLV-000", "status": "merged"})
+        self.note("workspace/docs/delivery/deliveries/dlv-000/delivery-review.md",
+                  {"finding_control_bindings": json.dumps([{"story": "AUTH-01", **rows[0]}])})
+        record = {"stories": [{"id": "AUTH-01", "test_body": ""}]}
+        self.assertEqual(backlog_compile.pending_finding_controls(self.root / "workspace/docs", record)[0]["test_ids"],
+                         ["focused_tests.Focused.test_affected"])
+        record["stories"][0]["test_body"] = "## AUTH-01-TS-001\n- automation_target: focused_tests.Focused.test_affected\n"
+        self.assertEqual(backlog_compile.pending_finding_controls(self.root / "workspace/docs", record), [])
 
     def test_negative_control_ids_of_a_finding_are_literal_test_ids(self):
         for controls in ([], ["-k"], ["same", "same"], "tests/test_x.py::test_y"):

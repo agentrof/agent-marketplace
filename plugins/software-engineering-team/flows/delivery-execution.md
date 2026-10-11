@@ -363,3 +363,9 @@ lease it lost, or a remote without atomic push support, from the refetched
 refs. One whose refetched refs hold its candidate, or moved on from it, may
 have landed and reports `DELIVERY_TRANSACTION_UNCERTAIN` instead. Release
 Management is intentionally not part of this flow.
+
+Finding-control runs are retained as candidate-bound records across verification
+passes. Evidence approval writes the bindings into the Item verification record,
+and Delivery Review lists them. After that Delivery merges, the next ordinary
+backlog revision lists the unabsorbed targets and its approval requires them in
+the owning story Test Plan. Finding-only repairs need no mid-Delivery revision.

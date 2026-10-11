@@ -1812,10 +1812,12 @@ def plan_approval_refusals(docs: Path, root: Path, props: dict) -> list[str]:
     Gate A covers the first execution approval of the approved scope. Each later
     approval is named by its number: the approvals it supersedes, plus one.
     """
+    import delivery_verification
+    rebound = delivery_verification.rebind_unit_refusals(docs.parent.parent, str(props.get("id")))
     if props.get("status") not in BETWEEN_GATES_STATUSES:
-        return []
+        return rebound
     approval = len(superseded_plan_approvals(root, props)) + 1
-    return between_gates_refusals(docs, f"execution plan approval {approval}", str(props.get("id")))
+    return rebound + between_gates_refusals(docs, f"execution plan approval {approval}", str(props.get("id")))
 
 
 # merge-pr merges a Delivery PR only on green provider checks, so execution

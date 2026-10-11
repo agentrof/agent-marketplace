@@ -17,3 +17,10 @@ A current revision can intentionally change assertions only through the normal
 backlog review and approval. Review the recorded delta for lost coverage. A
 failing newly selected target must be repaired before freeze; this value does
 not waive the pre-handoff gate or authorize changing an approved contract.
+
+Before approving a plan with newly bound unit targets, run
+`delivery_verification.py --worktree <project> rebind-unit-run --delivery DLV-###`.
+The runner deduplicates new unit targets, uses the approved diagnostic adapter
+or full suite, and records the exact source tree, selection, command and raw
+output. Plan approval refuses missing, stale or red evidence. Metadata-only
+revisions require no extra execution.

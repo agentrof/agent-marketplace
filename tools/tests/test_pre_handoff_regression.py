@@ -568,7 +568,7 @@ class CandidateTests(unittest.TestCase):
         policy(self.docs, "set", "--switch", "regression_plan_revision", "--value", "current_approved")
         policy(self.docs, "approve")
         self.plan("ST-001", scenario("ST-001-TS-001", "required", "tests/st001/test_api.py::test_current")
-                  + "\n- environment_effect: reads\n")
+                  + "\n- environment_effect: reads\n- level: unit\n")
         self.write("tests/st001/test_api.py", suite("src/api/limit.txt", "test_current", "20"))
         self.commit("Revise the regression binding without an approval")
         with self.assertRaisesRegex(RuntimeError, "complete committed backlog approval"):
@@ -584,6 +584,10 @@ class CandidateTests(unittest.TestCase):
         change = receipt["scenario_delta"]["ST-001-TS-001"]
         self.assertEqual(change["before"]["automation_target"], "tests/st001/test_api.py::test_limit")
         self.assertEqual(change["after"]["environment_effect"], "reads")
+        self.assertTrue(verification.rebind_unit_refusals(self.root, "DLV-002"))
+        proof = verification.rebind_unit_run(self.root, "DLV-002")
+        self.assertEqual((proof["exit_code"], proof["candidate_intact"]), (0, True))
+        self.assertEqual(verification.rebind_unit_refusals(self.root, "DLV-002"), [])
         result = self.run_regression()
         self.assertEqual(result["exit_code"], 0, self.output(result))
         self.assertIn("PASS tests/st001/test_api.py::test_current", self.output(result))

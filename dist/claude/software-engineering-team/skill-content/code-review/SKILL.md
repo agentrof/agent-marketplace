@@ -82,7 +82,8 @@ updated set for the orchestrator to record.
 ## The Three Passes
 
 Fixed order, all three on every cycle. Security is never optional. Full
-checklists per pass live in the passes reference.
+checklists per pass live in the passes reference. Follow the
+[verification bounds](references/passes.md#verification). Read when planning verification in any review cycle.
 
 1. **Correctness:** logic, edge cases, error propagation, type safety.
 2. **Conformance:** the change against the declared interface contract, data
@@ -90,10 +91,6 @@ checklists per pass live in the passes reference.
    architectural impact rating (high, medium, low).
 3. **Security:** authentication and authorization, input validation, data
    protection, common vulnerability classes.
-
-## Verification
-
-DO follow the [verification bounds](references/passes.md#verification). Read when planning verification in any review cycle.
 
 ## Architecture-Implicating Findings
 

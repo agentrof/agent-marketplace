@@ -1133,7 +1133,8 @@ print(sys.argv[2])
         for phrase in (f"`wait_bound_seconds`, {bound} seconds, in any one tool call",
                        "never through a sleep, a polling loop or a long timeout of its own",
                        "`wait --role <role>` returns once that reader's own verification command has exited",
-                       "The code reviewer runs no command, so it registers its finished result at once and returns"):
+                       "The code reviewer runs no command, not even a diagnostic test",
+                       "It registers its finished result at once and returns"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, flow)
         for host in ("claude", "codex"):

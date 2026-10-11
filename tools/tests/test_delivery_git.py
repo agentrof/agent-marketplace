@@ -3848,6 +3848,12 @@ class DeliveryGitTests(unittest.TestCase):
         project, worktree, item, active = self.prepare_stamped_architecture_item()
         before, _ = delivery_compile.split_note(item)
         integration, relative = self.republish_integration_plan(project, worktree, item)
+        head = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        with mock.patch("delivery_verification.guard_write", side_effect=RuntimeError("readers active")):
+            with self.assertRaisesRegex(RuntimeError, "readers active"):
+                delivery_git.converge_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(delivery_git.run_git(worktree, "rev-parse", "HEAD"), head)
+        self.assertEqual(delivery_git.worktree_pending_paths(project, worktree), set())
         result = delivery_git.converge_item(project, "DLV-001", "AUTH-01")
         product = delivery_git.run_git(worktree, "rev-parse", "HEAD")
         self.assertEqual((result["mutation_state"], result["integration"], result["item"]),

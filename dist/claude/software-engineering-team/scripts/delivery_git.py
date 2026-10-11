@@ -5535,14 +5535,24 @@ def converge_item(project_root: Path, delivery_id: str, story_id: str, remote: s
     """
     from delivery_compile import split_note
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
         raise RuntimeError("local Delivery package path is required to converge an Item")
     refs = canonical_refs(delivery_id, story_id)
     integration = remote_oid(root, remote, refs["integration"])
     run_git(root, "fetch", "--no-tags", remote, refs["integration"])
+    item_oid = remote_oid(root, remote, refs["item"])
+    slots = remote_slot_oids(root, remote)
+    slot = next((key for key, oid in slots.items() if oid == item_oid), None)
+    if slot is None:
+        raise RuntimeError("DELIVERY_ITEM_SLOT_DIVERGED: Item and Slot refs diverge")
+    active_writer_receipt(root, delivery_id, story_id, item_oid, f"refs/heads/agentrof/slots/{slot}")
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
+    require_visible_item_index(worktree)
     head = worktree_head(root, worktree)
+    if not is_ancestor(root, item_oid, head):
+        raise RuntimeError("DELIVERY_LOCAL_REF_DIVERGED: local Item does not descend from the remote writer tip")
     pending = worktree_pending_paths(root, worktree)
     if pending:
         raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: commit or remove pending Item changes before converge-item: "
@@ -5554,9 +5564,13 @@ def converge_item(project_root: Path, delivery_id: str, story_id: str, remote: s
     if previous == integration and is_ancestor(root, integration, head):
         return {"ok": True, "mutation_state": "none", "integration": integration,
                 "observations": [{"kind": "worktree", "target": "item", "value": "already_converged"}]}
-    if isinstance(previous, str) and OID_RE.fullmatch(previous) and not is_ancestor(root, previous, integration):
+    if not isinstance(previous, str) or not OID_RE.fullmatch(previous):
+        raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: Item has no valid integration base")
+    if not is_ancestor(root, previous, integration):
         raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: the Integration no longer descends from the"
                            " Item's integration base " + previous)
+    from delivery_verification import guard_write
+    guard_write(worktree)
     git = lambda *args: run_git(root, "-C", str(worktree), *args)  # noqa: E731
     merge = subprocess.run(["git", "-C", str(worktree), "merge", "--no-ff", "--no-commit", "--no-edit", integration],
                            cwd=root, capture_output=True, encoding="utf-8", check=False)

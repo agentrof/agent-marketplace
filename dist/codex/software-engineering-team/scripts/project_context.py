@@ -584,6 +584,15 @@ def expand_context(project: Path, index: dict, plan: dict, *, reason: str,
     request = request_data(project, plan, policy=policy)
     if persist_state is False:
         request["persist_state"] = False
+    if refs and request.get("focus_ranges"):
+        # Suggested units need not have been read. An explicit follow-up asks
+        # for those references, independent of the earlier recommendation.
+        request["refs"] = refs
+        request["seen_units"] = []
+        request.pop("focus_ranges", None)
+        request.pop("cursor", None)
+        request.pop("state", None)
+        return resolve_context(project, index, **request, reason=reason, policy=policy)
 
     def reuse_seed():
         state = plan["request"].get("state")

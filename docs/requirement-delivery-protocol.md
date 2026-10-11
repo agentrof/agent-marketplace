@@ -248,7 +248,7 @@ the switches that flow owns: `code_review_panel`, `context_pack`,
 `execution_planning`, `implementation_schedule`, `item_cost_report`,
 `item_qa_tier`, `item_review_scale`, `lane_isolation`, `lane_table`,
 `level_change_map`, `own_target_reuse`, `owner_gates`,
-`pre_handoff_regression`, `provisional_claims`, `qa_gate_order`,
+`pre_handoff_regression`, `provisional_claims`, `qa_gate_order`, `regression_plan_revision`,
 `review_loop`, `review_scope`, `step_budgets`, `step_timing`, `test_engines`
 and `test_group_report`. A switch no
 Delivery flow owns, such as

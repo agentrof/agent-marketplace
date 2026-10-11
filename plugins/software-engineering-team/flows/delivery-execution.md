@@ -366,3 +366,11 @@ lease it lost, or a remote without atomic push support, from the refetched
 refs. One whose refetched refs hold its candidate, or moved on from it, may
 have landed and reports `DELIVERY_TRANSACTION_UNCERTAIN` instead. Release
 Management is intentionally not part of this flow.
+
+While a live group runs, `status --summary --run live_test:<group>` reports its
+heartbeat, elapsed time and growing output file. A stale heartbeat identifies
+an interrupted runner, not a failed test. An approved test adapter may write
+`scratch/live-progress.json` under `AGENTROF_VERIFICATION_SCRATCH` with
+`test_id`, `cases_done`, `cases_total` and `failures`; the status labels these as
+adapter observations. They never satisfy a verification gate. Final outcomes
+still come only from the completed command and its recorded evidence.

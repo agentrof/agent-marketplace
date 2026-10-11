@@ -134,6 +134,10 @@ candidate beside the official code reviewer and `merge-panel` registers the
 one code review result, as
 `skill-content/code-review/references/switch-code_review_panel-beside_official.md`
 defines.
+At `risk_scoped`, a lens reader joins the official code reviewer only when the
+frozen change triggers its lens by the owner's parameters, as
+`skill-content/code-review/references/switch-code_review_panel-risk_scoped.md`
+defines.
 Switch `item_review_scale`: at `by_change_size`, the official code reviewer
 reads alone an Item whose frozen change is within the owner's size limits, as
 `skill-content/code-review/references/switch-item_review_scale-by_change_size.md`

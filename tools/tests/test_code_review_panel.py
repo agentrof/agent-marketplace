@@ -34,6 +34,7 @@ import delivery_verification as verification  # noqa: E402
 import fixtures  # noqa: E402
 import process_policy  # noqa: E402
 import task_inputs  # noqa: E402
+import validate  # noqa: E402
 from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 REGISTRY = "skill-content/configure/data/process-switches.json"
@@ -166,6 +167,52 @@ class CodeReviewPanelValidatorTests(unittest.TestCase):
         (self.plugin / DATA).write_text('{"schema_version": 1, "review_steps": {}, "review_steps": {}}\n',
                                         encoding="utf-8")
         self.assertTrue(any("not valid unique-key JSON" in message for message in self.messages()))
+
+
+class CodeReviewPanelRiskParameterTests(unittest.TestCase):
+    """risk_scoped reads two owner-set lens triggers of different types: a glob list and a number."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.docs = Path(temporary.name) / "workspace/docs"
+        self.docs.mkdir(parents=True)
+
+    def set(self, *argv: str) -> dict:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            process_policy.main(["set", "--docs", str(self.docs), *argv])
+        return json.loads(output.getvalue())
+
+    def test_each_trigger_parameter_takes_its_own_type(self):
+        run_policy(self.docs, "init")
+        self.set("--switch", "code_review_panel", "--value", "risk_scoped")
+        refused = self.set("--switch", "code_review_panel", "--parameter", "risk_paths", "--value", "src/a b")
+        self.assertEqual(refused["errors"], ["parameter 'risk_paths' of switch 'code_review_panel' must be a"
+                                             " glob list, not 'src/a b'"])
+        refused = self.set("--switch", "code_review_panel", "--parameter", "lens_changed_lines", "--value", "*")
+        self.assertEqual(refused["errors"], ["parameter 'lens_changed_lines' of switch 'code_review_panel' must be"
+                                             " a positive integer, not '*'"])
+        self.assertEqual(self.set("--switch", "code_review_panel", "--parameter", "risk_paths",
+                                  "--value", "src/auth/*, *secret*")["value"], ["src/auth/*", "*secret*"])
+        with self.assertRaises(AssertionError):
+            run_policy(self.docs, "approve")
+        self.set("--switch", "code_review_panel", "--parameter", "lens_changed_lines", "--value", "40")
+        run_policy(self.docs, "approve")
+        value = process_policy.effective_values(self.docs)[0]["code_review_panel"]
+        self.assertEqual((value["value"], value["parameters"]),
+                         ("risk_scoped", {"lens_changed_lines": 40, "risk_paths": ["src/auth/*", "*secret*"]}))
+
+    def test_a_glob_list_parameter_takes_no_package_limit(self):
+        spec = json.loads(read(REGISTRY))["switches"]["code_review_panel"]
+        ids = [value["id"] for value in spec["values"]]
+        self.assertEqual(validate.parameter_problems("switch", spec["parameters"], ids, spec["default"], TEAM), [])
+        limited = {**spec["parameters"], "package_limits": {"risk_paths": 3}}
+        self.assertIn("switch: package_limits must map declared parameter ids to positive whole numbers",
+                      validate.parameter_problems("switch", limited, ids, spec["default"], TEAM))
+        with self.assertRaisesRegex(ValueError, "declares invalid parameters"):
+            process_policy.parameter_declaration(TEAM, "code_review_panel",
+                                                 {**spec, "parameters": limited}, ids)
 
 
 @integration
@@ -303,6 +350,61 @@ class CodeReviewPanelMachineTests(unittest.TestCase):
         self.assertEqual(code, 0, output.getvalue())
         return delivery.section_bodies(delivery.split_note(
             self.root / self.directory / "items/auth-01/code-review.md")[1])
+
+    def risk_policy(self, risk_paths="src/auth/*", lines="10"):
+        docs = self.root / "workspace/docs"
+        run_policy(docs, "init")
+        run_policy(docs, "set", "--switch", "code_review_panel", "--value", "risk_scoped")
+        run_policy(docs, "set", "--switch", "code_review_panel", "--parameter", "risk_paths", "--value", risk_paths)
+        run_policy(docs, "set", "--switch", "code_review_panel", "--parameter", "lens_changed_lines",
+                   "--value", lines)
+        run_policy(docs, "approve")
+        self.commit()
+
+    def test_risk_scoped_reads_a_small_low_risk_change_with_the_official_reviewer_alone(self):
+        """No changed path matches the risk globs and the change stays under the line threshold: the
+        manifest carries no panel, the official result registers through result and panel-result refuses."""
+        self.risk_policy()
+        self.freeze()
+        manifest = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_initial")
+        self.assertNotIn("code_review_panel", manifest)
+        with self.assertRaisesRegex(RuntimeError, "panel-result registers a code review panel result only"):
+            verification.register_panel_result(self.root, self.lens("security-isolation"))
+        verification.register_result(self.root, self.official())
+        self.assertEqual(self.session()["workers"]["code_reviewer"]["state"], "settled")
+
+    def test_risk_scoped_brings_in_the_security_lens_for_a_risky_path(self):
+        """A changed path matching a risk glob brings in only the security lens; the official reviewer and
+        that lens settle through merge-panel, and result refuses to skip the merge."""
+        self.risk_policy()
+        self.write("src/auth/token.py", "secret = 1\n")
+        self.commit()
+        self.freeze()
+        panel = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer",
+                                      "review_initial")["code_review_panel"]
+        self.assertEqual([assignment["lens"] for assignment in panel["assignments"]], [["security-isolation"]])
+        selection = panel["lens_selection"]
+        self.assertEqual(selection["lenses"]["security-isolation"],
+                         {"joined": True, "trigger": "changed_path_matches", "matched_paths": ["src/auth/token.py"]})
+        self.assertEqual(selection["lenses"]["correctness-contract"],
+                         {"joined": False, "trigger": "changed_lines_above", "threshold": 10})
+        with self.assertRaisesRegex(RuntimeError, "at code_review_panel risk_scoped the code review settles"
+                                                  " through merge-panel"):
+            verification.register_result(self.root, self.official())
+        self.register_panel(self.official(), {"security-isolation": []})
+        verification.merge_panel(self.root)
+        self.assertEqual(self.session()["workers"]["code_reviewer"]["state"], "settled")
+
+    def test_risk_scoped_brings_in_the_correctness_and_conformance_lenses_above_the_line_threshold(self):
+        self.risk_policy(lines="1")
+        self.freeze()
+        panel = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer",
+                                      "review_initial")["code_review_panel"]
+        self.assertEqual([assignment["lens"] for assignment in panel["assignments"]],
+                         [["correctness-contract"], ["conformance-tests"]])
+        self.assertEqual(panel["lens_selection"]["changed_lines"],
+                         verification.changed_lines(self.root, self.session()["candidate"]))
+        self.assertFalse(panel["lens_selection"]["lenses"]["security-isolation"]["joined"])
 
     def test_single_reader_keeps_the_released_code_review(self):
         self.freeze()

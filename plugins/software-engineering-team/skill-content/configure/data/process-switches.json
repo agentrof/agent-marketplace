@@ -249,7 +249,7 @@
       "issue": 436
     },
     "code_review_panel": {
-      "summary": "Whether Delivery code review reads a frozen candidate with the official code reviewer alone, or also with a lens panel beside it whose calibrated blocking findings join the official result.",
+      "summary": "Whether Delivery code review reads a frozen candidate with the official code reviewer alone, also with a lens panel beside it whose calibrated blocking findings join the official result, or with only the lens readers a risky or large change brings in.",
       "issue": 347,
       "flows": ["delivery-execution"],
       "values": [
@@ -260,6 +260,10 @@
         {
           "id": "beside_official",
           "tradeoffs": "One fresh code-reviewer-lens reader per lens assignment reads the same frozen candidate and inputs in parallel with the official code reviewer, which reviews as at single_reader. A panel critical or major finding gates only once a fresh code reviewer on its role's own tier calibrates it and finds that the official result lacks it, and merge-panel registers the one code review result: the official findings and the validated panel findings, each with its source. More blockers caught per pass, as in one measured project, where the panel added 4 valid blockers the official reviewer missed in one pass, while every pass adds the lens readers' tokens and a calibration pass before the merge, and a pass where the panel adds nothing, as that project's next pass did, pays them for no gain."
+        },
+        {
+          "id": "risk_scoped",
+          "tradeoffs": "As beside_official, but a lens reader joins only when the frozen change triggers one of its lenses, by the owner's parameters: the security-isolation lens when a changed path matches the risk path globs, and the correctness-contract and conformance-tests lenses only above the changed-lines threshold. With no lens triggered the official code reviewer reads alone, as at single_reader. Small, low-risk Items skip the lens readers' tokens and the calibration before the merge, while a defect a left-out lens would have caught, in a path the globs miss or a change under the threshold, is caught only when the official reviewer finds it."
         }
       ],
       "default": "single_reader",
@@ -271,10 +275,21 @@
           "agents": ["code-reviewer"]
         }
       },
-      "value_data": {
-        "beside_official": ["skill-content/code-review/data/code-review-panel.json"]
+      "parameters": {
+        "summary": "Owner-set lens triggers at risk_scoped: the path globs that bring in the security-isolation lens and the changed-lines threshold above which the correctness-contract and conformance-tests lenses join. The package sets neither.",
+        "values": ["risk_scoped"],
+        "declared_by": {
+          "path": "skill-content/code-review/data/lens-triggers.json",
+          "key": "parameters"
+        },
+        "type": "positive_integer",
+        "min_count": 2
       },
-      "metric": "Per code-review pass: the valid critical and major findings found only by the panel, only by the official reviewer and by both, as the shadow judge rates them; the panel claims calibration confirmed, lowered, ruled invalid and ruled duplicate of another finding; and the wall clock of the combined step, from the freeze to merge-panel, against the official reviewer's alone, from the freeze to its registration, as the panel record of each pass keeps them.",
+      "value_data": {
+        "beside_official": ["skill-content/code-review/data/code-review-panel.json"],
+        "risk_scoped": ["skill-content/code-review/data/code-review-panel.json", "skill-content/code-review/data/lens-triggers.json"]
+      },
+      "metric": "Per code-review pass: the valid critical and major findings found only by the panel, only by the official reviewer and by both, as the shadow judge rates them; the panel claims calibration confirmed, lowered, ruled invalid and ruled duplicate of another finding; and the wall clock of the combined step, from the freeze to merge-panel, against the official reviewer's alone, from the freeze to its registration, as the panel record of each pass keeps them. At risk_scoped also the lenses each trigger brought in, and every valid critical or major finding later found that a left-out lens owns.",
       "promotion": {
         "unit": "At least 5 code-review passes run with beside_official across at least 2 Deliveries, the measurement criterion of #347.",
         "threshold": "Union valid critical and major recall above the official reviewer's alone and a combined wall clock at most 120% of the official reviewer's, summed over those passes, with every shared quality guard holding and the owner's approval."

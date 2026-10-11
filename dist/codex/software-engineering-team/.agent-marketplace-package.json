@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "70661640404a1e01348d78c2ec25dbfce59b339515e63feb7027bc82229252a3"
+      "d2aa474fe0bf6b11ff184ef7b89e76a83d5972bf15651a73c52094d7306329f5"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -137,7 +137,7 @@
       "6907f6c826873e160a411f49ef34e346b7bbf4db046f50b46528184ace2d604a"
     ,
     "host-contract.md":
-      "d2e285d750d02a87d2e312491a79c0f575c144980d1400ea0e09096105a71b42"
+      "5c0c18c8db2847c95121ea80080752cdfc9dbf1b45868a28f1add5bd2cf08f26"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -197,7 +197,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "fe70083f5af7e9f9b85736b33469bf5ce87c6e24049f28d99ff52c8156cba5b2"
+      "7b7950bc1a8cfeb6db2d50fa75607ec0d361a610bf12f1300fbce7a5b8c494f9"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -242,7 +242,7 @@
       "3fb6df9e647e942c52eb6651826b11f096e59d8acd454832fe6e6e7a6c54a478"
     ,
     "scripts/process_policy.py":
-      "673e45268b8b1f8161ecb4f1d26a9d5c970049015022e804a70c84b7da87828a"
+      "2c4cd76d5d95c3b6669d7210cd95a880718afd3282bcb77052c75437adf16900"
     ,
     "scripts/project_config.py":
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
@@ -415,6 +415,9 @@
     "skill-content/code-review/data/code-review-panel.json":
       "32735dceafa375129973ead0d3232d54b790cdfd2b83b49f7a22f8c09011a367"
     ,
+    "skill-content/code-review/data/lens-triggers.json":
+      "8df834b33b1a9bcb4f93747993db6721e50179f2b3066a4b886aafd73343444d"
+    ,
     "skill-content/code-review/references/passes.md":
       "ab804c90783ecfe6d8e26fb906e3daed4bf44ac58910b94db04d401967915b38"
     ,
@@ -427,6 +430,9 @@
     "skill-content/code-review/references/switch-code_review_panel-beside_official.md":
       "be3be367917f0e6e42272262cc89899774976272325de244e229a4b9db2f99fa"
     ,
+    "skill-content/code-review/references/switch-code_review_panel-risk_scoped.md":
+      "e827434f9735f89a8e37d4d29c507ff003d1c39af71a1a95d3764f086b5961e0"
+    ,
     "skill-content/code-review/references/switch-item_review_scale-by_change_size.md":
       "60e30321f786976ae5682a3f4d1551babfba4dd87ed7b981e44a5331fe018721"
     ,
@@ -437,7 +443,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "20973b2f9cc74881c8913b36db7058d157f6f1a8dffdebf64ea3d3e66d01f2cb"
+      "48139f69b888947db91fde8d6da125cadcaab39e34631c336fa9bf4f90e1e1eb"
     ,
     "skill-content/configure/data/step-budgets.json":
       "c63c5e90e1726b573c681f28008aa627575600f2d81dc8f8c0851b768e1b04fc"
@@ -446,7 +452,7 @@
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "ef9077b6eef7aacd2926603f9ecfcab1c45d9d32d2d20bdd6ac6168d5d93506c"
+      "b5a481fb89b77d04ac47f0eb87592113b61f4c04cab11019b05ce03380a767e0"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"

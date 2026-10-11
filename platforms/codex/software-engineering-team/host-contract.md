@@ -59,7 +59,8 @@
 - Under switch `review_panels` at `lens_panel`, run a review panel's lens
   readers in parallel: start every reader of the panel before waiting on any
   of them, then wait for all of them before triage.
-- Under switch `code_review_panel` at `beside_official`, run the code review
+- Under switch `code_review_panel` at `beside_official`, or at `risk_scoped`
+  when its manifest carries a panel, run the code review
   panel beside the official reviewer: start the official `code-reviewer`,
   every `code-reviewer-lens` reader of the panel and QA before waiting on any
   of them, then wait for all of them before the calibration and `merge-panel`.
@@ -131,8 +132,8 @@
   `review_panels` at `lens_panel` start them, and the reviewers themselves
   keep their own tier.
   Every build also ships `code-reviewer-lens` on the same tier; only the code
-  review panel under switch `code_review_panel` at `beside_official` starts
-  it, and `code-reviewer` keeps its own tier.
+  review panel under switch `code_review_panel` at `beside_official` or
+  `risk_scoped` starts it, and `code-reviewer` keeps its own tier.
   The pinned models need Codex 0.159.1 or later, the first release whose
   bundled model catalog lists `gpt-6.1-sol`; `gpt-6-luna` is bundled from
   0.157.0.

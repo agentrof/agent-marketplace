@@ -3565,11 +3565,14 @@ def carried_findings(root: Path, session: dict, current: dict, scope_expanded: b
     findings = [finding for finding in session.get("unresolved_findings", []) if finding.get("role") == "code_reviewer"]
     previous = session.get("previous_candidate") or {}
     changed_files: set[str] = set()
+    known_files: set[str] = set()
     changed_lines: list[str] = []
     whole = scope_expanded or not previous.get("product_commit")
     if not whole and findings:
         old, new = previous["product_commit"], current["product_commit"]
         try:
+            known_files = {part for commit in (old, new)
+                           for part in git(root, "ls-tree", "-r", "--name-only", "-z", commit).split("\0") if part}
             changed_files = {part for part in git(root, "diff", "--name-only", "--no-renames", "-z", old, new)
                              .split("\0") if part}
             changed_lines = [line[1:] for line in git(root, "diff", "--no-renames", "--unified=0", old, new)
@@ -3584,7 +3587,9 @@ def carried_findings(root: Path, session: dict, current: dict, scope_expanded: b
         moved = sorted(symbol for symbol in symbols
                        if any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?![A-Za-z0-9_])", line)
                               for line in changed_lines))
-        reexamine = whole or bool(touched or moved)
+        anchored = any(path in known_files or any(name.startswith(path.rstrip("/") + "/") for name in known_files)
+                       for path in paths)
+        reexamine = whole or not anchored or bool(touched or moved)
         rows.append({"id": finding["id"], "severity": finding.get("severity"), "status": finding.get("status"),
                      "named_files": paths, "named_symbols": symbols, "changed_files": touched,
                      "changed_symbols": moved, "action": "reexamine" if reexamine else "carry"})

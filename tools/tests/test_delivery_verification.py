@@ -1980,7 +1980,8 @@ print(sys.argv[1])
 
         findings = [minor("CR-1", "src/product.py:1", "The name value hides its unit."),
                     minor("CR-2", "src/other.py:1", "`helper_name` returns a bare constant."),
-                    minor("CR-3", "src/other.py:2", "The caller mirrors `value` without a bound.")]
+                    minor("CR-3", "src/other.py:2", "The caller mirrors `value` without a bound."),
+                    minor("CR-4", "repository", "The reported behavior needs a resolvable anchor.")]
         result = self.result()
         result["findings"] = findings
         verification.register_result(self.root, result)
@@ -1991,7 +1992,7 @@ print(sys.argv[1])
         rows = {row["id"]: row for row in verification.manifest(
             self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["carried_findings"]}
         self.assertEqual({identifier: row["action"] for identifier, row in rows.items()},
-                         {"CR-1": "reexamine", "CR-2": "carry", "CR-3": "reexamine"})
+                         {"CR-1": "reexamine", "CR-2": "carry", "CR-3": "reexamine", "CR-4": "reexamine"})
         self.assertEqual(rows["CR-1"]["changed_files"], ["src/product.py"])
         self.assertEqual((rows["CR-2"]["named_files"], rows["CR-2"]["named_symbols"], rows["CR-2"]["changed_files"],
                           rows["CR-2"]["changed_symbols"]), (["src/other.py"], ["helper_name"], [], []))

@@ -114,6 +114,9 @@ defines.
 Switch `own_target_reuse`: at `spot_run`, QA's final test run also takes the
 Item's own Test Plan targets from that run, but for the ones QA spot-runs, as
 `skill-content/deliver/references/switch-own_target_reuse-spot_run.md`
+defines; at `accept_record` it takes every own target from that run and runs
+none of them itself, as
+`skill-content/deliver/references/switch-own_target_reuse-accept_record.md`
 defines.
 
 Invoke Code Review and QA independently through the host's native agent

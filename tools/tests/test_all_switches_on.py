@@ -42,6 +42,8 @@ OWNER_GATES = "deliver/references/switch-owner_gates-two_fixed_gates.md"
 LANES = "deliver/references/switch-implementation_schedule-parallel_lanes_v1.md"
 PRE_HANDOFF = "deliver/references/switch-pre_handoff_regression-touched_suites.md"
 OWN_TARGETS = "deliver/references/switch-own_target_reuse-spot_run.md"
+# own_target_reuse ships a third value; tools/tests/test_pre_handoff_regression.py checks its binding.
+ACCEPT_RECORD = "deliver/references/switch-own_target_reuse-accept_record.md"
 GATE_FIRST = "qa-verification/references/switch-qa_gate_order-gate_first.md"
 GROUPS = "deliver/references/switch-test_group_report-refuse_missing_groups.md"
 ENGINES = "deliver/references/switch-test_engines-partitioned.md"
@@ -234,10 +236,11 @@ class AllSwitchesOnBindingTests(unittest.TestCase):
                     if "/references/switch-" in path)
         self.maxDiff = None
         self.assertEqual(bound, {key: sorted(value) for key, value in EXPECTED.items()})
-        # Every switch reference the package ships reaches at least one task.
+        # Every switch reference the package ships reaches at least one task; a third value, which this
+        # run does not select, is bound by its own switch's tests.
         shipped = {path.relative_to(ROOT / "plugins/software-engineering-team/skill-content")
                    .as_posix() for path in (ROOT / "plugins/software-engineering-team/skill-content")
-                   .glob("*/references/switch-*.md")}
+                   .glob("*/references/switch-*.md")} - {ACCEPT_RECORD}
         self.assertEqual(shipped, {path for paths in bound.values() for path in paths})
 
 
@@ -269,8 +272,11 @@ class AllSwitchesOnTests(unittest.TestCase):
         return result
 
     def test_the_policy_selects_every_non_default_value(self):
-        # A switch with three values would need a run per value; every switch has two.
-        self.assertTrue(all(len(spec["values"]) == 2 for spec in self.registry.values()))
+        # A switch with three values would need a run per value; every switch has two but own_target_reuse,
+        # whose third value accept_record binds its reference as test_pre_handoff_regression checks.
+        self.assertEqual(sorted(name for name, spec in self.registry.items() if len(spec["values"]) != 2),
+                         ["own_target_reuse"])
+        self.assertEqual(len(self.registry["own_target_reuse"]["values"]), 3)
         for switch, value in self.values.items():
             with self.subTest(switch=switch):
                 self.assertEqual(self.policy("value", "--switch", switch)["value"], value)
@@ -310,10 +316,11 @@ class AllSwitchesOnTests(unittest.TestCase):
                     if "/references/switch-" in path)
         self.maxDiff = None
         self.assertEqual(bound, {key: sorted(value) for key, value in EXPECTED.items()})
-        # Every switch reference the package ships reaches at least one task.
+        # Every switch reference the package ships reaches at least one task; a third value, which this
+        # run does not select, is bound by its own switch's tests.
         shipped = {path.relative_to(ROOT / "plugins/software-engineering-team/skill-content")
                    .as_posix() for path in (ROOT / "plugins/software-engineering-team/skill-content")
-                   .glob("*/references/switch-*.md")}
+                   .glob("*/references/switch-*.md")} - {ACCEPT_RECORD}
         self.assertEqual(shipped, {path for paths in bound.values() for path in paths})
 
 

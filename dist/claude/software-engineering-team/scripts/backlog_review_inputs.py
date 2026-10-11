@@ -1112,6 +1112,9 @@ def main(argv: list[str] | None = None) -> int:
     except (InputError, OSError, ValueError, RuntimeError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2, sort_keys=True))
         return 1
+    if not args.scope_findings:
+        from reader_manifest import compact
+        result = compact(args.docs.resolve().parents[1], result)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

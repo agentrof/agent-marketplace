@@ -208,5 +208,6 @@
     "consume": "implement",
     "review": "review",
     "repair": "implement"
-  }
+  },
+  "reader_manifest_bytes": 65536
 }

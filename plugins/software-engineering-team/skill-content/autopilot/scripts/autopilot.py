@@ -663,11 +663,14 @@ def chain(directory: Path, grant: dict) -> list[str]:
     return ids
 
 
-def report_payload(directory: Path, grant: dict) -> dict:
+def report_payload(directory: Path, grant: dict, now: datetime | None = None) -> dict:
     """Every decision and queued question of the grant and the grants it replaced, in time order."""
     ids = chain(directory, grant)
     entries = [event for event in ledger(directory)
                if event.get("grant") in ids and event.get("event") in ("decision", "queued")]
+    if now is not None:
+        entries = [{**event, **({"age_seconds": max(0, int((now - parse_stamp(event["time"])).total_seconds()))}
+                               if event["event"] == "queued" else {})} for event in entries]
     return {"grant": grant, "chain": ids, "entries": entries,
             "counts": {"decisions": sum(event["event"] == "decision" for event in entries),
                        "queued": sum(event["event"] == "queued" for event in entries)}}
@@ -707,7 +710,8 @@ def report_lines(payload: dict) -> list[str]:
             lines.append(f"{number}. {entry['time']}{owner} queued [{classes}]"
                          f" {entry['question']} -> recommended: {entry['recommendation']}")
             lines.append(f"   options: {options or 'none offered'}"
-                         + (f"; blocks: {entry['blocks']}" if entry.get("blocks") else ""))
+                         + (f"; blocks: {entry['blocks']}" if entry.get("blocks") else "")
+                         + (f"; waiting {entry['age_seconds']}s" if "age_seconds" in entry else ""))
     counts = payload["counts"]
     lines.append(f"decisions: {counts['decisions']}, queued: {counts['queued']}")
     return lines
@@ -974,6 +978,44 @@ def cmd_queue(args: argparse.Namespace, now: datetime) -> int:
     return 0
 
 
+
+def notify_owner(title: str, message: str) -> dict:
+    try:
+        import owner_notification
+    except ImportError:
+        return {"submitted": False, "reason": "host notification adapter is unavailable"}
+    return owner_notification.send(title, message)
+
+
+def cmd_waiting(args: argparse.Namespace, now: datetime) -> int:
+    directory = state_dir(Path(args.project_root))
+    require_state(directory, "no active grant")
+    with locked(directory):
+        grant = active_grant(directory, now, Path(args.project_root))
+        queued = [entry for entry in ledger(directory, grant["id"]) if entry.get("event") == "queued"]
+        if args.runnable_task or not queued:
+            print(json.dumps({"submitted": False, "reason": "independent work remains" if args.runnable_task
+                              else "no queued decision"}))
+            return 0
+        import hashlib
+        queue_hash = hashlib.sha256(json.dumps(queued, sort_keys=True).encode()).hexdigest()
+        if any(entry.get("event") == "owner_notified" and entry.get("queue_hash") == queue_hash
+               for entry in ledger(directory, grant["id"])):
+            print(json.dumps({"submitted": False, "reason": "this decision queue was already notified"}))
+            return 0
+        last = queued[-1]
+        elapsed = max(0, int((now - parse_stamp(grant["granted_at"])).total_seconds()))
+        message = (last["question"] + " Recommended: " + last["recommendation"]
+                   + ". Blocked: " + (last.get("blocks") or "remaining work")
+                   + f". Running for {elapsed // 60} minutes.")
+        result = notify_owner("Delivery needs your decision", message)
+        log(directory, now, grant, "owner_notified" if result.get("submitted") else "notification_failed",
+            queue_hash=queue_hash, question=last["question"], recommendation=last["recommendation"],
+            blocks=last.get("blocks", ""), elapsed_seconds=elapsed, notification=result)
+        print(json.dumps(result))
+        return 0 if result.get("submitted") else 1
+
+
 def cmd_off(args: argparse.Namespace, now: datetime) -> int:
     directory = state_dir(Path(args.project_root))
     require_state(directory, "no grant to revoke")
@@ -1018,7 +1060,7 @@ def cmd_report(args: argparse.Namespace, now: datetime) -> int:
                  "replaces": granted[0].get("replaces")}
     if grant is None:
         raise Refusal("no grant to report")
-    payload = report_payload(directory, grant)
+    payload = report_payload(directory, grant, now)
     print(json.dumps(payload, indent=2, sort_keys=True) if args.json
           else "\n".join(report_lines(payload)))
     return 0
@@ -1083,7 +1125,7 @@ def denial(grant: dict, now: datetime) -> str:
         " governing document where the flow records the user's answer, marked"
         f" {grant['id']}. Otherwise run `{command} queue` with --class, --question, --options"
         " and --recommendation, and continue the work that does not depend on it; stop only"
-        " when every remaining task waits on a queued question, then end with the queued list.")
+        " when every remaining task waits on a queued question, then call `autopilot.py waiting` once and end with the queued list.")
 
 
 def hook_pre_question(options: dict, payload: dict, now: datetime) -> None:
@@ -1140,6 +1182,9 @@ def parser() -> argparse.ArgumentParser:
         verb.add_argument("--json", action="store_true")
         verb.set_defaults(handler=handler)
     verbs.choices["report"].add_argument("--grant")
+    waiting = verbs.add_parser("waiting")
+    waiting.add_argument("--runnable-task", action="append", default=[])
+    waiting.set_defaults(handler=cmd_waiting)
     record = verbs.add_parser("record")
     record.add_argument("--choice", required=True)
     record.add_argument("--reason", required=True)

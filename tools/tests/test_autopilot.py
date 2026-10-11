@@ -437,6 +437,40 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(len([event for event in self.p.events() if event["event"] == "decision"]), 2)
 
+    def test_desktop_notification_backends_pass_text_as_data(self):
+        import importlib.util
+        source = ROOT / "platforms/shared/software-engineering-team/overlay/scripts/owner_notification.py"
+        spec = importlib.util.spec_from_file_location("notification_test", source)
+        notification = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(notification)
+        message = 'Choose "Hold"; $(do-not-run)'
+        for system in ("Darwin", "Linux", "Windows"):
+            with self.subTest(system=system), mock.patch.object(notification.platform, "system", return_value=system), \
+                    mock.patch.object(notification.shutil, "which", return_value="notification-program"), \
+                    mock.patch.object(notification.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+                self.assertTrue(notification.send("Decision", message)["submitted"])
+                self.assertNotIn("shell", run.call_args.kwargs)
+                self.assertEqual(run.call_args.kwargs["timeout"], 15)
+                payload = run.call_args.kwargs["input"]
+                self.assertEqual(json.loads(payload)["message"], message) if payload else self.assertIn(message, run.call_args.args[0])
+
+    def test_owner_wait_notifies_once_and_reports_question_age(self):
+        self.p.run_verb("on")
+        self.queue(now=NOW + timedelta(minutes=2))
+        with mock.patch.object(autopilot, "notify_owner", return_value={"submitted": True}) as notify:
+            code, output, _ = self.p.run_verb("waiting", "--runnable-task", "unit tests", now=NOW + timedelta(minutes=3))
+            self.assertEqual(code, 0)
+            notify.assert_not_called()
+            self.assertEqual(self.p.run_verb("waiting", now=NOW + timedelta(minutes=4))[0], 0)
+            self.assertEqual(self.p.run_verb("waiting", now=NOW + timedelta(minutes=5))[0], 0)
+            self.assertEqual(notify.call_count, 1)
+            self.assertIn("Publish the tag?", notify.call_args.args[1])
+            self.assertIn("release notes", notify.call_args.args[1])
+        code, output, _ = self.p.run_verb("report", "--json", now=NOW + timedelta(minutes=10))
+        queued = [entry for entry in json.loads(output)["entries"] if entry["event"] == "queued"]
+        self.assertEqual(queued[0]["age_seconds"], 480)
+        self.assertEqual(sum(entry["event"] == "owner_notified" for entry in self.p.events()), 1)
+
     def test_queue_appends_one_pending_question(self):
         self.p.run_verb("on")
         code, out, err = self.queue(now=NOW + timedelta(minutes=2))

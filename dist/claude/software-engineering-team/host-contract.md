@@ -324,3 +324,8 @@
   every queued question there too, as a `pending` row of class `queued` or its
   at-once class with the Items it holds in `blocks`, so the Delivery's
   refusals apply.
+
+When all remaining work waits on queued owner decisions, call the packaged
+`autopilot.py waiting` before ending the turn. It submits one desktop notice
+per queue. Report an unavailable notification backend; never claim delivery
+when the command failed. The decision still belongs to the owner.

@@ -190,7 +190,7 @@ class VaultHookPrototypeTests(unittest.TestCase):
             diagnostic_text = subprocess.list2cmdline(diagnostic) if os.name == "nt" else shlex.join(diagnostic)
             for value, expected in ((command_text, 0), (command_text + " && echo unsafe", 2),
                                     (diagnostic_text, 0), (diagnostic_text + " && echo unsafe", 2),
-                                    ("git status", 2 if os.name == "nt" else 0), ("git commit -qm change", 2)):
+                                    ("git -P -c core.fsmonitor=false status", 2 if os.name == "nt" else 0), ("git commit -qm change", 2)):
                 with self.subTest(command=value), redirect_stderr(io.StringIO()):
                     self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(value)), expected)
             unknown_shell = shell_payload(command_text)
@@ -226,20 +226,22 @@ class VaultHookPrototypeTests(unittest.TestCase):
                 with redirect_stderr(output):
                     return self.hook.delivery_reader_barrier(payload), output.getvalue()
 
-            for command in ("git diff HEAD~1 -- src", "git -C . log --oneline | head -5", "jq .a data.json",
+            for command in ("git -P -c core.fsmonitor=false diff --no-ext-diff --no-textconv HEAD~1 -- src", "git -P -c core.fsmonitor=false -C . log --no-ext-diff --no-textconv --oneline | head -5", "jq .a data.json",
                             "date -u +%s", "docker ps", "docker volume inspect cache", "gh pr checks 12",
-                            "find . -name '*.py'", "grep -rn 'value$' src 2>/dev/null", "rg -n token src",
-                            f"git -C {shlex.quote(str(unrelated))} status",
-                            f"cd {shlex.quote(str(unrelated))} && git add -A && git commit -qm change",
+                            "find . -name '*.py'", "grep -rn 'value$' src 2>/dev/null", "rg --no-config -n token src",
+                            f"git -P -c core.fsmonitor=false -C {shlex.quote(str(unrelated))} status",
                             f"cd {shlex.quote(str(unrelated))} && touch notes.txt > log.txt"):
                 with self.subTest(command=command):
                     self.assertEqual(shell(command)[0], 0)
             self.assertEqual(shell("git commit -qm change", unrelated)[0], 0)
+            for command in ("python3 -c 'pass'", "git commit -qm change", "LD_PRELOAD=library.so touch note.txt"):
+                self.assertEqual(shell(f"cd {shlex.quote(str(unrelated))} && {command}")[0], 2)
             for command in ("rm src/product.py", f"rm -rf {shlex.quote(str(project / 'src'))}",
                             "touch product.py", "git commit -qm change", "git diff --output=patch.txt",
                             "find . -name '*.py' -delete", "find . | xargs rm", "git log > history.txt",
                             "echo $HOME", "cat product.py | sh", "date 0101000026", "docker rm cache",
-                            "gh pr merge 12", "rg --pre ./run.sh token",
+                            "gh pr merge 12", "rg --pre ./run.sh token", "rg token src", "git status",
+                            "git -P -c core.fsmonitor=false diff --textconv",
                             f"cd {shlex.quote(str(unrelated))} ; rm -rf {shlex.quote(str(session))}",
                             f"cd {shlex.quote(str(unrelated))} && rm -rf ../item",
                             f"cd {shlex.quote(str(unrelated))} ; rm notes.txt",

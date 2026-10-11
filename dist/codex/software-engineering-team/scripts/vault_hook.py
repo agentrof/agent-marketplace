@@ -2136,6 +2136,7 @@ def valid_git_experience_sync_result(payload: dict, project: Path,
 # it is a known read-only form or stays wholly outside the protected roots.
 READ_ONLY_COMMANDS = {"cat", "head", "tail", "ls", "wc", "grep", "rg", "jq", "ps", "date", "find",
                       "git", "docker", "gh", "cd"}
+SAFE_FILE_COMMANDS = {"touch", "mkdir", "rmdir", "rm", "cp", "mv"}
 READ_ONLY_GIT = {"diff", "log", "show", "status", "rev-parse", "ls-files", "cat-file"}
 READ_ONLY_DOCKER = {("ps",), ("inspect",), ("logs",), ("images",), ("volume", "ls"), ("volume", "inspect")}
 READ_ONLY_GH = {("issue", "view"), ("issue", "list"), ("pr", "view"), ("pr", "list"), ("pr", "checks")}
@@ -2248,12 +2249,28 @@ def _read_only_command(words: list[str]) -> bool:
     if name not in READ_ONLY_COMMANDS:
         return False
     if name == "git":
-        while args and args[0] in {"-C", "--no-pager", "-P"}:
-            args = args[2:] if args[0] == "-C" else args[1:]
-        return bool(args) and args[0] in READ_ONLY_GIT \
-            and not any(arg.startswith(("--output", "--ext-diff")) for arg in args)
+        safe_monitor = False
+        no_pager = False
+        while args and args[0] in {"-C", "--no-pager", "-P", "-c"}:
+            option = args[0]
+            if option in {"-C", "-c"}:
+                if len(args) < 2:
+                    return False
+                if option == "-c":
+                    if args[1] != "core.fsmonitor=false":
+                        return False
+                    safe_monitor = True
+                args = args[2:]
+            else:
+                no_pager = True
+                args = args[1:]
+        if not args or args[0] not in READ_ONLY_GIT or not safe_monitor or not no_pager:
+            return False
+        if any(arg.startswith(("--output", "--ext-diff", "--textconv", "--filters")) for arg in args):
+            return False
+        return args[0] not in {"diff", "log", "show"} or {"--no-ext-diff", "--no-textconv"} <= set(args)
     if name == "rg":
-        return not any(arg == "--pre" or arg.startswith("--pre=") for arg in args)
+        return "--no-config" in args and not any(arg == "--pre" or arg.startswith("--pre=") for arg in args)
     if name == "find":
         return not FIND_WRITE_ACTIONS.intersection(args)
     if name == "date":
@@ -2307,6 +2324,8 @@ def shell_outside_verification(payload: dict, roots: list[Path], scratch: Path) 
             return False
         sanctioned = all(SANCTIONED_SHELL_ASSIGNMENTS.get(item.split("=", 1)[0]) == item.split("=", 1)[1]
                          for item in assignments)
+        if not sanctioned:
+            return False
         if segment[0] == "cd" and not assignments:
             if len(segment) > 2 or segment[1:] == ["-"]:
                 return False
@@ -2316,7 +2335,7 @@ def shell_outside_verification(payload: dict, roots: list[Path], scratch: Path) 
             cwds = moved if word == "&&" else cwds + moved if word == ";" else cwds
         elif sanctioned and "/" not in segment[0] and _read_only_command(segment):
             pass
-        elif piped or os.path.basename(segment[0]) in INDIRECT_COMMANDS \
+        elif (segment[0] not in SAFE_FILE_COMMANDS or piped) or os.path.basename(segment[0]) in INDIRECT_COMMANDS \
                 or any(_inside(cwd, roots, scratch) for cwd in cwds) \
                 or any(_word_touches(item.split("=", 1)[1], cwds, roots, scratch) for item in assignments) \
                 or any(_word_touches(item, cwds, roots, scratch) for item in segment):
@@ -2342,7 +2361,9 @@ def readers_active_message(message: str, roots: list[Path], scratch: Path) -> st
             " read-only commands (git diff/log/show/status/rev-parse/ls-files/cat-file, grep, rg, jq,"
             " cat, head, tail, ls, wc, date, ps, docker ps/inspect/logs/images/volume ls|inspect,"
             " gh issue|pr view/list, gh pr checks, find without -delete or -exec);"
-            " other commands whose working directory and every path argument stay outside "
+            " Git needs -P -c core.fsmonitor=false and diff/log/show also need --no-ext-diff --no-textconv;"
+            " rg needs --no-config. Only literal file operations (touch/mkdir/rmdir/rm/cp/mv) whose"
+            " working directory and every path argument stay outside "
             + " and ".join(str(root) for root in roots)
             + "; Edit and Write outside them, or under " + str(scratch))
 

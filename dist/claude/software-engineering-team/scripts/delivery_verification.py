@@ -9,6 +9,7 @@ import hmac
 import functools
 import fnmatch
 import json
+import math
 import os
 import platform
 import re
@@ -1016,11 +1017,19 @@ def live_progress_records(root: Path, session: dict) -> dict:
     scratch = session_path(root).parent / "scratch"
     for path in scratch.glob("progress-*.json"):
         try:
-            value = json.loads(safe_runtime_path(root, path, file_only=True).read_text(encoding="utf-8"))
+            path = safe_runtime_path(root, path, file_only=True)
+            if path.stat().st_size > 65536:
+                continue
+            value = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(value, dict):
                 continue
             if (value.get("session_id") != session["session_id"]
                     or value.get("candidate_hash") != session["candidate"]["candidate_hash"]):
+                continue
+            if (value.get("state") not in {"running", "finished"}
+                    or not isinstance(value.get("record_key"), str)
+                    or not isinstance(value.get("updated_at"), (int, float))
+                    or not math.isfinite(value["updated_at"])):
                 continue
             if value.get("state") == "running" and time.time() - value["updated_at"] > LIVE_PROGRESS_STALE:
                 value["state"] = "stale"

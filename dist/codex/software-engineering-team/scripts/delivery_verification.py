@@ -728,6 +728,23 @@ def prepare_repair(root: Path) -> dict:
                     or root in path.resolve().parents
                     or existing["candidate_hash"] != current["candidate_hash"]):
                 raise RuntimeError("recorded repair workspace is missing, unsafe or bound to another candidate")
+            temporary = Path(tempfile.gettempdir()).resolve()
+            if path.parent.parent.resolve() != temporary or not path.parent.name.startswith("agentrof-repair-"):
+                raise RuntimeError("recorded repair workspace is outside its private directory")
+            for component in (path.parent, path, path / ".git"):
+                metadata = component.lstat()
+                if (stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0)
+                        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+                    raise RuntimeError("recorded repair workspace contains an alias")
+            if (Path(git(path, "rev-parse", "--show-toplevel")).resolve() != path.resolve()
+                    or git(path, "branch", "--show-current") != existing["branch"]
+                    or git(path, "remote", "get-url", "origin") != str(root)
+                    or (path / ".git/objects/info/alternates").exists()
+                    or subprocess.run(["git", "-C", str(path), "merge-base", "--is-ancestor",
+                                       existing["base_commit"], "HEAD"], capture_output=True).returncode):
+                raise RuntimeError("recorded repair workspace repository identity changed")
+            existing["findings"] = [findings[key] for key in sorted(findings)]
+            write_session(root, session)
             return {**existing, "reused": True}
         parent = Path(tempfile.mkdtemp(prefix="agentrof-repair-"))
         checkout = parent / "checkout"

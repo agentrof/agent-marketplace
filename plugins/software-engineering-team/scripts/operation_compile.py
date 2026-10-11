@@ -38,7 +38,7 @@ FILE_FOR = {
 COMMAND_FIELDS = {
     "verification": (
         "test_command", "mutation_command", "dependency_audit_command", "diagnostic_test_command",
-        "test_partition_command", "live_test_command",
+        "test_partition_command", "live_test_command", "live_resume_command",
     ),
     "environment": ("env_command",),
 }
@@ -219,7 +219,8 @@ def live_test_problems(props: dict) -> list[str]:
     """Why a Verification Contract's optional live test group declaration is invalid."""
     if not any(name in props for name in LIVE_TEST_FIELDS):
         return ([f"{LIVE_GROUP_RUN} needs live_test_command, live_test_workdir and live_groups"]
-                if LIVE_GROUP_RUN in props else [])
+                if LIVE_GROUP_RUN in props else []) + (["live_resume_command needs live test groups"]
+                if "live_resume_command" in props else [])
     errors = []
     if not all(name in props for name in LIVE_TEST_FIELDS):
         errors.append("live_test_command, live_test_workdir and live_groups are declared together or not at all")
@@ -237,6 +238,10 @@ def live_test_problems(props: dict) -> list[str]:
         errors.append("live_groups must list unique group names of letters, digits, '.', '_' and '-'")
     if LIVE_GROUP_RUN in props and props[LIVE_GROUP_RUN] not in LIVE_GROUP_RUNS:
         errors.append(f"{LIVE_GROUP_RUN} must be one of {', '.join(LIVE_GROUP_RUNS)}")
+    if "live_resume_command" in props:
+        resume = props["live_resume_command"]
+        if not isinstance(resume, str) or not resume.strip() or resume.count(LIVE_GROUP_PLACEHOLDER) != 1:
+            errors.append("live_resume_command must contain {group} exactly once")
     return errors
 
 

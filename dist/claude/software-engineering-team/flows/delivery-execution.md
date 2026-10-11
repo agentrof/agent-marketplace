@@ -374,3 +374,11 @@ an interrupted runner, not a failed test. An approved test adapter may write
 `test_id`, `cases_done`, `cases_total` and `failures`; the status labels these as
 adapter observations. They never satisfy a verification gate. Final outcomes
 still come only from the completed command and its recorded evidence.
+
+For a live group whose approved adapter reported a preflight-only failed
+measurement, `run --kind live_test --group <group> --resume` permits one resume
+on the same frozen candidate and environment. It requires the contract's
+`live_resume_command`, preserves the first attempt by evidence hash and passes
+only its pending phases. A second attempt, a changed candidate, an expired
+record or a failed test case refuses this path. The resumed command must run
+preflight again before any pending test phase.

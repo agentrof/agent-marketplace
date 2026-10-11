@@ -106,7 +106,7 @@ RUNNER_VARIABLES = ("AGENTROF_MUTATION_FILES", "AGENTROF_VERIFICATION_SCRATCH")
 # names neither the variable nor its path. A partitioned test run hands each
 # partition its own file and engine, which its record names, never the identity.
 PARTITION_VARIABLES = ("AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE")
-SELECTION_VARIABLES = ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
+SELECTION_VARIABLES = ("AGENTROF_LIVE_RESUME", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
 # At touched_suites QA's final test run names here the earlier-story targets the
 # accepted pre-handoff run covered, for the approved test command to skip (#354).
 REUSED_TESTS = "reused-tests.json"
@@ -1040,12 +1040,70 @@ def live_progress_records(root: Path, session: dict) -> dict:
 
 
 def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
-              spot_file: Path | None = None, group: str | None = None) -> dict:
+              spot_file: Path | None = None, group: str | None = None, resume: bool = False) -> dict:
     root = root.resolve()
     read_session(root)
     with environment_lock(root, "qa_engineer", "run --kind " + kind), \
             command_lock(root, "qa_engineer", "run --kind " + kind):
-        return _run_check(root, kind, fresh=fresh, selection_file=selection_file, spot_file=spot_file, group=group)
+        return _run_check(root, kind, fresh=fresh, selection_file=selection_file, spot_file=spot_file, group=group, resume=resume)
+
+
+
+def valid_live_checkpoint(value) -> bool:
+    if (not isinstance(value, dict) or value.get("schema_version") != 1
+            or value.get("failure") != "infrastructure_preflight"
+            or value.get("preflight") not in {"dns", "tls", "registry"}
+            or type(value.get("failed_cases")) is not int or value["failed_cases"] != 0
+            or type(value.get("started_cases_in_phase")) is not int or value["started_cases_in_phase"] != 0):
+        return False
+    completed, pending = value.get("completed_phases"), value.get("pending_phases")
+    if not isinstance(completed, dict) or not isinstance(pending, list) or not pending:
+        return False
+    if any(not isinstance(name, str) or not operation_compile.LIVE_GROUP_RE.fullmatch(name)
+           for name in [*completed, *pending]):
+        return False
+    evidence = value.get("phase_evidence", {})
+    if not isinstance(evidence, dict) or set(evidence) != set(completed):
+        return False
+    if any(not isinstance(row, dict) or set(row) != {"file", "sha256"}
+           or not isinstance(row["file"], str) or row["sha256"] != completed[name]
+           for name, row in evidence.items()):
+        return False
+    return (len(pending) == len(set(pending)) and not set(completed).intersection(pending)
+            and all(isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value)
+                    for value in completed.values()))
+
+
+def checkpoint_evidence_current(root: Path, value: dict) -> bool:
+    try:
+        for row in value.get("phase_evidence", {}).values():
+            path = raw_output_path(root, row["file"])
+            if not row["file"].startswith("scratch/") or not path.is_file() or path.stat().st_size > 1024 * 1024:
+                return False
+            if "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() != row["sha256"]:
+                return False
+        return True
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
+def live_checkpoint(root: Path) -> dict | None:
+    path = raw_output_path(root, "scratch/live-checkpoint.json")
+    try:
+        if not path.is_file() or path.stat().st_size > 65536:
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if valid_live_checkpoint(value) and checkpoint_evidence_current(root, value) else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def resumable_live_run(record: dict | None, current: dict) -> bool:
+    return bool(record and record.get("exit_code") == 2 and record.get("candidate_intact") is True
+                and record.get("identity", {}).get("candidate_hash") == current["candidate_hash"]
+                and record.get("resume_count", 0) == 0 and valid_live_checkpoint(record.get("live_checkpoint"))
+                and fresh_record(record)
+                and record.get("evidence_hash") == digest({k: v for k, v in record.items() if k != "evidence_hash"}))
 
 
 def live_groups_selected(group: str) -> list[str]:
@@ -1083,13 +1141,15 @@ def live_record_group(contract: dict, group: str) -> str:
 
 
 def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
-               spot_file: Path | None = None, group: str | None = None) -> dict:
+               spot_file: Path | None = None, group: str | None = None, resume: bool = False) -> dict:
     """Run an approved command verbatim with a file-based mutation scope binding."""
     root = root.resolve()
     if kind not in RUN_KINDS:
         raise RuntimeError("unsupported verification command kind")
     if (kind == "live_test") != (group is not None):
         raise RuntimeError("run --kind live_test requires --group; other kinds take no --group")
+    if resume and (kind != "live_test" or fresh):
+        raise RuntimeError("resume is only for a live preflight attempt on the unchanged candidate")
     # Each live group keeps its own evidence beside the final commands' records.
     record_key = kind if group is None else f"{kind}:{group}"
     if (kind == "diagnostic_test") != (selection_file is not None):
@@ -1119,6 +1179,12 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         if group is not None:
             group = live_record_group(contract, group)
             record_key = f"{kind}:{group}"
+        prior = session["raw_evidence"].get(record_key) if resume else None
+        if resume:
+            if (not resumable_live_run(prior, current) or "live_resume_command" not in contract
+                    or not checkpoint_evidence_current(root, prior["live_checkpoint"])):
+                raise RuntimeError("live resume requires one fresh preflight-only failed measurement and an approved resume command")
+            command = contract["live_resume_command"].replace(operation_compile.LIVE_GROUP_PLACEHOLDER, group)
         if not isinstance(command, str) or not command.strip() or "{{" in command or "}}" in command:
             raise RuntimeError("approved verification command is missing or contains unresolved parameters")
         partitions = (partition_declaration(root, current["delivery"], contract, contract_body)
@@ -1143,6 +1209,19 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         scratch = safe_runtime_path(root, Path(environment["AGENTROF_VERIFICATION_SCRATCH"]))
         scratch.mkdir(exist_ok=True)
         declared = environment_identity(root, environment, contract)
+        resume_input = None
+        if resume:
+            if any(prior["identity"].get(key) != declared[key] for key in ENVIRONMENT_FIELDS):
+                raise RuntimeError("live resume requires the original command environment")
+            resume_path = raw_output_path(root, "scratch/live-resume.json")
+            resume_input = {"candidate_hash": current["candidate_hash"], "group": group,
+                            "prior_evidence_hash": prior["evidence_hash"], **prior["live_checkpoint"]}
+            atomic_file.replace_text(resume_path, json.dumps(resume_input, sort_keys=True) + "\n")
+            resume_generation = source_file_generation(resume_path)
+            environment["AGENTROF_LIVE_RESUME"] = str(resume_path)
+        checkpoint_path = raw_output_path(root, "scratch/live-checkpoint.json") if group is not None else None
+        if checkpoint_path is not None and checkpoint_path.exists():
+            checkpoint_path.unlink()
         reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
                           if kind == "test" else (None, None))
         own_note = None
@@ -1160,6 +1239,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             identity["diagnostic_selection_hash"] = digest(selection)
         if group is not None:
             identity["live_group"] = group
+        if resume_input is not None:
+            identity["live_resume_hash"] = digest(resume_input)
         if reuse is not None:
             identity["reused_pre_handoff"] = reuse
         groups = (group_report_declaration(root, current["delivery"], contract)
@@ -1234,8 +1315,16 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                                 and source_file_generation(reused) == reused_generation)
         except (RuntimeError, ValueError, OSError):
             selection_intact = False
+    if resume_input is not None:
+        try:
+            selection_intact = (json.loads(resume_path.read_text(encoding="utf-8")) == resume_input
+                                and source_file_generation(resume_path) == resume_generation
+                                and checkpoint_evidence_current(root, resume_input))
+        except (OSError, ValueError):
+            selection_intact = False
     if selection_intact is not None:
         intact = intact and selection_intact
+    checkpoint = live_checkpoint(root) if group is not None and completed.returncode == 2 else None
     with locked(root):
         session = read_session(root)
         if session["session_id"] != session_id:
@@ -1248,6 +1337,12 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         record = {"identity": identity, "exit_code": completed.returncode, "candidate_intact": intact,
                   "output_file": output_name, "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
                   "duration_seconds": time.monotonic() - started, "completed_at": time.time()}
+        if checkpoint is not None:
+            record["live_checkpoint"] = checkpoint
+        if resume:
+            record["resume_count"] = 1
+            record["prior_attempt"] = prior
+            record["resume_of"] = prior["evidence_hash"]
         if difference:
             record["checkout_difference"] = difference
         if selection is not None:
@@ -3666,7 +3761,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     return result
 
 
-RUN_SUMMARY_FIELDS = ("live_group", "exit_code", "candidate_intact", "selection_intact", "reused_pre_handoff", "duration_seconds",
+RUN_SUMMARY_FIELDS = ("live_group", "resume_count", "resume_of", "exit_code", "candidate_intact", "selection_intact", "reused_pre_handoff", "duration_seconds",
                       "completed_at", "evidence_hash", "environment_hash", "checkout_difference", "earlier_stories",
                       "output_file")
 
@@ -3737,6 +3832,7 @@ def main(argv=None) -> int:
     run.add_argument("--selection-file", type=Path)
     run.add_argument("--spot-run-file", type=Path)
     run.add_argument("--fresh", action="store_true")
+    run.add_argument("--resume", action="store_true")
     environment = subs.add_parser("environment")
     environment.add_argument("--verb", required=True, choices=("down", "up", "seed", "logs", "url"))
     environment.add_argument("--value")
@@ -3807,7 +3903,7 @@ def main(argv=None) -> int:
             value = wait_for_release(root, args.role, args.seconds)
         elif args.command == "run":
             value = run_check(root, args.kind, fresh=args.fresh, selection_file=args.selection_file,
-                              spot_file=args.spot_run_file, group=",".join(args.group) if args.group else None)
+                              spot_file=args.spot_run_file, group=",".join(args.group) if args.group else None, resume=args.resume)
         elif args.command == "manifest":
             value = manifest(root, args.delivery, args.story, args.role, args.mode, args.remote)
         elif args.summary or args.run:

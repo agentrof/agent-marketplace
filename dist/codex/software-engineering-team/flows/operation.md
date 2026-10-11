@@ -147,3 +147,14 @@ never binds the evidence. The contract check refuses a name of the runner's
 own `AGENTROF_` namespace: the runner sets those variables, and run evidence
 binds them without a declaration, a selection file the runner writes by its
 content. Add the field through the normal revision and approval lifecycle.
+
+A Verification Contract may opt in to one preflight-only live resume with
+`live_resume_command`, containing `{group}` exactly once and using the same
+`live_test_workdir`. The approved adapter writes `live-checkpoint.json` under
+`AGENTROF_VERIFICATION_SCRATCH`: schema version 1, failure
+`infrastructure_preflight`, preflight `dns`, `tls` or `registry`, zero
+`failed_cases` and `started_cases_in_phase`, `completed_phases` mapping phase
+names to SHA-256 evidence hashes, and unique `pending_phases`. The resume
+command receives that immutable selection through `AGENTROF_LIVE_RESUME`,
+rechecks preflight and runs only the pending phases. A failed product case is
+never resumable through this interface.

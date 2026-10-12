@@ -129,11 +129,10 @@ none of them itself, as
 defines.
 
 Invoke Code Review and QA independently through the host's native agents.
-Keep the implementation writer idle until both readers finish or cancellation
-is confirmed, except an isolated `lane_isolation` `scratch_clone` repair of
-registered findings. Each reader registers `result --file <result.json>` when
-finished, also while another reader's command runs; registration waits only for
-its own command. The owner alone persists canonical reports after the barrier.
+Keep the implementation writer idle until both readers finish or cancellation is confirmed,
+except isolated `lane_isolation` `scratch_clone` repairs of registered findings.
+Each reader registers `result --file <result.json>` when its own command ends,
+even while the other runs; the owner alone persists canonical reports after the barrier.
 The code reviewer runs no command, not even a diagnostic test.
 Its `verification_evidence` names the freeze record and QA runs.
 It registers its finished result at once and returns. A reader waiting for another role's step
@@ -213,14 +212,11 @@ them. A QA reader whose command the host refuses lists it in
 diagnostic or failed result, never a passed final one. `status --summary`
 shows those rows; ask the owner at once, then `resume-qa` reruns only the
 blocked commands on the same candidate.
-For failed or affected tests first, an optional approved
-`diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
-<scratch-selection.json>`. Copy the selector schema from the QA manifest,
-fill literal `failed_test_ids` and `affected_test_ids`, and write it under the
-manifest's scratch directory. The runner validates the candidate binding and
-passes normalized selection data through `AGENTROF_DIAGNOSTIC_TESTS`; it never
-appends those identifiers to shell text. The compiler-owned JSON adds
-`selected_test_ids`, the sorted union of the failed and affected identifiers.
+For failed or affected tests, an approved `diagnostic_test_command` enables
+`run --kind diagnostic_test --selection-file <scratch-selection.json>`.
+Copy the QA manifest's selector to scratch with literal `failed_test_ids` and
+`affected_test_ids`. The runner adds their sorted `selected_test_ids` union and
+passes candidate-bound data through `AGENTROF_DIAGNOSTIC_TESTS`, never shell text.
 An open inherited finding may list `negative_control_test_ids`. Its
 `finding_controls: [{finding_id, test_ids}]` selects only prescribed ids in
 changed test files, without a Test Plan scenario binding. The runner adds
@@ -234,8 +230,7 @@ runtime commands and lane commands remove it, including any inherited value.
 A changed selection cannot reuse an older diagnostic run. Without this
 adapter, use the full approved test command or revise the Operation Contract
 through its normal approval.
-Diagnostic command evidence never satisfies the final full-suite gate.
-Commands run in an independent scratch checkout of the frozen product commit,
+Diagnostic command evidence never satisfies the final full-suite gate. Commands run in an independent scratch checkout of the frozen product commit,
 with no shared Git objects or mutable working files. The runner exposes an
 output directory through `AGENTROF_VERIFICATION_SCRATCH` and the candidate's
 Delivery and Item ids through `AGENTROF_DELIVERY_ID` and `AGENTROF_ITEM_ID`,
@@ -420,3 +415,10 @@ with the contract's `live_resume_command`, on the same candidate and environment
 The runner preserves the first attempt and verifies `phase_evidence` files and
 hashes before passing only pending phases. It refuses stale or changed evidence,
 a second retry or any failed product case. Preflight runs again before tests.
+
+After failed QA, an approved `live_diagnostic_command` enables `repair-live
+--delivery DLV-### --story <story>` on a committed repair after readers settle.
+QA's `failed_live_cases` names only failed ids in the adapter's schema-1
+`live-case-report.json` groups. Each selected case must be recorded as passed
+on this candidate; zero exit status alone is insufficient. A missing, stale
+or failed repair record blocks freeze; the full QA round still runs.

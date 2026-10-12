@@ -124,7 +124,7 @@ RUNNER_VARIABLES = ("AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID", "AGENTROF_MUTATI
 # names neither the variable nor its path. A partitioned test run hands each
 # partition its own file and engine, which its record names, never the identity.
 PARTITION_VARIABLES = ("AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE")
-SELECTION_VARIABLES = ("AGENTROF_LIVE_RESUME", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
+SELECTION_VARIABLES = ("AGENTROF_LIVE_RESUME", "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
 # At touched_suites QA's final test run names here the earlier-story targets the
 # accepted pre-handoff run covered, for the approved test command to skip (#354).
 REUSED_TESTS = "reused-tests.json"
@@ -677,6 +677,7 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
         if previous and any(worker["state"] == "running" for worker in previous["workers"].values()):
             raise RuntimeError("settle or cancel the existing readers before freezing a new candidate")
         current = candidate(root, delivery_id, story, allow_evidence=True)
+        live_repair = require_live_repairs(root, previous, current)
         if current.get("assertion_map", {}).get("problems"):
             raise RuntimeError("assertion map: " + "; ".join(current["assertion_map"]["problems"]))
         require_published_claims(root, current, remote)
@@ -719,6 +720,8 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
                  "workers": {role: {"state": "running", "started_at": time.time()} for role in ROLES},
                  "metrics": {"freeze_seconds": time.monotonic() - started, "command_cache_hits": 0,
                              "command_seconds": 0.0, "model_seconds": None, "model_tokens": None}, "raw_evidence": {}}
+        if live_repair is not None:
+            value["live_repair"] = live_repair
         controls = finding_control_history(previous)
         if controls:
             value["finding_control_bindings"] = controls
@@ -1290,6 +1293,122 @@ def resumable_live_run(record: dict | None, current: dict) -> bool:
                 and record.get("evidence_hash") == digest({k: v for k, v in record.items() if k != "evidence_hash"}))
 
 
+
+def live_case_report(root: Path) -> dict:
+    path = raw_output_path(root, "scratch/live-case-report.json")
+    if not path.is_file() or path.stat().st_size > 1024 * 1024:
+        return {}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("schema_version") != 1 or not isinstance(value.get("groups"), dict):
+        raise RuntimeError("live case report requires schema_version 1 and groups")
+    groups = value["groups"]
+    for group, cases in groups.items():
+        if (not isinstance(group, str) or not operation_compile.LIVE_GROUP_RE.fullmatch(group)
+                or not isinstance(cases, dict)
+                or any(not literal_test_id(key) or not isinstance(status, str) or status not in {"passed", "failed"}
+                       for key, status in cases.items())):
+            raise RuntimeError("live case report requires literal test ids and passed or failed outcomes")
+    return groups
+
+
+def failed_live_cases(root: Path, result: dict) -> dict:
+    cases = result.get("failed_live_cases", {})
+    if not cases:
+        return {}
+    contract = verification_contract(root)
+    if (result.get("role") != "qa_engineer" or result.get("verdict") != "failed"
+            or not isinstance(cases, dict) or not contract.get("live_diagnostic_command")):
+        raise RuntimeError("failed_live_cases requires failed QA and an approved live_diagnostic_command")
+    for group, targets in cases.items():
+        if (group not in contract.get("live_groups", []) or not isinstance(targets, list) or not targets
+                or any(not isinstance(target, str) or not literal_test_id(target) for target in targets)
+                or len(targets) != len(set(targets))):
+            raise RuntimeError("failed_live_cases must name declared groups and unique literal test ids")
+    session = read_session(root)
+    for group, targets in cases.items():
+        runs = [raw for raw in session.get("raw_evidence", {}).values()
+                if raw.get("identity", {}).get("candidate_hash") == result.get("candidate_hash")
+                and group in raw.get("live_case_report", {})]
+        if not any(all(raw["live_case_report"][group].get(target) == "failed" for target in targets) for raw in runs):
+            raise RuntimeError("failed_live_cases must cite failed cases in recorded live run evidence")
+    return {group: sorted(targets) for group, targets in sorted(cases.items())}
+
+
+def live_repair_record_path(root: Path) -> Path:
+    return raw_output_path(root, "scratch/live-repair.json")
+
+
+def require_live_repairs(root: Path, previous: dict | None, current: dict) -> dict | None:
+    if not previous:
+        return None
+    cases = failed_live_cases(root, previous["workers"].get("qa_engineer", {}).get("result", {}))
+    if not cases:
+        return None
+    try:
+        record = json.loads(live_repair_record_path(root).read_text(encoding="utf-8"))
+        if (record["source_session_id"] != previous["session_id"]
+                or record["candidate_hash"] != current["candidate_hash"] or record["cases"] != cases
+                or record["evidence_hash"] != digest({k: v for k, v in record.items() if k != "evidence_hash"})
+                or not fresh_record(record) or set(record["runs"]) != set(cases)):
+            raise ValueError("repair record binding differs")
+        for group, run in record["runs"].items():
+            output = raw_output_path(root, run["output_file"])
+            if (run["exit_code"] != 0 or run["candidate_intact"] is not True
+                    or run.get("cases") != {target: "passed" for target in cases[group]}
+                    or run.get("command") != verification_contract(root)["live_diagnostic_command"].replace(operation_compile.LIVE_GROUP_PLACEHOLDER, group)
+                    or hashlib.sha256(output.read_bytes()).hexdigest() != run["output_sha256"]):
+                raise ValueError("a failed case has no passing intact repair run")
+        return record
+    except (OSError, ValueError, KeyError, TypeError):
+        raise RuntimeError("previously failed live cases need a passing repair-live run on this candidate") from None
+
+
+def repair_live(root: Path, delivery_id: str, story: str) -> dict:
+    root = root.resolve()
+    guard_write(root)
+    with environment_lock(root, PRE_HANDOFF_HOLDER, "repair-live"), command_lock(root, PRE_HANDOFF_HOLDER, "repair-live"):
+        previous = read_session(root)
+        current = candidate(root, delivery_id, story, allow_evidence=True)
+        cases = failed_live_cases(root, previous["workers"].get("qa_engineer", {}).get("result", {}))
+        if not cases:
+            raise RuntimeError("no registered failed live cases need a repair run")
+        contract = verification_contract(root)
+        record = {"source_session_id": previous["session_id"], "candidate_hash": current["candidate_hash"],
+                  "cases": cases, "runs": {}}
+        for group, targets in cases.items():
+            environment = command_environment(root, current)
+            selection = {"candidate_hash": current["candidate_hash"], "group": group, "selected_test_ids": targets}
+            selector = raw_output_path(root, "scratch/live-repair-selection.json")
+            data = json.dumps(selection, sort_keys=True) + "\n"
+            atomic_file.replace_text(selector, data)
+            generation = source_file_generation(selector)
+            report_path = raw_output_path(root, "scratch/live-case-report.json")
+            report_path.unlink(missing_ok=True)
+            environment["AGENTROF_LIVE_TESTS"] = str(selector)
+            declared = environment_identity(root, environment, contract)
+            command = contract["live_diagnostic_command"].replace(operation_compile.LIVE_GROUP_PLACEHOLDER, group)
+            completed, intact, difference, _dropped, _ran = private_checkout_run(
+                root, selector.parent, current["product_commit"], contract.get("live_test_workdir", "."),
+                command, environment)
+            reported = live_case_report(root).get(group, {})
+            intact = (intact and selector.read_text(encoding="utf-8") == data
+                      and source_file_generation(selector) == generation
+                      and reported == {target: "passed" for target in targets})
+            output_name = "scratch/live-repair-" + uuid.uuid4().hex + ".log"
+            atomic_file.replace_bytes(raw_output_path(root, output_name), completed.stdout)
+            record["runs"][group] = {"exit_code": completed.returncode, "candidate_intact": intact,
+                                     "command": command, "cases": reported, **declared,
+                                     "output_file": output_name,
+                                     "output_sha256": hashlib.sha256(completed.stdout).hexdigest()}
+        if candidate(root, delivery_id, story, allow_evidence=True)["candidate_hash"] != current["candidate_hash"]:
+            raise RuntimeError("repair candidate changed during the live run")
+        record["completed_at"] = time.time()
+        record["evidence_hash"] = digest(record)
+        atomic_file.replace_text(live_repair_record_path(root), json.dumps(record, indent=2) + "\n")
+        return {**record, "exit_code": 0 if all(run["exit_code"] == 0 and run["candidate_intact"]
+                                               for run in record["runs"].values()) else 1}
+
+
 def live_groups_selected(group: str) -> list[str]:
     """The live group names one run selects: a comma-separated list, as --group gives it."""
     return [name.strip() for name in group.split(",")]
@@ -1462,6 +1581,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             atomic_file.replace_bytes(reused, reused_bytes)
             reused_generation = source_file_generation(reused)
             environment["AGENTROF_REUSED_TESTS"] = str(reused)
+        if group is not None:
+            raw_output_path(root, "scratch/live-case-report.json").unlink(missing_ok=True)
         session["raw_evidence"].pop(record_key, None)
         write_session(root, session)
         session_id = session["session_id"]
@@ -1541,6 +1662,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         record = {"identity": identity, "exit_code": completed.returncode, "candidate_intact": intact,
                   "output_file": output_name, "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
                   "duration_seconds": time.monotonic() - started, "completed_at": time.time()}
+        if group is not None:
+            record["live_case_report"] = live_case_report(root)
         if checkpoint is not None:
             record["live_checkpoint"] = checkpoint
         if resume:
@@ -2599,6 +2722,7 @@ def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dic
             environment = require_raw_evidence(root, value, checks)
             if current["runtime_required"]:
                 require_runtime_evidence(root, value, checks["fresh_runtime"], environment)
+    failed_live_cases(root, result)
     if check_blocked_commands(result) and verdict == "passed" and mode != "qa_diagnostic":
         raise RuntimeError(f"a final passed result cannot leave a {BLOCKED_BY_PERMISSION} command unrun;"
                            " settle as a diagnostic or failed result, and resume once the owner allows it")
@@ -4613,7 +4737,7 @@ def main(argv=None) -> int:
     parser.add_argument("--worktree", required=True)
     subs = parser.add_subparsers(dest="command", required=True)
     for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map",
-                 "permission-preflight"):
+                 "repair-live", "permission-preflight"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
@@ -4719,6 +4843,8 @@ def main(argv=None) -> int:
             value = regression_selection(root, args.delivery, args.story)
         elif args.command == "regression-run":
             value = regression_run(root, args.delivery, args.story)
+        elif args.command == "repair-live":
+            value = repair_live(root, args.delivery, args.story)
         elif args.command == "permission-probe":
             value = permission_probe(root, args.kind, args.group)
         elif args.command == "permission-preflight":
@@ -4745,7 +4871,7 @@ def main(argv=None) -> int:
         else:
             value = read_session(root)
         print(json.dumps({"ok": True, **value}, indent=2))
-        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run", "rebind-unit-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
+        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run", "repair-live", "rebind-unit-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2))
         return 2

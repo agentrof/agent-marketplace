@@ -161,3 +161,9 @@ names to SHA-256 evidence hashes, and unique `pending_phases`. The resume
 command receives that immutable selection through `AGENTROF_LIVE_RESUME`,
 rechecks preflight and runs only the pending phases. A failed product case is
 never resumable through this interface.
+
+`live_diagnostic_command`, when declared beside live groups, contains `{group}`
+once. It reads the immutable case selection from `AGENTROF_LIVE_TESTS` and
+executes exactly those literal test ids in the selected group. It uses the
+existing `live_test_workdir`; the runner never interpolates test ids into shell
+text. This command enables targeted repair proof before a new QA candidate.

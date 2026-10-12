@@ -765,6 +765,13 @@ SAFETY_RULES = {
             "the audit then reports them as NO-TEST and fails, which is a finding for the Verification Contract",
             "a skip, a retry or a warning it cannot explain is a finding",
         ),
+        f"{SKILLS}/deliver/references/switch-own_target_reuse-accept_record.md": (
+            "with no spot-run file, which the runner refuses at this value",
+            "Its only check of the reuse is that the record binds the exact frozen candidate",
+            "the approved test command runs the same selection itself",
+            "it is not NO-TEST for the default run",
+            "never a reason to rerun the suite with `--fresh` or to drop the audit",
+        ),
     },
     "pre_handoff_regression": {
         f"{SKILLS}/deliver/references/switch-pre_handoff_regression-touched_suites.md": (

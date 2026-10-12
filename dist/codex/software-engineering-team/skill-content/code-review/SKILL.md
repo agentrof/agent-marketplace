@@ -30,7 +30,7 @@ field does not exist.
 - **Description:** what is wrong, stated from the code itself, not from expectation
 - **Impact:** why it matters: the security, correctness, or maintainability risk
 - **Fix:** the specific, actionable change; never vague advice
-- **Verification:** how to confirm the fix works (test to run, behavior to observe)
+- **Verification:** how to confirm the fix works (test to run, behavior to observe); list prescribed negative-control test ids in `negative_control_test_ids`
 
 ## Severity Definitions
 

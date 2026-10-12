@@ -821,6 +821,8 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         reading = Path(manifest["project_reading_file"]["path"])
         self.assertEqual(verification.digest(json.loads(reading.read_text())),
                          manifest["project_reading_file"]["sha256"])
+        # The other reader's different plan must not replace this attachment.
+        verification.manifest(self.root, "DLV-001", "AUTH-01", "qa_engineer", "qa_final")
         inspected = verification.inspect_context(self.root, manifest)
         self.assertEqual(inspected["candidate_hash"], frozen["candidate"]["candidate_hash"])
         self.assertNotIn("source_observations", manifest)

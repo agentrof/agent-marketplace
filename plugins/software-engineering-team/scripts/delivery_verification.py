@@ -3341,8 +3341,12 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
     plan = payload.get("project_reading")
     if "project_reading_file" in payload:
         reference = payload["project_reading_file"]
-        path = safe_runtime_path(root, session_path(root).parent / "manifest/project-reading.json", file_only=True)
         try:
+            checksum = reference.get("sha256", "")
+            if not re.fullmatch(r"sha256:[0-9a-f]{64}", checksum):
+                raise ValueError("invalid reading attachment digest")
+            path = safe_runtime_path(root, session_path(root).parent / "manifest" /
+                                     ("project-reading-" + checksum[7:] + ".json"), file_only=True)
             plan = json.loads(path.read_text(encoding="utf-8"))
             if reference.get("path") != str(path) or digest(plan) != reference.get("sha256"):
                 raise ValueError("context attachment differs")
@@ -3599,7 +3603,8 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     if len(json.dumps(result, indent=2).encode("utf-8")) > budget:
         reading = result["project_reading"]
         result["project_reading_file"] = reader_attachment(
-            root, "project-reading.json", reading, "The frozen inspect-context command loads this bound reading plan.")
+            root, "project-reading-" + digest(reading)[7:] + ".json", reading,
+            "The frozen inspect-context command loads this bound reading plan.")
         result["project_reading"] = {key: reading[key] for key in ("status", "coverage") if key in reading}
     return result
 

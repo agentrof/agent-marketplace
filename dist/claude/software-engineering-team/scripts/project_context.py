@@ -826,6 +826,9 @@ def main(argv=None) -> int:
                 raise ValueError("one unit's address exceeds the metadata budget")
             return {"units": listed, "remaining": max(0, len(identities) - args.offset - len(listed))}
         payload = json.loads(args.plan.read_text(encoding="utf-8"))
+        if "complete_manifest" in payload:
+            from reader_manifest import expand
+            payload = expand(project, payload)
         if args.command == "read" and "candidate_hash" in payload and "product_commit" in payload:
             raise ValueError("use delivery_verification.py inspect-context for a frozen candidate manifest")
         plan = payload.get("project_reading", payload)

@@ -1522,6 +1522,9 @@ def main(argv=None) -> int:
                            delivery=args.delivery, remote=args.remote,
                            pass_kind=args.pass_kind, full_root_reason=args.full_root_reason,
                            changed=args.changed, context_plan=args.context_plan))
+        if args.project_root and result.get("write_boundary") == "read_only":
+            from reader_manifest import compact
+            result = compact(args.project_root, result)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError, KeyError, TypeError) as exc:

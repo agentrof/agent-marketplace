@@ -338,6 +338,11 @@ def wait_for_release(root: Path, role: str | None = None, seconds: float | None 
     started = time.monotonic()
     while True:
         holder = wait_holder(root, role)
+        if holder is None and role in {None, "qa_engineer"}:
+            session = read_session(root, required=False)
+            pending = pending_owner_step(session or {})
+            if pending is not None:
+                holder = {"lock": "owner_step", **pending}
         elapsed = time.monotonic() - started
         if holder is None or elapsed >= limit:
             break
@@ -346,6 +351,9 @@ def wait_for_release(root: Path, role: str | None = None, seconds: float | None 
              "bound_seconds": bound}
     if holder is not None:
         value.update(holder=holder, next="call wait again now, as a tool call of its own")
+    progress = owner_step_progress(read_session(root, required=False) or {})
+    if progress:
+        value["owner_steps"] = progress
     return value
 
 
@@ -1691,6 +1699,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
     with locked(root):
         session = read_session(root)
         current = require_current(root, session, allow_evidence=True)
+        require_owner_step_progress(root, session)
         if session["workers"]["qa_engineer"]["state"] != "running":
             raise RuntimeError("verification commands require the active QA reader")
         spot = None
@@ -2908,8 +2917,12 @@ def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dic
     Returns the candidate the result binds, the role's inherited findings and
     the result's findings by id. settle_result adds the review_loop checks.
     """
-    if result.get("role") == "qa_engineer" and runtime_needs_cleanup(value):
-        raise RuntimeError("tear the environment down before settling the QA reader")
+    if result.get("role") == "qa_engineer":
+        if result.get("verdict") != "cancelled":
+            require_owner_step_progress(root, value, final=result.get("verdict") == "passed"
+                                        and result.get("mode") == "qa_final")
+        if runtime_needs_cleanup(value):
+            raise RuntimeError("tear the environment down before settling the QA reader")
     current = value["candidate"] if result.get("verdict") == "cancelled" else require_current(root, value, allow_evidence=True)
     role, mode, verdict = (result.get(key) for key in ("role", "mode", "verdict"))
     if role not in ROLES or mode not in policy()["role_modes"][role]:
@@ -3025,7 +3038,9 @@ def settle_result(root: Path, value: dict, result: dict, *, merged: bool = False
         # Refuses an open minor finding that is not a complete follow-up.
         open_follow_ups(result, item)
     stored = dict(result)
-    stored["result_hash"] = digest(result)
+    if role == "qa_engineer" and value.get("owner_steps"):
+        stored["owner_steps"] = owner_step_progress(value)
+    stored["result_hash"] = digest(stored)
     value["workers"][role] = {"state": "cancelled" if verdict == "cancelled" else "settled", "result": stored,
                               "completed_at": time.time(),
                               "reader_elapsed_seconds": max(0.0, time.time() - value["workers"][role].get("started_at", time.time()))}
@@ -3232,6 +3247,100 @@ def merge_panel(root: Path) -> dict:
         return settle_result(root, value, result, merged=True)
 
 
+def declared_owner_steps(root: Path) -> list[dict]:
+    props, body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+    steps, errors = operation_compile.owner_steps(body)
+    if steps and (props.get("status") != "approved"
+                  or props.get("source_hash") != operation_compile.receipt_hash(props, body)):
+        errors.append("Owner Steps requires an unchanged approved Verification Contract")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return steps
+
+
+def owner_step_progress(value: dict) -> list[dict]:
+    return [{**row, "state": "timed_out" if row["state"] == "awaiting_owner_step"
+             and time.time() >= row["deadline"] else row["state"]}
+            for row in value.get("owner_steps", [])]
+
+
+def pending_owner_step(value: dict) -> dict | None:
+    return next((row for row in owner_step_progress(value) if row["state"] == "awaiting_owner_step"), None)
+
+
+def require_owner_step_progress(root: Path, value: dict, *, final: bool = False) -> None:
+    pending = pending_owner_step(value)
+    if pending is not None:
+        raise RuntimeError(f"awaiting_owner_step {pending['step']}: keep this QA reader and frozen candidate open;"
+                           " the owner must attach the command output before QA continues")
+    if final:
+        passed = {row["step"] for row in owner_step_progress(value) if row["state"] == "passed"}
+        missing = [row["step"] for row in declared_owner_steps(root) if row["step"] not in passed]
+        if missing:
+            raise RuntimeError("final QA requires passing owner steps: " + ", ".join(missing))
+
+
+def await_owner_step(root: Path, step: str) -> dict:
+    """Keep QA running at a declared handoff without executing the owner's command."""
+    root = root.resolve()
+    with locked(root):
+        if command_active(root):
+            raise RuntimeError("wait for the active verification command before an owner handoff")
+        value = read_session(root)
+        current = require_current(root, value, allow_evidence=True)
+        if value["workers"]["qa_engineer"]["state"] != "running":
+            raise RuntimeError("an owner handoff requires the active QA reader")
+        plan = declared_owner_steps(root)
+        completed = value.get("owner_steps", [])
+        pending = pending_owner_step(value)
+        if pending is not None:
+            if pending["step"] != step:
+                raise RuntimeError("another owner step is already pending: " + pending["step"])
+            return {"session_id": value["session_id"], "candidate_hash": current["candidate_hash"], **pending}
+        if any(row["state"] != "passed" for row in owner_step_progress(value)):
+            raise RuntimeError("the owner step failed or timed out; record failed QA before retrying")
+        if len(completed) >= len(plan) or plan[len(completed)]["step"] != step:
+            raise RuntimeError("await-owner-step must name the next declared owner step")
+        row = {**plan[len(completed)], "state": "awaiting_owner_step", "started_at": time.time()}
+        row["deadline"] = row["started_at"] + row["timeout_seconds"]
+        value.setdefault("owner_steps", []).append(row)
+        write_session(root, value)
+        return {"session_id": value["session_id"], "candidate_hash": current["candidate_hash"], **row}
+
+
+def record_owner_step(root: Path, result: dict) -> dict:
+    """Attach explicitly confirmed owner output; the runner never executes that command."""
+    root = root.resolve()
+    with locked(root):
+        value = read_session(root)
+        current = require_current(root, value, allow_evidence=True)
+        if value["workers"]["qa_engineer"]["state"] != "running" or command_active(root):
+            raise RuntimeError("owner output requires the waiting QA reader with no command running")
+        keys = {"session_id", "candidate_hash", "step", "command", "exit_code", "output", "owner_confirmed"}
+        if (not isinstance(result, dict) or set(result) != keys or result["owner_confirmed"] is not True
+                or type(result["exit_code"]) is not int or not isinstance(result["output"], str)):
+            raise RuntimeError("owner output requires the exact receipt fields and explicit owner confirmation")
+        pending = pending_owner_step(value)
+        if pending is None:
+            previous = next((row for row in value.get("owner_steps", [])
+                             if row.get("result", {}).get("evidence_hash") == digest(result)), None)
+            if previous is not None:
+                return {"session_id": value["session_id"], "candidate_hash": current["candidate_hash"], **previous}
+            raise RuntimeError("no owner step is waiting, or its deadline expired")
+        if (result["session_id"] != value["session_id"] or result["candidate_hash"] != current["candidate_hash"]
+                or result["step"] != pending["step"] or result["command"] != pending["command"]):
+            raise RuntimeError("owner output does not bind the waiting step, command and frozen candidate")
+        passed = result["exit_code"] == 0 and pending["expected_output"] in result["output"]
+        completed_at = time.time()
+        if completed_at >= pending["deadline"]:
+            raise RuntimeError("owner step deadline expired before its output was accepted")
+        pending.update(state="passed" if passed else "failed", completed_at=completed_at,
+                       result={**result, "evidence_hash": digest(result)})
+        value["owner_steps"][-1] = pending
+        write_session(root, value)
+        return {"session_id": value["session_id"], "candidate_hash": current["candidate_hash"], **pending}
+
+
 def resume_qa(root: Path) -> dict:
     """Continue QA on unchanged sources without repeating the independent review."""
     root = root.resolve()
@@ -3254,6 +3363,9 @@ def resume_qa(root: Path) -> dict:
                 retained[("qa_engineer", finding["id"])] = {**finding, "role": "qa_engineer"}
         value["unresolved_findings"] = [retained[key] for key in sorted(retained)]
         value.setdefault("qa_attempts", []).append(worker)
+        if value.get("owner_steps"):
+            value.setdefault("owner_step_attempts", []).append(owner_step_progress(value))
+            value.pop("owner_steps")
         runtime = value.get("runtime")
         failed_runtime = runtime and (runtime.get("interrupted_commands")
                                       or any(event.get("exit_code") != 0 or event.get("candidate_intact") is not True
@@ -3293,6 +3405,7 @@ def validate(root: Path, delivery_id: str, story: str) -> dict:
                 or result.get("result_hash") != digest({key: item for key, item in result.items() if key != "result_hash"})):
             raise RuntimeError(f"same-candidate final passed {role} result is required")
         if role == "qa_engineer":
+            require_owner_step_progress(root, value, final=True)
             environment = require_raw_evidence(root, value, result["checks"])
             if current["runtime_required"]:
                 require_runtime_evidence(root, value, result["checks"]["fresh_runtime"], environment)
@@ -3311,6 +3424,8 @@ def runtime_environment_identity(root: Path, current: dict) -> dict:
 def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
     """Invoke only the approved environment contract in a persistent private clone."""
     root = root.resolve()
+    if verb != "down":
+        require_owner_step_progress(root, read_session(root))
     if verb not in {"down", "up", "seed", "logs", "url"}:
         raise RuntimeError("unsupported environment verb")
     with environment_lock(root, "qa_engineer", "environment --verb " + verb), \
@@ -4628,6 +4743,16 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
               "next_transition": "Register independent result; owner writes reports only after both readers settle"}
     if role == "qa_engineer" and value["workers"][role].get("resume_commands"):
         result["resume_commands"] = value["workers"][role]["resume_commands"]
+    if role == "qa_engineer" and (steps := declared_owner_steps(root)):
+        result["owner_step_interface"] = {
+            "steps": steps, "progress": owner_step_progress(value),
+            "await": "await-owner-step --step <step>",
+            "owner_result": "owner-step-result --file <owner-output.json> (owner's external terminal only)",
+            "result_fields": {"session_id": value["session_id"], "candidate_hash": current["candidate_hash"],
+                              "step": "Declared step id", "command": "Exact declared command", "exit_code": 0,
+                              "output": "Owner's actual command output", "owner_confirmed": True},
+            "rule": "Keep the reader open while awaiting_owner_step; resume at the declared instruction after"
+                    " owner output passes. Never run the owner's command or confirm output on their behalf."}
 
     if finding_control_history(value):
         result["finding_control_bindings"] = finding_control_history(value)
@@ -4991,7 +5116,7 @@ def status_summary(root: Path, run: str | None = None) -> dict:
             raise RuntimeError(f"no {run} run is recorded in verification session {session['session_id']}")
         runs = {run: runs[run]}
     current = session["candidate"]
-    return {"session_id": session["session_id"], "delivery": current["delivery"], "story": current["story"],
+    result = {"session_id": session["session_id"], "delivery": current["delivery"], "story": current["story"],
             "candidate_hash": current["candidate_hash"], "product_commit": current["product_commit"],
             "workers": {role: worker["state"] for role, worker in session["workers"].items()},
             "unresolved_findings": len(session.get("unresolved_findings", [])),
@@ -5000,6 +5125,9 @@ def status_summary(root: Path, run: str | None = None) -> dict:
             "metrics": session["metrics"], "runs": {
                 kind: record if kind in progress and "identity" not in record else run_summary(root, record)
                 for kind, record in runs.items()}}
+    if session.get("owner_steps"):
+        result["owner_steps"] = owner_step_progress(session)
+    return result
 
 
 def main(argv=None) -> int:
@@ -5031,6 +5159,10 @@ def main(argv=None) -> int:
     start.add_argument("--remote", default="origin")
     result = subs.add_parser("result")
     result.add_argument("--file", required=True)
+    owner_wait = subs.add_parser("await-owner-step")
+    owner_wait.add_argument("--step", required=True)
+    owner_result = subs.add_parser("owner-step-result")
+    owner_result.add_argument("--file", required=True)
     calibrate = subs.add_parser("calibrate")
     calibrate.add_argument("--file", required=True)
     panel_result = subs.add_parser("panel-result")
@@ -5097,6 +5229,10 @@ def main(argv=None) -> int:
                                     reason=args.reason, refs=args.ref)
         elif args.command == "result":
             value = register_result(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
+        elif args.command == "await-owner-step":
+            value = await_owner_step(root, args.step)
+        elif args.command == "owner-step-result":
+            value = record_owner_step(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "calibrate":
             value = register_calibration(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "panel-result":
@@ -5151,6 +5287,8 @@ def main(argv=None) -> int:
         else:
             value = read_session(root)
         print(json.dumps({"ok": True, **value}, indent=2))
+        if args.command == "owner-step-result":
+            return 0 if value["state"] == "passed" else 1
         return 0 if args.command not in {"run", "environment", "lane-run", "regression-run", "repair-live", "rehearse", "rebind-unit-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2))

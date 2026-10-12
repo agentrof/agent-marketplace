@@ -258,6 +258,41 @@ TEST_PARTITIONS = "Test Partitions"
 TEST_PARTITION_COLUMNS = ("partition", "groups", "profile")
 PARTITION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 VERIFICATION_REHEARSALS = "Verification Rehearsals"
+OWNER_STEPS = "Owner Steps"
+
+
+def owner_steps(body: str) -> tuple[list[dict], list[str]]:
+    """Ordered owner handoffs declared by an approved Verification Contract."""
+    import backlog_compile
+
+    if OWNER_STEPS not in backlog_compile.headings(body):
+        return [], []
+    rows, errors = backlog_compile.structured_table(
+        backlog_compile.section(body, OWNER_STEPS),
+        ("step", "command", "expected_output", "resume_at", "timeout_seconds"),
+        "verification contract", OWNER_STEPS)
+    plan, seen = [], set()
+    for raw in rows:
+        row = {key: value.strip().strip("`") for key, value in raw.items()}
+        step = row["step"]
+        if not PARTITION_ID_RE.fullmatch(step) or step in seen:
+            errors.append("Owner Steps requires unique literal step ids")
+        seen.add(step)
+        if not row["command"] or TOKEN_RE.search(row["command"]) or CREDENTIAL_RE.search(row["command"]):
+            errors.append("Owner Steps command must be non-empty, without credentials or unresolved tokens")
+        if not row["expected_output"] or row["resume_at"] in {"", "-"}:
+            errors.append("Owner Steps requires expected output and a resume instruction")
+        try:
+            timeout = int(row["timeout_seconds"]) if row["timeout_seconds"].isdigit() else 0
+            if timeout < 1 or timeout > sys.float_info.max:
+                raise ValueError("invalid timeout")
+            row["timeout_seconds"] = timeout
+        except ValueError:
+            errors.append("Owner Steps timeout seconds must be a finite positive integer")
+        plan.append({**row, "runner": "owner"})
+    if not plan:
+        errors.append("Owner Steps must declare at least one step")
+    return plan, errors
 
 
 def verification_rehearsals(props: dict, body: str) -> tuple[list[dict], list[str]]:
@@ -487,6 +522,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         errors.extend(test_group_problems(props))
         errors.extend(live_test_problems(props))
         errors.extend(verification_rehearsals(props, body)[1])
+        errors.extend(owner_steps(body)[1])
         errors.extend(test_partition_plan(props, body)[1])
         source, provider = pull_request_checks(props)
         if source not in PULL_REQUEST_CHECK_SOURCES:

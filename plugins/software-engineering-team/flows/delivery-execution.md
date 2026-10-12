@@ -87,6 +87,9 @@ DLV-### --story <story>` before invoking the two readers. The resulting
 candidate and session identities bind all source and instruction inputs.
 Generate each role's `manifest` with `--role code_reviewer|qa_engineer` and
 `--mode review_initial|review_repair|qa_diagnostic|qa_final`.
+Put the manifest's `command_form` verbatim into every reader prompt: while
+readers are active, Bash admits only that one direct invocation followed by a
+verb, and readers read files with the host's Read tool.
 Every verification manifest includes the default `project_reading` plan. Start
 with `inspect-context --plan <saved verification manifest>` to batch-read its
 units from the frozen Git candidate. Preserve all `full_read` obligations and
@@ -167,6 +170,14 @@ every run with the session identity through `status --summary`; plain
 `status` prints the whole session, bindings included.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
+When the Verification Contract declares `live_groups`, QA runs one opt-in live
+group at a time with `run --kind live_test --group <group>`: the runner
+substitutes the declared group for `{group}` in `live_test_command` and runs
+it in `live_test_workdir` of the same private frozen clone, under the same
+locks, environment identity and raw-evidence recording as `run --kind test`.
+Each group keeps its own record, read with `status --run live_test:<group>`.
+Live groups never join the required checks; the Test Plan decides which ones
+a result needs, and the result cites their `evidence_hash` values.
 Switch `qa_gate_order`: at `gate_first`, QA starts its first test command of a
 round before it plans and drafts its result, as
 `skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md`
@@ -202,7 +213,9 @@ test command or revise the Operation Contract through its normal approval.
 Diagnostic command evidence never satisfies the final full-suite gate.
 Commands run in an independent scratch checkout of the frozen product commit,
 with no shared Git objects or mutable working files. The runner exposes an
-output directory through `AGENTROF_VERIFICATION_SCRATCH`. Provision dependencies through
+output directory through `AGENTROF_VERIFICATION_SCRATCH` and the candidate's
+Delivery and Item ids through `AGENTROF_DELIVERY_ID` and `AGENTROF_ITEM_ID`,
+whatever the caller's shell exports. Provision dependencies through
 approved commands and environment, never by borrowing the writer's ignored
 files. Tests and mutation cannot temporarily edit the reviewer's source.
 The runner stores raw output under ignored runtime and binds it to the

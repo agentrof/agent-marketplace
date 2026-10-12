@@ -1317,7 +1317,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         import project_context
         seeds = set(project_files) if closure is not None or scoped is not None else set(inputs or []) or set(project_files)
         project_reading = project_context.task_context(project, entry=entry, role=role,
-                                                       mode=mode, paths=seeds)
+                                                       mode=mode, paths=seeds, change_base=base)
     # An exact epic's closure is derived again on every run, so a source that
     # reaches it, an incoming dependency edge included, joins its paths. Like
     # the epic's review manifest, the task binds those and none of the other

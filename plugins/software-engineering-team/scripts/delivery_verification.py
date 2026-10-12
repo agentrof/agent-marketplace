@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import secrets
+import shlex
 import stat
 import time
 from pathlib import Path, PurePosixPath
@@ -98,8 +99,11 @@ REVIEW_SEVERITY_ORDER = ("critical", "major")
 # record and a hash of a few guessable values would check a guess of a credential.
 COMMAND_VARIABLES = ("HOME", "LANG", "PATH", "TZ")
 COMMAND_VARIABLE_PREFIXES = ("AGENTROF_", "LC_")
-# The runner sets these for every command it runs.
-RUNNER_VARIABLES = ("AGENTROF_MUTATION_FILES", "AGENTROF_VERIFICATION_SCRATCH")
+# The runner sets these for every command it runs. The Delivery and Item ids
+# come from the frozen candidate, so a reader whose shell exports nothing runs
+# an approved command that reads them like the coordinator's shell does.
+RUNNER_VARIABLES = ("AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID", "AGENTROF_MUTATION_FILES",
+                    "AGENTROF_VERIFICATION_SCRATCH")
 # The runner's per-run inputs: an identity binds the data each carries, so it
 # names neither the variable nor its path. A partitioned test run hands each
 # partition its own file and engine, which its record names, never the identity.
@@ -115,6 +119,9 @@ IDENTITY_KEY_BYTES = 32
 # A runner before #356 hashed the whole process environment and checked it against the checker's.
 LEGACY_ENVIRONMENT = ("carries the whole-environment hash of an earlier runner, which binds the shell that ran"
                       " it; freeze the candidate again with freeze --fresh and rerun both readers")
+
+
+RUN_KINDS = ("test", "mutation", "dependency_audit", "diagnostic_test", "live_test")
 
 
 def policy() -> dict:
@@ -457,7 +464,17 @@ def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
         raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
                            + describe_environment_holder(holder or {})
                            + f"; writes to the Item worktree wait until {wait}")
-    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing")
+    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing."
+                       " Until then Bash runs only the reader manifest's command_form, one direct"
+                       " `<python> [-B] <bound delivery_verification.py> --worktree <worktree> <verb> ...` with no"
+                       " pipe, redirect, variable or prefix but PYTHONDONTWRITEBYTECODE=1; read files with the host's"
+                       " Read tool or the CLI's inspect, inspect-context and diff, and write only under allowed_writes")
+
+
+def command_form(root: Path) -> str:
+    """The literal invocation a reader's Bash call starts with while readers are active; a verb follows it."""
+    arguments = [sys.executable, "-B", str(Path(__file__).resolve()), "--worktree", str(root.resolve())]
+    return subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
 
 
 def instruction_identity() -> str:
@@ -734,8 +751,10 @@ def raw_output_path(root: Path, relative: str) -> Path:
     return safe_runtime_path(root, path, file_only=True)
 
 
-def command_environment(root: Path, *, diagnostic: bool = False) -> dict:
+def command_environment(root: Path, current: dict, *, diagnostic: bool = False) -> dict:
     environment = dict(os.environ)
+    environment["AGENTROF_DELIVERY_ID"] = current["delivery"]
+    environment["AGENTROF_ITEM_ID"] = current["story"]
     environment["AGENTROF_MUTATION_FILES"] = str(session_path(root).parent / "mutation-files.json")
     for name in SELECTION_VARIABLES:
         environment.pop(name, None)
@@ -944,20 +963,34 @@ def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, c
 
 
 def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
-              spot_file: Path | None = None) -> dict:
+              spot_file: Path | None = None, group: str | None = None) -> dict:
     root = root.resolve()
     read_session(root)
     with environment_lock(root, "qa_engineer", "run --kind " + kind), \
             command_lock(root, "qa_engineer", "run --kind " + kind):
-        return _run_check(root, kind, fresh=fresh, selection_file=selection_file, spot_file=spot_file)
+        return _run_check(root, kind, fresh=fresh, selection_file=selection_file, spot_file=spot_file, group=group)
+
+
+def live_test_command(contract: dict, group: str) -> str:
+    """The approved live test command for one declared group of the Verification Contract."""
+    if "live_test_command" not in contract or operation_compile.live_test_problems(contract):
+        raise RuntimeError("the Verification Contract declares no valid live_test_command, live_test_workdir"
+                           " and live_groups")
+    if group not in contract["live_groups"]:
+        raise RuntimeError(f"live group {group!r} is not declared in live_groups: {', '.join(contract['live_groups'])}")
+    return contract["live_test_command"].replace(operation_compile.LIVE_GROUP_PLACEHOLDER, group)
 
 
 def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
-               spot_file: Path | None = None) -> dict:
+               spot_file: Path | None = None, group: str | None = None) -> dict:
     """Run an approved command verbatim with a file-based mutation scope binding."""
     root = root.resolve()
-    if kind not in {"test", "mutation", "dependency_audit", "diagnostic_test"}:
+    if kind not in RUN_KINDS:
         raise RuntimeError("unsupported verification command kind")
+    if (kind == "live_test") != (group is not None):
+        raise RuntimeError("run --kind live_test requires --group; other kinds take no --group")
+    # Each live group keeps its own evidence beside the final commands' records.
+    record_key = kind if group is None else f"{kind}:{group}"
     if (kind == "diagnostic_test") != (selection_file is not None):
         raise RuntimeError("diagnostic_test requires --selection-file; final commands do not accept a focused selection")
     if spot_file is not None and kind != "test":
@@ -981,7 +1014,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                                    f" {current['delivery']} runs it at {value}")
             spot = spot_run_selection(root, Path(spot_file), current)
         contract, contract_body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
-        command = contract.get(kind + "_command")
+        command = live_test_command(contract, group) if group is not None else contract.get(kind + "_command")
         if not isinstance(command, str) or not command.strip() or "{{" in command or "}}" in command:
             raise RuntimeError("approved verification command is missing or contains unresolved parameters")
         partitions = (partition_declaration(root, current["delivery"], contract, contract_body)
@@ -992,7 +1025,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         directory = (root / workdir).resolve()
         if directory != root and root not in directory.parents:
             raise RuntimeError("verification command workdir must remain inside the Item worktree")
-        environment = command_environment(root, diagnostic=kind == "diagnostic_test")
+        environment = command_environment(root, current, diagnostic=kind == "diagnostic_test")
         selection = diagnostic_selection(root, selection_file, current) if selection_file is not None else None
         selection_bytes = None
         if selection is not None:
@@ -1021,6 +1054,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                     "workdir": workdir, **declared, "execution_isolation": "private_clone_v1"}
         if selection is not None:
             identity["diagnostic_selection_hash"] = digest(selection)
+        if group is not None:
+            identity["live_group"] = group
         if reuse is not None:
             identity["reused_pre_handoff"] = reuse
         groups = (group_report_declaration(root, current["delivery"], contract)
@@ -1031,7 +1066,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             identity["test_partitions"] = {key: partitions[key] for key in
                                            ("partitions", "test_engines", "shared_profiles")}
         key = digest(identity)
-        old = session["raw_evidence"].get(kind)
+        old = session["raw_evidence"].get(record_key)
         if (not fresh and old and old.get("identity") == identity and old.get("exit_code") == 0 and old.get("candidate_intact") is True
                 and fresh_record(old)):
             output = raw_output_path(root, old["output_file"])
@@ -1048,7 +1083,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             atomic_file.replace_bytes(reused, reused_bytes)
             reused_generation = source_file_generation(reused)
             environment["AGENTROF_REUSED_TESTS"] = str(reused)
-        session["raw_evidence"].pop(kind, None)
+        session["raw_evidence"].pop(record_key, None)
         write_session(root, session)
         session_id = session["session_id"]
         if groups is not None and partitions is None:
@@ -1098,7 +1133,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         if session["session_id"] != session_id:
             raise RuntimeError("verification session changed while the command ran")
         require_current(root, session, allow_evidence=True)
-        output_prefix = f"scratch/{kind}-{key.removeprefix('sha256:')}-{uuid.uuid4().hex}"
+        output_prefix = f"scratch/{record_key.replace(':', '-')}-{key.removeprefix('sha256:')}-{uuid.uuid4().hex}"
         output_name = output_prefix + ".log"
         output = raw_output_path(root, output_name)
         atomic_file.replace_bytes(output, completed.stdout)
@@ -1123,7 +1158,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                                              "output_file": name,
                                              "output_sha256": hashlib.sha256(entry["output"]).hexdigest()})
         record["evidence_hash"] = digest(record)
-        session["raw_evidence"][kind] = record
+        session["raw_evidence"][record_key] = record
         session["metrics"]["command_seconds"] += record["duration_seconds"]
         write_session(root, session)
         return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {}),
@@ -2408,8 +2443,8 @@ def runtime_needs_cleanup(session: dict) -> bool:
     return bool(state.get("active") or state.get("cleanup_required") or state.get("pending"))
 
 
-def runtime_environment_identity(root: Path) -> dict:
-    return environment_identity(root, command_environment(root))
+def runtime_environment_identity(root: Path, current: dict) -> dict:
+    return environment_identity(root, command_environment(root, current))
 
 
 def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
@@ -2471,7 +2506,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 raise RuntimeError("runtime checkout changed" + (f" ({difference})" if difference else "")
                                    + "; only teardown is allowed before a new verification session")
             bound_session = session["session_id"]
-            environment_identity = runtime_environment_identity(root)
+            environment_identity = runtime_environment_identity(root, current)
             # Persist before launching: a failed/interrupted up may still leave
             # real services behind, so only a successful down permits settlement.
             if state.get("pending"):
@@ -2485,7 +2520,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
         # suffix; project command bytes remain the approved contract's bytes.
         command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
-        completed = subprocess.run(command, cwd=workdir, env=command_environment(root), shell=True,
+        completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         with locked(root):
             session = read_session(root)
@@ -3109,7 +3144,7 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
         contract = verification_contract(root)
         contract_variables(contract)
         shared = write_pre_handoff_selection(root, derived)
-        environment = command_environment(root, diagnostic=derived["kind"] == "diagnostic_test")
+        environment = command_environment(root, current, diagnostic=derived["kind"] == "diagnostic_test")
         selections: dict[Path, tuple[bytes, list[int]]] = {}
         if derived["kind"] == "diagnostic_test":
             selector = safe_runtime_path(root, session_path(root).parent / "pre-handoff-tests.json", file_only=True)
@@ -3328,7 +3363,7 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
             raise RuntimeError("manual context source differs from the frozen candidate")
         manual.append({**obligation, "candidate_hash": current["candidate_hash"],
             "product_commit": current["product_commit"], "disposition": "requires_frozen_inspect",
-            "next_action": "Use delivery_verification.py inspect --path <path> to read this source from the bound candidate before completing its obligation."})
+            "next_action": "When the task needs this source, read it from the bound candidate with delivery_verification.py inspect --path <path>."})
     units = {}
     for row in plan["must_read"]:
         unit = addresses[row["unit_id"]]
@@ -3506,6 +3541,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
               "read_interface": {"inspect": "inspect --path <repository-relative-path> [--base]", "diff": "diff [--path <repository-relative-path>]"},
               "review_passes": policy()["review_checks"], "allowed_writes": [str(session_path(root).parent / "scratch")],
               "mutation_scope_file": str(session_path(root).parent / "mutation-files.json"),
+              "command_form": command_form(root) + " <verb> ...",
               "result_interface": {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
                                    "role": role, "mode": mode, "verdict": "passed|failed|cancelled",
                                    "report": "Independent findings and conclusion", "checks": checks, "findings": []},
@@ -3515,6 +3551,10 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                                                      "failed_test_ids": [], "affected_test_ids": []},
                                        "environment_variable": "AGENTROF_DIAGNOSTIC_TESTS",
                                        "terminal_evidence": False},
+              "live_test_interface": {"groups": list(contract.get("live_groups") or []),
+                                      "command": "run --kind live_test --group <group>",
+                                      "evidence": "Cite evidence_hash from status --run live_test:<group> in the check"
+                                                  " the Test Plan names; live groups never join required_checks"},
               "execution_note": "Commands run in private clones containing tracked files only. Approved commands must provision dependencies or use a fixed external environment; ignored dependencies are never copied. The clone is not an operating-system sandbox for trusted commands with absolute paths.",
               "next_transition": "Register independent result; owner writes reports only after both readers settle"}
     if review_scope(root, delivery_id) == CLOSURE_VALUE:
@@ -3524,11 +3564,12 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     import project_context
     seeds = {path for path in current["inputs"] if path.endswith("/item.md")}
     result["project_reading"] = project_context.task_context(root, entry="deliver",
-        role=role.replace("_", "-"), mode="review", paths=seeds, no_cache=True)
+        role=role.replace("_", "-"), mode="review", paths=seeds | set(current["changed_files"]), no_cache=True,
+        change_base=current["integration_base_commit"])
     result["read_interface"]["context"] = "inspect-context --plan <saved verification manifest>"
     result["read_interface"]["expand_context"] = "expand-context --plan <saved context manifest> --reason <reason> [--ref <reference>]"
     result["context_guidance"] = ("Start with project_reading and batch-read with inspect-context; "
-        "full_read and all verification gates remain mandatory. Expand incomplete plans. "
+        "Required review scope and verification gates remain mandatory; suggested reads are bounded advice. Expand optional context only when needed. "
         "If context is insufficient, use frozen inspect/diff on your initiative or parent direction "
         "and report context_findings with sources, impact, recovery and proposed fix to the parent. "
         "Only the parent offers an anonymous issue through issue-report after exact-payload user approval.")
@@ -3548,7 +3589,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     return result
 
 
-RUN_SUMMARY_FIELDS = ("exit_code", "candidate_intact", "selection_intact", "reused_pre_handoff", "duration_seconds",
+RUN_SUMMARY_FIELDS = ("live_group", "exit_code", "candidate_intact", "selection_intact", "reused_pre_handoff", "duration_seconds",
                       "completed_at", "evidence_hash", "environment_hash", "checkout_difference", "earlier_stories",
                       "output_file")
 
@@ -3605,7 +3646,8 @@ def main(argv=None) -> int:
     panel_result.add_argument("--file", required=True)
     subs.add_parser("merge-panel")
     run = subs.add_parser("run")
-    run.add_argument("--kind", choices=("test", "mutation", "dependency_audit", "diagnostic_test"), required=True)
+    run.add_argument("--kind", choices=RUN_KINDS, required=True)
+    run.add_argument("--group", help="with --kind live_test: one group of the contract's live_groups")
     run.add_argument("--selection-file", type=Path)
     run.add_argument("--spot-run-file", type=Path)
     run.add_argument("--fresh", action="store_true")
@@ -3635,7 +3677,7 @@ def main(argv=None) -> int:
     subs.add_parser("resume-qa")
     status = subs.add_parser("status")
     status.add_argument("--summary", action="store_true")
-    status.add_argument("--run", choices=("test", "mutation", "dependency_audit", "diagnostic_test", "pre_handoff"))
+    status.add_argument("--run", help="one recorded run: " + ", ".join(RUN_KINDS[:-1]) + ", live_test:<group> or pre_handoff")
     wait = subs.add_parser("wait")
     wait.add_argument("--role", choices=ROLES)
     wait.add_argument("--seconds", type=float)
@@ -3679,7 +3721,7 @@ def main(argv=None) -> int:
             value = wait_for_release(root, args.role, args.seconds)
         elif args.command == "run":
             value = run_check(root, args.kind, fresh=args.fresh, selection_file=args.selection_file,
-                              spot_file=args.spot_run_file)
+                              spot_file=args.spot_run_file, group=args.group)
         elif args.command == "manifest":
             value = manifest(root, args.delivery, args.story, args.role, args.mode, args.remote)
         elif args.summary or args.run:

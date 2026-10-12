@@ -1,0 +1,6 @@
+{
+  "summary": "Delivery verification runs a Verification Contract's opt-in live test groups one at a time through run --kind live_test --group <group>, each group keeping its own evidence outside the required checks.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

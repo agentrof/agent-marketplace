@@ -13,6 +13,7 @@ import argparse
 import base64
 import contextlib
 import hashlib
+import io
 import json
 import os
 import re
@@ -3875,6 +3876,29 @@ def apply_target_update(project_root: Path, mode: str = "source_handoff",
                     "target": f"refs/heads/{target_branch}",
                     "target_oid": target_before, "receipt": verified,
                     "recovered": True}
+        # A person may merge the authorized draft PR by hand. When the target
+        # holds exactly the merge commit this call would have produced (first
+        # parent the authorized base, second the authorized head), the update
+        # happened as authorized and only its local receipt is missing.
+        if carrier == "github_pr":
+            from delivery_provider import GitHubProvider
+            repository = values["Target-Repository"].removeprefix("github:")
+            number = values["Target-Carrier-Object"].removeprefix("pr:")
+            url = f"https://github.com/{repository}/pull/{number}"
+            observed = GitHubProvider(root, remote).inspect_pull_request(url)
+            merge_oid = str((observed.get("mergeCommit") or {}).get("oid") or "")
+            if (str(observed.get("state", "")).upper() == "MERGED" and merge_oid
+                    and observed.get("headRefOid") == values["Target-Carrier-Head"]
+                    and is_ancestor(root, merge_oid, target_before)):
+                commit = run_git(root, "cat-file", "-p", merge_oid)
+                parents = [line.split(" ", 1)[1] for line in commit.splitlines()
+                           if line.startswith("parent ") and " " in line]
+                if parents == [base, values["Target-Carrier-Head"]]:
+                    verified = mark_target_verified(root, mode, attempt)
+                    return {"ok": True, "mode": mode, "carrier": carrier,
+                            "pull_request_url": url, "merge_commit": merge_oid,
+                            "target": target_before, "receipt": verified,
+                            "recovered": True}
         # No external mutation was elected yet: keep the exact prepared
         # receipt so a fresh target-carrier attempt can be based safely.
         if receipt["state"] == "prepared":
@@ -5495,6 +5519,147 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
             "refs": short_refs(delivery_id, story_id, slot)}
 
 
+# The vault paths render-relations owns outright, which converge-item regenerates instead of merging.
+RELATION_VIEW_PREFIXES = ("workspace/docs/maps/_relations/",)
+RELATION_VIEW_PATHS = frozenset(f"workspace/docs/maps/_generated/{name}.md" for name in (
+    "cross-subtree-matrix", "uncovered-analysis", "stale-relations", "relation-status"))
+
+
+def relation_view(path: str) -> bool:
+    return path in RELATION_VIEW_PATHS or path.startswith(RELATION_VIEW_PREFIXES)
+
+
+def converged_item_record(published: tuple[dict, str], mine: dict, integration: str) -> str:
+    """The Item record an Item carries once it takes *integration*: the Integration's plan-owned
+    fields and body, the Item's own lifecycle and Architecture stamp, and the new base."""
+    from delivery_compile import content_hash, frontmatter
+    props, body = published
+    record = dict(props)
+    record["tags"] = ([tag for tag in props.get("tags") or [] if not str(tag).startswith("status/")]
+                      + [tag for tag in mine.get("tags") or [] if str(tag).startswith("status/")])
+    for key in ("status", "architecture_delta_hash"):
+        if key in mine:
+            record[key] = mine[key]
+        else:
+            record.pop(key, None)
+    record["integration_base_commit"] = integration
+    record["source_hash"] = content_hash(record, body)
+    return frontmatter(record, body)
+
+
+def converge_item(project_root: Path, delivery_id: str, story_id: str, remote: str = "origin") -> dict:
+    """Take the Delivery Integration into the Item worktree after a plan revision and commit it.
+
+    The merge brings the republished plan. Every Delivery control path takes the
+    Integration's bytes, the Item record its converged form, the relation views
+    are rendered again, and the result is committed in the Item worktree, as
+    push-item's converged-Integration check accepts it. A conflict in any other
+    path aborts the merge, leaves the worktree as it was and names the paths.
+    """
+    from delivery_compile import split_note
+    root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
+    directory = find_delivery_dir_from_remote(root, remote, delivery_id)
+    if directory is None:
+        raise RuntimeError("local Delivery package path is required to converge an Item")
+    refs = canonical_refs(delivery_id, story_id)
+    integration = remote_oid(root, remote, refs["integration"])
+    run_git(root, "fetch", "--no-tags", remote, refs["integration"])
+    item_oid = remote_oid(root, remote, refs["item"])
+    slots = remote_slot_oids(root, remote)
+    slot = next((key for key, oid in slots.items() if oid == item_oid), None)
+    if slot is None:
+        raise RuntimeError("DELIVERY_ITEM_SLOT_DIVERGED: Item and Slot refs diverge")
+    active_writer_receipt(root, delivery_id, story_id, item_oid, f"refs/heads/agentrof/slots/{slot}")
+    worktree = worktree_paths(root, delivery_id, story_id)["item"]
+    require_visible_item_index(worktree)
+    head = worktree_head(root, worktree)
+    if not is_ancestor(root, item_oid, head):
+        raise RuntimeError("DELIVERY_LOCAL_REF_DIVERGED: local Item does not descend from the remote writer tip")
+    pending = worktree_pending_paths(root, worktree)
+    if pending:
+        raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: commit or remove pending Item changes before converge-item: "
+                           + ", ".join(sorted(pending)))
+    relative_delivery = rel_posix(root, directory).rstrip("/") + "/"
+    relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
+    mine = split_remote_note(root, head, relative_item, split_note)[0]
+    previous = mine.get("integration_base_commit")
+    if previous == integration and is_ancestor(root, integration, head):
+        return {"ok": True, "mutation_state": "none", "integration": integration,
+                "observations": [{"kind": "worktree", "target": "item", "value": "already_converged"}]}
+    if not isinstance(previous, str) or not OID_RE.fullmatch(previous):
+        raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: Item has no valid integration base")
+    if not is_ancestor(root, previous, integration):
+        raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: the Integration no longer descends from the"
+                           " Item's integration base " + previous)
+    from delivery_verification import guard_write
+    guard_write(worktree)
+    git = lambda *args: run_git(root, "-C", str(worktree), *args)  # noqa: E731
+    merge = subprocess.run(["git", "-C", str(worktree), "merge", "--no-ff", "--no-commit", "--no-edit", integration],
+                           cwd=root, capture_output=True, encoding="utf-8", check=False)
+    merging = subprocess.run(["git", "-C", str(worktree), "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+                             cwd=root, capture_output=True, check=False).returncode == 0
+    if merge.returncode and not merging:
+        raise RuntimeError("converge-item cannot merge the Integration: " + (merge.stderr or merge.stdout).strip())
+    unmerged = set(git_paths(root, "-C", str(worktree), "diff", "--name-only", "--diff-filter=U", "-z"))
+    blocking = sorted(path for path in unmerged
+                      if not path.startswith(relative_delivery) and not relation_view(path))
+    if blocking:
+        git("merge", "--abort")
+        raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: converge-item stopped on a merge conflict outside"
+                           " the Delivery controls and relation views; merge Integration " + integration
+                           + " by hand and resolve: " + ", ".join(blocking))
+    resolved = []
+    try:
+        for path in sorted(unmerged):
+            if relation_view(path):
+                git("checkout", "--theirs", "--", path)
+                resolved.append(path)
+        docs = worktree / "workspace" / "docs"
+        rendered = ""
+        if docs.is_dir():
+            import vault_check
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                code = vault_check.main(["render-relations", "--vault", str(docs)])
+            rendered = output.getvalue().strip()
+            if code:
+                raise RuntimeError("converge-item cannot render the relation views: " + rendered)
+        # Push-item accepts a converged Item only with the Integration's Delivery controls, byte for byte.
+        controls = set(git_paths(root, "-C", str(worktree), "ls-files", "-z", "--", relative_delivery))
+        published = set(git_paths(root, "ls-tree", "-r", "--name-only", "-z", integration, "--", relative_delivery))
+        for path in sorted((controls | published | unmerged) - {relative_item}):
+            if not path.startswith(relative_delivery):
+                continue
+            if path in published:
+                git("checkout", integration, "--", path)
+            else:
+                git("rm", "-q", "--cached", "--ignore-unmatch", "--", path)
+                (worktree / path).unlink(missing_ok=True)
+        record = converged_item_record(split_remote_note(root, integration, relative_item, split_note), mine,
+                                       integration)
+        (worktree / relative_item).write_bytes(record.encode("utf-8"))
+        git("add", "-A", "--", "workspace/docs")
+        left = git_paths(root, "-C", str(worktree), "diff", "--name-only", "--diff-filter=U", "-z")
+        if left:
+            raise RuntimeError("converge-item left unresolved paths: " + ", ".join(sorted(left)))
+        git("commit", "-q", "--no-edit", "-m", f"Converge {story_id} on the {delivery_id} Integration",
+            "-m", f"Integration: {integration}")
+    except Exception:
+        if merging:
+            subprocess.run(["git", "-C", str(worktree), "merge", "--abort"], cwd=root, capture_output=True, check=False)
+        else:
+            subprocess.run(["git", "-C", str(worktree), "reset", "-q", "--hard", head], cwd=root,
+                           capture_output=True, check=False)
+        raise
+    converged = worktree_head(root, worktree)
+    return {"ok": True, "mutation_state": "complete", "integration": integration, "item": converged,
+            "observations": [{"kind": "worktree", "target": "item", "value": converged},
+                             {"kind": "file", "target": relative_item, "value": "converged_record"},
+                             *({"kind": "file", "target": path, "value": "rendered_from_integration"}
+                               for path in resolved)]}
+
+
 def push_item(project_root: Path, delivery_id: str, story_id: str,
               remote: str = "origin") -> dict:
     """Publish one Item's real product/test commit plus its exact evidence.
@@ -5960,6 +6125,7 @@ def main(argv=None) -> int:
     provisional = sub.add_parser("provisional-claim"); provisional.add_argument("--project-root", default="."); provisional.add_argument("--delivery", required=True); provisional.add_argument("--story", required=True); provisional.add_argument("--path", action="append", required=True); provisional.add_argument("--remote", default="origin"); provisional.set_defaults(func="provisional-claim")
     withdraw = sub.add_parser("withdraw-provisional-claim"); withdraw.add_argument("--project-root", default="."); withdraw.add_argument("--delivery", required=True); withdraw.add_argument("--story", required=True); withdraw.add_argument("--remote", default="origin"); withdraw.set_defaults(func="withdraw-provisional-claim")
     lanes = sub.add_parser("lane-status"); lanes.add_argument("--project-root", default="."); lanes.add_argument("--delivery", required=True); lanes.add_argument("--story", required=True); lanes.add_argument("--remote", default="origin"); lanes.set_defaults(func="lane-status")
+    converge = sub.add_parser("converge-item"); converge.add_argument("--project-root", default="."); converge.add_argument("--delivery", required=True); converge.add_argument("--story", required=True); converge.add_argument("--remote", default="origin"); converge.set_defaults(func="converge-item")
     push_item_parser = sub.add_parser("push-item"); push_item_parser.add_argument("--project-root", default="."); push_item_parser.add_argument("--delivery", required=True); push_item_parser.add_argument("--story", required=True); push_item_parser.add_argument("--remote", default="origin"); push_item_parser.set_defaults(func="push-item")
     integrate = sub.add_parser("integrate-item"); integrate.add_argument("--project-root", default="."); integrate.add_argument("--delivery", required=True); integrate.add_argument("--story", required=True); integrate.add_argument("--remote", default="origin"); integrate.set_defaults(func="integrate")
     publish_review = sub.add_parser("publish-delivery-review"); publish_review.add_argument("--project-root", default="."); publish_review.add_argument("--delivery", required=True); publish_review.add_argument("--remote", default="origin"); publish_review.set_defaults(func="publish-review")
@@ -6046,6 +6212,8 @@ def main(argv=None) -> int:
                 result = withdraw_provisional_claim(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "lane-status":
                 result = lane_status(Path(args.project_root), args.delivery, args.story, args.remote)
+            elif args.func == "converge-item":
+                result = converge_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "push-item":
                 result = push_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "integrate":

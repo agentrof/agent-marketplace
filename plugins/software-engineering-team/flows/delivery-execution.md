@@ -138,7 +138,7 @@ while the other reader's verification command runs: the runner records which
 role runs each command, and a registration waits only for the settling
 reader's own command to exit. The code reviewer runs no command, not even a
 diagnostic test. Its `verification_evidence` names the freeze record and QA runs.
-It registers immediately and returns. A reader waiting for another role,
+It registers its finished result at once and returns. A reader waiting for another role,
 such as calibration, returns its result unregistered for the coordinator. A
 cancelled or diagnostic result cannot approve an Item. Code, test, contract or
 instruction drift invalidates the candidate.

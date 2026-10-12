@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import secrets
+import shlex
 import stat
 import time
 from pathlib import Path, PurePosixPath
@@ -98,8 +99,11 @@ REVIEW_SEVERITY_ORDER = ("critical", "major")
 # record and a hash of a few guessable values would check a guess of a credential.
 COMMAND_VARIABLES = ("HOME", "LANG", "PATH", "TZ")
 COMMAND_VARIABLE_PREFIXES = ("AGENTROF_", "LC_")
-# The runner sets these for every command it runs.
-RUNNER_VARIABLES = ("AGENTROF_MUTATION_FILES", "AGENTROF_VERIFICATION_SCRATCH")
+# The runner sets these for every command it runs. The Delivery and Item ids
+# come from the frozen candidate, so a reader whose shell exports nothing runs
+# an approved command that reads them like the coordinator's shell does.
+RUNNER_VARIABLES = ("AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID", "AGENTROF_MUTATION_FILES",
+                    "AGENTROF_VERIFICATION_SCRATCH")
 # The runner's per-run inputs: an identity binds the data each carries, so it
 # names neither the variable nor its path. A partitioned test run hands each
 # partition its own file and engine, which its record names, never the identity.
@@ -460,7 +464,17 @@ def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
         raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
                            + describe_environment_holder(holder or {})
                            + f"; writes to the Item worktree wait until {wait}")
-    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing")
+    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing."
+                       " Until then Bash runs only the reader manifest's command_form, one direct"
+                       " `<python> [-B] <bound delivery_verification.py> --worktree <worktree> <verb> ...` with no"
+                       " pipe, redirect, variable or prefix but PYTHONDONTWRITEBYTECODE=1; read files with the host's"
+                       " Read tool or the CLI's inspect, inspect-context and diff, and write only under allowed_writes")
+
+
+def command_form(root: Path) -> str:
+    """The literal invocation a reader's Bash call starts with while readers are active; a verb follows it."""
+    arguments = [sys.executable, "-B", str(Path(__file__).resolve()), "--worktree", str(root.resolve())]
+    return subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
 
 
 def instruction_identity() -> str:
@@ -737,8 +751,10 @@ def raw_output_path(root: Path, relative: str) -> Path:
     return safe_runtime_path(root, path, file_only=True)
 
 
-def command_environment(root: Path, *, diagnostic: bool = False) -> dict:
+def command_environment(root: Path, current: dict, *, diagnostic: bool = False) -> dict:
     environment = dict(os.environ)
+    environment["AGENTROF_DELIVERY_ID"] = current["delivery"]
+    environment["AGENTROF_ITEM_ID"] = current["story"]
     environment["AGENTROF_MUTATION_FILES"] = str(session_path(root).parent / "mutation-files.json")
     for name in SELECTION_VARIABLES:
         environment.pop(name, None)
@@ -1009,7 +1025,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         directory = (root / workdir).resolve()
         if directory != root and root not in directory.parents:
             raise RuntimeError("verification command workdir must remain inside the Item worktree")
-        environment = command_environment(root, diagnostic=kind == "diagnostic_test")
+        environment = command_environment(root, current, diagnostic=kind == "diagnostic_test")
         selection = diagnostic_selection(root, selection_file, current) if selection_file is not None else None
         selection_bytes = None
         if selection is not None:
@@ -2427,8 +2443,8 @@ def runtime_needs_cleanup(session: dict) -> bool:
     return bool(state.get("active") or state.get("cleanup_required") or state.get("pending"))
 
 
-def runtime_environment_identity(root: Path) -> dict:
-    return environment_identity(root, command_environment(root))
+def runtime_environment_identity(root: Path, current: dict) -> dict:
+    return environment_identity(root, command_environment(root, current))
 
 
 def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
@@ -2490,7 +2506,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 raise RuntimeError("runtime checkout changed" + (f" ({difference})" if difference else "")
                                    + "; only teardown is allowed before a new verification session")
             bound_session = session["session_id"]
-            environment_identity = runtime_environment_identity(root)
+            environment_identity = runtime_environment_identity(root, current)
             # Persist before launching: a failed/interrupted up may still leave
             # real services behind, so only a successful down permits settlement.
             if state.get("pending"):
@@ -2504,7 +2520,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
         # suffix; project command bytes remain the approved contract's bytes.
         command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
-        completed = subprocess.run(command, cwd=workdir, env=command_environment(root), shell=True,
+        completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         with locked(root):
             session = read_session(root)
@@ -3128,7 +3144,7 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
         contract = verification_contract(root)
         contract_variables(contract)
         shared = write_pre_handoff_selection(root, derived)
-        environment = command_environment(root, diagnostic=derived["kind"] == "diagnostic_test")
+        environment = command_environment(root, current, diagnostic=derived["kind"] == "diagnostic_test")
         selections: dict[Path, tuple[bytes, list[int]]] = {}
         if derived["kind"] == "diagnostic_test":
             selector = safe_runtime_path(root, session_path(root).parent / "pre-handoff-tests.json", file_only=True)
@@ -3347,7 +3363,7 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
             raise RuntimeError("manual context source differs from the frozen candidate")
         manual.append({**obligation, "candidate_hash": current["candidate_hash"],
             "product_commit": current["product_commit"], "disposition": "requires_frozen_inspect",
-            "next_action": "Use delivery_verification.py inspect --path <path> to read this source from the bound candidate before completing its obligation."})
+            "next_action": "When the task needs this source, read it from the bound candidate with delivery_verification.py inspect --path <path>."})
     units = {}
     for row in plan["must_read"]:
         unit = addresses[row["unit_id"]]
@@ -3491,6 +3507,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
               "read_interface": {"inspect": "inspect --path <repository-relative-path> [--base]", "diff": "diff [--path <repository-relative-path>]"},
               "review_passes": policy()["review_checks"], "allowed_writes": [str(session_path(root).parent / "scratch")],
               "mutation_scope_file": str(session_path(root).parent / "mutation-files.json"),
+              "command_form": command_form(root) + " <verb> ...",
               "result_interface": {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
                                    "role": role, "mode": mode, "verdict": "passed|failed|cancelled",
                                    "report": "Independent findings and conclusion", "checks": checks, "findings": []},
@@ -3513,11 +3530,12 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     import project_context
     seeds = {path for path in current["inputs"] if path.endswith("/item.md")}
     result["project_reading"] = project_context.task_context(root, entry="deliver",
-        role=role.replace("_", "-"), mode="review", paths=seeds, no_cache=True)
+        role=role.replace("_", "-"), mode="review", paths=seeds | set(current["changed_files"]), no_cache=True,
+        change_base=current["integration_base_commit"])
     result["read_interface"]["context"] = "inspect-context --plan <saved verification manifest>"
     result["read_interface"]["expand_context"] = "expand-context --plan <saved context manifest> --reason <reason> [--ref <reference>]"
     result["context_guidance"] = ("Start with project_reading and batch-read with inspect-context; "
-        "full_read and all verification gates remain mandatory. Expand incomplete plans. "
+        "Required review scope and verification gates remain mandatory; suggested reads are bounded advice. Expand optional context only when needed. "
         "If context is insufficient, use frozen inspect/diff on your initiative or parent direction "
         "and report context_findings with sources, impact, recovery and proposed fix to the parent. "
         "Only the parent offers an anonymous issue through issue-report after exact-payload user approval.")

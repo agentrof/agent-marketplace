@@ -169,7 +169,7 @@ class VaultHookPrototypeTests(unittest.TestCase):
                         "tool_input": {"command": value}}
             # A reader waits through wait while both readers run.
             for verb in ("status", "inspect", "inspect-context", "expand-context", "diff", "environment",
-                         "permission-preflight", "permission-probe", "wait"):
+                         "permission-preflight", "permission-probe", "wait", "await-owner-step"):
                 routed = [*command[:-1], verb]
                 routed_text = subprocess.list2cmdline(routed) if os.name == "nt" else shlex.join(routed)
                 self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(routed_text)), 0)
@@ -188,6 +188,16 @@ class VaultHookPrototypeTests(unittest.TestCase):
                         with self.subTest(command=shell), redirect_stderr(io.StringIO()):
                             self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(shell)), outcome)
             command_text = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
+            owner_result = [*command[:-1], "owner-step-result", "--file", str(scratch)]
+            owner_text = subprocess.list2cmdline(owner_result) if os.name == "nt" else shlex.join(owner_result)
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(owner_text)), 2)
+                for argv in (owner_result,
+                             [*command[:3], "--worktree=" + str(project), *owner_result[-3:]],
+                             [*command[:3], "--worktree", str(project.parent), *owner_result[3:]]):
+                    outside = shell_payload(subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv))
+                    outside["cwd"] = str(project.parent)
+                    self.assertEqual(self.hook.delivery_reader_barrier(outside), 2)
             diagnostic = [*command[:-1], "run", "--kind", "diagnostic_test", "--selection-file", str(scratch.parent / "selection.json")]
             diagnostic_text = subprocess.list2cmdline(diagnostic) if os.name == "nt" else shlex.join(diagnostic)
             for value, expected in ((command_text, 0), (command_text + " && echo unsafe", 2),

@@ -17,7 +17,16 @@ executes the approved adapter; the adapter reads `AGENTROF_DIAGNOSTIC_TESTS`
 as JSON and passes identifiers through its test runner's argument-list API.
 The final suite still requires separate `run --kind test` evidence.
 
-When the host refuses a verification command, never stop silently: list it in
+For an approved `Owner Steps` row, use `await-owner-step --step <id>` and keep
+the reader open. Give the coordinator the exact returned owner command; never
+execute it or confirm owner output. `wait --role qa_engineer` and `status
+--summary` expose `awaiting_owner_step`, completion and timeout. Continue at
+the row's `Resume at` instruction only after the owner attaches passing output
+from an external terminal. Keep the same candidate, session and prior run
+evidence. Register no QA result while waiting; failed output or timeout is a
+normal failure, and explicit confirmed cancellation remains available.
+
+When the host refuses another verification command, never stop silently: list it in
 the result's `blocked_commands` as `{command, reason, outcome:
 blocked_by_permission}` and settle as `qa_diagnostic` or a failed result, so
 the owner can allow it and QA reruns it on the same candidate.

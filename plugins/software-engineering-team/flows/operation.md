@@ -128,6 +128,34 @@ revision lifecycle. Delivery runs a group with `run --kind live_test --group
 run all selected groups in one live run whose `{group}` receives their names
 comma-separated; declare it only for a command that accepts such a list.
 
+Verification may declare an `Owner Steps` table for procedure steps only the
+project owner can execute. Its columns are `Step`, `Command`, `Expected output`,
+`Resume at` and `Timeout seconds`. Each row names a unique literal step id,
+the exact owner command, a non-empty literal output marker, the next QA
+instruction and a positive integer timeout. Rows run in their declared order;
+every row must pass before final QA passes. The compiler exposes these rows as
+`runner: owner`. The table is optional and follows normal contract review and
+approval. Do not include credentials or unresolved tokens in a command.
+
+QA reaches a row with `delivery_verification.py --worktree <item>
+await-owner-step --step <id>`. The coordinator relays the returned command to
+the owner; it never executes or confirms it for them. The owner runs the
+command outside the agent's reader barrier and attaches the actual output
+through `owner-step-result --file <receipt.json>` using the same runner and
+worktree. The receipt declares `session_id`, `candidate_hash`, `step`, the
+exact `command`, integer `exit_code`, string `output` and `owner_confirmed:
+true`. Zero exit code and the declared literal marker in the output pass the
+step. A different command or candidate is refused. The existing reader
+barrier permits waiting, but never permits an agent to register owner output.
+
+While `awaiting_owner_step`, keep the QA reader and frozen candidate open;
+do not register a QA result or start another check. `wait --role qa_engineer`
+and `status --summary` report its state. After the owner output passes,
+continue at `Resume at` using the same session and its retained run evidence.
+Failed output or expiry is a normal QA failure; confirmed cancellation remains
+available. No timer executes a command, changes host permissions or releases
+the reader barrier.
+
 Verification may declare an optional `diagnostic_test_command` adapter for
 failed or affected tests, with `diagnostic_test_workdir` defaulting to `.` only
 at execution. Add it through the normal revision and approval lifecycle.

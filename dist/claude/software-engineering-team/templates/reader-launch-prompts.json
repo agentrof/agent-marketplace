@@ -30,6 +30,7 @@
       "Verification session {session_id} froze candidate {candidate_hash}. Your saved verification manifest is {manifest}; its full_read, required checks and gates are mandatory.",
       "Start with: {runner} inspect-context --plan {manifest}",
       "Run the approved commands with {runner} run --kind test|mutation|dependency_audit and wait for a long one with {runner} wait --role qa_engineer.",
+      "At a declared Owner Step, use {runner} await-owner-step --step <id> and relay its exact command to the coordinator. An owner-only step is never a reason to register a result. Keep this reader and freeze open, wait through {runner} wait --role qa_engineer, and resume at the declared instruction after the owner attaches their output. Never run or confirm that command on the owner's behalf; a timeout or failed output is a normal QA failure.",
       "Write only under {scratch}. Register your result, shaped as the manifest's result_interface, with: {runner} {register} --file <result.json>"
     ],
     "code_reviewer_lens": [

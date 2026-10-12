@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "d20a82340551af8d1be8d6b0efae90ca9790f865f3fae3c9aed6a55489d4ab45"
+      "8ce85ad8d4873e86848b8dc5085e49b34be4bd7826bd9d3152afb6bef5dd0e51"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -125,7 +125,7 @@
       "c964a5acf445e6bed890365402d24888188cd2c4ee21dc5d169cfeea622bb512"
     ,
     "flows/operation.md":
-      "7ff2894b25b671c207d0eacd311a2f82eb3f7798d0aed90d05e1fa28fc566b72"
+      "8906dbed6ca16ba571096deafd2304b32c1eed7258e5001c1e9db9f9e0b71434"
     ,
     "flows/requirement.md":
       "7528573f9fa14f3fc724d7a12972ad3b548409d1085a95c2c2e2024b4a46d04c"
@@ -200,7 +200,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "d3daf105c15526a057d08bdaa1ca2682c18b80e58e53eb7da60742b799ab58ba"
+      "56b9628e1b903f5e136be68b17aab006cfae505cd8ce8979a2f426a641ab1737"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -242,7 +242,7 @@
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/operation_compile.py":
-      "1254a82a969cb437cec77e480bf95dee76c375f60bf3727e7846ca529ca0016d"
+      "7363cabaffeabb446fa04512fee2e5cb2b7d0abd3098c69d74f570ecff4e57c2"
     ,
     "scripts/owner_notification.py":
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
@@ -299,7 +299,7 @@
       "5874e6fed717df6c29ad5d6888c8985690fca14ed83458b1f0e77af298e8da81"
     ,
     "scripts/vault_hook.py":
-      "58e3c3a51a3d3eec43813922ee3e107f85998d77923777440e652c5451b5a7e1"
+      "b9a4f98e46f1b052990acddcaaee2ba9894c6099e4fb1ecce4b87ee5fe7014dd"
     ,
     "scripts/vault_index.py":
       "e71cc817cae308e57ae5e78804966343606c683a1830b95b4e394b5282eded1f"
@@ -731,7 +731,7 @@
       "619d535ef451a5359c98c97ae321cb2999038446cd17228c0c3e6eb0abdbd488"
     ,
     "skill-content/qa-verification/references/report-format.md":
-      "e15675a246f99c07d33804f7f313d170bad550a8f9cc40166c0f4c4cf74aa3de"
+      "086c02917f1fcff3f89481d42b3d0422ee95235439b0873bd73b0b8cce70f601"
     ,
     "skill-content/qa-verification/references/runtime-protocol.md":
       "7ddf13911059f2676d23cb1ae8a0e33e69f0f3cd7e2f2a9c3a7f4149761194d3"
@@ -1097,7 +1097,7 @@
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
     ,
     "templates/reader-launch-prompts.json":
-      "8f0d6a42892fd7cd39ae4044106e04b5ee0f97df12b57cf74af67dfbfbf18922"
+      "07dcd548a59bd2b19e22d2fdf1592009f12a655b4ce1d1001325c94c6a1dd88e"
     ,
     "templates/task-input-contract.md":
       "a1e14667ea11bd2989b2ed59055ed4a37da59b20411a4af60f6dc84ad5e3c03a"

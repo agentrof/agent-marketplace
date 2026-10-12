@@ -2379,13 +2379,16 @@ def delivery_reader_barrier(payload: dict) -> int:
         if parsed is not None:
             script, args, cwd = parsed
             if (_installed_script_path(script, cwd, "delivery_verification.py") is not None
+                    and "owner-step-result" in args):
+                return deny("owner-step-result requires the owner's external terminal, not an agent tool call")
+            if (_installed_script_path(script, cwd, "delivery_verification.py") is not None
                     and len(args) >= 3 and args[0] == "--worktree"
                     and args.count("--worktree") == 1
                     and _cli_path(args[1], cwd) == project
                     and args[2] in {"freeze", "result", "panel-result", "calibrate", "merge-panel", "status",
                                     "manifest", "validate", "run", "resume-qa", "inspect", "inspect-context",
                                     "expand-context", "diff", "environment",
-                                    "permission-preflight", "permission-probe", "prepare-repair", "wait"}):
+                                    "permission-preflight", "permission-probe", "prepare-repair", "wait", "await-owner-step"}):
                 return 0
     elif payload.get("file_targets") and not payload.get("patch_parse_error"):
         cwd = Path(str(payload.get("cwd") or project))

@@ -96,3 +96,9 @@ session to asking.
 4. A readable goal ends only when its owning compiler reads a terminal state.
    `complete` ends any grant and records whether that compiler agreed; the
    session's own judgement never ends a readable goal otherwise.
+
+Before ending because every remaining task waits on a queued owner decision,
+run `autopilot.py --project-root <root> waiting`. It submits one desktop
+notification per unchanged queue; a failed submission is reported, not treated
+as delivered. With independent work left, keep working and do not call it.
+`report --json` includes each queued question's age in seconds.

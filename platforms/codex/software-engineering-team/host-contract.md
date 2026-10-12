@@ -318,3 +318,8 @@
   only switches on `request_user_input_async`; no tool of that name runs.
   `send_message_to_user_async` sends the user a message without waiting for an
   answer and is not guarded: never ask a question through it under a grant.
+
+When all remaining work waits on queued owner decisions, call the packaged
+`autopilot.py waiting` before ending the turn. It submits one desktop notice
+per queue. Report an unavailable notification backend; never claim delivery
+when the command failed. The decision still belongs to the owner.

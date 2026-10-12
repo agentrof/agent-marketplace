@@ -1,0 +1,6 @@
+{
+  "summary": "Notify the owner once when an active autopilot grant is blocked only on queued decisions, and report queue age.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

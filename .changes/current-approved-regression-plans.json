@@ -1,0 +1,6 @@
+{
+  "summary": "Allow regression selection to follow the current complete committed backlog approval, retaining closed-to-current scenario receipts and execution metadata.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

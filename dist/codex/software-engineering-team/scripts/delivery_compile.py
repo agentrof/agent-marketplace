@@ -107,7 +107,8 @@ PRE_HANDOFF_RUN_COLUMNS = ("run", "candidate_tree", "kind", "result", "exit_code
 # And what QA's final test run reused of the accepted run, which only the disposable runtime holds otherwise.
 ITEM_REUSED_TARGETS = "Earlier-story targets QA's final test run reused, recorded by approve-item-evidence:"
 REUSED_TARGET_COLUMNS = ("story", "test_ids", "pre_handoff_run", "evidence_hash")
-# At own_target_reuse spot_run, also the Item's own targets it reused and those QA's run spot-ran itself.
+# At own_target_reuse spot_run or accept_record, also the Item's own targets it reused and those QA's run
+# spot-ran itself.
 ITEM_REUSED_OWN_TARGETS = "Own targets QA's final test run reused, recorded by approve-item-evidence:"
 REUSED_OWN_TARGET_COLUMNS = ("story", "test_ids", "spot_run_test_ids", "pre_handoff_run", "evidence_hash")
 USER_DECISION_STATUSES = ("pending", "answered")
@@ -1812,10 +1813,12 @@ def plan_approval_refusals(docs: Path, root: Path, props: dict) -> list[str]:
     Gate A covers the first execution approval of the approved scope. Each later
     approval is named by its number: the approvals it supersedes, plus one.
     """
+    import delivery_verification
+    rebound = delivery_verification.rebind_unit_refusals(docs.parent.parent, str(props.get("id")))
     if props.get("status") not in BETWEEN_GATES_STATUSES:
-        return []
+        return rebound
     approval = len(superseded_plan_approvals(root, props)) + 1
-    return between_gates_refusals(docs, f"execution plan approval {approval}", str(props.get("id")))
+    return rebound + between_gates_refusals(docs, f"execution plan approval {approval}", str(props.get("id")))
 
 
 # merge-pr merges a Delivery PR only on green provider checks, so execution
@@ -2999,8 +3002,9 @@ def pre_handoff_evidence(worktree: Path, delivery_id: str, story: str, session: 
     result, exit code, wall clock and the earlier stories it ran. Below them it
     records what QA's final test run reused: each earlier story with its test
     ids, the reused run's number in that list and its evidence hash, or none.
-    At own_target_reuse spot_run it adds the Item's own targets that run
-    reused, with the spot-run targets QA's run ran itself, or none.
+    At own_target_reuse spot_run or accept_record it adds the Item's own
+    targets that run reused, with the spot-run targets QA's run ran itself,
+    none at accept_record, or none.
     At the default the body is returned unchanged.
     """
     import delivery_verification
@@ -3027,11 +3031,23 @@ def pre_handoff_evidence(worktree: Path, delivery_id: str, story: str, session: 
         own = reuse.get("own_targets")
         if own is not None:
             reused_own = ["| " + " | ".join(table_cell(cell) for cell in (
-                f"{story} of {delivery_id}", ", ".join(own["test_ids"]), ", ".join(own["spot_test_ids"]), run,
+                f"{story} of {delivery_id}", ", ".join(own["test_ids"]), ", ".join(own["spot_test_ids"]) or "none", run,
                 reuse["evidence_hash"])) + " |"]
     block = (table_block(ITEM_PRE_HANDOFF_RUNS, PRE_HANDOFF_RUN_COLUMNS, rows) + "\n\n"
              + table_block(ITEM_REUSED_TARGETS, REUSED_TARGET_COLUMNS, reused))
-    if delivery_verification.own_target_reuse(worktree, delivery_id) == delivery_verification.SPOT_RUN:
+    revisions = []
+    for number, run in enumerate(history, start=1):
+        for entry in run["earlier_stories"]:
+            revision = entry.get("plan_revision")
+            if revision is not None:
+                revisions.append("| " + " | ".join(table_cell(cell) for cell in (
+                    number, entry["story"], revision["closed_source_hash"], revision["current_source_hash"],
+                    json.dumps(revision["scenario_delta"], sort_keys=True))) + " |")
+    if revisions:
+        block += "\n\n" + table_block("Current approved regression plan revisions:",
+                                     ("Run", "Story", "Closed plan", "Current plan", "Scenario delta"), revisions)
+    if delivery_verification.own_target_reuse(worktree, delivery_id) in {delivery_verification.SPOT_RUN,
+                                                                         delivery_verification.ACCEPT_RECORD}:
         block += "\n\n" + table_block(ITEM_REUSED_OWN_TARGETS, REUSED_OWN_TARGET_COLUMNS, reused_own)
     return with_compiler_block(body, "Implementation Evidence", ITEM_PRE_HANDOFF_RUNS, block)
 
@@ -3232,6 +3248,15 @@ def _approve_item_evidence(args) -> int:
                 target["verification_mode"] = result["mode"]
                 target["verification_result_hash"] = result["result_hash"]
             verification_body = pre_handoff_evidence(worktree, args.delivery, args.story, session, verification_body)
+            controls = delivery_verification.finding_control_history(session)
+            if controls:
+                verification_props["finding_control_bindings"] = json.dumps(controls, sort_keys=True)
+                block = table_block("Finding control bindings:", ("Finding", "Tests", "Candidate", "Run evidence"), [
+                    "| " + " | ".join(table_cell(cell) for cell in (row["finding_id"], ", ".join(row["test_ids"]),
+                                                                   row["candidate_hash"], row["evidence_hash"])) + " |"
+                    for row in controls])
+                verification_body = with_compiler_block(verification_body, "Implementation Evidence",
+                                                         "Finding control bindings:", block)
     except (RuntimeError, ValueError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 2
     reviewed = head
@@ -3303,6 +3328,20 @@ def approve_review(args) -> int:
         review_body = with_compiler_block(
             review_body, "Lessons and Follow-up", DELIVERY_FOLLOW_UPS,
             table_block(DELIVERY_FOLLOW_UPS, ("item", *FOLLOW_UP_COLUMNS), delivery_follow_ups(root)))
+    controls = []
+    for item_path in sorted(root.glob("items/*/item.md")):
+        item_props, _ = split_note(item_path)
+        evidence_path = item_path.parent / "verification.md"
+        if item_props.get("status") == "integrated" and evidence_path.is_file():
+            evidence_props, _ = split_note(evidence_path)
+            controls.extend({"story": item_props.get("story_id"), **row}
+                            for row in json.loads(evidence_props.get("finding_control_bindings", "[]")))
+    if controls:
+        review_props["finding_control_bindings"] = json.dumps(controls, sort_keys=True)
+        review_body = with_compiler_block(review_body, "Lessons and Follow-up", "Finding control bindings:",
+            table_block("Finding control bindings:", ("Story", "Finding", "Tests", "Run evidence"), [
+                "| " + " | ".join(table_cell(cell) for cell in (row["story"], row["finding_id"],
+                    ", ".join(row["test_ids"]), row["evidence_hash"])) + " |" for row in controls]))
     if provisional_work(docs, args.delivery):
         import delivery_git
         try:

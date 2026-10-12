@@ -3232,6 +3232,15 @@ def _approve_item_evidence(args) -> int:
                 target["verification_mode"] = result["mode"]
                 target["verification_result_hash"] = result["result_hash"]
             verification_body = pre_handoff_evidence(worktree, args.delivery, args.story, session, verification_body)
+            controls = delivery_verification.finding_control_history(session)
+            if controls:
+                verification_props["finding_control_bindings"] = json.dumps(controls, sort_keys=True)
+                block = table_block("Finding control bindings:", ("Finding", "Tests", "Candidate", "Run evidence"), [
+                    "| " + " | ".join(table_cell(cell) for cell in (row["finding_id"], ", ".join(row["test_ids"]),
+                                                                   row["candidate_hash"], row["evidence_hash"])) + " |"
+                    for row in controls])
+                verification_body = with_compiler_block(verification_body, "Implementation Evidence",
+                                                         "Finding control bindings:", block)
     except (RuntimeError, ValueError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 2
     reviewed = head
@@ -3303,6 +3312,20 @@ def approve_review(args) -> int:
         review_body = with_compiler_block(
             review_body, "Lessons and Follow-up", DELIVERY_FOLLOW_UPS,
             table_block(DELIVERY_FOLLOW_UPS, ("item", *FOLLOW_UP_COLUMNS), delivery_follow_ups(root)))
+    controls = []
+    for item_path in sorted(root.glob("items/*/item.md")):
+        item_props, _ = split_note(item_path)
+        evidence_path = item_path.parent / "verification.md"
+        if item_props.get("status") == "integrated" and evidence_path.is_file():
+            evidence_props, _ = split_note(evidence_path)
+            controls.extend({"story": item_props.get("story_id"), **row}
+                            for row in json.loads(evidence_props.get("finding_control_bindings", "[]")))
+    if controls:
+        review_props["finding_control_bindings"] = json.dumps(controls, sort_keys=True)
+        review_body = with_compiler_block(review_body, "Lessons and Follow-up", "Finding control bindings:",
+            table_block("Finding control bindings:", ("Story", "Finding", "Tests", "Run evidence"), [
+                "| " + " | ".join(table_cell(cell) for cell in (row["story"], row["finding_id"],
+                    ", ".join(row["test_ids"]), row["evidence_hash"])) + " |" for row in controls]))
     if provisional_work(docs, args.delivery):
         import delivery_git
         try:

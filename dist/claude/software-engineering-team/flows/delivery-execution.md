@@ -87,6 +87,9 @@ DLV-### --story <story>` before invoking the two readers. The resulting
 candidate and session identities bind all source and instruction inputs.
 Generate each role's `manifest` with `--role code_reviewer|qa_engineer` and
 `--mode review_initial|review_repair|qa_diagnostic|qa_final`.
+Put the manifest's `command_form` verbatim into every reader prompt: while
+readers are active, Bash admits only that one direct invocation followed by a
+verb, and readers read files with the host's Read tool.
 Every verification manifest includes the default `project_reading` plan. Start
 with `inspect-context --plan <saved verification manifest>` to batch-read its
 units from the frozen Git candidate. Preserve all `full_read` obligations and
@@ -167,6 +170,14 @@ every run with the session identity through `status --summary`; plain
 `status` prints the whole session, bindings included.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
+When the Verification Contract declares `live_groups`, QA runs one opt-in live
+group at a time with `run --kind live_test --group <group>`: the runner
+substitutes the declared group for `{group}` in `live_test_command` and runs
+it in `live_test_workdir` of the same private frozen clone, under the same
+locks, environment identity and raw-evidence recording as `run --kind test`.
+Each group keeps its own record, read with `status --run live_test:<group>`.
+Live groups never join the required checks; the Test Plan decides which ones
+a result needs, and the result cites their `evidence_hash` values.
 Switch `qa_gate_order`: at `gate_first`, QA starts its first test command of a
 round before it plans and drafts its result, as
 `skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md`
@@ -186,6 +197,15 @@ change-level tier the Verification Contract declares, and the Delivery runs
 its integration tier once before its pull request, as
 `skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md`
 defines.
+Before an Item's first QA round, run `permission-preflight --delivery <id>
+--story <id>` and show the owner its `commands` and `allow_rules`: the exact
+packaged forms QA runs, live groups and runtime verbs included. The owner
+allows them once in the host's permission settings; the package never edits
+them. A QA reader whose command the host refuses lists it in
+`blocked_commands` with outcome `blocked_by_permission` and settles as a
+diagnostic or failed result, never a passed final one. `status --summary`
+shows those rows; ask the owner at once, then `resume-qa` reruns only the
+blocked commands on the same candidate.
 For failed or affected tests first, an optional approved
 `diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
 <scratch-selection.json>`. Copy the selector schema from the QA manifest,
@@ -194,6 +214,16 @@ manifest's scratch directory. The runner validates the candidate binding and
 passes normalized selection data through `AGENTROF_DIAGNOSTIC_TESTS`; it never
 appends those identifiers to shell text. The compiler-owned JSON adds
 `selected_test_ids`, the sorted union of the failed and affected identifiers.
+An open inherited finding may list `negative_control_test_ids`, its
+prescribed negative controls. The selection may then add
+`finding_controls: [{finding_id, test_ids}]`: ids the finding lists, in test
+files the Item changed, with no Test Plan scenario binding them. The runner
+adds them to `selected_test_ids`, passes `finding_control_test_ids` and
+`evidence_scope: finding_diagnostic` so the adapter knows they are finding
+controls, and records the run as finding-scoped diagnostic evidence that QA
+cites when it resolves the finding. It never counts as acceptance evidence;
+Test Plan selection and approved row values are unchanged, and the backlog
+absorbs such controls at its next ordinary revision.
 Only diagnostic commands receive this environment variable; final checks,
 runtime commands and lane commands remove it, including any inherited value.
 A changed selection cannot reuse an
@@ -202,7 +232,9 @@ test command or revise the Operation Contract through its normal approval.
 Diagnostic command evidence never satisfies the final full-suite gate.
 Commands run in an independent scratch checkout of the frozen product commit,
 with no shared Git objects or mutable working files. The runner exposes an
-output directory through `AGENTROF_VERIFICATION_SCRATCH`. Provision dependencies through
+output directory through `AGENTROF_VERIFICATION_SCRATCH` and the candidate's
+Delivery and Item ids through `AGENTROF_DELIVERY_ID` and `AGENTROF_ITEM_ID`,
+whatever the caller's shell exports. Provision dependencies through
 approved commands and environment, never by borrowing the writer's ignored
 files. Tests and mutation cannot temporarily edit the reviewer's source.
 The runner stores raw output under ignored runtime and binds it to the
@@ -248,8 +280,11 @@ exact direct-parent binding. Runtime verification is mandatory exactly when
 the approved Item declares `runtime_required: true`.
 For that Item, run the approved Environment Contract through
 `environment --verb down|up|seed|logs|url [--value <approved-identifier>]`.
-Its persistent private checkout supports the existing fresh-runtime protocol;
-return the recorded event hashes with the full per-surface runtime findings.
+Its persistent private checkout supports the existing fresh-runtime protocol.
+Every verification session of the Item uses that one checkout path, so a
+project environment that binds an Item instance to the checkout that created
+it accepts the next session's `up`; each session's first command re-pins it to
+the session's candidate with untracked and ignored files removed. Return the recorded event hashes with the full per-surface runtime findings.
 Successful down, up, seed, logs and final down are required, alongside the
 independent runtime assessment. A non-runtime Item starts no environment.
 
@@ -353,3 +388,16 @@ lease it lost, or a remote without atomic push support, from the refetched
 refs. One whose refetched refs hold its candidate, or moved on from it, may
 have landed and reports `DELIVERY_TRANSACTION_UNCERTAIN` instead. Release
 Management is intentionally not part of this flow.
+
+A permission probe validates the approved command without executing it. Neither
+host exposes a portable no-effect permission prediction API, so its authorization
+result remains unknown; show the exact allow rules to the owner. The optional
+Verification Contract `live_permission_commands` lists service or container
+commands needing that review. Permission-only QA resume preserves successful
+evidence and names only refused commands in `resume_commands`.
+
+Finding-control runs are retained as candidate-bound records across verification
+passes. Evidence approval writes the bindings into the Item verification record,
+and Delivery Review lists them. After that Delivery merges, the next ordinary
+backlog revision lists the unabsorbed targets and its approval requires them in
+the owning story Test Plan. Finding-only repairs need no mid-Delivery revision.

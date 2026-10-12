@@ -3333,7 +3333,7 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
             raise RuntimeError("manual context source differs from the frozen candidate")
         manual.append({**obligation, "candidate_hash": current["candidate_hash"],
             "product_commit": current["product_commit"], "disposition": "requires_frozen_inspect",
-            "next_action": "Use delivery_verification.py inspect --path <path> to read this source from the bound candidate before completing its obligation."})
+            "next_action": "When the task needs this source, read it from the bound candidate with delivery_verification.py inspect --path <path>."})
     units = {}
     for row in plan["must_read"]:
         unit = addresses[row["unit_id"]]
@@ -3495,11 +3495,12 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     import project_context
     seeds = {path for path in current["inputs"] if path.endswith("/item.md")}
     result["project_reading"] = project_context.task_context(root, entry="deliver",
-        role=role.replace("_", "-"), mode="review", paths=seeds, no_cache=True)
+        role=role.replace("_", "-"), mode="review", paths=seeds | set(current["changed_files"]), no_cache=True,
+        change_base=current["integration_base_commit"])
     result["read_interface"]["context"] = "inspect-context --plan <saved verification manifest>"
     result["read_interface"]["expand_context"] = "expand-context --plan <saved context manifest> --reason <reason> [--ref <reference>]"
     result["context_guidance"] = ("Start with project_reading and batch-read with inspect-context; "
-        "full_read and all verification gates remain mandatory. Expand incomplete plans. "
+        "Required review scope and verification gates remain mandatory; suggested reads are bounded advice. Expand optional context only when needed. "
         "If context is insufficient, use frozen inspect/diff on your initiative or parent direction "
         "and report context_findings with sources, impact, recovery and proposed fix to the parent. "
         "Only the parent offers an anonymous issue through issue-report after exact-payload user approval.")

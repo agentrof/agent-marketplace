@@ -273,7 +273,8 @@
         "tools.tests.test_performance_contracts.*",
         "tools.tests.test_live_test_groups.*",
         "tools.tests.test_qa_preflight.*",
-        "tools.tests.test_qa_owner_steps.*"
+        "tools.tests.test_qa_owner_steps.*",
+        "tools.tests.test_qa_verbs.*"
       ],
       "depends_on": [
         "contracts"
@@ -687,6 +688,7 @@
     "tools.tests.test_python_entry",
     "tools.tests.test_qa_preflight",
     "tools.tests.test_qa_owner_steps",
+    "tools.tests.test_qa_verbs",
     "tools.tests.test_reader_waves",
     "tools.tests.test_release",
     "tools.tests.test_release_publish",

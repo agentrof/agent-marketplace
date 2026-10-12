@@ -766,6 +766,9 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
     started = time.monotonic()
     root = root.resolve()
     with locked(root):
+        pairing_errors = operation_compile.pairing_findings(delivery.docs_root(root))
+        if pairing_errors:
+            raise RuntimeError("; ".join(pairing_errors))
         if command_active(root):
             raise RuntimeError("verification command is still running")
         previous = read_session(root, required=False)
@@ -4831,6 +4834,9 @@ def start_pass(root: Path, delivery_id: str, story: str, *, review_mode: str | N
         steps.append({"step": step, "ok": False, "error": error})
         return {"ok": False, "failed_step": step, "errors": [f"{step}: {error}"], "steps": steps}
 
+    pairing_errors = operation_compile.pairing_findings(delivery.docs_root(root))
+    if pairing_errors:
+        return stopped("contract-pairing", "; ".join(pairing_errors))
     try:
         if delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, "repair_review") == "before_freeze":
             previous = read_session(root, required=False)

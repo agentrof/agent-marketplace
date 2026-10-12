@@ -102,8 +102,16 @@ Requirement stage and it does not alter product-stage package hashes.
    A Verification Contract approval stamps `paired_environment_revision` and
    `paired_environment_source_hash` from the approved current Environment
    Contract; writers never author that receipt, so the two writers can work
-   side by side. Approve the Environment Contract first; `check --kind
-   verification` reports a later Environment approval as advisory drift.
+   side by side. Approve the Environment Contract first. A later Environment
+   approval reports the Verification Contract it leaves unpaired and the exact
+   `operation_compile.py re-pair --docs <docs>` command. Offer that pairing-only
+   repair in the same owner approval step, without another contract review or
+   approval when its authored content is unchanged. The command verifies both
+   approved receipts, changes only the pairing fields and Verification source
+   hash, and preserves its revision, approval timestamp and authored bytes.
+   Changed or draft Verification content still needs normal review and approval.
+   Plan binding, light-path reuse, verification round start and direct freeze
+   refuse stale pairing with this command before running any test suite.
    Switch `owner_gates`: at `two_fixed_gates`, a revision that a Delivery's
    execution plan needs is approved in that Delivery's gate A, as
    `skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`

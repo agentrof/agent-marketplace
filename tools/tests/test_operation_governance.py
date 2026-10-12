@@ -357,8 +357,13 @@ class OperationGovernanceTests(unittest.TestCase):
             self.assertFalse(output.exists())
 
     def test_verification_approval_projects_the_paired_environment_receipt(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+        import delivery_compile
+        import delivery_verification
+
         with tempfile.TemporaryDirectory() as temporary:
-            docs = Path(temporary) / "workspace" / "docs"
+            docs = Path(temporary).resolve() / "workspace" / "docs"
             ref = self.approved_solution(docs)
             for kind in ("environment", "verification"):
                 initialized = self.invoke(OPERATION, "init", "--docs", str(docs), "--kind", kind,
@@ -366,6 +371,13 @@ class OperationGovernanceTests(unittest.TestCase):
                 self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
             environment = docs / "operation" / "environment-contract.md"
             verification = docs / "operation" / "verification-contract.md"
+
+            def repair():
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    code = operation_compile.main(["re-pair", "--docs", str(docs)])
+                return subprocess.CompletedProcess([], code, output.getvalue(), "")
+
             declare(environment, env_command="./tools/env")
             declare(verification, test_command="make test")
             env_approved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "environment")
@@ -382,14 +394,89 @@ class OperationGovernanceTests(unittest.TestCase):
             self.assertTrue(checked["ok"])
             self.assertEqual(checked["receipt"]["paired_environment"],
                              {"revision": 1, "source_hash": env_hash, "current": True})
-            # A later Environment Contract approval shows as advisory drift and
-            # the next Verification revision drops the stamp until it is approved.
+            before = verification.read_bytes()
+            # A later Environment approval offers a receipt-only repair before execution.
             self.invoke(OPERATION, "begin-revision", "--docs", str(docs), "--kind", "environment")
             reapproved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "environment")
             self.assertEqual(reapproved.returncode, 0, reapproved.stdout + reapproved.stderr)
+            offer = json.loads(reapproved.stdout)["verification_pairing"]
+            self.assertEqual(Path(offer["path"]), verification.resolve())
+            self.assertFalse(offer["current"])
+            self.assertIn("re-pair", offer["repair_command"])
+            self.assertIn("--docs", offer["repair_command"])
+            with mock.patch.object(operation_compile, "os") as host, \
+                    mock.patch.object(sys, "executable", "C:\\Program Files\\Py$hon's\\python.exe"):
+                host.name = "nt"
+                windows_receipt, _errors = operation_compile.check_contract(docs, "verification")
+            self.assertTrue(windows_receipt["paired_environment"]["repair_command"].startswith(
+                "& 'C:\\Program Files\\Py$hon''s\\python.exe' "))
             checked = json.loads(self.invoke(OPERATION, "check", "--docs", str(docs), "--kind", "verification").stdout)
             self.assertTrue(checked["ok"])
             self.assertFalse(checked["receipt"]["paired_environment"]["current"])
+            binding, errors = delivery_compile.operation_contract_snapshot(docs, "verification")
+            self.assertEqual(binding, {})
+            self.assertIn(offer["repair_command"], errors[0])
+            self.assertTrue(delivery_compile.reused_contract_receipts(docs, False)[1])
+            with mock.patch.object(delivery_verification, "regression_run") as regression, \
+                    mock.patch.object(delivery_verification, "freeze") as freeze:
+                result = delivery_verification.start_pass(docs.parent.parent, "DLV-001", "AUTH-01")
+            self.assertEqual(result["failed_step"], "contract-pairing")
+            self.assertIn(offer["repair_command"], result["errors"][0])
+            regression.assert_not_called()
+            freeze.assert_not_called()
+            with mock.patch.object(delivery_verification, "locked", return_value=contextlib.nullcontext()), \
+                    mock.patch.object(delivery_verification, "candidate") as candidate:
+                with self.assertRaisesRegex(RuntimeError, "not paired"):
+                    delivery_verification.freeze(docs.parent.parent, "DLV-001", "AUTH-01")
+            candidate.assert_not_called()
+
+            for changes in ({"test_command": "make changed"}, {"status": "draft"}):
+                with self.subTest(changes=changes):
+                    declare(verification, **changes)
+                    changed = verification.read_bytes()
+                    refused = repair()
+                    self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+                    self.assertIn("unchanged approved", refused.stdout)
+                    self.assertEqual(verification.read_bytes(), changed)
+                    verification.write_bytes(before)
+            with mock.patch.object(delivery_compile, "between_gates_refusals", return_value=["owner ruling needed"]) as gate:
+                refused = repair()
+            self.assertEqual(refused.returncode, 2)
+            self.assertEqual(verification.read_bytes(), before)
+            gate.assert_called_once_with(docs, "Environment Contract revision 2")
+
+            environment_before = environment.read_bytes()
+            replace = operation_compile.atomic_file.replace_bytes
+
+            def concurrent_change(path, data, **kwargs):
+                environment.write_bytes(environment_before + b"\nConcurrent change\n")
+                return replace(path, data, **kwargs)
+
+            with mock.patch.object(operation_compile.atomic_file, "replace_bytes", side_effect=concurrent_change):
+                refused = repair()
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn("changed during re-pair", refused.stdout)
+            self.assertEqual(verification.read_bytes(), before)
+            environment.write_bytes(environment_before)
+
+            repaired = repair()
+            self.assertEqual(repaired.returncode, 0, repaired.stdout + repaired.stderr)
+            self.assertTrue(json.loads(repaired.stdout)["repaired"])
+            self.assertTrue(json.loads(repaired.stdout)["paired_environment"]["current"])
+            before_props, before_body = operation_compile.parse_text(before.decode("utf-8"), verification)
+            after_props, after_body = operation_compile.parse(verification)
+            changed_fields = {*operation_compile.PAIRED_FIELDS, "source_hash"}
+            self.assertEqual({key: value for key, value in before_props.items() if key not in changed_fields},
+                             {key: value for key, value in after_props.items() if key not in changed_fields})
+            self.assertEqual(before_body, after_body)
+            from ba_compile import remove_frontmatter_keys
+            self.assertEqual(remove_frontmatter_keys(before.decode("utf-8"), changed_fields),
+                             remove_frontmatter_keys(verification.read_text(encoding="utf-8"), changed_fields))
+            self.assertEqual(delivery_compile.operation_contract_snapshot(docs, "verification")[1], [])
+            with mock.patch.object(operation_compile.atomic_file, "replace_bytes") as write:
+                retried = repair()
+            self.assertFalse(json.loads(retried.stdout)["repaired"])
+            write.assert_not_called()
             self.invoke(OPERATION, "begin-revision", "--docs", str(docs), "--kind", "verification")
             self.assertNotIn("paired_environment", verification.read_text(encoding="utf-8"))
             approved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "verification")

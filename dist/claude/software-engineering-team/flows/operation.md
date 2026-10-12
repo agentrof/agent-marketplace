@@ -143,8 +143,7 @@ commands QA runs itself, such as a recorded-results reader. Its columns are
 `seed`, `logs` and `url`, the exact command and a repository-relative working
 directory. QA runs a row with `environment --verb <verb>` in the private
 runtime checkout; the runner records its exit code, output digest and
-`candidate_intact` like any environment verb, and the reader barrier allows it
-as the bound command. Without the table only the fixed verbs exist. Keep a step
+`candidate_intact` like any environment verb. Without the table only the fixed verbs exist. Keep a step
 in `Owner Steps` only when the owner alone may run it.
 
 QA reaches a row with `delivery_verification.py --worktree <item>

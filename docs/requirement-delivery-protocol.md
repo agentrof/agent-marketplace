@@ -798,8 +798,24 @@ An absent schedule preserves `sequential_v1` for legacy approved Items without
 altering their bytes or hashes. Parallel Code Review and QA bind one committed
 candidate and its exact plan, source and instruction identities. Both readers
 must settle or confirm cancellation before anyone writes the candidate's
-tracked files, its Git metadata or the session records outside scratch;
-untracked, ignored and runtime files stay writable. A reader's
+tracked files, its Git index, HEAD or refs, or the session record outside
+scratch. The barrier protects these by effect, not by command: while a
+reader runs, the runner keeps the tracked files, the worktree's HEAD and
+index and the session record read-only, recording each original mode, and
+restores the exact modes when the readers settle or are cancelled, or at the
+next guarded command after a crash. The host hook refuses only an explicit
+write to a protected path (a file tool target, a redirect, a file command or
+a Git command that writes the index, HEAD or refs); every other command runs.
+After each command the hook compares HEAD, the index, the tracked files'
+observations and the session record with the frozen state, restores any
+change from the frozen commit or the runner's session copy, and marks the
+pass `candidate_intact: false` with a `CANDIDATE_MUTATED` finding, so no
+reader passes and validate refuses until both readers settle and a new
+freeze starts. File modes do not stop a delete or rename on POSIX or a
+process running as root, and Windows keeps the session record writable
+because it refuses to replace a read-only file; the check after each
+command covers those cases. Untracked, ignored and runtime files stay
+writable. A reader's
 registration waits only for its own verification command, and a role waits
 for the Item's commands and locks only through the runner's `wait`, which
 returns once the holder releases its lock and at the latest after the

@@ -34,7 +34,7 @@ import file_lock
 import context_catalog
 import context_history
 import project_context
-from git_fixture import init_repository, remove_temporary
+from git_fixture import init_repository, make_writable, remove_temporary
 from tools.tests.test_impact_closure import note
 
 
@@ -78,7 +78,7 @@ class VerificationTests(unittest.TestCase):
     def write(self, relative, text):
         path = self.root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        make_writable(path).write_text(text, encoding="utf-8")
 
     def note(self, relative, props):
         self.write(relative, delivery.frontmatter(props, "# Evidence\n\nReviewed independently.\n"))
@@ -362,7 +362,8 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
             verification.guard_write(self.root, [self.root / "src/product.py"])
         message = str(refused.exception)
         self.assertTrue(message.startswith("DELIVERY_VERIFICATION_READERS_ACTIVE: "), message)
-        for part in ("command_form", "no pipe, redirect, variable or prefix", "Read tool", "allowed_writes"):
+        for part in ("tracked files", "Git index, HEAD or refs", "session record",
+                     "Untracked, ignored and runtime files", "environment --verb <name>"):
             self.assertIn(part, message)
 
     def test_frozen_manifest_defaults_to_resolver_and_batches_exact_candidate_text(self):
@@ -716,7 +717,7 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         path = verification.session_path(self.root)
         current = json.loads(path.read_text())
         current["workers"]["qa_engineer"]["state"] = "settled"
-        path.write_text(json.dumps(current))
+        make_writable(path).write_text(json.dumps(current))
         with self.assertRaisesRegex(RuntimeError, "invalid"):
             verification.validate(self.root, "DLV-001", "AUTH-01")
         path.unlink()
@@ -814,11 +815,11 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         original = verification.session_path(self.root).read_bytes()
         for message, change in refusals:
             with self.subTest(message=message):
-                verification.session_path(self.root).write_bytes(original)
+                make_writable(verification.session_path(self.root)).write_bytes(original)
                 self.forge_test_identity(change)
                 with mock.patch.dict(os.environ, checker), self.assertRaisesRegex(RuntimeError, re.escape(message)):
                     verification.validate(self.root, "DLV-001", "AUTH-01")
-        verification.session_path(self.root).write_bytes(original)
+        make_writable(verification.session_path(self.root)).write_bytes(original)
         raw = verification.read_session(self.root)["raw_evidence"]["test"]
         with mock.patch.object(verification.time, "time", return_value=raw["completed_at"] + 86401), \
                 self.assertRaisesRegex(RuntimeError, "full_test_suite evidence expired"):
@@ -941,7 +942,7 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
             if check == "full_test_suite":
                 continue
             with self.subTest(reuse=check):
-                verification.session_path(self.root).write_bytes(original)
+                make_writable(verification.session_path(self.root)).write_bytes(original)
                 self.forge_identity(kind, check, lambda identity: identity.update(reused_pre_handoff=reuse))
                 with self.assertRaisesRegex(RuntimeError, f"^{check} evidence reuses a pre-handoff run, which only"
                                                           " the full test suite does$"):
@@ -1508,7 +1509,7 @@ print(sys.argv[2])
         path = self.root / "src/product.py"
         old = path.read_bytes()
         metadata = path.stat()
-        path.write_bytes(b"temporary mutant")
+        make_writable(path).write_bytes(b"temporary mutant")
         path.write_bytes(old)
         os.utime(path, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
         self.assertEqual(path.stat().st_mtime_ns, metadata.st_mtime_ns)
@@ -2518,7 +2519,7 @@ class FrozenContextReadingTests(unittest.TestCase):
     def write(self, relative, text):
         path = self.root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        make_writable(path).write_text(text, encoding="utf-8")
         self.frozen[relative] = path.read_bytes()
 
     def git_transport(self, command, **_kwargs):

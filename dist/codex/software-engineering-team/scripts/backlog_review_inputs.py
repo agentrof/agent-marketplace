@@ -685,6 +685,9 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
             check["test_cost"] = backlog.test_cost_block(cost, scope_stories, levels is not None)
         if levels is not None:
             check["test_levels"] = backlog.test_levels_block(levels, scope_stories)
+        pending_controls = backlog.pending_finding_controls(docs, record)
+        if pending_controls:
+            check["finding_control_bindings_to_absorb"] = pending_controls
         if carried:
             check["scaffold_findings"] = carried
         if writer and record.get("transition_findings"):

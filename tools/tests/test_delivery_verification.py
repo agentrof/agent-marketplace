@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 sys.path.insert(0, str(ROOT / "tools/tests"))
 import delivery_compile as delivery
+import backlog_compile
 import delivery_verification as verification
 import file_lock
 import context_catalog
@@ -241,6 +242,79 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         selector.write_text(json.dumps(literal), encoding="utf-8")
         parsed = verification.diagnostic_selection(self.root, selector, verification.read_session(self.root)["candidate"])
         self.assertEqual(parsed["failed_test_ids"], literal["failed_test_ids"])
+
+    def test_open_finding_runs_its_prescribed_negative_controls_as_finding_diagnostic(self):
+        self.prepare_diagnostic()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [{"id": "CR-1", "severity": "major", "status": "open", "verification": "Run the controls",
+                               "negative_control_test_ids": ["focused_tests.Focused.test_affected",
+                                                             "untouched.Suite.test_control"]},
+                              {"id": "CR-2", "severity": "minor", "status": "open", "verification": "Review"}]
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        frozen = self.freeze()
+        selector = verification.session_path(self.root).parent / "scratch/controls.json"
+        base = {"schema_version": 1, "candidate_hash": frozen["candidate"]["candidate_hash"],
+                "failed_test_ids": [], "affected_test_ids": []}
+        refusals = (([{"finding_id": "CR-9", "test_ids": ["focused_tests.Focused.test_affected"]}], "no open inherited"),
+                    ([{"finding_id": "CR-2", "test_ids": ["focused_tests.Focused.test_affected"]}], "prescribes no"),
+                    ([{"finding_id": "CR-1", "test_ids": ["focused_tests.Focused.test_failed"]}], "prescribes no"),
+                    ([{"finding_id": "CR-1", "test_ids": ["untouched.Suite.test_control"]}], "test files the Item changed"),
+                    ([{"finding_id": "CR-1", "test_ids": []}], "unique nonempty"),
+                    ([{"finding_id": "CR-1"}], "only finding_id and test_ids"))
+        for controls, message in refusals:
+            with self.subTest(controls=controls):
+                selector.write_text(json.dumps({**base, "finding_controls": controls}), encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, message):
+                    verification.run_check(self.root, "diagnostic_test", selection_file=selector)
+        controls = [{"finding_id": "CR-1", "test_ids": ["focused_tests.Focused.test_affected"]}]
+        selector.write_text(json.dumps({**base, "finding_controls": controls}), encoding="utf-8")
+        raw = verification.run_check(self.root, "diagnostic_test", selection_file=selector)
+        self.assertEqual((raw["exit_code"], raw["candidate_intact"], raw["selection_intact"]), (0, True, True))
+        self.assertIn("Ran 1 test", verification.raw_output_path(self.root, raw["output_file"]).read_text())
+        self.assertEqual(raw["evidence_scope"], "finding_diagnostic")
+        rows = verification.finding_control_history(verification.read_session(self.root))
+        self.assertEqual(rows, [{"finding_id": "CR-1", "test_ids": ["focused_tests.Focused.test_affected"],
+                                "candidate_hash": frozen["candidate"]["candidate_hash"], "evidence_hash": raw["evidence_hash"]}])
+        self.assertEqual(verification.finding_control_history({"finding_control_bindings": rows}), rows)
+        self.assertEqual(verification.read_session(self.root)["finding_control_bindings"], rows)
+        second = copy.deepcopy(raw)
+        second["diagnostic_selection"]["finding_controls"][0]["finding_id"] = "CR-2"
+        combined = verification.finding_control_history({"finding_control_bindings": rows,
+                                                         "raw_evidence": {"diagnostic_test": second}})
+        self.assertEqual([row["finding_id"] for row in combined], ["CR-1", "CR-2"])
+        recorded = raw["diagnostic_selection"]
+        self.assertEqual((recorded["finding_controls"], recorded["finding_control_test_ids"], recorded["selected_test_ids"]),
+                         (controls, ["focused_tests.Focused.test_affected"], ["focused_tests.Focused.test_affected"]))
+        # Finding-scoped evidence never stands in for the acceptance suite.
+        result = self.result("qa_engineer", "qa_diagnostic")
+        result["mode"] = "qa_final"
+        result["checks"]["full_test_suite"].update(command=self.command, exit_code=0,
+            environment=raw["identity"]["environment_hash"], raw_evidence_hash=raw["evidence_hash"])
+        with self.assertRaisesRegex(RuntimeError, "same-candidate command evidence"):
+            verification.register_result(self.root, result)
+
+        self.note("workspace/docs/delivery/deliveries/dlv-000/delivery.md", {"id": "DLV-000", "status": "merged"})
+        self.note("workspace/docs/delivery/deliveries/dlv-000/delivery-review.md",
+                  {"finding_control_bindings": json.dumps([{"story": "AUTH-01", **rows[0]}])})
+        record = {"stories": [{"id": "AUTH-01", "test_body": ""}]}
+        self.assertEqual(backlog_compile.pending_finding_controls(self.root / "workspace/docs", record)[0]["test_ids"],
+                         ["focused_tests.Focused.test_affected"])
+        record["stories"][0]["test_body"] = "## AUTH-01-TS-001\n- automation_target: focused_tests.Focused.test_affected\n"
+        self.assertEqual(backlog_compile.pending_finding_controls(self.root / "workspace/docs", record), [])
+
+    def test_negative_control_ids_of_a_finding_are_literal_test_ids(self):
+        for controls in ([], ["-k"], ["same", "same"], "tests/test_x.py::test_y"):
+            with self.subTest(controls=controls), self.assertRaisesRegex(RuntimeError, "negative_control_test_ids"):
+                verification.check_findings([{"id": "CR-1", "severity": "major", "status": "open",
+                                              "verification": "Run", "negative_control_test_ids": controls}])
+        verification.check_findings([{"id": "CR-1", "severity": "major", "status": "open", "verification": "Run",
+                                      "negative_control_test_ids": ["tests/test_x.py::test_y"]}])
+        self.assertTrue(verification.test_id_in_file("tests/test_x.py::test_y", "tests/test_x.py"))
+        self.assertTrue(verification.test_id_in_file("tests.test_x.Case.test_y", "tests/test_x.py"))
+        self.assertFalse(verification.test_id_in_file("tests.test_xy.Case.test_y", "tests/test_x.py"))
 
     def test_diagnostic_selector_edit_and_restore_invalidates_command_evidence(self):
         selector, _ = self.prepare_diagnostic()

@@ -1,7 +1,8 @@
 # Check lifecycle paths before a full verification pass
 
-These instructions apply only at `qa_preflight: lifecycle_first`. At `off`, the
-existing QA order and freeze rules remain unchanged.
+These are the instructions of process switch `qa_preflight` at `lifecycle_first`,
+selected in the project's Process Policy. At `off`, the existing QA order and
+freeze rules remain unchanged.
 
 ## Before freezing
 

@@ -2631,5 +2631,47 @@ class FrozenContextReadingTests(unittest.TestCase):
             verification.inspect_context(self.root, {**self.current, "project_reading": {"status": "unavailable"}})
 
 
+
+class LiveStepTimingTests(unittest.TestCase):
+    """At step_timing recorded the live runner times each live step its progress adapter reports, in the
+    Delivery's timing run, watching the live progress record; at off it writes no timing (#543)."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        self.root = Path(temporary.name).resolve() / "item"
+        self.root.mkdir()
+        verification.session_path(self.root).parent.joinpath("scratch").mkdir(parents=True)
+        self.adapter = verification.raw_output_path(self.root, "scratch/live-progress.json")
+        self.current = {"delivery": "DLV-001", "candidate_hash": "sha256:" + "0" * 64}
+
+    def run_cases(self, values, cases):
+        with mock.patch.object(verification, "timing_values", return_value=values), \
+                mock.patch.object(verification, "LIVE_PROGRESS_INTERVAL", 0.01), \
+                verification.live_progress(self.root, "s1", self.current, "live_test:smoke", "smoke"):
+            for case in cases:
+                self.adapter.write_text(json.dumps({"test_id": case}), encoding="utf-8")
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and case not in self.adapter.parent.joinpath(
+                        verification.live_progress_path(self.root, "live_test:smoke").name).read_text():
+                    time.sleep(0.01)
+
+    def test_each_reported_live_step_is_a_timed_span(self):
+        values = {"step_timing": {"value": "recorded", "default": "off"}}
+        self.run_cases(values, ["case a", "case-b"])
+        events = [json.loads(line) for line in (self.root / ".agentrof/agent-marketplace/timing/DLV-001.jsonl")
+                  .read_text(encoding="utf-8").splitlines()]
+        starts = [event for event in events if event["event"] == "start"]
+        self.assertEqual([(event["step"], event["budget"]) for event in starts],
+                         [("live_step:case_a", "live_step"), ("live_step:case-b", "live_step")])
+        self.assertEqual(starts[0]["watch"], verification.live_progress_path(self.root, "live_test:smoke")
+                         .relative_to(self.root).as_posix())
+        self.assertEqual(sum(event["event"] == "end" for event in events), 2)
+
+    def test_no_timing_without_step_timing_recorded(self):
+        self.run_cases(None, ["case a"])
+        self.assertFalse((self.root / ".agentrof/agent-marketplace/timing").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

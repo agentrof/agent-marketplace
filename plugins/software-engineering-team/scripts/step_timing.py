@@ -28,9 +28,19 @@ lists the spans still open that have already passed their budget. ``report``
 prints the per-step breakdown of a run against its budgets, and ``report
 --write`` keeps it durable as ``<run>.report.json`` beside the records.
 
+Process switch ``step_baseline`` at ``median`` adds a baseline per step name:
+the median of the last ``runs`` finished spans of that step, across every run
+file, that ended before the span started, once at least ``min_samples`` exist.
+A span is then over when it passes the larger of its maximum and
+``ratio_percent`` / 100 times its baseline, so a step whose length depends on
+the project, such as a live test run, is compared with its own history. A
+span started with ``--watch <path>`` names a file, relative to the project
+root, whose live progress record or last output line tells the owner what the
+step is doing when it is over.
+
 Commands:
   step_timing.py start  --run R --step S [--kind step|spawn] [--phase P] [--role X]
-                        [--parent SPAN] [--budget ID] [--project-root P] [--at ISO]
+                        [--parent SPAN] [--budget ID] [--watch PATH] [--project-root P] [--at ISO]
   step_timing.py end    --run R --span SPAN [--metric k=v]... [--project-root P] [--at ISO]
   step_timing.py overruns --run R [--project-root P] [--at ISO]
   step_timing.py report --run R [--project-root P] [--write]
@@ -48,6 +58,7 @@ import argparse
 import json
 import os
 import re
+import statistics
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -60,6 +71,12 @@ import file_lock  # noqa: E402
 SWITCH = "step_timing"
 RECORDED = "recorded"
 BUDGET_SWITCH = "step_budgets"
+BASELINE_SWITCH = "step_baseline"
+MEDIAN = "median"
+BASELINE_PARAMETERS = ("runs", "min_samples", "ratio_percent")
+# How much of a watched file is read for its last line, and how long that line may be.
+TAIL_BYTES = 4096
+LINE_CHARS = 300
 TIMING = Path(".agentrof") / "agent-marketplace" / "timing"
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 STEP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:-]{0,127}$")
@@ -136,6 +153,100 @@ def budgets(values: dict) -> dict[str, int]:
         return {}
     return {key: value for key, value in (spec.get("parameters") or {}).items()
             if isinstance(value, int) and value > 0}
+
+
+def baseline_settings(values: dict) -> dict | None:
+    """The baseline parameters in force while step_baseline is median, else None."""
+    spec = values.get(BASELINE_SWITCH, {})
+    parameters = spec.get("parameters") or {}
+    if spec.get("value") != MEDIAN or not all(
+            type(parameters.get(key)) is int and parameters[key] > 0 for key in BASELINE_PARAMETERS):
+        return None
+    return {key: parameters[key] for key in BASELINE_PARAMETERS}
+
+
+def history(root: Path, settings: dict | None) -> dict[str, list[tuple[datetime, float]]]:
+    """Every finished span of every run, by step name, as (end, seconds); none without a baseline."""
+    folder = root / TIMING
+    found: dict[str, list[tuple[datetime, float]]] = {}
+    if settings is None or not folder.is_dir():
+        return found
+    for path in sorted(folder.glob("*.jsonl")):
+        try:
+            known = spans(read_events(path))
+        except Refused:
+            continue  # another run's damaged file never stops this one's report
+        for span in known.values():
+            if "seconds" in span:
+                found.setdefault(span["step"], []).append((parse_stamp(span["ended_at"]), span["seconds"]))
+    return found
+
+
+def baseline(span: dict, past: dict, settings: dict | None) -> float | None:
+    """The median seconds of the step's last runs ended before this span started."""
+    if settings is None:
+        return None
+    started = parse_stamp(span["at"])
+    samples = sorted(item for item in past.get(span["step"], []) if item[0] <= started)[-settings["runs"]:]
+    if len(samples) < settings["min_samples"]:
+        return None
+    return statistics.median(seconds for _, seconds in samples)
+
+
+def limit(span: dict, limits: dict[str, int], past: dict, settings: dict | None) -> dict | None:
+    """The span's limit: the larger of its maximum and ratio times its baseline, with its basis."""
+    base = baseline(span, past, settings)
+    options = {}
+    if span.get("budget") in limits:
+        options["budget"] = limits[span["budget"]] * 60
+    if base is not None:
+        options["baseline"] = base * settings["ratio_percent"] / 100
+    if not options:
+        return None
+    basis = max(options, key=lambda key: options[key])
+    result = {"basis": basis, "threshold_minutes": round(options[basis] / 60, 2),
+              "_seconds": options[basis]}
+    if base is not None:
+        result["baseline_minutes"] = round(base / 60, 2)
+    return result
+
+
+def last_line(path: Path) -> str | None:
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        handle.seek(max(0, handle.tell() - TAIL_BYTES))
+        lines = [line for line in handle.read().decode("utf-8", "replace").splitlines() if line.strip()]
+    return lines[-1][-LINE_CHARS:] if lines else None
+
+
+def inside(root: Path, path: Path) -> bool:
+    return root.resolve() in path.resolve().parents
+
+
+def doing(root: Path, watch: str) -> dict:
+    """What a watched step is doing: its live progress record and last output line, or the file's last line."""
+    path = root / watch
+    result: dict = {"watch": watch}
+    try:
+        if not inside(root, path) or not path.is_file():
+            return result
+        value = None
+        if path.stat().st_size <= 65536:
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except ValueError:
+                pass
+        if isinstance(value, dict):
+            result["progress"] = {key: value[key] for key in
+                                  ("state", "elapsed_seconds", "adapter_observation") if key in value}
+            output = value.get("output_path")
+            if isinstance(output, str) and inside(root, Path(output)) and Path(output).is_file():
+                result["last_line"] = last_line(Path(output))
+        else:
+            result["last_line"] = last_line(path)
+    except OSError:
+        pass
+    return result
 
 
 def now(at: str | None) -> datetime:
@@ -237,16 +348,22 @@ def breakdown(span: dict, all_spans: dict[str, dict], until: datetime | None = N
 
 
 def overrun(span: dict, all_spans: dict[str, dict], limits: dict[str, int],
-            until: datetime | None = None) -> dict | None:
-    budget = span.get("budget")
-    if budget not in limits:
+            until: datetime | None = None, *, root: Path | None = None, past: dict | None = None,
+            settings: dict | None = None) -> dict | None:
+    bound = limit(span, limits, past or {}, settings)
+    if bound is None:
         return None
     parts = breakdown(span, all_spans, until)
-    if parts["seconds"] <= limits[budget] * 60:
+    if parts["seconds"] <= bound["_seconds"]:
         return None
-    return {"span": span["span"], "step": span["step"], "budget": budget,
-            "budget_minutes": limits[budget], "minutes": round(parts["seconds"] / 60, 2),
-            "over_minutes": round(parts["seconds"] / 60 - limits[budget], 2), **parts}
+    budget = span.get("budget")
+    found = {"span": span["span"], "step": span["step"], "budget": budget,
+             "budget_minutes": limits.get(budget), "minutes": round(parts["seconds"] / 60, 2),
+             "over_minutes": round((parts["seconds"] - bound["_seconds"]) / 60, 2),
+             **{key: value for key, value in bound.items() if key != "_seconds"}, **parts}
+    if root is not None and span.get("watch"):
+        found["doing"] = doing(root, span["watch"])
+    return found
 
 
 def append(root: Path, run: str, build) -> dict:
@@ -275,9 +392,11 @@ def append(root: Path, run: str, build) -> dict:
 
 def start(root: Path, values: dict, *, run: str, step: str, kind: str = "step",
           phase: str = "other", role: str | None = None, parent: str | None = None,
-          budget: str | None = None, at: str | None = None) -> dict:
+          budget: str | None = None, watch: str | None = None, at: str | None = None) -> dict:
     if not recording(values):
         return {"ok": True, "recorded": False}
+    if watch is not None and (Path(watch).is_absolute() or ".." in Path(watch).parts):
+        raise Refused("TIMING_BAD_WATCH", f"--watch names a path inside the project root: {watch!r}")
     moment = now(at)
     limits = budgets(values)
 
@@ -293,7 +412,7 @@ def start(root: Path, values: dict, *, run: str, step: str, kind: str = "step",
         chosen = budget if budget is not None else (step if step in limits else None)
         event = {"event": "start", "span": span_id, "base": base, "step": step, "kind": kind,
                  "phase": phase, "at": stamp(moment)}
-        for key, value in (("role", role), ("parent", parent), ("budget", chosen)):
+        for key, value in (("role", role), ("parent", parent), ("budget", chosen), ("watch", watch)):
             if value is not None:
                 event[key] = value
         result = {"ok": True, "recorded": True, "span": span_id, "at": event["at"]}
@@ -310,9 +429,11 @@ def end(root: Path, values: dict, *, run: str, span: str, metrics: dict[str, int
         return {"ok": True, "recorded": False}
     moment = now(at)
     limits = budgets(values)
+    settings = baseline_settings(values)
 
     def build(events):
         known = spans(events)
+        past = history(root, settings)
         if span not in known:
             raise Refused("TIMING_UNKNOWN_SPAN", f"span {span!r} was never started in run {run}")
         if "ended_at" in known[span]:
@@ -325,7 +446,7 @@ def end(root: Path, values: dict, *, run: str, span: str, metrics: dict[str, int
         closed = spans([*events, event])
         result = {"ok": True, "recorded": True, "span": span,
                   "seconds": closed[span]["seconds"]}
-        found = overrun(closed[span], closed, limits)
+        found = overrun(closed[span], closed, limits, root=root, past=past, settings=settings)
         if found is not None:
             result["overrun"] = found
             result["_extra_events"] = [{"event": "overrun", "at": event["at"], **found}]
@@ -336,9 +457,11 @@ def end(root: Path, values: dict, *, run: str, span: str, metrics: dict[str, int
 
 def open_overruns(root: Path, values: dict, run: str, at: str | None = None) -> dict:
     limits = budgets(values)
+    settings = baseline_settings(values)
+    past = history(root, settings)
     moment = now(at)
     known = spans(read_events(records_path(root, run)))
-    found = [item for item in (overrun(span, known, limits, moment)
+    found = [item for item in (overrun(span, known, limits, moment, root=root, past=past, settings=settings)
                                for span in known.values() if "ended_at" not in span) if item]
     return {"ok": True, "run": run, "overruns": found}
 
@@ -349,6 +472,8 @@ def report(root: Path, values: dict, run: str, write: bool = False) -> dict:
     if not events:
         raise Refused("TIMING_NO_RUN", f"no timing records for run {run}")
     limits = budgets(values)
+    settings = baseline_settings(values)
+    past = history(root, settings)
     known = spans(events)
     last = max(parse_stamp(event["at"]) for event in events)
     steps = []
@@ -357,12 +482,13 @@ def report(root: Path, values: dict, run: str, write: bool = False) -> dict:
             continue
         parts = breakdown(span, known, last)
         budget = span.get("budget")
-        verdict = ("open" if "ended_at" not in span else "no_budget" if budget not in limits
-                   else "over" if parts["seconds"] > limits[budget] * 60 else "within")
+        bound = limit(span, limits, past, settings)
+        verdict = ("open" if "ended_at" not in span else "no_budget" if bound is None
+                   else "over" if parts["seconds"] > bound["_seconds"] else "within")
         row = {"span": span["span"], "step": span["step"], "started_at": span["at"],
                "ended_at": span.get("ended_at"), "minutes": round(parts["seconds"] / 60, 2),
                "budget": budget, "budget_minutes": limits.get(budget), "verdict": verdict,
-               **parts}
+               **{key: value for key, value in (bound or {}).items() if key != "_seconds"}, **parts}
         if span.get("metrics"):
             row["metrics"] = span["metrics"]
         steps.append(row)
@@ -395,6 +521,7 @@ def main(argv: list[str] | None = None) -> int:
     begun.add_argument("--role", type=name)
     begun.add_argument("--parent")
     begun.add_argument("--budget", type=step_name)
+    begun.add_argument("--watch", help="a file under the project root that shows what the step is doing")
     finished = sub.add_parser("end")
     finished.add_argument("--run", type=name, required=True)
     finished.add_argument("--span", required=True)
@@ -421,7 +548,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "start":
                 result = start(root, values, run=args.run, step=args.step, kind=args.kind,
                                phase=args.phase, role=args.role, parent=args.parent,
-                               budget=args.budget, at=args.at)
+                               budget=args.budget, watch=args.watch, at=args.at)
             elif args.command == "end":
                 result = end(root, values, run=args.run, span=args.span,
                              metrics=dict(args.metric), at=args.at)

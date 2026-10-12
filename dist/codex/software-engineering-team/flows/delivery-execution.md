@@ -7,29 +7,27 @@ Batch-read its units, using the frozen context reader for frozen candidates. Whe
 on the role's initiative or parent direction; record sources and reasons, rebind evidence, preserve gates and return `context_findings` to the parent for user-approved reporting.
 For gaps, use `vault_query.py`, machine indexes and generated views, typed frontmatter, relation blocks and wikilinks, then maps and targeted search.
 Fallback navigation with a shell can use `home.md`, `maps/_generated/relation-status.md`,
-`maps/_generated/cross-subtree-matrix.md` and
-`maps/_generated/stale-relations.md`, `maps/delivery.md` and the Item's
-story, Test Plan and pinned contract relations. Switch `context_pack`:
-at `role_digest`, a spawned role receives its pack from `context_pack.py
-build --entry <entry> --role <role> --mode <mode> --project-root <root>`
-instead of the full required reads; it reads a named source in full only
-when the pack does not cover a case, and records that read and why, as
-`skill-content/challenge-review/references/switch-context_pack-role_digest.md`
-defines. Switch `step_timing`: at `recorded`, the coordinator runs
-`step_timing.py start --run <run> --step <step> [--budget <id>]` before
-each step and `step_timing.py end --run <run> --span <span>` after it,
-and records each role spawn with `--kind spawn --parent <step span>
---role <role> --phase reading|writing|review|re_review|waiting`. An end
-that returns overrun is reported to the owner at once with its
-breakdown, largest contributor and lever. The run ends with
-`step_timing.py report --run <run> --write`, as
-`skill-content/challenge-review/references/switch-step_timing-recorded.md`
-defines. Switch `step_budgets`: at `enforced`, each budgeted step is
-compared with its maximum, the owner's parameter or the package target
-in `skill-content/configure/data/step-budgets.json`; a step may finish
-well under it, and only an exceeded maximum is reported, never blocking,
-as
-`skill-content/challenge-review/references/switch-step_budgets-enforced.md`
+`maps/_generated/cross-subtree-matrix.md` and `maps/_generated/stale-relations.md`,
+`maps/delivery.md` and the Item's story, Test Plan and pinned contract relations. Switch
+`context_pack`: at `role_digest`, a spawned role receives its pack from `context_pack.py build
+--entry <entry> --role <role> --mode <mode> --project-root <root>` instead of the full required
+reads; it reads a named source in full only when the pack does not cover a case, and records that
+read and why, as `skill-content/challenge-review/references/switch-context_pack-role_digest.md`
+defines. Switch `step_timing`: at `recorded`, the coordinator runs `step_timing.py start --run <run>
+--step <step> [--budget <id>]` before each step and `step_timing.py end --run <run> --span <span>`
+after it, and records each role spawn with `--kind spawn --parent <step span> --role <role> --phase
+reading|writing|review|re_review|waiting`. An end that returns overrun is reported to the owner at
+once with its breakdown, largest contributor and lever. The run ends with `step_timing.py report
+--run <run> --write`, as `skill-content/challenge-review/references/switch-step_timing-recorded.md`
+defines. Switch `step_budgets`: at `enforced`, each budgeted step is compared with its maximum, the
+owner's parameter or the package target in `skill-content/configure/data/step-budgets.json`; a step
+may finish well under it, and only an exceeded maximum is reported, never blocking, as
+`skill-content/challenge-review/references/switch-step_budgets-enforced.md` defines. Switch
+`step_baseline`: at `median`, a timed step is also compared with the median of its own last runs,
+and `delivery_verification.py` times each live run, live step and rehearsal command under the QA
+step keys of `skill-content/configure/data/step-budgets.json`; while a long QA command runs, the
+coordinator polls `step_timing.py overruns` and reports each overrun with its step, elapsed time,
+baseline and what it is doing, as `skill-content/deliver/references/switch-step_baseline-median.md`
 defines.
 
 `/deliver DLV-###` resumes from tracked Delivery files and verified remote

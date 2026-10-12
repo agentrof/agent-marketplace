@@ -95,7 +95,7 @@
       "4d392c04a01efa757b47e327dcd42e937a47a60cf69926dfacdf5f5cb1c72c52"
     ,
     "constitution.md":
-      "a980d74e7460071f12237b8432d43e819f523374238679c98cec1abb98ed6fd9"
+      "9ab4dd0b8df2fde66c82556e9a743a347294034035a73e6746f4bb12292ff00b"
     ,
     "flows/backlog-planning.md":
       "d77eb8e4d6086766a9462eff3c31abb02f36efd50f9eaa718e3800e638d555ac"
@@ -197,7 +197,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "fe70083f5af7e9f9b85736b33469bf5ce87c6e24049f28d99ff52c8156cba5b2"
+      "06a56274b1d610f2f9a100c7166cdea856bd2d03a277b944faaf4b7a80f17206"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -251,7 +251,7 @@
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
     ,
     "scripts/project_context.py":
-      "bf21e9bf8c7886022a786363f9e30db7ec66dcb8f796355c6bcd012408e46fbc"
+      "0b13efa0b6d9ccc906f3b54cad289d2a69e3172afb2e6e939cafbc2739974313"
     ,
     "scripts/project_instructions.py":
       "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
@@ -281,7 +281,7 @@
       "b7f2cad266008812a38779f0b2208596e5d5fddf8fd9a47354706406f03ca655"
     ,
     "scripts/task_inputs.py":
-      "a95ca026d628c95cf20d313cbe1ef8faed78815b78744e8ec077b462a14067a1"
+      "ad6272c71742152ba46115ddcc559fffd1accf4585e7174404fb63a19ff66eb9"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -1040,7 +1040,7 @@
       "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
     ,
     "templates/project-context-policy.json":
-      "e05e4ac021470f303ee20d13b2f741a5870679d23ceca9c850c7a50f91c69e31"
+      "df76bb2701006cbde36c1ac96dec9d15338a21854c8041ca0a698e2826dd7412"
     ,
     "templates/project-instruction-surfaces.json":
       "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c"
@@ -1058,7 +1058,7 @@
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
     ,
     "templates/task-input-contract.md":
-      "adf4f3c92f2522f35b90706f28b659e9e18d51896b81b8b3bbe8c8a26db20a26"
+      "a1e14667ea11bd2989b2ed59055ed4a37da59b20411a4af60f6dc84ad5e3c03a"
     ,
     "templates/task-input-policy.json":
       "a388f65395aa5d8b62c12b82fc2635e8efd37fac9cb28718293874af330fff69"

@@ -1145,6 +1145,29 @@
         "unit": "At least 3 Deliveries whose backlog pin a source-rebind receipt carried forward, each with its revision replayed as a frozen reviewed revision.",
         "threshold": "Every critical and major finding of the reviewed replay also found or made moot, zero defects found after merge in a reused epic that trace to a changed source, and a median begin-revision-to-approval wall clock at most 50% of comparable reviewed revisions, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "repair_review": {
+      "summary": "Whether a repair diff receives an independent correctness review before the next verification candidate is frozen.",
+      "issue": 533,
+      "flows": [
+        "delivery-execution"
+      ],
+      "values": [
+        {
+          "id": "after_freeze",
+          "tradeoffs": "Repairs are first reviewed in the next full verification pass, preserving the current workflow. An incorrect repair can consume a full pass before it is rejected."
+        },
+        {
+          "id": "before_freeze",
+          "tradeoffs": "A fresh correctness reader checks the committed repair diff and previous findings before freeze. Critical and major findings block the new pass; minor findings carry into the full review. The extra review costs time on sound repairs and prevents costly live verification of known incorrect repairs."
+        }
+      ],
+      "default": "after_freeze",
+      "metric": "Per repaired candidate: pre-freeze review duration, blocking repair defects found before freeze, full passes later rejected for a defect in the same repair, and total verification time.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with repaired verification candidates.",
+        "threshold": "No pass fails on a repair defect missed by the pre-freeze review, and total verification time is below the after_freeze baseline, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

@@ -79,21 +79,18 @@ defines.
 
 ## Parallel verification
 
-Follow the approved Item's `verification_schedule`; a missing field keeps
-the sequential protocol. At `parallel_snapshot_v1`, commit the complete
-product/test candidate and use the packaged
+Follow the Item's `verification_schedule`, or sequential when absent. At
+`parallel_snapshot_v1`, commit the product/test candidate and use the packaged
 `scripts/delivery_verification.py --worktree <item-root> freeze --delivery
 DLV-### --story <story>` before invoking the two readers. The resulting
 candidate and session identities bind all source and instruction inputs.
 Generate each role's `manifest` with `--role code_reviewer|qa_engineer` and
 `--mode review_initial|review_repair|qa_diagnostic|qa_final`.
-`start-pass --delivery DLV-### --story <story>` chains the pass: at
-`pre_handoff_regression` `touched_suites`, `regression-selection` and
-`regression-run` precede `freeze`. It saves both manifests and each reader's
-launch prompt from `templates/reader-launch-prompts.json`, lens assignments
-included. Modes default to `review_repair` after an earlier candidate and
-`qa_final`; `--review-mode` and `--qa-mode` override them. The first failing
-step stops the chain and returns its error.
+`start-pass --delivery DLV-### --story <story>` checks required repair review
+before regression work, then runs configured regressions, `freeze`, manifests
+and `templates/reader-launch-prompts.json` prompts, including lens assignments.
+Modes default to `review_repair` after an earlier candidate and `qa_final`;
+`--review-mode` and `--qa-mode` override them. The first failing step stops the chain.
 Put the manifest's `command_form` verbatim into every reader prompt: while
 readers are active, Bash admits only that one direct invocation followed by a
 verb, and readers read files with the host's Read tool.
@@ -113,6 +110,9 @@ of each scenario whose Test Plan level the Item converts, `freeze` refuses an
 incomplete map and the code reviewer reads the pairs it flags, as
 `skill-content/deliver/references/switch-level_change_map-assertion_map.md`
 defines.
+Switch `repair_review` at `before_freeze` blocks a candidate on unresolved repair
+review; minor findings enter full review. Follow
+`skill-content/code-review/references/switch-repair_review-before_freeze.md`.
 Switch `pre_handoff_regression`: at `touched_suites`, the coordinator runs the
 suites of the earlier stories the candidate touches, with the Item's own Test
 Plan targets, before `freeze`, which refuses until that run passed on the exact

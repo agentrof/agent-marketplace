@@ -79,22 +79,21 @@ defines.
 
 ## Parallel verification
 
-Follow the approved Item's `verification_schedule`. An older Item with no
-field retains the sequential protocol. For `parallel_snapshot_v1`, commit
-the complete product/test candidate and use the packaged
+Follow the approved Item's `verification_schedule`; a missing field keeps
+the sequential protocol. At `parallel_snapshot_v1`, commit the complete
+product/test candidate and use the packaged
 `scripts/delivery_verification.py --worktree <item-root> freeze --delivery
 DLV-### --story <story>` before invoking the two readers. The resulting
 candidate and session identities bind all source and instruction inputs.
 Generate each role's `manifest` with `--role code_reviewer|qa_engineer` and
 `--mode review_initial|review_repair|qa_diagnostic|qa_final`.
-`start-pass --delivery DLV-### --story <story>` chains these steps for one
-pass: at `pre_handoff_regression` `touched_suites` it runs
-`regression-selection` and `regression-run` first, then `freeze`, saves both
-manifests under the session's runtime directory, `review_repair` after an
-earlier candidate and `qa_final` unless `--review-mode` or `--qa-mode` says
-otherwise, and writes each reader's launch prompt, one per lens assignment
-included, from `templates/reader-launch-prompts.json`. It
-stops at the first failing step and names it with its error.
+`start-pass --delivery DLV-### --story <story>` chains the pass: at
+`pre_handoff_regression` `touched_suites`, `regression-selection` and
+`regression-run` precede `freeze`. It saves both manifests and each reader's
+launch prompt from `templates/reader-launch-prompts.json`, lens assignments
+included. Modes default to `review_repair` after an earlier candidate and
+`qa_final`; `--review-mode` and `--qa-mode` override them. The first failing
+step stops the chain and returns its error.
 
 Put the manifest's `command_form` verbatim into every reader prompt: while
 readers are active, Bash admits only that one direct invocation followed by a
@@ -107,10 +106,8 @@ for continuation; `--ref` adds a reference. If context is insufficient or wrong,
 and `diff` on the reader's initiative or parent direction, and return
 `context_findings` with recovery and proposed fix when known. The parent offers
 an anonymous issue through `issue-report` only with exact-payload user approval.
-While readers are active, use the same CLI's `inspect --path <file>` and
-`diff [--path <file>]` to read the frozen Git candidate. `inspect --base`
-selects its exact integration base. These interfaces permit source inspection
-without opening a general shell writer through the barrier.
+Read the frozen candidate with `inspect --path <file>` and
+`diff [--path <file>]`; `inspect --base` selects its exact integration base.
 Use `inspect --instruction <package-relative-file>` for bound package instructions.
 Switch `level_change_map`: at `assertion_map`, the writer maps the assertions
 of each scenario whose Test Plan level the Item converts, `freeze` refuses an
@@ -141,15 +138,18 @@ role runs each command, and a registration waits only for the settling
 reader's own command to exit. The code reviewer runs no command, not even a
 diagnostic test: its manifest names the freeze record and QA's recorded runs
 as `verification_evidence` instead. It registers its finished result at once
-and returns. A reader whose result is
-refused until a step only another role takes, such as a calibration, does not
-wait for it: it returns the result unregistered for the coordinator. A
+and returns. A reader waiting on another role's step, such as calibration,
+returns its result unregistered for the coordinator. A
 cancelled or diagnostic result cannot approve an Item. Code, test, contract or
 instruction drift invalidates the candidate.
 Switch `code_review_panel`: at `beside_official`, a lens panel reads the frozen
 candidate beside the official code reviewer and `merge-panel` registers the
 one code review result, as
 `skill-content/code-review/references/switch-code_review_panel-beside_official.md`
+defines.
+At `risk_scoped`, a lens reader joins the official code reviewer only when the
+frozen change triggers its lens by the owner's parameters, as
+`skill-content/code-review/references/switch-code_review_panel-risk_scoped.md`
 defines.
 Switch `item_review_scale`: at `by_change_size`, the official code reviewer
 reads alone an Item whose frozen change is within the owner's size limits, as
@@ -189,9 +189,9 @@ group at a time with `run --kind live_test --group <group>`: the runner
 substitutes the declared group for `{group}` in `live_test_command` and runs
 it in `live_test_workdir` of the same private frozen clone, under the same
 locks, environment identity and raw-evidence recording as `run --kind test`.
-Each group keeps its own record, read with `status --run live_test:<group>`.
-Live groups never join the required checks; the Test Plan decides which ones
-a result needs, and the result cites their `evidence_hash` values.
+Each group has a record at `status --run live_test:<group>`. Live groups
+never join required checks; the Test Plan selects them and the result cites
+their `evidence_hash` values.
 Switch `qa_gate_order`: at `gate_first`, QA starts its first test command of a
 round before it plans and drafts its result, as
 `skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md`

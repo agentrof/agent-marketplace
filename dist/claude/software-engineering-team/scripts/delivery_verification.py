@@ -31,6 +31,7 @@ from backlog_compile import meaningful_text, scenario_blocks, scenario_fields
 import delivery_compile as delivery
 import file_lock
 import operation_compile
+import process_policy
 
 POLICY_PATH = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/delivery-verification-policy.json"
 ROLES = ("code_reviewer", "qa_engineer")
@@ -90,6 +91,11 @@ CODE_REVIEW_PANEL = "code_review_panel"
 BESIDE_OFFICIAL = "beside_official"
 PANEL_LENS_MODE = "panel_lens"
 PANEL_DATA_PATH = Path(__file__).resolve().parents[1] / "skill-content/code-review/data/code-review-panel.json"
+# At code_review_panel risk_scoped a lens joins the official reviewer only when
+# the frozen change fires its trigger, by the owner's lens-trigger parameters.
+RISK_SCOPED = "risk_scoped"
+PANEL_VALUES = (BESIDE_OFFICIAL, RISK_SCOPED)
+LENS_TRIGGERS_PATH = Path(__file__).resolve().parents[1] / "skill-content/code-review/data/lens-triggers.json"
 PANEL_STEP = "code_review"
 OFFICIAL = "official"
 DUPLICATE = "duplicate"
@@ -1868,6 +1874,54 @@ def panel_assignments() -> list[dict]:
             for assignment in step["default_panel"]]
 
 
+def changed_lines(root: Path, current: dict) -> int:
+    """Lines added plus lines removed in the frozen change's product and test paths against its base.
+
+    The vault under workspace/docs is not code a lens reads, and a binary file counts nothing.
+    """
+    total = 0
+    for row in git(root, "diff", "--numstat", "--no-renames", "-z", current["integration_base_commit"],
+                   current["product_commit"]).split("\0"):
+        added, removed, path = (row.split("\t", 2) + ["", ""])[:3]
+        if added.isdigit() and removed.isdigit() and not path.startswith("workspace/docs/"):
+            total += int(added) + int(removed)
+    return total
+
+
+def lens_selection(root: Path, current: dict, assignments: list[dict]) -> tuple[list[dict], dict]:
+    """The lens assignments the frozen change triggers at risk_scoped, and why each lens joined or not.
+
+    Each lens joins by the trigger lens-triggers.json declares for it, read
+    against the owner's parameter in force; a lens with no declared trigger
+    always joins. An assignment joins when any of its lenses does.
+    """
+    data = json.loads(LENS_TRIGGERS_PATH.read_text(encoding="utf-8"))
+    state = process_policy.delivery_values(delivery.docs_root(root), current["delivery"],
+                                           switches={CODE_REVIEW_PANEL})
+    parameters = state["values"][CODE_REVIEW_PANEL].get("parameters", {})
+    lines = changed_lines(root, current)
+    lenses = {}
+    for lens in sorted({lens for assignment in assignments for lens in assignment["lens"]}):
+        declared = next((entry for entry in data["lens_triggers"] if entry["lens"] == lens), None)
+        if declared is None:
+            lenses[lens] = {"joined": True, "trigger": None}
+            continue
+        threshold = parameters.get(declared["parameter"])
+        if threshold is None:
+            raise RuntimeError(f"code_review_panel {RISK_SCOPED} needs parameter {declared['parameter']!r}"
+                               " set in the Process Policy")
+        if declared["trigger"] == "changed_path_matches":
+            matched = sorted(path for path in current["changed_files"]
+                             if any(fnmatch.fnmatchcase(path, glob) for glob in threshold))
+            lenses[lens] = {"joined": bool(matched), "trigger": declared["trigger"], "matched_paths": matched}
+        elif declared["trigger"] == "changed_lines_above":
+            lenses[lens] = {"joined": lines > threshold, "trigger": declared["trigger"], "threshold": threshold}
+        else:
+            raise RuntimeError(f"lens {lens!r} declares unknown trigger {declared['trigger']!r}")
+    chosen = [assignment for assignment in assignments if any(lenses[lens]["joined"] for lens in assignment["lens"])]
+    return chosen, {"changed_lines": lines, "lenses": lenses}
+
+
 def panel_prefix(panel: dict, assignment: dict) -> str:
     """The id prefix of a lens assignment's findings in one panel pass."""
     return f"P{panel['pass']}-{assignment['key']}-"
@@ -1881,14 +1935,24 @@ def code_review_panel_state(root: Path, value: dict) -> dict | None:
     carries, so a lens finding id never repeats an earlier one. The Process
     Policy is part of the frozen candidate, so the value holds for the session.
     """
-    if code_review_panel(root, value["candidate"]["delivery"]) != BESIDE_OFFICIAL:
+    selected = code_review_panel(root, value["candidate"]["delivery"])
+    if selected not in PANEL_VALUES:
         return None
     if isinstance(value.get("panel"), dict):
         return value["panel"]
+    assignments, selection = panel_assignments(), None
+    if selected == RISK_SCOPED:
+        # With no lens triggered the official reviewer reads alone and registers through result.
+        assignments, selection = lens_selection(root, value["candidate"], assignments)
+        if not assignments:
+            return None
     passes = [record.get("pass", 0) for record in value.get("panel_history", [])]
     passes += [int(match.group(1)) for finding in value.get("unresolved_findings", [])
                for match in [PANEL_PASS_RE.match(str(finding.get("id", "")))] if match]
-    return {"pass": max(passes, default=0) + 1, "assignments": panel_assignments(), "members": {}}
+    panel = {"pass": max(passes, default=0) + 1, "assignments": assignments, "members": {}}
+    if selection is not None:
+        panel["lens_selection"] = selection
+    return panel
 
 
 def panel_history(session: dict | None) -> list[dict]:
@@ -2293,9 +2357,10 @@ def settle_result(root: Path, value: dict, result: dict, *, merged: bool = False
     role, verdict = result["role"], result["verdict"]
     findings = result.get("findings", [])
     if (role == "code_reviewer" and verdict != "cancelled" and not merged
-            and code_review_panel(root, current["delivery"]) == BESIDE_OFFICIAL):
-        raise RuntimeError("at code_review_panel beside_official the code review settles through merge-panel:"
-                           " register the official result and every lens result with panel-result")
+            and code_review_panel_state(root, value) is not None):
+        raise RuntimeError(f"at code_review_panel {code_review_panel(root, current['delivery'])} the code review"
+                           " settles through merge-panel: register the official result and every lens result"
+                           " with panel-result")
     if (role == "code_reviewer" and verdict != "cancelled"
             and review_loop(root, current["delivery"]) == "blocking_delta"):
         item = item_record(root, current["delivery"], current["story"])
@@ -3778,6 +3843,8 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
         if review_loop(root, delivery_id) == "blocking_delta" and mode == "review_repair":
             result["carried_findings"] = carried_findings(root, value, current, scope_expanded)
     panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
+    if panel is None and role == "code_reviewer" and code_review_panel(root, current["delivery"]) == RISK_SCOPED:
+        result["lens_selection"] = lens_selection(root, current, panel_assignments())[1]
     if panel is not None:
         # Every reader of the panel pass receives this same manifest and one assignment.
         result["code_review_panel"] = {
@@ -3790,6 +3857,8 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                                       "findings": []},
             "registration": "Every reader registers its own result with panel-result --file <result.json>;"
                             " merge-panel then registers the one code review result"}
+        if "lens_selection" in panel:
+            result["code_review_panel"]["lens_selection"] = panel["lens_selection"]
     budget = json.loads(project_context.POLICY.read_text(encoding="utf-8"))["reader_manifest_bytes"]
     if len(json.dumps(result, indent=2).encode("utf-8")) > budget:
         reading = result["project_reading"]

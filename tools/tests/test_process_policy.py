@@ -660,10 +660,13 @@ SAFETY_RULES = {
             "Spawn a fresh `code-reviewer` on its own tier, never a `code-reviewer-lens`",
             "A duplicate never gates on its own",
         ),
+        f"{SKILLS}/code-review/references/switch-code_review_panel-risk_scoped.md": (
+            "the official `code-reviewer` always reads, exactly as at `single_reader`",
+        ),
         HOSTS["claude"]: ("only the code review panel under switch `code_review_panel` at"
-                          " `beside_official` spawns it",),
+                          " `beside_official` or `risk_scoped` spawns it",),
         HOSTS["codex"]: ("only the code review panel under switch `code_review_panel` at"
-                         " `beside_official` starts it",),
+                         " `beside_official` or `risk_scoped` starts it",),
     },
     "delivery_path": {
         f"{SKILLS}/delivery-plan/references/switch-delivery_path-light_when_eligible.md": (

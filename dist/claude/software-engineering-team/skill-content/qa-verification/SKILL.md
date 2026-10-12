@@ -50,6 +50,7 @@ Classify every planned check into exactly one category. A plan missing any categ
   verification is required.
 - DON'T hardcode tool invocations or ports. These approved contracts are the
   only project entry points.
+- Run live test groups the Test Plan asks for one at a time: `run --kind live_test --group <group>`.
 - DO record the exact commands executed in the report, so the run is reproducible.
 - The suite is hermetic: the test and mutation commands never depend on a standing environment; a suite found depending on one is a blocking finding (waiver semantics in the environment stack skill's Hermetic Suite Rule).
 - The mutation gate is mandatory on code stories: run the mutation command scoped to the story's changed code-owned files (environment-owned paths are verified by the live protocol, not by mutants); a surviving mutant anywhere in a changed file is a finding, a missing mutation_command on a code story is a blocking finding. Method: [mutation](references/mutation.md). Read when running the mutation gate or judging a survivor.

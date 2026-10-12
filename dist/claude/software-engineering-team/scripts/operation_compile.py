@@ -208,12 +208,18 @@ def test_group_problems(props: dict) -> list[str]:
 LIVE_TEST_FIELDS = ("live_test_command", "live_test_workdir", "live_groups")
 LIVE_GROUP_PLACEHOLDER = "{group}"
 LIVE_GROUP_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+# How a pass runs the selected live groups: one run per group, the default, or
+# one combined run whose {group} receives the comma-separated names, which the
+# command must accept.
+LIVE_GROUP_RUN = "live_group_run"
+LIVE_GROUP_RUNS = ("per_group", "combined")
 
 
 def live_test_problems(props: dict) -> list[str]:
     """Why a Verification Contract's optional live test group declaration is invalid."""
     if not any(name in props for name in LIVE_TEST_FIELDS):
-        return []
+        return ([f"{LIVE_GROUP_RUN} needs live_test_command, live_test_workdir and live_groups"]
+                if LIVE_GROUP_RUN in props else [])
     errors = []
     if not all(name in props for name in LIVE_TEST_FIELDS):
         errors.append("live_test_command, live_test_workdir and live_groups are declared together or not at all")
@@ -229,6 +235,8 @@ def live_test_problems(props: dict) -> list[str]:
             not isinstance(groups, list) or not groups or len(set(map(str, groups))) != len(groups)
             or any(not isinstance(group, str) or not LIVE_GROUP_RE.fullmatch(group) for group in groups)):
         errors.append("live_groups must list unique group names of letters, digits, '.', '_' and '-'")
+    if LIVE_GROUP_RUN in props and props[LIVE_GROUP_RUN] not in LIVE_GROUP_RUNS:
+        errors.append(f"{LIVE_GROUP_RUN} must be one of {', '.join(LIVE_GROUP_RUNS)}")
     return errors
 
 

@@ -184,14 +184,15 @@ every run with the session identity through `status --summary`; plain
 `status` prints the whole session, bindings included.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
-When the Verification Contract declares `live_groups`, QA runs one opt-in live
-group at a time with `run --kind live_test --group <group>`: the runner
-substitutes the declared group for `{group}` in `live_test_command` and runs
-it in `live_test_workdir` of the same private frozen clone, under the same
-locks, environment identity and raw-evidence recording as `run --kind test`.
-Each group has a record at `status --run live_test:<group>`. Live groups
-never join required checks; the Test Plan selects them and the result cites
-their `evidence_hash` values.
+QA runs each declared `live_groups` entry with `run --kind live_test --group <group>`,
+substituting `{group}` in `live_test_command` in `live_test_workdir`.
+The frozen clone, locks, environment binding and raw evidence match `run --kind test`.
+The Test Plan selects live groups; they never join required checks automatically.
+Read each record with `status --run live_test:<group>` and cite its `evidence_hash`.
+At `live_group_run: combined`, pass all selected groups in one call, as
+`--group a,b` or `--group a --group b`. Names are substituted in `live_groups`
+order; the one record is read with `status --run live_test:a,b`.
+Without `combined`, multiple groups in one call are refused.
 Switch `qa_gate_order`: at `gate_first`, QA starts its first test command of a
 round before it plans and drafts its result, as
 `skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md`

@@ -159,6 +159,7 @@
     "live_test_command": "text",
     "live_test_workdir": "text",
     "live_groups": "multitext",
+    "live_group_run": "text",
     "max_parallel": "number",
     "governance_hash": "text",
     "decision_kind": "text",

@@ -15,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import threading
+import time
 try:
     from tools.tests.levels import integration
 except ModuleNotFoundError:  # run as a script from tools/tests
@@ -102,6 +104,47 @@ class LiveRunTests(unittest.TestCase):
         self.write("live.py", "import os, sys\nprint('LIVE', sys.argv[1], os.getcwd())\n")
         self.commit()
         self.freeze()
+
+    def test_running_live_group_exposes_heartbeat_output_and_adapter_progress(self):
+        executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
+        self.declare(live_test_command=executable + " live.py {group}", live_test_workdir=".",
+                     live_groups=["smoke"])
+        self.settle()
+        self.write("live.py", "import json, os, pathlib, time\n"
+                   "p = pathlib.Path(os.environ['AGENTROF_VERIFICATION_SCRATCH'])\n"
+                   "(p / 'live-progress.json').write_text(json.dumps({'test_id':'slow_case','cases_done':1,'cases_total':2}))\n"
+                   "print('first case finished', flush=True)\n"
+                   "while not (p / 'release-live').exists(): time.sleep(0.02)\n")
+        self.commit()
+        verification.freeze(self.root, "DLV-001", "AUTH-01", fresh=True)
+        result = []
+        worker = threading.Thread(target=lambda: result.append(
+            verification.run_check(self.root, "live_test", group="smoke")))
+        worker.start()
+        release = verification.raw_output_path(self.root, "scratch/release-live")
+        try:
+            deadline = time.monotonic() + 10
+            observed = None
+            while time.monotonic() < deadline:
+                summary = verification.status_summary(self.root)
+                observed = summary["runs"].get("live_test:smoke")
+                if observed and observed.get("adapter_observation", {}).get("test_id") == "slow_case":
+                    break
+                time.sleep(0.02)
+            self.assertIsNotNone(observed)
+            self.assertEqual(observed["state"], "running")
+            self.assertEqual(observed["adapter_observation"]["cases_done"], 1)
+            self.assertGreater(observed["elapsed_seconds"], 0)
+            self.assertIn("first case finished", Path(observed["output_path"]).read_text())
+            self.assertEqual(verification.status_summary(self.root, "live_test:smoke")["runs"]
+                             ["live_test:smoke"]["state"], "running")
+        finally:
+            release.touch()
+            worker.join(10)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(result[0]["exit_code"], 0)
+        self.assertNotIn("state", verification.status_summary(self.root, "live_test:smoke")["runs"]
+                         ["live_test:smoke"])
 
     def test_each_declared_group_runs_through_the_test_path_with_its_own_evidence(self):
         executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)

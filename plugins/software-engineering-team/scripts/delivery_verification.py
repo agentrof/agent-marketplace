@@ -9,6 +9,7 @@ import hmac
 import functools
 import fnmatch
 import json
+import math
 import os
 import platform
 import re
@@ -19,6 +20,7 @@ import shlex
 import shutil
 import stat
 import time
+import threading
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
@@ -1029,7 +1031,7 @@ def checkout_difference(execution_root: Path) -> str:
 
 def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, command: str, environment: dict,
                          *, isolate_search_paths: bool = False,
-                         cloned=None) -> tuple[subprocess.CompletedProcess, bool, str, dict, dict]:
+                         cloned=None, live_output: Path | None = None) -> tuple[subprocess.CompletedProcess, bool, str, dict, dict]:
     """Run an approved command verbatim in a private clone of one exact commit.
 
     Returns the completed command, whether the clone still holds that commit
@@ -1052,8 +1054,14 @@ def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, c
         dropped: dict[str, list[str]] = {}
         if isolate_search_paths:
             environment, dropped = lane_command_environment(execution_root.resolve(), execution_directory, environment)
-        completed = subprocess.run(command, cwd=execution_directory, env=environment, shell=True,
-                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        if live_output is None:
+            completed = subprocess.run(command, cwd=execution_directory, env=environment, shell=True,
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        else:
+            with live_output.open("xb") as output:
+                completed = subprocess.run(command, cwd=execution_directory, env=environment, shell=True,
+                                           stdout=output, stderr=subprocess.STDOUT, check=False)
+            completed.stdout = live_output.read_bytes()
         from delivery_git import require_visible_item_index
         difference = ""
         try:
@@ -1064,6 +1072,91 @@ def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, c
         except RuntimeError:
             intact = False
     return completed, intact, difference, dropped, environment
+
+
+
+LIVE_PROGRESS_INTERVAL = 1.0
+LIVE_PROGRESS_STALE = 30.0
+
+
+def live_progress_path(root: Path, record_key: str) -> Path:
+    name = hashlib.sha256(record_key.encode("utf-8")).hexdigest()[:20]
+    return raw_output_path(root, f"scratch/progress-{name}.json")
+
+
+@contextlib.contextmanager
+def live_progress(root: Path, session_id: str, current: dict, record_key: str, group: str):
+    """Heartbeat and adapter observations are status only, never passing evidence."""
+    progress = live_progress_path(root, record_key)
+    output = raw_output_path(root, "scratch/live-output-" + uuid.uuid4().hex + ".log")
+    adapter = raw_output_path(root, "scratch/live-progress.json")
+    if adapter.exists():
+        adapter.unlink()
+    started = time.time()
+    stopped = threading.Event()
+
+    def update(state="running"):
+        observed = {}
+        if adapter.is_file() and adapter.stat().st_size <= 65536:
+            try:
+                value = json.loads(safe_runtime_path(root, adapter, file_only=True).read_text(encoding="utf-8"))
+                for key in ("cases_done", "cases_total", "failures"):
+                    if type(value.get(key)) is int and value[key] >= 0:
+                        observed[key] = value[key]
+                if (isinstance(value.get("test_id"), str) and len(value["test_id"]) <= 512
+                        and value["test_id"].isprintable()):
+                    observed["test_id"] = value["test_id"]
+            except (OSError, ValueError, RuntimeError, AttributeError):
+                pass
+        now = time.time()
+        payload = {"session_id": session_id, "candidate_hash": current["candidate_hash"],
+                   "record_key": record_key, "live_group": group, "state": state,
+                   "started_at": started, "updated_at": now, "elapsed_seconds": now - started,
+                   "output_path": str(output), "output_bytes": output.stat().st_size if output.exists() else 0,
+                   "adapter_observation": observed}
+        atomic_file.replace_text(safe_runtime_path(root, progress, file_only=True),
+                                 json.dumps(payload, sort_keys=True) + "\n")
+
+    def heartbeat():
+        while not stopped.wait(LIVE_PROGRESS_INTERVAL):
+            update()
+
+    update()
+    worker = threading.Thread(target=heartbeat, daemon=True)
+    worker.start()
+    try:
+        yield output
+    finally:
+        stopped.set()
+        worker.join()
+        update("finished")
+
+
+def live_progress_records(root: Path, session: dict) -> dict:
+    result = {}
+    scratch = session_path(root).parent / "scratch"
+    for path in scratch.glob("progress-*.json"):
+        try:
+            path = safe_runtime_path(root, path, file_only=True)
+            if path.stat().st_size > 65536:
+                continue
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, dict):
+                continue
+            if (value.get("session_id") != session["session_id"]
+                    or value.get("candidate_hash") != session["candidate"]["candidate_hash"]):
+                continue
+            if (value.get("state") not in {"running", "finished"}
+                    or not isinstance(value.get("record_key"), str)
+                    or not isinstance(value.get("updated_at"), (int, float))
+                    or not math.isfinite(value["updated_at"])):
+                continue
+            if value.get("state") == "running" and time.time() - value["updated_at"] > LIVE_PROGRESS_STALE:
+                value["state"] = "stale"
+            result[value["record_key"]] = value
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError):
+            continue
+    return result
 
 
 def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
@@ -1255,8 +1348,12 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             "missing_test_groups": sorted(group for record in partition_records
                                           for group in record.get("missing_test_groups", []))}
     else:
-        completed, intact, difference, _dropped, _ran = private_checkout_run(
-            root, scratch, current["product_commit"], workdir, command, environment)
+        with contextlib.ExitStack() as progress:
+            live_output = (progress.enter_context(live_progress(root, session_id, current, record_key, group))
+                           if group is not None else None)
+            completed, intact, difference, _dropped, _ran = private_checkout_run(
+                root, scratch, current["product_commit"], workdir, command, environment,
+                **({"live_output": live_output} if live_output is not None else {}))
         group_report = read_group_report(scratch, groups) if groups is not None else None
     if group_report is not None and group_report["missing_test_groups"]:
         intact = False
@@ -4330,6 +4427,10 @@ def status_summary(root: Path, run: str | None = None) -> dict:
     """The session's identity, readers and run outcomes; `run` narrows the runs to one kind."""
     session = read_session(root)
     runs = dict(session["raw_evidence"])
+    progress = live_progress_records(root, session)
+    for key, value in progress.items():
+        if key not in runs:
+            runs[key] = value
     if "pre_handoff" in session:
         runs["pre_handoff"] = session["pre_handoff"]
     if run is not None:
@@ -4343,7 +4444,9 @@ def status_summary(root: Path, run: str | None = None) -> dict:
             "unresolved_findings": len(session.get("unresolved_findings", [])),
             BLOCKED_BY_PERMISSION: [{**row, "role": role} for role, worker in session["workers"].items()
                                     for row in worker.get("result", {}).get("blocked_commands", [])],
-            "metrics": session["metrics"], "runs": {kind: run_summary(root, record) for kind, record in runs.items()}}
+            "metrics": session["metrics"], "runs": {
+                kind: record if kind in progress and "identity" not in record else run_summary(root, record)
+                for kind, record in runs.items()}}
 
 
 def main(argv=None) -> int:

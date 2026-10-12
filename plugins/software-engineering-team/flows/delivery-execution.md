@@ -398,26 +398,26 @@ rejected without ref mutation, pending explicit source or plan revision.
 Authored merge conflicts remain unresolved. No stale target grants a Slot or
 worktree. `reopen-item` reactivates a sealed Item on the Integration that
 absorbed it, so a target refreshed after integration never strands the Item.
-Failed checks, target drift, review changes and process loss become explicit
-resumable states. A rejected remote transaction changes no ref and names the
+A rejected remote transaction changes no ref and names the
 lease it lost, or a remote without atomic push support, from the refetched
 refs. One whose refetched refs hold its candidate, or moved on from it, may
 have landed and reports `DELIVERY_TRANSACTION_UNCERTAIN` instead. Release
 Management is intentionally not part of this flow.
 
-With `live_environment_plan: effect_ordered_v1` in the approved Verification
-Contract, regression selection exports `live_environment_plan` to the project
-adapter. It deduplicates targets, lists special builds before the one shared
-environment, then fixtures, parallel readers, serial changes with readiness
-checks, resets and removals with reset/residue checks. Missing metadata is
-reported and executes as serial `changes`. The approved adapter must implement
-these phases and report its per-phase setup counts; it owns service commands.
+`status --summary --run live_test:<group>` reports heartbeat, elapsed time and output.
+A stale heartbeat means an interrupted runner, not a failed test. Adapters may write
+`scratch/live-progress.json` under `AGENTROF_VERIFICATION_SCRATCH`, naming `test_id`,
+`cases_done`, `cases_total` and `failures`; these observations never satisfy a gate.
 
-A permission probe validates without execution; host authorization remains
-unknown. Show the exact allow rules to the owner. The Verification Contract's
-optional `live_permission_commands` names service or container commands needing
-that review. Permission-only resume keeps successful evidence and lists only
-refused commands in `resume_commands`.
+With `live_environment_plan: effect_ordered_v1`, regression selection exports the
+plan to the adapter: deduplicated builds, one shared environment, fixtures,
+parallel readers, serial changes, resets and removals, with readiness/reset/residue
+checks. Missing metadata runs as serial `changes`. The adapter owns service commands
+and reports per-phase setup counts; final outcomes require completed command evidence.
+
+A permission probe validates without execution; host authorization stays unknown.
+Show the owner exact allow rules, including optional `live_permission_commands`.
+Permission-only resume keeps successful evidence and lists refused `resume_commands`.
 
 Finding-control bindings persist in the Item verification record and Delivery
 Review. After merge, the next ordinary backlog revision lists unabsorbed

@@ -1,0 +1,6 @@
+{
+  "summary": "Let a Test Plan scenario give a parallel test target a different environment_effect per parameter case, as a comma list of effect or effect [parameter] items, and allow touches when any item is changes.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

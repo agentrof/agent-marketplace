@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import subprocess
 import zlib
 
 import context_catalog as catalog
@@ -140,7 +141,7 @@ def manual_units(project: Path, paths: list[str]) -> list[dict]:
         result.append({"unit_id": relative + "::manual", "path": relative, "kind": "manual",
             "source_root": "project", "source_hash": catalog.digest(raw), "source_bytes": len(raw),
             "bytes": 0, "authority": "selected_evidence",
-            "next_action": "Read the selected evidence manually; its source hash remains an owning-task obligation."})
+            "next_action": "Read the selected evidence manually when the task needs it; check its source hash before relying on it."})
     return result
 
 
@@ -237,6 +238,8 @@ def paged_context(project: Path, source: dict, all_required: list[dict], optiona
             "coverage": {"required_units": len(all_required), "returned_units": endpoint - initial,
                 "previously_returned_units": initial, "remaining_required_units": remaining,
                 "optional_units": len(optional), "relevant_gaps": len(gaps), "source_bytes": source_bytes},
+            **({"reading_kind": "ranked_advice", "continuation_kind": "optional"}
+               if request.get("focus_ranges") else {}),
             "optional_groups": dict(Counter(source["documents"][u["path"]]["type"] for u in optional.values())),
             "gaps": gaps[:3], "unresolved_required_refs": unresolved[:3],
             "unresolved_required_count": len(unresolved), "reason": reason}
@@ -264,6 +267,8 @@ def paged_context(project: Path, source: dict, all_required: list[dict], optiona
     result = baseline
     while position < len(all_required):
         unit = all_required[position]
+        if len(rows) >= limits.get("max_units", len(all_required) + 1):
+            break
         if len(paths | {unit["path"]}) > limits["max_files"]:
             break
         available = limits["max_source_bytes"] - source_bytes
@@ -330,6 +335,7 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
                     snapshot_scope: str = "vault", cursor: dict | None = None,
                     state: dict | None = None, persist_state: bool = True,
                     manual_sources: list[str] | None = None,
+                    focus_ranges: dict | None = None,
                     state_reuse: dict | None = None, allow_state_writes: bool = True) -> dict:
     policy = policy or json.loads(POLICY.read_text(encoding="utf-8"))
     policy = copy.deepcopy(policy)
@@ -358,7 +364,7 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
         raise ValueError("continuation requires its snapshot and a reason")
     limits = dict(policy["budgets"])
     if budget:
-        if set(budget) - set(limits):
+        if set(budget) - set(limits) - {"max_units"}:
             raise ValueError("unknown context budget")
         limits.update(budget)
     if any(type(value) is not int or value <= 0 for value in limits.values()):
@@ -459,6 +465,24 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
             elif key in optional_keys:
                 for unit in units:
                     optional.setdefault(unit["unit_id"], unit)
+    if focus_ranges:
+        for path, ranges in focus_ranges.items():
+            if not isinstance(path, str) or not isinstance(ranges, list) or any(
+                    not isinstance(pair, list) or len(pair) != 2 or any(type(n) is not int or n < 1 for n in pair)
+                    or pair[0] > pair[1] for pair in ranges):
+                raise ValueError("invalid changed-section ranges")
+            if not any(unit["path"] == path for unit in required.values()):
+                continue
+            candidates = [source["units"][key] for key in source["documents"][path].get("units", [])
+                          if source["units"][key]["kind"] not in {"document", "manual"}]
+            selected = [unit for unit in candidates if any(
+                low <= end and start <= high for low, high in unit.get("ranges", []) for start, end in ranges)]
+            if selected:
+                required = {key: unit for key, unit in required.items()
+                            if unit["path"] != path or unit["kind"] != "document"}
+                for unit in selected:
+                    required[unit["unit_id"]] = unit
+                    reasons.setdefault(unit["unit_id"], []).append("changed section")
     # A complete document subsumes its rows/sections, while distinct requested
     # records of the same document remain separately addressed.
     whole_paths = {(u["path"], u["source_hash"]) for u in required.values() if u["kind"] == "document"}
@@ -468,7 +492,8 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
                 if key not in required and (unit["path"], unit["source_hash"]) not in whole_paths}
     def order(unit):
         kind = source["documents"][unit["path"]]["type"]
-        return (0 if any(r.startswith("requested reference:") for r in reasons.get(unit["unit_id"], [])) else 1,
+        return (0 if "changed section" in reasons.get(unit["unit_id"], []) else
+                1 if any(r.startswith("requested reference:") for r in reasons.get(unit["unit_id"], [])) else 2,
                 preferred.index(kind) if kind in preferred else len(preferred), unit["path"], unit["unit_id"])
     all_required = sorted(required.values(), key=order) + manual
     if manual and snapshot_scope == "vault":
@@ -498,6 +523,8 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
     for unit in ordered[offset:]:
         if unit["kind"] == "manual":
             break
+        if len(picked) >= limits.get("max_units", len(ordered) + 1):
+            break
         if len(paths | {unit["path"]}) > limits["max_files"] or source_bytes + unit["bytes"] > limits["max_source_bytes"]:
             break
         item = {key: value for key, value in unit.items() if key not in {"references", "historical_properties"}}
@@ -513,6 +540,8 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
     remaining = len(ordered) - offset - len(picked)
     request = {"entry": entry, "role": role, "refs": refs, "purpose": purpose, "budget": limits,
                "seen_units": sorted(seen), "snapshot_scope": snapshot_scope}
+    if focus_ranges:
+        request["focus_ranges"] = focus_ranges
     if manual_sources:
         request["manual_sources"] = sorted(set(manual_sources))
     if not persist_state:
@@ -524,6 +553,7 @@ def resolve_context(project: Path, index: dict, *, entry: str, role: str, refs: 
                      "previously_returned_units": len(seen & set(required)),
                      "remaining_required_units": remaining, "optional_units": len(optional),
                      "relevant_gaps": len(gaps), "source_bytes": source_bytes},
+        **({"reading_kind": "ranked_advice", "continuation_kind": "optional"} if focus_ranges else {}),
         "optional_groups": dict(Counter(source["documents"][u["path"]]["type"] for u in optional.values())),
         "gaps": gaps[:3], "unresolved_required_refs": unresolved[:3],
         "unresolved_required_count": len(unresolved), "reason": reason}
@@ -554,6 +584,15 @@ def expand_context(project: Path, index: dict, plan: dict, *, reason: str,
     request = request_data(project, plan, policy=policy)
     if persist_state is False:
         request["persist_state"] = False
+    if refs and request.get("focus_ranges"):
+        # Suggested units need not have been read. An explicit follow-up asks
+        # for those references, independent of the earlier recommendation.
+        request["refs"] = refs
+        request["seen_units"] = []
+        request.pop("focus_ranges", None)
+        request.pop("cursor", None)
+        request.pop("state", None)
+        return resolve_context(project, index, **request, reason=reason, policy=policy)
 
     def reuse_seed():
         state = plan["request"].get("state")
@@ -631,7 +670,8 @@ def read_plan(project: Path, index: dict, plan: dict, *, policy: dict | None = N
     result.update(plan_status=plan["status"], coverage=plan["coverage"])
     if "manual_reads" in plan:
         result["manual_reads"] = plan["manual_reads"]
-        result["status"] = "needs_manual_read"
+        if plan.get("reading_kind") != "ranked_advice":
+            result["status"] = "needs_manual_read"
     if "continuation" in plan:
         result["continuation"] = plan["continuation"]
     if not plan["must_read"] and "manual_reads" not in plan and plan["status"] != "ready":
@@ -675,8 +715,41 @@ def with_index(project: Path, action, *, no_cache: bool = False):
                 store.close()
 
 
+
+def review_change_scope(project: Path, paths: set[str], policy: dict, base: str | None = None) -> tuple[dict, dict] | None:
+    metadata = project / ".git"
+    if not (metadata.is_file() or (metadata / "HEAD").is_file()):
+        return None
+    command = ["git", "-c", "core.quotePath=false", "-C", str(project), "diff", "--no-ext-diff",
+               "--no-textconv", "--unified=0", "--no-renames", base or "HEAD", "--", *sorted(paths)]
+    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", check=False)
+    if result.returncode or not result.stdout:
+        return None
+    ranges = {}
+    path = None
+    changed = 0
+    for line in result.stdout.splitlines():
+        if line.startswith("+++ "):
+            path = line[6:].removeprefix("workspace/docs/") if line.startswith("+++ b/") else None
+        match = re.match(r"^@@ -[0-9]+(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@", line)
+        if path and match:
+            start = max(1, int(match[2])); count = int(match[3] or 1)
+            ranges.setdefault(path, []).append([max(1, start - 2), start + max(count, 1) + 1])
+            changed += int(match[1] or 1) + count
+    if not ranges:
+        return None
+    tiers = policy.get("review_advice_budgets", [])
+    keys = {"max_changed_lines", "max_changed_files", "max_units", "max_files", "max_source_bytes"}
+    if not isinstance(tiers, list) or any(not isinstance(item, dict) or set(item) != keys
+            or any(type(value) is not int or value <= 0 for value in item.values()) for item in tiers):
+        raise ValueError("review advice budgets require positive integer limits")
+    tier = next((item for item in tiers if changed <= item["max_changed_lines"]
+                 and len(ranges) <= item["max_changed_files"]), tiers[-1] if tiers else None)
+    return (ranges, {key: tier[key] for key in ("max_units", "max_files", "max_source_bytes")}) if tier else None
+
+
 def task_context(project: Path, *, entry: str, role: str | None, mode: str,
-                 paths: set[str], no_cache: bool = False) -> dict:
+                 paths: set[str], no_cache: bool = False, change_base: str | None = None) -> dict:
     """Resolve a task's already-selected sources; never infer a larger scope."""
     import vault_query
     vault_query.project_docs(project)  # A fallback cannot authorize a foreign vault.
@@ -694,8 +767,10 @@ def task_context(project: Path, *, entry: str, role: str | None, mode: str,
         return {"status": "needs_scope", "must_read": [],
                 "next_action": "Select source references with the owning flow or compiler, then resolve; use manual discovery if needed."}
     try:
+        advice = review_change_scope(project, paths, policy, change_base) if mode in {"review", "repair"} else None
         return with_index(project, lambda index: resolve_context(project, index, entry=entry, role=role, refs=refs,
             purpose=policy["task_purposes"][mode], snapshot_scope="selection",
+            budget=advice[1] if advice else None, focus_ranges=advice[0] if advice else None,
             manual_sources=manual or None, persist_state=not no_cache), no_cache=no_cache or not refs)
     except (ValueError, OSError, UnicodeError, TypeError) as exc:
         return {"status": "unavailable", "must_read": [], "reason": str(exc)[:500],
@@ -751,6 +826,9 @@ def main(argv=None) -> int:
                 raise ValueError("one unit's address exceeds the metadata budget")
             return {"units": listed, "remaining": max(0, len(identities) - args.offset - len(listed))}
         payload = json.loads(args.plan.read_text(encoding="utf-8"))
+        if "complete_manifest" in payload:
+            from reader_manifest import expand
+            payload = expand(project, payload)
         if args.command == "read" and "candidate_hash" in payload and "product_commit" in payload:
             raise ValueError("use delivery_verification.py inspect-context for a frozen candidate manifest")
         plan = payload.get("project_reading", payload)

@@ -1,0 +1,6 @@
+{
+  "summary": "Let abort-source-handoff release an authorized draft PR carrier whose PR is still open and whose head the target does not hold, so a handoff whose draft PR failed its checks can be aborted and retried instead of staying stuck behind the target-update intent.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

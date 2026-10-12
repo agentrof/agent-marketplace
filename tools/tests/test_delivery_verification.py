@@ -1029,6 +1029,98 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
             verification.register_result(self.root, result)
 
 
+    def test_an_empty_mutation_scope_records_a_passed_run_without_launching_it(self):
+        """With no compiler-selected file, run --kind mutation records `scope empty, not run` with zero
+        duration and exit 0, never launching the approved command, and QA's final result passes on it."""
+        executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
+        failing = executable + ' -c "import sys; sys.exit(3)"'
+        contract_path = "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(self.root / contract_path)
+        contract.update(mutation_disposition="required", mutation_command=failing)
+        self.write(contract_path, delivery.frontmatter(contract, body))
+        self.commit()
+        with mock.patch.object(verification, "mutation_scope", return_value=[]), \
+                mock.patch.object(verification, "private_checkout_run",
+                                  side_effect=AssertionError("an empty scope launches no command")) as launched:
+            frozen = self.freeze()
+            self.assertEqual(frozen["candidate"]["mutation_files"], [])
+            verification.register_result(self.root, self.result())
+            raw = verification.run_check(self.root, "mutation")
+            self.assertEqual((raw["exit_code"], raw["candidate_intact"], raw["duration_seconds"], raw["not_run"]),
+                             (0, True, 0, "scope empty, not run"))
+            self.assertEqual(raw["identity"]["command"], failing)
+            self.assertEqual(verification.raw_output_path(self.root, raw["output_file"]).read_text(encoding="utf-8"),
+                             "scope empty, not run\n")
+            launched.assert_not_called()
+        with mock.patch.object(verification, "mutation_scope", return_value=[]):
+            result = self.result("qa_engineer", "qa_final")
+            result["checks"]["mutation_whole_changed_files"].update(files=[], raw_evidence_hash=raw["evidence_hash"])
+            verification.register_result(self.root, result)
+            verification.validate(self.root, "DLV-001", "AUTH-01")
+
+    def test_start_pass_freezes_writes_both_manifests_and_their_launch_prompts(self):
+        """start-pass skips the pre-handoff regression at its default, freezes, saves each reader's manifest
+        as manifest prints it and writes each reader's launch prompt from the package templates."""
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = verification.main(["--worktree", str(self.root), "start-pass", "--delivery", "DLV-001",
+                                      "--story", "AUTH-01"])
+        value = json.loads(output.getvalue())
+        self.assertEqual(code, 0, value)
+        self.assertEqual([step["step"] for step in value["steps"]],
+                         ["regression-selection", "regression-run", "freeze", "manifest code_reviewer",
+                          "manifest qa_engineer", "launch prompts"])
+        self.assertIn("skipped", value["steps"][0])
+        session = verification.read_session(self.root)
+        self.assertEqual(value["session_id"], session["session_id"])
+        for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_final")):
+            saved = json.loads(Path(value["manifests"][role]).read_text(encoding="utf-8"))
+            self.assertEqual(saved, verification.manifest(self.root, "DLV-001", "AUTH-01", role, mode))
+            prompt = value["prompts"][role]
+            self.assertEqual(Path(prompt["path"]).read_text(encoding="utf-8"), prompt["text"])
+            for text in (value["manifests"][role], session["session_id"], session["candidate"]["candidate_hash"],
+                         f"mode {mode}", "inspect-context --plan", " result --file <result.json>"):
+                self.assertIn(text, prompt["text"])
+            self.assertNotRegex(prompt["text"], r"\{[a-z_]+\}")
+        self.assertEqual(sorted(value["prompts"]), ["code_reviewer", "qa_engineer"])
+
+    def test_start_pass_writes_a_launch_prompt_per_lens_assignment_beside_the_official_reviewer(self):
+        """At code_review_panel beside_official the official reviewer registers through panel-result and
+        every lens assignment of the manifest gets its own prompt with its lens and id prefix."""
+        with mock.patch.object(verification, "code_review_panel", return_value=verification.BESIDE_OFFICIAL):
+            value = verification.start_pass(self.root, "DLV-001", "AUTH-01")
+        self.assertTrue(value["ok"], value)
+        assignments = json.loads(Path(value["manifests"]["code_reviewer"]).read_text(
+            encoding="utf-8"))["code_review_panel"]["assignments"]
+        lenses = {name: prompt["text"] for name, prompt in value["prompts"].items() if "lens" in name}
+        self.assertEqual(len(lenses), len(assignments))
+        for assignment in assignments:
+            text = lenses["code_reviewer_lens-" + assignment["id_prefix"].rstrip("-")]
+            for part in (", ".join(assignment["lens"]), assignment["id_prefix"], "panel-result --file"):
+                self.assertIn(part, text)
+        self.assertIn(" panel-result --file", value["prompts"]["code_reviewer"]["text"])
+        self.assertIn(" result --file", value["prompts"]["qa_engineer"]["text"])
+
+    def test_start_pass_stops_at_the_first_failing_step(self):
+        """A failing pre-handoff run stops the chain before the freeze, and a refused freeze before any
+        manifest; each names its step and error."""
+        with mock.patch.object(verification, "pre_handoff_regression", return_value=verification.TOUCHED_SUITES), \
+                mock.patch.object(verification, "regression_selection", return_value={"selection_file": "s.json"}), \
+                mock.patch.object(verification, "regression_run",
+                                  return_value={"exit_code": 1, "candidate_intact": True, "output_file": "o.log"}), \
+                mock.patch.object(verification, "freeze") as freeze:
+            value = verification.start_pass(self.root, "DLV-001", "AUTH-01")
+            freeze.assert_not_called()
+        self.assertEqual((value["ok"], value["failed_step"]), (False, "regression-run"))
+        self.assertEqual([step["step"] for step in value["steps"]], ["regression-selection", "regression-run"])
+        self.assertRegex(value["errors"][0], r"^regression-run: exit code 1, ")
+        self.assertTrue(verification.start_pass(self.root, "DLV-001", "AUTH-01")["ok"])
+        value = verification.start_pass(self.root, "DLV-001", "AUTH-01")
+        self.assertEqual((value["ok"], value["failed_step"]), (False, "freeze"))
+        self.assertEqual(value["errors"], ["freeze: settle or cancel the existing readers before freezing a new"
+                                           " candidate"])
+        self.assertNotIn("manifests", value)
+
     def test_mutation_scope_excludes_environment_assets_config_and_tests_but_expands_approved_paths(self):
         names = ["src/settings.json", "tests/test_product.py", "web/logo.svg", "workspace/environment/start.py", "src/new.unknown"]
         for name in names:

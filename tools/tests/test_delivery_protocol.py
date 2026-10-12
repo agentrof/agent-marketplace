@@ -71,6 +71,7 @@ COORDINATOR_COMMANDS = {
     "finish-upgrade",
     "abort-upgrade",
     "start-item",
+    "converge-item",
     "block-item",
     "unblock-item",
     "reopen-item",

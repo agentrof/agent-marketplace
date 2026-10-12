@@ -16,7 +16,6 @@ import json
 import os
 import re
 import shlex
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -534,7 +533,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
             }
             if not pairing["current"]:
                 parts = [sys.executable, str(Path(__file__).resolve()), "re-pair", "--docs", str(docs)]
-                pairing["repair_command"] = ("& " + subprocess.list2cmdline(parts) if os.name == "nt"
+                pairing["repair_command"] = ("& " + " ".join("'" + part.replace("'", "''") + "'" for part in parts) if os.name == "nt"
                                              else shlex.join(parts))
             value["paired_environment"] = pairing
     return value, errors

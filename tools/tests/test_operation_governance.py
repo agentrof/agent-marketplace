@@ -402,7 +402,14 @@ class OperationGovernanceTests(unittest.TestCase):
             offer = json.loads(reapproved.stdout)["verification_pairing"]
             self.assertEqual(Path(offer["path"]), verification.resolve())
             self.assertFalse(offer["current"])
-            self.assertIn("re-pair --docs", offer["repair_command"])
+            self.assertIn("re-pair", offer["repair_command"])
+            self.assertIn("--docs", offer["repair_command"])
+            with mock.patch.object(operation_compile, "os") as host, \
+                    mock.patch.object(sys, "executable", "C:\\Program Files\\Py$hon's\\python.exe"):
+                host.name = "nt"
+                windows_receipt, _errors = operation_compile.check_contract(docs, "verification")
+            self.assertTrue(windows_receipt["paired_environment"]["repair_command"].startswith(
+                "& 'C:\\Program Files\\Py$hon''s\\python.exe' "))
             checked = json.loads(self.invoke(OPERATION, "check", "--docs", str(docs), "--kind", "verification").stdout)
             self.assertTrue(checked["ok"])
             self.assertFalse(checked["receipt"]["paired_environment"]["current"])

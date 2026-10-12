@@ -60,6 +60,13 @@ effect makes it never, an excluded effect the grant does not allow queues it,
 and doubt queues it. `record` takes `--class` once per class a decision
 touches and refuses when one of them is not allowed.
 
+`phase_start` lets the session run the next entry itself once a phase closed.
+`record --class phase_start` also takes `--entry <next entry>` and `--after
+<kind>:<id>`, and refuses unless the policy's `phase_starts` lists that entry
+and the owning compiler reads the closed phase in one of its ready states. The
+host contract names the procedure; without the class the session stops at the
+next entry as before.
+
 ## Only the user arms a grant
 
 Starting, extending or widening a grant needs the user's own typed entry

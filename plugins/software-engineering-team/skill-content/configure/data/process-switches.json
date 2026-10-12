@@ -1184,6 +1184,40 @@
         "unit": "At least 3 Deliveries with repaired verification candidates.",
         "threshold": "No pass fails on a repair defect missed by the pre-freeze review, and total verification time is below the after_freeze baseline, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "step_baseline": {
+      "summary": "Whether a timed step is also compared with its own history, the median of its last recorded runs, so a step whose length depends on the project, such as a QA live run, is reported when it runs far past its usual time, or only with a fixed maximum. A baseline only reports: it never blocks, fails or shortens a step.",
+      "issue": 543,
+      "flows": ["delivery-execution"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {"id": "off", "tradeoffs": "A step is compared only with its fixed step_budgets maximum, if any. Today's behaviour; a QA live run, live step or rehearsal has no sensible fixed maximum, so a hung one shows only when the owner asks."},
+        {"id": "median", "tradeoffs": "With switch step_timing at recorded, step_timing.py takes the median of the last runs of the same step name and reports a step over the larger of its maximum and ratio_percent of that median, with its baseline, its threshold and what a watched step is doing now; delivery_verification.py times each live run, live step and rehearsal command. A step needs min_samples earlier runs before it has a baseline, and a project whose steps all grow together moves its own baseline with them."}
+      ],
+      "default": "off",
+      "parameters": {
+        "summary": "How the baseline is taken: the number of last runs whose median it is, the runs it needs before it applies, and the percentage of it a step may reach before it is reported.",
+        "values": ["median"],
+        "declared_by": {
+          "path": "skill-content/configure/data/step-baseline.json",
+          "key": "parameters"
+        },
+        "type": "positive_integer",
+        "min_count": 0,
+        "package_limits": {
+          "min_samples": 3,
+          "ratio_percent": 150,
+          "runs": 10
+        }
+      },
+      "value_data": {
+        "median": ["skill-content/configure/data/step-baseline.json"]
+      },
+      "metric": "Per Delivery: steps reported over their baseline, the share the owner confirms as real stalls or hangs, and the time from a step passing its threshold to the owner seeing it.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with live verification run with median and step_timing at recorded.",
+        "threshold": "Every stalled QA step reported during the run, at most one in five reports a healthy step, and no step blocked or shortened for time, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

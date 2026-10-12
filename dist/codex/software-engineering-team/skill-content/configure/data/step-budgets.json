@@ -18,6 +18,24 @@
     },
     "story_end_to_end": {
       "summary": "Maximum minutes one story takes end to end, from its Requirement's intake to its Delivery's merge."
+    },
+    "qa_lifecycle_gate": {
+      "summary": "Maximum minutes one runtime lifecycle check or verification rehearsal command takes, from its start to its recorded result."
+    },
+    "live_run": {
+      "summary": "Maximum minutes one QA live run of one live group or combined groups takes, from its start to its record."
+    },
+    "live_step": {
+      "summary": "Maximum minutes one live step that the live progress adapter reports takes, from its first observation to the next step's."
+    },
+    "manual_scenario": {
+      "summary": "Maximum minutes one owner-run or manual verification scenario takes, from its handoff to its recorded output."
+    },
+    "freeze": {
+      "summary": "Maximum minutes freezing one verification candidate takes, from its start to its frozen session."
+    },
+    "pre_handoff": {
+      "summary": "Maximum minutes one pre-handoff regression run takes, from its start to its record."
     }
   }
 }

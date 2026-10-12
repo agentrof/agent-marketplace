@@ -35,6 +35,7 @@ import delivery_compile as delivery
 import file_lock
 import operation_compile
 import process_policy
+import step_timing
 
 POLICY_PATH = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/delivery-verification-policy.json"
 ROLES = ("code_reviewer", "qa_engineer")
@@ -1260,6 +1261,44 @@ def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, c
 
 LIVE_PROGRESS_INTERVAL = 1.0
 LIVE_PROGRESS_STALE = 30.0
+# With step_timing at recorded for the Delivery, the runner times its own QA
+# steps in the Delivery's timing run under the QA keys of step-budgets.json.
+TIMING_SWITCHES = {"step_timing", "step_budgets", "step_baseline"}
+
+
+def timing_values(root: Path, delivery_id: str) -> dict | None:
+    try:
+        values = process_policy.delivery_values(delivery.docs_root(root), delivery_id,
+                                                switches=TIMING_SWITCHES)["values"]
+    except (ValueError, OSError, RuntimeError, KeyError):
+        return None
+    return values if step_timing.recording(values) else None
+
+
+def timing_start(root: Path, values: dict | None, delivery_id: str, budget: str, name: str,
+                 watch: Path | None = None) -> tuple | None:
+    """Start a QA step span; timing never changes or stops a verification command."""
+    if values is None:
+        return None
+    anchor = runtime_anchor(root.resolve()).resolve()
+    step = budget + ":" + (re.sub(r"[^A-Za-z0-9._/:-]", "_", name)[:100] or "_")
+    try:
+        relative = watch.resolve().relative_to(anchor).as_posix() if watch is not None else None
+        return anchor, values, delivery_id, step_timing.start(
+            anchor, values, run=delivery_id, step=step, budget=budget, watch=relative)["span"]
+    except (step_timing.Refused, OSError, ValueError):
+        return None
+
+
+def timing_end(handle: tuple | None) -> dict | None:
+    """End a QA step span and return its overrun, if any."""
+    if handle is None:
+        return None
+    anchor, values, run, span = handle
+    try:
+        return step_timing.end(anchor, values, run=run, span=span).get("overrun")
+    except (step_timing.Refused, OSError, ValueError):
+        return None
 
 
 def live_progress_path(root: Path, record_key: str) -> Path:
@@ -1277,6 +1316,14 @@ def live_progress(root: Path, session_id: str, current: dict, record_key: str, g
         adapter.unlink()
     started = time.time()
     stopped = threading.Event()
+    values = timing_values(root, current["delivery"])
+    step = {"test_id": None, "span": None}
+
+    def step_seen(test_id):
+        if test_id != step["test_id"]:
+            timing_end(step["span"])
+            step.update(test_id=test_id, span=None if test_id is None else timing_start(
+                root, values, current["delivery"], "live_step", test_id, progress))
 
     def update(state="running"):
         observed = {}
@@ -1299,6 +1346,8 @@ def live_progress(root: Path, session_id: str, current: dict, record_key: str, g
                    "adapter_observation": observed}
         atomic_file.replace_text(safe_runtime_path(root, progress, file_only=True),
                                  json.dumps(payload, sort_keys=True) + "\n")
+        if values is not None:
+            step_seen(None if state == "finished" else observed.get("test_id"))
 
     def heartbeat():
         while not stopped.wait(LIVE_PROGRESS_INTERVAL):
@@ -1615,6 +1664,12 @@ def rehearse(root: Path, delivery_id: str, story: str) -> dict:
             saved = {}
         if not isinstance(saved, dict):
             saved = {}
+        timing = timing_values(root, delivery_id)
+        overruns: list[dict] = []
+
+        def timed(value: dict) -> dict:
+            return {**value, "step_overruns": overruns} if overruns else value
+
         for row in status["steps"]:
             if row["state"] != "pending":
                 continue
@@ -1627,8 +1682,14 @@ def rehearse(root: Path, delivery_id: str, story: str) -> dict:
             environment = command_environment(root, current)
             environment["AGENTROF_LIVE_TESTS"] = str(selection)
             identity = row["identity"]
-            result, intact, _difference, _dropped, _ran = private_checkout_run(
-                root, selection.parent, current["product_commit"], identity["workdir"], identity["command"], environment)
+            timer = timing_start(root, timing, delivery_id, "qa_lifecycle_gate", row["step"])
+            try:
+                result, intact, _difference, _dropped, _ran = private_checkout_run(
+                    root, selection.parent, current["product_commit"], identity["workdir"], identity["command"], environment)
+            finally:
+                late = timing_end(timer)
+                if late is not None:
+                    overruns.append(late)
             cases = live_case_report(root).get(row["group"], {})
             intact = (intact and selection.read_text(encoding="utf-8") == data
                       and source_file_generation(selection) == generation)
@@ -1641,11 +1702,12 @@ def rehearse(root: Path, delivery_id: str, story: str) -> dict:
             saved[row["step"]] = record
             atomic_file.replace_text(saved_path, json.dumps(saved, indent=2) + "\n")
             if result.returncode != 0 or not intact or cases != {row["target"]: "passed"}:
-                return {**rehearsal_status(root, delivery_id, story), "exit_code": 1, "failed_step": row["step"]}
+                return timed({**rehearsal_status(root, delivery_id, story), "exit_code": 1,
+                              "failed_step": row["step"]})
         if candidate(root, delivery_id, story, allow_evidence=True)["candidate_hash"] != current["candidate_hash"]:
             raise RuntimeError("rehearsal candidate changed while its targets ran")
         final = rehearsal_status(root, delivery_id, story)
-        return {**final, "exit_code": int(any(row["state"] == "pending" for row in final["steps"]))}
+        return timed({**final, "exit_code": int(any(row["state"] == "pending" for row in final["steps"]))})
 
 
 def live_test_command(contract: dict, group: str) -> str:
@@ -1826,6 +1888,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             clear_group_report(scratch, groups)
     started = time.monotonic()
     partition_records = None
+    step_overrun = None
     accepted_full = (own_value == ACCEPT_RECORD and reuse is not None and not fresh
                      and session["pre_handoff"].get("kind") == "test"
                      and session["pre_handoff"].get("command") == command
@@ -1850,12 +1913,17 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             "missing_test_groups": sorted(group for record in partition_records
                                           for group in record.get("missing_test_groups", []))}
     else:
-        with contextlib.ExitStack() as progress:
-            live_output = (progress.enter_context(live_progress(root, session_id, current, record_key, group))
-                           if group is not None else None)
-            completed, intact, difference, _dropped, _ran = private_checkout_run(
-                root, scratch, current["product_commit"], workdir, command, environment,
-                **({"live_output": live_output} if live_output is not None else {}))
+        timer = (timing_start(root, timing_values(root, current["delivery"]), current["delivery"], "live_run",
+                              group, live_progress_path(root, record_key)) if group is not None else None)
+        try:
+            with contextlib.ExitStack() as progress:
+                live_output = (progress.enter_context(live_progress(root, session_id, current, record_key, group))
+                               if group is not None else None)
+                completed, intact, difference, _dropped, _ran = private_checkout_run(
+                    root, scratch, current["product_commit"], workdir, command, environment,
+                    **({"live_output": live_output} if live_output is not None else {}))
+        finally:
+            step_overrun = timing_end(timer)
         group_report = read_group_report(scratch, groups) if groups is not None else None
     if group_report is not None and group_report["missing_test_groups"]:
         intact = False
@@ -1934,7 +2002,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         session["metrics"]["command_seconds"] += record["duration_seconds"]
         write_session(root, session)
         return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {}),
-                **({"own_target_reuse": own_note} if own_note else {})}
+                **({"own_target_reuse": own_note} if own_note else {}),
+                **({"step_overrun": step_overrun} if step_overrun else {})}
 
 
 def record_empty_mutation(root: Path, session: dict, current: dict, command: str, workdir: str,

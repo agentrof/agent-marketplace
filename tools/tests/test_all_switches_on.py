@@ -74,7 +74,8 @@ LANE_TABLE = "deliver/references/switch-lane_table-recorded.md"
 LANE_ISOLATION = "deliver/references/switch-lane_isolation-scratch_clone.md"
 LEVEL_CHANGE = "deliver/references/switch-level_change_map-assertion_map.md"
 DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE, LEVEL_CHANGE,
-           "qa-verification/references/switch-qa_preflight-lifecycle_first.md")
+           "qa-verification/references/switch-qa_preflight-lifecycle_first.md",
+           "deliver/references/switch-step_baseline-median.md")
 EXPECTED = {
     **{f"{entry}:{role}": [] for entry, role in (
         ("business-analysis", "analysis-challenger"), ("business-analysis", "business-analyst"),
@@ -369,7 +370,9 @@ class AllSwitchesOnTests(unittest.TestCase):
         budgets = step_timing.budgets(values)
         shipped = json.loads((ROOT / "plugins/software-engineering-team/skill-content/configure"
                               "/data/step-budgets.json").read_text(encoding="utf-8"))["budgets"]
-        self.assertEqual(sorted(budgets), sorted(shipped))
+        targets = process_policy.load_registry()["step_budgets"]["parameters"]["package_limits"]
+        self.assertEqual(sorted(budgets), sorted(targets))
+        self.assertLess(set(budgets), set(shipped))
         self.assertEqual(budgets["story_end_to_end"], 180)
         begun = step_timing.start(self.project, values, run="all-on", step="story",
                                   budget="story_end_to_end", at="2026-01-01T00:00:00Z")

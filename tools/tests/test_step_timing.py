@@ -27,6 +27,11 @@ ON = {"step_timing": {"value": "recorded", "default": "off", "source": "policy"}
                        "parameters": {"backlog_revision": 10, "confirmation_rereview": 3}}}
 NO_BUDGETS = {"step_timing": {"value": "recorded", "default": "off", "source": "policy"}}
 OFF = {"step_timing": {"value": "off", "default": "off", "source": "default"}}
+# step_baseline at median: the median of the last 3 finished spans, once 2 exist, times 1.5.
+MEDIAN = {"value": "median", "default": "off", "source": "policy",
+          "parameters": {"runs": 3, "min_samples": 2, "ratio_percent": 150}}
+BASELINE = {**NO_BUDGETS, "step_baseline": MEDIAN}
+BASELINE_AND_BUDGETS = {**ON, "step_baseline": MEDIAN}
 
 
 def at(minute: float) -> str:
@@ -224,6 +229,63 @@ class StepTimingTests(unittest.TestCase):
         kept = self.root / result["path"]
         self.assertEqual(kept.name, "r1.report.json")
         self.assertEqual(json.loads(kept.read_text())["over_budget"], [over])
+
+    def history_of(self, step: str, *minutes: float, values=BASELINE) -> None:
+        """Earlier runs of *step*, one run file each, lasting *minutes* in turn, all before minute 0 of r1."""
+        for index, length in enumerate(minutes):
+            run = f"past{index}"
+            span = step_timing.start(self.root, values, run=run, step=step,
+                                     at=f"2025-12-01T{index:02d}:00:00Z")["span"]
+            step_timing.end(self.root, values, run=run, span=span,
+                            at=f"2025-12-01T{index:02d}:{int(length):02d}:{int(length * 60) % 60:02d}Z")
+
+    def test_a_step_far_past_its_own_median_is_over_without_a_fixed_maximum(self) -> None:
+        self.history_of("live_run:smoke", 10, 10, 12)
+        within = self.start("live_run:smoke", 0, values=BASELINE)["span"]
+        self.assertNotIn("overrun", self.end(within, 15, values=BASELINE))
+        # The 15-minute run joins the window: the last three are 10, 12 and 15.
+        over = self.start("live_run:smoke", 15, values=BASELINE)["span"]
+        found = self.end(over, 35, values=BASELINE)["overrun"]
+        self.assertEqual((found["basis"], found["baseline_minutes"], found["threshold_minutes"],
+                          found["over_minutes"], found["budget"]), ("baseline", 12.0, 18.0, 2.0, None))
+
+    def test_the_baseline_reads_only_the_last_runs_and_needs_its_samples(self) -> None:
+        self.history_of("live_step:a", 50)
+        span = self.start("live_step:a", 0, values=BASELINE)["span"]
+        self.assertNotIn("overrun", self.end(span, 59, values=BASELINE))
+        self.history_of("live_step:b", 50, 50, 4, 4, 4)
+        span = self.start("live_step:b", 0, values=BASELINE)["span"]
+        self.assertEqual(self.end(span, 7, values=BASELINE)["overrun"]["baseline_minutes"], 4.0)
+        # At off the same history reports nothing.
+        span = step_timing.start(self.root, NO_BUDGETS, run="r3", step="live_step:b", at=at(0))["span"]
+        self.assertNotIn("overrun", step_timing.end(self.root, NO_BUDGETS, run="r3", span=span, at=at(59)))
+
+    def test_the_larger_of_maximum_and_baseline_applies(self) -> None:
+        self.history_of("confirmation_rereview", 1, 1, values=BASELINE_AND_BUDGETS)
+        span = self.start("confirmation_rereview", 0, values=BASELINE_AND_BUDGETS)["span"]
+        found = self.end(span, 4, values=BASELINE_AND_BUDGETS)["overrun"]
+        self.assertEqual((found["basis"], found["threshold_minutes"], found["baseline_minutes"]),
+                         ("budget", 3.0, 1.0))
+
+    def test_an_open_watched_step_shows_what_it_is_doing(self) -> None:
+        self.history_of("live_run:smoke", 2, 2)
+        scratch = self.root / ".agentrof/agent-marketplace/.runtime/scratch"
+        scratch.mkdir(parents=True)
+        (scratch / "live.log").write_text("case 1 passed\ncase 2 waiting for registry\n\n", encoding="utf-8")
+        (scratch / "progress.json").write_text(json.dumps(
+            {"state": "running", "elapsed_seconds": 300.0, "output_path": str(scratch / "live.log"),
+             "adapter_observation": {"test_id": "case 2"}}), encoding="utf-8")
+        watch = ".agentrof/agent-marketplace/.runtime/scratch/progress.json"
+        self.start("live_run:smoke", 0, values=BASELINE, watch=watch)
+        late = step_timing.open_overruns(self.root, BASELINE, "r1", at(5))["overruns"]
+        self.assertEqual(late[0]["doing"], {"watch": watch, "last_line": "case 2 waiting for registry",
+                                            "progress": {"state": "running", "elapsed_seconds": 300.0,
+                                                         "adapter_observation": {"test_id": "case 2"}}})
+        report = step_timing.report(self.root, BASELINE, "r1")
+        self.assertEqual(report["steps"][0]["basis"], "baseline")
+        with self.assertRaises(step_timing.Refused) as caught:
+            self.start("other", 0, values=BASELINE, watch="../outside.json")
+        self.assertEqual(caught.exception.code, "TIMING_BAD_WATCH")
 
     def test_runs_lists_run_files(self) -> None:
         self.start("a", 0)

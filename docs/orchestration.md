@@ -321,6 +321,13 @@ target in `configure/data/step-budgets.json`; a step may finish well under it,
 and only an exceeded maximum is reported, at once and never blocking, as
 `challenge-review/references/switch-step_budgets-enforced.md` defines.
 
+Whether a step is also compared with its own history is process switch
+`step_baseline`. At `off`, the default, it is not. At `median`, a timed step
+is over when it passes the larger of its maximum and a percentage of the
+median of its last recorded runs, and the QA runner times its live runs, live
+steps and rehearsal commands, as
+`deliver/references/switch-step_baseline-median.md` defines.
+
 A Delivery Item's implementation writers run as process switch
 `implementation_schedule` selects. `sequential_v1`, the default, runs them one
 after another in their approved order. For an Item whose approved plan

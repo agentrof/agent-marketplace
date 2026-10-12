@@ -554,6 +554,7 @@ RELEASED_DEFAULTS = {
     "root_review_scope": "full",
     "source_decision_gate": "two_gates",
     "source_rebind": "reviewed_revision",
+    "step_baseline": "off",
     "step_budgets": "off",
     "step_timing": "off",
     "story_size_budget": "off",
@@ -666,6 +667,13 @@ SAFETY_RULES = {
             "A budget is a maximum, never an expectation",
             "Enforcement is reporting only",
             "a review is never cut to stay under one",
+        ),
+    },
+    "step_baseline": {
+        f"{SKILLS}/deliver/references/switch-step_baseline-median.md": (
+            "A baseline only reports",
+            "a verification command is never stopped to stay under one",
+            "never a verdict on the product",
         ),
     },
     "calculation_examples": {
@@ -1190,6 +1198,8 @@ READING_SWITCHES = {
 STEP_BUDGET_TARGETS = {"backlog_revision": 10, "confirmation_rereview": 3,
                        "delivery_and_execution_planning": 15, "reader_closure_unit": 5,
                        "requirement_technical": 10, "story_end_to_end": 180}
+# The QA step keys, whose length depends on the project, ship no target (#543).
+QA_STEP_KEYS = ("freeze", "live_run", "live_step", "manual_scenario", "pre_handoff", "qa_lifecycle_gate")
 VAULT_FIRST = "Vault first, per constitution section 5"
 VAULT_TIERS = ("`project_reading` plan", "machine indexes and generated views",
                "typed frontmatter", "relation blocks and wikilinks", "then maps",
@@ -1232,7 +1242,7 @@ class ReadingSwitchTests(unittest.TestCase):
         declared = json.loads((TEAM / spec["declared_by"]["path"]).read_text(
             encoding="utf-8"))[spec["declared_by"]["key"]]
         self.assertEqual(spec["package_limits"], STEP_BUDGET_TARGETS)
-        self.assertEqual(sorted(declared), sorted(STEP_BUDGET_TARGETS))
+        self.assertEqual(sorted(declared), sorted([*STEP_BUDGET_TARGETS, *QA_STEP_KEYS]))
         for budget, item in declared.items():
             with self.subTest(budget=budget):
                 self.assertTrue(item["summary"].startswith("Maximum minutes"))

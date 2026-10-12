@@ -488,6 +488,8 @@ def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
     if paths and all(scratch in (path if path.is_absolute() else root / path).resolve().parents
                      for path in paths):
         return
+    if readers and paths and not protected_paths(root, paths):
+        return
     if not readers:
         # Each command holds the environment lock around the command lock, so
         # a command with no environment holder left has finished.
@@ -499,11 +501,55 @@ def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
         raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
                            + describe_environment_holder(holder or {})
                            + f"; writes to the Item worktree wait until {wait}")
-    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing."
-                       " Until then Bash runs only the reader manifest's command_form, one direct"
-                       " `<python> [-B] <bound delivery_verification.py> --worktree <worktree> <verb> ...` with no"
-                       " pipe, redirect, variable or prefix but PYTHONDONTWRITEBYTECODE=1; read files with the host's"
-                       " Read tool or the CLI's inspect, inspect-context and diff, and write only under allowed_writes")
+    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before"
+                       " writing the frozen candidate's tracked files, its Git metadata or the verification session"
+                       " records. Untracked, ignored and runtime files of the Item worktree and the session scratch"
+                       " stay writable. Readers run the manifest's command_form, one direct"
+                       " `<python> [-B] <bound delivery_verification.py> --worktree <worktree> <verb> ...`, including"
+                       " `environment --verb <name>` for a QA verb the Verification Contract declares; read files with"
+                       " the host's Read tool or the CLI's inspect, inspect-context and diff, and write only under"
+                       " allowed_writes")
+
+
+def protected_paths(worktree: Path, paths: list[Path]) -> list[Path]:
+    """The paths among *paths* whose write could change the frozen candidate or its session records.
+
+    They are the Item worktree's Git metadata and tracked files, a directory that holds one, and
+    the verification session directory outside its scratch. A worktree whose tracked files cannot
+    be listed protects every path inside it.
+    """
+    root = Path(worktree).resolve()
+    session = session_path(root).parent
+    found = []
+    for raw in paths:
+        path = raw if raw.is_absolute() else root / raw
+        for candidate in {Path(os.path.normpath(path)), path.resolve()}:
+            if candidate.is_relative_to(session / "scratch"):
+                continue
+            if (candidate.is_relative_to(session) or session.is_relative_to(candidate)
+                    or root.is_relative_to(candidate) or tracked_path(root, candidate)):
+                found.append(raw)
+                break
+    return found
+
+
+def tracked_path(root: Path, path: Path) -> bool:
+    if not path.is_relative_to(root):
+        return False
+    relative = path.relative_to(root).as_posix()
+    if relative.casefold().split("/")[0] == ".git":
+        return True
+    metadata = root / ".git"
+    with contextlib.suppress(OSError, IndexError):
+        if metadata.is_file():
+            metadata = root / metadata.read_text(encoding="utf-8").split("gitdir:", 1)[1].strip()
+    if not (metadata / "index").is_file():
+        return True
+    try:
+        # icase: a case-insensitive file system writes a tracked file through any spelling.
+        return bool(git(root, "ls-files", "-z", "--", ":(literal,icase)" + relative))
+    except RuntimeError:
+        return True
 
 
 def command_form(root: Path) -> str:
@@ -3884,7 +3930,7 @@ def fresh_runtime_problem(session: dict, evidence: dict | None = None) -> bool:
     state = session.get("runtime", {})
     events = state.get("events", [])
     attempt_id = state.get("attempt_id")
-    verbs = [event["verb"] for event in events if event.get("exit_code") == 0]
+    verbs = [event["verb"] for event in events if event.get("exit_code") == 0 and event["verb"] in ENVIRONMENT_VERBS]
     return bool(not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id)
                 or runtime_needs_cleanup(session) or state.get("interrupted_commands")
                 or state.get("lifecycle", FRESH) != FRESH
@@ -3945,11 +3991,29 @@ def runtime_environment_identity(root: Path, current: dict) -> dict:
     return environment_identity(root, command_environment(root, current))
 
 
+ENVIRONMENT_VERBS = operation_compile.ENVIRONMENT_VERBS
+
+
+def declared_qa_verbs(root: Path) -> dict[str, dict]:
+    """The QA Verbs an unchanged approved Verification Contract declares, by verb."""
+    props, body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+    verbs, errors = operation_compile.qa_verbs(body)
+    if verbs and (props.get("status") != "approved"
+                  or props.get("source_hash") != operation_compile.receipt_hash(props, body)):
+        errors.append("QA Verbs requires an unchanged approved Verification Contract")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return {row["verb"]: row for row in verbs}
+
+
 def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
-    """Invoke only the approved environment contract in a persistent private clone."""
+    """Invoke only the approved environment contract, or a declared QA verb, in a persistent private clone."""
     root = root.resolve()
-    if verb not in {"down", "up", "seed", "logs", "url"}:
-        raise RuntimeError("unsupported environment verb")
+    declared = None
+    if verb not in ENVIRONMENT_VERBS:
+        declared = declared_qa_verbs(root).get(verb)
+        if declared is None:
+            raise RuntimeError("unsupported environment verb; declare it in the Verification Contract's QA Verbs")
     with environment_lock(root, "qa_engineer", "environment --verb " + verb), \
             command_lock(root, "qa_engineer", "environment --verb " + verb):
         with locked(root):
@@ -3972,6 +4036,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                     raise RuntimeError("environment argument must be an exact approved scenario or service identifier")
             elif value is not None:
                 raise RuntimeError("this environment verb does not accept a value")
+            if declared:
+                command, contract = declared["command"], {"env_workdir": declared["workdir"]}
             state = session.get("runtime", {"attempt_id": uuid.uuid4().hex, "events": [], "active": False})
             if state.get("pending") and verb != "down":
                 raise RuntimeError("interrupted runtime command requires teardown before another command")
@@ -3981,7 +4047,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                     and runtime_lifecycle(root, session)["mode"] == LONG_LIVED):
                 state["lifecycle"] = LONG_LIVED
             long_lived = state.get("lifecycle") == LONG_LIVED
-            successful = [event["verb"] for event in state["events"] if event["exit_code"] == 0]
+            successful = [event["verb"] for event in state["events"]
+                          if event["exit_code"] == 0 and event["verb"] in ENVIRONMENT_VERBS]
             if verb == "up" and not long_lived and (not successful or successful[-1] != "down"):
                 raise RuntimeError("fresh runtime requires a successful down before up")
             if verb in {"seed", "logs", "url"} and not state["active"]:
@@ -4031,7 +4098,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             write_session(root, session)
         # Only fixed verbs and declared identifier tokens enter this argument
         # suffix; project command bytes remain the approved contract's bytes.
-        command = command + " " + verb + (" " + value if value else "")
+        if not declared:
+            command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
         with host_awake(host_guard(root)["keep_awake"]) as awake:
             completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
@@ -4942,7 +5010,7 @@ def require_lifecycle_ready(root: Path, session: dict) -> None:
         return
     state = session.get("runtime", {})
     events = state.get("events", [])
-    verbs = [event.get("verb") for event in events]
+    verbs = [event.get("verb") for event in events if event.get("verb") in ENVIRONMENT_VERBS]
     up = max((i for i, verb in enumerate(verbs) if verb == "up"), default=-1)
     long_lived = (state.get("lifecycle") == LONG_LIVED if events
                   else runtime_lifecycle(root, session)["mode"] == LONG_LIVED)
@@ -4965,7 +5033,7 @@ def require_runtime_evidence(root: Path, session: dict, evidence: dict, environm
     state = session.get("runtime", {})
     events = state.get("events", [])
     attempt_id = state.get("attempt_id")
-    verbs = [event["verb"] for event in events if event.get("exit_code") == 0]
+    verbs = [event["verb"] for event in events if event.get("exit_code") == 0 and event["verb"] in ENVIRONMENT_VERBS]
     required = runtime_lifecycle(root, session)
     recorded = {event.get("lifecycle", FRESH) for event in events} | {state.get("lifecycle", FRESH)}
     if recorded != {required["mode"]}:
@@ -5617,7 +5685,7 @@ def permission_preflight(root: Path, delivery_id: str, story: str) -> dict:
     for group in groups if isinstance(groups, list) else []:
         forms.append((f"live_test:{group}", cli_form(root, "run", "--kind", "live_test", "--group", str(group))))
     if item.get("runtime_required"):
-        for verb in ("up", "seed", "logs", "url", "down"):
+        for verb in ("up", "seed", "logs", "url", "down", *declared_qa_verbs(root)):
             forms.append((f"environment:{verb}", cli_form(root, "environment", "--verb", verb)))
     if qa_preflight(root, delivery_id):
         forms.append(("rehearse", cli_form(root, "rehearse", "--delivery", delivery_id, "--story", story)))
@@ -5765,7 +5833,8 @@ def main(argv=None) -> int:
     run.add_argument("--fresh", action="store_true")
     run.add_argument("--resume", action="store_true")
     environment = subs.add_parser("environment")
-    environment.add_argument("--verb", required=True, choices=("down", "up", "seed", "logs", "url"))
+    environment.add_argument("--verb", required=True,
+                             help="down, up, seed, logs, url or a QA verb the Verification Contract declares")
     environment.add_argument("--value")
     lane = subs.add_parser("lane-run")
     lane.add_argument("--delivery", required=True)

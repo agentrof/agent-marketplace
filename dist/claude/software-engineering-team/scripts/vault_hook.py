@@ -2132,11 +2132,17 @@ def valid_git_experience_sync_result(payload: dict, project: Path,
 
 
 # While verification readers hold an Item, only writes that can change the
-# frozen candidate or its verification session are refused. Shell intent is
-# not fully parseable, so a command passes only when every simple command in
-# it is a known read-only form or stays wholly outside the protected roots.
+# frozen candidate's tracked files or its verification session records are
+# refused. Shell intent is not fully parseable, so a command passes only when
+# every simple command in it is a known read-only form or names no protected path.
 READ_ONLY_COMMANDS = {"cat", "head", "tail", "ls", "wc", "grep", "rg", "jq", "ps", "date", "find",
-                      "git", "docker", "gh", "cd"}
+                      "git", "docker", "gh", "cd", "echo"}
+# Commands whose options can write a file: a filename glob could expand into such an option.
+OPTION_CHECKED_COMMANDS = {"git", "rg", "find", "date", "docker", "gh"}
+# A $NAME or ${NAME} expansion of an inherited variable; the shell's own variables that a
+# command fills from its words (BASH_COMMAND, $_) or that split words (IFS) stay refused.
+SHELL_VARIABLE_RE = re.compile(r"\$(?:([A-Z][A-Z0-9_]*)|\{([A-Z][A-Z0-9_]*)\})")
+SHELL_SET_VARIABLE_RE = re.compile(r"IFS|BASH.*|ZSH.*")
 SAFE_FILE_COMMANDS = {"touch", "mkdir", "rmdir", "rm", "cp", "mv"}
 READ_ONLY_GIT = {"diff", "log", "show", "status", "rev-parse", "ls-files", "cat-file"}
 READ_ONLY_DOCKER = {("ps",), ("inspect",), ("logs",), ("images",), ("volume", "ls"), ("volume", "inspect")}
@@ -2149,22 +2155,35 @@ SHELL_SEPARATORS = {";", "&&", "||", "|", "&", "|&"}
 SHELL_REDIRECTS = {">", ">>", ">|", "&>", "&>>", "<", ">&", "<&"}
 
 
-def _shell_words(command: str) -> list[tuple[str, bool]] | None:
-    """Split one POSIX command into (word, is_operator); refuse expansions and subshells."""
-    words: list[tuple[str, bool]] = []
+def _shell_words(command: str) -> list[tuple[str, bool, bool]] | None:
+    """Split one POSIX command into (word, is_operator, globbed); refuse subshells.
+
+    A plain $NAME or ${NAME} stays in its word as written; globbed marks an unquoted
+    *, ? or [ the shell may expand into file names.
+    """
+    words: list[tuple[str, bool, bool]] = []
     current: list[str] = []
     started = False
+    globbed = False
     quote = ""
     index = 0
 
     def flush() -> None:
-        nonlocal current, started
+        nonlocal current, started, globbed
         if started:
-            words.append(("".join(current), False))
-        current, started = [], False
+            words.append(("".join(current), False, globbed))
+        current, started, globbed = [], False, False
 
     while index < len(command):
         char = command[index]
+        if char == "$" and quote != "'":
+            match = SHELL_VARIABLE_RE.match(command, index)
+            if not match or SHELL_SET_VARIABLE_RE.fullmatch(match[1] or match[2]):
+                return None
+            current.append(match[0])
+            started = True
+            index = match.end()
+            continue
         if quote == "'":
             if char == "'":
                 quote = ""
@@ -2190,7 +2209,7 @@ def _shell_words(command: str) -> list[tuple[str, bool]] | None:
             started = True
         elif char in " \t":
             flush()
-        elif char in "$`(){}\n\r":
+        elif char in "`(){}\n\r":
             return None
         elif char in ";&|<>":
             # A file descriptor number written against its redirect is not a word.
@@ -2203,12 +2222,13 @@ def _shell_words(command: str) -> list[tuple[str, bool]] | None:
             operator = command[index:end]
             if operator not in SHELL_SEPARATORS | SHELL_REDIRECTS:
                 return None
-            words.append((operator, True))
+            words.append((operator, True, False))
             index = end
             continue
         else:
             current.append(char)
             started = True
+            globbed = globbed or char in "*?["
         index += 1
     if quote:
         return None
@@ -2217,16 +2237,12 @@ def _shell_words(command: str) -> list[tuple[str, bool]] | None:
 
 
 def _touches(path: Path, roots: list[Path], scratch: Path) -> bool:
-    """A path inside, equal to or above a protected root, scratch excepted."""
-    candidates = {Path(os.path.normpath(path))}
-    with contextlib.suppress(OSError, RuntimeError):
-        candidates.add(path.resolve())
-    for candidate in candidates:
-        if _path_within(candidate, scratch):
-            continue
-        if any(_path_within(candidate, root) or _path_within(root, candidate) for root in roots):
-            return True
-    return False
+    """A tracked path of the Item worktree, a directory holding one, or the session outside scratch."""
+    from delivery_verification import protected_paths
+    try:
+        return bool(protected_paths(roots[0], [path]))
+    except (OSError, RuntimeError):
+        return True
 
 
 def _word_touches(word: str, cwds: list[Path], roots: list[Path], scratch: Path) -> bool:
@@ -2234,8 +2250,10 @@ def _word_touches(word: str, cwds: list[Path], roots: list[Path], scratch: Path)
     if word.startswith("-") and "=" in word:
         values.append(word.split("=", 1)[1])
     for value in values:
-        if any(str(root) in value for root in roots):
+        if "$" in value:
             return True
+        # A protected root embedded after a prefix, such as host:/root/file, names that path.
+        value = next((value[value.index(str(root)):] for root in roots if str(root) in value), value)
         if "*" in value or "?" in value or "[" in value:
             prefix = re.split(r"[*?\[]", value, maxsplit=1)[0]
             value = prefix[:prefix.rfind("/") + 1] or "."
@@ -2245,9 +2263,13 @@ def _word_touches(word: str, cwds: list[Path], roots: list[Path], scratch: Path)
     return False
 
 
-def _read_only_command(words: list[str]) -> bool:
+def _read_only_command(words: list[str], globbed: bool = False) -> bool:
     name, args = words[0], words[1:]
-    if name not in READ_ONLY_COMMANDS:
+    # An absolute path to a tool in a PATH directory runs what its bare name would.
+    if os.path.isabs(name) and os.path.dirname(os.path.normpath(name)) in {
+            os.path.normpath(entry) for entry in os.environ.get("PATH", "").split(os.pathsep) if entry}:
+        name = os.path.basename(name)
+    if name not in READ_ONLY_COMMANDS or globbed and name in OPTION_CHECKED_COMMANDS:
         return False
     if name == "git":
         safe_monitor = False
@@ -2299,10 +2321,11 @@ def shell_outside_verification(payload: dict, roots: list[Path], scratch: Path) 
         return False
     cwds = [Path(str(payload.get("cwd") or ".")).resolve()]
     segment: list[str] = []
+    globbed = False
     piped = False
     index = 0
     while True:
-        word, operator = words[index] if index < len(words) else (";", True)
+        word, operator, glob = words[index] if index < len(words) else (";", True, False)
         if operator and word in SHELL_REDIRECTS:
             index += 1
             if index >= len(words) or words[index][1]:
@@ -2316,6 +2339,7 @@ def shell_outside_verification(payload: dict, roots: list[Path], scratch: Path) 
             continue
         if not operator:
             segment.append(word)
+            globbed = globbed or glob
             index += 1
             continue
         assignments = []
@@ -2328,23 +2352,22 @@ def shell_outside_verification(payload: dict, roots: list[Path], scratch: Path) 
         if not sanctioned:
             return False
         if segment[0] == "cd" and not assignments:
-            if len(segment) > 2 or segment[1:] == ["-"]:
+            if len(segment) > 2 or segment[1:] == ["-"] or globbed or "$" in "".join(segment):
                 return False
             target = os.path.expanduser(segment[1] if len(segment) == 2 else "~")
             moved = [(cwd / target).resolve() for cwd in cwds]
             # A failed cd keeps the old directory unless && stops the chain.
             cwds = moved if word == "&&" else cwds + moved if word == ";" else cwds
-        elif sanctioned and "/" not in segment[0] and _read_only_command(segment):
+        elif sanctioned and _read_only_command(segment, globbed):
             pass
         elif (segment[0] not in SAFE_FILE_COMMANDS or piped) or os.path.basename(segment[0]) in INDIRECT_COMMANDS \
-                or any(_inside(cwd, roots, scratch) for cwd in cwds) \
                 or any(_word_touches(item.split("=", 1)[1], cwds, roots, scratch) for item in assignments) \
                 or any(_word_touches(item, cwds, roots, scratch) for item in segment):
             return False
         if index >= len(words):
             return True
         piped = word in {"|", "|&"}
-        segment = []
+        segment, globbed = [], False
         index += 1
 
 
@@ -2358,15 +2381,20 @@ def verification_scope(project: Path) -> tuple[list[Path], Path]:
 def readers_active_message(message: str, roots: list[Path], scratch: Path) -> str:
     if not message.startswith("DELIVERY_VERIFICATION_READERS_ACTIVE"):
         return message
-    return (message + ". Allowed meanwhile: the bound delivery_verification.py command;"
+    return (message + ". Protected: the tracked files and Git metadata of " + str(roots[0])
+            + " and the session directory " + str(roots[1]) + " outside " + str(scratch)
+            + ". Allowed meanwhile: the bound delivery_verification.py command, including environment --verb"
+            " for a QA verb the Verification Contract declares;"
             " read-only commands (git diff/log/show/status/rev-parse/ls-files/cat-file, grep, rg, jq,"
-            " cat, head, tail, ls, wc, date, ps, docker ps/inspect/logs/images/volume ls|inspect,"
-            " gh issue|pr view/list, gh pr checks, find without -delete or -exec);"
+            " cat, head, tail, ls, wc, echo, date, ps, docker ps/inspect/logs/images/volume ls|inspect,"
+            " gh issue|pr view/list, gh pr checks, find without -delete or -exec), by bare name or by an"
+            " absolute path in a PATH directory, in pipes and with $NAME or ${NAME} expansions of upper-case"
+            " variables but no command substitution, backticks or unquoted globs for git, rg, find, date,"
+            " docker or gh;"
             " Git needs -P -c core.fsmonitor=false and diff/log/show also need --no-ext-diff --no-textconv;"
-            " rg needs --no-config. Only literal file operations (touch/mkdir/rmdir/rm/cp/mv) whose"
-            " working directory and every path argument stay outside "
-            + " and ".join(str(root) for root in roots)
-            + "; Edit and Write outside them, or under " + str(scratch))
+            " rg needs --no-config. Redirects and literal file operations (touch/mkdir/rmdir/rm/cp/mv) whose"
+            " paths name no protected path, such as untracked, ignored or runtime files;"
+            " Edit and Write of any path that is not protected")
 
 
 def delivery_reader_barrier(payload: dict) -> int:

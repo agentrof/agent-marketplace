@@ -241,6 +241,8 @@ class VaultHookPrototypeTests(unittest.TestCase):
             for command in ("git -P -c core.fsmonitor=false diff --no-ext-diff --no-textconv HEAD~1 -- src", "git -P -c core.fsmonitor=false -C . log --no-ext-diff --no-textconv --oneline | head -5", "jq .a data.json",
                             "date -u +%s", "docker ps", "docker volume inspect cache", "gh pr checks 12",
                             "find . -name '*.py'", "grep -rn 'value$' src 2>/dev/null", "rg --no-config -n token src",
+                            "echo $HOME", 'grep -n "${PATTERN}" data.json | head -3',
+                            "git -P -c core.fsmonitor=false -C $ITEM log --no-ext-diff --no-textconv | wc -l",
                             f"git -P -c core.fsmonitor=false -C {shlex.quote(str(unrelated))} status",
                             f"cd {shlex.quote(str(unrelated))} && touch notes.txt > log.txt"):
                 with self.subTest(command=command):
@@ -251,7 +253,10 @@ class VaultHookPrototypeTests(unittest.TestCase):
             for command in ("rm src/product.py", f"rm -rf {shlex.quote(str(project / 'src'))}",
                             "touch product.py", "git commit -qm change", "git diff --output=patch.txt",
                             "find . -name '*.py' -delete", "find . | xargs rm", "git log > history.txt",
-                            "echo $HOME", "cat product.py | sh", "date 0101000026", "docker rm cache",
+                            "echo $(id)", "echo `id`", "cat $_", "echo ${IFS}x", "echo $BASH_COMMAND",
+                            "echo ${HOME:-x}", "./grep token src", "echo x > $OUT", "cd $ITEM && ls",
+                            "git -P -c core.fsmonitor=false diff --no-ext-diff --no-textconv *",
+                            "cat product.py | sh", "date 0101000026", "docker rm cache",
                             "gh pr merge 12", "rg --pre ./run.sh token", "rg token src", "git status",
                             "git -P -c core.fsmonitor=false diff --textconv",
                             f"cd {shlex.quote(str(unrelated))} ; rm -rf {shlex.quote(str(session))}",
@@ -272,6 +277,88 @@ class VaultHookPrototypeTests(unittest.TestCase):
                         self.assertEqual(self.hook.delivery_reader_barrier({
                             "cwd": str(project), "tool_name": tool,
                             "file_targets": [{"file_path": str(path)}]}), expected)
+
+    @unittest.skipIf(os.name == "nt", "the narrowed shell scope parses POSIX commands only")
+    def test_active_readers_protect_only_tracked_candidate_files_and_session_records(self):
+        import delivery_verification
+        tracked = {"src/product.py", ".gitignore"}
+
+        def git(root, *args):
+            # The index lists tracked files; a pathspec names a file or the directory above files.
+            self.assertEqual(args[:3], ("ls-files", "-z", "--"))
+            spec = args[3].split(")", 1)[1].casefold()
+            return "\0".join(name for name in sorted(tracked)
+                              if name.casefold() == spec or name.casefold().startswith(spec + "/"))
+
+        with tempfile.TemporaryDirectory() as temporary, \
+                mock.patch.object(delivery_verification, "git", side_effect=git), \
+                mock.patch.dict(os.environ, {"PATH": os.pathsep.join(("/usr/local/bin", "/usr/bin"))}):
+            project = Path(temporary).resolve() / "item"
+            (project / ".git").mkdir(parents=True)
+            (project / ".git/index").write_bytes(b"")
+            delivery_verification.write_session(project, {"schema_version": 1, "workers": {
+                "code_reviewer": {"state": "running"}, "qa_engineer": {"state": "running"}}})
+            session = delivery_verification.session_path(project).parent
+
+            def shell(command):
+                payload = {"cwd": str(project), "tool_name": "Bash", "shell_family": "posix",
+                           "tool_input": {"command": command}}
+                output = io.StringIO()
+                with redirect_stderr(output):
+                    return self.hook.delivery_reader_barrier(payload), output.getvalue()
+
+            for command in ("grep -n $PATTERN src/product.py | head -5", "docker logs $SERVICE | grep -c error",
+                            "/usr/local/bin/docker ps", "/usr/bin/grep -n value src/product.py",
+                            "echo done > runtime/state.log", "mkdir -p runtime/cache && touch runtime/cache/a",
+                            "rm -f runtime/old.log", "touch notes.txt",
+                            f"cp {shlex.quote(str(session / 'scratch/a.json'))} runtime/a.json"):
+                with self.subTest(command=command):
+                    self.assertEqual(shell(command), (0, ""))
+            for command in ("echo x > src/product.py", "echo x >> SRC/Product.py", "rm -rf src", "rm -rf .",
+                            "touch .git/index", "cp runtime/a.json src/product.py", "rm -rf runtime/../src",
+                            "mv .gitignore runtime/", f"echo x > {shlex.quote(str(session / 'session.json'))}",
+                            "/usr/local/bin/docker rm cache", "/opt/tools/grep value src", "echo x > $OUT"):
+                with self.subTest(command=command):
+                    code, message = shell(command)
+                    self.assertEqual(code, 2)
+                    self.assertIn("Protected: the tracked files and Git metadata of " + str(project), message)
+                    self.assertIn("$NAME or ${NAME}", message)
+            for path, expected in ((project / "runtime/state.log", 0), (project / "notes/new.md", 0),
+                                   (session / "scratch/result.json", 0), (project / "src/product.py", 2),
+                                   (project / ".git/HEAD", 2), (session / "session.json", 2)):
+                with self.subTest(path=path), redirect_stderr(io.StringIO()):
+                    self.assertEqual(self.hook.delivery_reader_barrier({
+                        "cwd": str(project), "tool_name": "Write",
+                        "file_targets": [{"file_path": str(path)}]}), expected)
+            delivery_verification.guard_write(project, [project / "runtime/state.log", Path("notes.txt")])
+            with self.assertRaisesRegex(RuntimeError, "READERS_ACTIVE: .* tracked files"):
+                delivery_verification.guard_write(project, [project / "runtime/state.log", Path("src/product.py")])
+
+    @integration
+    def test_active_readers_keep_ignored_runtime_files_of_a_real_checkout_writable(self):
+        import delivery_verification
+        with temporary_directory() as temporary:
+            project = Path(temporary).resolve() / "item"
+            project.mkdir()
+            init_repository(project)
+            (project / ".gitignore").write_text("runtime/\n", encoding="utf-8")
+            (project / "src").mkdir()
+            (project / "src/product.py").write_text("value = 1\n", encoding="utf-8")
+            for args in (("add", "-A"), ("-c", "user.name=Test", "-c", "user.email=test@example.com",
+                                         "commit", "-qm", "Candidate")):
+                subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
+            delivery_verification.write_session(project, {"schema_version": 1, "workers": {
+                "code_reviewer": {"state": "running"}, "qa_engineer": {"state": "running"}}})
+            delivery_verification.guard_write(project, [project / "runtime/state.log", project / "untracked.txt"])
+            for path in (project / "src/product.py", project / "src", project / ".gitignore"):
+                with self.subTest(path=path), self.assertRaisesRegex(RuntimeError, "READERS_ACTIVE"):
+                    delivery_verification.guard_write(project, [path])
+            payload = {"cwd": str(project), "tool_name": "Bash", "shell_family": "posix"}
+            if os.name != "nt":
+                for command, expected in (("echo done > runtime/state.log", 0), ("echo x > src/product.py", 2)):
+                    with self.subTest(command=command), redirect_stderr(io.StringIO()):
+                        self.assertEqual(self.hook.delivery_reader_barrier(
+                            {**payload, "tool_input": {"command": command}}), expected)
 
     def test_safe_os_metadata_never_changes_the_guard_inventory(self):
         with tempfile.TemporaryDirectory() as temporary:

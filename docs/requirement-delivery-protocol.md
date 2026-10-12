@@ -797,7 +797,9 @@ New Items approve an explicit `parallel_snapshot_v1` verification schedule.
 An absent schedule preserves `sequential_v1` for legacy approved Items without
 altering their bytes or hashes. Parallel Code Review and QA bind one committed
 candidate and its exact plan, source and instruction identities. Both readers
-must settle or confirm cancellation before the owner can write. A reader's
+must settle or confirm cancellation before anyone writes the candidate's
+tracked files, its Git metadata or the session records outside scratch;
+untracked, ignored and runtime files stay writable. A reader's
 registration waits only for its own verification command, and a role waits
 for the Item's commands and locks only through the runner's `wait`, which
 returns once the holder releases its lock and at the latest after the

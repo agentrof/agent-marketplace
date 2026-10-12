@@ -1,0 +1,6 @@
+{
+  "summary": "While verification readers run, refuse only writes to the frozen candidate's tracked files, its Git metadata and the session records; allow read-only commands with $NAME expansions and absolute tool paths, and let a Verification Contract declare QA Verbs that QA runs as recorded environment verbs.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

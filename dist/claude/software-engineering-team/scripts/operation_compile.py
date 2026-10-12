@@ -341,6 +341,35 @@ def owner_steps(body: str) -> tuple[list[dict], list[str]]:
     return plan, errors
 
 
+QA_VERBS = "QA Verbs"
+# The runner's own environment verbs; a declared QA verb never shadows one.
+ENVIRONMENT_VERBS = ("down", "up", "seed", "logs", "url")
+
+
+def qa_verbs(body: str) -> tuple[list[dict], list[str]]:
+    """Extra verbs QA runs through `environment --verb <verb>`, each with its exact command."""
+    import backlog_compile
+
+    if QA_VERBS not in backlog_compile.headings(body):
+        return [], []
+    rows, errors = backlog_compile.structured_table(
+        backlog_compile.section(body, QA_VERBS), ("verb", "command", "workdir"), "verification contract", QA_VERBS)
+    plan, seen = [], set()
+    for raw in rows:
+        row = {key: value.strip().strip("`") for key, value in raw.items()}
+        if not PARTITION_ID_RE.fullmatch(row["verb"]) or row["verb"] in seen or row["verb"] in ENVIRONMENT_VERBS:
+            errors.append("QA Verbs requires unique literal verbs other than down, up, seed, logs and url")
+        seen.add(row["verb"])
+        if not row["command"] or TOKEN_RE.search(row["command"]) or CREDENTIAL_RE.search(row["command"]):
+            errors.append("QA Verbs command must be non-empty, without credentials or unresolved tokens")
+        if not valid_workdir(row["workdir"]):
+            errors.append("QA Verbs workdir must be a normalized repository-relative path")
+        plan.append(row)
+    if not plan:
+        errors.append("QA Verbs must declare at least one verb")
+    return plan, errors
+
+
 def verification_rehearsals(props: dict, body: str) -> tuple[list[dict], list[str]]:
     """Approved short live targets to rehearse before a full verification pass."""
     import backlog_compile
@@ -570,6 +599,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         errors.extend(host_guard_problems(props))
         errors.extend(verification_rehearsals(props, body)[1])
         errors.extend(owner_steps(body)[1])
+        errors.extend(qa_verbs(body)[1])
         errors.extend(test_partition_plan(props, body)[1])
         source, provider = pull_request_checks(props)
         if source not in PULL_REQUEST_CHECK_SOURCES:

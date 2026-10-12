@@ -1,0 +1,6 @@
+{
+  "summary": "Allow one evidence-bound resume of unreached live phases after a classified infrastructure preflight failure.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

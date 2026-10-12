@@ -1969,7 +1969,7 @@ print(sys.argv[1])
         self.write(contract_path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
         self.commit()
         # The partition variables of switch test_engines partitioned are per-run inputs too (#386).
-        self.assertEqual(names, ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS",
+        self.assertEqual(names, ("AGENTROF_LIVE_RESUME", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS",
                                  "AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE"))
         with mock.patch.dict(os.environ, {"AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json",
                                           "AGENTROF_REUSED_TESTS": "inherited-reuse.json",

@@ -128,20 +128,17 @@ none of them itself, as
 `skill-content/deliver/references/switch-own_target_reuse-accept_record.md`
 defines.
 
-Invoke Code Review and QA independently through the host's native agent
-mechanism. Keep the implementation writer idle until both readers finish or
-their cancellation is confirmed, except for a private repair checkout prepared
-under `lane_isolation` `scratch_clone` for registered open findings. Readers return separate JSON results through
-`result --file <result.json>`; the existing owner alone persists canonical
-reports after the barrier. A reader registers as soon as it finishes, also
-while the other reader's verification command runs: the runner records which
-role runs each command, and a registration waits only for the settling
-reader's own command to exit. The code reviewer runs no command, not even a
-diagnostic test. Its `verification_evidence` names the freeze record and QA runs.
-It registers its finished result at once and returns. A reader waiting for another role,
-such as calibration, returns its result unregistered for the coordinator. A
-cancelled or diagnostic result cannot approve an Item. Code, test, contract or
-instruction drift invalidates the candidate.
+Invoke Code Review and QA independently through the host's native agents.
+Keep the implementation writer idle until both readers finish or cancellation
+is confirmed, except an isolated `lane_isolation` `scratch_clone` repair of
+registered findings. Each reader registers `result --file <result.json>` when
+finished, also while another reader's command runs; registration waits only for
+its own command. The owner alone persists canonical reports after the barrier.
+The code reviewer runs no command, not even a diagnostic test.
+Its `verification_evidence` names the freeze record and QA runs.
+It registers its finished result at once and returns. A reader waiting for another role's step
+returns its result unregistered. Cancelled or diagnostic results cannot approve
+an Item. Code, test, contract or instruction drift invalidates the candidate.
 Switch `code_review_panel`: at `beside_official`, a lens panel reads the frozen
 candidate beside the official code reviewer and `merge-panel` registers the
 one code review result, as
@@ -155,17 +152,12 @@ Switch `item_review_scale`: at `by_change_size`, the official code reviewer
 reads alone an Item whose frozen change is within the owner's size limits, as
 `skill-content/code-review/references/switch-item_review_scale-by_change_size.md`
 defines.
-Switch `review_scope`: at `impact_closure`, the frozen candidate stays the
-structural check before any reader and the code reviewer reads the changed
-files, the Item's story, Test Plan and pinned contracts and the files those
-relations name; code review and QA read the closure the
-`delivery_verification.py` manifest derives; every role reads the change's
-impact closure, each approved, unchanged note outside it only as its
-hash-bound summary, reads beyond it when unsure and records why, a writer
-fixes a reported graph gap through its owning compiler and recomputes the
-closure, and a confirmation re-review reads only the fix's delta, as
-`skill-content/challenge-review/references/switch-review_scope-impact_closure.md`
-defines.
+Switch `review_scope`: at `impact_closure`, run the structural check before any reader.
+Both readers use the frozen manifest's impact closure; approved unchanged notes
+outside it remain hash-bound summaries. Expand uncertain context and record why.
+The owning compiler repairs graph gaps and recomputes the closure; a confirmation
+re-review reads only the fix's delta, as
+`skill-content/challenge-review/references/switch-review_scope-impact_closure.md` defines.
 
 A role that waits inside its turn waits at most the Delivery verification
 policy's `wait_bound_seconds`, 240 seconds, in any one tool call, so its next
@@ -422,3 +414,9 @@ Permission-only resume keeps successful evidence and lists refused `resume_comma
 Finding-control bindings persist in the Item verification record and Delivery
 Review. After merge, the next ordinary backlog revision lists unabsorbed
 targets and requires them in the owning Test Plan before approval.
+
+For one preflight-only retry, use `run --kind live_test --group <group> --resume`
+with the contract's `live_resume_command`, on the same candidate and environment.
+The runner preserves the first attempt and verifies `phase_evidence` files and
+hashes before passing only pending phases. It refuses stale or changed evidence,
+a second retry or any failed product case. Preflight runs again before tests.

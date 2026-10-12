@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import hashlib
 import json
 import os
 import shlex
@@ -104,6 +105,47 @@ class LiveRunTests(unittest.TestCase):
         self.write("live.py", "import os, sys\nprint('LIVE', sys.argv[1], os.getcwd())\n")
         self.commit()
         self.freeze()
+
+    def test_live_preflight_resumes_pending_phases_once_on_the_same_candidate(self):
+        executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
+        self.declare(live_test_command=executable + " live.py {group}", live_test_workdir=".",
+                     live_groups=["smoke"], live_resume_command=executable + " live.py {group}")
+        self.settle()
+        phase_hash = "sha256:" + hashlib.sha256(b"unit passed").hexdigest()
+        checkpoint = {"schema_version": 1, "failure": "infrastructure_preflight", "preflight": "dns",
+                      "failed_cases": 0, "started_cases_in_phase": 0,
+                      "completed_phases": {"unit": phase_hash}, "pending_phases": ["live"],
+                      "phase_evidence": {"unit": {"file": "scratch/unit-proof.json", "sha256": phase_hash}}}
+        self.write("live.py", "import json, os, pathlib, sys\n"
+                   "p = pathlib.Path(os.environ['AGENTROF_VERIFICATION_SCRATCH'])\n"
+                   "if 'AGENTROF_LIVE_RESUME' not in os.environ:\n"
+                   "    (p / 'unit-proof.json').write_bytes(b'unit passed')\n"
+                   "    (p / 'live-checkpoint.json').write_text(" + repr(json.dumps(checkpoint)) + ")\n"
+                   "    print('unit complete; DNS preflight unavailable')\n"
+                   "    sys.exit(2)\n"
+                   "resume = json.loads(pathlib.Path(os.environ['AGENTROF_LIVE_RESUME']).read_text())\n"
+                   "assert resume['pending_phases'] == ['live']\n"
+                   "assert resume['completed_phases']['unit'] == " + repr(phase_hash) + "\n"
+                   "print('preflight retried; live complete')\n")
+        self.commit()
+        verification.freeze(self.root, "DLV-001", "AUTH-01", fresh=True)
+        first = verification.run_check(self.root, "live_test", group="smoke")
+        self.assertEqual(first["exit_code"], 2)
+        self.assertEqual(first["live_checkpoint"], checkpoint)
+        proof = verification.raw_output_path(self.root, "scratch/unit-proof.json")
+        proof.write_bytes(b"changed")
+        with self.assertRaisesRegex(RuntimeError, "one fresh preflight-only"):
+            verification.run_check(self.root, "live_test", group="smoke", resume=True)
+        proof.write_bytes(b"unit passed")
+        resumed = verification.run_check(self.root, "live_test", group="smoke", resume=True)
+        self.assertEqual(resumed["exit_code"], 0)
+        self.assertEqual(resumed["resume_count"], 1)
+        self.assertEqual(resumed["prior_attempt"]["evidence_hash"], first["evidence_hash"])
+        self.assertEqual(resumed["identity"]["candidate_hash"], first["identity"]["candidate_hash"])
+        with self.assertRaisesRegex(RuntimeError, "one fresh preflight-only"):
+            verification.run_check(self.root, "live_test", group="smoke", resume=True)
+        for field in ("failed_cases", "started_cases_in_phase"):
+            self.assertFalse(verification.valid_live_checkpoint({**checkpoint, field: 1}))
 
     def test_running_live_group_exposes_heartbeat_output_and_adapter_progress(self):
         executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)

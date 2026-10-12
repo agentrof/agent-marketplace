@@ -216,6 +216,28 @@ LIVE_GROUP_RUN = "live_group_run"
 LIVE_GROUP_RUNS = ("per_group", "combined")
 
 
+# A Verification Contract may opt in to a host guard for long verification
+# commands: an idle-sleep inhibitor and host sleep detection, and a host:port
+# a live run probes for network loss.
+HOST_KEEP_AWAKE = "host_keep_awake"
+INHIBIT_SLEEP = "inhibit_sleep"
+KEEP_AWAKE_VALUES = ("off", INHIBIT_SLEEP)
+REACHABILITY_PROBE = "reachability_probe"
+PROBE_TARGET_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252}[A-Za-z0-9])?:([1-9][0-9]{0,4})")
+
+
+def host_guard_problems(props: dict) -> list[str]:
+    """Why a Verification Contract's optional host guard is invalid."""
+    errors = []
+    if HOST_KEEP_AWAKE in props and props[HOST_KEEP_AWAKE] not in KEEP_AWAKE_VALUES:
+        errors.append(f"{HOST_KEEP_AWAKE} must be one of {', '.join(KEEP_AWAKE_VALUES)}")
+    if REACHABILITY_PROBE in props:
+        match = PROBE_TARGET_RE.fullmatch(str(props[REACHABILITY_PROBE]))
+        if not isinstance(props[REACHABILITY_PROBE], str) or not match or int(match.group(1)) > 65535:
+            errors.append(f"{REACHABILITY_PROBE} must be one host:port, a DNS name or address and a port")
+    return errors
+
+
 def live_test_problems(props: dict) -> list[str]:
     """Why a Verification Contract's optional live test group declaration is invalid."""
     if not any(name in props for name in LIVE_TEST_FIELDS):
@@ -522,6 +544,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
             errors.append(problem)
         errors.extend(test_group_problems(props))
         errors.extend(live_test_problems(props))
+        errors.extend(host_guard_problems(props))
         errors.extend(verification_rehearsals(props, body)[1])
         errors.extend(owner_steps(body)[1])
         errors.extend(test_partition_plan(props, body)[1])

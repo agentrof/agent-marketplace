@@ -238,7 +238,7 @@ def doing(root: Path, watch: str) -> dict:
                 pass
         if isinstance(value, dict):
             result["progress"] = {key: value[key] for key in
-                                  ("state", "elapsed_seconds", "adapter_observation") if key in value}
+                                  ("state", "elapsed_seconds", "adapter_observation", "interruptions") if key in value}
             output = value.get("output_path")
             if isinstance(output, str) and inside(root, Path(output)) and Path(output).is_file():
                 result["last_line"] = last_line(Path(output))

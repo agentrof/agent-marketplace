@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "0ea4f3bb31bf55e444993602e77c9064522f641965ad4723fd886f103f25face"
+      "c0322ad9bbd794556ec476c127c89e8ffb861f3607a49ee1f1e98f33baaa574f"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -200,7 +200,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "5f28bc9be8cfb84d792a10fe57305f89a383637c06838f7ce21c2cba445cb997"
+      "45990bc82c8a1387cd917cc59c8b95cfabc87b2bf53cc2c2e003c5a0739165e8"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -470,7 +470,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "095dbf41132d83f23479634689b3bf6d208f219bd92e25b80a56df08414aecb9"
+      "335c00a27d8e3949a4f421b74e2097d6873f06e7e4dfc74433f28535e4fe9e75"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -482,7 +482,7 @@
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "ee896b5b9304232fde8164298baf0234d8002e7b060b735319c7bc64b76c6d48"
+      "686bd63b35f08bc44ebc302b07abb692b4d24d8f975c110d15538cda985a8ed4"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -730,6 +730,9 @@
     "skill-content/qa-verification/SKILL.md":
       "3742e3d0f81ee86a610a9d6ae0d4ab7075eb3f27e35403f0c414e21af579ef6c"
     ,
+    "skill-content/qa-verification/data/runtime-lifecycle.json":
+      "eb763f3c91ea9a6fd60b14a3415d19604acd2b4af73d9ea91069ad5efbf4126c"
+    ,
     "skill-content/qa-verification/references/coverage-audit.md":
       "ba4abc9c13305ed09b51194b8ef5665ff946b99c13efcf04ac5537c8bf33fb11"
     ,
@@ -743,7 +746,7 @@
       "086c02917f1fcff3f89481d42b3d0422ee95235439b0873bd73b0b8cce70f601"
     ,
     "skill-content/qa-verification/references/runtime-protocol.md":
-      "7ddf13911059f2676d23cb1ae8a0e33e69f0f3cd7e2f2a9c3a7f4149761194d3"
+      "92c5f40b09b1129b51ab0a6c4690276ca8049ee975a1e97f74508f4bcce325a4"
     ,
     "skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md":
       "549947c59c6a87988af1fc6a646414d85177c1f68c8249a05d9522bd99f47b74"
@@ -752,7 +755,10 @@
       "77ec83ef7c481c79826ca6627c6b45a7cdb7450144ed8b67f28e5443bbb5073f"
     ,
     "skill-content/qa-verification/references/switch-qa_preflight-lifecycle_first.md":
-      "228888bb411b7b1d6ccc3834e0625df8ad70401487d388803ef5059a94d58ec0"
+      "17ebceb80d9b99adc922cff9e3b67b56af932391c08a881603d23668a9bcb5a3"
+    ,
+    "skill-content/qa-verification/references/switch-runtime_lifecycle-long_lived.md":
+      "9f26bbe77234b48d6f4363713df02101b93d005c4c3d7651a161088ed5b56c95"
     ,
     "skill-content/qa-verification/references/test-design.md":
       "c8ef52eb9cbb30c14fcb905b49b92a9e88489ba9a842b75834da615d7fb330cd"

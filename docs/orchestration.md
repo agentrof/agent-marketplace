@@ -122,6 +122,14 @@ them. Only an approved Verification Contract can waive a rehearsal; full QA
 evidence stays required. The steps are in
 `qa-verification/references/switch-qa_preflight-lifecycle_first.md`.
 
+Process switch `runtime_lifecycle` keeps the full down/up path for every
+runtime candidate at `fresh`. At `long_lived`, a candidate reuses the running
+instance: an idempotent `up` converges it to the candidate, `seed` resets its
+state, and no teardown follows. It applies only after an earlier candidate of
+the Item holds fresh runtime evidence on the same `environment_paths` bytes,
+so the first pass and any environment code change still take the fresh path.
+The steps are in `qa-verification/references/switch-runtime_lifecycle-long_lived.md`.
+
 Process switch `repair_review` decides when a corrected candidate receives an
 independent correctness review. `after_freeze`, the default, keeps the review
 inside the next full pass. At `before_freeze`, a fresh reader checks the repair

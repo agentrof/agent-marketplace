@@ -47,6 +47,8 @@ CALIBRATION_MODE = "calibration"
 # At pre_handoff_regression touched_suites the coordinator runs the suites of the
 # earlier stories a candidate touches before the freeze, which needs that run.
 PRE_HANDOFF_SWITCH = "pre_handoff_regression"
+# At long_lived, QA reuses a running product environment unless the change needs a fresh one.
+RUNTIME_LIFECYCLE, LONG_LIVED, FRESH = "runtime_lifecycle", "long_lived", "fresh"
 TOUCHED_SUITES = "touched_suites"
 PRE_HANDOFF_HOLDER = "delivery_coordinator"
 PRE_HANDOFF_RUN = "regression-run"
@@ -849,6 +851,9 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
         history = panel_history(previous)
         if history:
             value["panel_history"] = history
+        fresh_history = fresh_runtime_history(previous)
+        if fresh_history:
+            value["fresh_runtime_history"] = fresh_history
         write_session(root, value)
         scope = session_path(root).parent / "mutation-files.json"
         atomic_file.replace_text(scope, json.dumps({"candidate_hash": current["candidate_hash"],
@@ -3490,7 +3495,79 @@ def validate(root: Path, delivery_id: str, story: str) -> dict:
 
 def runtime_needs_cleanup(session: dict) -> bool:
     state = session.get("runtime", {})
+    if state.get("lifecycle") == LONG_LIVED:
+        # A long-lived instance stays up between sessions; only an interrupted command needs teardown.
+        return bool(state.get("pending"))
     return bool(state.get("active") or state.get("cleanup_required") or state.get("pending"))
+
+
+def runtime_lifecycle_policy(root: Path, delivery_id: str) -> tuple[str, list[str]]:
+    """The runtime_lifecycle value a Delivery runs under and the owner's environment_paths globs."""
+    state = process_policy.delivery_values(delivery.docs_root(root), delivery_id,
+                                           switches={RUNTIME_LIFECYCLE})["values"][RUNTIME_LIFECYCLE]
+    return state["value"], state.get("parameters", {}).get("environment_paths") or []
+
+
+def fresh_runtime_problem(session: dict, evidence: dict | None = None) -> bool:
+    """Whether the session's recorded runtime events miss the fresh down/up/seed/logs/down shape."""
+    state = session.get("runtime", {})
+    events = state.get("events", [])
+    attempt_id = state.get("attempt_id")
+    verbs = [event["verb"] for event in events if event.get("exit_code") == 0]
+    return bool(not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id)
+                or runtime_needs_cleanup(session) or state.get("interrupted_commands")
+                or state.get("lifecycle", FRESH) != FRESH
+                or state.get("active") is not False or not verbs or verbs[0] != "down" or verbs[-1] != "down"
+                or any(verb not in verbs for verb in ("up", "seed", "logs"))
+                or (evidence is not None
+                    and evidence.get("event_hashes") != [event["evidence_hash"] for event in events]))
+
+
+def fresh_runtime_history(session: dict | None) -> list[dict]:
+    """The Item's candidates whose sessions recorded a complete fresh runtime lifecycle, oldest first."""
+    if not session:
+        return []
+    history = list(session.get("fresh_runtime_history", []))
+    events = session.get("runtime", {}).get("events", [])
+    # A complete, intact fresh lifecycle proves the environment code even when QA failed on product behaviour.
+    if (events and not fresh_runtime_problem(session)
+            and all(event.get("exit_code") == 0 and event.get("candidate_intact") is True for event in events)):
+        record = {"candidate_hash": session["candidate"]["candidate_hash"],
+                  "product_commit": session["candidate"]["product_commit"],
+                  "event_hashes": [event["evidence_hash"] for event in events]}
+        if record not in history:
+            history.append(record)
+    return history
+
+
+def runtime_lifecycle(root: Path, session: dict) -> dict:
+    """The runtime lifecycle QA's environment evidence of the session's candidate must follow, and why.
+
+    At runtime_lifecycle long_lived it is long_lived only when an earlier
+    candidate of the Item holds fresh runtime evidence and holds every path of
+    the owner's environment_paths globs as this candidate does. Otherwise the
+    fresh down/up path applies: fresh_evidence_missing or environment_code_changed.
+    """
+    value, globs = runtime_lifecycle_policy(root, session["candidate"]["delivery"])
+    if value != LONG_LIVED:
+        return {"mode": FRESH, "reason": "switch"}
+    if not globs:
+        raise RuntimeError(f"{RUNTIME_LIFECYCLE} {LONG_LIVED} needs parameter 'environment_paths'"
+                           " set in the Process Policy")
+    commit = session["candidate"]["product_commit"]
+    changed = None
+    for record in reversed(session.get("fresh_runtime_history", [])):
+        try:
+            paths = git(root, "diff", "--name-only", "--no-renames", "-z", record["product_commit"], commit).split("\0")
+        except RuntimeError:
+            continue
+        matched = sorted(path for path in paths if path and any(fnmatch.fnmatchcase(path, glob) for glob in globs))
+        if not matched:
+            return {"mode": LONG_LIVED, "reason": "fresh_evidence_held", "fresh_candidate": record["candidate_hash"]}
+        changed = changed if changed is not None else matched
+    if changed is not None:
+        return {"mode": FRESH, "reason": "environment_code_changed", "matched_paths": changed}
+    return {"mode": FRESH, "reason": "fresh_evidence_missing"}
 
 
 def runtime_environment_identity(root: Path, current: dict) -> dict:
@@ -3529,8 +3606,12 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 raise RuntimeError("interrupted runtime command requires teardown before another command")
             if state.get("attempt_id") and not re.fullmatch(r"[0-9a-f]{32}", str(state["attempt_id"])):
                 raise RuntimeError("runtime attempt identity is invalid")
+            if (not state["events"] and not state.get("pending")
+                    and runtime_lifecycle(root, session)["mode"] == LONG_LIVED):
+                state["lifecycle"] = LONG_LIVED
+            long_lived = state.get("lifecycle") == LONG_LIVED
             successful = [event["verb"] for event in state["events"] if event["exit_code"] == 0]
-            if verb == "up" and (not successful or successful[-1] != "down"):
+            if verb == "up" and not long_lived and (not successful or successful[-1] != "down"):
                 raise RuntimeError("fresh runtime requires a successful down before up")
             if verb in {"seed", "logs", "url"} and not state["active"]:
                 raise RuntimeError("runtime must be up before seed, logs or url")
@@ -3605,6 +3686,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                      "duration_seconds": time.monotonic() - started, "candidate_hash": current["candidate_hash"],
                      "environment_identity": environment_identity, "completed_at": time.time(),
                      "attempt_id": state.get("attempt_id")}
+            if state.get("lifecycle") == LONG_LIVED:
+                event["lifecycle"] = LONG_LIVED
             if difference:
                 event["checkout_difference"] = difference
             event["evidence_hash"] = digest(event)
@@ -4487,10 +4570,14 @@ def require_lifecycle_ready(root: Path, session: dict) -> None:
     events = state.get("events", [])
     verbs = [event.get("verb") for event in events]
     up = max((i for i, verb in enumerate(verbs) if verb == "up"), default=-1)
+    long_lived = (state.get("lifecycle") == LONG_LIVED if events
+                  else runtime_lifecycle(root, session)["mode"] == LONG_LIVED)
     if (state.get("active") is not True or state.get("pending") or state.get("interrupted_commands")
-            or up < 1 or verbs[up - 1] != "down" or "seed" not in verbs[up + 1:]
+            or up < (0 if long_lived else 1) or (not long_lived and verbs[up - 1] != "down")
+            or "seed" not in verbs[up + 1:]
             or "logs" not in verbs[up + 1:] or verbs.index("logs", up + 1) < verbs.index("seed", up + 1)):
-        raise RuntimeError("live groups require successful lifecycle down/up/seed/logs first")
+        raise RuntimeError("live groups require successful lifecycle up/seed/logs on the long-lived instance first"
+                           if long_lived else "live groups require successful lifecycle down/up/seed/logs first")
     contract = verification_contract(root)
     expected = runtime_environment_identity(root, current)
     if any(runtime_event_environment(root, session, event, contract) != expected for event in events):
@@ -4505,11 +4592,20 @@ def require_runtime_evidence(root: Path, session: dict, evidence: dict, environm
     events = state.get("events", [])
     attempt_id = state.get("attempt_id")
     verbs = [event["verb"] for event in events if event.get("exit_code") == 0]
-    if (not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id)
-            or runtime_needs_cleanup(session) or state.get("interrupted_commands")
-            or state.get("active") is not False or not verbs or verbs[0] != "down" or verbs[-1] != "down"
-            or any(verb not in verbs for verb in ("up", "seed", "logs"))
-            or evidence.get("event_hashes") != [event["evidence_hash"] for event in events]):
+    required = runtime_lifecycle(root, session)
+    recorded = {event.get("lifecycle", FRESH) for event in events} | {state.get("lifecycle", FRESH)}
+    if recorded != {required["mode"]}:
+        raise RuntimeError(f"runtime evidence follows the {'/'.join(sorted(recorded))} lifecycle but this candidate"
+                           f" requires {required['mode']} ({required['reason']})")
+    if required["mode"] == LONG_LIVED:
+        up = max((i for i, verb in enumerate(verbs) if verb == "up"), default=-1)
+        if (not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id)
+                or runtime_needs_cleanup(session) or state.get("interrupted_commands") or up < 0
+                or "seed" not in verbs[up + 1:] or "logs" not in verbs[verbs.index("seed", up + 1):]
+                or evidence.get("event_hashes") != [event["evidence_hash"] for event in events]):
+            raise RuntimeError("long-lived runtime evidence requires recorded up/seed/logs on the running instance"
+                               " and exact event hashes")
+    elif fresh_runtime_problem(session, evidence):
         raise RuntimeError("fresh runtime evidence requires recorded down/up/seed/logs/down and exact event hashes")
     contract = verification_contract(root)
     shared = None

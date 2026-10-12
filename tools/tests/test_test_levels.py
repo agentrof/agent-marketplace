@@ -323,6 +323,8 @@ def all_switches_on_backlog(fixture: cost.CostProject) -> None:
                    "--value", str(all_on.SERIAL_ROWS))
     fixture.policy("set", "--switch", "item_review_scale", "--parameter", "changed_lines",
                    "--value", "200")
+    fixture.policy("set", "--switch", "runtime_lifecycle", "--parameter", "environment_paths",
+                   "--value", "deploy/*")
     fixture.policy("approve")
     size.approved_backlog(fixture)
 

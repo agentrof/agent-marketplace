@@ -8,9 +8,26 @@ Severity vocabulary: CRITICAL (maps to Critical), FAIL (maps to High), MINOR (ma
 
 - Use the approved Environment Contract's `env_command`. Never invent commands.
 - Full teardown first (`down`), then one-command bring-up (`up`): every service healthy, the default scenario seeded. Seed the scenario the test plan names (`seed baseline` unless the plan says otherwise).
+- Switch `runtime_lifecycle`: at `long_lived`, once an earlier candidate of the Item holds fresh runtime evidence on the same declared environment code, a later candidate skips the teardown: `up` converges the running instance to the candidate and checks its identity, `seed` resets its state, and Step 8 leaves it standing. Follow `switch-runtime_lifecycle-long_lived.md`.
 - Verify bring-up output is clean: no errors, no unexplained warnings.
 - Resolve and record the base URL per published service (`url <service>`).
 - Bring-up fails or any service stays unhealthy: CRITICAL, stop the protocol, report.
+
+## Step 1a: Manual Scenarios and Owner Steps
+
+Run the test plan's `automation: manual` scenarios and the Verification
+Contract's `Owner Steps` rows right after Step 1, before the long live
+groups, so a manual failure surfaces before hours of automated live time.
+
+- Record each manual step command by command: the exact command or action,
+  its start and end time in UTC, its exit code or observed outcome, and the
+  SHA-256 digest of its full output. A step without its own record did not
+  run.
+- A step the agent cannot run itself, because it needs the owner's
+  credentials, device or judgement, goes through `await-owner-step --step
+  <id>` as `report-format.md` describes. Never register a result for it,
+  never run it on the owner's behalf and never accept a described outcome in
+  place of the owner's attached output.
 
 ## Step 2: Enumerate and Visit Every Navigable Surface
 
@@ -106,4 +123,4 @@ In the verification record (see report-format.md):
 - Service-log audit: window covered, PASS/FAIL with the offending lines.
 - Overall runtime verdict: PASS only with zero CRITICAL and zero FAIL findings; otherwise FAIL with the finding list mapped into the severity table.
 
-Tear the environment down (`down`) when the story needs no design verification; otherwise leave it standing for that step and tear down after.
+Tear the environment down (`down`) when the story needs no design verification; otherwise leave it standing for that step and tear down after. At `runtime_lifecycle: long_lived`, a long-lived instance is never torn down here.

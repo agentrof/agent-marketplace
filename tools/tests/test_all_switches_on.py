@@ -75,7 +75,8 @@ LANE_ISOLATION = "deliver/references/switch-lane_isolation-scratch_clone.md"
 LEVEL_CHANGE = "deliver/references/switch-level_change_map-assertion_map.md"
 DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE, LEVEL_CHANGE,
            "qa-verification/references/switch-qa_preflight-lifecycle_first.md",
-           "deliver/references/switch-step_baseline-median.md")
+           "deliver/references/switch-step_baseline-median.md",
+           "qa-verification/references/switch-runtime_lifecycle-long_lived.md")
 EXPECTED = {
     **{f"{entry}:{role}": [] for entry, role in (
         ("business-analysis", "analysis-challenger"), ("business-analysis", "business-analyst"),
@@ -213,6 +214,9 @@ def approve_every_switch(docs: Path, overrides: dict | None = None) -> tuple[dic
            "--value", "50")
     policy("set", "--switch", "test_cost_budget", "--parameter", "serial_rows", "--value", str(SERIAL_ROWS))
     policy("set", "--switch", "item_review_scale", "--parameter", "changed_lines", "--value", "200")
+    if values.get("runtime_lifecycle") == "long_lived":
+        policy("set", "--switch", "runtime_lifecycle", "--parameter", "environment_paths",
+               "--value", "deploy/*")
     if values.get("code_review_panel") == "risk_scoped":
         policy("set", "--switch", "code_review_panel", "--parameter", "risk_paths",
                "--value", "src/auth/*")

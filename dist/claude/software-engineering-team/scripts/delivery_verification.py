@@ -1267,7 +1267,7 @@ def live_progress(root: Path, session_id: str, current: dict, record_key: str, g
     started = host_activity.clock_sample()
     stopped = threading.Event()
     diagnostics = {"host_sleep_gap": {"count": 0, "seconds": 0.0}, "progress_log": str(log)}
-    log_stream = log.open("x", encoding="utf-8")
+    log_stream = log.open("x", encoding="utf-8", newline="\n")
 
     def update(state="running"):
         observed = {}

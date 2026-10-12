@@ -408,11 +408,11 @@ Finding-control bindings persist in the Item verification record and Delivery
 Review. After merge, the next ordinary backlog revision lists unabsorbed
 targets and requires them in the owning Test Plan before approval.
 
-For one preflight-only retry, use `run --kind live_test --group <group> --resume`
-with the contract's `live_resume_command`, on the same candidate and environment.
-The runner preserves the first attempt and verifies `phase_evidence` files and
-hashes before passing only pending phases. It refuses stale or changed evidence,
-a second retry or any failed product case. Preflight runs again before tests.
+For one preflight-only retry, or a run whose record names `interrupted_by` (host sleep or network
+loss), use `run --kind live_test --group <group> --resume` with the contract's `live_resume_command`,
+on the same candidate and environment. The runner preserves the first attempt and verifies
+`phase_evidence` files and hashes before passing only pending phases. It refuses stale or changed
+evidence, a second retry or any failed product case. Preflight runs again before tests.
 
 After failed QA, an approved `live_diagnostic_command` enables `repair-live
 --delivery DLV-### --story <story>` on a committed repair after readers settle.

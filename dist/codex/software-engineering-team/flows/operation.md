@@ -198,6 +198,18 @@ command receives that immutable selection through `AGENTROF_LIVE_RESUME`,
 rechecks preflight and runs only the pending phases. A failed product case is
 never resumable through this interface.
 
+A Verification Contract may opt in to a host guard. At `host_keep_awake:
+inhibit_sleep`, `off` by default, each verification and environment command
+runs under an idle-sleep inhibitor bound to the runner (`caffeinate` on macOS,
+`systemd-inhibit` on Linux); a host without one records `keep_awake_warning`
+and runs the command anyway. A live run's heartbeat then compares a clock that
+counts host sleep with one that does not and records a `host_sleep`
+interruption in its live progress. `reachability_probe: <host>:<port>` names
+a DNS and TCP target the live run probes every 30 seconds; while it fails, a
+`network_loss` interruption stays open. A failed live run that saw either
+records `interrupted_by`, and with a valid preflight checkpoint it takes the
+one resume above. Neither key is a product verdict or a required check.
+
 `live_diagnostic_command`, when declared beside live groups, contains `{group}`
 once. It reads the immutable case selection from `AGENTROF_LIVE_TESTS` and
 executes exactly those literal test ids in the selected group. It uses the

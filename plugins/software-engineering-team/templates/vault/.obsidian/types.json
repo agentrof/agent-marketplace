@@ -162,6 +162,8 @@
     "live_test_workdir": "text",
     "live_groups": "multitext",
     "live_group_run": "text",
+    "host_keep_awake": "text",
+    "reachability_probe": "text",
     "max_parallel": "number",
     "governance_hash": "text",
     "decision_kind": "text",

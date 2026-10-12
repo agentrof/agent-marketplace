@@ -2728,5 +2728,120 @@ class RuntimeLifecycleTests(unittest.TestCase):
         self.assertTrue(verification.runtime_needs_cleanup(
             {"runtime": {**state, "lifecycle": "long_lived", "pending": {"verb": "up"}}}))
 
+
+class HostGuardTests(unittest.TestCase):
+    """At host_keep_awake inhibit_sleep a verification command runs under a lifetime-bound idle-sleep inhibitor,
+    or records why none held, and a live run classifies host sleep and network loss in its live progress, which a
+    failed run's record names as interrupted_by and the resume path accepts (#550)."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        self.root = Path(temporary.name).resolve() / "item"
+        self.root.mkdir()
+        verification.session_path(self.root).parent.joinpath("scratch").mkdir(parents=True)
+        self.progress = verification.live_progress_path(self.root, "live_test:smoke")
+        self.current = {"delivery": "DLV-001", "candidate_hash": "sha256:" + "0" * 64}
+
+    def live(self, guard, until, **patches):
+        """Run live progress heartbeats under *guard* until *until* holds for the progress record."""
+        with mock.patch.object(verification, "host_guard", return_value=guard), \
+                mock.patch.object(verification, "LIVE_PROGRESS_INTERVAL", 0.01), \
+                mock.patch.multiple(verification, **patches), \
+                verification.live_progress(self.root, "s1", self.current, "live_test:smoke", "smoke"):
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                try:
+                    if until(json.loads(self.progress.read_text(encoding="utf-8"))):
+                        break
+                except ValueError:
+                    pass
+                time.sleep(0.01)
+        return json.loads(self.progress.read_text(encoding="utf-8"))
+
+    def test_a_clock_jump_between_heartbeats_is_a_host_sleep(self):
+        # The sleep-counting clock jumps 120 seconds past the awake clock once.
+        ticks = iter([(0.0, 0.0), (1.0, 1.0), (122.0, 2.0)])
+        clocks = lambda: next(ticks, (123.0, 3.0))  # noqa: E731
+        shown = self.live({"keep_awake": True, "probe": None}, lambda value: value.get("interruptions"),
+                          host_clocks=clocks)
+        self.assertEqual([(row["kind"], row["seconds"]) for row in shown["interruptions"]], [("host_sleep", 120.0)])
+        off = self.live({"keep_awake": False, "probe": None}, lambda value: value["state"] == "running",
+                        host_clocks=lambda: (time.monotonic() * 100, 0.0))
+        self.assertNotIn("interruptions", off)
+
+    def test_a_failing_probe_opens_and_a_passing_one_closes_a_network_loss(self):
+        answers = iter([False, False, True])
+        shown = self.live({"keep_awake": False, "probe": "registry.test:5000"},
+                          lambda value: any("restored_at" in row for row in value.get("interruptions", [])),
+                          reachable=lambda target: next(answers, True), PROBE_INTERVAL=0.01)
+        self.assertEqual([(row["kind"], row["target"], "restored_at" in row) for row in shown["interruptions"]],
+                         [("network_loss", "registry.test:5000", True)])
+
+    def test_a_host_without_an_inhibitor_runs_the_command_and_records_a_warning(self):
+        ran = []
+        with mock.patch.object(verification.shutil, "which", return_value=None), \
+                verification.host_awake(True) as state:
+            ran.append("command")
+        self.assertEqual(ran, ["command"])
+        self.assertEqual(list(state), ["keep_awake_warning"])
+        with verification.host_awake(False) as state:
+            pass
+        self.assertEqual(state, {})
+
+    def test_the_inhibitor_is_bound_to_the_runner_and_released_after_the_command(self):
+        started = []
+
+        class Inhibitor:
+            returncode = None
+
+            def __init__(self, argv, **_options):
+                started.append(argv)
+                self.terminated = False
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                self.terminated = True
+                started.append("terminated")
+
+            def wait(self, _timeout):
+                return 0
+
+        pid = str(os.getpid())
+        for platform_name, expected in (("darwin", ["caffeinate", "-i", "-w", pid]),
+                                        ("linux", ["systemd-inhibit", "--what=sleep:idle"])):
+            started.clear()
+            with mock.patch.object(verification.sys, "platform", platform_name), \
+                    mock.patch.object(verification.shutil, "which", return_value="/bin/tool"), \
+                    mock.patch.object(verification.subprocess, "Popen", Inhibitor), \
+                    verification.host_awake(True) as state:
+                self.assertEqual(started[0][:len(expected)], expected)
+            self.assertEqual(started[-1], "terminated")
+            self.assertEqual(state, {"keep_awake": expected[0]})
+
+    def test_the_contract_keys_are_validated(self):
+        problems = verification.operation_compile.host_guard_problems
+        self.assertEqual(problems({"host_keep_awake": "inhibit_sleep", "reachability_probe": "registry.test:5000"}), [])
+        self.assertEqual(problems({}), [])
+        for props in ({"host_keep_awake": "always"}, {"reachability_probe": "registry.test"},
+                      {"reachability_probe": "registry.test:70000"}, {"reachability_probe": "a b:1"}):
+            with self.subTest(props=props):
+                self.assertEqual(len(problems(props)), 1)
+
+    def test_an_interrupted_failed_run_is_resumable_and_a_plain_failure_is_not(self):
+        checkpoint = {"schema_version": 1, "failure": "infrastructure_preflight", "preflight": "registry",
+                      "failed_cases": 0, "started_cases_in_phase": 0, "completed_phases": {},
+                      "pending_phases": ["smoke"], "phase_evidence": {}}
+        record = {"exit_code": 1, "candidate_intact": True, "identity": {"candidate_hash": "sha256:x"},
+                  "live_checkpoint": checkpoint, "completed_at": time.time()}
+        sealed = lambda value: {**value, "evidence_hash": verification.digest(value)}  # noqa: E731
+        current = {"candidate_hash": "sha256:x"}
+        self.assertFalse(verification.resumable_live_run(sealed(record), current))
+        self.assertTrue(verification.resumable_live_run(sealed({**record, "interrupted_by": ["host_sleep"]}),
+                                                        current))
+
+
 if __name__ == "__main__":
     unittest.main()

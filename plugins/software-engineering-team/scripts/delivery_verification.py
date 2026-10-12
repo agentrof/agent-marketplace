@@ -14,6 +14,7 @@ import os
 import platform
 import re
 import secrets
+import socket
 from shlex import quote as shlex_quote
 
 import shlex
@@ -1218,6 +1219,59 @@ def checkout_difference(execution_root: Path) -> str:
     return ", ".join(named[:CHECKOUT_DIFFERENCE_LIMIT]) + (f" and {more} more" if more > 0 else "")
 
 
+def host_guard(root: Path) -> dict:
+    """The Verification Contract's opt-in host guard: keep the host awake, and the reachability probe target."""
+    try:
+        contract, _body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+    except (OSError, ValueError, RuntimeError):
+        return {"keep_awake": False, "probe": None}
+    return {"keep_awake": contract.get(operation_compile.HOST_KEEP_AWAKE) == operation_compile.INHIBIT_SLEEP,
+            "probe": contract.get(operation_compile.REACHABILITY_PROBE)}
+
+
+@contextlib.contextmanager
+def host_awake(enabled: bool):
+    """Hold an idle-sleep inhibitor bound to this process while a command runs.
+
+    The yielded record names the inhibitor, or carries keep_awake_warning when
+    the host has none or it exits early; the command runs either way.
+    """
+    state: dict = {}
+    if not enabled:
+        yield state
+        return
+    pid = str(os.getpid())
+    if sys.platform == "darwin" and shutil.which("caffeinate"):
+        argv = ["caffeinate", "-i", "-w", pid]
+    elif shutil.which("systemd-inhibit") and shutil.which("tail"):
+        argv = ["systemd-inhibit", "--what=sleep:idle", "--who=agent-marketplace", "--why=verification command",
+                "--mode=block", "tail", f"--pid={pid}", "-f", "/dev/null"]
+    else:
+        state["keep_awake_warning"] = "neither caffeinate nor systemd-inhibit exists; the host may sleep during the command"
+        yield state
+        return
+    try:
+        inhibitor = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        state["keep_awake_warning"] = f"{argv[0]} could not start: {exc}"
+        yield state
+        return
+    state["keep_awake"] = argv[0]
+    try:
+        yield state
+    finally:
+        if inhibitor.poll() is not None:
+            del state["keep_awake"]
+            state["keep_awake_warning"] = f"{argv[0]} exited with {inhibitor.returncode} before the command ended"
+        else:
+            inhibitor.terminate()
+            try:
+                inhibitor.wait(5)
+            except subprocess.TimeoutExpired:
+                inhibitor.kill()
+
+
 def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, command: str, environment: dict,
                          *, isolate_search_paths: bool = False,
                          cloned=None, live_output: Path | None = None) -> tuple[subprocess.CompletedProcess, bool, str, dict, dict]:
@@ -1243,14 +1297,18 @@ def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, c
         dropped: dict[str, list[str]] = {}
         if isolate_search_paths:
             environment, dropped = lane_command_environment(execution_root.resolve(), execution_directory, environment)
-        if live_output is None:
-            completed = subprocess.run(command, cwd=execution_directory, env=environment, shell=True,
-                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
-        else:
-            with live_output.open("xb") as output:
+        with host_awake(host_guard(root)["keep_awake"]) as awake:
+            if live_output is None:
                 completed = subprocess.run(command, cwd=execution_directory, env=environment, shell=True,
-                                           stdout=output, stderr=subprocess.STDOUT, check=False)
-            completed.stdout = live_output.read_bytes()
+                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+            else:
+                with live_output.open("xb") as output:
+                    completed = subprocess.run(command, cwd=execution_directory, env=environment, shell=True,
+                                               stdout=output, stderr=subprocess.STDOUT, check=False)
+                completed.stdout = live_output.read_bytes()
+        if awake:
+            # The tuple callers unpack stays as it is; the run's record reads this attribute.
+            completed.host_awake = awake
         from delivery_git import require_visible_item_index
         difference = ""
         try:
@@ -1304,6 +1362,34 @@ def timing_end(handle: tuple | None) -> dict | None:
         return step_timing.end(anchor, values, run=run, span=span).get("overrun")
     except (step_timing.Refused, OSError, ValueError):
         return None
+# A sleep-counting clock passing the awake clock by this much between two heartbeats is a host sleep.
+SLEEP_GAP_SECONDS = 30.0
+PROBE_INTERVAL = 30.0
+PROBE_TIMEOUT = 5.0
+INTERRUPTION_KINDS = ("host_sleep", "network_loss")
+
+
+def host_clocks() -> tuple[float, float]:
+    """A clock that counts host sleep and one that does not, in seconds.
+
+    Linux has boot time and monotonic time; on macOS the monotonic clock
+    counts sleep and the uptime clock does not. Elsewhere wall time and
+    monotonic time stand in, which a wall clock adjustment can also move.
+    """
+    for counting, awake in (("CLOCK_BOOTTIME", "CLOCK_MONOTONIC"), ("CLOCK_MONOTONIC", "CLOCK_UPTIME_RAW")):
+        if hasattr(time, counting) and hasattr(time, awake):
+            return time.clock_gettime(getattr(time, counting)), time.clock_gettime(getattr(time, awake))
+    return time.time(), time.monotonic()
+
+
+def reachable(target: str) -> bool:
+    """Whether a DNS lookup and a TCP connection to host:port succeed within the probe timeout."""
+    host, _, port = target.rpartition(":")
+    try:
+        with socket.create_connection((host, int(port)), timeout=PROBE_TIMEOUT):
+            return True
+    except (OSError, ValueError):
+        return False
 
 
 def live_progress_path(root: Path, record_key: str) -> Path:
@@ -1330,6 +1416,27 @@ def live_progress(root: Path, session_id: str, current: dict, record_key: str, g
             step.update(test_id=test_id, span=None if test_id is None else timing_start(
                 root, values, current["delivery"], "live_step", test_id, progress))
 
+    guard = host_guard(root)
+    interruptions: list[dict] = []
+    clocks = {"last": host_clocks()}
+
+    def observe_sleep():
+        counting, awake = host_clocks()
+        gap = (counting - clocks["last"][0]) - (awake - clocks["last"][1])
+        clocks["last"] = (counting, awake)
+        if gap > SLEEP_GAP_SECONDS:
+            interruptions.append({"kind": "host_sleep", "detected_at": time.time(), "seconds": round(gap, 1)})
+
+    def probe():
+        while not stopped.wait(PROBE_INTERVAL):
+            ok = reachable(guard["probe"])
+            open_loss = next((row for row in interruptions if row["kind"] == "network_loss"
+                              and "restored_at" not in row), None)
+            if not ok and open_loss is None:
+                interruptions.append({"kind": "network_loss", "detected_at": time.time(), "target": guard["probe"]})
+            elif ok and open_loss is not None:
+                open_loss["restored_at"] = time.time()
+
     def update(state="running"):
         observed = {}
         if adapter.is_file() and adapter.stat().st_size <= 65536:
@@ -1349,6 +1456,10 @@ def live_progress(root: Path, session_id: str, current: dict, record_key: str, g
                    "started_at": started, "updated_at": now, "elapsed_seconds": now - started,
                    "output_path": str(output), "output_bytes": output.stat().st_size if output.exists() else 0,
                    "adapter_observation": observed}
+        if guard["keep_awake"]:
+            observe_sleep()
+        if interruptions:
+            payload["interruptions"] = [dict(row) for row in interruptions]
         atomic_file.replace_text(safe_runtime_path(root, progress, file_only=True),
                                  json.dumps(payload, sort_keys=True) + "\n")
         if values is not None:
@@ -1361,11 +1472,15 @@ def live_progress(root: Path, session_id: str, current: dict, record_key: str, g
     update()
     worker = threading.Thread(target=heartbeat, daemon=True)
     worker.start()
+    prober = threading.Thread(target=probe, daemon=True) if guard["probe"] else None
+    if prober is not None:
+        prober.start()
     try:
         yield output
     finally:
         stopped.set()
         worker.join()
+        # A probe stuck in a DNS lookup never delays the run's record.
         update("finished")
 
 
@@ -1456,7 +1571,9 @@ def live_checkpoint(root: Path) -> dict | None:
 
 
 def resumable_live_run(record: dict | None, current: dict) -> bool:
-    return bool(record and record.get("exit_code") == 2 and record.get("candidate_intact") is True
+    """A preflight-only failure, or a run the host interrupted, with the command's valid checkpoint."""
+    return bool(record and (record.get("exit_code") == 2 or record.get("interrupted_by"))
+                and record.get("candidate_intact") is True
                 and record.get("identity", {}).get("candidate_hash") == current["candidate_hash"]
                 and record.get("resume_count", 0) == 0 and valid_live_checkpoint(record.get("live_checkpoint"))
                 and fresh_record(record)
@@ -1958,7 +2075,16 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             selection_intact = False
     if selection_intact is not None:
         intact = intact and selection_intact
-    checkpoint = live_checkpoint(root) if group is not None and completed.returncode == 2 else None
+    interrupted_by = []
+    if group is not None and completed.returncode != 0:
+        try:
+            shown = json.loads(live_progress_path(root, record_key).read_text(encoding="utf-8"))
+            interrupted_by = sorted({row["kind"] for row in shown.get("interruptions", [])
+                                     if isinstance(row, dict) and row.get("kind") in INTERRUPTION_KINDS})
+        except (OSError, ValueError, AttributeError, TypeError):
+            pass
+    checkpoint = (live_checkpoint(root) if group is not None and (completed.returncode == 2 or interrupted_by)
+                  else None)
     with locked(root):
         session = read_session(root)
         if session["session_id"] != session_id:
@@ -1975,6 +2101,10 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             record["live_case_report"] = live_case_report(root)
         if checkpoint is not None:
             record["live_checkpoint"] = checkpoint
+        if interrupted_by:
+            record["interrupted_by"] = interrupted_by
+        if getattr(completed, "host_awake", None):
+            record["host_awake"] = completed.host_awake
         if resume:
             record["resume_count"] = 1
             record["prior_attempt"] = prior
@@ -3662,8 +3792,9 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
         # suffix; project command bytes remain the approved contract's bytes.
         command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
-        completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
-                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        with host_awake(host_guard(root)["keep_awake"]) as awake:
+            completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         with locked(root):
             session = read_session(root)
             if session["session_id"] != bound_session:
@@ -3690,6 +3821,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 event["lifecycle"] = LONG_LIVED
             if difference:
                 event["checkout_difference"] = difference
+            if awake:
+                event["host_awake"] = awake
             event["evidence_hash"] = digest(event)
             state["events"].append(event)
             state.pop("pending", None)

@@ -843,13 +843,14 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         leaves the Item's verification runtime, where every identity is compared (#356)."""
         self.declare_variables("ITEM_TOKEN")
         self.freeze()
-        with mock.patch.dict(os.environ, {"ITEM_TOKEN": "7319"}):
+        # A hex-only canary can coincidentally appear inside an unrelated digest.
+        with mock.patch.dict(os.environ, {"ITEM_TOKEN": "p1n!"}):
             self.settle()
             environment = verification.command_environment(self.root, verification.read_session(self.root)["candidate"])
         identity = verification.read_session(self.root)["raw_evidence"]["test"]["identity"]
         # Every covered value known and the declared one guessed right: the guess still checks nothing.
         values = {name: verification.variable_value(environment, name) for name in identity["environment_variables"]}
-        self.assertEqual(values["ITEM_TOKEN"], "7319")
+        self.assertEqual(values["ITEM_TOKEN"], "p1n!")
         canonical = json.dumps(values, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()
         self.assertNotEqual(identity["environment_hash"], "sha256:" + hashlib.sha256(canonical).hexdigest())
         key = verification.session_path(self.root).parent / "identity.key"
@@ -863,7 +864,7 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
             self.assertEqual(delivery.approve_item_evidence(args), 0)
         record = (self.root / self.directory / "items/auth-01/verification.md").read_text(encoding="utf-8")
         self.assertIn(identity["environment_hash"], record)
-        self.assertNotIn("7319", record)
+        self.assertNotIn("p1n!", record)
 
     def test_a_contract_that_names_a_runner_variable_refuses_before_any_command_runs(self):
         """A run identity drops a selection file the runner writes and binds it by content, so a contract that

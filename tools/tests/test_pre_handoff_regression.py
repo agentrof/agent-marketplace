@@ -596,7 +596,11 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(change["before"]["automation_target"], "tests/st001/test_api.py::test_limit")
         self.assertEqual(change["after"]["environment_effect"], "reads")
         self.assertTrue(verification.rebind_unit_refusals(self.root, "DLV-002"))
-        proof = verification.rebind_unit_run(self.root, "DLV-002")
+        with mock.patch.object(verification, "private_checkout_run", wraps=verification.private_checkout_run) as run:
+            with mock.patch.dict(os.environ, {"AGENTROF_DELIVERY_ID": "other", "AGENTROF_ITEM_ID": "other"}):
+                proof = verification.rebind_unit_run(self.root, "DLV-002")
+        self.assertEqual(run.call_args.args[5]["AGENTROF_DELIVERY_ID"], "DLV-002")
+        self.assertEqual(run.call_args.args[5]["AGENTROF_ITEM_ID"], "")
         self.assertEqual((proof["exit_code"], proof["candidate_intact"]), (0, True))
         self.assertEqual(verification.rebind_unit_refusals(self.root, "DLV-002"), [])
         result = self.run_regression()

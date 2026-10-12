@@ -215,7 +215,8 @@
         "tools.tests.test_project_context.*",
         "tools.tests.test_approval_history.*",
         "tools.tests.test_python_entry.*",
-        "tools.tests.test_vault_index.*"
+        "tools.tests.test_vault_index.*",
+        "tools.tests.test_resolver_reading_rule.*"
       ]
     },
     "documentation": {
@@ -268,7 +269,8 @@
         "tools.tests.test_test_group_report.*",
         "tools.tests.test_level_change_map.*",
         "tools.tests.test_test_engines.*",
-        "tools.tests.test_performance_contracts.*"
+        "tools.tests.test_performance_contracts.*",
+        "tools.tests.test_live_test_groups.*"
       ],
       "depends_on": [
         "contracts"
@@ -662,6 +664,7 @@
     "tools.tests.test_lane_table",
     "tools.tests.test_level_change_map",
     "tools.tests.test_light_backlog_path",
+    "tools.tests.test_live_test_groups",
     "tools.tests.test_living_experience_flow",
     "tools.tests.test_maintainer_protocol",
     "tools.tests.test_mechanical_pass_tier",
@@ -687,6 +690,7 @@
     "tools.tests.test_requirement_compile",
     "tools.tests.test_requirement_flow",
     "tools.tests.test_requirement_review_contract",
+    "tools.tests.test_resolver_reading_rule",
     "tools.tests.test_review_loop",
     "tools.tests.test_review_manifest_scope",
     "tools.tests.test_review_panels",

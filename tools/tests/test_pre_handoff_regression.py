@@ -45,6 +45,7 @@ OWN_SWITCH = "own_target_reuse"
 GATE_SWITCH = "qa_gate_order"
 REFERENCE = "skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md"
 OWN_REFERENCE = "skill-content/deliver/references/switch-own_target_reuse-spot_run.md"
+ACCEPT_REFERENCE = "skill-content/deliver/references/switch-own_target_reuse-accept_record.md"
 GATE_REFERENCE = "skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md"
 CODE = "DELIVERY_PRE_HANDOFF_MISSING"
 REUSED_MARKER = "Earlier-story targets QA's final test run reused, recorded by approve-item-evidence:"
@@ -203,6 +204,16 @@ class BindingTests(unittest.TestCase):
                 self.assertEqual(self.bound(entry, role, OWN_REFERENCE), entry == "deliver")
             with self.subTest(value="gate_first", task=(entry, role)):
                 self.assertEqual(self.bound(entry, role, GATE_REFERENCE), (entry, role) == ("deliver", "qa-engineer"))
+
+    def test_accept_record_binds_its_own_reference_to_the_delivery_tasks_only(self):
+        tasks = (("deliver", "qa-engineer"), ("deliver", "delivery-coordinator"), ("execution-plan", "qa-engineer"))
+        policy(self.docs, "init")
+        policy(self.docs, "set", "--switch", OWN_SWITCH, "--value", "accept_record")
+        policy(self.docs, "approve")
+        for entry, role in tasks:
+            with self.subTest(task=(entry, role)):
+                self.assertEqual(self.bound(entry, role, ACCEPT_REFERENCE), entry == "deliver")
+                self.assertFalse(self.bound(entry, role, OWN_REFERENCE))
 
     def test_only_delivery_execution_tasks_at_touched_suites_bind_the_reference(self):
         tasks = (("deliver", "delivery-coordinator"), ("deliver", "qa-engineer"),
@@ -1399,9 +1410,89 @@ class CandidateTests(unittest.TestCase):
 
         self.forge_test_evidence(change)
         with self.assertRaisesRegex(RuntimeError, "^full_test_suite evidence reuses the Item's own Test Plan targets,"
-                                                  " which only process switch own_target_reuse spot_run allows;"
+                                                  " which only process switch own_target_reuse spot_run or"
+                                                  " accept_record allows;"
                                                   " DLV-002 runs it at off$"):
             self.validate()
+
+    # At own_target_reuse accept_record QA's final test run takes every own target from the accepted run.
+    def test_at_accept_record_qa_reuses_every_own_target_and_runs_none_itself(self):
+        total, more = "tests/st005/test_new.py::test_total", "tests/st005/test_more.py::test_more"
+        passed, selection = self.frozen_with_own_targets([total, more], own="accept_record")
+        earlier = selection["earlier_stories"][0]["automation_targets"]
+        with mock.patch.object(verification, "private_checkout_run", side_effect=AssertionError("duplicate full suite")):
+            raw = verification.run_check(self.root, "test")
+        self.assertEqual(raw["execution_mode"], "accepted_pre_handoff")
+        self.assertEqual((raw["exit_code"], raw["candidate_intact"], raw["reused"]), (0, True, False))
+        self.assertNotIn("own_target_reuse", raw)
+        self.assertNotIn("pre_handoff_reuse", raw)
+        self.assertEqual(raw["identity"]["reused_pre_handoff"], {
+            "evidence_hash": passed["evidence_hash"], "test_ids": sorted([*earlier, more, total]),
+            "earlier_stories": [{"delivery": "DLV-001", "story": "ST-001", "test_ids": earlier}],
+            "own_targets": {"test_ids": sorted([more, total]), "spot_test_ids": []}})
+        output = self.suite_output(raw)
+        for target in (*earlier, more, total):
+            self.assertIn("REUSED " + target, output)
+            self.assertNotIn("PASS " + target, output)
+        section = delivery.section_bodies(self.approve_evidence())["Implementation Evidence"]
+        self.assertTrue(section.endswith("\n".join([
+            "", OWN_MARKER, "", "| story | test_ids | spot_run_test_ids | pre_handoff_run | evidence_hash |",
+            "|---|---|---|---|---|",
+            f"| ST-005 of DLV-002 | {', '.join(sorted([more, total]))} | none | 1 | {passed['evidence_hash']} |"])),
+            section)
+
+    def test_at_accept_record_a_spot_run_file_is_refused_and_fresh_runs_every_target(self):
+        total, more = "tests/st005/test_new.py::test_total", "tests/st005/test_more.py::test_more"
+        self.frozen_with_own_targets([total, more], own="accept_record")
+        with self.assertRaisesRegex(RuntimeError, "^run --spot-run-file serves only process switch own_target_reuse"
+                                                  " spot_run; DLV-002 runs it at accept_record$"):
+            verification.run_check(self.root, "test", spot_file=self.spot_file(total))
+        raw = verification.run_check(self.root, "test", fresh=True)
+        self.assertEqual(raw["pre_handoff_reuse"], "run --fresh runs every suite itself")
+        self.assertEqual(raw["own_target_reuse"], "no accepted pre-handoff run binds the frozen candidate for the"
+                                                  " Item's own targets, so the approved test command runs every one"
+                                                  " of them itself")
+        self.assertNotIn("reused_pre_handoff", raw["identity"])
+        for target in (total, more):
+            self.assertIn("PASS " + target, self.suite_output(raw))
+
+    def test_at_accept_record_without_a_matching_record_qa_runs_the_same_selection_itself(self):
+        total = "tests/st005/test_new.py::test_total"
+        self.frozen_with_own_targets([total], own="accept_record")
+        # The accepted run aged past the final-evidence bound, so it binds nothing any more.
+        self.rewrite_session(lambda session: session["pre_handoff"].update(completed_at=0))
+        raw = verification.run_check(self.root, "test")
+        self.assertEqual(raw["pre_handoff_reuse"], "the accepted pre-handoff run expired")
+        self.assertIn("own_target_reuse", raw)
+        self.assertNotIn("reused_pre_handoff", raw["identity"])
+        self.assertIn("PASS " + total, self.suite_output(raw))
+
+    def test_approval_checks_an_accept_record_reuse_as_recorded(self):
+        total, more = "tests/st005/test_new.py::test_total", "tests/st005/test_more.py::test_more"
+        self.frozen_with_own_targets([total, more], own="accept_record")
+        for role in ("code_reviewer", "qa_engineer"):
+            verification.register_result(self.root, self.reader_result(role))
+        self.validate()
+
+        def own_reuse(own: dict):
+            def change(identity):
+                reuse = identity["reused_pre_handoff"]
+                reuse["own_targets"] = own
+                reuse["test_ids"] = sorted({test for entry in reuse["earlier_stories"] for test in entry["test_ids"]}
+                                           | set(own["test_ids"]))
+            return change
+
+        original = verification.session_path(self.root).read_bytes()
+        refusal = ("at own_target_reuse accept_record reuses every own Test Plan target of the Item and spot-runs"
+                   " none, which this reuse does not")
+        for own in ({"test_ids": [more], "spot_test_ids": []}, {"test_ids": [more], "spot_test_ids": [total]}):
+            with self.subTest(own=own):
+                verification.session_path(self.root).write_bytes(original)
+                self.forge_test_evidence(own_reuse(own))
+                with self.assertRaisesRegex(RuntimeError, re.escape("full_test_suite evidence " + refusal)):
+                    self.validate()
+        verification.session_path(self.root).write_bytes(original)
+        self.validate()
 
     def test_the_command_line_reports_the_run_and_the_refusal(self):
         self.build()

@@ -38,7 +38,7 @@ FILE_FOR = {
 COMMAND_FIELDS = {
     "verification": (
         "test_command", "mutation_command", "dependency_audit_command", "diagnostic_test_command",
-        "test_partition_command",
+        "test_partition_command", "live_test_command",
     ),
     "environment": ("env_command",),
 }
@@ -198,6 +198,45 @@ def test_group_problems(props: dict) -> list[str]:
         errors.append("test_groups must list unique literal group ids")
     if "test_group_report" in props and not scratch_relative_path(props["test_group_report"]):
         errors.append("test_group_report must be a normalized relative path under the verification scratch")
+    return errors
+
+
+# A Verification Contract may declare opt-in live test groups that QA runs one
+# at a time: a command naming the group through one {group} placeholder, its
+# workdir and the ordered group names, all or none. Group names enter the
+# command, so they are identifier tokens.
+LIVE_TEST_FIELDS = ("live_test_command", "live_test_workdir", "live_groups")
+LIVE_GROUP_PLACEHOLDER = "{group}"
+LIVE_GROUP_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+# How a pass runs the selected live groups: one run per group, the default, or
+# one combined run whose {group} receives the comma-separated names, which the
+# command must accept.
+LIVE_GROUP_RUN = "live_group_run"
+LIVE_GROUP_RUNS = ("per_group", "combined")
+
+
+def live_test_problems(props: dict) -> list[str]:
+    """Why a Verification Contract's optional live test group declaration is invalid."""
+    if not any(name in props for name in LIVE_TEST_FIELDS):
+        return ([f"{LIVE_GROUP_RUN} needs live_test_command, live_test_workdir and live_groups"]
+                if LIVE_GROUP_RUN in props else [])
+    errors = []
+    if not all(name in props for name in LIVE_TEST_FIELDS):
+        errors.append("live_test_command, live_test_workdir and live_groups are declared together or not at all")
+    command = props.get("live_test_command")
+    if "live_test_command" in props and (not isinstance(command, str) or not command.strip()
+                                         or command.count(LIVE_GROUP_PLACEHOLDER) != 1):
+        errors.append("live_test_command must be a non-empty command containing {group} exactly once")
+    workdir = props.get("live_test_workdir")
+    if "live_test_workdir" in props and workdir != "." and not scratch_relative_path(workdir):
+        errors.append("live_test_workdir must be a normalized repository-relative path")
+    groups = props.get("live_groups")
+    if "live_groups" in props and (
+            not isinstance(groups, list) or not groups or len(set(map(str, groups))) != len(groups)
+            or any(not isinstance(group, str) or not LIVE_GROUP_RE.fullmatch(group) for group in groups)):
+        errors.append("live_groups must list unique group names of letters, digits, '.', '_' and '-'")
+    if LIVE_GROUP_RUN in props and props[LIVE_GROUP_RUN] not in LIVE_GROUP_RUNS:
+        errors.append(f"{LIVE_GROUP_RUN} must be one of {', '.join(LIVE_GROUP_RUNS)}")
     return errors
 
 
@@ -402,6 +441,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         if problem:
             errors.append(problem)
         errors.extend(test_group_problems(props))
+        errors.extend(live_test_problems(props))
         errors.extend(test_partition_plan(props, body)[1])
         source, provider = pull_request_checks(props)
         if source not in PULL_REQUEST_CHECK_SOURCES:

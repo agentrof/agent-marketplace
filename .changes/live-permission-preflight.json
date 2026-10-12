@@ -1,0 +1,6 @@
+{
+  "summary": "Delivery verification gains permission-preflight, which names the exact packaged commands QA runs (live groups and runtime verbs included) and the host allow rules for the owner to add before the first QA round, and a QA result records a host-refused command as blocked_by_permission instead of stopping silently.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

@@ -4421,6 +4421,26 @@ def source_rebind_findings(record: dict, docs: Path, *, approving: bool = False,
                                             approved_receipt=approved_receipt)
 
 
+def pending_finding_controls(docs: Path, record: dict) -> list[dict]:
+    """Finding-only bindings enter the Test Plan at the next ordinary backlog revision."""
+    targets = {story["id"]: {fields.get("automation_target")
+               for _identifier, block in scenario_blocks(story["test_body"])
+               for fields in [scenario_fields(block)[0]]} for story in record.get("stories", [])}
+    pending = []
+    for path in sorted((docs / "delivery/deliveries").glob("*/delivery.md")):
+        props, _ = parse_front_matter(path)
+        review = path.with_name("delivery-review.md")
+        if props.get("status") != "merged" or not review.is_file():
+            continue
+        review_props, _ = parse_front_matter(review)
+        for row in json.loads(review_props.get("finding_control_bindings", "[]")):
+            missing = sorted(set(row["test_ids"]) - targets.get(row["story"], set()))
+            if missing:
+                pending.append({"delivery": props.get("id"), "story": row["story"],
+                                "finding_id": row["finding_id"], "test_ids": missing})
+    return pending
+
+
 def approval_preflight(docs: Path, record: dict,
                        collect_errors: list[str], *, approving: bool = False,
                        approved_receipt: str | None = None) -> tuple[list[str], dict, dict, bool]:
@@ -4432,6 +4452,9 @@ def approval_preflight(docs: Path, record: dict,
     findings = approval_readiness_findings(record)
     already_approved = (record.get("backlog") or {}).get("props", {}).get("status") == "approved"
     if not already_approved:
+        for row in pending_finding_controls(docs, record):
+            findings.append(f"{row['story']} must absorb {row['finding_id']} finding controls from {row['delivery']}: "
+                            + ", ".join(row["test_ids"]))
         findings.extend(requirement_coverage_findings(record))
         findings.extend(light_root_review_findings(record, docs))
         findings.extend(source_rebind_findings(record, docs, approving=approving,

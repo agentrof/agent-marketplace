@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch own_target_reuse gains accept_record: QA's final test run takes every own Test Plan target of the Item and every touched earlier-suite target from the pre-handoff run the freeze accepted, spot-runs none and takes no spot-run selection, and checks only that the record binds the exact frozen candidate; where no accepted run binds it, the approved test command runs every target itself. Evidence approval refuses an accept_record reuse that leaves an own target out or names a spot-run target, approve-item-evidence records it with none as the spot-run targets, and the switch reference states that a reused case the accepted run deferred to its live group keeps that deferral in the default run's coverage audit instead of counting as NO-TEST, so a project never needs run --fresh to pass the audit. In one measured project QA's final test run repeated the pre-freeze run on the identical tree, and the reuse path counted live deferrals as NO-TEST, which forced --fresh runs.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

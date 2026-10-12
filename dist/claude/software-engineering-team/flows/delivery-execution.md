@@ -94,7 +94,6 @@ launch prompt from `templates/reader-launch-prompts.json`, lens assignments
 included. Modes default to `review_repair` after an earlier candidate and
 `qa_final`; `--review-mode` and `--qa-mode` override them. The first failing
 step stops the chain and returns its error.
-
 Put the manifest's `command_form` verbatim into every reader prompt: while
 readers are active, Bash admits only that one direct invocation followed by a
 verb, and readers read files with the host's Read tool.
@@ -120,6 +119,7 @@ Plan targets, before `freeze`, which refuses until that run passed on the exact
 candidate, as
 `skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md`
 defines.
+Switch `regression_plan_revision`: at `current_approved`, earlier-story regression targets and metadata follow the complete current committed backlog approval, with a closed-to-current receipt, as `skill-content/deliver/references/switch-regression_plan_revision-current_approved.md` defines.
 Switch `own_target_reuse`: at `spot_run`, QA's final test run also takes the
 Item's own Test Plan targets from that run, but for the ones QA spot-runs, as
 `skill-content/deliver/references/switch-own_target_reuse-spot_run.md`

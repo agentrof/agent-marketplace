@@ -2988,7 +2988,9 @@ def integrated_plan(root: Path, commit: str, plans: list[str], hashes: set[str])
             return None
         body = backlog_compile.parse_front_matter_text(text)[1]
         return {"test_plan": relative, "source_hash": value, "commit": holder,
-                "targets": automation_targets(body), "scenarios": scenario_records(body)}
+                "targets": automation_targets(body), "scenarios": scenario_records(body),
+                "scenario_metadata": {identifier: scenario_fields(block)[0]
+                                      for identifier, block in scenario_blocks(body)}}
 
     for relative in plans:
         path = docs / relative
@@ -3235,6 +3237,127 @@ def assertion_map_status(root: Path, delivery_id: str, story: str) -> dict:
                 for entry in check["converted_scenarios"]}}}
 
 
+
+def rebind_unit_selection(root: Path, delivery_id: str) -> dict:
+    commit = git(root, "rev-parse", "HEAD")
+    integrations = {}
+    for _identifier, _current, _path, item in integrated_items(root, delivery_id):
+        add_integration(integrations, item)
+    targets = set()
+    revisions = []
+    for story, value in sorted(integrations.items()):
+        closed = integrated_plan(root, commit, value["plans"], value["hashes"])
+        if closed is None:
+            raise RuntimeError("rebound unit selection requires the closed plan")
+        _current, receipt = current_approved_regression_plan(root, commit, story, closed)
+        for row in receipt["scenario_delta"].values():
+            before, after = row.get("before") or {}, row.get("after") or {}
+            target = after.get("automation_target")
+            if (after.get("level") == "unit" and after.get("automation", "").lower() == "required"
+                    and target and target != before.get("automation_target")):
+                if not literal_test_id(target):
+                    raise RuntimeError("rebound unit target must be a literal test id")
+                targets.add(target)
+        revisions.append({"story": story, "current_source_hash": receipt["current_source_hash"]})
+    contract = verification_contract(root)
+    kind = "diagnostic_test" if contract.get("diagnostic_test_command") else "test"
+    return {"delivery": delivery_id, "candidate_tree": git(root, "rev-parse", "HEAD^{tree}"),
+            "selected_test_ids": sorted(targets), "revisions": revisions, "kind": kind,
+            "command": contract[kind + "_command"], "workdir": contract.get(kind + "_workdir", ".")}
+
+
+def rebind_unit_record(root: Path, delivery_id: str) -> Path:
+    if not re.fullmatch(r"DLV-[0-9]+", delivery_id):
+        raise RuntimeError("invalid Delivery id")
+    return safe_runtime_path(root, session_path(root).parent / (delivery_id + "-rebound-units.json"), file_only=True)
+
+
+def rebind_unit_run(root: Path, delivery_id: str) -> dict:
+    root = root.resolve()
+    guard_write(root)
+    with environment_lock(root, PRE_HANDOFF_HOLDER, "rebind-unit-run"), command_lock(root, PRE_HANDOFF_HOLDER, "rebind-unit-run"):
+        selection = rebind_unit_selection(root, delivery_id)
+        if not selection["selected_test_ids"]:
+            return {"exit_code": 0, "candidate_intact": True, "needed": False}
+        path = rebind_unit_record(root, delivery_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # This Delivery-wide run has no single Item identity.
+        environment = command_environment(root, {"delivery": delivery_id, "story": ""},
+                                          diagnostic=selection["kind"] == "diagnostic_test")
+        data = {"schema_version": 1, "candidate_hash": digest(selection), "failed_test_ids": [],
+                "affected_test_ids": selection["selected_test_ids"], "selected_test_ids": selection["selected_test_ids"]}
+        selector = raw_output_path(root, "scratch/rebound-unit-selection.json")
+        selector.parent.mkdir(parents=True, exist_ok=True)
+        atomic_file.replace_text(selector, json.dumps(data, sort_keys=True))
+        generation = source_file_generation(selector)
+        if selection["kind"] == "diagnostic_test":
+            environment["AGENTROF_DIAGNOSTIC_TESTS"] = str(selector)
+        completed, intact, _difference, _dropped, _ran = private_checkout_run(root, selector.parent,
+            git(root, "rev-parse", "HEAD"), selection["workdir"], selection["command"], environment)
+        intact = (intact and rebind_unit_selection(root, delivery_id) == selection
+                  and source_file_generation(selector) == generation)
+        output = raw_output_path(root, "scratch/rebound-units-" + uuid.uuid4().hex + ".log")
+        atomic_file.replace_bytes(output, completed.stdout)
+        record = {"selection": selection, "exit_code": completed.returncode, "candidate_intact": intact,
+                  "output_file": output.relative_to(session_path(root).parent).as_posix(),
+                  "output_sha256": hashlib.sha256(completed.stdout).hexdigest(), "completed_at": time.time()}
+        record["evidence_hash"] = digest(record)
+        atomic_file.replace_text(path, json.dumps(record, sort_keys=True))
+        return record
+
+
+def rebind_unit_refusals(root: Path, delivery_id: str) -> list[str]:
+    try:
+        import process_policy
+        values, _pin = process_policy.effective_values(delivery.docs_root(root))
+        if values.get("regression_plan_revision", {}).get("value", "integrated") != "current_approved":
+            return []
+        selection = rebind_unit_selection(root, delivery_id)
+        if not selection["selected_test_ids"]:
+            return []
+        record = json.loads(rebind_unit_record(root, delivery_id).read_text(encoding="utf-8"))
+        output = raw_output_path(root, record["output_file"])
+        if (record["selection"] != selection or record["exit_code"] != 0 or record["candidate_intact"] is not True
+                or record["evidence_hash"] != digest({k: v for k, v in record.items() if k != "evidence_hash"})
+                or hashlib.sha256(output.read_bytes()).hexdigest() != record["output_sha256"] or not fresh_record(record)):
+            raise ValueError("no current green evidence")
+        return []
+    except (OSError, ValueError, RuntimeError, KeyError) as exc:
+        return ["Newly rebound unit targets need a passing rebind-unit-run before plan approval: " + str(exc)]
+
+
+def current_approved_regression_plan(root: Path, commit: str, story: str, closed: dict) -> tuple[dict, dict]:
+    """Read one story from the complete approved backlog at the candidate commit."""
+    docs = delivery.docs_root(root)
+    sources = backlog_compile.approved_history_sources(root, docs, commit)
+    if sources is None:
+        raise RuntimeError("current regression plans require a complete committed backlog approval")
+    matches = []
+    for path, raw in sources.items():
+        if path.name != "test-plan.md":
+            continue
+        text = raw.decode("utf-8")
+        props, body = backlog_compile.parse_front_matter_text(text)
+        if props.get("story_id") == story:
+            matches.append((path, text, body))
+    if len(matches) != 1:
+        raise RuntimeError(f"{story} requires exactly one current approved Test Plan; found {len(matches)}")
+    path, text, body = matches[0]
+    before = closed.get("scenario_metadata", closed["scenarios"])
+    after = {identifier: scenario_fields(block)[0] for identifier, block in scenario_blocks(body)}
+    delta = {identifier: {"before": before.get(identifier), "after": after.get(identifier)}
+             for identifier in sorted(set(before) | set(after))
+             if before.get(identifier) != after.get(identifier)}
+    metadata = after
+    revision = {"test_plan": path.relative_to(docs).as_posix(),
+                "source_hash": backlog_compile.digest_text(text), "commit": commit,
+                "targets": automation_targets(body), "scenarios": scenario_records(body)}
+    receipt = {"closed_commit": closed["commit"], "closed_source_hash": closed["source_hash"],
+               "current_commit": commit, "current_source_hash": revision["source_hash"],
+               "scenario_delta": delta, "scenario_metadata": metadata}
+    return revision, receipt
+
+
 def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -> dict:
     """Derive the pre-handoff regression selection of an Item's exact candidate.
 
@@ -3295,13 +3418,18 @@ def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -
             raise RuntimeError(f"{entry['label']} integrated Test Plan {entry['plan']} at {entry['recorded']},"
                                " a revision neither the candidate nor its history holds; its suite cannot be"
                                " selected")
+        plan_revision = None
+        if delivery.delivery_switch_value(docs, delivery_id, "regression_plan_revision") == "current_approved":
+            revision, plan_revision = current_approved_regression_plan(
+                root, current["product_commit"], entry["story"], revision)
         earlier.append({"delivery": entry["delivery"], "story": entry["story"], "item": entry["item"],
                         "test_plan": (docs / revision["test_plan"]).relative_to(root).as_posix(),
                         "test_plan_source_hash": revision["source_hash"], "test_plan_commit": revision["commit"],
                         "touched_claims": entry["touched"],
                         "touched_paths": sorted({path for path in changed for claim in entry["touched"]
                                                  if delivery._claims_overlap(claim, path)}),
-                        "automation_targets": sorted(set(revision["targets"]))})
+                        "automation_targets": sorted(set(revision["targets"])),
+                        **({"plan_revision": plan_revision} if plan_revision is not None else {})})
     earlier.sort(key=lambda entry: (entry["delivery"], entry["story"]))
     plan = str(item_record(root, delivery_id, story).get("test_plan_path") or "")
     own = sorted(set(plan_automation_targets(docs, plan, f"{story} of {delivery_id}")))
@@ -3430,7 +3558,11 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
             atomic_file.replace_text(selector, json.dumps(
                 {"schema_version": 1, "candidate_hash": current["candidate_hash"], "failed_test_ids": [],
                  "affected_test_ids": derived["affected_test_ids"],
-                 "selected_test_ids": derived["affected_test_ids"]}, indent=2, sort_keys=True) + "\n")
+                 "selected_test_ids": derived["affected_test_ids"],
+                 **({"regression_plans": [{"story": entry["story"], **entry["plan_revision"]}
+                                           for entry in derived["earlier_stories"] if "plan_revision" in entry]}
+                    if any("plan_revision" in entry for entry in derived["earlier_stories"]) else {})},
+                indent=2, sort_keys=True) + "\n")
             environment["AGENTROF_DIAGNOSTIC_TESTS"] = str(selector)
             # As in QA's diagnostic run, neither the selection the command
             # receives nor the one QA's diagnostic reads may change while it runs.
@@ -3462,7 +3594,9 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
             output_name = "scratch/pre-handoff-" + uuid.uuid4().hex + ".log"
             atomic_file.replace_bytes(raw_output_path(root, output_name), completed.stdout)
             record = {**{key: derived[key] for key in ("delivery", "story", "product_commit", *PRE_HANDOFF_IDENTITY)},
-                      "earlier_stories": [{"delivery": entry["delivery"], "story": entry["story"]}
+                      "earlier_stories": [{"delivery": entry["delivery"], "story": entry["story"],
+                                           **({"plan_revision": entry["plan_revision"]}
+                                              if "plan_revision" in entry else {})}
                                           for entry in derived["earlier_stories"]],
                       "exit_code": completed.returncode, "candidate_intact": intact, "output_file": output_name,
                       "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
@@ -4221,6 +4355,8 @@ def main(argv=None) -> int:
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
+    rebind = subs.add_parser("rebind-unit-run")
+    rebind.add_argument("--delivery", required=True)
     subs.choices["freeze"].add_argument("--fresh", action="store_true")
     for name in ("freeze", "manifest"):
         subs.choices[name].add_argument("--remote", default="origin",
@@ -4313,6 +4449,8 @@ def main(argv=None) -> int:
             value = run_environment(root, args.verb, args.value)
         elif args.command == "lane-run":
             value = lane_run(root, args.delivery, args.story, args.role, args.kind, args.verb, args.value)
+        elif args.command == "rebind-unit-run":
+            value = rebind_unit_run(root, args.delivery)
         elif args.command == "regression-selection":
             value = regression_selection(root, args.delivery, args.story)
         elif args.command == "regression-run":
@@ -4341,7 +4479,7 @@ def main(argv=None) -> int:
         else:
             value = read_session(root)
         print(json.dumps({"ok": True, **value}, indent=2))
-        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
+        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run", "rebind-unit-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2))
         return 2

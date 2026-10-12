@@ -654,3 +654,7 @@ question autopilot queues is also a `pending` row, of class `queued` or its
 at-once class, with the Items it holds in `blocks`, so gate A, gate B and the
 Item starts refuse while it is open. `delivery_compile.py check` accepts both
 rows.
+
+Process switch `regression_plan_revision` keeps `integrated` as the default. At
+`current_approved`, pre-handoff regression selects earlier stories from the
+complete committed backlog approval and records the closed-to-current delta.

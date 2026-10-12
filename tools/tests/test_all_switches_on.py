@@ -175,6 +175,8 @@ REBIND = "references/switch-source_rebind-receipt_when_unchanged.md"
 EXPECTED = {key: sorted([*value, key.split(":")[0] + "/" + REBIND])
             if key.split(":")[0] in ("backlog-plan", "execution-plan") else value
             for key, value in EXPECTED.items()}
+EXPECTED = {key: sorted([*value, "deliver/references/switch-regression_plan_revision-current_approved.md"])
+            if key.startswith("deliver:") else value for key, value in EXPECTED.items()}
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")
 

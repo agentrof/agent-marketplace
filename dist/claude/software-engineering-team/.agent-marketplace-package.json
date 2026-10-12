@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "c47c0e0910f228f6e504a35cbf6bc5761d33a78a3254fd8ec420bf41eb5838d6"
+      "796d63c2fb6632cfecf79c0fc62ab1d948737f7210015e0ee7e00e1184abd6e3"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -185,7 +185,7 @@
       "73b210d3acdffaa912802807dbf11d47f068ba2c635d300bd051142310e05633"
     ,
     "scripts/delivery_compile.py":
-      "dca044af7f2dd5e76463ac297203039e59dfad1b2d9d66a8b4a4db2a6a1f23ec"
+      "53363834eb71abeae34009d491f1effd1b0decb6640e642bedf831136043131e"
     ,
     "scripts/delivery_git.py":
       "46a4a848e86d70ce195c546cd951be8e7a4aaefe6b8fc45e1490d54e18ae3b76"
@@ -200,7 +200,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "f057d481177b94e34dae2521da6d64e09ce4c750650e030127286278e93b79da"
+      "ccf2f6c41569f5623e6d42fc938abcfda7eb5d28bfa24c97862aa24818bb9bd6"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -452,7 +452,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "e869f7b1c9b87c7ddadf0c298a5b5203fa71c71571f3665591ad416819515497"
+      "792b8389d4a8df70bca96fbfbca61117e55a417e8d608e7aa8ea2617d360f100"
     ,
     "skill-content/configure/data/step-budgets.json":
       "c63c5e90e1726b573c681f28008aa627575600f2d81dc8f8c0851b768e1b04fc"
@@ -461,7 +461,7 @@
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "b5a481fb89b77d04ac47f0eb87592113b61f4c04cab11019b05ce03380a767e0"
+      "2737daeee41e03b410c830c49cb4788e93c707a4fbfa7ed4bc0f3317e8b970fe"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -528,6 +528,9 @@
     ,
     "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
       "c23b324300ea70379a61bafdc1faa0ab5886de392f89e7f9a54771ecb9bc9830"
+    ,
+    "skill-content/deliver/references/switch-regression_plan_revision-current_approved.md":
+      "487cedfffcba65c9c333f0153b57bfa7fb346e6bcc03e00ca599adf72f5d2b62"
     ,
     "skill-content/deliver/references/switch-test_engines-partitioned.md":
       "718714d0b07687b4d670499555397d5bac780a749b3dcd50736a6f3e5b0fafa7"

@@ -334,6 +334,23 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertFalse(raw["candidate_intact"])
         self.assertFalse(verification.run_check(self.root, "diagnostic_test", selection_file=selector)["reused"])
 
+    def test_the_manifest_and_the_active_reader_refusal_name_the_one_allowed_command_form(self):
+        """A reader told only that writes wait loses its run to refused shell calls, so the manifest carries the
+        literal invocation and the refusal names its form and where files are read instead."""
+        self.freeze()
+        form = verification.manifest(self.root, "DLV-001", "AUTH-01", "qa_engineer", "qa_final")["command_form"]
+        self.assertTrue(form.startswith(verification.command_form(self.root) + " "), form)
+        tokens = (shlex.split(form) if os.name != "nt" else form.split())[:5]
+        self.assertEqual(Path(tokens[2]).name, "delivery_verification.py")
+        self.assertEqual(tokens[1], "-B")
+        self.assertEqual(tokens[3:5], ["--worktree", str(self.root)])
+        with self.assertRaises(RuntimeError) as refused:
+            verification.guard_write(self.root, [self.root / "src/product.py"])
+        message = str(refused.exception)
+        self.assertTrue(message.startswith("DELIVERY_VERIFICATION_READERS_ACTIVE: "), message)
+        for part in ("command_form", "no pipe, redirect, variable or prefix", "Read tool", "allowed_writes"):
+            self.assertIn(part, message)
+
     def test_frozen_manifest_defaults_to_resolver_and_batches_exact_candidate_text(self):
         self.freeze()
         for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_final")):
@@ -730,6 +747,29 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         with self.assertRaisesRegex(RuntimeError, "missing or changed"):
             verification.validate(self.root, "DLV-001", "AUTH-01")
 
+    def test_every_command_reads_the_candidate_delivery_and_item_ids_whatever_the_shell_exports(self):
+        """A reader's shell can export no variable, so an approved command that needs the Delivery and Item ids
+        reads them from the runner, set from the frozen candidate over any inherited value, and every run
+        identity covers both."""
+        script = "import os; print(os.environ['AGENTROF_DELIVERY_ID'], os.environ['AGENTROF_ITEM_ID'])"
+        arguments = [sys.executable, "-c", script]
+        path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(path)
+        contract["test_command"] = self.command = (subprocess.list2cmdline(arguments) if os.name == "nt"
+                                                   else shlex.join(arguments))
+        self.write(path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
+        self.commit()
+        self.freeze()
+        verification.register_result(self.root, self.result())
+        with mock.patch.dict(os.environ, {"AGENTROF_DELIVERY_ID": "DLV-999"}):
+            os.environ.pop("AGENTROF_ITEM_ID", None)
+            raw = verification.run_check(self.root, "test")
+        self.assertEqual(raw["exit_code"], 0)
+        output = verification.raw_output_path(self.root, raw["output_file"]).read_text(encoding="utf-8")
+        self.assertIn("DLV-001 AUTH-01", output)
+        self.assertLessEqual({"AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID"}, set(raw["identity"]["environment_variables"]))
+        self.assertLessEqual({"AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID"}, set(verification.RUNNER_VARIABLES))
+
     def test_the_tracked_environment_hash_checks_no_guess_of_a_declared_value(self):
         """Evidence approval writes QA's checks, the run identity's environment hash among them, into the Item's
         tracked verification record. A hash of a few guessable values would let anyone who reads that record
@@ -739,7 +779,7 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.freeze()
         with mock.patch.dict(os.environ, {"ITEM_TOKEN": "7319"}):
             self.settle()
-            environment = verification.command_environment(self.root)
+            environment = verification.command_environment(self.root, verification.read_session(self.root)["candidate"])
         identity = verification.read_session(self.root)["raw_evidence"]["test"]["identity"]
         # Every covered value known and the declared one guessed right: the guess still checks nothing.
         values = {name: verification.variable_value(environment, name) for name in identity["environment_variables"]}
@@ -825,6 +865,56 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
                 with self.assertRaisesRegex(RuntimeError, f"^{check} evidence reuses a pre-handoff run, which only"
                                                           " the full test suite does$"):
                     verification.validate(self.root, "DLV-001", "AUTH-01")
+
+    def test_reader_manifest_stays_small_and_references_its_bulky_data(self):
+        for index in range(2500):
+            self.write(f"vendor/lib/module_{index:04d}.js", f"export const v{index} = {index};\n")
+        self.commit()
+        base = verification.git(self.root, "rev-parse", "HEAD")
+        props, body = delivery.split_note(self.root / self.item_path)
+        self.write(self.item_path, delivery.frontmatter({**props, "integration_base_commit": base}, body))
+        for index in range(200):
+            self.write(f"src/feature/component_{index:03d}.py", f"value_{index} = {index}\n")
+        self.commit()
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [{"id": f"CR-{index}", "severity": "minor", "status": "open",
+                               "file": f"src/feature/component_{index:03d}.py",
+                               "verification": "Rerun the targeted check",
+                               "description": f"Finding {index} headline\n" + "Detail. " * 300}
+                              for index in range(1, 71)]
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        self.write("src/feature/component_000.py", "value_0 = -1\n")
+        self.commit()
+        frozen = self.freeze()
+        manifest = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")
+        size = len(json.dumps({"ok": True, **manifest}, indent=2).encode())
+        self.assertLess(size, 64 * 1024, f"reader manifest is {size} bytes")
+        self.assertNotIn("source_observations", manifest)
+        observations = manifest["source_observations_file"]
+        self.assertEqual(json.loads(Path(observations["path"]).read_text()),
+                         frozen["candidate"]["source_observations"])
+        self.assertEqual(observations["sha256"], verification.digest(frozen["candidate"]["source_observations"]))
+        self.assertGreater(observations["entries"], 2700)
+        self.assertEqual(manifest["candidate_hash"], frozen["candidate"]["candidate_hash"])
+        self.assertEqual(manifest["repair_delta"], ["src/feature/component_000.py"])
+        summary = manifest["unresolved_findings"][0]
+        self.assertEqual(summary, {"id": "CR-1", "role": "code_reviewer", "severity": "minor", "status": "open",
+                                   "file": "src/feature/component_001.py", "title": "Finding 1 headline"})
+        full = json.loads(Path(manifest["unresolved_findings_file"]["path"]).read_text())
+        self.assertEqual(full, frozen["unresolved_findings"])
+        self.assertEqual(manifest["unresolved_findings_file"]["sha256"], verification.digest(full))
+        # The CLI still refuses a stale snapshot, whatever the reader's copy says.
+        self.write("vendor/lib/module_0000.js", "export const v0 = -1;\n")
+        self.commit()
+        with self.assertRaisesRegex(RuntimeError, "verification candidate or source bindings changed"):
+            verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")
+
+    def test_repair_delta_names_changed_files_when_the_whole_change_is_new(self):
+        self.freeze()
+        manifest = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_initial")
+        self.assertEqual(manifest["repair_delta"], "changed_files")
 
     def test_repair_preserves_finding_ids_and_requires_explicit_resolution(self):
         self.freeze()
@@ -2005,8 +2095,9 @@ print(sys.argv[1])
         self.write("src/product.py", "value = 3\n")
         self.commit()
         self.freeze()
-        unresolved = {finding["id"]: finding for finding in verification.manifest(
-            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["unresolved_findings"]}
+        attached = verification.manifest(
+            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["unresolved_findings_file"]
+        unresolved = {finding["id"]: finding for finding in json.loads(Path(attached["path"]).read_text())}
         self.assertEqual(sorted(unresolved), ["CR-1", "CR-2"])
         self.assertEqual((unresolved["CR-1"]["severity"], unresolved["CR-1"]["calibrated_severity"]),
                          ("major", "major"))

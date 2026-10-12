@@ -197,6 +197,15 @@ change-level tier the Verification Contract declares, and the Delivery runs
 its integration tier once before its pull request, as
 `skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md`
 defines.
+Before an Item's first QA round, run `permission-preflight --delivery <id>
+--story <id>` and show the owner its `commands` and `allow_rules`: the exact
+packaged forms QA runs, live groups and runtime verbs included. The owner
+allows them once in the host's permission settings; the package never edits
+them. A QA reader whose command the host refuses lists it in
+`blocked_commands` with outcome `blocked_by_permission` and settles as a
+diagnostic or failed result, never a passed final one. `status --summary`
+shows those rows; ask the owner at once, then `resume-qa` reruns only the
+blocked commands on the same candidate.
 For failed or affected tests first, an optional approved
 `diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
 <scratch-selection.json>`. Copy the selector schema from the QA manifest,
@@ -376,6 +385,13 @@ lease it lost, or a remote without atomic push support, from the refetched
 refs. One whose refetched refs hold its candidate, or moved on from it, may
 have landed and reports `DELIVERY_TRANSACTION_UNCERTAIN` instead. Release
 Management is intentionally not part of this flow.
+
+A permission probe validates the approved command without executing it. Neither
+host exposes a portable no-effect permission prediction API, so its authorization
+result remains unknown; show the exact allow rules to the owner. The optional
+Verification Contract `live_permission_commands` lists service or container
+commands needing that review. Permission-only QA resume preserves successful
+evidence and names only refused commands in `resume_commands`.
 
 Finding-control runs are retained as candidate-bound records across verification
 passes. Evidence approval writes the bindings into the Item verification record,

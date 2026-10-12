@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "6bc0f4eecd5ea774613a3fe441a4a845d6b08ecd014c821d1f2b89e62ec0d555"
+      "b1ccbb5f4fbbf7058b8ffa7600a2e7ccd9621d173ef79daa056c98c6a89b5a95"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -197,7 +197,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "2519e3a01033bae7d0d314bcbf254b2f1581ddb3cf5f92d861cd60e798b988cf"
+      "44526ee9d42ac44de47abdd975b839838d543eacd2877a965efbdae0fd846f48"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -293,7 +293,7 @@
       "5874e6fed717df6c29ad5d6888c8985690fca14ed83458b1f0e77af298e8da81"
     ,
     "scripts/vault_hook.py":
-      "25beabdefd1ebf48f0cb9b6d116a0c4614e0833d35a00a35439dd1980f0d7e07"
+      "5388aa97924d0bf1e3799932fef8fcc4e5c5bc3c8f2a40f840242fe392e6a802"
     ,
     "scripts/vault_index.py":
       "e71cc817cae308e57ae5e78804966343606c683a1830b95b4e394b5282eded1f"
@@ -698,7 +698,7 @@
       "619d535ef451a5359c98c97ae321cb2999038446cd17228c0c3e6eb0abdbd488"
     ,
     "skill-content/qa-verification/references/report-format.md":
-      "661e7af531ff0cf84784c9833738bb62ce8631fa394e33e42fe4e24e2cbd56a6"
+      "e15675a246f99c07d33804f7f313d170bad550a8f9cc40166c0f4c4cf74aa3de"
     ,
     "skill-content/qa-verification/references/runtime-protocol.md":
       "7ddf13911059f2676d23cb1ae8a0e33e69f0f3cd7e2f2a9c3a7f4149761194d3"

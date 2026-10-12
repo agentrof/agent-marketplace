@@ -637,6 +637,95 @@ def refuse_unpublished_paths(root: Path, delivery_id: str, story: str, path_clai
                               " claims: " + ", ".join(outside))
 
 
+
+def repair_review_manifest(root: Path, delivery_id: str, story: str, *, previous=None, current=None) -> dict:
+    """Bind a read-only repair review to the last pass, current commit and source inputs."""
+    if delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, "repair_review") != "before_freeze":
+        return {"required": False, "reason": "repair_review is after_freeze"}
+    previous = previous if previous is not None else read_session(root, required=False)
+    if previous is None:
+        return {"required": False, "reason": "first verification candidate"}
+    current = current if current is not None else candidate(root, delivery_id, story, allow_evidence=True)
+    old = previous["candidate"]
+    if (old["delivery"], old["story"]) != (delivery_id, story):
+        raise RuntimeError("repair review belongs to another Item")
+    if current == old:
+        return {"required": False, "reason": "candidate is unchanged"}
+    delta = sorted(set(filter(None, git(root, "diff", "--name-only", "--no-renames", "-z",
+                                        old["product_commit"], current["product_commit"]).split("\0"))))
+    findings = list(previous.get("unresolved_findings", []))
+    for role, worker in previous["workers"].items():
+        findings.extend({**finding, "role": role} for finding in worker.get("result", {}).get("findings", []))
+    claims = {(finding.get("role"), finding["id"]): finding for finding in findings}
+    result = {"required": True, "schema_version": 1, "source_session_id": previous["session_id"],
+              "candidate_hash": current["candidate_hash"], "base_commit": old["product_commit"],
+              "head_commit": current["product_commit"], "repair_delta": delta,
+              "source_inputs": current["inputs"], "instruction_identity": current["instruction_identity"],
+              "findings_to_check": [claims[key] for key in sorted(claims)],
+              "reader_role": "code-reviewer", "lens": "correctness-contract",
+              "full_read": sorted(set(delta) | set(current["inputs"])),
+              "instructions": "Read the committed repair diff against the previous findings and approved contracts. "
+                              "Check preserved invariants, removed checks, boundary values and whether a repair test "
+                              "merely endorses incorrect behavior. Do not edit the candidate or run the verification suite."}
+    result["manifest_hash"] = digest(result)
+    result["finding_prefix"] = "RR-" + result["manifest_hash"].removeprefix("sha256:")[:12] + "-"
+    return result
+
+
+def repair_review_path(root: Path) -> Path:
+    return raw_output_path(root, "scratch/repair-review.json")
+
+
+def check_repair_review(manifest: dict, result: dict) -> None:
+    if (result.get("manifest_hash") != manifest["manifest_hash"]
+            or result.get("candidate_hash") != manifest["candidate_hash"]
+            or result.get("source_session_id") != manifest["source_session_id"]):
+        raise RuntimeError("repair review does not bind the current repair and previous pass")
+    if (result.get("role") != "code_reviewer" or result.get("mode") != "repair_review"
+            or result.get("verdict") not in {"passed", "failed"}
+            or not isinstance(result.get("reviewer"), str) or not result["reviewer"].strip()
+            or not isinstance(result.get("report"), str) or not result["report"].strip()):
+        raise RuntimeError("repair review requires its independent reader, mode, verdict and report")
+    findings = result.get("findings")
+    check_findings(findings)
+    for finding in findings:
+        if (finding["status"] != "open" or not finding["id"].startswith(manifest["finding_prefix"])
+                or finding.get("file") not in manifest["full_read"]
+                or not isinstance(finding.get("description"), str) or not finding["description"].strip()):
+            raise RuntimeError("repair findings require new prefixed IDs, open status, a reviewed file and description")
+    if result["verdict"] == "passed" and any(blocking(finding) for finding in findings):
+        raise RuntimeError("a repair review with blocking findings cannot pass")
+
+
+def register_repair_review(root: Path, delivery_id: str, story: str, result: dict) -> dict:
+    with locked(root):
+        manifest = repair_review_manifest(root, delivery_id, story)
+        if not manifest["required"]:
+            raise RuntimeError("this candidate needs no pre-freeze repair review")
+        check_repair_review(manifest, result)
+        record = {"manifest_hash": manifest["manifest_hash"], "result": result, "completed_at": time.time()}
+        record["evidence_hash"] = digest(record)
+        atomic_file.replace_text(repair_review_path(root), json.dumps(record, indent=2) + "\n")
+        return record
+
+
+def require_repair_review(root: Path, previous: dict | None, current: dict) -> dict | None:
+    manifest = repair_review_manifest(root, current["delivery"], current["story"], previous=previous, current=current)
+    if not manifest["required"]:
+        return None
+    try:
+        record = json.loads(repair_review_path(root).read_text(encoding="utf-8"))
+        if (record["evidence_hash"] != digest({key: value for key, value in record.items() if key != "evidence_hash"})
+                or record["manifest_hash"] != manifest["manifest_hash"] or not fresh_record(record)):
+            raise ValueError("stale or changed record")
+        check_repair_review(manifest, record["result"])
+    except (OSError, ValueError, KeyError, TypeError):
+        raise RuntimeError("a current repair-review-result is required before freezing this candidate") from None
+    if record["result"]["verdict"] != "passed" or any(blocking(finding) for finding in record["result"]["findings"]):
+        raise RuntimeError("repair review blocks the freeze; repair its findings and review the new diff")
+    return record
+
+
 def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, remote: str = "origin") -> dict:
     started = time.monotonic()
     root = root.resolve()
@@ -649,6 +738,7 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
         if previous and any(worker["state"] == "running" for worker in previous["workers"].values()):
             raise RuntimeError("settle or cancel the existing readers before freezing a new candidate")
         current = candidate(root, delivery_id, story, allow_evidence=True)
+        repair_review = require_repair_review(root, previous, current)
         live_repair = require_live_repairs(root, previous, current)
         if current.get("assertion_map", {}).get("problems"):
             raise RuntimeError("assertion map: " + "; ".join(current["assertion_map"]["problems"]))
@@ -685,6 +775,9 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
                     retained.pop(key, None)
                 else:
                     retained[key] = {**finding, "role": role}
+        if repair_review is not None:
+            for finding in repair_review["result"]["findings"]:
+                retained[("code_reviewer", finding["id"])] = {**finding, "role": "code_reviewer"}
         findings = [retained[key] for key in sorted(retained)]
         value = {"schema_version": 1, "session_id": uuid.uuid4().hex, "candidate": current,
                  "previous_candidate": previous.get("candidate") if previous else None,
@@ -692,6 +785,15 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
                  "workers": {role: {"state": "running", "started_at": time.time()} for role in ROLES},
                  "metrics": {"freeze_seconds": time.monotonic() - started, "command_cache_hits": 0,
                              "command_seconds": 0.0, "model_seconds": None, "model_tokens": None}, "raw_evidence": {}}
+        repair_history = list(previous.get("repair_review_history", [])) if previous else []
+        if previous and previous.get("repair_review"):
+            prior = previous["repair_review"]
+            if all(row["evidence_hash"] != prior["evidence_hash"] for row in repair_history):
+                repair_history.append(prior)
+        if repair_history:
+            value["repair_review_history"] = repair_history
+        if repair_review is not None:
+            value["repair_review"] = repair_review
         if live_repair is not None:
             value["live_repair"] = live_repair
         if pre_handoff is not None:
@@ -3834,10 +3936,11 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", required=True)
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map", "repair-live"):
+    for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map", "repair-live", "repair-review-manifest", "repair-review-result"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
+    subs.choices["repair-review-result"].add_argument("--file", required=True)
     subs.choices["freeze"].add_argument("--fresh", action="store_true")
     for name in ("freeze", "manifest"):
         subs.choices[name].add_argument("--remote", default="origin",
@@ -3919,6 +4022,10 @@ def main(argv=None) -> int:
             value = regression_selection(root, args.delivery, args.story)
         elif args.command == "regression-run":
             value = regression_run(root, args.delivery, args.story)
+        elif args.command == "repair-review-manifest":
+            value = repair_review_manifest(root, args.delivery, args.story)
+        elif args.command == "repair-review-result":
+            value = register_repair_review(root, args.delivery, args.story, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "repair-live":
             value = repair_live(root, args.delivery, args.story)
         elif args.command == "assertion-map":

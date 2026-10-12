@@ -105,6 +105,12 @@ of each scenario whose Test Plan level the Item converts, `freeze` refuses an
 incomplete map and the code reviewer reads the pairs it flags, as
 `skill-content/deliver/references/switch-level_change_map-assertion_map.md`
 defines.
+Switch `repair_review`: at `before_freeze`, a fresh correctness reader reviews
+repairs against the previous pass and approved contracts before a new candidate
+is frozen. Blocking findings prevent the freeze and minor findings enter the
+full review, as
+`skill-content/code-review/references/switch-repair_review-before_freeze.md`
+defines.
 Switch `pre_handoff_regression`: at `touched_suites`, the coordinator runs the
 suites of the earlier stories the candidate touches, with the Item's own Test
 Plan targets, before `freeze`, which refuses until that run passed on the exact

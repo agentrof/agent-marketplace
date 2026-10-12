@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "2b0148f9b54bc20ce96d680b8bd61e81689060373fff4f9b8f478f92df8f8e0e"
+      "d199d57211aa5a90c42d37fe25f957603e6d1f4da9a345cfa0b4d3ca659f60b9"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -200,7 +200,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "e4aeda251f7e29b21850e24ef8b1b99613b0fa62cf446fb3cea0eb96b1a50948"
+      "17f7b2845d14c60404a81ce8c8bcd7575cb4ff3afb796fd474c898438eb2837c"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -222,6 +222,9 @@
     ,
     "scripts/hook_launcher.py":
       "450086b054cecaa8070947ea5829691c7278f88df05a684555101dfdac23196a"
+    ,
+    "scripts/host_activity.py":
+      "509bb0e7a345d266ed20cef68513114dd813f5a2d430d0a5d787b3c1a2c6ed59"
     ,
     "scripts/host_listing.py":
       "dbaca8977555d96f71b80e6e6b842ebfa242501c24d6ba04763990a5316451d6"
@@ -737,7 +740,7 @@
       "e15675a246f99c07d33804f7f313d170bad550a8f9cc40166c0f4c4cf74aa3de"
     ,
     "skill-content/qa-verification/references/runtime-protocol.md":
-      "7ddf13911059f2676d23cb1ae8a0e33e69f0f3cd7e2f2a9c3a7f4149761194d3"
+      "4889c64dcf4ca9205976b58b3e9ed77184d29025f448f52898c9586c7e2951ef"
     ,
     "skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md":
       "549947c59c6a87988af1fc6a646414d85177c1f68c8249a05d9522bd99f47b74"

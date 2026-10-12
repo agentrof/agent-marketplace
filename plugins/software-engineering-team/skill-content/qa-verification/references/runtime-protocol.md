@@ -4,6 +4,14 @@ Execute after the automated suite is green. The application must be observed run
 
 Severity vocabulary: CRITICAL (maps to Critical), FAIL (maps to High), MINOR (maps to Low). See the severity table in SKILL.md.
 
+## Host Sleep During Live Commands
+
+Live tests, `repair-live` and runtime commands hold a temporary idle-sleep assertion and release it on exit. Both hosts use the operating system's facilities: IOKit on macOS, `systemd-inhibit` on Linux and the Windows execution-state API. No package is installed. `keep_awake` records whether the assertion was held; an unavailable or refused backend is reported without changing a test's result.
+
+Keep a laptop open and connected to power. Lid closure, manual sleep and low battery can override the assertion; the runner warns once at command start. An idle-sleep assertion does not keep the display on or change persistent power settings.
+
+Read `status --summary --run live_test:<group>` before diagnosing a hang. Progress and results carry `wall_seconds`, `monotonic_seconds`, `keep_awake` and `host_sleep_gap`. The latter counts gaps over a minute confirmed by the OS clocks that include and exclude sleep. Each new gap appends a `host_sleep_gap` line with both durations to `progress_log`; adjusting the wall clock alone does not prove sleep. `sleep_detection: unavailable` means the clocks could not be read. These observations explain elapsed time, never satisfy a verification gate.
+
 ## Step 1: Stand the Environment Up From Scratch
 
 - Use the approved Environment Contract's `env_command`. Never invent commands.

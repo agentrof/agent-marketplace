@@ -1,0 +1,6 @@
+{
+  "summary": "Hold temporary native idle-sleep assertions during live verification and report wall time, awake time and sleep gaps without confusing clock adjustments with host sleep.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

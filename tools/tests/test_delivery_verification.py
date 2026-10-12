@@ -25,6 +25,7 @@ except ModuleNotFoundError:  # run as a script from tools/tests
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/scripts"))
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 sys.path.insert(0, str(ROOT / "tools/tests"))
 import delivery_compile as delivery
@@ -1538,6 +1539,8 @@ print(sys.argv[2])
         for verb, value in (("down", None), ("up", None), ("seed", "baseline"), ("url", "api"), ("logs", None), ("down", None)):
             event = verification.run_environment(self.root, verb, value)
             self.assertEqual(event["exit_code"], 0)
+            self.assertIn("keep_awake", event)
+            self.assertGreaterEqual(event["monotonic_seconds"], 0)
             events.append(event["evidence_hash"])
         result = self.result("qa_engineer", "qa_final")
         result["checks"]["fresh_runtime"]["event_hashes"] = events

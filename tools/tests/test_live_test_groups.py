@@ -18,6 +18,7 @@ import tempfile
 import unittest
 import threading
 import time
+from unittest import mock
 try:
     from tools.tests.levels import integration
 except ModuleNotFoundError:  # run as a script from tools/tests
@@ -31,10 +32,53 @@ import delivery_compile as delivery  # noqa: E402
 import delivery_verification as verification  # noqa: E402
 import operation_compile  # noqa: E402
 import test_delivery_verification as base  # noqa: E402
+import host_activity  # noqa: E402
 from git_fixture import remove_temporary  # noqa: E402
 
 LIVE = {"live_test_command": "make test-live GROUP={group}", "live_test_workdir": ".",
         "live_groups": ["smoke", "billing"]}
+
+
+class LiveActivityTests(unittest.TestCase):
+    def test_sleep_gaps_are_reported_once_without_mistaking_clock_adjustments_for_sleep(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "scratch").mkdir()
+            clock = [0.0, 0.0, 0.0]
+            state = {"held": True, "warning": "test assertion"}
+            with mock.patch.object(verification, "raw_output_path", side_effect=lambda _root, path: root / path), \
+                    mock.patch.object(verification, "safe_runtime_path", side_effect=lambda _root, path, **_kwargs: path), \
+                    mock.patch.object(verification, "LIVE_PROGRESS_INTERVAL", 0.005), \
+                    mock.patch.object(host_activity, "keep_awake", return_value=contextlib.nullcontext(state)), \
+                    mock.patch.object(host_activity, "clock_sample", side_effect=lambda: tuple(clock)):
+                def wait_wall(seconds):
+                    deadline = time.monotonic() + 3
+                    path = verification.live_progress_path(root, "live_test:smoke")
+                    while time.monotonic() < deadline:
+                        value = json.loads(path.read_text())
+                        if value["wall_seconds"] == seconds:
+                            return value
+                        time.sleep(0.005)
+                    self.fail("live progress did not observe the injected clock")
+
+                with verification.live_progress(root, "session", {"candidate_hash": "candidate"},
+                                                "live_test:smoke", "smoke") as (_output, activity):
+                    clock[:] = [4000.0, 0.0, 0.0]
+                    self.assertEqual(wait_wall(4000)["host_sleep_gap"]["count"], 0)
+                    clock[:] = [6000.0, 2000.0, 6000.0]
+                    value = wait_wall(6000)
+                    self.assertEqual(value["host_sleep_gap"], {"count": 1, "seconds": 4000})
+                    time.sleep(0.02)
+                    self.assertEqual(wait_wall(6000)["host_sleep_gap"]["count"], 1)
+                    clock[:] = [6040.0, 2000.0, 6040.0]
+                    self.assertEqual(wait_wall(6040)["host_sleep_gap"]["count"], 1)
+                    clock[:] = [6080.0, 2000.0, 6080.0]
+                    self.assertEqual(wait_wall(6080)["host_sleep_gap"], {"count": 2, "seconds": 4080})
+                self.assertEqual((activity["wall_seconds"], activity["monotonic_seconds"]), (6080, 2000))
+                events = [json.loads(line) for line in Path(activity["progress_log"]).read_text().splitlines()]
+                self.assertEqual([event["event"] for event in events], ["host_sleep_gap", "host_sleep_gap"])
+                self.assertEqual((events[0]["wall_seconds"], events[0]["monotonic_seconds"]), (6000, 2000))
+                self.assertEqual(wait_wall(6080)["state"], "finished")
 
 
 class ContractTests(unittest.TestCase):
@@ -146,6 +190,8 @@ class LiveRunTests(unittest.TestCase):
             self.freeze()
         passed = verification.repair_live(self.root, "DLV-001", "AUTH-01")
         self.assertEqual(passed["exit_code"], 0)
+        self.assertIn("keep_awake", passed["runs"]["smoke"])
+        self.assertGreaterEqual(passed["runs"]["smoke"]["wall_seconds"], 0)
         self.assertIn("selected only failed live case", verification.raw_output_path(
             self.root, passed["runs"]["smoke"]["output_file"]).read_text())
         frozen = self.freeze()
@@ -222,6 +268,7 @@ class LiveRunTests(unittest.TestCase):
             self.assertEqual(observed["state"], "running")
             self.assertEqual(observed["adapter_observation"]["cases_done"], 1)
             self.assertGreater(observed["elapsed_seconds"], 0)
+            self.assertIn("held", observed["keep_awake"])
             self.assertIn("first case finished", Path(observed["output_path"]).read_text())
             self.assertEqual(verification.status_summary(self.root, "live_test:smoke")["runs"]
                              ["live_test:smoke"]["state"], "running")
@@ -230,6 +277,10 @@ class LiveRunTests(unittest.TestCase):
             worker.join(10)
         self.assertFalse(worker.is_alive())
         self.assertEqual(result[0]["exit_code"], 0)
+        self.assertGreaterEqual(result[0]["monotonic_seconds"], 0)
+        summary = verification.status_summary(self.root, "live_test:smoke")["runs"]["live_test:smoke"]
+        self.assertEqual(summary["keep_awake"], result[0]["keep_awake"])
+        self.assertEqual(summary["host_sleep_gap"]["count"], 0)
         self.assertNotIn("state", verification.status_summary(self.root, "live_test:smoke")["runs"]
                          ["live_test:smoke"])
 

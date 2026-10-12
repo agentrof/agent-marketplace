@@ -1256,13 +1256,18 @@ def live_progress_path(root: Path, record_key: str) -> Path:
 @contextlib.contextmanager
 def live_progress(root: Path, session_id: str, current: dict, record_key: str, group: str):
     """Heartbeat and adapter observations are status only, never passing evidence."""
+    import host_activity
+
     progress = live_progress_path(root, record_key)
     output = raw_output_path(root, "scratch/live-output-" + uuid.uuid4().hex + ".log")
+    log = output.with_suffix(".progress.jsonl")
     adapter = raw_output_path(root, "scratch/live-progress.json")
     if adapter.exists():
         adapter.unlink()
-    started = time.time()
+    started = host_activity.clock_sample()
     stopped = threading.Event()
+    diagnostics = {"host_sleep_gap": {"count": 0, "seconds": 0.0}, "progress_log": str(log)}
+    log_stream = log.open("x", encoding="utf-8")
 
     def update(state="running"):
         observed = {}
@@ -1277,12 +1282,25 @@ def live_progress(root: Path, session_id: str, current: dict, record_key: str, g
                     observed["test_id"] = value["test_id"]
             except (OSError, ValueError, RuntimeError, AttributeError):
                 pass
-        now = time.time()
+        now = host_activity.clock_sample()
+        clocks_available = all(value is not None for value in (*started[1:], *now[1:]))
+        if clocks_available:
+            gap = max(0.0, (now[2] - started[2]) - (now[1] - started[1]))
+            if gap - diagnostics["host_sleep_gap"]["seconds"] > 60:
+                diagnostics["host_sleep_gap"]["count"] += 1
+                diagnostics["host_sleep_gap"]["seconds"] = gap
+                event = {"event": "host_sleep_gap", "wall_seconds": now[0] - started[0],
+                         "monotonic_seconds": now[1] - started[1], "sleep_seconds": gap}
+                log_stream.write(json.dumps(event, sort_keys=True) + "\n")
+                log_stream.flush()
+        diagnostics.update(wall_seconds=now[0] - started[0],
+                           monotonic_seconds=(now[1] - started[1] if now[1] is not None and started[1] is not None else None),
+                           sleep_detection="available" if clocks_available else "unavailable")
         payload = {"session_id": session_id, "candidate_hash": current["candidate_hash"],
                    "record_key": record_key, "live_group": group, "state": state,
-                   "started_at": started, "updated_at": now, "elapsed_seconds": now - started,
+                   "started_at": started[0], "updated_at": now[0], "elapsed_seconds": diagnostics["wall_seconds"],
                    "output_path": str(output), "output_bytes": output.stat().st_size if output.exists() else 0,
-                   "adapter_observation": observed}
+                   "adapter_observation": observed, **diagnostics}
         atomic_file.replace_text(safe_runtime_path(root, progress, file_only=True),
                                  json.dumps(payload, sort_keys=True) + "\n")
 
@@ -1290,15 +1308,26 @@ def live_progress(root: Path, session_id: str, current: dict, record_key: str, g
         while not stopped.wait(LIVE_PROGRESS_INTERVAL):
             update()
 
-    update()
-    worker = threading.Thread(target=heartbeat, daemon=True)
-    worker.start()
+    worker = None
     try:
-        yield output
+        with host_activity.keep_awake() as assertion:
+            diagnostics["keep_awake"] = assertion
+            print("live verification: " + (assertion["reason"] + ". " if assertion.get("reason") else "")
+                  + assertion["warning"], file=sys.stderr)
+            update()
+            worker = threading.Thread(target=heartbeat, daemon=True)
+            worker.start()
+            try:
+                yield output, diagnostics
+            finally:
+                stopped.set()
+                worker.join()
     finally:
-        stopped.set()
-        worker.join()
-        update("finished")
+        try:
+            if worker is not None:
+                update("finished")
+        finally:
+            log_stream.close()
 
 
 def live_progress_records(root: Path, session: dict) -> dict:
@@ -1489,9 +1518,10 @@ def repair_live(root: Path, delivery_id: str, story: str) -> dict:
             environment["AGENTROF_LIVE_TESTS"] = str(selector)
             declared = environment_identity(root, environment, contract)
             command = contract["live_diagnostic_command"].replace(operation_compile.LIVE_GROUP_PLACEHOLDER, group)
-            completed, intact, difference, _dropped, _ran = private_checkout_run(
-                root, selector.parent, current["product_commit"], contract.get("live_test_workdir", "."),
-                command, environment)
+            with live_progress(root, previous["session_id"], current, "repair-live:" + group, group) as (output, activity):
+                completed, intact, difference, _dropped, _ran = private_checkout_run(
+                    root, selector.parent, current["product_commit"], contract.get("live_test_workdir", "."),
+                    command, environment, live_output=output)
             reported = live_case_report(root).get(group, {})
             intact = (intact and selector.read_text(encoding="utf-8") == data
                       and source_file_generation(selector) == generation
@@ -1501,7 +1531,7 @@ def repair_live(root: Path, delivery_id: str, story: str) -> dict:
             record["runs"][group] = {"exit_code": completed.returncode, "candidate_intact": intact,
                                      "command": command, "cases": reported, **declared,
                                      "output_file": output_name,
-                                     "output_sha256": hashlib.sha256(completed.stdout).hexdigest()}
+                                     "output_sha256": hashlib.sha256(completed.stdout).hexdigest(), **activity}
         if candidate(root, delivery_id, story, allow_evidence=True)["candidate_hash"] != current["candidate_hash"]:
             raise RuntimeError("repair candidate changed during the live run")
         record["completed_at"] = time.time()
@@ -1692,6 +1722,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             clear_group_report(scratch, groups)
     started = time.monotonic()
     partition_records = None
+    activity = {}
     accepted_full = (own_value == ACCEPT_RECORD and reuse is not None and not fresh
                      and session["pre_handoff"].get("kind") == "test"
                      and session["pre_handoff"].get("command") == command
@@ -1717,8 +1748,9 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                                           for group in record.get("missing_test_groups", []))}
     else:
         with contextlib.ExitStack() as progress:
-            live_output = (progress.enter_context(live_progress(root, session_id, current, record_key, group))
-                           if group is not None else None)
+            live_output = None
+            if group is not None:
+                live_output, activity = progress.enter_context(live_progress(root, session_id, current, record_key, group))
             completed, intact, difference, _dropped, _ran = private_checkout_run(
                 root, scratch, current["product_commit"], workdir, command, environment,
                 **({"live_output": live_output} if live_output is not None else {}))
@@ -1763,7 +1795,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         atomic_file.replace_bytes(output, completed.stdout)
         record = {"identity": identity, "exit_code": completed.returncode, "candidate_intact": intact,
                   "output_file": output_name, "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
-                  "duration_seconds": time.monotonic() - started, "completed_at": time.time()}
+                  "duration_seconds": time.monotonic() - started, "completed_at": time.time(), **activity}
         if group is not None:
             record["live_case_report"] = live_case_report(root)
         if checkpoint is not None:
@@ -3268,8 +3300,11 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
         # suffix; project command bytes remain the approved contract's bytes.
         command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
-        completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
-                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        with live_progress(root, bound_session, current, "runtime:" + verb, verb) as (output, activity):
+            with output.open("xb") as stream:
+                completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
+                                           stdout=stream, stderr=subprocess.STDOUT, check=False)
+            completed.stdout = output.read_bytes()
         with locked(root):
             session = read_session(root)
             if session["session_id"] != bound_session:
@@ -3291,7 +3326,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                      "output_file": output_name, "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
                      "duration_seconds": time.monotonic() - started, "candidate_hash": current["candidate_hash"],
                      "environment_identity": environment_identity, "completed_at": time.time(),
-                     "attempt_id": state.get("attempt_id")}
+                     "attempt_id": state.get("attempt_id"), **activity}
             if difference:
                 event["checkout_difference"] = difference
             event["evidence_hash"] = digest(event)
@@ -4712,7 +4747,8 @@ def carried_findings(root: Path, session: dict, current: dict, scope_expanded: b
 
 RUN_SUMMARY_FIELDS = ("live_group", "resume_count", "resume_of", "exit_code", "candidate_intact", "selection_intact", "evidence_scope", "reused_pre_handoff", "duration_seconds",
                       "completed_at", "evidence_hash", "environment_hash", "checkout_difference", "earlier_stories",
-                      "output_file")
+                      "output_file", "wall_seconds", "monotonic_seconds", "host_sleep_gap", "keep_awake",
+                      "sleep_detection", "progress_log")
 
 
 def run_summary(root: Path, record: dict) -> dict:

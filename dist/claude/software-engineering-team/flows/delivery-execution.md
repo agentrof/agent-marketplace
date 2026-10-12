@@ -391,8 +391,8 @@ refs. One whose refetched refs hold its candidate, or moved on from it, may
 have landed and reports `DELIVERY_TRANSACTION_UNCERTAIN` instead. Release
 Management is intentionally not part of this flow.
 
-`status --summary --run live_test:<group>` reports heartbeat, elapsed time and output.
-A stale heartbeat means an interrupted runner, not a failed test. Adapters may write
+`status --summary --run live_test:<group>` reports heartbeat, wall/awake time, sleep gaps and output.
+A stale heartbeat means an interrupted or sleeping runner, not a failed test. Adapters may write
 `scratch/live-progress.json` under `AGENTROF_VERIFICATION_SCRATCH`, naming `test_id`,
 `cases_done`, `cases_total` and `failures`; these observations never satisfy a gate.
 

@@ -1,6 +1,0 @@
-{
-  "summary": "Let a Verification Contract declare live_group_run combined, so a pass runs all selected live groups in one live run whose {group} receives their names comma-separated, through run --kind live_test --group a,b or a repeated --group; the default stays one group per call.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

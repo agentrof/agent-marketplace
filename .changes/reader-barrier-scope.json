@@ -1,6 +1,0 @@
-{
-  "summary": "While verification readers run, keep the frozen candidate's tracked files, HEAD, index and session record read-only, restore and flag any change after each command (candidate_intact false), and refuse only explicit writes to those paths, so every other command runs; a Verification Contract may declare QA Verbs that QA runs as recorded environment verbs.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "Add code_review_panel value risk_scoped: a lens reader joins the official code reviewer only when the frozen change triggers its lens, the security lens on a changed path matching the owner's risk path globs and the correctness and conformance lenses above the owner's changed-lines threshold, both Process Policy parameters; a switch parameter may now name its own type, among them the new glob_list.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

@@ -1,4 +1,0 @@
-{
-  "summary": "Keep a frozen QA pass open while a declared owner-only step waits for confirmed output, preserving completed checks and enforcing the reader barrier.",
-  "components": {"software-engineering-team": "minor"}
-}

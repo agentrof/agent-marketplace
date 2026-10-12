@@ -1,6 +1,0 @@
-{
-  "summary": "The code reviewer starts no test or diagnostic run: its verification manifest drops the diagnostic interface and names the freeze record's pre-handoff run and QA's recorded runs as verification_evidence, which the reviewer reads with status, and the role, the code-review skill and the flow say so. At review_loop blocking_delta a review_repair manifest lists every unresolved code review finding under carried_findings with the files and backticked symbols it names, those that changed since the previous candidate and an action: reexamine when one changed or the bound inputs changed, carry otherwise, and the switch reference has a carried finding returned with its recorded status instead of re-examined. In one measured project the official reviewer spent about 20 minutes on a repair review whose 30 findings were mostly carried, and its diagnostic run held the environment and refused QA's dependency audit once.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

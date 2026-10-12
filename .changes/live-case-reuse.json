@@ -1,4 +1,0 @@
-{
-  "summary": "Add opt-in live case reuse: a pass reruns only the live groups whose declared paths changed since their last green run, and repair reviews keep the last reviewed candidate as their baseline through cancelled passes.",
-  "components": {"software-engineering-team": "minor"}
-}

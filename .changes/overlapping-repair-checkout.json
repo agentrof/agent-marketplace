@@ -1,6 +1,0 @@
-{
-  "summary": "Prepare an independent repair checkout for registered findings while QA retains the frozen Item, at lane_isolation scratch_clone.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

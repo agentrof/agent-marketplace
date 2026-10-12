@@ -228,21 +228,19 @@ manifest's scratch directory. The runner validates the candidate binding and
 passes normalized selection data through `AGENTROF_DIAGNOSTIC_TESTS`; it never
 appends those identifiers to shell text. The compiler-owned JSON adds
 `selected_test_ids`, the sorted union of the failed and affected identifiers.
-An open inherited finding may list `negative_control_test_ids`, its
-prescribed negative controls. The selection may then add
-`finding_controls: [{finding_id, test_ids}]`: ids the finding lists, in test
-files the Item changed, with no Test Plan scenario binding them. The runner
-adds them to `selected_test_ids`, passes `finding_control_test_ids` and
-`evidence_scope: finding_diagnostic` so the adapter knows they are finding
-controls, and records the run as finding-scoped diagnostic evidence that QA
-cites when it resolves the finding. It never counts as acceptance evidence;
-Test Plan selection and approved row values are unchanged, and the backlog
-absorbs such controls at its next ordinary revision.
+An open inherited finding may list `negative_control_test_ids`. Its
+`finding_controls: [{finding_id, test_ids}]` selects only prescribed ids in
+changed test files, without a Test Plan scenario binding. The runner adds
+these to `selected_test_ids`, passes `finding_control_test_ids` and
+`evidence_scope: finding_diagnostic`, and records finding-scoped evidence QA
+cites when resolving the finding. It never counts as acceptance evidence.
+Test Plan selection and approved row values stay unchanged; the backlog
+absorbs these controls at its next ordinary revision.
 Only diagnostic commands receive this environment variable; final checks,
 runtime commands and lane commands remove it, including any inherited value.
-A changed selection cannot reuse an
-older diagnostic run. Without this approved adapter, use the full approved
-test command or revise the Operation Contract through its normal approval.
+A changed selection cannot reuse an older diagnostic run. Without this
+adapter, use the full approved test command or revise the Operation Contract
+through its normal approval.
 Diagnostic command evidence never satisfies the final full-suite gate.
 Commands run in an independent scratch checkout of the frozen product commit,
 with no shared Git objects or mutable working files. The runner exposes an
@@ -251,16 +249,13 @@ Delivery and Item ids through `AGENTROF_DELIVERY_ID` and `AGENTROF_ITEM_ID`,
 whatever the caller's shell exports. Provision dependencies through
 approved commands and environment, never by borrowing the writer's ignored
 files. Tests and mutation cannot temporarily edit the reviewer's source.
-The runner stores raw output under ignored runtime and binds it to the
-candidate, the command and the variables that can change its result: `PATH`,
-`HOME`, `LANG`, `LC_*`, `TZ`, every `AGENTROF_*` variable but a selection file
-the runner writes, which the run binds by its content, and the variables the
-approved Verification Contract names in `command_variables`. The run identity names
-them and keeps only a hash of their values, keyed with a random key that never
-leaves the Item's verification runtime, so a shell or session variable such as
-`PWD` never binds it, no secret value is written, and the hash QA's result
-carries into the tracked verification record checks no guess of a value. The
-runner reuses only identical successful evidence, these values included.
+Raw output stays under ignored runtime, bound to the candidate, command and
+result-affecting variables: `PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `AGENTROF_*`
+and the Verification Contract's `command_variables`. Runner-written selection
+files bind by content. Each named value is hashed with a random key kept only
+in the Item's verification runtime; `PWD` and other session variables do not
+bind it. No secret value is written, and the tracked hash checks no guess of
+one. The runner reuses only identical successful evidence, these values included.
 `--fresh` explicitly reruns a command. Evidence approval and `push-item` check
 each identity as recorded: complete, running the approved command, and shared
 by every final run and runtime event of the session. They never compare it
@@ -295,11 +290,10 @@ exact direct-parent binding. Runtime verification is mandatory exactly when
 the approved Item declares `runtime_required: true`.
 For that Item, run the approved Environment Contract through
 `environment --verb down|up|seed|logs|url [--value <approved-identifier>]`.
-Its persistent private checkout supports the existing fresh-runtime protocol.
-Every verification session of the Item uses that one checkout path, so a
-project environment that binds an Item instance to the checkout that created
-it accepts the next session's `up`; each session's first command re-pins it to
-the session's candidate with untracked and ignored files removed. Return the recorded event hashes with the full per-surface runtime findings.
+Every verification session of the Item uses that one checkout path, preserving
+the environment instance's path binding. Its first command re-pins the checkout
+to the session's candidate and removes untracked and ignored files. Return
+recorded event hashes with the full per-surface runtime findings.
 Successful down, up, seed, logs and final down are required, alongside the
 independent runtime assessment. A non-runtime Item starts no environment.
 
@@ -410,15 +404,20 @@ refs. One whose refetched refs hold its candidate, or moved on from it, may
 have landed and reports `DELIVERY_TRANSACTION_UNCERTAIN` instead. Release
 Management is intentionally not part of this flow.
 
-A permission probe validates the approved command without executing it. Neither
-host exposes a portable no-effect permission prediction API, so its authorization
-result remains unknown; show the exact allow rules to the owner. The optional
-Verification Contract `live_permission_commands` lists service or container
-commands needing that review. Permission-only QA resume preserves successful
-evidence and names only refused commands in `resume_commands`.
+With `live_environment_plan: effect_ordered_v1` in the approved Verification
+Contract, regression selection exports `live_environment_plan` to the project
+adapter. It deduplicates targets, lists special builds before the one shared
+environment, then fixtures, parallel readers, serial changes with readiness
+checks, resets and removals with reset/residue checks. Missing metadata is
+reported and executes as serial `changes`. The approved adapter must implement
+these phases and report its per-phase setup counts; it owns service commands.
 
-Finding-control runs are retained as candidate-bound records across verification
-passes. Evidence approval writes the bindings into the Item verification record,
-and Delivery Review lists them. After that Delivery merges, the next ordinary
-backlog revision lists the unabsorbed targets and its approval requires them in
-the owning story Test Plan. Finding-only repairs need no mid-Delivery revision.
+A permission probe validates without execution; host authorization remains
+unknown. Show the exact allow rules to the owner. The Verification Contract's
+optional `live_permission_commands` names service or container commands needing
+that review. Permission-only resume keeps successful evidence and lists only
+refused commands in `resume_commands`.
+
+Finding-control bindings persist in the Item verification record and Delivery
+Review. After merge, the next ordinary backlog revision lists unabsorbed
+targets and requires them in the owning Test Plan before approval.

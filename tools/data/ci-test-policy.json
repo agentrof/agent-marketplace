@@ -298,7 +298,8 @@
         "tools.tests.test_backlog_pre_approval.*",
         "tools.tests.test_backlog_upstream_transition.*",
         "tools.tests.test_light_backlog_path.*",
-        "tools.tests.test_source_rebind.*"
+        "tools.tests.test_source_rebind.*",
+        "tools.tests.test_scenario_environment_effect.*"
       ],
       "depends_on": [
         "delivery"
@@ -697,6 +698,7 @@
     "tools.tests.test_runtime_floor",
     "tools.tests.test_runtime_scripts",
     "tools.tests.test_scaffold",
+    "tools.tests.test_scenario_environment_effect",
     "tools.tests.test_scenario_report",
     "tools.tests.test_semantic_markdown",
     "tools.tests.test_setup_project",

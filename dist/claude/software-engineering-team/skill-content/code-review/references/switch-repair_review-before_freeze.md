@@ -3,7 +3,8 @@
 Process switch `repair_review` at `before_freeze` adds a pre-freeze correctness
 review after the first verification candidate. It does not replace the full
 code review, lens panel, calibration, QA or live verification of the next pass.
-The default `after_freeze` preserves the existing workflow.
+The default `after_freeze` preserves the existing workflow. Select this value
+through the project's Process Policy.
 
 1. Commit the repaired product and tests. The coordinator runs
    `delivery_verification.py --worktree <item-root> repair-review-manifest

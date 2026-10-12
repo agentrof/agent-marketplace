@@ -539,6 +539,7 @@ RELEASED_DEFAULTS = {
     "rebind_review_scope": "full",
     "remediation_bookkeeping": "writer",
     "remediation_writers": "single_writer",
+    "repair_review": "after_freeze",
     "review_loop": "current",
     "review_fanout": "single_reader",
     "review_levels": "sequential",
@@ -563,6 +564,14 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "repair_review": {
+        f"{SKILLS}/code-review/references/switch-repair_review-before_freeze.md": (
+            "The repair writer never reviews its own fix",
+            "Critical and major findings require `failed`",
+            "Passing minor findings enter the next pass's unresolved findings",
+            "It is not approval of the Item, a merge, a release",
+        ),
+    },
     "backlog_schema_migration": {
         f"{SKILLS}/backlog-plan/references/switch-backlog_schema_migration-receipt_only.md": (
             "source must be an ancestor of HEAD",

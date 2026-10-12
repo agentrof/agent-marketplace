@@ -47,7 +47,7 @@ parameter the table leaves unset. A switch that only reports, such as
    `item_qa_tier`, `item_review_scale`, `lane_isolation`, `lane_table`,
    `level_change_map`, `own_target_reuse`, `owner_gates`,
    `pre_handoff_regression`, `provisional_claims`, `qa_gate_order`,
-   `review_loop`, `review_scope`, `step_budgets`, `step_timing`,
+   `repair_review`, `review_loop`, `review_scope`, `step_budgets`, `step_timing`,
    `test_engines` and `test_group_report`.
    A switch no Delivery flow owns is read from the current policy and stops
    no Delivery.

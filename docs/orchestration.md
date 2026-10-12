@@ -108,6 +108,14 @@ code review record.
 `code-review/references/switch-code_review_panel-beside_official.md` defines
 the steps.
 
+Process switch `repair_review` decides when a corrected candidate receives an
+independent correctness review. `after_freeze`, the default, keeps the review
+inside the next full pass. At `before_freeze`, a fresh reader checks the repair
+diff and previous findings before the candidate is frozen. A missing, stale or
+blocking result prevents freeze; passing minor findings carry into the full
+review. The regular reader panel, calibration and QA still run.
+`code-review/references/switch-repair_review-before_freeze.md` defines the steps.
+
 What a backlog epic reviewer reads is process switch `review_manifest_scope`.
 At `transitive`, the default, every note the epic's manifest includes expands
 its own links, so the read set follows the vault. At `bounded`, links are

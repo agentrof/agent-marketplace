@@ -1124,7 +1124,7 @@
       "metric": "Per repaired candidate: pre-freeze review duration, blocking repair defects found before freeze, full passes later rejected for a defect in the same repair, and total verification time.",
       "promotion": {
         "unit": "At least 3 Deliveries with repaired verification candidates.",
-        "threshold": "No pass fails on a repair defect missed by the pre-freeze review, and total verification time is below the after_freeze baseline, with the shared quality guards and owner approval."
+        "threshold": "No pass fails on a repair defect missed by the pre-freeze review, and total verification time is below the after_freeze baseline, with every shared quality guard holding and the owner's approval."
       }
     }
   }

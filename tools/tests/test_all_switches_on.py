@@ -94,6 +94,7 @@ EXPECTED = {
                     "frontend-developer")},
     "deliver:qa-engineer": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GATE_FIRST, GROUPS, ENGINES],
     "deliver:code-reviewer": ["code-review/references/switch-code_review_panel-beside_official.md",
+                              "code-review/references/switch-repair_review-before_freeze.md",
                               "code-review/references/switch-review_loop-blocking_delta.md",
                               LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES],
     "deliver:software-architect": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES,

@@ -50,13 +50,30 @@ delta and the consumers a fix could have touched, with the correctness,
 conformance and security passes all mandatory. Once no CRITICAL or MAJOR
 finding is open, the Item needs no further review cycle.
 
+A carried finding is re-examined only when its code changed. The
+`review_repair` manifest lists every unresolved code review finding under
+`carried_findings` with the files and symbols it names, those that changed
+between the previous candidate and this one, and an `action`:
+
+- `reexamine`: a named file or a backticked symbol changed, or the bound
+  inputs or instructions changed and every finding is re-examined. Check it
+  as its `verification` field prescribes and record its new status.
+- `carry`: nothing it names changed. Return it on its id with the status,
+  severity and follow-up fields the record holds, and do not re-examine it.
+  A fix that resolves it without touching anything it names is the
+  developer's to show: when the repair delta's own changes give evidence that
+  it is resolved, re-examine it and say why in the report.
+
+The reviewer starts no test or diagnostic run in any cycle; it reads the freeze
+record and QA's results, as the passes reference states.
+
 ## Calibration
 
 Before a code review result with an open CRITICAL or MAJOR claim is registered,
 one fresh, read-only calibration reader checks every such claim that no earlier
 calibration ruled. Calibration is skipped when the result has none. A claim that
-the manifest's `unresolved_findings` marks with `calibrated_severity` was ruled
-in an earlier cycle and keeps that ruling.
+the manifest's `unresolved_findings` summary marks with `calibrated_severity`
+was ruled in an earlier cycle and keeps that ruling.
 
 1. Spawn a fresh `code-reviewer` on its own tier, neither an implementation
    writer nor the reviewer that returned the claims. Give it each claim as

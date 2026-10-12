@@ -240,6 +240,9 @@ SHIPPED_ADDITIONS = {
         72, "#461: the read-only Delivery closure audit, pull request closure check and protection"
             " report, a package script every task binds with the other package scripts; no"
             " default-path compiler or coordinator output changes."),
+    "scripts/autopilot_provenance.py": (
+        72, "#495: the autopilot writer marks the vault hook reads, a package script every task"
+            " binds with the other package scripts; no default-path step runs it."),
     "scripts/context_history.py": (
         72, "#441: exact bound document history is resolved by package code"
     ),
@@ -355,6 +358,9 @@ EXPECTED_DIFFERENCES = {
                ("writer", "sha256:98d2ef075ab3e4c193acf816c87d5fe6258a80428c3f413ccf5087ebad3829f6"))},
     },
     "shipped": {
+        ("tasks",): ("sha256:e7a201aa9f3cf7c77ed2ccdefe7b28d2a29d5f9fa6a068a5c25afaa25d442a90",
+                      "#485: context policy identity includes the configured reader manifest byte budget;"
+                      " required task paths and compiler authority remain unchanged."),
         ("additions",): ({path: count for path, (count, _reason) in SHIPPED_ADDITIONS.items()},
                          "The files SHIPPED_ADDITIONS lists, each with its issue."),
     },

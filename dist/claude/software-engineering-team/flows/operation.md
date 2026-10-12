@@ -109,6 +109,17 @@ Requirement stage and it does not alter product-stage package hashes.
    `skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
    defines.
 
+Verification may declare opt-in live test groups that QA runs one at a time:
+`live_test_command`, which contains the literal placeholder `{group}` exactly
+once, `live_test_workdir` (`.` for the repository root) and `live_groups`, the
+ordered, unique group names of letters, digits, `.`, `_` and `-`. The three
+are declared together or not at all, and their approval follows the normal
+revision lifecycle. Delivery runs a group with `run --kind live_test --group
+<group>`; groups never become required checks by themselves. The optional
+`live_group_run` is `per_group`, the default, or `combined`, which makes a pass
+run all selected groups in one live run whose `{group}` receives their names
+comma-separated; declare it only for a command that accepts such a list.
+
 Verification may declare an optional `diagnostic_test_command` adapter for
 failed or affected tests, with `diagnostic_test_workdir` defaulting to `.` only
 at execution. Add it through the normal revision and approval lifecycle.
@@ -135,4 +146,24 @@ that carries the hash checks no guess of a value, and a variable left out
 never binds the evidence. The contract check refuses a name of the runner's
 own `AGENTROF_` namespace: the runner sets those variables, and run evidence
 binds them without a declaration, a selection file the runner writes by its
-content. Add the field through the normal revision and approval lifecycle.
+content. Every command it runs reads the frozen candidate's Delivery id in
+`AGENTROF_DELIVERY_ID` and its Item id in `AGENTROF_ITEM_ID`, so a command that
+needs them reads those two and never asks a reader to export them. Add the
+field through the normal revision and approval lifecycle.
+
+A Verification Contract may opt in to one preflight-only live resume with
+`live_resume_command`, containing `{group}` exactly once and using the same
+`live_test_workdir`. The approved adapter writes `live-checkpoint.json` under
+`AGENTROF_VERIFICATION_SCRATCH`: schema version 1, failure
+`infrastructure_preflight`, preflight `dns`, `tls` or `registry`, zero
+`failed_cases` and `started_cases_in_phase`, `completed_phases` mapping phase
+names to SHA-256 evidence hashes, and unique `pending_phases`. The resume
+command receives that immutable selection through `AGENTROF_LIVE_RESUME`,
+rechecks preflight and runs only the pending phases. A failed product case is
+never resumable through this interface.
+
+`live_diagnostic_command`, when declared beside live groups, contains `{group}`
+once. It reads the immutable case selection from `AGENTROF_LIVE_TESTS` and
+executes exactly those literal test ids in the selected group. It uses the
+existing `live_test_workdir`; the runner never interpolates test ids into shell
+text. This command enables targeted repair proof before a new QA candidate.

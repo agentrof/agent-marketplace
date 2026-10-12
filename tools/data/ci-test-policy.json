@@ -215,7 +215,8 @@
         "tools.tests.test_project_context.*",
         "tools.tests.test_approval_history.*",
         "tools.tests.test_python_entry.*",
-        "tools.tests.test_vault_index.*"
+        "tools.tests.test_vault_index.*",
+        "tools.tests.test_resolver_reading_rule.*"
       ]
     },
     "documentation": {
@@ -297,7 +298,8 @@
         "tools.tests.test_backlog_pre_approval.*",
         "tools.tests.test_backlog_upstream_transition.*",
         "tools.tests.test_light_backlog_path.*",
-        "tools.tests.test_source_rebind.*"
+        "tools.tests.test_source_rebind.*",
+        "tools.tests.test_scenario_environment_effect.*"
       ],
       "depends_on": [
         "delivery"
@@ -688,6 +690,7 @@
     "tools.tests.test_requirement_compile",
     "tools.tests.test_requirement_flow",
     "tools.tests.test_requirement_review_contract",
+    "tools.tests.test_resolver_reading_rule",
     "tools.tests.test_review_loop",
     "tools.tests.test_review_manifest_scope",
     "tools.tests.test_review_panels",
@@ -695,6 +698,7 @@
     "tools.tests.test_runtime_floor",
     "tools.tests.test_runtime_scripts",
     "tools.tests.test_scaffold",
+    "tools.tests.test_scenario_environment_effect",
     "tools.tests.test_scenario_report",
     "tools.tests.test_semantic_markdown",
     "tools.tests.test_setup_project",

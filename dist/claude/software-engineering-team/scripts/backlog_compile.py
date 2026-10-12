@@ -171,6 +171,13 @@ TEST_LEVELS_SWITCH = "test_levels"
 TEST_LEVELS_VALUE = "declared"
 LEVELS = ("unit", "fixture", "live")
 REASONED_LEVELS = ("fixture", "live")
+# A live scenario may state how it affects the project's shared test
+# environment, so a runner can order and parallelize scenarios; only one that
+# changes the environment names the parts it touches. builds_fixture runs in
+# the live run's one shared fixture-project environment.
+ENVIRONMENT_EFFECTS = ("builds", "builds_shared", "builds_fixture", "reads", "changes", "resets", "removes")
+TOUCHING_EFFECT = "changes"
+TOUCH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 BACKLOG_PATH_SWITCH = "backlog_path"
 BACKLOG_PATH_VALUE = "light_when_eligible"
 LIGHT_PATH_DATA_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
@@ -2175,9 +2182,76 @@ def scenario_fields(block: str) -> tuple[dict[str, str], list[str]]:
             active = key
             continue
         nested = re.match(r"^\s{2,}-\s+(.+?)\s*$", raw)
-        if nested and active == "source_refs":
+        if nested and active in {"source_refs", "touches"}:
             fields[active] = (fields[active] + ", " + nested.group(1)).strip(", ")
     return fields, duplicates
+
+
+def touch_names(raw: str) -> list[str]:
+    """The names a scenario's touches field lists, inline or as nested bullets, comma-separated."""
+    value = raw.strip()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    return [name.strip() for name in value.split(",")] if value else []
+
+
+def live_environment_plan(scenarios: list[dict]) -> dict:
+    """Normalize and deduplicate selected live rows for an effect-ordered adapter."""
+    by_target = {}
+    missing = []
+    for row in scenarios:
+        fields = row["fields"]
+        if fields.get("level") != "live" or fields.get("automation", "").lower() != "required":
+            continue
+        target = fields.get("automation_target", "").strip()
+        if not target:
+            raise ValueError("a selected live scenario needs an automation target")
+        effect = fields.get("environment_effect", "changes")
+        if effect not in ENVIRONMENT_EFFECTS:
+            raise ValueError("a live execution plan needs a declared environment effect")
+        if "environment_effect" not in fields:
+            missing.append(row["id"])
+        item = {"target": target, "effect": effect, "touches": sorted(touch_names(fields.get("touches", ""))),
+                "scenarios": [row["id"]]}
+        if target in by_target:
+            prior = by_target[target]
+            if (prior["effect"], prior["touches"]) != (item["effect"], item["touches"]):
+                raise ValueError("one live target has conflicting environment metadata: " + target)
+            prior["scenarios"].append(row["id"])
+        else:
+            by_target[target] = item
+    phases = []
+    for effect in ("builds", "builds_shared", "builds_fixture", "reads", "changes", "resets", "removes"):
+        targets = [row for row in by_target.values() if row["effect"] == effect]
+        if targets:
+            phases.append({"effect": effect, "parallel": effect == "reads", "targets": targets,
+                           "readiness_after_each": effect == "changes", "reset_before": effect == "removes",
+                           "residue_check_after_each": effect == "removes"})
+    return {"schema_version": 1, "phases": phases, "missing_environment_effect": sorted(missing),
+            "target_count": len(by_target), "shared_environment_instances": 1 if by_target else 0}
+
+
+def environment_effect_findings(fields: dict[str, str], label: str) -> list[str]:
+    """Refuse an environment_effect outside ENVIRONMENT_EFFECTS and a touches field that is malformed
+    or stated without environment_effect: changes."""
+    errors = []
+    effect = fields.get("environment_effect")
+    if effect is not None and effect not in ENVIRONMENT_EFFECTS:
+        errors.append(f"{label} environment_effect must be one of {', '.join(ENVIRONMENT_EFFECTS)},"
+                      f" not {effect or '(empty)'}")
+    if "touches" in fields:
+        names = touch_names(fields["touches"])
+        if effect != TOUCHING_EFFECT:
+            errors.append(f"{label} touches is allowed only with environment_effect: {TOUCHING_EFFECT}")
+        if not names:
+            errors.append(f"{label} touches must list at least one name")
+        invalid = [name for name in names if not TOUCH_NAME_RE.fullmatch(name)]
+        if invalid:
+            errors.append(f"{label} touches names must be letters, digits, '.', '_', '/' or '-': "
+                          + ", ".join(invalid))
+        if len(names) != len(set(names)):
+            errors.append(f"{label} repeats a touches name")
+    return errors
 
 
 def source_ref_values(raw: str) -> tuple[list[str], bool]:
@@ -2250,6 +2324,7 @@ def scenario_findings(docs: Path, body: str, story_id: str,
             errors.append(f"{path} scenario {scenario_id} row_split must be one of {', '.join(ROW_SPLITS)}")
         if "level" in fields and fields["level"] not in LEVELS:
             errors.append(f"{path} scenario {scenario_id} level must be one of {', '.join(LEVELS)}")
+        errors.extend(environment_effect_findings(fields, f"{path} scenario {scenario_id}"))
         target = fields.get("automation_target", "").strip()
         if target and (target.startswith("/") or ".." in Path(target).parts
                        or any(char.isspace() for char in target)):
@@ -4288,6 +4363,26 @@ def source_rebind_findings(record: dict, docs: Path, *, approving: bool = False,
                                             approved_receipt=approved_receipt)
 
 
+def pending_finding_controls(docs: Path, record: dict) -> list[dict]:
+    """Finding-only bindings enter the Test Plan at the next ordinary backlog revision."""
+    targets = {story["id"]: {fields.get("automation_target")
+               for _identifier, block in scenario_blocks(story["test_body"])
+               for fields in [scenario_fields(block)[0]]} for story in record.get("stories", [])}
+    pending = []
+    for path in sorted((docs / "delivery/deliveries").glob("*/delivery.md")):
+        props, _ = parse_front_matter(path)
+        review = path.with_name("delivery-review.md")
+        if props.get("status") != "merged" or not review.is_file():
+            continue
+        review_props, _ = parse_front_matter(review)
+        for row in json.loads(review_props.get("finding_control_bindings", "[]")):
+            missing = sorted(set(row["test_ids"]) - targets.get(row["story"], set()))
+            if missing:
+                pending.append({"delivery": props.get("id"), "story": row["story"],
+                                "finding_id": row["finding_id"], "test_ids": missing})
+    return pending
+
+
 def approval_preflight(docs: Path, record: dict,
                        collect_errors: list[str], *, approving: bool = False,
                        approved_receipt: str | None = None) -> tuple[list[str], dict, dict, bool]:
@@ -4299,6 +4394,9 @@ def approval_preflight(docs: Path, record: dict,
     findings = approval_readiness_findings(record)
     already_approved = (record.get("backlog") or {}).get("props", {}).get("status") == "approved"
     if not already_approved:
+        for row in pending_finding_controls(docs, record):
+            findings.append(f"{row['story']} must absorb {row['finding_id']} finding controls from {row['delivery']}: "
+                            + ", ".join(row["test_ids"]))
         findings.extend(requirement_coverage_findings(record))
         findings.extend(light_root_review_findings(record, docs))
         findings.extend(source_rebind_findings(record, docs, approving=approving,

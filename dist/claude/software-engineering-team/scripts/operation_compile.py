@@ -386,6 +386,8 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
     except (OSError, ValueError) as exc:
         return {}, [str(exc)]
     errors: list[str] = []
+    if "live_environment_plan" in props and (kind != "verification" or props["live_environment_plan"] != "effect_ordered_v1"):
+        errors.append("live_environment_plan must be effect_ordered_v1 on a Verification Contract")
     if props.get("type") != TYPE_FOR[kind]:
         errors.append(f"type must be {TYPE_FOR[kind]}")
     if props.get("status") not in {"draft", "approved"}:

@@ -12,7 +12,13 @@ replace it.
 
 DO use the project's approved Operation Contracts and existing verification
 evidence. Keep verification read-only; never stage or change another role's
-candidate. For Agent Marketplace package PRs, use `make check-local` and
+candidate. In a Delivery the code reviewer starts no test, diagnostic or other
+verification command and no `regression-run`: a run holds the Item's
+environment lock that QA's commands need. It reads the freeze record's
+pre-handoff run and QA's recorded runs, which the verification manifest's
+`verification_evidence` names, with `status --summary` and `status --run
+<kind>`; a test result it needs that no record holds is a finding or a
+question for QA, never a run of its own. For Agent Marketplace package PRs, use `make check-local` and
 `make verify-local` against the owner's exact staged candidate, plus at most
 the single test named in a finding. If that candidate is unavailable, report
 missing evidence. Run a full test module, `make check`, or a `--full` local gate

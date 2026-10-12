@@ -76,7 +76,8 @@ LEVEL_CHANGE = "deliver/references/switch-level_change_map-assertion_map.md"
 DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE, LEVEL_CHANGE,
            "qa-verification/references/switch-qa_preflight-lifecycle_first.md",
            "deliver/references/switch-step_baseline-median.md",
-           "qa-verification/references/switch-runtime_lifecycle-long_lived.md")
+           "qa-verification/references/switch-runtime_lifecycle-long_lived.md",
+           "qa-verification/references/switch-live_case_reuse-delta_since_green.md")
 EXPECTED = {
     **{f"{entry}:{role}": [] for entry, role in (
         ("business-analysis", "analysis-challenger"), ("business-analysis", "business-analyst"),

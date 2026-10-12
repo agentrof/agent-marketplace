@@ -247,7 +247,7 @@ until a plan revision, whose approval pins the policy anew, so it reads only
 the switches that flow owns: `code_review_panel`, `context_pack`,
 `execution_planning`, `implementation_schedule`, `item_cost_report`,
 `item_qa_tier`, `item_review_scale`, `lane_isolation`, `lane_table`,
-`level_change_map`, `own_target_reuse`, `owner_gates`,
+`level_change_map`, `live_case_reuse`, `own_target_reuse`, `owner_gates`,
 `pre_handoff_regression`, `provisional_claims`, `qa_gate_order`, `qa_preflight`, `regression_plan_revision`,
 `repair_review`, `review_loop`, `review_scope`, `runtime_lifecycle`, `step_baseline`, `step_budgets`, `step_timing`, `test_engines`
 and `test_group_report`. A switch no

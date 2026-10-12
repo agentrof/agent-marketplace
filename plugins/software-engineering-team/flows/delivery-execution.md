@@ -57,8 +57,7 @@ defines.
 Switch `owner_gates`: at `two_fixed_gates`, a question between gate A and gate
 B is queued in the Delivery's `User Decisions` unless it is of an at-once class,
 and the Delivery Review and the merge are decided together in gate B, as
-`skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
-defines.
+`skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md` defines.
 Switch `lane_table`: at `recorded`, a coordinator that runs parallel lanes
 records each lane's start and finish and reads the lanes still pending before
 it launches anything, as
@@ -90,6 +89,7 @@ Modes default to `review_repair` after an earlier candidate and `qa_final`;
 `--review-mode` and `--qa-mode` override them. The first failing step stops the chain.
 Switch `qa_preflight`: at `lifecycle_first`, follow `skill-content/qa-verification/references/switch-qa_preflight-lifecycle_first.md`.
 Switch `runtime_lifecycle`: at `long_lived`, follow `skill-content/qa-verification/references/switch-runtime_lifecycle-long_lived.md`.
+Switch `live_case_reuse`: at `delta_since_green`, follow `skill-content/qa-verification/references/switch-live_case_reuse-delta_since_green.md`.
 Put the manifest's `command_form` verbatim into every reader prompt: while
 readers are active, Bash admits only that one direct invocation followed by a
 verb, and readers read files with the host's Read tool.
@@ -335,8 +335,7 @@ section, fills only the sections left empty and the navigation the compiler
 owns, and binds that content in its approval hash; the PR body is that Review.
 Switch `item_cost_report`: at `per_step`, the Review also carries each Item's
 fixed cost step by step, as
-`skill-content/deliver/references/switch-item_cost_report-per_step.md`
-defines.
+`skill-content/deliver/references/switch-item_cost_report-per_step.md` defines.
 The Git coordinator first publishes the approved Review, then
 publishes one durable PR-creation intent and records the provider URL as its
 exact descendant. That record is the PR head and moves the reviewed Delivery

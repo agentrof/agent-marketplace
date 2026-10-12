@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "b6472ce21811e90734dd3194ab1245ec04c1c606975d4168e5ccaeffdefaa865"
+      "a661c3cc0e6da54c812e07fc56ad454d209cff47f048decb9211b90bc57580f5"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -125,7 +125,7 @@
       "c964a5acf445e6bed890365402d24888188cd2c4ee21dc5d169cfeea622bb512"
     ,
     "flows/operation.md":
-      "f1bd68a941d853fea55d7cf3a7d1e0985c14f112461094cc0f48293a83f722e3"
+      "85b3422bb26f3f09c3651c1054ff0f3cb7d712f1721c68fd821837bfb938dc6f"
     ,
     "flows/requirement.md":
       "7528573f9fa14f3fc724d7a12972ad3b548409d1085a95c2c2e2024b4a46d04c"
@@ -200,7 +200,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "ec338214ddbeb167a55e18b1ba381d2a3983cf6e318a6fc7cccd0301c807893c"
+      "bc64f2649f3ad3498ab3ced27e42aa4707f73bd1e23b343ac0198ee6ac280c01"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -245,7 +245,7 @@
       "6f2ab2233f9e5f8d85d06969be333fe8713294a6b9af6b6552ddf61ce5efa4bd"
     ,
     "scripts/operation_compile.py":
-      "5dac1869afb7c718b8b89be90172b0f2d2bb4417bb4faa5e94f8f0e05afbc92d"
+      "c78f448eba5b910a3788c8db5cc79826dbceecb2c6855a5cbe081ff8ff32652f"
     ,
     "scripts/owner_notification.py":
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
@@ -470,7 +470,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "335c00a27d8e3949a4f421b74e2097d6873f06e7e4dfc74433f28535e4fe9e75"
+      "e756dfb49bb52c9c24c29a8d3077e0048ca5aae1ded618e09143feecda2b819e"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -482,7 +482,7 @@
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "686bd63b35f08bc44ebc302b07abb692b4d24d8f975c110d15538cda985a8ed4"
+      "08670da6a91f9a5aff586e17db1056c5af1e576dfa25d2ca04eaa3cae5a605fb"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -665,7 +665,7 @@
       "931c87622196a746700885aa5a78081954df37d0b6dc571ff54e70a93dcf9a05"
     ,
     "skill-content/obsidian-vault/data/vault-policy.json":
-      "4916e8e23f878feba369f76a28fd8bff68a73cd28f42c6cc2490ae6fe44dcce8"
+      "e8023ae6dfc03d990f72b9f4e294604cfef70d1f385ae4f5ba7d0af267cf8d63"
     ,
     "skill-content/obsidian-vault/references/graph.md":
       "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e"
@@ -750,6 +750,9 @@
     ,
     "skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md":
       "549947c59c6a87988af1fc6a646414d85177c1f68c8249a05d9522bd99f47b74"
+    ,
+    "skill-content/qa-verification/references/switch-live_case_reuse-delta_since_green.md":
+      "f2fa961e2f18c72a5a54db840fa1f3bb652dc10ea4b1c7cc2ae892aba6f3c3e4"
     ,
     "skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md":
       "77ec83ef7c481c79826ca6627c6b45a7cdb7450144ed8b67f28e5443bbb5073f"
@@ -1154,7 +1157,7 @@
       "46b840eaddc2c50abf29b4b0b145e1e0774c4760e89b4d09a7a9ce122b33bbbe"
     ,
     "templates/vault/.obsidian/types.json":
-      "9be66d7d7d4c3904f9f5082fdcc6aa70263b50a45919839810bd95b0e2d4b5b9"
+      "d31b895c5f4f214bc72d7d6b3fe2cee8ae009ed8dece7f70fadf5da6475fddf3"
     ,
     "templates/vault/home.md":
       "b62efb50cb11a9e14ea667a2e12cbff4789ec458c705cd226440c9d5d25b3397"

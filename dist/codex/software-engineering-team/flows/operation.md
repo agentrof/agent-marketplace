@@ -210,6 +210,12 @@ a DNS and TCP target the live run probes every 30 seconds; while it fails, a
 records `interrupted_by`, and with a valid preflight checkpoint it takes the
 one resume above. Neither key is a product verdict or a required check.
 
+A Verification Contract may declare the live impact map a pass uses to reuse
+green live groups in `live_group_paths`: unique `<group>=<glob>` entries
+naming a declared live group, or `*` for catch-all paths that change every
+group. A group with no entry is never reused. The map is approved data, so a
+revision that changes it invalidates every recorded live base.
+
 `live_diagnostic_command`, when declared beside live groups, contains `{group}`
 once. It reads the immutable case selection from `AGENTROF_LIVE_TESTS` and
 executes exactly those literal test ids in the selected group. It uses the

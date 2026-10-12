@@ -164,6 +164,7 @@
     "live_group_run": "text",
     "host_keep_awake": "text",
     "reachability_probe": "text",
+    "live_group_paths": "multitext",
     "max_parallel": "number",
     "governance_hash": "text",
     "decision_kind": "text",

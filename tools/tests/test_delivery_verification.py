@@ -152,6 +152,20 @@ class VerificationTests(unittest.TestCase):
             return identity
         return mock.patch.object(verification.platform, "platform", side_effect=probe)
 
+    def test_freeze_carries_the_reviewed_baseline_through_a_cancelled_pass(self):
+        reviewed = self.freeze()["candidate"]
+        self.settle()
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        skipped = self.freeze()
+        self.assertEqual(skipped["previous_candidate"], reviewed)
+        for role, mode in (("code_reviewer", "review_repair"), ("qa_engineer", "qa_final")):
+            verification.register_result(self.root, {**self.result(role, mode, "cancelled"),
+                                                     "cancellation_confirmed": True})
+        self.write("src/product.py", "value = 4\n")
+        self.commit()
+        self.assertEqual(self.freeze()["previous_candidate"], reviewed)
+
     def prepare_diagnostic(self):
         self.write("focused_tests.py", """import unittest
 class Focused(unittest.TestCase):
@@ -1969,9 +1983,11 @@ print(sys.argv[1])
         self.write(contract_path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
         self.commit()
         # The partition variables of switch test_engines partitioned are per-run inputs too (#386).
-        self.assertEqual(names, ("AGENTROF_LIVE_RESUME", "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS",
+        self.assertEqual(names, ("AGENTROF_LIVE_BASE", "AGENTROF_LIVE_BASE_COMMIT", "AGENTROF_LIVE_RESUME",
+                                 "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS",
                                  "AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE"))
         with mock.patch.dict(os.environ, {"AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json",
+                                          "AGENTROF_LIVE_BASE": "inherited-base.json",
                                           "AGENTROF_REUSED_TESTS": "inherited-reuse.json",
                                           "AGENTROF_TEST_PARTITION": "inherited-partition.json",
                                           "AGENTROF_TEST_ENGINE": "inherited-engine"}):
@@ -2431,6 +2447,26 @@ print(sys.argv[1])
         qa["verification_candidate_hash"] = "sha256:different"
         with self.assertRaisesRegex(RuntimeError, "same verification candidate"):
             verification.validate_evidence(item, review, qa)
+
+
+class ReviewBaselineTests(unittest.TestCase):
+    """freeze binds previous_candidate to the last candidate a code reviewer settled on."""
+
+    @staticmethod
+    def session(candidate, baseline, state):
+        return {"candidate": candidate, "previous_candidate": baseline,
+                "workers": {"code_reviewer": {"state": state}, "qa_engineer": {"state": "settled"}}}
+
+    def test_a_cancelled_session_between_two_reviewed_candidates_is_never_the_baseline(self):
+        first, cancelled, third = ({"candidate_hash": name} for name in ("sha256:a", "sha256:b", "sha256:c"))
+        self.assertIsNone(verification.review_baseline(None))
+        reviewed = self.session(first, None, "settled")
+        self.assertEqual(verification.review_baseline(reviewed), first)
+        skipped = self.session(cancelled, verification.review_baseline(reviewed), "cancelled")
+        self.assertEqual(verification.review_baseline(skipped), first)
+        twice = self.session({"candidate_hash": "sha256:b2"}, verification.review_baseline(skipped), "cancelled")
+        self.assertEqual(verification.review_baseline(twice), first)
+        self.assertEqual(verification.review_baseline(self.session(third, first, "settled")), third)
 
 
 class ProvisionalClaimFreezeTests(unittest.TestCase):

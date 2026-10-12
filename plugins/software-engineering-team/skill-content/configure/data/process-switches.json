@@ -1247,6 +1247,30 @@
         "unit": "At least 3 Deliveries with live verification run with median and step_timing at recorded.",
         "threshold": "Every stalled QA step reported during the run, at most one in five reports a healthy step, and no step blocked or shortened for time, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "live_case_reuse": {
+      "summary": "Whether a verification pass reruns every live group or takes the groups the change since their last green run cannot reach from that run.",
+      "issue": 548,
+      "flows": [
+        "delivery-execution"
+      ],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "Every pass reruns every live group QA selects. Today's behaviour and the baseline: in one measured project, a combined live run took about 3 hours and a two-file chart change re-ran all of it."
+        },
+        {
+          "id": "delta_since_green",
+          "tradeoffs": "A live group none of whose approved live_group_paths, and no catch-all path, changed since its last passing intact run takes that run's passed cases instead of running again, while the base is fresh, on an ancestor commit, of the identical approved command, impact map and declared environment. An incomplete impact map hides a regression in a reused group, so the map must name every path a group depends on and declare shared paths catch-all; a nightly full run keeps the bases fresh."
+        }
+      ],
+      "default": "off",
+      "metric": "Per verification pass: live wall clock, the groups it reused and ran, and every defect found later in a group a pass reused.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with repaired verification candidates and live groups.",
+        "threshold": "No defect found later in a live group a pass reused, and a median live wall clock per repair pass at most half of the off baseline, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

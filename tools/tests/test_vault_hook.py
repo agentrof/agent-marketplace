@@ -168,7 +168,8 @@ class VaultHookPrototypeTests(unittest.TestCase):
                 return {"cwd": str(project), "tool_name": "Bash", "shell_family": "cmd" if os.name == "nt" else "posix",
                         "tool_input": {"command": value}}
             # A reader waits through wait while both readers run.
-            for verb in ("status", "inspect", "inspect-context", "expand-context", "diff", "environment", "wait"):
+            for verb in ("status", "inspect", "inspect-context", "expand-context", "diff", "environment",
+                         "permission-preflight", "permission-probe", "wait"):
                 routed = [*command[:-1], verb]
                 routed_text = subprocess.list2cmdline(routed) if os.name == "nt" else shlex.join(routed)
                 self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(routed_text)), 0)
@@ -190,7 +191,7 @@ class VaultHookPrototypeTests(unittest.TestCase):
             diagnostic_text = subprocess.list2cmdline(diagnostic) if os.name == "nt" else shlex.join(diagnostic)
             for value, expected in ((command_text, 0), (command_text + " && echo unsafe", 2),
                                     (diagnostic_text, 0), (diagnostic_text + " && echo unsafe", 2),
-                                    ("git status", 2)):
+                                    ("git -P -c core.fsmonitor=false status", 2 if os.name == "nt" else 0), ("git commit -qm change", 2)):
                 with self.subTest(command=value), redirect_stderr(io.StringIO()):
                     self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(value)), expected)
             unknown_shell = shell_payload(command_text)
@@ -206,6 +207,60 @@ class VaultHookPrototypeTests(unittest.TestCase):
                 with self.subTest(tool=tool), redirect_stderr(io.StringIO()):
                     self.assertEqual(self.hook.delivery_reader_barrier({"cwd": str(other), "tool_name": tool,
                                                                       "file_targets": [{"file_path": str(project / "product.py") }]}), 2)
+
+    @unittest.skipIf(os.name == "nt", "the narrowed shell scope parses POSIX commands only")
+    def test_active_readers_refuse_only_writes_into_the_item_and_its_session(self):
+        import delivery_verification
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            project, unrelated = base / "item", base / "unrelated"
+            for root in (project, unrelated):
+                (root / ".git").mkdir(parents=True)
+            delivery_verification.write_session(project, {"schema_version": 1, "workers": {
+                "code_reviewer": {"state": "running"}, "qa_engineer": {"state": "running"}}})
+            session = delivery_verification.session_path(project).parent
+
+            def shell(command, cwd=project):
+                payload = {"cwd": str(cwd), "tool_name": "Bash", "shell_family": "posix",
+                           "tool_input": {"command": command}}
+                output = io.StringIO()
+                with redirect_stderr(output):
+                    return self.hook.delivery_reader_barrier(payload), output.getvalue()
+
+            for command in ("git -P -c core.fsmonitor=false diff --no-ext-diff --no-textconv HEAD~1 -- src", "git -P -c core.fsmonitor=false -C . log --no-ext-diff --no-textconv --oneline | head -5", "jq .a data.json",
+                            "date -u +%s", "docker ps", "docker volume inspect cache", "gh pr checks 12",
+                            "find . -name '*.py'", "grep -rn 'value$' src 2>/dev/null", "rg --no-config -n token src",
+                            f"git -P -c core.fsmonitor=false -C {shlex.quote(str(unrelated))} status",
+                            f"cd {shlex.quote(str(unrelated))} && touch notes.txt > log.txt"):
+                with self.subTest(command=command):
+                    self.assertEqual(shell(command)[0], 0)
+            self.assertEqual(shell("git commit -qm change", unrelated)[0], 0)
+            for command in ("python3 -c 'pass'", "git commit -qm change", "LD_PRELOAD=library.so touch note.txt"):
+                self.assertEqual(shell(f"cd {shlex.quote(str(unrelated))} && {command}")[0], 2)
+            for command in ("rm src/product.py", f"rm -rf {shlex.quote(str(project / 'src'))}",
+                            "touch product.py", "git commit -qm change", "git diff --output=patch.txt",
+                            "find . -name '*.py' -delete", "find . | xargs rm", "git log > history.txt",
+                            "echo $HOME", "cat product.py | sh", "date 0101000026", "docker rm cache",
+                            "gh pr merge 12", "rg --pre ./run.sh token", "rg token src", "git status",
+                            "git -P -c core.fsmonitor=false diff --textconv",
+                            f"cd {shlex.quote(str(unrelated))} ; rm -rf {shlex.quote(str(session))}",
+                            f"cd {shlex.quote(str(unrelated))} && rm -rf ../item",
+                            f"cd {shlex.quote(str(unrelated))} ; rm notes.txt",
+                            f"cd {shlex.quote(str(unrelated))} && rm -rf {shlex.quote(str(base))}/*",
+                            f"cd {shlex.quote(str(unrelated))} && cp notes.txt {shlex.quote(str(project))}"):
+                with self.subTest(command=command):
+                    code, message = shell(command)
+                    self.assertEqual(code, 2)
+                    self.assertIn("DELIVERY_VERIFICATION_READERS_ACTIVE", message)
+                    self.assertIn("read-only commands", message)
+            for path, expected in ((unrelated / "notes.md", 0), (base / "notes.md", 0),
+                                   (session / "scratch/result.json", 0), (project / "src/product.py", 2),
+                                   (session / "session.json", 2)):
+                for tool in ("Write", "Edit"):
+                    with self.subTest(path=path, tool=tool), redirect_stderr(io.StringIO()):
+                        self.assertEqual(self.hook.delivery_reader_barrier({
+                            "cwd": str(project), "tool_name": tool,
+                            "file_targets": [{"file_path": str(path)}]}), expected)
 
     def test_safe_os_metadata_never_changes_the_guard_inventory(self):
         with tempfile.TemporaryDirectory() as temporary:

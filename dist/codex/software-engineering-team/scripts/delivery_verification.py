@@ -99,8 +99,11 @@ REVIEW_SEVERITY_ORDER = ("critical", "major")
 # record and a hash of a few guessable values would check a guess of a credential.
 COMMAND_VARIABLES = ("HOME", "LANG", "PATH", "TZ")
 COMMAND_VARIABLE_PREFIXES = ("AGENTROF_", "LC_")
-# The runner sets these for every command it runs.
-RUNNER_VARIABLES = ("AGENTROF_MUTATION_FILES", "AGENTROF_VERIFICATION_SCRATCH")
+# The runner sets these for every command it runs. The Delivery and Item ids
+# come from the frozen candidate, so a reader whose shell exports nothing runs
+# an approved command that reads them like the coordinator's shell does.
+RUNNER_VARIABLES = ("AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID", "AGENTROF_MUTATION_FILES",
+                    "AGENTROF_VERIFICATION_SCRATCH")
 # The runner's per-run inputs: an identity binds the data each carries, so it
 # names neither the variable nor its path. A partitioned test run hands each
 # partition its own file and engine, which its record names, never the identity.
@@ -461,7 +464,17 @@ def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
         raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
                            + describe_environment_holder(holder or {})
                            + f"; writes to the Item worktree wait until {wait}")
-    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing")
+    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing."
+                       " Until then Bash runs only the reader manifest's command_form, one direct"
+                       " `<python> [-B] <bound delivery_verification.py> --worktree <worktree> <verb> ...` with no"
+                       " pipe, redirect, variable or prefix but PYTHONDONTWRITEBYTECODE=1; read files with the host's"
+                       " Read tool or the CLI's inspect, inspect-context and diff, and write only under allowed_writes")
+
+
+def command_form(root: Path) -> str:
+    """The literal invocation a reader's Bash call starts with while readers are active; a verb follows it."""
+    arguments = [sys.executable, "-B", str(Path(__file__).resolve()), "--worktree", str(root.resolve())]
+    return subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
 
 
 def instruction_identity() -> str:
@@ -690,6 +703,9 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
                  "workers": {role: {"state": "running", "started_at": time.time()} for role in ROLES},
                  "metrics": {"freeze_seconds": time.monotonic() - started, "command_cache_hits": 0,
                              "command_seconds": 0.0, "model_seconds": None, "model_tokens": None}, "raw_evidence": {}}
+        controls = finding_control_history(previous)
+        if controls:
+            value["finding_control_bindings"] = controls
         if pre_handoff is not None:
             value["pre_handoff"] = pre_handoff
             value["pre_handoff_history"] = pre_handoff_history(root, previous, delivery_id, story)
@@ -738,8 +754,10 @@ def raw_output_path(root: Path, relative: str) -> Path:
     return safe_runtime_path(root, path, file_only=True)
 
 
-def command_environment(root: Path, *, diagnostic: bool = False) -> dict:
+def command_environment(root: Path, current: dict, *, diagnostic: bool = False) -> dict:
     environment = dict(os.environ)
+    environment["AGENTROF_DELIVERY_ID"] = current["delivery"]
+    environment["AGENTROF_ITEM_ID"] = current["story"]
     environment["AGENTROF_MUTATION_FILES"] = str(session_path(root).parent / "mutation-files.json")
     for name in SELECTION_VARIABLES:
         environment.pop(name, None)
@@ -849,7 +867,75 @@ def literal_test_id(identifier) -> bool:
             and not any(ord(character) < 32 or ord(character) == 127 for character in identifier))
 
 
-def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
+FINDING_DIAGNOSTIC_SCOPE = "finding_diagnostic"
+
+
+def test_id_in_file(identifier: str, path: str) -> bool:
+    """Whether a test id names a test in *path*, as a path::name or a dotted module.name id."""
+    module = PurePosixPath(path).with_suffix("").as_posix().replace("/", ".")
+    return identifier.startswith(path + "::") or bool(module) and identifier.startswith(module + ".")
+
+
+def finding_control_history(session: dict | None) -> list[dict]:
+    """Carry successful finding bindings across passes until ordinary backlog absorption."""
+    if not session:
+        return []
+    rows = list(session.get("finding_control_bindings", []))
+    known = {digest(row) for row in rows}
+    for raw in session.get("raw_evidence", {}).values():
+        if raw.get("exit_code") != 0 or raw.get("candidate_intact") is not True or raw.get("selection_intact") is not True:
+            continue
+        for binding in raw.get("diagnostic_selection", {}).get("finding_controls", []):
+            row = {**binding, "candidate_hash": raw["identity"]["candidate_hash"], "evidence_hash": raw["evidence_hash"]}
+            key = digest(row)
+            if key not in known:
+                rows.append(row)
+                known.add(key)
+    return rows
+
+
+def finding_controls(entries, current: dict, findings: list[dict]) -> list[dict]:
+    """The negative-control tests open findings prescribe, checked as diagnostic data.
+
+    Each entry names an open inherited finding and test ids the finding lists
+    in negative_control_test_ids; each id lies in a test file the Item itself
+    changed. Such a run is finding-scoped diagnostic evidence only: it never
+    serves an acceptance check, so no Test Plan scenario has to bind the ids.
+    """
+    if not isinstance(entries, list):
+        raise RuntimeError("finding_controls must be a list of {finding_id, test_ids}")
+    open_findings = {finding["id"]: finding for finding in findings
+                     if isinstance(finding, dict) and finding.get("status") != "resolved"}
+    changed = set(current["changed_files"])
+    seen = set()
+    rows = []
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"finding_id", "test_ids"}:
+            raise RuntimeError("finding_controls entries declare only finding_id and test_ids")
+        finding = open_findings.get(entry["finding_id"])
+        if finding is None:
+            raise RuntimeError(f"finding_controls names {entry['finding_id']!r}, which is no open inherited finding")
+        identifiers = entry["test_ids"]
+        if (not isinstance(identifiers, list) or not identifiers
+                or any(not literal_test_id(identifier) for identifier in identifiers)
+                or len(set(identifiers)) != len(identifiers)):
+            raise RuntimeError("finding control test IDs must be unique nonempty literal identifiers")
+        prescribed = set(finding.get("negative_control_test_ids") or [])
+        stray = sorted(set(identifiers) - prescribed)
+        if stray:
+            raise RuntimeError(f"finding {finding['id']} prescribes no negative control " + ", ".join(stray))
+        outside = sorted(identifier for identifier in identifiers
+                         if not any(test_id_in_file(identifier, path) for path in changed))
+        if outside:
+            raise RuntimeError("finding control tests must lie in test files the Item changed: " + ", ".join(outside))
+        if finding["id"] in seen:
+            raise RuntimeError(f"finding_controls names {finding['id']} more than once")
+        seen.add(finding["id"])
+        rows.append({"finding_id": finding["id"], "test_ids": sorted(identifiers)})
+    return sorted(rows, key=lambda row: row["finding_id"])
+
+
+def diagnostic_selection(root: Path, path: Path, current: dict, findings: list[dict] | None = None) -> dict:
     """Treat focused test identifiers as data, never command arguments or code."""
     path = path if path.is_absolute() else root / path
     try:
@@ -861,16 +947,22 @@ def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
     path = raw_output_path(root, relative)
     value = json.loads(path.read_text(encoding="utf-8"))
     fields = {"schema_version", "candidate_hash", "failed_test_ids", "affected_test_ids"}
-    if (not isinstance(value, dict) or set(value) != fields or type(value.get("schema_version")) is not int or value["schema_version"] != 1
+    if (not isinstance(value, dict) or set(value) - {"finding_controls"} != fields
+            or type(value.get("schema_version")) is not int or value["schema_version"] != 1
             or value.get("candidate_hash") != current["candidate_hash"]):
-        raise RuntimeError("diagnostic selection must bind this candidate and declare only schema_version, candidate_hash, failed_test_ids and affected_test_ids")
+        raise RuntimeError("diagnostic selection must bind this candidate and declare only schema_version, candidate_hash, failed_test_ids and affected_test_ids, with optional finding_controls")
     for name in ("failed_test_ids", "affected_test_ids"):
         identifiers = value[name]
         if (not isinstance(identifiers, list) or any(not literal_test_id(identifier) for identifier in identifiers)
                 or len(set(identifiers)) != len(identifiers)):
             raise RuntimeError("diagnostic test IDs must be unique nonempty literal identifiers, without option prefixes or control characters")
         value[name] = sorted(identifiers)
-    value["selected_test_ids"] = sorted(set(value["failed_test_ids"]) | set(value["affected_test_ids"]))
+    controls = finding_controls(value.pop("finding_controls", []), current, findings or [])
+    control_ids = sorted({identifier for row in controls for identifier in row["test_ids"]})
+    if controls:
+        value.update(finding_controls=controls, finding_control_test_ids=control_ids,
+                     evidence_scope=FINDING_DIAGNOSTIC_SCOPE)
+    value["selected_test_ids"] = sorted(set(value["failed_test_ids"]) | set(value["affected_test_ids"]) | set(control_ids))
     if not value["selected_test_ids"]:
         raise RuntimeError("diagnostic selection must include at least one failed or affected test ID")
     return value
@@ -1010,8 +1102,10 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         directory = (root / workdir).resolve()
         if directory != root and root not in directory.parents:
             raise RuntimeError("verification command workdir must remain inside the Item worktree")
-        environment = command_environment(root, diagnostic=kind == "diagnostic_test")
-        selection = diagnostic_selection(root, selection_file, current) if selection_file is not None else None
+        environment = command_environment(root, current, diagnostic=kind == "diagnostic_test")
+        inherited = session.get("unresolved_findings", [])
+        selection = (diagnostic_selection(root, selection_file, current, inherited)
+                     if selection_file is not None else None)
         selection_bytes = None
         if selection is not None:
             input_generation = source_file_generation(selection_file)
@@ -1098,7 +1192,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
     if selection is not None:
         try:
             selector = safe_runtime_path(root, Path(environment["AGENTROF_DIAGNOSTIC_TESTS"]), file_only=True)
-            selection_intact = (diagnostic_selection(root, selection_file, current) == selection
+            selection_intact = (diagnostic_selection(root, selection_file, current, inherited) == selection
                                 and selector.read_bytes() == selection_bytes
                                 and source_file_generation(selection_file) == input_generation
                                 and source_file_generation(selector) == selector_generation)
@@ -1129,6 +1223,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             record["checkout_difference"] = difference
         if selection is not None:
             record["diagnostic_selection"] = selection
+            if "evidence_scope" in selection:
+                record["evidence_scope"] = selection["evidence_scope"]
         if selection_intact is not None:
             record["selection_intact"] = selection_intact
         if group_report is not None:
@@ -1144,6 +1240,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                                              "output_sha256": hashlib.sha256(entry["output"]).hexdigest()})
         record["evidence_hash"] = digest(record)
         session["raw_evidence"][record_key] = record
+        if record.get("diagnostic_selection", {}).get("finding_controls"):
+            session["finding_control_bindings"] = finding_control_history(session)
         session["metrics"]["command_seconds"] += record["duration_seconds"]
         write_session(root, session)
         return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {}),
@@ -2029,6 +2127,12 @@ def check_findings(findings: object) -> None:
             or finding.get("status") not in {"open", "resolved"} for finding in findings)
             or len({finding["id"] for finding in findings}) != len(findings)):
         raise RuntimeError("findings require unique stable IDs, severity, verification and open/resolved status")
+    for finding in findings:
+        controls = finding.get("negative_control_test_ids")
+        if controls is not None and (not isinstance(controls, list) or not controls
+                                     or any(not literal_test_id(identifier) for identifier in controls)
+                                     or len(set(controls)) != len(controls)):
+            raise RuntimeError(f"finding {finding['id']} negative_control_test_ids must list unique literal test IDs")
     allowed_severities = {value.casefold() for value in policy()["blocking_severities"] + policy()["nonblocking_severities"]}
     if any(finding["severity"].casefold() not in allowed_severities for finding in findings):
         raise RuntimeError("finding severity is not declared in the verification policy")
@@ -2434,8 +2538,8 @@ def runtime_needs_cleanup(session: dict) -> bool:
     return bool(state.get("active") or state.get("cleanup_required") or state.get("pending"))
 
 
-def runtime_environment_identity(root: Path) -> dict:
-    return environment_identity(root, command_environment(root))
+def runtime_environment_identity(root: Path, current: dict) -> dict:
+    return environment_identity(root, command_environment(root, current))
 
 
 def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
@@ -2497,7 +2601,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 raise RuntimeError("runtime checkout changed" + (f" ({difference})" if difference else "")
                                    + "; only teardown is allowed before a new verification session")
             bound_session = session["session_id"]
-            environment_identity = runtime_environment_identity(root)
+            environment_identity = runtime_environment_identity(root, current)
             # Persist before launching: a failed/interrupted up may still leave
             # real services behind, so only a successful down permits settlement.
             if state.get("pending"):
@@ -2511,7 +2615,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
         # suffix; project command bytes remain the approved contract's bytes.
         command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
-        completed = subprocess.run(command, cwd=workdir, env=command_environment(root), shell=True,
+        completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         with locked(root):
             session = read_session(root)
@@ -3135,7 +3239,7 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
         contract = verification_contract(root)
         contract_variables(contract)
         shared = write_pre_handoff_selection(root, derived)
-        environment = command_environment(root, diagnostic=derived["kind"] == "diagnostic_test")
+        environment = command_environment(root, current, diagnostic=derived["kind"] == "diagnostic_test")
         selections: dict[Path, tuple[bytes, list[int]]] = {}
         if derived["kind"] == "diagnostic_test":
             selector = safe_runtime_path(root, session_path(root).parent / "pre-handoff-tests.json", file_only=True)
@@ -3354,7 +3458,7 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
             raise RuntimeError("manual context source differs from the frozen candidate")
         manual.append({**obligation, "candidate_hash": current["candidate_hash"],
             "product_commit": current["product_commit"], "disposition": "requires_frozen_inspect",
-            "next_action": "Use delivery_verification.py inspect --path <path> to read this source from the bound candidate before completing its obligation."})
+            "next_action": "When the task needs this source, read it from the bound candidate with delivery_verification.py inspect --path <path>."})
     units = {}
     for row in plan["must_read"]:
         unit = addresses[row["unit_id"]]
@@ -3459,6 +3563,29 @@ def closure_read(root: Path, current: dict) -> tuple[list[str], dict]:
     return sorted(full), {"scope": scope, "views": task_inputs.vault_views(docs)}
 
 
+FINDING_SUMMARY_FIELDS = ("id", "role", "severity", "calibrated_severity", "status", "file")
+
+
+def finding_summary(finding: dict) -> dict:
+    """One line per inherited finding; the full record stays in the manifest's findings file."""
+    value = {key: finding[key] for key in FINDING_SUMMARY_FIELDS if key in finding}
+    text = str(finding.get("title") or finding.get("description") or finding.get("verification") or "")
+    line = text.strip().splitlines()[0] if text.strip() else ""
+    value["title"] = line if len(line) <= 160 else line[:157] + "..."
+    return value
+
+
+def reader_attachment(root: Path, name: str, data, use: str) -> dict:
+    """Write bulky manifest data beside the session and return its path and hash.
+
+    The CLI binds staleness through the frozen session, never through this copy,
+    so a reader opens the file only when it needs the full data."""
+    path = safe_runtime_path(root, session_path(root).parent / "manifest" / name, file_only=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_file.replace_text(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return {"path": str(path), "sha256": digest(data), "entries": len(data), "use": use}
+
+
 def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, remote: str = "origin") -> dict:
     if role not in ROLES or mode not in policy()["role_modes"][role]:
         raise RuntimeError("unsupported verification role or mode")
@@ -3491,13 +3618,25 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
         checks["mutation_whole_changed_files"]["files"] = current["mutation_files"]
     if "fresh_runtime" in checks:
         checks["fresh_runtime"]["event_hashes"] = []
+    unresolved = value.get("unresolved_findings", [])
+    bound = {key: item for key, item in current.items() if key != "source_observations"}
     result = {"schema_version": 1, "role": role, "mode": mode, "session_id": value["session_id"],
-              **current, "required_checks": list(checks),
+              **bound, "required_checks": list(checks),
+              "source_observations_file": reader_attachment(
+                  root, "source-observations.json", current["source_observations"],
+                  "The CLI checks this snapshot itself; readers never open it."),
               "full_read": sorted(set(current["inputs"]) | set(current["changed_files"])),
-              "repair_delta": delta, "scope_expanded": scope_expanded, "unresolved_findings": value.get("unresolved_findings", []),
+              # A delta equal to the whole change names it instead of repeating every path.
+              "repair_delta": "changed_files" if delta == current["changed_files"] else delta,
+              "scope_expanded": scope_expanded,
+              "unresolved_findings": [finding_summary(finding) for finding in unresolved],
+              "unresolved_findings_file": reader_attachment(
+                  root, "unresolved-findings.json", unresolved,
+                  "Full records of the one-line unresolved_findings; read only to carry a finding forward."),
               "read_interface": {"inspect": "inspect --path <repository-relative-path> [--base]", "diff": "diff [--path <repository-relative-path>]"},
               "review_passes": policy()["review_checks"], "allowed_writes": [str(session_path(root).parent / "scratch")],
               "mutation_scope_file": str(session_path(root).parent / "mutation-files.json"),
+              "command_form": command_form(root) + " <verb> ...",
               "result_interface": {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
                                    "role": role, "mode": mode, "verdict": "passed|failed|cancelled",
                                    "report": "Independent findings and conclusion", "checks": checks, "findings": [],
@@ -3506,6 +3645,10 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                                        "command": "run --kind diagnostic_test --selection-file <scratch-selection.json>",
                                        "selection": {"schema_version": 1, "candidate_hash": current["candidate_hash"],
                                                      "failed_test_ids": [], "affected_test_ids": []},
+                                       "finding_controls": "Optional [{finding_id, test_ids}]: run the negative"
+                                                           " controls an open finding lists in"
+                                                           " negative_control_test_ids, from test files the Item"
+                                                           " changed; recorded as finding_diagnostic evidence only",
                                        "environment_variable": "AGENTROF_DIAGNOSTIC_TESTS",
                                        "terminal_evidence": False},
               "live_test_interface": {"groups": list(contract.get("live_groups") or []),
@@ -3516,6 +3659,9 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
               "next_transition": "Register independent result; owner writes reports only after both readers settle"}
     if role == "qa_engineer" and value["workers"][role].get("resume_commands"):
         result["resume_commands"] = value["workers"][role]["resume_commands"]
+
+    if finding_control_history(value):
+        result["finding_control_bindings"] = finding_control_history(value)
     if review_scope(root, delivery_id) == CLOSURE_VALUE:
         result["full_read"], closure = closure_read(root, current)
         result.update({CLOSURE_SWITCH: CLOSURE_VALUE, "vault_views": closure["views"],
@@ -3523,11 +3669,12 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     import project_context
     seeds = {path for path in current["inputs"] if path.endswith("/item.md")}
     result["project_reading"] = project_context.task_context(root, entry="deliver",
-        role=role.replace("_", "-"), mode="review", paths=seeds, no_cache=True)
+        role=role.replace("_", "-"), mode="review", paths=seeds | set(current["changed_files"]), no_cache=True,
+        change_base=current["integration_base_commit"])
     result["read_interface"]["context"] = "inspect-context --plan <saved verification manifest>"
     result["read_interface"]["expand_context"] = "expand-context --plan <saved context manifest> --reason <reason> [--ref <reference>]"
     result["context_guidance"] = ("Start with project_reading and batch-read with inspect-context; "
-        "full_read and all verification gates remain mandatory. Expand incomplete plans. "
+        "Required review scope and verification gates remain mandatory; suggested reads are bounded advice. Expand optional context only when needed. "
         "If context is insufficient, use frozen inspect/diff on your initiative or parent direction "
         "and report context_findings with sources, impact, recovery and proposed fix to the parent. "
         "Only the parent offers an anonymous issue through issue-report after exact-payload user approval.")
@@ -3547,7 +3694,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     return result
 
 
-RUN_SUMMARY_FIELDS = ("live_group", "exit_code", "candidate_intact", "selection_intact", "reused_pre_handoff", "duration_seconds",
+RUN_SUMMARY_FIELDS = ("live_group", "exit_code", "candidate_intact", "selection_intact", "evidence_scope", "reused_pre_handoff", "duration_seconds",
                       "completed_at", "evidence_hash", "environment_hash", "checkout_difference", "earlier_stories",
                       "output_file")
 

@@ -1146,6 +1146,22 @@
         "threshold": "Every critical and major finding of the reviewed replay also found or made moot, zero defects found after merge in a reused epic that trace to a changed source, and a median begin-revision-to-approval wall clock at most 50% of comparable reviewed revisions, with every shared quality guard holding and the owner's approval."
       }
     },
+    "qa_preflight": {
+      "summary": "Whether short lifecycle checks run before live groups and declared untried targets need rehearsal before a candidate freezes.",
+      "issue": 537,
+      "flows": ["delivery-execution"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {"id": "off", "tradeoffs": "Keep the current QA order and no pre-freeze rehearsal gate. A short lifecycle defect can reject a long completed live run."},
+        {"id": "lifecycle_first", "tradeoffs": "Run down/up/seed/log checks before live groups and a final log check afterward. Before freeze, each target in the approved Verification Rehearsals table needs current passing evidence or an explicit owner waiver in that approved contract."}
+      ],
+      "default": "off",
+      "metric": "Time to the first lifecycle failure, late lifecycle failures after live groups and rehearsal time per verification candidate.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with live verification.",
+        "threshold": "Fewer lifecycle failures discovered after long live runs and lower total verification time, without missed defects, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "repair_review": {
       "summary": "Whether a repair diff receives an independent correctness review before the next verification candidate is frozen.",
       "issue": 533,

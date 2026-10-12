@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "2b0148f9b54bc20ce96d680b8bd61e81689060373fff4f9b8f478f92df8f8e0e"
+      "d20a82340551af8d1be8d6b0efae90ca9790f865f3fae3c9aed6a55489d4ab45"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -200,7 +200,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "e4aeda251f7e29b21850e24ef8b1b99613b0fa62cf446fb3cea0eb96b1a50948"
+      "ac1eb34fa219bc403753b895a9f76c255f1ea09c2d0ed88aa94660d0a964acc5"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -242,7 +242,7 @@
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/operation_compile.py":
-      "4af9082547f10cc7f004b322f878bb10e7bf2a50a5591871141f39c22e9eb421"
+      "fb19df93218017457677ef7f9af6c107652713536754ce1c8e65f53509568823"
     ,
     "scripts/owner_notification.py":
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
@@ -467,7 +467,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "39604223e0cafab65a1ce74616652cdc7019381f91ed61de75c8666c1a7d4a10"
+      "db5b6721187c8e669c76a4864e3c4e428d39a3990b504ceba30d7e5c0be427f7"
     ,
     "skill-content/configure/data/step-budgets.json":
       "c63c5e90e1726b573c681f28008aa627575600f2d81dc8f8c0851b768e1b04fc"
@@ -741,6 +741,9 @@
     ,
     "skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md":
       "77ec83ef7c481c79826ca6627c6b45a7cdb7450144ed8b67f28e5443bbb5073f"
+    ,
+    "skill-content/qa-verification/references/switch-qa_preflight-lifecycle_first.md":
+      "e39782aec93f3d1ee8f2354ccca25ef1d1d4fb0a2a8d1fb4d9bcec26374ad9d3"
     ,
     "skill-content/qa-verification/references/test-design.md":
       "c8ef52eb9cbb30c14fcb905b49b92a9e88489ba9a842b75834da615d7fb330cd"

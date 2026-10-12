@@ -330,8 +330,9 @@ When all remaining work waits on queued owner decisions, call the packaged
 per queue. Report an unavailable notification backend; never claim delivery
 when the command failed. The decision still belongs to the owner.
 
-When the user armed autopilot with `--recover-transport`, register each assigned
-resumable host session and its structured JSONL transcript with
-`autopilot.py register-recovery`. Never register another project's session,
-select the latest session implicitly or substitute a new session. A session
-whose host exposes no such transcript stays owner-resumable and is reported.
+When the user arms `--recover-transport`, the packaged native watcher uses
+`asyncRewake` to continue the existing main conversation or registered subagent
+after a host-marked transient API failure. No separate SDK or service is installed.
+Only an active grant, unchanged workspace and remaining retry allowance can wake
+the conversation. CLI resume remains for separately registered exited processes;
+never use it to create a replacement for a native agent.

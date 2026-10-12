@@ -1,5 +1,5 @@
 {
-  "summary": "Add user-armed, grant-bounded transport recovery for explicitly registered host sessions, with exact-session resume and limited retries.",
+  "summary": "Add user-armed native session recovery through existing host wakeups and thread tools, with grant-bounded retries, same-context continuation and CLI fallback.",
   "components": {
     "software-engineering-team": "minor"
   }

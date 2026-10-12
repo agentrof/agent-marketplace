@@ -323,8 +323,10 @@ When all remaining work waits on queued owner decisions, call the packaged
 per queue. Report an unavailable notification backend; never claim delivery
 when the command failed. The decision still belongs to the owner.
 
-When the user armed autopilot with `--recover-transport`, register each assigned
-resumable host session and its structured JSONL transcript with
-`autopilot.py register-recovery`. Never register another project's session,
-select the latest session implicitly or substitute a new session. A session
-whose host exposes no such transcript stays owner-resumable and is reported.
+When the user arms `--recover-transport`, complete the native heartbeat enrollment
+emitted by `autopilot.py on` using the app's existing automation tool, then record
+its id with `native-bind`. This requires no separate app-server, SDK or service.
+A heartbeat keeps this thread's context and uses `native-plan` to resume only
+registered failed child threads; a running or cancelled thread is never resumed.
+When the grant ends, pause its heartbeat. Do not use CLI resume for native app
+threads, and report unsupported hosts explicitly.

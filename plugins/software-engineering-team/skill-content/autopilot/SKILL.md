@@ -86,8 +86,9 @@ session to asking.
 1. Run the packaged `skill-content/autopilot/scripts/autopilot.py` with the
    typed verb. On a host that arms, run `on` without options: the script takes
    them from the typed command. Pass every other verb's options as typed.
-2. Show the script's output as it prints it. A refusal names what is wrong;
-   never retry `on` with options of your own.
+2. Show the script's human status. Consume a machine `native_recovery_enrollment`
+   internally as the recovery reference directs; do not display its scheduling
+   payload. A refusal names what is wrong; never retry `on` with options of your own.
 3. While a grant is active, the host contract's autopilot procedure governs
    every question of the orchestrating session. Each decision is recorded with
    `record` before it is applied, and `record` and `queue` refuse once the
@@ -105,12 +106,6 @@ as delivered. With independent work left, keep working and do not call it.
 
 ## Transport recovery
 
-The user may type `on --recover-transport` to arm a watcher bounded by that
-grant's lifetime. Register each supported host session with `register-recovery
---session-id <uuid> --transcript <host-jsonl-file> --role <role> --pid <pid>`. Register only
-CLI sessions assigned to this project; a still-running host process is never resumed. The watcher reads explicit terminal transport
-errors and never treats assistant prose as an error. It refuses recovery after
-workspace writes following the error, limits attempts and preserves host
-permissions. A host session without a readable structured error transcript is
-not automatically recoverable; report it rather than guessing or selecting the
-host's latest session. `heal` performs the same one-pass check manually.
+With `on --recover-transport`, follow [transport recovery](references/transport-recovery.md).
+Native continuation stays in the same conversation, is bound to the grant and
+requires no additional program, SDK, API key or service installation.

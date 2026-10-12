@@ -1211,6 +1211,8 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
             if (is_hooks_manifest and where == "$.hooks"
                     and HOOK_EVENT_KEY_RE.match(key)):
                 continue  # hook event names are the host platform's schema
+            if is_hooks_manifest and "claude" in path.parts and key == "asyncRewake":
+                continue  # Native host command-hook field.
             if is_model_catalog and where == "$.models":
                 continue
             if not SNAKE_KEY_RE.match(key):
@@ -3583,7 +3585,8 @@ def check_assertion_kinds(tree: Tree, findings: list[Finding]) -> None:
 AUTOPILOT_POLICY_RELPATH = "skill-content/autopilot/data/autopilot-policy.json"
 AUTOPILOT_SCRIPT_RELPATH = "skill-content/autopilot/scripts/autopilot.py"
 AUTOPILOT_NUMBERS = ("default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
-                     "arming_ttl_minutes", "transport_interval_seconds", "transport_max_attempts")
+                     "arming_ttl_minutes", "transport_interval_seconds", "transport_max_attempts",
+                     "native_arming_wait_seconds", "native_watch_seconds", "native_poll_seconds", "native_retry_delay_seconds", "native_permit_ttl_seconds")
 AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", "transport_error_codes", *AUTOPILOT_NUMBERS}
 AUTOPILOT_DEFAULTS = ("allowed", "excluded", "never")
 
@@ -3602,6 +3605,10 @@ def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
         problems.append("transport_max_attempts must be between 1 and 3")
     if not 1 <= numbers.get("transport_interval_seconds", 0) <= 3600:
         problems.append("transport_interval_seconds must be between 1 and 3600")
+    if numbers.get("native_watch_seconds", 0) > numbers.get("max_duration_hours", 0) * 3600:
+        problems.append("native_watch_seconds must not outlive the maximum grant")
+    if numbers.get("native_arming_wait_seconds", 0) > numbers.get("arming_ttl_minutes", 0) * 60:
+        problems.append("native_arming_wait_seconds must not outlive the arming record")
     codes = data.get("transport_error_codes")
     if (not isinstance(codes, list) or not codes or any(not _nonblank(code) for code in codes)
             or len(codes) != len(set(codes))):

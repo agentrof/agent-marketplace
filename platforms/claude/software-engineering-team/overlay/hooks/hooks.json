@@ -18,11 +18,27 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py skill-content/autopilot/scripts/autopilot.py hook user-prompt --host claude --entry software-engineering-team:autopilot --session-env CLAUDE_CODE_SESSION_ID",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py skill-content/autopilot/scripts/autopilot.py hook native-watch --host claude",
+            "asyncRewake": true,
+            "timeout": 260000
           }
         ]
       }
     ],
     "PreToolUse": [
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py skill-content/autopilot/scripts/autopilot.py hook native-dispatch --host claude",
+            "timeout": 10
+          }
+        ]
+      },
       {
         "matcher": "Write|Edit|Bash|PowerShell",
         "hooks": [
@@ -81,6 +97,39 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/model_fallback.py",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py skill-content/autopilot/scripts/autopilot.py hook native-register --host claude",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py skill-content/autopilot/scripts/autopilot.py hook native-watch --host claude",
+            "asyncRewake": true,
+            "timeout": 260000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py skill-content/autopilot/scripts/autopilot.py hook native-watch --host claude",
+            "asyncRewake": true,
+            "timeout": 260000
           }
         ]
       }

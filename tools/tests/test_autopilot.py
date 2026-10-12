@@ -1608,5 +1608,116 @@ class ValidatorTests(unittest.TestCase):
                 self.assertEqual(bool(flagged), rejected, flagged)
 
 
+@integration
+class NativeRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/skill-content/autopilot/scripts"))
+        import native_recovery
+        import uuid
+        self.native = native_recovery
+        original = native_recovery.autopilot
+        native_recovery.autopilot = autopilot
+        self.addCleanup(setattr, native_recovery, "autopilot", original)
+        self.p = Project(self)
+        self.now = datetime.now(timezone.utc)
+        self.owner, self.child = str(uuid.uuid4()), str(uuid.uuid4())
+        self.assertEqual(self.p.run_verb("on", "--for", "1h", "--host", "codex", now=self.now)[0], 0)
+        grant = self.p.grant()
+        grant["transport_recovery"] = True
+        grant["armed_by"]["session_id"] = self.owner
+        autopilot.write_private(self.p.state / "grant.json", grant)
+        self.grant = grant
+        environment = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.p.state)})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def snapshot(self, session=None, *, status="failed", message="ENOTFOUND", thread_status="idle"):
+        import time
+        return {"schemaVersion": 1, "thread": {"id": session or self.child,
+            "cwd": str(self.p.root), "status": {"type": thread_status}},
+            "turns": [{"id": "turn-failure", "status": status, "error": {"message": message},
+                       "completedAt": time.time()}]}
+
+    @integration
+    def test_codex_native_plan_preserves_identity_and_refuses_other_work(self):
+        self.native.remember({"session_id": self.owner, "agent_id": self.child,
+                              "cwd": str(self.p.root), "agent_type": "qa"}, "codex", self.now)
+        plan = self.native.plan(self.p.root, None, self.now, self.grant["id"])
+        self.assertEqual(plan["inspect"], sorted([self.owner, self.child]))
+        self.assertEqual(plan["enrollment"]["arguments"]["targetThreadId"], self.owner)
+        for change in ({"status": "completed"}, {"status": "interrupted"},
+                       {"message": "invalid API key"}, {"thread_status": "active"}):
+            self.assertEqual(self.native.plan(self.p.root, [self.snapshot(**change)], self.now,
+                                                   self.grant["id"])["actions"], [])
+        result = self.native.plan(self.p.root, [self.snapshot()], self.now, self.grant["id"])
+        self.assertEqual([row["thread_id"] for row in result["actions"]], [self.child])
+        message = result["actions"][0]["message"]
+        event = {"cwd": str(self.p.root), "session_id": self.owner,
+                 "tool_input": {"id": self.child, "message": message, "interrupt": False}}
+        changed = {**event, "tool_input": {**event["tool_input"], "message": message + " changed"}}
+        self.assertIn("message changed", self.native.dispatch_guard(changed, self.now))
+        self.assertIn("expired", self.native.dispatch_guard(event, self.now + timedelta(minutes=6)))
+        self.assertIn("another coordinator", self.native.dispatch_guard({**event, "session_id": self.child}, self.now))
+        with mock.patch.object(autopilot, "load_native_recovery", side_effect=ValueError("fixture")):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                autopilot.run_hook(["native-dispatch"], io.StringIO(json.dumps(event)), self.now)
+            self.assertEqual(json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(self.native.dispatch_guard({**event, "tool_input": {
+            **event["tool_input"], "content": message[:50] + "…"}}, self.now), "")
+        self.assertIn("consumed", self.native.dispatch_guard(event, self.now))
+        self.assertEqual(self.native.plan(self.p.root, [self.snapshot()], self.now,
+                                               self.grant["id"])["actions"], [])
+        wrong = self.snapshot(); wrong["thread"]["cwd"] = str(self.p.root.parent)
+        with self.assertRaisesRegex(ValueError, "outside"):
+            self.native.plan(self.p.root, [wrong], self.now, self.grant["id"])
+        self.assertFalse(self.native.plan(self.p.root, None, self.now, "replaced")["active"])
+
+    @integration
+    def test_native_enrollment_is_bound_once_and_inactive_hooks_do_nothing(self):
+        with mock.patch.object(autopilot, "load_native_recovery", return_value=self.native):
+            code, _out, error = self.p.run_verb("native-bind", "--grant", self.grant["id"],
+                                              "--automation-id", "fixture-heartbeat", now=self.now)
+            self.assertEqual(code, 0, error)
+            code, _out, _error = self.p.run_verb("native-bind", "--grant", self.grant["id"],
+                                               "--automation-id", "different-heartbeat", now=self.now)
+            self.assertEqual(code, 1)
+        grant = self.p.grant(); grant["state"] = "revoked"
+        autopilot.write_private(self.p.state / "grant.json", grant)
+        with self.assertRaises(autopilot.Refusal):
+            self.native.remember({"session_id": self.owner, "cwd": str(self.p.root)}, "codex", self.now)
+
+    @integration
+    def test_claude_native_wake_is_bounded_and_ignores_unmarked_prose(self):
+        grant = self.p.grant(); grant["host"] = "claude"
+        autopilot.write_private(self.p.state / "grant.json", grant)
+        path = self.p.state / "native-transcript.jsonl"
+        event = {"type": "assistant", "is_api_error_message": True,
+                 "message": {"content": [{"type": "text", "text": "API Error: 503 temporary service error"}]}}
+        path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+        payload = {"session_id": self.owner, "cwd": str(self.p.root), "transcript_path": str(path)}
+        error = io.StringIO()
+        with contextlib.redirect_stderr(error):
+            self.assertEqual(self.native.watch(payload, clock=lambda: self.now, sleep=lambda _: None), 2)
+        self.assertIn("same conversation", error.getvalue())
+        self.assertEqual(self.native.watch(payload, clock=lambda: self.now, sleep=lambda _: None), 0)
+        for index in range(1, 4):
+            event["message"]["content"][0]["text"] += str(index)
+            path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()), mock.patch.object(autopilot, "notify_owner"):
+                self.assertEqual(self.native.watch(payload, clock=lambda: self.now, sleep=lambda _: None),
+                                 2 if index < 3 else 0)
+        event["is_api_error_message"] = False
+        path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+        self.assertIsNone(self.native.claude_failure(path, POLICY))
+        event["is_api_error_message"] = True
+        path.write_text(json.dumps(event) + "\n" + json.dumps({"type": "user", "isMeta": True,
+                        "message": {"content": "[Request interrupted by user]"}}), encoding="utf-8")
+        self.assertIsNone(self.native.claude_failure(path, POLICY))
+        grant["state"] = "revoked"
+        autopilot.write_private(self.p.state / "grant.json", grant)
+        self.assertEqual(self.native.watch(payload, clock=lambda: self.now, sleep=lambda _: None), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

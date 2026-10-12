@@ -84,6 +84,20 @@ def span(delta: timedelta) -> str:
     return f"{minutes // 60}h {minutes % 60:02d}m"
 
 
+def load_native_recovery():
+    """Load the host adapter shipped beside this entry in a built package."""
+    import importlib.util
+    path = Path(__file__).with_name("native_recovery.py")
+    if not path.is_file() or path.is_symlink():
+        raise ImportError("native recovery adapter is unavailable")
+    spec = importlib.util.spec_from_file_location("native_recovery_host", path)
+    if spec is None or spec.loader is None:
+        raise ImportError("native recovery adapter is unreadable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_policy() -> dict:
     return json.loads(POLICY.read_text(encoding="utf-8"))
 
@@ -815,6 +829,15 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
         except (ImportError, OSError, ValueError) as error:
             lines.append(f"transport recovery unavailable: {error}")
     print("\n".join(lines))
+    if grant.get("transport_recovery"):
+        try:
+            native_recovery = load_native_recovery()
+        except ImportError:
+            pass
+        else:
+            request = native_recovery.enrollment(project, grant)
+            if request is not None:
+                print(json.dumps({"native_recovery_enrollment": request}))
     return 0
 
 
@@ -1167,6 +1190,7 @@ def hook_pre_question(options: dict, payload: dict, now: datetime) -> None:
 
 
 def run_hook(argv: list[str], stdin, now: datetime) -> int:
+    verb, payload = "", {}
     try:
         verb, rest = argv[0], argv[1:]
         options = dict(zip(rest[::2], rest[1::2]))
@@ -1177,9 +1201,25 @@ def run_hook(argv: list[str], stdin, now: datetime) -> int:
             hook_user_prompt(options, payload, now)
         elif verb == "pre-question":
             hook_pre_question(options, payload, now)
+        elif verb == "native-watch":
+            native_recovery = load_native_recovery()
+            return native_recovery.watch(payload)
+        elif verb == "native-register":
+            native_recovery = load_native_recovery()
+            native_recovery.remember(payload, options.get("--host"), now)
+        elif verb == "native-dispatch":
+            native_recovery = load_native_recovery()
+            refusal = native_recovery.dispatch_guard(payload, now)
+            if refusal:
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                    "permissionDecision": "deny", "permissionDecisionReason": refusal}}))
     except Exception:
-        # An internal error allows the prompt or the question: the session asks as usual.
-        pass
+        data = payload.get("tool_input", {}) if isinstance(payload, dict) else {}
+        prompt = data.get("message", data.get("prompt", data.get("content", ""))) if isinstance(data, dict) else ""
+        if verb == "native-dispatch" and isinstance(prompt, str) and prompt.startswith("AUTOPILOT_TRANSPORT_RECOVERY:"):
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                "permissionDecision": "deny", "permissionDecisionReason": "Native recovery validation failed."}}))
+        # Other internal hook errors preserve the ordinary prompt and question paths.
     return 0
 
 
@@ -1254,6 +1294,49 @@ def cmd_watch_recovery(args, now):
         os.close(descriptor)
 
 
+def cmd_native_bind(args, now):
+    native_recovery = load_native_recovery()
+    directory, grant = recovery_grant(args, now)
+    if grant["id"] != args.grant or not native_recovery.supports_enrollment(grant):
+        raise Refusal("native enrollment belongs to the active native grant")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", args.automation_id):
+        raise Refusal("native enrollment requires the host's automation id")
+    with locked(directory):
+        state = native_recovery.load(directory)
+        old = state.get("enrollment", {})
+        if old.get("grant") == args.grant and old.get("automation_id") != args.automation_id:
+            raise Refusal("this grant already has a native heartbeat")
+        state["enrollment"] = {"grant": args.grant, "automation_id": args.automation_id,
+                               "owner": grant["armed_by"].get("session_id")}
+        native_recovery.store(directory, state)
+        log(directory, now, grant, "transport_recovery", state="native_heartbeat_enrolled",
+            session=grant["armed_by"].get("session_id"), automation_id=args.automation_id)
+    print(json.dumps({"native_recovery": "armed", **state["enrollment"]}))
+    return 0
+
+
+def cmd_native_plan(args, now):
+    native_recovery = load_native_recovery()
+    project = Path(args.project_root).resolve()
+    snapshots = None
+    if args.snapshots:
+        path = Path(args.snapshots).absolute()
+        if any(part.is_symlink() or part.is_junction() for part in (path, *path.parents)):
+            raise Refusal("native snapshots cannot use filesystem aliases")
+        path = path.resolve()
+        directory = state_dir(project).resolve()
+        if directory not in path.parents or path.stat().st_nlink != 1 or path.stat().st_size > 2 * 1024 * 1024:
+            raise Refusal("native snapshots must be a bounded runtime file")
+        snapshots = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        result = native_recovery.plan(project, snapshots, now, args.grant)
+    except Refusal as error:
+        state = native_recovery.load(state_dir(project))
+        result = {"active": False, "reason": str(error), "enrollment": state.get("enrollment")}
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     root.add_argument("--project-root", default=".")
@@ -1273,6 +1356,14 @@ def parser() -> argparse.ArgumentParser:
     waiting.add_argument("--runnable-task", action="append", default=[])
     waiting.set_defaults(handler=cmd_waiting)
 
+    native = verbs.add_parser("native-plan")
+    native.add_argument("--snapshots")
+    native.add_argument("--grant", required=True)
+    native.set_defaults(handler=cmd_native_plan)
+    binding = verbs.add_parser("native-bind")
+    binding.add_argument("--grant", required=True)
+    binding.add_argument("--automation-id", required=True)
+    binding.set_defaults(handler=cmd_native_bind)
     registration = verbs.add_parser("register-recovery")
     registration.add_argument("--session-id", required=True)
     registration.add_argument("--transcript", required=True)

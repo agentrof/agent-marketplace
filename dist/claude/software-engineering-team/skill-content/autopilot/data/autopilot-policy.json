@@ -97,5 +97,10 @@
     "HTTP 502",
     "HTTP 503",
     "HTTP 504"
-  ]
+  ],
+  "native_arming_wait_seconds": 600,
+  "native_watch_seconds": 259200,
+  "native_poll_seconds": 2,
+  "native_retry_delay_seconds": 5,
+  "native_permit_ttl_seconds": 300
 }

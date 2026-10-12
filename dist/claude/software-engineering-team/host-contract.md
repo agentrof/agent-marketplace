@@ -79,7 +79,8 @@
 - Under switch `review_panels` at `lens_panel`, run a review panel's lens
   readers in parallel: spawn every reader of the panel in one message, then
   wait for all of them before triage.
-- Under switch `code_review_panel` at `beside_official`, run the code review
+- Under switch `code_review_panel` at `beside_official`, or at `risk_scoped`
+  when its manifest carries a panel, run the code review
   panel beside the official reviewer: spawn the official `code-reviewer`,
   every `code-reviewer-lens` reader of the panel and QA in one message, then
   wait for all of them before the calibration and `merge-panel`.
@@ -144,7 +145,7 @@
   review panels under switch `review_panels` at `lens_panel` spawn them, and
   the reviewers themselves keep their own tier. Every build also ships
   `code-reviewer-lens` on the same tier; only the code review panel under
-  switch `code_review_panel` at `beside_official` spawns it, and
+  switch `code_review_panel` at `beside_official` or `risk_scoped` spawns it, and
   `code-reviewer` keeps its own tier. The package cannot switch the profile
   per user.
   The pinned models need Claude Code 2.1.284 or later: Sonnet 5.5 from
@@ -276,9 +277,9 @@
   narrows the gap: it denies `Write` and `Edit` into
   `.agentrof/agent-marketplace/.runtime/autopilot/` and puts back what a `Bash`
   command adds to the grant or the arming record there, while a command may
-  still end the grant or delete the files. A command that overlaps a run of
-  `autopilot.py` can undo that run's write, so run `autopilot.py` on its own,
-  never in a parallel batch.
+  still end the grant or delete the files. It keeps a grant or arming record
+  whose bytes `autopilot.py` or its prompt hook marked as their latest write,
+  so a long command that overlaps an `on` no longer undoes it.
 - A grant governs only the Claude Code session whose user typed it: the hook
   records its session id, the question hook denies only that session, and
   `on`, `record` and `queue` refuse when `CLAUDE_CODE_SESSION_ID` differs.

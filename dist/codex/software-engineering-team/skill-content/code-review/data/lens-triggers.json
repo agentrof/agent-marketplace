@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "parameters": {
+    "risk_paths": {
+      "summary": "Comma-separated path globs of the risky code the security-isolation lens reads: authorization, secrets, deletion and resources another owner holds. A glob matches a repository path as fnmatch does, so * also crosses a directory separator; a changed path that matches any glob brings the lens in.",
+      "type": "glob_list"
+    },
+    "lens_changed_lines": {
+      "summary": "Lines added plus lines removed in the product and test paths of the Item's frozen change against its base, as git diff --numstat counts them outside workspace/docs, above which the correctness-contract and conformance-tests lenses join; at or under it they stay out."
+    }
+  },
+  "triggers": {
+    "changed_path_matches": "A changed path of the frozen change matches a glob of the parameter.",
+    "changed_lines_above": "The frozen change's changed lines exceed the parameter."
+  },
+  "lens_triggers": [
+    {
+      "lens": "security-isolation",
+      "trigger": "changed_path_matches",
+      "parameter": "risk_paths"
+    },
+    {
+      "lens": "correctness-contract",
+      "trigger": "changed_lines_above",
+      "parameter": "lens_changed_lines"
+    },
+    {
+      "lens": "conformance-tests",
+      "trigger": "changed_lines_above",
+      "parameter": "lens_changed_lines"
+    }
+  ]
+}

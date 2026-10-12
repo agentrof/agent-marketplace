@@ -31,7 +31,8 @@ parameter the table leaves unset. A switch that only reports, such as
    later promoted default reaches the project. Never choose for the user and
    never skip a switch. When the chosen value takes parameters, ask one
    question per declared parameter with its summary and type, and take the
-   number from the owner's own answer: the package recommends none. Offer the
+   number, or for a `glob_list` the comma-separated path globs, from the
+   owner's own answer: the package recommends none. Offer the
    value in force, if any, and unset, which leaves a package limit in force
    where the switch ships one. At least the declared `min_count` must be set,
    package limits included.
@@ -46,8 +47,8 @@ parameter the table leaves unset. A switch that only reports, such as
    `execution_planning`, `implementation_schedule`, `item_cost_report`,
    `item_qa_tier`, `item_review_scale`, `lane_isolation`, `lane_table`,
    `level_change_map`, `own_target_reuse`, `owner_gates`,
-   `pre_handoff_regression`, `provisional_claims`, `qa_gate_order`,
-   `review_loop`, `review_scope`, `step_budgets`, `step_timing`,
+   `pre_handoff_regression`, `provisional_claims`, `qa_gate_order`, `regression_plan_revision`,
+`review_loop`, `review_scope`, `step_budgets`, `step_timing`,
    `test_engines` and `test_group_report`.
    A switch no Delivery flow owns is read from the current policy and stops
    no Delivery.
@@ -63,7 +64,7 @@ parameter the table leaves unset. A switch that only reports, such as
    Ask the approval choice gate. On rejection write nothing.
 5. On approval run `init` when the document is absent or `begin-revision`
    when it is approved, then `set --switch <id> --value <value>` for each
-   changed switch and `set --switch <id> --parameter <id> --value <number>`,
+   changed switch and `set --switch <id> --parameter <id> --value <number|globs>`,
    or `--default` to unset it, for each changed parameter, then
    `set --switch <id> --default` for each undeclared switch row and
    `set --switch <id> --parameter <id> --default` for each undeclared

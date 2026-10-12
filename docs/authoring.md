@@ -499,7 +499,9 @@ To add a switch:
    with the base agent's body. A value that needs owner-set numbers declares
    `parameters` (`summary`, the `values` that take them, `declared_by` naming
    the package data file and key that declare their ids, `type` and
-   `min_count`). The package sets no parameter value: the owner sets each one
+   `min_count`). `type` is `positive_integer` or `glob_list`, comma-separated
+   path globs; a declared parameter may name its own `type`, and only a
+   `positive_integer` takes a package limit. The package sets no parameter value: the owner sets each one
    in the policy's Parameters table through `/configure process`, a parameter
    exists only while its switch is at a value that takes it, and
    `process_policy.py value` reports the typed values beside the switch's. A
@@ -628,6 +630,17 @@ and the pass's panel record. The `code_review_panel` validator check rejects
 data without the review-panel shape or with a step other than `code_review`, a
 reader without the value's variant, a variant without a reader and data the
 value does not bind. A new lens or a regrouped panel is a data change.
+
+At `risk_scoped` the same panel reads, but a lens reader joins the official
+reviewer only when the frozen change fires its lens trigger.
+`plugins/software-engineering-team/skill-content/code-review/data/lens-triggers.json`
+declares each lens's trigger, `changed_path_matches` or
+`changed_lines_above`, and the switch parameter it reads, which the owner
+sets: the `risk_paths` glob list for the security lens and the
+`lens_changed_lines` threshold for the correctness and conformance lenses.
+With no lens triggered the official reviewer reads alone. A new trigger for a
+lens is a data change; a new trigger kind is a code change in
+`delivery_verification.py`.
 
 ## Mechanical passes
 

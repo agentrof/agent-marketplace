@@ -249,7 +249,7 @@
       "issue": 436
     },
     "code_review_panel": {
-      "summary": "Whether Delivery code review reads a frozen candidate with the official code reviewer alone, or also with a lens panel beside it whose calibrated blocking findings join the official result.",
+      "summary": "Whether Delivery code review reads a frozen candidate with the official code reviewer alone, also with a lens panel beside it whose calibrated blocking findings join the official result, or with only the lens readers a risky or large change brings in.",
       "issue": 347,
       "flows": ["delivery-execution"],
       "values": [
@@ -260,6 +260,10 @@
         {
           "id": "beside_official",
           "tradeoffs": "One fresh code-reviewer-lens reader per lens assignment reads the same frozen candidate and inputs in parallel with the official code reviewer, which reviews as at single_reader. A panel critical or major finding gates only once a fresh code reviewer on its role's own tier calibrates it and finds that the official result lacks it, and merge-panel registers the one code review result: the official findings and the validated panel findings, each with its source. More blockers caught per pass, as in one measured project, where the panel added 4 valid blockers the official reviewer missed in one pass, while every pass adds the lens readers' tokens and a calibration pass before the merge, and a pass where the panel adds nothing, as that project's next pass did, pays them for no gain."
+        },
+        {
+          "id": "risk_scoped",
+          "tradeoffs": "As beside_official, but a lens reader joins only when the frozen change triggers one of its lenses, by the owner's parameters: the security-isolation lens when a changed path matches the risk path globs, and the correctness-contract and conformance-tests lenses only above the changed-lines threshold. With no lens triggered the official code reviewer reads alone, as at single_reader. Small, low-risk Items skip the lens readers' tokens and the calibration before the merge, while a defect a left-out lens would have caught, in a path the globs miss or a change under the threshold, is caught only when the official reviewer finds it."
         }
       ],
       "default": "single_reader",
@@ -271,10 +275,21 @@
           "agents": ["code-reviewer"]
         }
       },
-      "value_data": {
-        "beside_official": ["skill-content/code-review/data/code-review-panel.json"]
+      "parameters": {
+        "summary": "Owner-set lens triggers at risk_scoped: the path globs that bring in the security-isolation lens and the changed-lines threshold above which the correctness-contract and conformance-tests lenses join. The package sets neither.",
+        "values": ["risk_scoped"],
+        "declared_by": {
+          "path": "skill-content/code-review/data/lens-triggers.json",
+          "key": "parameters"
+        },
+        "type": "positive_integer",
+        "min_count": 2
       },
-      "metric": "Per code-review pass: the valid critical and major findings found only by the panel, only by the official reviewer and by both, as the shadow judge rates them; the panel claims calibration confirmed, lowered, ruled invalid and ruled duplicate of another finding; and the wall clock of the combined step, from the freeze to merge-panel, against the official reviewer's alone, from the freeze to its registration, as the panel record of each pass keeps them.",
+      "value_data": {
+        "beside_official": ["skill-content/code-review/data/code-review-panel.json"],
+        "risk_scoped": ["skill-content/code-review/data/code-review-panel.json", "skill-content/code-review/data/lens-triggers.json"]
+      },
+      "metric": "Per code-review pass: the valid critical and major findings found only by the panel, only by the official reviewer and by both, as the shadow judge rates them; the panel claims calibration confirmed, lowered, ruled invalid and ruled duplicate of another finding; and the wall clock of the combined step, from the freeze to merge-panel, against the official reviewer's alone, from the freeze to its registration, as the panel record of each pass keeps them. At risk_scoped also the lenses each trigger brought in, and every valid critical or major finding later found that a left-out lens owns.",
       "promotion": {
         "unit": "At least 5 code-review passes run with beside_official across at least 2 Deliveries, the measurement criterion of #347.",
         "threshold": "Union valid critical and major recall above the official reviewer's alone and a combined wall clock at most 120% of the official reviewer's, summed over those passes, with every shared quality guard holding and the owner's approval."
@@ -392,8 +407,31 @@
         "threshold": "Zero blocking findings that are regressions in an earlier story's suite after the first review round of any Item, with every shared quality guard holding and the owner's approval."
       }
     },
+    "regression_plan_revision": {
+      "summary": "Which approved Test Plan revision supplies an earlier story's regression targets and execution metadata.",
+      "issue": 525,
+      "flows": [
+        "delivery-execution"
+      ],
+      "values": [
+        {
+          "id": "integrated",
+          "tradeoffs": "Keep the Test Plan revision the closed Item accepted. Later approved revisions do not change regression selection until an Item integrates them."
+        },
+        {
+          "id": "current_approved",
+          "tradeoffs": "Use the current complete committed backlog approval for earlier stories, record the closed-to-current scenario delta and pass current scenario metadata to the diagnostic adapter. The closure evidence remains immutable; a missing or incomplete approval refuses selection."
+        }
+      ],
+      "default": "integrated",
+      "metric": "Per Delivery: interim revisions needed only to supersede regression bindings, and missing or weakened regression coverage found after selection.",
+      "promotion": {
+        "unit": "At least 3 Deliveries using current_approved.",
+        "threshold": "Fewer binding-only interim revisions and no missing regression coverage, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "own_target_reuse": {
-      "summary": "Whether QA's final test run on a frozen candidate runs every own Test Plan target of the Item itself, or takes them, but for the ones QA spot-runs, from the pre-handoff regression run that passed on the same tree.",
+      "summary": "Whether QA's final test run on a frozen candidate runs every own Test Plan target of the Item itself, takes them, but for the ones QA spot-runs, from the pre-handoff regression run that passed on the same tree, or takes every one of them from that run and runs none itself.",
       "issue": 383,
       "flows": ["delivery-execution"],
       "values": [
@@ -404,12 +442,16 @@
         {
           "id": "spot_run",
           "tradeoffs": "Where the freeze accepted a pre-handoff run at pre_handoff_regression touched_suites, QA's final test run also takes the Item's own Test Plan targets from it, under the bindings the earlier stories' targets need: the frozen tree, the selection and approved command derived for it, the declared environment of QA's run and the age final evidence may have. QA names at least one own target in a spot-run selection, and the approved test command runs those, every own target that overlaps them and every target the run did not cover. QA's gate stops repeating the new story's cases the run covered, while a flaky own test outside the spot run passes on one green run, QA's coverage audit needs the accepted run's results, so the approved commands must keep each run's JUnit apart, and at pre_handoff_regression off nothing is reused."
+        },
+        {
+          "id": "accept_record",
+          "tradeoffs": "Where the freeze accepted a pre-handoff run at pre_handoff_regression touched_suites, QA's final test run takes every own Test Plan target of the Item and every earlier story's target from it, under the bindings spot_run checks, spot-runs none and takes no spot-run selection; QA checks only that the record binds the exact frozen candidate, and where no accepted run binds it the approved test command runs every target itself. The pre-freeze run becomes the one run of the candidate's own and touched suites in a pass, while a flaky own test passes on that one green run with no second chance to fail, QA's coverage audit reads the accepted run's results, so the approved commands must keep each run's JUnit apart, and at pre_handoff_regression off nothing is reused."
         }
       ],
       "default": "off",
       "metric": "Per Delivery: the wall clock of QA's final test run, the own targets it reused and spot-ran per Item, and every defect found after a passing QA gate, in a later review round, in the Delivery Review or after merge, in an own target that gate reused.",
       "promotion": {
-        "unit": "At least 3 Deliveries run with spot_run, each with pre_handoff_regression at touched_suites.",
+        "unit": "At least 3 Deliveries run with spot_run or accept_record, each with pre_handoff_regression at touched_suites.",
         "threshold": "No defect found after a passing QA gate in an own target that gate reused, and a median wall clock of QA's final test run at most half of the project's final test runs at off for stories of a similar suite, with every shared quality guard holding and the owner's approval."
       }
     },

@@ -685,6 +685,9 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
             check["test_cost"] = backlog.test_cost_block(cost, scope_stories, levels is not None)
         if levels is not None:
             check["test_levels"] = backlog.test_levels_block(levels, scope_stories)
+        pending_controls = backlog.pending_finding_controls(docs, record)
+        if pending_controls:
+            check["finding_control_bindings_to_absorb"] = pending_controls
         if carried:
             check["scaffold_findings"] = carried
         if writer and record.get("transition_findings"):
@@ -1112,6 +1115,9 @@ def main(argv: list[str] | None = None) -> int:
     except (InputError, OSError, ValueError, RuntimeError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2, sort_keys=True))
         return 1
+    if not args.scope_findings:
+        from reader_manifest import compact
+        result = compact(args.docs.resolve().parents[1], result)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

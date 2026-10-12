@@ -280,7 +280,7 @@ class PartitionedRunTests(unittest.TestCase):
         self.assertIn("== partition new on engine", merged)
         # No other command receives the partition variables, an inherited one included.
         with mock.patch.dict(os.environ, {"AGENTROF_TEST_PARTITION": "x", "AGENTROF_TEST_ENGINE": "engine-a"}):
-            environment = verification.command_environment(self.root)
+            environment = verification.command_environment(self.root, verification.read_session(self.root)["candidate"])
             self.assertFalse(set(verification.PARTITION_VARIABLES) & set(environment))
             names = verification.environment_identity(self.root, environment)["environment_variables"]
             self.assertFalse(set(verification.PARTITION_VARIABLES) & set(names))

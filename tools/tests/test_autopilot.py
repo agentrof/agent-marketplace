@@ -393,6 +393,21 @@ class LifecycleTests(unittest.TestCase):
                                "--options", "Publish; Hold", "--recommendation", "Hold",
                                "--blocks", "release notes", now=now)
 
+    def test_failed_authority_publication_restores_the_previous_mark(self):
+        import atomic_file
+        import autopilot_provenance
+        self.p.run_verb("on")
+        path = self.p.state / "grant.json"
+        before = path.read_bytes()
+        changed = {**json.loads(before), "id": "unpublished"}
+        after = (json.dumps(changed, indent=2, sort_keys=True) + "\n").encode()
+        with mock.patch.object(atomic_file, "replace_bytes", side_effect=OSError("interrupted write")):
+            with self.assertRaises(OSError):
+                autopilot.write_private(path, changed)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertTrue(autopilot_provenance.written_by_package(path.parent, path.name, before))
+        self.assertFalse(autopilot_provenance.written_by_package(path.parent, path.name, after))
+
     def test_check_reports_an_active_an_expired_and_no_grant(self):
         code, out, _err = self.p.run_verb("check")
         self.assertEqual((code, out.strip()), (1, "autopilot: inactive"))
@@ -436,6 +451,40 @@ class LifecycleTests(unittest.TestCase):
         code, _out, err = self.record(options="")
         self.assertEqual(code, 0, err)
         self.assertEqual(len([event for event in self.p.events() if event["event"] == "decision"]), 2)
+
+    def test_desktop_notification_backends_pass_text_as_data(self):
+        import importlib.util
+        source = ROOT / "platforms/shared/software-engineering-team/overlay/scripts/owner_notification.py"
+        spec = importlib.util.spec_from_file_location("notification_test", source)
+        notification = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(notification)
+        message = 'Choose "Hold"; $(do-not-run)'
+        for system in ("Darwin", "Linux", "Windows"):
+            with self.subTest(system=system), mock.patch.object(notification.platform, "system", return_value=system), \
+                    mock.patch.object(notification.shutil, "which", return_value="notification-program"), \
+                    mock.patch.object(notification.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+                self.assertTrue(notification.send("Decision", message)["submitted"])
+                self.assertNotIn("shell", run.call_args.kwargs)
+                self.assertEqual(run.call_args.kwargs["timeout"], 15)
+                payload = run.call_args.kwargs["input"]
+                self.assertEqual(json.loads(payload)["message"], message) if payload else self.assertIn(message, run.call_args.args[0])
+
+    def test_owner_wait_notifies_once_and_reports_question_age(self):
+        self.p.run_verb("on")
+        self.queue(now=NOW + timedelta(minutes=2))
+        with mock.patch.object(autopilot, "notify_owner", return_value={"submitted": True}) as notify:
+            code, output, _ = self.p.run_verb("waiting", "--runnable-task", "unit tests", now=NOW + timedelta(minutes=3))
+            self.assertEqual(code, 0)
+            notify.assert_not_called()
+            self.assertEqual(self.p.run_verb("waiting", now=NOW + timedelta(minutes=4))[0], 0)
+            self.assertEqual(self.p.run_verb("waiting", now=NOW + timedelta(minutes=5))[0], 0)
+            self.assertEqual(notify.call_count, 1)
+            self.assertIn("Publish the tag?", notify.call_args.args[1])
+            self.assertIn("release notes", notify.call_args.args[1])
+        code, output, _ = self.p.run_verb("report", "--json", now=NOW + timedelta(minutes=10))
+        queued = [entry for entry in json.loads(output)["entries"] if entry["event"] == "queued"]
+        self.assertEqual(queued[0]["age_seconds"], 480)
+        self.assertEqual(sum(entry["event"] == "owner_notified" for entry in self.p.events()), 1)
 
     def test_queue_appends_one_pending_question(self):
         self.p.run_verb("on")
@@ -654,8 +703,78 @@ def system_zone(name: str):
         time.tzset()
 
 
+class RecoveryProcessTests(unittest.TestCase):
+    @integration
+    def test_process_liveness_query_keeps_the_current_process_alive_on_every_os(self):
+        import autopilot_recovery as recovery
+        self.assertTrue(recovery.process_alive(os.getpid()))
+
+
 @integration
 @unittest.skipIf(os.name == "nt", "time.tzset sets the system zone only on POSIX hosts")
+class TransportRecoveryTests(unittest.TestCase):
+    @integration
+    def test_only_registered_terminal_transport_errors_resume_and_attempts_are_bounded(self):
+        import autopilot_recovery as recovery
+        import types
+        import uuid
+        project = Project(self)
+        (project.root / "tracked.txt").write_text("before the error")
+        git(project.root, "add", "tracked.txt")
+        git(project.root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "commit", "-qm", "Track the recovery input")
+        directory = project.root / ".agentrof/recovery-test"
+        directory.mkdir(parents=True)
+        session = str(uuid.uuid4())
+        transcript = directory / "host.jsonl"
+        transcript.write_text(json.dumps({"type": "thread.started", "thread_id": session, "cwd": str(project.root)}) + "\n"
+                              + json.dumps({"type": "error", "message": "ENOTFOUND initial"}) + "\n")
+        grant = {"id": "grant"}
+        unbound = directory / "unbound.jsonl"
+        unbound.write_text(json.dumps({"type": "thread.started", "thread_id": session}))
+        with self.assertRaisesRegex(ValueError, "no workspace binding"):
+            recovery.register(directory, project.root, grant, session, unbound, "qa_engineer", 99999999)
+        recovery.register(directory, project.root, grant, session, transcript, "qa_engineer", 99999999)
+        recovery.CHILDREN.clear()
+        launched = []
+        def launch(command, **kwargs):
+            launched.append(command)
+            kwargs["stdout"].write(json.dumps({"type": "error", "message": "ENOTFOUND " + str(len(launched))}).encode())
+            return types.SimpleNamespace(poll=lambda: 1)
+        host = types.SimpleNamespace(resume_command=lambda session, prompt: ["host", session, prompt],
+                                     spawn_options=lambda: {})
+        with mock.patch.object(recovery, "host_adapter", return_value=host), mock.patch.object(recovery, "process_alive", return_value=True) as alive:
+            self.assertEqual(recovery.heal(directory, project.root, grant, POLICY, launch), [])
+            alive.return_value = False
+            for expected in (1, 2, 3):
+                result = recovery.heal(directory, project.root, grant, POLICY, launch)
+                self.assertEqual(result[0]["attempt"], expected)
+            result = recovery.heal(directory, project.root, grant, POLICY, launch)
+            self.assertEqual(result[0]["state"], "needs_owner")
+            self.assertEqual(recovery.heal(directory, project.root, grant, POLICY, launch), [])
+        self.assertEqual(len(launched), 3)
+        removed = project.root / "tracked.txt"
+        removed.unlink()
+        timestamp = transcript.stat().st_mtime_ns + 1_000_000
+        os.utime(removed.parent, ns=(timestamp, timestamp))
+        self.assertTrue(recovery.wrote_after(project.root, transcript.stat().st_mtime_ns, transcript))
+        changed = project.root / "changed.txt"
+        changed.write_text("later write")
+        self.assertTrue(recovery.wrote_after(project.root, transcript.stat().st_mtime_ns, transcript))
+        self.assertTrue(all(command[1] == session for command in launched))
+        transcript.write_text(json.dumps({"type": "assistant", "message": "ENOTFOUND is quoted text"}))
+        self.assertIsNone(recovery.terminal_error(transcript, POLICY["transport_error_codes"]))
+
+    def test_recovery_is_explicitly_armed_and_expiry_refuses_it(self):
+        import autopilot_recovery as recovery
+        project = Project(self)
+        project.assert_refused("no active grant", "heal")
+        with mock.patch.object(recovery, "start", return_value=123):
+            self.assertEqual(project.run_verb("on", "--for", "1h", "--recover-transport")[0], 0)
+        self.assertTrue(project.grant()["transport_recovery"])
+        project.assert_refused("no active grant", "heal", now=NOW + timedelta(hours=2))
+
+
 class ClockTests(unittest.TestCase):
     """--until reads the system zone across a daylight-saving change, from when the user typed it."""
 
@@ -1502,6 +1621,117 @@ class ValidatorTests(unittest.TestCase):
                 validate.check_stdlib_only(validate.build_tree(self.root), findings)
                 flagged = [finding for finding in findings if finding.path.endswith("probe.py")]
                 self.assertEqual(bool(flagged), rejected, flagged)
+
+
+@integration
+class NativeRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/skill-content/autopilot/scripts"))
+        import native_recovery
+        import uuid
+        self.native = native_recovery
+        original = native_recovery.autopilot
+        native_recovery.autopilot = autopilot
+        self.addCleanup(setattr, native_recovery, "autopilot", original)
+        self.p = Project(self)
+        self.now = datetime.now(timezone.utc)
+        self.owner, self.child = str(uuid.uuid4()), str(uuid.uuid4())
+        self.assertEqual(self.p.run_verb("on", "--for", "1h", "--host", "codex", now=self.now)[0], 0)
+        grant = self.p.grant()
+        grant["transport_recovery"] = True
+        grant["armed_by"]["session_id"] = self.owner
+        autopilot.write_private(self.p.state / "grant.json", grant)
+        self.grant = grant
+        environment = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.p.state)})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def snapshot(self, session=None, *, status="failed", message="ENOTFOUND", thread_status="idle"):
+        import time
+        return {"schemaVersion": 1, "thread": {"id": session or self.child,
+            "cwd": str(self.p.root), "status": {"type": thread_status}},
+            "turns": [{"id": "turn-failure", "status": status, "error": {"message": message},
+                       "completedAt": time.time()}]}
+
+    @integration
+    def test_codex_native_plan_preserves_identity_and_refuses_other_work(self):
+        self.native.remember({"session_id": self.owner, "agent_id": self.child,
+                              "cwd": str(self.p.root), "agent_type": "qa"}, "codex", self.now)
+        plan = self.native.plan(self.p.root, None, self.now, self.grant["id"])
+        self.assertEqual(plan["inspect"], sorted([self.owner, self.child]))
+        self.assertEqual(plan["enrollment"]["arguments"]["targetThreadId"], self.owner)
+        for change in ({"status": "completed"}, {"status": "interrupted"},
+                       {"message": "invalid API key"}, {"thread_status": "active"}):
+            self.assertEqual(self.native.plan(self.p.root, [self.snapshot(**change)], self.now,
+                                                   self.grant["id"])["actions"], [])
+        result = self.native.plan(self.p.root, [self.snapshot()], self.now, self.grant["id"])
+        self.assertEqual([row["thread_id"] for row in result["actions"]], [self.child])
+        message = result["actions"][0]["message"]
+        event = {"cwd": str(self.p.root), "session_id": self.owner,
+                 "tool_input": {"id": self.child, "message": message, "interrupt": False}}
+        changed = {**event, "tool_input": {**event["tool_input"], "message": message + " changed"}}
+        self.assertIn("message changed", self.native.dispatch_guard(changed, self.now))
+        self.assertIn("expired", self.native.dispatch_guard(event, self.now + timedelta(minutes=6)))
+        self.assertIn("another coordinator", self.native.dispatch_guard({**event, "session_id": self.child}, self.now))
+        with mock.patch.object(autopilot, "load_native_recovery", side_effect=ValueError("fixture")):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                autopilot.run_hook(["native-dispatch"], io.StringIO(json.dumps(event)), self.now)
+            self.assertEqual(json.loads(output.getvalue())["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(self.native.dispatch_guard({**event, "tool_input": {
+            **event["tool_input"], "content": message[:50] + "…"}}, self.now), "")
+        self.assertIn("consumed", self.native.dispatch_guard(event, self.now))
+        self.assertEqual(self.native.plan(self.p.root, [self.snapshot()], self.now,
+                                               self.grant["id"])["actions"], [])
+        wrong = self.snapshot(); wrong["thread"]["cwd"] = str(self.p.root.parent)
+        with self.assertRaisesRegex(ValueError, "outside"):
+            self.native.plan(self.p.root, [wrong], self.now, self.grant["id"])
+        self.assertFalse(self.native.plan(self.p.root, None, self.now, "replaced")["active"])
+
+    @integration
+    def test_native_enrollment_is_bound_once_and_inactive_hooks_do_nothing(self):
+        with mock.patch.object(autopilot, "load_native_recovery", return_value=self.native):
+            code, _out, error = self.p.run_verb("native-bind", "--grant", self.grant["id"],
+                                              "--automation-id", "fixture-heartbeat", now=self.now)
+            self.assertEqual(code, 0, error)
+            code, _out, _error = self.p.run_verb("native-bind", "--grant", self.grant["id"],
+                                               "--automation-id", "different-heartbeat", now=self.now)
+            self.assertEqual(code, 1)
+        grant = self.p.grant(); grant["state"] = "revoked"
+        autopilot.write_private(self.p.state / "grant.json", grant)
+        with self.assertRaises(autopilot.Refusal):
+            self.native.remember({"session_id": self.owner, "cwd": str(self.p.root)}, "codex", self.now)
+
+    @integration
+    def test_claude_native_wake_is_bounded_and_ignores_unmarked_prose(self):
+        grant = self.p.grant(); grant["host"] = "claude"
+        autopilot.write_private(self.p.state / "grant.json", grant)
+        path = self.p.state / "native-transcript.jsonl"
+        event = {"type": "assistant", "is_api_error_message": True,
+                 "message": {"content": [{"type": "text", "text": "API Error: 503 temporary service error"}]}}
+        path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+        payload = {"session_id": self.owner, "cwd": str(self.p.root), "transcript_path": str(path)}
+        error = io.StringIO()
+        with contextlib.redirect_stderr(error):
+            self.assertEqual(self.native.watch(payload, clock=lambda: self.now, sleep=lambda _: None), 2)
+        self.assertIn("same conversation", error.getvalue())
+        self.assertEqual(self.native.watch(payload, clock=lambda: self.now, sleep=lambda _: None), 0)
+        for index in range(1, 4):
+            event["message"]["content"][0]["text"] += str(index)
+            path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()), mock.patch.object(autopilot, "notify_owner"):
+                self.assertEqual(self.native.watch(payload, clock=lambda: self.now, sleep=lambda _: None),
+                                 2 if index < 3 else 0)
+        event["is_api_error_message"] = False
+        path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+        self.assertIsNone(self.native.claude_failure(path, POLICY))
+        event["is_api_error_message"] = True
+        path.write_text(json.dumps(event) + "\n" + json.dumps({"type": "user", "isMeta": True,
+                        "message": {"content": "[Request interrupted by user]"}}), encoding="utf-8")
+        self.assertIsNone(self.native.claude_failure(path, POLICY))
+        grant["state"] = "revoked"
+        autopilot.write_private(self.p.state / "grant.json", grant)
+        self.assertEqual(self.native.watch(payload, clock=lambda: self.now, sleep=lambda _: None), 0)
 
 
 if __name__ == "__main__":

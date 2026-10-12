@@ -71,7 +71,7 @@ def environment() -> dict:
             "PYTHONDONTWRITEBYTECODE": "1"}
 
 
-def hook_commands(host: str) -> dict[tuple[str, str | None], list[str]]:
+def hook_commands(host: str) -> dict[tuple[str, str | None, int], list[str]]:
     """Each packaged hook's argv after `python3`, the plugin root substituted, by event and matcher."""
     events = json.loads((package(host) / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
     commands = {}
@@ -81,13 +81,13 @@ def hook_commands(host: str) -> dict[tuple[str, str | None], list[str]]:
                 text = handler["command"].replace(ROOT_VARIABLES[host], shlex.quote(str(package(host))))
                 argv = shlex.split(text)
                 assert argv[0] == "python3", argv
-                commands[event, group.get("matcher")] = argv[1:]
+                commands[event, group.get("matcher"), len(commands)] = argv[1:]
     return commands
 
 
 def vault_pre(host: str) -> list[str]:
     """The packaged PreToolUse vault hook command."""
-    return next(argv for (event, _matcher), argv in hook_commands(host).items()
+    return next(argv for (event, _matcher, _index), argv in hook_commands(host).items()
                 if event == "PreToolUse" and argv[1] == "scripts/vault_hook.py")
 
 
@@ -167,7 +167,8 @@ class RuntimeFloorTests(unittest.TestCase):
     def test_below_the_floor_session_start_reports_the_runtime_and_never_blocks(self):
         for host in ROOT_VARIABLES:
             with self.subTest(host=host):
-                argv = hook_commands(host)["SessionStart", None]
+                argv = next(argv for (event, _matcher, _index), argv in hook_commands(host).items()
+                            if event == "SessionStart")
                 result = run(argv, {"hook_event_name": "SessionStart", "source": "startup",
                                     "session_id": "floor", "cwd": str(self.work)}, self.work, BELOW)
                 self.assertEqual((result.returncode, result.stderr), (0, ""))
@@ -185,7 +186,7 @@ class RuntimeFloorTests(unittest.TestCase):
                     "PreToolUse": {"tool_name": "AskUserQuestion", "tool_input": {"questions": []}}}
         project = plugin_project(self.work / "project")
         for host in ROOT_VARIABLES:
-            for (event, matcher), argv in hook_commands(host).items():
+            for (event, matcher, _index), argv in hook_commands(host).items():
                 if event not in payloads or argv == vault_pre(host):
                     continue
                 with self.subTest(host=host, event=event, matcher=matcher):
@@ -270,8 +271,8 @@ class RuntimeFloorTests(unittest.TestCase):
                       ("not json", None), ("", None)],
         }
         for host, cases in prompts.items():
-            argv = next(argv for (event, _matcher), argv in hook_commands(host).items()
-                        if event.startswith("UserPrompt"))
+            argv = next(argv for (event, _matcher, _index), argv in hook_commands(host).items()
+                        if event.startswith("UserPrompt") and "user-prompt" in argv)
             for payload, expected in cases:
                 with self.subTest(host=host, payload=payload):
                     if isinstance(payload, dict):
@@ -394,12 +395,13 @@ class RuntimeFloorTests(unittest.TestCase):
             "SessionStart": {"source": "startup"},
             "UserPromptExpansion": {"prompt": "Plan the next Delivery."},
             "UserPromptSubmit": {"prompt": "Plan the next Delivery."},
+            "SubagentStart": {"agent_id": "fixture", "agent_type": "fixture"},
             "PreToolUse": {"tool_name": "Write", "tool_input": {"file_path": note, "content": "[a](b.md)\n"}},
             "PostToolUse": {"tool_name": "Write", "tool_input": {"file_path": note}},
             "PostToolUseFailure": {"tool_name": "Agent", "tool_input": {}, "error": "failed"},
         }
         for host in ROOT_VARIABLES:
-            for (event, matcher), argv in hook_commands(host).items():
+            for (event, matcher, _index), argv in hook_commands(host).items():
                 payload = dict(payloads[event], hook_event_name=event, session_id="floor", cwd=str(project))
                 with self.subTest(host=host, event=event, matcher=matcher):
                     through = run(argv, payload, project, process=True)

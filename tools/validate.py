@@ -1211,6 +1211,8 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
             if (is_hooks_manifest and where == "$.hooks"
                     and HOOK_EVENT_KEY_RE.match(key)):
                 continue  # hook event names are the host platform's schema
+            if is_hooks_manifest and "claude" in path.parts and key == "asyncRewake":
+                continue  # Native host command-hook field.
             if is_model_catalog and where == "$.models":
                 continue
             if not SNAKE_KEY_RE.match(key):
@@ -2770,7 +2772,9 @@ PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants", "parameters", "value_
 # skill holds them, declares this reference_scope.
 SWITCH_REFERENCE_SCOPES = {"owning_flows"}
 SWITCH_PARAMETER_KEYS = {"summary", "values", "declared_by", "type", "min_count"}
-SWITCH_PARAMETER_TYPES = {"positive_integer"}
+SWITCH_PARAMETER_TYPES = {"positive_integer", "glob_list"}
+# A package limit is a number; a promotion ships no glob list.
+SWITCH_LIMIT_TYPES = {"positive_integer"}
 VALUE_DATA_RE = re.compile(r"^skill-content/[a-z0-9]+(?:-[a-z0-9]+)*/data/[a-z0-9]+(?:-[a-z0-9]+)*\.json$")
 AGENT_VARIANT_KEYS = {"suffix", "tier", "description", "agents"}
 MECHANICAL_PASS_SWITCH = "mechanical_pass_tier"
@@ -2930,6 +2934,11 @@ def parameter_problems(where: str, parameters: object, values: list[str], defaul
                 problems.append(f"{where}: declared_by {relative} key {source['key']!r} must map"
                                 " snake_case parameter ids to a summary")
                 declared = None
+            else:
+                for key, item in sorted(declared.items()):
+                    if "type" in item and item["type"] not in SWITCH_PARAMETER_TYPES:
+                        problems.append(f"{where}: parameter {key!r} type {item['type']!r} is not one of"
+                                        f" {sorted(SWITCH_PARAMETER_TYPES)}")
     minimum = parameters["min_count"]
     if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 0 \
             or (declared is not None and minimum > len(declared)):
@@ -2940,7 +2949,10 @@ def parameter_problems(where: str, parameters: object, values: list[str], defaul
     if not isinstance(limits, dict) or any(
             isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
             for limit in limits.values()) or (
-            declared is not None and set(limits) - set(declared)):
+            declared is not None and set(limits) - set(declared)) or (
+            declared is not None and isinstance(limits, dict) and any(
+                declared[key].get("type", parameters["type"]) not in SWITCH_LIMIT_TYPES
+                for key in set(limits) & set(declared))):
         problems.append(f"{where}: package_limits must map declared parameter ids to"
                         " positive whole numbers")
     return problems
@@ -3583,8 +3595,9 @@ def check_assertion_kinds(tree: Tree, findings: list[Finding]) -> None:
 AUTOPILOT_POLICY_RELPATH = "skill-content/autopilot/data/autopilot-policy.json"
 AUTOPILOT_SCRIPT_RELPATH = "skill-content/autopilot/scripts/autopilot.py"
 AUTOPILOT_NUMBERS = ("default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
-                     "arming_ttl_minutes")
-AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", *AUTOPILOT_NUMBERS}
+                     "arming_ttl_minutes", "transport_interval_seconds", "transport_max_attempts",
+                     "native_arming_wait_seconds", "native_watch_seconds", "native_poll_seconds", "native_retry_delay_seconds", "native_permit_ttl_seconds")
+AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", "transport_error_codes", *AUTOPILOT_NUMBERS}
 AUTOPILOT_DEFAULTS = ("allowed", "excluded", "never")
 
 
@@ -3598,6 +3611,18 @@ def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
                if isinstance(data[key], int) and not isinstance(data[key], bool) and data[key] > 0}
     problems += [f"{key} must be a positive whole number"
                  for key in AUTOPILOT_NUMBERS if key not in numbers]
+    if not 1 <= numbers.get("transport_max_attempts", 0) <= 3:
+        problems.append("transport_max_attempts must be between 1 and 3")
+    if not 1 <= numbers.get("transport_interval_seconds", 0) <= 3600:
+        problems.append("transport_interval_seconds must be between 1 and 3600")
+    if numbers.get("native_watch_seconds", 0) > numbers.get("max_duration_hours", 0) * 3600:
+        problems.append("native_watch_seconds must not outlive the maximum grant")
+    if numbers.get("native_arming_wait_seconds", 0) > numbers.get("arming_ttl_minutes", 0) * 60:
+        problems.append("native_arming_wait_seconds must not outlive the arming record")
+    codes = data.get("transport_error_codes")
+    if (not isinstance(codes, list) or not codes or any(not _nonblank(code) for code in codes)
+            or len(codes) != len(set(codes))):
+        problems.append("transport_error_codes must list unique nonempty error codes")
     maximum = numbers.get("max_duration_hours")
     problems += [f"{key} {numbers[key]} is above max_duration_hours {maximum}"
                  for key in ("default_duration_hours", "default_goal_cap_hours")

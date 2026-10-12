@@ -29,6 +29,8 @@ through the project's Process Policy.
 4. The coordinator records the result with `repair-review-result --delivery
    DLV-### --story <story> --file <result.json>`. `freeze`, including a freeze
    called by `start-pass`, refuses a missing, changed, stale or failed result.
+   `start-pass` checks this requirement before `regression-selection` or
+   `regression-run`, so an unreviewed repair starts no expensive verification.
    A product, contract, instruction or previous-pass findings change invalidates
    the review; obtain a new manifest and fresh review of the changed repair.
 5. Repair a blocking result and repeat this review before another freeze.

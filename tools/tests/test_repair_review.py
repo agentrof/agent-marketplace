@@ -114,6 +114,31 @@ class RepairReviewTests(unittest.TestCase):
             verification.register_repair_review(self.root, 'DLV-001', 'AUTH-01', result)
 
     @integration
+    def test_start_pass_refuses_unreviewed_repairs_before_running_regression(self):
+        manifest = self.begin_repair()
+        previous = verification.read_session(self.root)['session_id']
+        for result in (None, self.review(manifest, severity='major')):
+            if result is not None:
+                verification.register_repair_review(self.root, 'DLV-001', 'AUTH-01', result)
+            with mock.patch.object(verification, 'pre_handoff_regression', return_value=verification.TOUCHED_SUITES), \
+                 mock.patch.object(verification, 'regression_selection') as selection, \
+                 mock.patch.object(verification, 'regression_run') as run, \
+                 mock.patch.object(verification, 'freeze') as freeze:
+                rejected = verification.start_pass(self.root, 'DLV-001', 'AUTH-01', fresh=True)
+                self.assertFalse(rejected['ok'])
+                self.assertEqual(rejected['failed_step'], 'repair-review')
+                selection.assert_not_called()
+                run.assert_not_called()
+                freeze.assert_not_called()
+            self.assertEqual(verification.read_session(self.root)['session_id'], previous)
+        verification.register_repair_review(self.root, 'DLV-001', 'AUTH-01', self.review(manifest))
+        with mock.patch.object(verification, 'pre_handoff_regression', return_value=verification.TOUCHED_SUITES), \
+             mock.patch.object(verification, 'regression_selection', side_effect=RuntimeError('after review')) as selection:
+            accepted = verification.start_pass(self.root, 'DLV-001', 'AUTH-01')
+            self.assertEqual(accepted['failed_step'], 'regression-selection')
+            selection.assert_called_once()
+
+    @integration
     def test_default_keeps_freeze_behavior_and_disabled_review_writes_nothing(self):
         self.freeze(); self.settle()
         self.write('src/product.py', 'value = 4\n'); self.commit()

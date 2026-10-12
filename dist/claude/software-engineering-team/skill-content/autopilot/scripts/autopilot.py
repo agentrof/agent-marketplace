@@ -40,6 +40,10 @@ SCRIPTS = PACKAGE / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+RECOVERY_SCRIPTS = str(Path(__file__).resolve().parent)
+if RECOVERY_SCRIPTS not in sys.path:
+    sys.path.insert(0, RECOVERY_SCRIPTS)
+
 POLICY = ENTRY / "data" / "autopilot-policy.json"
 HOOKS = PACKAGE / "hooks" / "hooks.json"
 # The build writes this provenance file into every host package it makes.
@@ -78,6 +82,20 @@ def parse_stamp(value: str) -> datetime:
 def span(delta: timedelta) -> str:
     minutes = max(0, int(delta.total_seconds() // 60))
     return f"{minutes // 60}h {minutes % 60:02d}m"
+
+
+def load_native_recovery():
+    """Load the host adapter shipped beside this entry in a built package."""
+    import importlib.util
+    path = Path(__file__).with_name("native_recovery.py")
+    if not path.is_file() or path.is_symlink():
+        raise ImportError("native recovery adapter is unavailable")
+    spec = importlib.util.spec_from_file_location("native_recovery_host", path)
+    if spec is None or spec.loader is None:
+        raise ImportError("native recovery adapter is unreadable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def load_policy() -> dict:
@@ -212,14 +230,27 @@ def private_dir(directory: Path) -> Path:
     return directory
 
 
+def mark_write(path: Path, data: bytes | None) -> None:
+    """Tell the vault hook a grant or arming write is this package's; see autopilot_provenance."""
+    import autopilot_provenance
+
+    if path.name in (GRANT, ARMING):
+        autopilot_provenance.record(path.parent, path.name, data)
+
+
 def write_private(path: Path, value: dict) -> None:
     import atomic_file
 
     private_dir(path.parent)
-    with contextlib.suppress(FileExistsError):
-        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
-    os.chmod(path, 0o600)
-    atomic_file.replace_bytes(path, (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+    data = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    import autopilot_provenance
+    publication = (autopilot_provenance.publication(path.parent, path.name, data)
+                   if path.name in (GRANT, ARMING) else contextlib.nullcontext())
+    with publication:
+        with contextlib.suppress(FileExistsError):
+            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        os.chmod(path, 0o600)
+        atomic_file.replace_bytes(path, data)
 
 
 def append_private(path: Path, value: dict) -> None:
@@ -359,6 +390,7 @@ def move_aside(path: Path, now: datetime) -> Path:
     while target.exists():
         number += 1
         target = path.with_name(f"{stem}-{number}")
+    mark_write(path, None)
     os.replace(path, target)
     os.chmod(target, 0o600)
     return target
@@ -459,6 +491,7 @@ def option_parser() -> Parser:
     parser.add_argument("--for", dest="duration")
     parser.add_argument("--until")
     parser.add_argument("--goal")
+    parser.add_argument("--recover-transport", action="store_true")
     parser.add_argument("--allow", action="append", default=[])
     parser.add_argument("--deny", action="append", default=[])
     return parser
@@ -571,11 +604,12 @@ def grant_terms(policy: dict, options: argparse.Namespace, now: datetime, projec
         hours = policy["default_goal_cap_hours"] if goal else policy["default_duration_hours"]
         expires = now + timedelta(hours=hours)
     return {"expires_at": stamp(expires), "goal": goal,
-            "classes": grant_classes(policy, names(options.allow), names(options.deny))}
+            "classes": grant_classes(policy, names(options.allow), names(options.deny)),
+            **({"transport_recovery": True} if options.recover_transport else {})}
 
 
 def options_given(options: argparse.Namespace) -> bool:
-    return bool(options.duration or options.until or options.goal or options.allow or options.deny)
+    return bool(options.duration or options.until or options.goal or options.allow or options.deny or options.recover_transport)
 
 
 def fresh_arming(directory: Path, policy: dict, now: datetime) -> dict:
@@ -663,12 +697,18 @@ def chain(directory: Path, grant: dict) -> list[str]:
     return ids
 
 
-def report_payload(directory: Path, grant: dict) -> dict:
+def report_payload(directory: Path, grant: dict, now: datetime | None = None) -> dict:
     """Every decision and queued question of the grant and the grants it replaced, in time order."""
     ids = chain(directory, grant)
     entries = [event for event in ledger(directory)
                if event.get("grant") in ids and event.get("event") in ("decision", "queued")]
+    if now is not None:
+        entries = [{**event, **({"age_seconds": max(0, int((now - parse_stamp(event["time"])).total_seconds()))}
+                               if event["event"] == "queued" else {})} for event in entries]
+    recovery = [event for event in ledger(directory)
+                if event.get("grant") in ids and event.get("event") == "transport_recovery"]
     return {"grant": grant, "chain": ids, "entries": entries,
+            **({"transport_recovery": recovery} if recovery else {}),
             "counts": {"decisions": sum(event["event"] == "decision" for event in entries),
                        "queued": sum(event["event"] == "queued" for event in entries)}}
 
@@ -707,7 +747,11 @@ def report_lines(payload: dict) -> list[str]:
             lines.append(f"{number}. {entry['time']}{owner} queued [{classes}]"
                          f" {entry['question']} -> recommended: {entry['recommendation']}")
             lines.append(f"   options: {options or 'none offered'}"
-                         + (f"; blocks: {entry['blocks']}" if entry.get("blocks") else ""))
+                         + (f"; blocks: {entry['blocks']}" if entry.get("blocks") else "")
+                         + (f"; waiting {entry['age_seconds']}s" if "age_seconds" in entry else ""))
+    for entry in payload.get("transport_recovery", []):
+        lines.append(f"transport recovery: {entry.get('state')} for {entry.get('session')}"
+                     + (f"; {entry['reason']}" if entry.get("reason") else ""))
     counts = payload["counts"]
     lines.append(f"decisions: {counts['decisions']}, queued: {counts['queued']}")
     return lines
@@ -747,6 +791,7 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
             problem = binding_problem(arming.get("host"), arming.get("session_id"), typed=True)
             if problem:
                 raise Refusal(problem)
+            mark_write(directory / ARMING, None)
             (directory / ARMING).unlink()
         try:
             tokens = shlex.split(arming["arguments"])
@@ -765,6 +810,8 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
             ("for", args.duration), ("until", args.until), ("goal", args.goal)) if value]
         typed += [f"--allow {value}" for value in args.allow]
         typed += [f"--deny {value}" for value in args.deny]
+        if args.recover_transport:
+            typed.append("--recover-transport")
         armed_by = {"guard": "user_only_entry", "arguments": " ".join(["on", *typed])}
         host = args.host
     terms = grant_terms(policy, options, now, project,
@@ -789,7 +836,23 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
     if grant["replaces"]:
         lines.append(f"replaces: {grant['replaces']}")
     lines.append(f"armed by: {armed_by['guard']} with `{armed_by['arguments']}`")
+    if grant.get("transport_recovery"):
+        import autopilot_recovery
+        try:
+            pid = autopilot_recovery.start(Path(__file__), project.resolve(), grant, directory)
+            lines.append(f"transport recovery watcher: {pid}")
+        except (ImportError, OSError, ValueError) as error:
+            lines.append(f"transport recovery unavailable: {error}")
     print("\n".join(lines))
+    if grant.get("transport_recovery"):
+        try:
+            native_recovery = load_native_recovery()
+        except ImportError:
+            pass
+        else:
+            request = native_recovery.enrollment(project, grant)
+            if request is not None:
+                print(json.dumps({"native_recovery_enrollment": request}))
     return 0
 
 
@@ -974,6 +1037,44 @@ def cmd_queue(args: argparse.Namespace, now: datetime) -> int:
     return 0
 
 
+
+def notify_owner(title: str, message: str) -> dict:
+    try:
+        import owner_notification
+    except ImportError:
+        return {"submitted": False, "reason": "host notification adapter is unavailable"}
+    return owner_notification.send(title, message)
+
+
+def cmd_waiting(args: argparse.Namespace, now: datetime) -> int:
+    directory = state_dir(Path(args.project_root))
+    require_state(directory, "no active grant")
+    with locked(directory):
+        grant = active_grant(directory, now, Path(args.project_root))
+        queued = [entry for entry in ledger(directory, grant["id"]) if entry.get("event") == "queued"]
+        if args.runnable_task or not queued:
+            print(json.dumps({"submitted": False, "reason": "independent work remains" if args.runnable_task
+                              else "no queued decision"}))
+            return 0
+        import hashlib
+        queue_hash = hashlib.sha256(json.dumps(queued, sort_keys=True).encode()).hexdigest()
+        if any(entry.get("event") == "owner_notified" and entry.get("queue_hash") == queue_hash
+               for entry in ledger(directory, grant["id"])):
+            print(json.dumps({"submitted": False, "reason": "this decision queue was already notified"}))
+            return 0
+        last = queued[-1]
+        elapsed = max(0, int((now - parse_stamp(grant["granted_at"])).total_seconds()))
+        message = (last["question"] + " Recommended: " + last["recommendation"]
+                   + ". Blocked: " + (last.get("blocks") or "remaining work")
+                   + f". Running for {elapsed // 60} minutes.")
+        result = notify_owner("Delivery needs your decision", message)
+        log(directory, now, grant, "owner_notified" if result.get("submitted") else "notification_failed",
+            queue_hash=queue_hash, question=last["question"], recommendation=last["recommendation"],
+            blocks=last.get("blocks", ""), elapsed_seconds=elapsed, notification=result)
+        print(json.dumps(result))
+        return 0 if result.get("submitted") else 1
+
+
 def cmd_off(args: argparse.Namespace, now: datetime) -> int:
     directory = state_dir(Path(args.project_root))
     require_state(directory, "no grant to revoke")
@@ -1018,7 +1119,7 @@ def cmd_report(args: argparse.Namespace, now: datetime) -> int:
                  "replaces": granted[0].get("replaces")}
     if grant is None:
         raise Refusal("no grant to report")
-    payload = report_payload(directory, grant)
+    payload = report_payload(directory, grant, now)
     print(json.dumps(payload, indent=2, sort_keys=True) if args.json
           else "\n".join(report_lines(payload)))
     return 0
@@ -1083,7 +1184,7 @@ def denial(grant: dict, now: datetime) -> str:
         " governing document where the flow records the user's answer, marked"
         f" {grant['id']}. Otherwise run `{command} queue` with --class, --question, --options"
         " and --recommendation, and continue the work that does not depend on it; stop only"
-        " when every remaining task waits on a queued question, then end with the queued list.")
+        " when every remaining task waits on a queued question, then call `autopilot.py waiting` once and end with the queued list.")
 
 
 def hook_pre_question(options: dict, payload: dict, now: datetime) -> None:
@@ -1104,6 +1205,7 @@ def hook_pre_question(options: dict, payload: dict, now: datetime) -> None:
 
 
 def run_hook(argv: list[str], stdin, now: datetime) -> int:
+    verb, payload = "", {}
     try:
         verb, rest = argv[0], argv[1:]
         options = dict(zip(rest[::2], rest[1::2]))
@@ -1114,15 +1216,140 @@ def run_hook(argv: list[str], stdin, now: datetime) -> int:
             hook_user_prompt(options, payload, now)
         elif verb == "pre-question":
             hook_pre_question(options, payload, now)
+        elif verb == "native-watch":
+            native_recovery = load_native_recovery()
+            return native_recovery.watch(payload)
+        elif verb == "native-register":
+            native_recovery = load_native_recovery()
+            native_recovery.remember(payload, options.get("--host"), now)
+        elif verb == "native-dispatch":
+            native_recovery = load_native_recovery()
+            refusal = native_recovery.dispatch_guard(payload, now)
+            if refusal:
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                    "permissionDecision": "deny", "permissionDecisionReason": refusal}}))
     except Exception:
-        # An internal error allows the prompt or the question: the session asks as usual.
-        pass
+        data = payload.get("tool_input", {}) if isinstance(payload, dict) else {}
+        prompt = data.get("message", data.get("prompt", data.get("content", ""))) if isinstance(data, dict) else ""
+        if verb == "native-dispatch" and isinstance(prompt, str) and prompt.startswith("AUTOPILOT_TRANSPORT_RECOVERY:"):
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                "permissionDecision": "deny", "permissionDecisionReason": "Native recovery validation failed."}}))
+        # Other internal hook errors preserve the ordinary prompt and question paths.
     return 0
 
 
 # ---------------------------------------------------------------------------
 # Command line
 # ---------------------------------------------------------------------------
+
+
+
+def recovery_grant(args, now):
+    directory = state_dir(Path(args.project_root))
+    require_state(directory, "no active grant")
+    grant = active_grant(directory, now, Path(args.project_root))
+    if grant.get("transport_recovery") is not True:
+        raise Refusal("transport recovery needs a user-armed --recover-transport grant")
+    return directory, grant
+
+
+def cmd_register_recovery(args, now):
+    import autopilot_recovery
+    directory, grant = recovery_grant(args, now)
+    with locked(directory):
+        result = autopilot_recovery.register(directory, Path(args.project_root), grant,
+                                             args.session_id, args.transcript, args.role, args.pid)
+    print(json.dumps(result))
+    return 0
+
+
+def cmd_heal(args, now):
+    import autopilot_recovery
+    directory, grant = recovery_grant(args, now)
+    with locked(directory):
+        result = autopilot_recovery.heal(directory, Path(args.project_root), grant, load_policy())
+        for entry in result:
+            log(directory, now, grant, "transport_recovery", **entry)
+            if entry.get("state") == "needs_owner":
+                notify_owner("Transport recovery needs attention", entry["reason"] + ": " + entry["session"])
+    print(json.dumps({"outcomes": result}))
+    return 0
+
+
+def cmd_watch_recovery(args, now):
+    import file_lock
+    directory, grant = recovery_grant(args, now)
+    if grant["id"] != args.grant:
+        return 0
+    path = directory / "recovery-watch.lock"
+    if path.is_symlink():
+        raise Refusal("recovery watcher lock cannot be a symlink")
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    held = False
+    try:
+        if not file_lock.try_lock(descriptor):
+            return 0
+        held = True
+        while True:
+            moment = datetime.now(timezone.utc)
+            try:
+                _directory, active = recovery_grant(args, moment)
+            except Refusal:
+                return 0
+            if active["id"] != args.grant:
+                return 0
+            cmd_heal(args, moment)
+            remaining = (parse_stamp(active["expires_at"]) - moment).total_seconds()
+            if remaining <= 0:
+                return 0
+            time.sleep(min(load_policy()["transport_interval_seconds"], remaining))
+    finally:
+        if held:
+            file_lock.unlock(descriptor)
+        os.close(descriptor)
+
+
+def cmd_native_bind(args, now):
+    native_recovery = load_native_recovery()
+    directory, grant = recovery_grant(args, now)
+    if grant["id"] != args.grant or not native_recovery.supports_enrollment(grant):
+        raise Refusal("native enrollment belongs to the active native grant")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", args.automation_id):
+        raise Refusal("native enrollment requires the host's automation id")
+    with locked(directory):
+        state = native_recovery.load(directory)
+        old = state.get("enrollment", {})
+        if old.get("grant") == args.grant and old.get("automation_id") != args.automation_id:
+            raise Refusal("this grant already has a native heartbeat")
+        state["enrollment"] = {"grant": args.grant, "automation_id": args.automation_id,
+                               "owner": grant["armed_by"].get("session_id")}
+        native_recovery.store(directory, state)
+        log(directory, now, grant, "transport_recovery", state="native_heartbeat_enrolled",
+            session=grant["armed_by"].get("session_id"), automation_id=args.automation_id)
+    print(json.dumps({"native_recovery": "armed", **state["enrollment"]}))
+    return 0
+
+
+def cmd_native_plan(args, now):
+    native_recovery = load_native_recovery()
+    project = Path(args.project_root).resolve()
+    snapshots = None
+    if args.snapshots:
+        path = Path(args.snapshots).absolute()
+        if any(part.is_symlink() or part.is_junction() for part in (path, *path.parents)):
+            raise Refusal("native snapshots cannot use filesystem aliases")
+        path = path.resolve()
+        directory = state_dir(project).resolve()
+        if directory not in path.parents or path.stat().st_nlink != 1 or path.stat().st_size > 2 * 1024 * 1024:
+            raise Refusal("native snapshots must be a bounded runtime file")
+        snapshots = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        result = native_recovery.plan(project, snapshots, now, args.grant)
+    except Refusal as error:
+        state = native_recovery.load(state_dir(project))
+        result = {"active": False, "reason": str(error), "enrollment": state.get("enrollment")}
+    print(json.dumps(result, sort_keys=True))
+    return 0
 
 
 def parser() -> argparse.ArgumentParser:
@@ -1140,6 +1367,28 @@ def parser() -> argparse.ArgumentParser:
         verb.add_argument("--json", action="store_true")
         verb.set_defaults(handler=handler)
     verbs.choices["report"].add_argument("--grant")
+    waiting = verbs.add_parser("waiting")
+    waiting.add_argument("--runnable-task", action="append", default=[])
+    waiting.set_defaults(handler=cmd_waiting)
+
+    native = verbs.add_parser("native-plan")
+    native.add_argument("--snapshots")
+    native.add_argument("--grant", required=True)
+    native.set_defaults(handler=cmd_native_plan)
+    binding = verbs.add_parser("native-bind")
+    binding.add_argument("--grant", required=True)
+    binding.add_argument("--automation-id", required=True)
+    binding.set_defaults(handler=cmd_native_bind)
+    registration = verbs.add_parser("register-recovery")
+    registration.add_argument("--session-id", required=True)
+    registration.add_argument("--transcript", required=True)
+    registration.add_argument("--role", required=True)
+    registration.add_argument("--pid", type=int, required=True)
+    registration.set_defaults(handler=cmd_register_recovery)
+    verbs.add_parser("heal").set_defaults(handler=cmd_heal)
+    watcher = verbs.add_parser("watch-recovery")
+    watcher.add_argument("--grant", required=True)
+    watcher.set_defaults(handler=cmd_watch_recovery)
     record = verbs.add_parser("record")
     record.add_argument("--choice", required=True)
     record.add_argument("--reason", required=True)

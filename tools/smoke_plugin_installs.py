@@ -518,6 +518,9 @@ def smoke_claude(source: str | Path, expected: Path | None = None) -> None:
         run(["claude", "plugin", "install", f"{TEAM}@{MARKETPLACE}"], env)
         inventory = json.loads(run(["claude", "plugin", "list", "--json"], env))
         root = installed_root(inventory, "claude")
+        if (root / "skill-content/autopilot/scripts/native_recovery.py").is_file():
+            run([sys.executable, str(VERIFIER_ROOT / "tools/native_recovery_smoke.py"),
+                 "--plugin-root", str(root)], env)
         if expected is not None:
             verify_installed_package(root, expected, "claude")
         exercise_package(root, project, env)

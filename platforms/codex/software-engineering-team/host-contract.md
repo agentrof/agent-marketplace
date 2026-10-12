@@ -59,7 +59,8 @@
 - Under switch `review_panels` at `lens_panel`, run a review panel's lens
   readers in parallel: start every reader of the panel before waiting on any
   of them, then wait for all of them before triage.
-- Under switch `code_review_panel` at `beside_official`, run the code review
+- Under switch `code_review_panel` at `beside_official`, or at `risk_scoped`
+  when its manifest carries a panel, run the code review
   panel beside the official reviewer: start the official `code-reviewer`,
   every `code-reviewer-lens` reader of the panel and QA before waiting on any
   of them, then wait for all of them before the calibration and `merge-panel`.
@@ -131,8 +132,8 @@
   `review_panels` at `lens_panel` start them, and the reviewers themselves
   keep their own tier.
   Every build also ships `code-reviewer-lens` on the same tier; only the code
-  review panel under switch `code_review_panel` at `beside_official` starts
-  it, and `code-reviewer` keeps its own tier.
+  review panel under switch `code_review_panel` at `beside_official` or
+  `risk_scoped` starts it, and `code-reviewer` keeps its own tier.
   The pinned models need Codex 0.159.1 or later, the first release whose
   bundled model catalog lists `gpt-6.1-sol`; `gpt-6-luna` is bundled from
   0.157.0.
@@ -262,9 +263,9 @@
   narrows the gap: it denies `apply_patch` into
   `.agentrof/agent-marketplace/.runtime/autopilot/` and puts back what a shell
   command adds to the grant or the arming record there, while a command may
-  still end the grant or delete the files. A command that overlaps a run of
-  `autopilot.py` can undo that run's write, so run `autopilot.py` on its own,
-  never in a parallel batch.
+  still end the grant or delete the files. It keeps a grant or arming record
+  whose bytes `autopilot.py` or its prompt hook marked as their latest write,
+  so a long command that overlaps an `on` no longer undoes it.
 - A grant governs only the Codex session whose user typed it: the hook
   records its session id, the question hook denies only that session, and
   `on`, `record` and `queue` refuse when `CODEX_THREAD_ID` differs, as it does
@@ -317,3 +318,16 @@
   only switches on `request_user_input_async`; no tool of that name runs.
   `send_message_to_user_async` sends the user a message without waiting for an
   answer and is not guarded: never ask a question through it under a grant.
+
+When all remaining work waits on queued owner decisions, call the packaged
+`autopilot.py waiting` before ending the turn. It submits one desktop notice
+per queue. Report an unavailable notification backend; never claim delivery
+when the command failed. The decision still belongs to the owner.
+
+When the user arms `--recover-transport`, complete the native heartbeat enrollment
+emitted by `autopilot.py on` using the app's existing automation tool, then record
+its id with `native-bind`. This requires no separate app-server, SDK or service.
+A heartbeat keeps this thread's context and uses `native-plan` to resume only
+registered failed child threads; a running or cancelled thread is never resumed.
+When the grant ends, pause its heartbeat. Do not use CLI resume for native app
+threads, and report unsupported hosts explicitly.

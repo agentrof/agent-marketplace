@@ -158,6 +158,7 @@
     "shared_profiles": "multitext",
     "live_test_command": "text",
     "live_diagnostic_command": "text",
+    "live_resume_command": "text",
     "live_test_workdir": "text",
     "live_groups": "multitext",
     "live_group_run": "text",

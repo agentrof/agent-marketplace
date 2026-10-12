@@ -38,7 +38,7 @@ FILE_FOR = {
 COMMAND_FIELDS = {
     "verification": (
         "test_command", "mutation_command", "dependency_audit_command", "diagnostic_test_command",
-        "test_partition_command", "live_test_command", "live_diagnostic_command",
+        "test_partition_command", "live_test_command", "live_diagnostic_command", "live_resume_command",
     ),
     "environment": ("env_command",),
 }
@@ -220,7 +220,8 @@ def live_test_problems(props: dict) -> list[str]:
     if not any(name in props for name in LIVE_TEST_FIELDS):
         return ([f"{LIVE_GROUP_RUN} needs live_test_command, live_test_workdir and live_groups"]
                 if LIVE_GROUP_RUN in props else []) + (["live_diagnostic_command needs live test groups"]
-                if "live_diagnostic_command" in props else [])
+                if "live_diagnostic_command" in props else []) + (["live_resume_command needs live test groups"]
+                if "live_resume_command" in props else [])
     errors = []
     if not all(name in props for name in LIVE_TEST_FIELDS):
         errors.append("live_test_command, live_test_workdir and live_groups are declared together or not at all")
@@ -242,6 +243,10 @@ def live_test_problems(props: dict) -> list[str]:
         command = props["live_diagnostic_command"]
         if not isinstance(command, str) or not command.strip() or command.count(LIVE_GROUP_PLACEHOLDER) != 1:
             errors.append("live_diagnostic_command must contain {group} exactly once")
+    if "live_resume_command" in props:
+        resume = props["live_resume_command"]
+        if not isinstance(resume, str) or not resume.strip() or resume.count(LIVE_GROUP_PLACEHOLDER) != 1:
+            errors.append("live_resume_command must contain {group} exactly once")
     return errors
 
 
@@ -391,6 +396,8 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
     except (OSError, ValueError) as exc:
         return {}, [str(exc)]
     errors: list[str] = []
+    if "live_environment_plan" in props and (kind != "verification" or props["live_environment_plan"] != "effect_ordered_v1"):
+        errors.append("live_environment_plan must be effect_ordered_v1 on a Verification Contract")
     if props.get("type") != TYPE_FOR[kind]:
         errors.append(f"type must be {TYPE_FOR[kind]}")
     if props.get("status") not in {"draft", "approved"}:

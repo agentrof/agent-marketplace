@@ -65,8 +65,14 @@ PARAMETER_HEADER = ("Switch", "Parameter", "Value")
 PARAMETER_SEPARATOR_RE = re.compile(r"^\|(?:\s*:?-{3,}:?\s*\|){3}$")
 PARAMETERS_NOTE = ("Each row is an owner-set parameter of the switch value in force. The package"
                    " sets no parameter value, so a declared parameter without a row is unset.")
-# Each parameter type: the pattern its cell must match and its typed value.
-PARAMETER_TYPES = {"positive_integer": (re.compile(r"^[1-9][0-9]*$"), int)}
+# Each parameter type: the pattern its cell must match and its typed value. A
+# glob list is comma-separated path globs, each without whitespace, a pipe or a
+# backtick, so it stays one table cell.
+PARAMETER_TYPES = {"positive_integer": (re.compile(r"^[1-9][0-9]*$"), int),
+                   "glob_list": (re.compile(r"^[^\s,|`]+(?:\s*,\s*[^\s,|`]+)*$"),
+                                 lambda raw: [part.strip() for part in raw.split(",")])}
+# The parameter types a package limit may take: a promotion ships numbers.
+LIMIT_TYPES = ("positive_integer",)
 
 
 def docs_root(value: str | Path | None) -> Path:
@@ -117,20 +123,25 @@ def parameter_declaration(package: Path, name: str, spec: dict, values: list[str
             raise ValueError(f"declared_by path must stay inside the package: {relative}")
         items = json.loads((package / relative).read_text(encoding="utf-8"))[source["key"]]
         ids = {key: str(item["summary"]) for key, item in items.items()}
+        # A declared parameter may name its own type; every other one takes the switch's.
+        types = {key: str(item.get("type", declared["type"])) for key, item in items.items()}
         result = {"summary": str(declared["summary"]), "values": list(declared["values"]),
                   "ids": ids, "type": declared["type"], "min_count": declared["min_count"],
                   "package_limits": dict(declared.get("package_limits", {}))}
+        if any(kind != declared["type"] for kind in types.values()):
+            result["types"] = types
     except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError, ValueError) as exc:
         raise ValueError(f"process switch {name!r} parameters cannot be read: {exc}") from exc
     limits = result["package_limits"]
     if (not ids or not all(NAME_RE.match(key) for key in ids)
             or result["type"] not in PARAMETER_TYPES
+            or any(kind not in PARAMETER_TYPES for kind in result.get("types", {}).values())
             or not result["values"] or not set(result["values"]) <= set(values) - {spec["default"]}
             or not isinstance(result["min_count"], int) or isinstance(result["min_count"], bool)
             or not 0 <= result["min_count"] <= len(ids)
             or not set(limits) <= set(ids)
-            or any(isinstance(limit, bool) or parameter_value(result, str(limit)) != limit
-                   for limit in limits.values())):
+            or any(isinstance(limit, bool) or parameter_type(result, key) not in LIMIT_TYPES
+                   or parameter_value(result, str(limit), key) != limit for key, limit in limits.items())):
         raise ValueError(f"process switch {name!r} declares invalid parameters")
     return result
 
@@ -278,9 +289,14 @@ def render_parameters(body: str, parameters: dict[tuple[str, str], str]) -> str:
     return "\n".join([*lines[:end], *table, *lines[end:]])
 
 
-def parameter_value(declared: dict, raw: str):
+def parameter_type(declared: dict, parameter: str | None = None) -> str:
+    """The declared type of one parameter: its own, else its switch's."""
+    return declared.get("types", {}).get(parameter, declared["type"])
+
+
+def parameter_value(declared: dict, raw: str, parameter: str | None = None):
     """Return a parameter cell as its declared type, or None when it does not match it."""
-    pattern, convert = PARAMETER_TYPES[declared["type"]]
+    pattern, convert = PARAMETER_TYPES[parameter_type(declared, parameter)]
     return convert(raw) if pattern.match(raw) else None
 
 
@@ -298,9 +314,9 @@ def parameter_findings(rows: dict[str, str], parameters: dict[tuple[str, str], s
         elif parameter not in declared["ids"]:
             errors.append(f"switch {switch!r} has no parameter {parameter!r}; its parameters are"
                           f" {sorted(declared['ids'])}")
-        elif parameter_value(declared, raw) is None:
+        elif parameter_value(declared, raw, parameter) is None:
             errors.append(f"parameter {parameter!r} of switch {switch!r} must be a"
-                          f" {declared['type'].replace('_', ' ')}, not {raw!r}")
+                          f" {parameter_type(declared, parameter).replace('_', ' ')}, not {raw!r}")
     for switch, spec in sorted(registry.items()):
         declared = spec.get("parameters")
         if declared is None:
@@ -327,7 +343,7 @@ def typed_parameters(switch: str, spec: dict, parameters: dict[tuple[str, str], 
     """
     declared = spec["parameters"]
     limits = declared["package_limits"] if value in declared["values"] else {}
-    return dict(sorted({**limits, **{parameter: parameter_value(declared, raw)
+    return dict(sorted({**limits, **{parameter: parameter_value(declared, raw, parameter)
                                      for (name, parameter), raw in parameters.items()
                                      if name == switch}}.items()))
 
@@ -832,7 +848,7 @@ def set_value(args) -> int:
 
 def shown_parameter(declared: dict | None, parameter: str, raw: str):
     """Show a parameter cell as its declared type, or as written when it is invalid."""
-    typed = (parameter_value(declared, raw)
+    typed = (parameter_value(declared, raw, parameter)
              if declared is not None and parameter in declared["ids"] else None)
     return raw if typed is None else typed
 
@@ -857,9 +873,9 @@ def set_parameter(args, path: Path, props: dict, body: str, registry: dict[str, 
     elif args.parameter not in declared["ids"]:
         errors = [f"switch {args.switch!r} has no parameter {args.parameter!r}; its parameters are"
                   f" {sorted(declared['ids'])}"]
-    elif parameter_value(declared, args.value) is None:
+    elif parameter_value(declared, args.value, args.parameter) is None:
         errors = [f"parameter {args.parameter!r} of switch {args.switch!r} must be a"
-                  f" {declared['type'].replace('_', ' ')}, not {args.value!r}"]
+                  f" {parameter_type(declared, args.parameter).replace('_', ' ')}, not {args.value!r}"]
     elif rows.get(args.switch, spec["default"]) not in declared["values"]:
         errors = [f"parameters of switch {args.switch!r} apply only at"
                   f" {' or '.join(declared['values'])}; set its value first"]
@@ -873,7 +889,7 @@ def set_parameter(args, path: Path, props: dict, body: str, registry: dict[str, 
     if parameters != before:
         write(path, props, render_parameters(body, parameters))
     return emit({"ok": True, "switch": args.switch, "parameter": args.parameter,
-                 "value": parameter_value(declared, parameters[key]) if key in parameters else None,
+                 "value": parameter_value(declared, parameters[key], args.parameter) if key in parameters else None,
                  "source": "policy" if key in parameters else "unset",
                  "changed": parameters != before})
 
@@ -962,7 +978,8 @@ def switches(args) -> int:
             listed[-1]["parameters"] = {
                 "summary": declared["summary"], "values": declared["values"],
                 "type": declared["type"], "min_count": declared["min_count"],
-                "declared": [{"id": key, "summary": text}
+                "declared": [{"id": key, "summary": text,
+                              **({"type": declared["types"][key]} if "types" in declared else {})}
                              for key, text in sorted(declared["ids"].items())],
                 "in_force": in_force,
             }

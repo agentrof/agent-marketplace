@@ -41,6 +41,25 @@ def choose_panels(docs: Path, value: str | None = "lens_panel") -> None:
 
 
 class ReadSessionTests(unittest.TestCase):
+    def test_large_reader_view_keeps_the_complete_binding_in_a_digest_sidecar(self):
+        import reader_manifest
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            value = {"source_hash": "sha256:bound", "scope": "backlog",
+                     "files": [{"path": f"backlog/story-{n}.md", "sha256": "a" * 64} for n in range(3000)],
+                     "check": {"findings": ["finding detail " * 40] * 400}}
+            result = reader_manifest.compact(project, value)
+            self.assertLessEqual(len(json.dumps(result, indent=2).encode()), 65536)
+            self.assertEqual(result["source_hash"], value["source_hash"])
+            data = Path(result["complete_manifest"]["path"]).read_bytes()
+            self.assertEqual(json.loads(data), value)
+            self.assertEqual(reader_manifest.expand(project, result), value)
+            Path(result["complete_manifest"]["path"]).write_bytes(data + b" ")
+            with self.assertRaisesRegex(ValueError, "digest changed"):
+                reader_manifest.expand(project, result)
+            import hashlib
+            self.assertEqual(result["complete_manifest"]["sha256"], "sha256:" + hashlib.sha256(data).hexdigest())
+
     def test_session_read_computes_once_per_key_and_never_caches_errors(self):
         calls = []
 

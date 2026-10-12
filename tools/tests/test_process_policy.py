@@ -533,6 +533,7 @@ RELEASED_DEFAULTS = {
     "own_target_reuse": "off",
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
+    "regression_plan_revision": "integrated",
     "provisional_claims": "after_approval",
     "qa_gate_order": "plan_first",
     "reader_waves": "as_slots_free",
@@ -563,6 +564,12 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "regression_plan_revision": {
+        f"{SKILLS}/deliver/references/switch-regression_plan_revision-current_approved.md": (
+            "The integrated Item and its acceptance evidence are never rewritten",
+            "Missing, draft, stale or ambiguous current approval refuses selection before a command starts",
+        ),
+    },
     "backlog_schema_migration": {
         f"{SKILLS}/backlog-plan/references/switch-backlog_schema_migration-receipt_only.md": (
             "source must be an ancestor of HEAD",
@@ -660,10 +667,13 @@ SAFETY_RULES = {
             "Spawn a fresh `code-reviewer` on its own tier, never a `code-reviewer-lens`",
             "A duplicate never gates on its own",
         ),
+        f"{SKILLS}/code-review/references/switch-code_review_panel-risk_scoped.md": (
+            "the official `code-reviewer` always reads, exactly as at `single_reader`",
+        ),
         HOSTS["claude"]: ("only the code review panel under switch `code_review_panel` at"
-                          " `beside_official` spawns it",),
+                          " `beside_official` or `risk_scoped` spawns it",),
         HOSTS["codex"]: ("only the code review panel under switch `code_review_panel` at"
-                         " `beside_official` starts it",),
+                         " `beside_official` or `risk_scoped` starts it",),
     },
     "delivery_path": {
         f"{SKILLS}/delivery-plan/references/switch-delivery_path-light_when_eligible.md": (
@@ -764,6 +774,13 @@ SAFETY_RULES = {
             "no reused id is, prefixes or lies under a target the command had to run",
             "the audit then reports them as NO-TEST and fails, which is a finding for the Verification Contract",
             "a skip, a retry or a warning it cannot explain is a finding",
+        ),
+        f"{SKILLS}/deliver/references/switch-own_target_reuse-accept_record.md": (
+            "with no spot-run file, which the runner refuses at this value",
+            "Its only check of the reuse is that the record binds the exact frozen candidate",
+            "the approved test command runs the same selection itself",
+            "it is not NO-TEST for the default run",
+            "never a reason to rerun the suite with `--fresh` or to drop the audit",
         ),
     },
     "pre_handoff_regression": {
@@ -892,6 +909,10 @@ SAFETY_RULES = {
             "Credentials or secrets that reach a client artifact or a log stay critical",
             "Neither the claiming reviewer nor the writer changes a severity",
             "QA keeps its own blocking severities",
+            "A carried finding is re-examined only when its code changed",
+            "Return it on its id with the status, severity and follow-up fields the record holds, and do not"
+            " re-examine it",
+            "The reviewer starts no test or diagnostic run in any cycle",
         ),
     },
     "review_rounds": {

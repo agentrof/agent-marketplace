@@ -14,11 +14,16 @@ import os
 import platform
 import re
 import secrets
+from shlex import quote as shlex_quote
+
+import shlex
+import shutil
 import stat
 import time
 import threading
 from pathlib import Path, PurePosixPath
 import subprocess
+import shutil
 import sys
 import tempfile
 import uuid
@@ -29,6 +34,7 @@ from backlog_compile import meaningful_text, scenario_blocks, scenario_fields
 import delivery_compile as delivery
 import file_lock
 import operation_compile
+import process_policy
 
 POLICY_PATH = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/delivery-verification-policy.json"
 ROLES = ("code_reviewer", "qa_engineer")
@@ -52,8 +58,10 @@ PRE_HANDOFF_HISTORY_FIELDS = ("evidence_hash", "candidate_tree", "kind", "exit_c
 # At own_target_reuse spot_run QA's final test run also takes the Item's own Test
 # Plan targets from the accepted pre-handoff run, but for the spot-run targets QA
 # names, which the approved test command runs with every target the run did not cover.
+# At accept_record it takes every own target from that run and spot-runs none.
 OWN_TARGET_SWITCH = "own_target_reuse"
 SPOT_RUN = "spot_run"
+ACCEPT_RECORD = "accept_record"
 # At test_group_report refuse_missing_groups a test run also reads the group
 # report its approved command writes, where the Verification Contract declares one.
 GROUP_REPORT_SWITCH = "test_group_report"
@@ -77,6 +85,8 @@ ASSERTION_FIELDS = ("path", "code", "kind", "expected")
 ENGINE_SWITCH = "test_engines"
 PARTITIONED = "partitioned"
 PARTITION_DURATIONS = "partition-durations.json"
+# What a mutation run records, at once and passed, when its scope holds no file.
+EMPTY_MUTATION_SCOPE = "scope empty, not run"
 # At process switch code_review_panel beside_official a lens panel reads the
 # frozen candidate beside the official code reviewer, and merge-panel
 # registers the one code review result from both.
@@ -84,6 +94,11 @@ CODE_REVIEW_PANEL = "code_review_panel"
 BESIDE_OFFICIAL = "beside_official"
 PANEL_LENS_MODE = "panel_lens"
 PANEL_DATA_PATH = Path(__file__).resolve().parents[1] / "skill-content/code-review/data/code-review-panel.json"
+# At code_review_panel risk_scoped a lens joins the official reviewer only when
+# the frozen change fires its trigger, by the owner's lens-trigger parameters.
+RISK_SCOPED = "risk_scoped"
+PANEL_VALUES = (BESIDE_OFFICIAL, RISK_SCOPED)
+LENS_TRIGGERS_PATH = Path(__file__).resolve().parents[1] / "skill-content/code-review/data/lens-triggers.json"
 PANEL_STEP = "code_review"
 OFFICIAL = "official"
 DUPLICATE = "duplicate"
@@ -100,13 +115,16 @@ REVIEW_SEVERITY_ORDER = ("critical", "major")
 # record and a hash of a few guessable values would check a guess of a credential.
 COMMAND_VARIABLES = ("HOME", "LANG", "PATH", "TZ")
 COMMAND_VARIABLE_PREFIXES = ("AGENTROF_", "LC_")
-# The runner sets these for every command it runs.
-RUNNER_VARIABLES = ("AGENTROF_MUTATION_FILES", "AGENTROF_VERIFICATION_SCRATCH")
+# The runner sets these for every command it runs. The Delivery and Item ids
+# come from the frozen candidate, so a reader whose shell exports nothing runs
+# an approved command that reads them like the coordinator's shell does.
+RUNNER_VARIABLES = ("AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID", "AGENTROF_MUTATION_FILES",
+                    "AGENTROF_VERIFICATION_SCRATCH")
 # The runner's per-run inputs: an identity binds the data each carries, so it
 # names neither the variable nor its path. A partitioned test run hands each
 # partition its own file and engine, which its record names, never the identity.
 PARTITION_VARIABLES = ("AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE")
-SELECTION_VARIABLES = ("AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
+SELECTION_VARIABLES = ("AGENTROF_LIVE_RESUME", "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
 # At touched_suites QA's final test run names here the earlier-story targets the
 # accepted pre-handoff run covered, for the approved test command to skip (#354).
 REUSED_TESTS = "reused-tests.json"
@@ -462,7 +480,17 @@ def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
         raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
                            + describe_environment_holder(holder or {})
                            + f"; writes to the Item worktree wait until {wait}")
-    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing")
+    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing."
+                       " Until then Bash runs only the reader manifest's command_form, one direct"
+                       " `<python> [-B] <bound delivery_verification.py> --worktree <worktree> <verb> ...` with no"
+                       " pipe, redirect, variable or prefix but PYTHONDONTWRITEBYTECODE=1; read files with the host's"
+                       " Read tool or the CLI's inspect, inspect-context and diff, and write only under allowed_writes")
+
+
+def command_form(root: Path) -> str:
+    """The literal invocation a reader's Bash call starts with while readers are active; a verb follows it."""
+    arguments = [sys.executable, "-B", str(Path(__file__).resolve()), "--worktree", str(root.resolve())]
+    return subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
 
 
 def instruction_identity() -> str:
@@ -694,6 +722,9 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
                              "command_seconds": 0.0, "model_seconds": None, "model_tokens": None}, "raw_evidence": {}}
         if live_repair is not None:
             value["live_repair"] = live_repair
+        controls = finding_control_history(previous)
+        if controls:
+            value["finding_control_bindings"] = controls
         if pre_handoff is not None:
             value["pre_handoff"] = pre_handoff
             value["pre_handoff_history"] = pre_handoff_history(root, previous, delivery_id, story)
@@ -706,6 +737,69 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
         atomic_file.replace_text(scope, json.dumps({"candidate_hash": current["candidate_hash"],
                                                    "scope": "whole_changed_files", "files": current["mutation_files"]}, indent=2) + "\n")
         return value
+
+
+
+def prepare_repair(root: Path) -> dict:
+    """Create an independent repair checkout without changing the frozen Item."""
+    root = root.resolve()
+    with locked(root):
+        session = read_session(root)
+        current = require_current(root, session, allow_evidence=True)
+        if delivery.delivery_switch_value(delivery.docs_root(root), current["delivery"],
+                                          "lane_isolation") != "scratch_clone":
+            raise RuntimeError("overlapping repair requires lane_isolation scratch_clone")
+        if not any(worker["state"] == "running" for worker in session["workers"].values()):
+            raise RuntimeError("overlapping repair requires a reader still running")
+        findings = {(finding.get("role", "code_reviewer"), finding["id"]): finding
+                    for finding in session.get("unresolved_findings", []) if finding.get("status") == "open"}
+        for role, worker in session["workers"].items():
+            for finding in worker.get("result", {}).get("findings", []):
+                if finding.get("status") == "open":
+                    findings[(role, finding["id"])] = {**finding, "role": role}
+        if not findings:
+            raise RuntimeError("overlapping repair requires a registered open finding")
+        existing = session.get("repair_workspace")
+        if existing is not None:
+            path = Path(existing["path"])
+            if (path.is_symlink() or not path.is_dir() or root == path.resolve()
+                    or root in path.resolve().parents
+                    or existing["candidate_hash"] != current["candidate_hash"]):
+                raise RuntimeError("recorded repair workspace is missing, unsafe or bound to another candidate")
+            temporary = Path(tempfile.gettempdir()).resolve()
+            if path.parent.parent.resolve() != temporary or not path.parent.name.startswith("agentrof-repair-"):
+                raise RuntimeError("recorded repair workspace is outside its private directory")
+            for component in (path.parent, path, path / ".git"):
+                metadata = component.lstat()
+                if (stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0)
+                        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+                    raise RuntimeError("recorded repair workspace contains an alias")
+            if (Path(git(path, "rev-parse", "--show-toplevel")).resolve() != path.resolve()
+                    or git(path, "branch", "--show-current") != existing["branch"]
+                    or git(path, "remote", "get-url", "origin") != str(root)
+                    or (path / ".git/objects/info/alternates").exists()
+                    or subprocess.run(["git", "-C", str(path), "merge-base", "--is-ancestor",
+                                       existing["base_commit"], "HEAD"], capture_output=True).returncode):
+                raise RuntimeError("recorded repair workspace repository identity changed")
+            existing["findings"] = [findings[key] for key in sorted(findings)]
+            write_session(root, session)
+            return {**existing, "reused": True}
+        parent = Path(tempfile.mkdtemp(prefix="agentrof-repair-"))
+        checkout = parent / "checkout"
+        try:
+            clone_private_checkout(root, checkout, current["product_commit"])
+            branch = "repair/" + session["session_id"][:12]
+            git(checkout, "checkout", "-b", branch)
+            require_current(root, session, allow_evidence=True)
+        except BaseException:
+            shutil.rmtree(parent)
+            raise
+        record = {"path": str(checkout), "branch": branch, "session_id": session["session_id"],
+                  "candidate_hash": current["candidate_hash"], "base_commit": current["product_commit"],
+                  "findings": [findings[key] for key in sorted(findings)]}
+        session["repair_workspace"] = record
+        write_session(root, session)
+        return {**record, "reused": False}
 
 
 def require_current(root: Path, value: dict, *, allow_evidence: bool = False) -> dict:
@@ -742,8 +836,10 @@ def raw_output_path(root: Path, relative: str) -> Path:
     return safe_runtime_path(root, path, file_only=True)
 
 
-def command_environment(root: Path, *, diagnostic: bool = False) -> dict:
+def command_environment(root: Path, current: dict, *, diagnostic: bool = False) -> dict:
     environment = dict(os.environ)
+    environment["AGENTROF_DELIVERY_ID"] = current["delivery"]
+    environment["AGENTROF_ITEM_ID"] = current["story"]
     environment["AGENTROF_MUTATION_FILES"] = str(session_path(root).parent / "mutation-files.json")
     for name in SELECTION_VARIABLES:
         environment.pop(name, None)
@@ -853,7 +949,75 @@ def literal_test_id(identifier) -> bool:
             and not any(ord(character) < 32 or ord(character) == 127 for character in identifier))
 
 
-def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
+FINDING_DIAGNOSTIC_SCOPE = "finding_diagnostic"
+
+
+def test_id_in_file(identifier: str, path: str) -> bool:
+    """Whether a test id names a test in *path*, as a path::name or a dotted module.name id."""
+    module = PurePosixPath(path).with_suffix("").as_posix().replace("/", ".")
+    return identifier.startswith(path + "::") or bool(module) and identifier.startswith(module + ".")
+
+
+def finding_control_history(session: dict | None) -> list[dict]:
+    """Carry successful finding bindings across passes until ordinary backlog absorption."""
+    if not session:
+        return []
+    rows = list(session.get("finding_control_bindings", []))
+    known = {digest(row) for row in rows}
+    for raw in session.get("raw_evidence", {}).values():
+        if raw.get("exit_code") != 0 or raw.get("candidate_intact") is not True or raw.get("selection_intact") is not True:
+            continue
+        for binding in raw.get("diagnostic_selection", {}).get("finding_controls", []):
+            row = {**binding, "candidate_hash": raw["identity"]["candidate_hash"], "evidence_hash": raw["evidence_hash"]}
+            key = digest(row)
+            if key not in known:
+                rows.append(row)
+                known.add(key)
+    return rows
+
+
+def finding_controls(entries, current: dict, findings: list[dict]) -> list[dict]:
+    """The negative-control tests open findings prescribe, checked as diagnostic data.
+
+    Each entry names an open inherited finding and test ids the finding lists
+    in negative_control_test_ids; each id lies in a test file the Item itself
+    changed. Such a run is finding-scoped diagnostic evidence only: it never
+    serves an acceptance check, so no Test Plan scenario has to bind the ids.
+    """
+    if not isinstance(entries, list):
+        raise RuntimeError("finding_controls must be a list of {finding_id, test_ids}")
+    open_findings = {finding["id"]: finding for finding in findings
+                     if isinstance(finding, dict) and finding.get("status") != "resolved"}
+    changed = set(current["changed_files"])
+    seen = set()
+    rows = []
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"finding_id", "test_ids"}:
+            raise RuntimeError("finding_controls entries declare only finding_id and test_ids")
+        finding = open_findings.get(entry["finding_id"])
+        if finding is None:
+            raise RuntimeError(f"finding_controls names {entry['finding_id']!r}, which is no open inherited finding")
+        identifiers = entry["test_ids"]
+        if (not isinstance(identifiers, list) or not identifiers
+                or any(not literal_test_id(identifier) for identifier in identifiers)
+                or len(set(identifiers)) != len(identifiers)):
+            raise RuntimeError("finding control test IDs must be unique nonempty literal identifiers")
+        prescribed = set(finding.get("negative_control_test_ids") or [])
+        stray = sorted(set(identifiers) - prescribed)
+        if stray:
+            raise RuntimeError(f"finding {finding['id']} prescribes no negative control " + ", ".join(stray))
+        outside = sorted(identifier for identifier in identifiers
+                         if not any(test_id_in_file(identifier, path) for path in changed))
+        if outside:
+            raise RuntimeError("finding control tests must lie in test files the Item changed: " + ", ".join(outside))
+        if finding["id"] in seen:
+            raise RuntimeError(f"finding_controls names {finding['id']} more than once")
+        seen.add(finding["id"])
+        rows.append({"finding_id": finding["id"], "test_ids": sorted(identifiers)})
+    return sorted(rows, key=lambda row: row["finding_id"])
+
+
+def diagnostic_selection(root: Path, path: Path, current: dict, findings: list[dict] | None = None) -> dict:
     """Treat focused test identifiers as data, never command arguments or code."""
     path = path if path.is_absolute() else root / path
     try:
@@ -865,16 +1029,22 @@ def diagnostic_selection(root: Path, path: Path, current: dict) -> dict:
     path = raw_output_path(root, relative)
     value = json.loads(path.read_text(encoding="utf-8"))
     fields = {"schema_version", "candidate_hash", "failed_test_ids", "affected_test_ids"}
-    if (not isinstance(value, dict) or set(value) != fields or type(value.get("schema_version")) is not int or value["schema_version"] != 1
+    if (not isinstance(value, dict) or set(value) - {"finding_controls"} != fields
+            or type(value.get("schema_version")) is not int or value["schema_version"] != 1
             or value.get("candidate_hash") != current["candidate_hash"]):
-        raise RuntimeError("diagnostic selection must bind this candidate and declare only schema_version, candidate_hash, failed_test_ids and affected_test_ids")
+        raise RuntimeError("diagnostic selection must bind this candidate and declare only schema_version, candidate_hash, failed_test_ids and affected_test_ids, with optional finding_controls")
     for name in ("failed_test_ids", "affected_test_ids"):
         identifiers = value[name]
         if (not isinstance(identifiers, list) or any(not literal_test_id(identifier) for identifier in identifiers)
                 or len(set(identifiers)) != len(identifiers)):
             raise RuntimeError("diagnostic test IDs must be unique nonempty literal identifiers, without option prefixes or control characters")
         value[name] = sorted(identifiers)
-    value["selected_test_ids"] = sorted(set(value["failed_test_ids"]) | set(value["affected_test_ids"]))
+    controls = finding_controls(value.pop("finding_controls", []), current, findings or [])
+    control_ids = sorted({identifier for row in controls for identifier in row["test_ids"]})
+    if controls:
+        value.update(finding_controls=controls, finding_control_test_ids=control_ids,
+                     evidence_scope=FINDING_DIAGNOSTIC_SCOPE)
+    value["selected_test_ids"] = sorted(set(value["failed_test_ids"]) | set(value["affected_test_ids"]) | set(control_ids))
     if not value["selected_test_ids"]:
         raise RuntimeError("diagnostic selection must include at least one failed or affected test ID")
     return value
@@ -892,6 +1062,20 @@ def clone_private_checkout(root: Path, execution_root: Path, commit: str) -> Non
     git(root, "clone", "--config", "core.longpaths=true", "--no-local", "--no-hardlinks", "--no-checkout",
         "--", str(root), str(execution_root))
     git(execution_root, "checkout", "--detach", commit)
+
+
+# The one private runtime checkout of an Item, kept across verification sessions.
+RUNTIME_CHECKOUT = "runtime"
+
+
+def repin_private_checkout(root: Path, execution_root: Path, commit: str) -> None:
+    """Recreate private repository state while preserving the environment's checkout pathname."""
+    safe_runtime_path(root, execution_root)
+    def remove_readonly(function, path, _error):
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+        function(path)
+    shutil.rmtree(execution_root, onerror=remove_readonly)
+    clone_private_checkout(root, execution_root, commit)
 
 
 # How many paths a checkout difference names before it counts the rest.
@@ -1043,12 +1227,70 @@ def live_progress_records(root: Path, session: dict) -> dict:
 
 
 def run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
-              spot_file: Path | None = None, group: str | None = None) -> dict:
+              spot_file: Path | None = None, group: str | None = None, resume: bool = False) -> dict:
     root = root.resolve()
     read_session(root)
     with environment_lock(root, "qa_engineer", "run --kind " + kind), \
             command_lock(root, "qa_engineer", "run --kind " + kind):
-        return _run_check(root, kind, fresh=fresh, selection_file=selection_file, spot_file=spot_file, group=group)
+        return _run_check(root, kind, fresh=fresh, selection_file=selection_file, spot_file=spot_file, group=group, resume=resume)
+
+
+
+def valid_live_checkpoint(value) -> bool:
+    if (not isinstance(value, dict) or value.get("schema_version") != 1
+            or value.get("failure") != "infrastructure_preflight"
+            or value.get("preflight") not in {"dns", "tls", "registry"}
+            or type(value.get("failed_cases")) is not int or value["failed_cases"] != 0
+            or type(value.get("started_cases_in_phase")) is not int or value["started_cases_in_phase"] != 0):
+        return False
+    completed, pending = value.get("completed_phases"), value.get("pending_phases")
+    if not isinstance(completed, dict) or not isinstance(pending, list) or not pending:
+        return False
+    if any(not isinstance(name, str) or not operation_compile.LIVE_GROUP_RE.fullmatch(name)
+           for name in [*completed, *pending]):
+        return False
+    evidence = value.get("phase_evidence", {})
+    if not isinstance(evidence, dict) or set(evidence) != set(completed):
+        return False
+    if any(not isinstance(row, dict) or set(row) != {"file", "sha256"}
+           or not isinstance(row["file"], str) or row["sha256"] != completed[name]
+           for name, row in evidence.items()):
+        return False
+    return (len(pending) == len(set(pending)) and not set(completed).intersection(pending)
+            and all(isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value)
+                    for value in completed.values()))
+
+
+def checkpoint_evidence_current(root: Path, value: dict) -> bool:
+    try:
+        for row in value.get("phase_evidence", {}).values():
+            path = raw_output_path(root, row["file"])
+            if not row["file"].startswith("scratch/") or not path.is_file() or path.stat().st_size > 1024 * 1024:
+                return False
+            if "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() != row["sha256"]:
+                return False
+        return True
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
+def live_checkpoint(root: Path) -> dict | None:
+    path = raw_output_path(root, "scratch/live-checkpoint.json")
+    try:
+        if not path.is_file() or path.stat().st_size > 65536:
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if valid_live_checkpoint(value) and checkpoint_evidence_current(root, value) else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def resumable_live_run(record: dict | None, current: dict) -> bool:
+    return bool(record and record.get("exit_code") == 2 and record.get("candidate_intact") is True
+                and record.get("identity", {}).get("candidate_hash") == current["candidate_hash"]
+                and record.get("resume_count", 0) == 0 and valid_live_checkpoint(record.get("live_checkpoint"))
+                and fresh_record(record)
+                and record.get("evidence_hash") == digest({k: v for k, v in record.items() if k != "evidence_hash"}))
 
 
 
@@ -1134,7 +1376,7 @@ def repair_live(root: Path, delivery_id: str, story: str) -> dict:
         record = {"source_session_id": previous["session_id"], "candidate_hash": current["candidate_hash"],
                   "cases": cases, "runs": {}}
         for group, targets in cases.items():
-            environment = command_environment(root)
+            environment = command_environment(root, current)
             selection = {"candidate_hash": current["candidate_hash"], "group": group, "selected_test_ids": targets}
             selector = raw_output_path(root, "scratch/live-repair-selection.json")
             data = json.dumps(selection, sort_keys=True) + "\n"
@@ -1202,13 +1444,15 @@ def live_record_group(contract: dict, group: str) -> str:
 
 
 def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Path | None = None,
-               spot_file: Path | None = None, group: str | None = None) -> dict:
+               spot_file: Path | None = None, group: str | None = None, resume: bool = False) -> dict:
     """Run an approved command verbatim with a file-based mutation scope binding."""
     root = root.resolve()
     if kind not in RUN_KINDS:
         raise RuntimeError("unsupported verification command kind")
     if (kind == "live_test") != (group is not None):
         raise RuntimeError("run --kind live_test requires --group; other kinds take no --group")
+    if resume and (kind != "live_test" or fresh):
+        raise RuntimeError("resume is only for a live preflight attempt on the unchanged candidate")
     # Each live group keeps its own evidence beside the final commands' records.
     record_key = kind if group is None else f"{kind}:{group}"
     if (kind == "diagnostic_test") != (selection_file is not None):
@@ -1227,17 +1471,26 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         if session["workers"]["qa_engineer"]["state"] != "running":
             raise RuntimeError("verification commands require the active QA reader")
         spot = None
+        own_value = own_target_reuse(root, current["delivery"]) if kind == "test" else None
         if spot_file is not None:
-            value = own_target_reuse(root, current["delivery"])
-            if value != SPOT_RUN:
+            if own_value != SPOT_RUN:
                 raise RuntimeError(f"run --spot-run-file serves only process switch {OWN_TARGET_SWITCH} {SPOT_RUN};"
-                                   f" {current['delivery']} runs it at {value}")
+                                   f" {current['delivery']} runs it at {own_value}")
             spot = spot_run_selection(root, Path(spot_file), current)
+        elif own_value == ACCEPT_RECORD and not fresh:
+            # No own target is kept for the command: the accepted run supplies them all.
+            spot = []
         contract, contract_body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
         command = live_test_command(contract, group) if group is not None else contract.get(kind + "_command")
         if group is not None:
             group = live_record_group(contract, group)
             record_key = f"{kind}:{group}"
+        prior = session["raw_evidence"].get(record_key) if resume else None
+        if resume:
+            if (not resumable_live_run(prior, current) or "live_resume_command" not in contract
+                    or not checkpoint_evidence_current(root, prior["live_checkpoint"])):
+                raise RuntimeError("live resume requires one fresh preflight-only failed measurement and an approved resume command")
+            command = contract["live_resume_command"].replace(operation_compile.LIVE_GROUP_PLACEHOLDER, group)
         if not isinstance(command, str) or not command.strip() or "{{" in command or "}}" in command:
             raise RuntimeError("approved verification command is missing or contains unresolved parameters")
         partitions = (partition_declaration(root, current["delivery"], contract, contract_body)
@@ -1248,8 +1501,10 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         directory = (root / workdir).resolve()
         if directory != root and root not in directory.parents:
             raise RuntimeError("verification command workdir must remain inside the Item worktree")
-        environment = command_environment(root, diagnostic=kind == "diagnostic_test")
-        selection = diagnostic_selection(root, selection_file, current) if selection_file is not None else None
+        environment = command_environment(root, current, diagnostic=kind == "diagnostic_test")
+        inherited = session.get("unresolved_findings", [])
+        selection = (diagnostic_selection(root, selection_file, current, inherited)
+                     if selection_file is not None else None)
         selection_bytes = None
         if selection is not None:
             input_generation = source_file_generation(selection_file)
@@ -1262,23 +1517,43 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         scratch = safe_runtime_path(root, Path(environment["AGENTROF_VERIFICATION_SCRATCH"]))
         scratch.mkdir(exist_ok=True)
         declared = environment_identity(root, environment, contract)
+        resume_input = None
+        if resume:
+            if any(prior["identity"].get(key) != declared[key] for key in ENVIRONMENT_FIELDS):
+                raise RuntimeError("live resume requires the original command environment")
+            resume_path = raw_output_path(root, "scratch/live-resume.json")
+            resume_input = {"candidate_hash": current["candidate_hash"], "group": group,
+                            "prior_evidence_hash": prior["evidence_hash"], **prior["live_checkpoint"]}
+            atomic_file.replace_text(resume_path, json.dumps(resume_input, sort_keys=True) + "\n")
+            resume_generation = source_file_generation(resume_path)
+            environment["AGENTROF_LIVE_RESUME"] = str(resume_path)
+        checkpoint_path = raw_output_path(root, "scratch/live-checkpoint.json") if group is not None else None
+        if checkpoint_path is not None and checkpoint_path.exists():
+            checkpoint_path.unlink()
+        if kind == "mutation" and not current["mutation_files"]:
+            return record_empty_mutation(root, session, current, command, workdir, declared)
         reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
                           if kind == "test" else (None, None))
         own_note = None
         # Without a spot-run file the run says so even when it reuses nothing else; with one that
         # reuses nothing, its pre_handoff_reuse refusal says why.
         if (kind == "test" and (reuse is None and spot is None or reuse is not None and "own_targets" not in reuse)
-                and own_target_reuse(root, current["delivery"]) == SPOT_RUN):
+                and own_value == SPOT_RUN):
             own_note = ("no --spot-run-file names the own targets QA runs itself, so the run reuses none of the"
                         " Item's own targets" if spot is None else
                         "the spot-run targets, with every own target that is, prefixes or lies under one of them,"
                         " cover every own target, so the run reuses none of them")
+        elif kind == "test" and own_value == ACCEPT_RECORD and (reuse is None or "own_targets" not in reuse):
+            own_note = ("no accepted pre-handoff run binds the frozen candidate for the Item's own targets, so the"
+                        " approved test command runs every one of them itself")
         identity = {"candidate_hash": current["candidate_hash"], "kind": kind, "command": command,
                     "workdir": workdir, **declared, "execution_isolation": "private_clone_v1"}
         if selection is not None:
             identity["diagnostic_selection_hash"] = digest(selection)
         if group is not None:
             identity["live_group"] = group
+        if resume_input is not None:
+            identity["live_resume_hash"] = digest(resume_input)
         if reuse is not None:
             identity["reused_pre_handoff"] = reuse
         groups = (group_report_declaration(root, current["delivery"], contract)
@@ -1315,7 +1590,17 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             clear_group_report(scratch, groups)
     started = time.monotonic()
     partition_records = None
-    if partitions is not None:
+    accepted_full = (own_value == ACCEPT_RECORD and reuse is not None and not fresh
+                     and session["pre_handoff"].get("kind") == "test"
+                     and session["pre_handoff"].get("command") == command
+                     and session["pre_handoff"].get("workdir") == workdir
+                     and groups is None and partitions is None)
+    if accepted_full:
+        completed = subprocess.CompletedProcess(command, 0,
+            ("Accepted full-suite pre-handoff evidence " + reuse["evidence_hash"] + "\n"
+             + "".join("REUSED " + target + "\n" for target in reuse["test_ids"])).encode("utf-8"))
+        intact, difference, group_report = True, "", None
+    elif partitions is not None:
         partition_records = run_partitions(root, scratch, current, workdir, partitions, environment,
                                            reuse["test_ids"] if reuse is not None else [], groups)
         intact, difference = all(record["candidate_intact"] is True for record in partition_records), ""
@@ -1342,7 +1627,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
     if selection is not None:
         try:
             selector = safe_runtime_path(root, Path(environment["AGENTROF_DIAGNOSTIC_TESTS"]), file_only=True)
-            selection_intact = (diagnostic_selection(root, selection_file, current) == selection
+            selection_intact = (diagnostic_selection(root, selection_file, current, inherited) == selection
                                 and selector.read_bytes() == selection_bytes
                                 and source_file_generation(selection_file) == input_generation
                                 and source_file_generation(selector) == selector_generation)
@@ -1355,8 +1640,16 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                                 and source_file_generation(reused) == reused_generation)
         except (RuntimeError, ValueError, OSError):
             selection_intact = False
+    if resume_input is not None:
+        try:
+            selection_intact = (json.loads(resume_path.read_text(encoding="utf-8")) == resume_input
+                                and source_file_generation(resume_path) == resume_generation
+                                and checkpoint_evidence_current(root, resume_input))
+        except (OSError, ValueError):
+            selection_intact = False
     if selection_intact is not None:
         intact = intact and selection_intact
+    checkpoint = live_checkpoint(root) if group is not None and completed.returncode == 2 else None
     with locked(root):
         session = read_session(root)
         if session["session_id"] != session_id:
@@ -1371,10 +1664,20 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                   "duration_seconds": time.monotonic() - started, "completed_at": time.time()}
         if group is not None:
             record["live_case_report"] = live_case_report(root)
+        if checkpoint is not None:
+            record["live_checkpoint"] = checkpoint
+        if resume:
+            record["resume_count"] = 1
+            record["prior_attempt"] = prior
+            record["resume_of"] = prior["evidence_hash"]
+        if accepted_full:
+            record["execution_mode"] = "accepted_pre_handoff"
         if difference:
             record["checkout_difference"] = difference
         if selection is not None:
             record["diagnostic_selection"] = selection
+            if "evidence_scope" in selection:
+                record["evidence_scope"] = selection["evidence_scope"]
         if selection_intact is not None:
             record["selection_intact"] = selection_intact
         if group_report is not None:
@@ -1390,10 +1693,34 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                                              "output_sha256": hashlib.sha256(entry["output"]).hexdigest()})
         record["evidence_hash"] = digest(record)
         session["raw_evidence"][record_key] = record
+        if record.get("diagnostic_selection", {}).get("finding_controls"):
+            session["finding_control_bindings"] = finding_control_history(session)
         session["metrics"]["command_seconds"] += record["duration_seconds"]
         write_session(root, session)
         return {**record, "reused": False, **({"pre_handoff_reuse": refusal} if refusal else {}),
                 **({"own_target_reuse": own_note} if own_note else {})}
+
+
+def record_empty_mutation(root: Path, session: dict, current: dict, command: str, workdir: str,
+                          declared: dict) -> dict:
+    """Record a mutation run whose scope holds no file as passed without launching the command.
+
+    With no compiler-selected file there is no mutant to generate, so the
+    record says so, binds the approved command and environment as a run would,
+    and takes no time.
+    """
+    identity = {"candidate_hash": current["candidate_hash"], "kind": "mutation", "command": command,
+                "workdir": workdir, **declared, "execution_isolation": "private_clone_v1"}
+    output = (EMPTY_MUTATION_SCOPE + "\n").encode("utf-8")
+    output_name = f"scratch/mutation-{digest(identity).removeprefix('sha256:')}-{uuid.uuid4().hex}.log"
+    atomic_file.replace_bytes(raw_output_path(root, output_name), output)
+    record = {"identity": identity, "exit_code": 0, "candidate_intact": True, "not_run": EMPTY_MUTATION_SCOPE,
+              "output_file": output_name, "output_sha256": hashlib.sha256(output).hexdigest(),
+              "duration_seconds": 0, "completed_at": time.time()}
+    record["evidence_hash"] = digest(record)
+    session["raw_evidence"]["mutation"] = record
+    write_session(root, session)
+    return {**record, "reused": False}
 
 
 def own_target_reuse(root: Path, delivery_id: str) -> str:
@@ -1741,7 +2068,8 @@ def pre_handoff_reuse(root: Path, session: dict, current: dict, environment: dic
     nothing. With *spot*, the own targets QA names at own_target_reuse
     spot_run, the run also covers every other own target, and only those
     *spot* keeps with kept_own_targets stay QA's, with every target that
-    overlaps one. At any other value it returns (None, None), or with *spot*
+    overlaps one; at accept_record *spot* is empty and the run covers every
+    own target. At any other value it returns (None, None), or with *spot*
     why it reuses nothing.
     """
     value = pre_handoff_regression(root, current["delivery"])
@@ -1805,7 +2133,8 @@ def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> 
     targets is valid only at own_target_reuse spot_run, with its spot-run
     targets and its reused own targets disjoint automation targets of the
     Item's own Test Plan, and no reused id overlaps a target kept_own_targets
-    keeps for the command instead.
+    keeps for the command instead, or at accept_record, with every own target
+    reused and none spot-run.
     """
     reuse, receipt = identity["reused_pre_handoff"], session.get("pre_handoff")
     if (not isinstance(reuse, dict) or not isinstance(receipt, dict)
@@ -1815,7 +2144,7 @@ def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> 
     own_reuse = reuse.get("own_targets")
     if own_reuse is not None and (
             not isinstance(own_reuse, dict) or set(own_reuse) != {"test_ids", "spot_test_ids"}
-            or any(not isinstance(own_reuse[key], list) or not own_reuse[key]
+            or any(not isinstance(own_reuse[key], list) or (key == "test_ids" and not own_reuse[key])
                    or any(not isinstance(test, str) for test in own_reuse[key])
                    or own_reuse[key] != sorted(set(own_reuse[key])) for key in own_reuse)):
         return "names its reused own targets apart from its spot-run targets"
@@ -1841,10 +2170,15 @@ def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> 
     own = own_plan_targets(root, current)
     if own_reuse is not None:
         value = own_target_reuse(root, current["delivery"])
-        if value != SPOT_RUN:
+        if value not in {SPOT_RUN, ACCEPT_RECORD}:
             return (f"reuses the Item's own Test Plan targets, which only process switch {OWN_TARGET_SWITCH}"
-                    f" {SPOT_RUN} allows; {current['delivery']} runs it at {value}")
+                    f" {SPOT_RUN} or {ACCEPT_RECORD} allows; {current['delivery']} runs it at {value}")
         spot = own_reuse["spot_test_ids"]
+        if value == SPOT_RUN and not spot:
+            return "names its reused own targets apart from its spot-run targets"
+        if value == ACCEPT_RECORD and (spot or reused_own != sorted(set(own))):
+            return (f"at {OWN_TARGET_SWITCH} {ACCEPT_RECORD} reuses every own Test Plan target of the Item and"
+                    " spot-runs none, which this reuse does not")
         if not set(spot) | set(reused_own) <= set(own) or set(spot) & set(reused_own):
             return ("names spot-run targets or reused own targets that are no automation targets of the Item's own"
                     " Test Plan, or one target as both")
@@ -1946,6 +2280,54 @@ def panel_assignments() -> list[dict]:
             for assignment in step["default_panel"]]
 
 
+def changed_lines(root: Path, current: dict) -> int:
+    """Lines added plus lines removed in the frozen change's product and test paths against its base.
+
+    The vault under workspace/docs is not code a lens reads, and a binary file counts nothing.
+    """
+    total = 0
+    for row in git(root, "diff", "--numstat", "--no-renames", "-z", current["integration_base_commit"],
+                   current["product_commit"]).split("\0"):
+        added, removed, path = (row.split("\t", 2) + ["", ""])[:3]
+        if added.isdigit() and removed.isdigit() and not path.startswith("workspace/docs/"):
+            total += int(added) + int(removed)
+    return total
+
+
+def lens_selection(root: Path, current: dict, assignments: list[dict]) -> tuple[list[dict], dict]:
+    """The lens assignments the frozen change triggers at risk_scoped, and why each lens joined or not.
+
+    Each lens joins by the trigger lens-triggers.json declares for it, read
+    against the owner's parameter in force; a lens with no declared trigger
+    always joins. An assignment joins when any of its lenses does.
+    """
+    data = json.loads(LENS_TRIGGERS_PATH.read_text(encoding="utf-8"))
+    state = process_policy.delivery_values(delivery.docs_root(root), current["delivery"],
+                                           switches={CODE_REVIEW_PANEL})
+    parameters = state["values"][CODE_REVIEW_PANEL].get("parameters", {})
+    lines = changed_lines(root, current)
+    lenses = {}
+    for lens in sorted({lens for assignment in assignments for lens in assignment["lens"]}):
+        declared = next((entry for entry in data["lens_triggers"] if entry["lens"] == lens), None)
+        if declared is None:
+            lenses[lens] = {"joined": True, "trigger": None}
+            continue
+        threshold = parameters.get(declared["parameter"])
+        if threshold is None:
+            raise RuntimeError(f"code_review_panel {RISK_SCOPED} needs parameter {declared['parameter']!r}"
+                               " set in the Process Policy")
+        if declared["trigger"] == "changed_path_matches":
+            matched = sorted(path for path in current["changed_files"]
+                             if any(fnmatch.fnmatchcase(path, glob) for glob in threshold))
+            lenses[lens] = {"joined": bool(matched), "trigger": declared["trigger"], "matched_paths": matched}
+        elif declared["trigger"] == "changed_lines_above":
+            lenses[lens] = {"joined": lines > threshold, "trigger": declared["trigger"], "threshold": threshold}
+        else:
+            raise RuntimeError(f"lens {lens!r} declares unknown trigger {declared['trigger']!r}")
+    chosen = [assignment for assignment in assignments if any(lenses[lens]["joined"] for lens in assignment["lens"])]
+    return chosen, {"changed_lines": lines, "lenses": lenses}
+
+
 def panel_prefix(panel: dict, assignment: dict) -> str:
     """The id prefix of a lens assignment's findings in one panel pass."""
     return f"P{panel['pass']}-{assignment['key']}-"
@@ -1959,14 +2341,24 @@ def code_review_panel_state(root: Path, value: dict) -> dict | None:
     carries, so a lens finding id never repeats an earlier one. The Process
     Policy is part of the frozen candidate, so the value holds for the session.
     """
-    if code_review_panel(root, value["candidate"]["delivery"]) != BESIDE_OFFICIAL:
+    selected = code_review_panel(root, value["candidate"]["delivery"])
+    if selected not in PANEL_VALUES:
         return None
     if isinstance(value.get("panel"), dict):
         return value["panel"]
+    assignments, selection = panel_assignments(), None
+    if selected == RISK_SCOPED:
+        # With no lens triggered the official reviewer reads alone and registers through result.
+        assignments, selection = lens_selection(root, value["candidate"], assignments)
+        if not assignments:
+            return None
     passes = [record.get("pass", 0) for record in value.get("panel_history", [])]
     passes += [int(match.group(1)) for finding in value.get("unresolved_findings", [])
                for match in [PANEL_PASS_RE.match(str(finding.get("id", "")))] if match]
-    return {"pass": max(passes, default=0) + 1, "assignments": panel_assignments(), "members": {}}
+    panel = {"pass": max(passes, default=0) + 1, "assignments": assignments, "members": {}}
+    if selection is not None:
+        panel["lens_selection"] = selection
+    return panel
 
 
 def panel_history(session: dict | None) -> list[dict]:
@@ -2275,6 +2667,12 @@ def check_findings(findings: object) -> None:
             or finding.get("status") not in {"open", "resolved"} for finding in findings)
             or len({finding["id"] for finding in findings}) != len(findings)):
         raise RuntimeError("findings require unique stable IDs, severity, verification and open/resolved status")
+    for finding in findings:
+        controls = finding.get("negative_control_test_ids")
+        if controls is not None and (not isinstance(controls, list) or not controls
+                                     or any(not literal_test_id(identifier) for identifier in controls)
+                                     or len(set(controls)) != len(controls)):
+            raise RuntimeError(f"finding {finding['id']} negative_control_test_ids must list unique literal test IDs")
     allowed_severities = {value.casefold() for value in policy()["blocking_severities"] + policy()["nonblocking_severities"]}
     if any(finding["severity"].casefold() not in allowed_severities for finding in findings):
         raise RuntimeError("finding severity is not declared in the verification policy")
@@ -2325,6 +2723,9 @@ def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dic
             if current["runtime_required"]:
                 require_runtime_evidence(root, value, checks["fresh_runtime"], environment)
     failed_live_cases(root, result)
+    if check_blocked_commands(result) and verdict == "passed" and mode != "qa_diagnostic":
+        raise RuntimeError(f"a final passed result cannot leave a {BLOCKED_BY_PERMISSION} command unrun;"
+                           " settle as a diagnostic or failed result, and resume once the owner allows it")
     findings = result.get("findings", [])
     check_findings(findings)
     blocking_severities = {severity.casefold() for severity in policy()["blocking_severities"]}
@@ -2363,9 +2764,10 @@ def settle_result(root: Path, value: dict, result: dict, *, merged: bool = False
     role, verdict = result["role"], result["verdict"]
     findings = result.get("findings", [])
     if (role == "code_reviewer" and verdict != "cancelled" and not merged
-            and code_review_panel(root, current["delivery"]) == BESIDE_OFFICIAL):
-        raise RuntimeError("at code_review_panel beside_official the code review settles through merge-panel:"
-                           " register the official result and every lens result with panel-result")
+            and code_review_panel_state(root, value) is not None):
+        raise RuntimeError(f"at code_review_panel {code_review_panel(root, current['delivery'])} the code review"
+                           " settles through merge-panel: register the official result and every lens result"
+                           " with panel-result")
     if (role == "code_reviewer" and verdict != "cancelled"
             and review_loop(root, current["delivery"]) == "blocking_delta"):
         item = item_record(root, current["delivery"], current["story"])
@@ -2632,12 +3034,15 @@ def resume_qa(root: Path) -> dict:
         failed_runtime = runtime and (runtime.get("interrupted_commands")
                                       or any(event.get("exit_code") != 0 or event.get("candidate_intact") is not True
                                              for event in runtime.get("events", [])))
-        if runtime and (failed_final or failed_runtime):
+        permission_only = bool(result.get("blocked_commands")) and not failed_runtime
+        if runtime and ((failed_final and not permission_only) or failed_runtime):
             # Preserve failure evidence and its files. A new attempt receives a
             # different checkout and output namespace and cannot inherit events.
             value.setdefault("runtime_attempts", []).append(runtime)
             value.pop("runtime")
         value["workers"]["qa_engineer"] = {"state": "running", "started_at": time.time(), "resumed_from": result}
+        if permission_only:
+            value["workers"]["qa_engineer"]["resume_commands"] = [row["command"] for row in result["blocked_commands"]]
         write_session(root, value)
         return value
 
@@ -2675,8 +3080,8 @@ def runtime_needs_cleanup(session: dict) -> bool:
     return bool(state.get("active") or state.get("cleanup_required") or state.get("pending"))
 
 
-def runtime_environment_identity(root: Path) -> dict:
-    return environment_identity(root, command_environment(root))
+def runtime_environment_identity(root: Path, current: dict) -> dict:
+    return environment_identity(root, command_environment(root, current))
 
 
 def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
@@ -2714,13 +3119,22 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 raise RuntimeError("fresh runtime requires a successful down before up")
             if verb in {"seed", "logs", "url"} and not state["active"]:
                 raise RuntimeError("runtime must be up before seed, logs or url")
-            # Legacy disposable sessions retain their old path for teardown.
-            # New attempts always have independent checkouts and raw output.
-            namespace = state.get("attempt_id", session["session_id"])
-            execution_root = safe_runtime_path(root, session_path(root).parent / "scratch" / ("runtime-" + namespace))
+            # Every attempt of this Item runs in one kept checkout path, because
+            # a project environment may bind an Item instance to the checkout
+            # that created it. Each attempt's first command re-pins it to that
+            # attempt's candidate as a fresh clone would hold it; raw output
+            # stays per attempt. A session started by an older package keeps
+            # its own per-attempt path until its teardown.
+            scratch = session_path(root).parent / "scratch"
+            first_command = not state["events"] and not state.get("pending")
+            legacy = scratch / ("runtime-" + state.get("attempt_id", session["session_id"]))
+            kept = "attempt_id" in state and (first_command or not legacy.exists())
+            execution_root = safe_runtime_path(root, scratch / RUNTIME_CHECKOUT if kept else legacy)
             if not execution_root.exists():
                 execution_root.parent.mkdir(parents=True, exist_ok=True)
                 clone_private_checkout(root, execution_root, current["product_commit"])
+            elif kept and first_command and not execution_root.is_symlink():
+                repin_private_checkout(root, execution_root, current["product_commit"])
             if execution_root.is_symlink() or (verb != "down" and git(execution_root, "rev-parse", "HEAD") != current["product_commit"]):
                 raise RuntimeError("runtime checkout no longer binds the frozen candidate")
             workdir = (execution_root / str(contract.get("env_workdir", "."))).resolve()
@@ -2738,7 +3152,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 raise RuntimeError("runtime checkout changed" + (f" ({difference})" if difference else "")
                                    + "; only teardown is allowed before a new verification session")
             bound_session = session["session_id"]
-            environment_identity = runtime_environment_identity(root)
+            environment_identity = runtime_environment_identity(root, current)
             # Persist before launching: a failed/interrupted up may still leave
             # real services behind, so only a successful down permits settlement.
             if state.get("pending"):
@@ -2752,7 +3166,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
         # suffix; project command bytes remain the approved contract's bytes.
         command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
-        completed = subprocess.run(command, cwd=workdir, env=command_environment(root), shell=True,
+        completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         with locked(root):
             session = read_session(root)
@@ -2954,7 +3368,9 @@ def integrated_plan(root: Path, commit: str, plans: list[str], hashes: set[str])
             return None
         body = backlog_compile.parse_front_matter_text(text)[1]
         return {"test_plan": relative, "source_hash": value, "commit": holder,
-                "targets": automation_targets(body), "scenarios": scenario_records(body)}
+                "targets": automation_targets(body), "scenarios": scenario_records(body),
+                "scenario_metadata": {identifier: scenario_fields(block)[0]
+                                      for identifier, block in scenario_blocks(body)}}
 
     for relative in plans:
         path = docs / relative
@@ -3201,6 +3617,127 @@ def assertion_map_status(root: Path, delivery_id: str, story: str) -> dict:
                 for entry in check["converted_scenarios"]}}}
 
 
+
+def rebind_unit_selection(root: Path, delivery_id: str) -> dict:
+    commit = git(root, "rev-parse", "HEAD")
+    integrations = {}
+    for _identifier, _current, _path, item in integrated_items(root, delivery_id):
+        add_integration(integrations, item)
+    targets = set()
+    revisions = []
+    for story, value in sorted(integrations.items()):
+        closed = integrated_plan(root, commit, value["plans"], value["hashes"])
+        if closed is None:
+            raise RuntimeError("rebound unit selection requires the closed plan")
+        _current, receipt = current_approved_regression_plan(root, commit, story, closed)
+        for row in receipt["scenario_delta"].values():
+            before, after = row.get("before") or {}, row.get("after") or {}
+            target = after.get("automation_target")
+            if (after.get("level") == "unit" and after.get("automation", "").lower() == "required"
+                    and target and target != before.get("automation_target")):
+                if not literal_test_id(target):
+                    raise RuntimeError("rebound unit target must be a literal test id")
+                targets.add(target)
+        revisions.append({"story": story, "current_source_hash": receipt["current_source_hash"]})
+    contract = verification_contract(root)
+    kind = "diagnostic_test" if contract.get("diagnostic_test_command") else "test"
+    return {"delivery": delivery_id, "candidate_tree": git(root, "rev-parse", "HEAD^{tree}"),
+            "selected_test_ids": sorted(targets), "revisions": revisions, "kind": kind,
+            "command": contract[kind + "_command"], "workdir": contract.get(kind + "_workdir", ".")}
+
+
+def rebind_unit_record(root: Path, delivery_id: str) -> Path:
+    if not re.fullmatch(r"DLV-[0-9]+", delivery_id):
+        raise RuntimeError("invalid Delivery id")
+    return safe_runtime_path(root, session_path(root).parent / (delivery_id + "-rebound-units.json"), file_only=True)
+
+
+def rebind_unit_run(root: Path, delivery_id: str) -> dict:
+    root = root.resolve()
+    guard_write(root)
+    with environment_lock(root, PRE_HANDOFF_HOLDER, "rebind-unit-run"), command_lock(root, PRE_HANDOFF_HOLDER, "rebind-unit-run"):
+        selection = rebind_unit_selection(root, delivery_id)
+        if not selection["selected_test_ids"]:
+            return {"exit_code": 0, "candidate_intact": True, "needed": False}
+        path = rebind_unit_record(root, delivery_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # This Delivery-wide run has no single Item identity.
+        environment = command_environment(root, {"delivery": delivery_id, "story": ""},
+                                          diagnostic=selection["kind"] == "diagnostic_test")
+        data = {"schema_version": 1, "candidate_hash": digest(selection), "failed_test_ids": [],
+                "affected_test_ids": selection["selected_test_ids"], "selected_test_ids": selection["selected_test_ids"]}
+        selector = raw_output_path(root, "scratch/rebound-unit-selection.json")
+        selector.parent.mkdir(parents=True, exist_ok=True)
+        atomic_file.replace_text(selector, json.dumps(data, sort_keys=True))
+        generation = source_file_generation(selector)
+        if selection["kind"] == "diagnostic_test":
+            environment["AGENTROF_DIAGNOSTIC_TESTS"] = str(selector)
+        completed, intact, _difference, _dropped, _ran = private_checkout_run(root, selector.parent,
+            git(root, "rev-parse", "HEAD"), selection["workdir"], selection["command"], environment)
+        intact = (intact and rebind_unit_selection(root, delivery_id) == selection
+                  and source_file_generation(selector) == generation)
+        output = raw_output_path(root, "scratch/rebound-units-" + uuid.uuid4().hex + ".log")
+        atomic_file.replace_bytes(output, completed.stdout)
+        record = {"selection": selection, "exit_code": completed.returncode, "candidate_intact": intact,
+                  "output_file": output.relative_to(session_path(root).parent).as_posix(),
+                  "output_sha256": hashlib.sha256(completed.stdout).hexdigest(), "completed_at": time.time()}
+        record["evidence_hash"] = digest(record)
+        atomic_file.replace_text(path, json.dumps(record, sort_keys=True))
+        return record
+
+
+def rebind_unit_refusals(root: Path, delivery_id: str) -> list[str]:
+    try:
+        import process_policy
+        values, _pin = process_policy.effective_values(delivery.docs_root(root))
+        if values.get("regression_plan_revision", {}).get("value", "integrated") != "current_approved":
+            return []
+        selection = rebind_unit_selection(root, delivery_id)
+        if not selection["selected_test_ids"]:
+            return []
+        record = json.loads(rebind_unit_record(root, delivery_id).read_text(encoding="utf-8"))
+        output = raw_output_path(root, record["output_file"])
+        if (record["selection"] != selection or record["exit_code"] != 0 or record["candidate_intact"] is not True
+                or record["evidence_hash"] != digest({k: v for k, v in record.items() if k != "evidence_hash"})
+                or hashlib.sha256(output.read_bytes()).hexdigest() != record["output_sha256"] or not fresh_record(record)):
+            raise ValueError("no current green evidence")
+        return []
+    except (OSError, ValueError, RuntimeError, KeyError) as exc:
+        return ["Newly rebound unit targets need a passing rebind-unit-run before plan approval: " + str(exc)]
+
+
+def current_approved_regression_plan(root: Path, commit: str, story: str, closed: dict) -> tuple[dict, dict]:
+    """Read one story from the complete approved backlog at the candidate commit."""
+    docs = delivery.docs_root(root)
+    sources = backlog_compile.approved_history_sources(root, docs, commit)
+    if sources is None:
+        raise RuntimeError("current regression plans require a complete committed backlog approval")
+    matches = []
+    for path, raw in sources.items():
+        if path.name != "test-plan.md":
+            continue
+        text = raw.decode("utf-8")
+        props, body = backlog_compile.parse_front_matter_text(text)
+        if props.get("story_id") == story:
+            matches.append((path, text, body))
+    if len(matches) != 1:
+        raise RuntimeError(f"{story} requires exactly one current approved Test Plan; found {len(matches)}")
+    path, text, body = matches[0]
+    before = closed.get("scenario_metadata", closed["scenarios"])
+    after = {identifier: scenario_fields(block)[0] for identifier, block in scenario_blocks(body)}
+    delta = {identifier: {"before": before.get(identifier), "after": after.get(identifier)}
+             for identifier in sorted(set(before) | set(after))
+             if before.get(identifier) != after.get(identifier)}
+    metadata = after
+    revision = {"test_plan": path.relative_to(docs).as_posix(),
+                "source_hash": backlog_compile.digest_text(text), "commit": commit,
+                "targets": automation_targets(body), "scenarios": scenario_records(body)}
+    receipt = {"closed_commit": closed["commit"], "closed_source_hash": closed["source_hash"],
+               "current_commit": commit, "current_source_hash": revision["source_hash"],
+               "scenario_delta": delta, "scenario_metadata": metadata}
+    return revision, receipt
+
+
 def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -> dict:
     """Derive the pre-handoff regression selection of an Item's exact candidate.
 
@@ -3261,13 +3798,18 @@ def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -
             raise RuntimeError(f"{entry['label']} integrated Test Plan {entry['plan']} at {entry['recorded']},"
                                " a revision neither the candidate nor its history holds; its suite cannot be"
                                " selected")
+        plan_revision = None
+        if delivery.delivery_switch_value(docs, delivery_id, "regression_plan_revision") == "current_approved":
+            revision, plan_revision = current_approved_regression_plan(
+                root, current["product_commit"], entry["story"], revision)
         earlier.append({"delivery": entry["delivery"], "story": entry["story"], "item": entry["item"],
                         "test_plan": (docs / revision["test_plan"]).relative_to(root).as_posix(),
                         "test_plan_source_hash": revision["source_hash"], "test_plan_commit": revision["commit"],
                         "touched_claims": entry["touched"],
                         "touched_paths": sorted({path for path in changed for claim in entry["touched"]
                                                  if delivery._claims_overlap(claim, path)}),
-                        "automation_targets": sorted(set(revision["targets"]))})
+                        "automation_targets": sorted(set(revision["targets"])),
+                        **({"plan_revision": plan_revision} if plan_revision is not None else {})})
     earlier.sort(key=lambda entry: (entry["delivery"], entry["story"]))
     plan = str(item_record(root, delivery_id, story).get("test_plan_path") or "")
     own = sorted(set(plan_automation_targets(docs, plan, f"{story} of {delivery_id}")))
@@ -3284,11 +3826,22 @@ def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -
         resolved = isinstance(command, str) and command.strip() and "{{" not in command and "}}" not in command
         return command if resolved else None
 
-    kind = "diagnostic_test" if selected and approved("diagnostic_test") else "test"
+    accept_full = own_target_reuse(root, delivery_id) == ACCEPT_RECORD
+    kind = "diagnostic_test" if selected and approved("diagnostic_test") and not accept_full else "test"
     command = approved(kind)
     if command is None:
         raise RuntimeError("approved verification command is missing or contains unresolved parameters")
-    return {"delivery": delivery_id, "story": story, "candidate_hash": current["candidate_hash"],
+    live_plan = None
+    if contract.get("live_environment_plan") == "effect_ordered_v1":
+        rows = []
+        for path in sorted(docs.rglob("test-plan.md")):
+            for identifier, block in scenario_blocks(delivery.split_note(path)[1]):
+                fields = scenario_fields(block)[0]
+                if fields.get("automation_target", "").strip() in selected:
+                    rows.append({"id": identifier, "fields": fields})
+        live_plan = backlog_compile.live_environment_plan(rows)
+    return {**({"live_environment_plan": live_plan} if live_plan is not None else {}),
+            "delivery": delivery_id, "story": story, "candidate_hash": current["candidate_hash"],
             "product_commit": current["product_commit"],
             "candidate_tree": git(root, "rev-parse", current["product_commit"] + "^{tree}"),
             "earlier_stories": earlier, "own_targets": own, "affected_test_ids": selected,
@@ -3304,7 +3857,9 @@ def write_pre_handoff_selection(root: Path, derived: dict) -> Path | None:
     if not derived["affected_test_ids"]:
         return None
     path = raw_output_path(root, PRE_HANDOFF_SELECTION)
-    text = json.dumps({"schema_version": 1, "candidate_hash": derived["candidate_hash"], "failed_test_ids": [],
+    text = json.dumps({**({"live_environment_plan": derived["live_environment_plan"]}
+                         if "live_environment_plan" in derived else {}),
+                       "schema_version": 1, "candidate_hash": derived["candidate_hash"], "failed_test_ids": [],
                        "affected_test_ids": derived["affected_test_ids"]}, indent=2, sort_keys=True) + "\n"
     if not path.is_file() or path.read_bytes() != text.encode("utf-8"):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -3376,14 +3931,18 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
         contract = verification_contract(root)
         contract_variables(contract)
         shared = write_pre_handoff_selection(root, derived)
-        environment = command_environment(root, diagnostic=derived["kind"] == "diagnostic_test")
+        environment = command_environment(root, current, diagnostic=derived["kind"] == "diagnostic_test")
         selections: dict[Path, tuple[bytes, list[int]]] = {}
         if derived["kind"] == "diagnostic_test":
             selector = safe_runtime_path(root, session_path(root).parent / "pre-handoff-tests.json", file_only=True)
             atomic_file.replace_text(selector, json.dumps(
                 {"schema_version": 1, "candidate_hash": current["candidate_hash"], "failed_test_ids": [],
                  "affected_test_ids": derived["affected_test_ids"],
-                 "selected_test_ids": derived["affected_test_ids"]}, indent=2, sort_keys=True) + "\n")
+                 "selected_test_ids": derived["affected_test_ids"],
+                 **({"regression_plans": [{"story": entry["story"], **entry["plan_revision"]}
+                                           for entry in derived["earlier_stories"] if "plan_revision" in entry]}
+                    if any("plan_revision" in entry for entry in derived["earlier_stories"]) else {})},
+                indent=2, sort_keys=True) + "\n")
             environment["AGENTROF_DIAGNOSTIC_TESTS"] = str(selector)
             # As in QA's diagnostic run, neither the selection the command
             # receives nor the one QA's diagnostic reads may change while it runs.
@@ -3415,7 +3974,9 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
             output_name = "scratch/pre-handoff-" + uuid.uuid4().hex + ".log"
             atomic_file.replace_bytes(raw_output_path(root, output_name), completed.stdout)
             record = {**{key: derived[key] for key in ("delivery", "story", "product_commit", *PRE_HANDOFF_IDENTITY)},
-                      "earlier_stories": [{"delivery": entry["delivery"], "story": entry["story"]}
+                      "earlier_stories": [{"delivery": entry["delivery"], "story": entry["story"],
+                                           **({"plan_revision": entry["plan_revision"]}
+                                              if "plan_revision" in entry else {})}
                                           for entry in derived["earlier_stories"]],
                       "exit_code": completed.returncode, "candidate_intact": intact, "output_file": output_name,
                       "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
@@ -3571,6 +4132,19 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
     if payload.get("product_commit", current["product_commit"]) != current["product_commit"]:
         raise RuntimeError("context manifest names another candidate commit")
     plan = payload.get("project_reading")
+    if "project_reading_file" in payload:
+        reference = payload["project_reading_file"]
+        try:
+            checksum = reference.get("sha256", "")
+            if not re.fullmatch(r"sha256:[0-9a-f]{64}", checksum):
+                raise ValueError("invalid reading attachment digest")
+            path = safe_runtime_path(root, session_path(root).parent / "manifest" /
+                                     ("project-reading-" + checksum[7:] + ".json"), file_only=True)
+            plan = json.loads(path.read_text(encoding="utf-8"))
+            if reference.get("path") != str(path) or digest(plan) != reference.get("sha256"):
+                raise ValueError("context attachment differs")
+        except (OSError, ValueError, TypeError, AttributeError):
+            raise RuntimeError("project reading attachment changed or is unavailable") from None
     if not isinstance(plan, dict) or "request" not in plan:
         raise RuntimeError("resolve context or use frozen inspect reads before continuing")
     def addressed(index):
@@ -3595,7 +4169,7 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
             raise RuntimeError("manual context source differs from the frozen candidate")
         manual.append({**obligation, "candidate_hash": current["candidate_hash"],
             "product_commit": current["product_commit"], "disposition": "requires_frozen_inspect",
-            "next_action": "Use delivery_verification.py inspect --path <path> to read this source from the bound candidate before completing its obligation."})
+            "next_action": "When the task needs this source, read it from the bound candidate with delivery_verification.py inspect --path <path>."})
     units = {}
     for row in plan["must_read"]:
         unit = addresses[row["unit_id"]]
@@ -3700,6 +4274,29 @@ def closure_read(root: Path, current: dict) -> tuple[list[str], dict]:
     return sorted(full), {"scope": scope, "views": task_inputs.vault_views(docs)}
 
 
+FINDING_SUMMARY_FIELDS = ("id", "role", "severity", "calibrated_severity", "status", "file")
+
+
+def finding_summary(finding: dict) -> dict:
+    """One line per inherited finding; the full record stays in the manifest's findings file."""
+    value = {key: finding[key] for key in FINDING_SUMMARY_FIELDS if key in finding}
+    text = str(finding.get("title") or finding.get("description") or finding.get("verification") or "")
+    line = text.strip().splitlines()[0] if text.strip() else ""
+    value["title"] = line if len(line) <= 160 else line[:157] + "..."
+    return value
+
+
+def reader_attachment(root: Path, name: str, data, use: str) -> dict:
+    """Write bulky manifest data beside the session and return its path and hash.
+
+    The CLI binds staleness through the frozen session, never through this copy,
+    so a reader opens the file only when it needs the full data."""
+    path = safe_runtime_path(root, session_path(root).parent / "manifest" / name, file_only=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_file.replace_text(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return {"path": str(path), "sha256": digest(data), "entries": len(data), "use": use}
+
+
 def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, remote: str = "origin") -> dict:
     if role not in ROLES or mode not in policy()["role_modes"][role]:
         raise RuntimeError("unsupported verification role or mode")
@@ -3732,20 +4329,37 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
         checks["mutation_whole_changed_files"]["files"] = current["mutation_files"]
     if "fresh_runtime" in checks:
         checks["fresh_runtime"]["event_hashes"] = []
+    unresolved = value.get("unresolved_findings", [])
+    bound = {key: item for key, item in current.items() if key != "source_observations"}
     result = {"schema_version": 1, "role": role, "mode": mode, "session_id": value["session_id"],
-              **current, "required_checks": list(checks),
+              **bound, "required_checks": list(checks),
+              "source_observations_file": reader_attachment(
+                  root, "source-observations.json", current["source_observations"],
+                  "The CLI checks this snapshot itself; readers never open it."),
               "full_read": sorted(set(current["inputs"]) | set(current["changed_files"])),
-              "repair_delta": delta, "scope_expanded": scope_expanded, "unresolved_findings": value.get("unresolved_findings", []),
+              # A delta equal to the whole change names it instead of repeating every path.
+              "repair_delta": "changed_files" if delta == current["changed_files"] else delta,
+              "scope_expanded": scope_expanded,
+              "unresolved_findings": [finding_summary(finding) for finding in unresolved],
+              "unresolved_findings_file": reader_attachment(
+                  root, "unresolved-findings.json", unresolved,
+                  "Full records of the one-line unresolved_findings; read only to carry a finding forward."),
               "read_interface": {"inspect": "inspect --path <repository-relative-path> [--base]", "diff": "diff [--path <repository-relative-path>]"},
               "review_passes": policy()["review_checks"], "allowed_writes": [str(session_path(root).parent / "scratch")],
               "mutation_scope_file": str(session_path(root).parent / "mutation-files.json"),
+              "command_form": command_form(root) + " <verb> ...",
               "result_interface": {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
                                    "role": role, "mode": mode, "verdict": "passed|failed|cancelled",
-                                   "report": "Independent findings and conclusion", "checks": checks, "findings": []},
+                                   "report": "Independent findings and conclusion", "checks": checks, "findings": [],
+                                   "blocked_commands": []},
               "diagnostic_interface": {"available": bool(contract.get("diagnostic_test_command")),
                                        "command": "run --kind diagnostic_test --selection-file <scratch-selection.json>",
                                        "selection": {"schema_version": 1, "candidate_hash": current["candidate_hash"],
                                                      "failed_test_ids": [], "affected_test_ids": []},
+                                       "finding_controls": "Optional [{finding_id, test_ids}]: run the negative"
+                                                           " controls an open finding lists in"
+                                                           " negative_control_test_ids, from test files the Item"
+                                                           " changed; recorded as finding_diagnostic evidence only",
                                        "environment_variable": "AGENTROF_DIAGNOSTIC_TESTS",
                                        "terminal_evidence": False},
               "live_test_interface": {"groups": list(contract.get("live_groups") or []),
@@ -3759,6 +4373,11 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                            " comma-separated in live_groups order; live groups never join required_checks"},
               "execution_note": "Commands run in private clones containing tracked files only. Approved commands must provision dependencies or use a fixed external environment; ignored dependencies are never copied. The clone is not an operating-system sandbox for trusted commands with absolute paths.",
               "next_transition": "Register independent result; owner writes reports only after both readers settle"}
+    if role == "qa_engineer" and value["workers"][role].get("resume_commands"):
+        result["resume_commands"] = value["workers"][role]["resume_commands"]
+
+    if finding_control_history(value):
+        result["finding_control_bindings"] = finding_control_history(value)
     if review_scope(root, delivery_id) == CLOSURE_VALUE:
         result["full_read"], closure = closure_read(root, current)
         result.update({CLOSURE_SWITCH: CLOSURE_VALUE, "vault_views": closure["views"],
@@ -3766,15 +4385,24 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
     import project_context
     seeds = {path for path in current["inputs"] if path.endswith("/item.md")}
     result["project_reading"] = project_context.task_context(root, entry="deliver",
-        role=role.replace("_", "-"), mode="review", paths=seeds, no_cache=True)
+        role=role.replace("_", "-"), mode="review", paths=seeds | set(current["changed_files"]), no_cache=True,
+        change_base=current["integration_base_commit"])
     result["read_interface"]["context"] = "inspect-context --plan <saved verification manifest>"
     result["read_interface"]["expand_context"] = "expand-context --plan <saved context manifest> --reason <reason> [--ref <reference>]"
     result["context_guidance"] = ("Start with project_reading and batch-read with inspect-context; "
-        "full_read and all verification gates remain mandatory. Expand incomplete plans. "
+        "Required review scope and verification gates remain mandatory; suggested reads are bounded advice. Expand optional context only when needed. "
         "If context is insufficient, use frozen inspect/diff on your initiative or parent direction "
         "and report context_findings with sources, impact, recovery and proposed fix to the parent. "
         "Only the parent offers an anonymous issue through issue-report after exact-payload user approval.")
+    if role == "code_reviewer":
+        # The code reviewer runs no command: it reads the freeze record and QA's results instead.
+        del result["diagnostic_interface"]
+        result["verification_evidence"] = reviewer_evidence(root, value)
+        if review_loop(root, delivery_id) == "blocking_delta" and mode == "review_repair":
+            result["carried_findings"] = carried_findings(root, value, current, scope_expanded)
     panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
+    if panel is None and role == "code_reviewer" and code_review_panel(root, current["delivery"]) == RISK_SCOPED:
+        result["lens_selection"] = lens_selection(root, current, panel_assignments())[1]
     if panel is not None:
         # Every reader of the panel pass receives this same manifest and one assignment.
         result["code_review_panel"] = {
@@ -3787,10 +4415,191 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                                       "findings": []},
             "registration": "Every reader registers its own result with panel-result --file <result.json>;"
                             " merge-panel then registers the one code review result"}
+        if "lens_selection" in panel:
+            result["code_review_panel"]["lens_selection"] = panel["lens_selection"]
+    budget = json.loads(project_context.POLICY.read_text(encoding="utf-8"))["reader_manifest_bytes"]
+    if len(json.dumps(result, indent=2).encode("utf-8")) > budget:
+        reading = result["project_reading"]
+        result["project_reading_file"] = reader_attachment(
+            root, "project-reading-" + digest(reading)[7:] + ".json", reading,
+            "The frozen inspect-context command loads this bound reading plan.")
+        result["project_reading"] = {key: reading[key] for key in ("status", "coverage") if key in reading}
     return result
 
 
-RUN_SUMMARY_FIELDS = ("live_group", "exit_code", "candidate_intact", "selection_intact", "reused_pre_handoff", "duration_seconds",
+LAUNCH_PROMPTS_PATH = Path(__file__).resolve().parents[1] / "templates/reader-launch-prompts.json"
+
+
+def launch_prompt(template: list[str], fields: dict) -> str:
+    """A reader launch prompt: its template lines with every placeholder filled; a missing field refuses."""
+    try:
+        return "\n".join(line.format_map(fields) for line in template) + "\n"
+    except (KeyError, IndexError, ValueError) as exc:
+        raise RuntimeError(f"reader launch prompt template names an unknown placeholder: {exc}") from exc
+
+
+def start_pass(root: Path, delivery_id: str, story: str, *, review_mode: str | None = None,
+               qa_mode: str = "qa_final", fresh: bool = False, remote: str = "origin") -> dict:
+    """Start one verification pass of an Item: pre-handoff regression when the Delivery runs it, freeze,
+    both readers' manifests and their launch prompts. The first failing step stops the chain."""
+    root = root.resolve()
+    steps: list[dict] = []
+
+    def stopped(step: str, error: str) -> dict:
+        steps.append({"step": step, "ok": False, "error": error})
+        return {"ok": False, "failed_step": step, "errors": [f"{step}: {error}"], "steps": steps}
+
+    try:
+        regression = pre_handoff_regression(root, delivery_id)
+    except (RuntimeError, ValueError, OSError, KeyError) as exc:
+        return stopped("regression-selection", str(exc))
+    if regression == TOUCHED_SUITES:
+        try:
+            selection = regression_selection(root, delivery_id, story)
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
+            return stopped("regression-selection", str(exc))
+        steps.append({"step": "regression-selection", "ok": True, "selection_file": selection["selection_file"]})
+        try:
+            ran = regression_run(root, delivery_id, story)
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
+            return stopped("regression-run", str(exc))
+        if ran.get("exit_code") != 0 or ran.get("candidate_intact") is False:
+            return stopped("regression-run", f"exit code {ran.get('exit_code')}, candidate intact"
+                                             f" {ran.get('candidate_intact')}; read {ran.get('output_file')}")
+        steps.append({"step": "regression-run", "ok": True, "duration_seconds": ran.get("duration_seconds")})
+    else:
+        steps.extend({"step": step, "ok": True, "skipped": f"{PRE_HANDOFF_SWITCH} is {regression}"}
+                     for step in ("regression-selection", "regression-run"))
+    try:
+        frozen = freeze(root, delivery_id, story, fresh=fresh, remote=remote)
+    except (RuntimeError, ValueError, OSError, KeyError) as exc:
+        return stopped("freeze", str(exc))
+    steps.append({"step": "freeze", "ok": True, "reused": bool(frozen.get("reused"))})
+    modes = {"code_reviewer": review_mode or ("review_repair" if frozen.get("previous_candidate") else "review_initial"),
+             "qa_engineer": qa_mode}
+    directory = safe_runtime_path(root, session_path(root).parent / "pass")
+    directory.mkdir(parents=True, exist_ok=True)
+    manifests: dict[str, dict] = {}
+    paths: dict[str, str] = {}
+    for role, mode in modes.items():
+        try:
+            value = manifest(root, delivery_id, story, role, mode, remote)
+            path = safe_runtime_path(root, directory / f"manifest-{role}.json", file_only=True)
+            atomic_file.replace_text(path, json.dumps(value, indent=2) + "\n")
+        except (RuntimeError, ValueError, OSError, KeyError) as exc:
+            return stopped(f"manifest {role}", str(exc))
+        manifests[role], paths[role] = value, str(path)
+        steps.append({"step": f"manifest {role}", "ok": True, "mode": mode, "path": str(path)})
+    try:
+        templates = json.loads(LAUNCH_PROMPTS_PATH.read_text(encoding="utf-8"))["prompts"]
+        panel = manifests["code_reviewer"].get(CODE_REVIEW_PANEL)
+        common = {"delivery": delivery_id, "story": story, "session_id": frozen["session_id"],
+                  "candidate_hash": frozen["candidate"]["candidate_hash"],
+                  "constitution": str(Path(__file__).resolve().parents[1] / "constitution.md"),
+                  "runner": " ".join(subprocess.list2cmdline([part]) if os.name == "nt" else shlex_quote(part)
+                                     for part in (sys.executable, str(Path(__file__).resolve()),
+                                                  "--worktree", str(root))),
+                  "scratch": str(session_path(root).parent / "scratch")}
+        readers = [("code_reviewer", "code_reviewer", {"agent": "code-reviewer", "mode": modes["code_reviewer"],
+                                                       "register": "panel-result" if panel else "result"}),
+                   ("qa_engineer", "qa_engineer", {"agent": "qa-engineer", "mode": modes["qa_engineer"],
+                                                   "register": "result"})]
+        for assignment in (panel or {}).get("assignments", []):
+            readers.append((f"code_reviewer_lens-{assignment['id_prefix'].rstrip('-')}", "code_reviewer_lens",
+                            {"agent": "code-reviewer-lens", "mode": PANEL_LENS_MODE, "register": "panel-result",
+                             "lens": ", ".join(assignment["lens"]), "id_prefix": assignment["id_prefix"]}))
+        prompts = {}
+        for name, template, fields in readers:
+            role = "code_reviewer" if template != "qa_engineer" else "qa_engineer"
+            text = launch_prompt(templates[template], {**common, **fields, "manifest": paths[role]})
+            path = safe_runtime_path(root, directory / f"launch-{name}.md", file_only=True)
+            atomic_file.replace_text(path, text)
+            prompts[name] = {"path": str(path), "text": text}
+    except (RuntimeError, ValueError, OSError, KeyError) as exc:
+        return stopped("launch prompts", str(exc))
+    steps.append({"step": "launch prompts", "ok": True, "readers": sorted(prompts)})
+    return {"ok": True, "session_id": frozen["session_id"], "candidate_hash": frozen["candidate"]["candidate_hash"],
+            "steps": steps, "manifests": paths, "prompts": prompts}
+
+
+
+REVIEWER_COMMAND_RULE = ("The code reviewer starts no test, diagnostic or other verification command and no"
+                         " regression-run; it reads the frozen candidate's recorded runs with status instead.")
+# A finding names a repository path as a token with a slash or a file extension, and a
+# symbol as an identifier inside backticks.
+NAMED_PATH_RE = re.compile(r"(?<![\w.-])((?:[\w.-]+/)*[\w-][\w.-]*\.[A-Za-z0-9]+|(?:[\w.-]+/)+[\w.-]+)")
+BACKTICK_RE = re.compile(r"`([^`\n]+)`")
+IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+
+
+def reviewer_evidence(root: Path, session: dict) -> dict:
+    """What the code reviewer reads in place of a test run: the freeze record and QA's recorded runs."""
+    pre_handoff = session.get("pre_handoff")
+    return {"rule": REVIEWER_COMMAND_RULE,
+            "pre_handoff_run": run_summary(root, pre_handoff) if isinstance(pre_handoff, dict) else None,
+            "qa_runs": {kind: run_summary(root, record)
+                        for kind, record in sorted(session.get("raw_evidence", {}).items())},
+            "read": "status --summary; status --run pre_handoff|test|mutation|dependency_audit|diagnostic_test"}
+
+
+def finding_names(finding: dict) -> tuple[list[str], list[str]]:
+    """The repository paths and the code symbols a finding names, read as data from its text fields."""
+    anchor = str(finding.get("file") or "")
+    paths = {anchor.rsplit(":", 1)[0] if re.search(r":\d+(?:-\d+)?$", anchor) else anchor} - {""}
+    symbols = set()
+    for key in ("file", "description", "impact", "fix", "verification"):
+        text = str(finding.get(key) or "")
+        paths.update(match.rstrip(".") for match in NAMED_PATH_RE.findall(text))
+        for quoted in BACKTICK_RE.findall(text):
+            if not NAMED_PATH_RE.fullmatch(quoted.strip()):
+                symbols.update(IDENTIFIER_RE.findall(quoted))
+    return sorted(paths), sorted(symbols)
+
+
+def carried_findings(root: Path, session: dict, current: dict, scope_expanded: bool) -> list[dict]:
+    """Which unresolved code review findings a repair review re-examines and which it carries.
+
+    At review_loop blocking_delta a carried finding is re-examined only when a
+    file or symbol it names changed between the previous candidate and this
+    one; otherwise its status is carried from the record. Without a previous
+    candidate, or when the bound inputs or instructions changed, every one is
+    re-examined.
+    """
+    findings = [finding for finding in session.get("unresolved_findings", []) if finding.get("role") == "code_reviewer"]
+    previous = session.get("previous_candidate") or {}
+    changed_files: set[str] = set()
+    known_files: set[str] = set()
+    changed_lines: list[str] = []
+    whole = scope_expanded or not previous.get("product_commit")
+    if not whole and findings:
+        old, new = previous["product_commit"], current["product_commit"]
+        try:
+            known_files = {part for commit in (old, new)
+                           for part in git(root, "ls-tree", "-r", "--name-only", "-z", commit).split("\0") if part}
+            changed_files = {part for part in git(root, "diff", "--name-only", "--no-renames", "-z", old, new)
+                             .split("\0") if part}
+            changed_lines = [line[1:] for line in git(root, "diff", "--no-renames", "--unified=0", old, new)
+                             .splitlines() if line[:1] in {"+", "-"} and line[:3] not in {"+++", "---"}]
+        except RuntimeError:
+            whole = True
+    rows = []
+    for finding in findings:
+        paths, symbols = finding_names(finding)
+        touched = sorted(path for path in paths if path in changed_files
+                         or any(changed.startswith(path.rstrip("/") + "/") for changed in changed_files))
+        moved = sorted(symbol for symbol in symbols
+                       if any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?![A-Za-z0-9_])", line)
+                              for line in changed_lines))
+        anchored = any(path in known_files or any(name.startswith(path.rstrip("/") + "/") for name in known_files)
+                       for path in paths)
+        reexamine = whole or not anchored or bool(touched or moved)
+        rows.append({"id": finding["id"], "severity": finding.get("severity"), "status": finding.get("status"),
+                     "named_files": paths, "named_symbols": symbols, "changed_files": touched,
+                     "changed_symbols": moved, "action": "reexamine" if reexamine else "carry"})
+    return rows
+
+
+RUN_SUMMARY_FIELDS = ("live_group", "resume_count", "resume_of", "exit_code", "candidate_intact", "selection_intact", "evidence_scope", "reused_pre_handoff", "duration_seconds",
                       "completed_at", "evidence_hash", "environment_hash", "checkout_difference", "earlier_stories",
                       "output_file")
 
@@ -3804,6 +4613,97 @@ def run_summary(root: Path, record: dict) -> dict:
     if "output_file" in value:
         value["output_path"] = str(raw_output_path(root, value["output_file"]))
     return value
+
+
+BLOCKED_BY_PERMISSION = "blocked_by_permission"
+
+
+def cli_form(root: Path, *verb: str) -> str:
+    """One literal invocation of this packaged CLI, as a host permission rule matches it."""
+    arguments = [sys.executable, "-B", str(Path(__file__).resolve()), "--worktree", str(root.resolve()), *verb]
+    return subprocess.list2cmdline(arguments) if os.name == "nt" else shlex.join(arguments)
+
+
+def permission_preflight(root: Path, delivery_id: str, story: str) -> dict:
+    """The exact commands the QA reader runs for this Item, for the owner to allow before the first QA round.
+
+    Permission rules belong to the owner, so the package only names the
+    command forms and the host rules that admit them; it never edits them.
+    """
+    root = root.resolve()
+    contract, _ = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+    item = item_record(root, delivery_id, story)
+    forms = [("full_test_suite", cli_form(root, "run", "--kind", "test"))]
+    if contract.get("diagnostic_test_command"):
+        forms.append(("diagnostic_test", cli_form(root, "run", "--kind", "diagnostic_test", "--selection-file")
+                      + " <scratch-selection.json>"))
+    if contract.get("mutation_disposition") == "required":
+        forms.append(("mutation", cli_form(root, "run", "--kind", "mutation")))
+    if contract.get("dependency_audit_disposition") == "required":
+        forms.append(("dependency_audit", cli_form(root, "run", "--kind", "dependency_audit")))
+    groups = contract.get("live_groups")
+    for group in groups if isinstance(groups, list) else []:
+        forms.append((f"live_test:{group}", cli_form(root, "run", "--kind", "live_test", "--group", str(group))))
+    if item.get("runtime_required"):
+        for verb in ("up", "seed", "logs", "url", "down"):
+            forms.append((f"environment:{verb}", cli_form(root, "environment", "--verb", verb)))
+    extra = contract.get("live_permission_commands", [])
+    if not isinstance(extra, list) or any(not isinstance(command, str) or not command.strip() for command in extra):
+        raise RuntimeError("live_permission_commands must list exact nonempty commands")
+    forms.extend((f"environment_permission:{number}", command) for number, command in enumerate(extra, 1))
+    plan = delivery.docs_root(root) / str(item.get("test_plan_path", ""))
+    changing = []
+    if plan.is_file():
+        for identifier, block in scenario_blocks(delivery.split_note(plan)[1]):
+            fields = scenario_fields(block)[0]
+            effect = fields.get("environment_effect", "changes")
+            if fields.get("level") == "live" and effect != "reads":
+                changing.append({"scenario": identifier, "environment_effect": effect,
+                                 "target": fields.get("automation_target")})
+    prefix = cli_form(root)
+    return {"delivery": delivery_id, "story": story,
+            "environment_changing_scenarios": changing,
+            "probe": {"scope": "command_validation_only", "host_permission_prediction": False,
+                      "command": prefix + " permission-probe --kind <kind> [--group <group>]",
+                      "reason": "Host permission classifiers expose no portable no-effect authorization API; confirm the exact allow rules with the owner."},
+            "commands": [{"purpose": purpose, "command": command} for purpose, command in forms],
+            "allow_rules": {"command_prefixes": [f"{prefix} run", f"{prefix} environment"],
+                            "exact_commands": [command for _, command in forms]},
+            "next_action": ("Before the first QA round, show the owner these commands and ask them to allow them"
+                            " once in the host's permission settings, as a prefix rule per command_prefixes entry"
+                            " or one rule per exact command; the package never edits those settings."
+                            " A QA reader whose command the host refuses records it in blocked_commands with"
+                            f" outcome {BLOCKED_BY_PERMISSION}; once the owner allows it, resume-qa reruns it on"
+                            " the same candidate.")}
+
+
+def permission_probe(root: Path, kind: str, group: str | None = None) -> dict:
+    contract = verification_contract(root)
+    if kind == "live_test":
+        if group is None:
+            raise RuntimeError("live permission probe requires a group")
+        command = live_test_command(contract, group)
+    else:
+        if group is not None:
+            raise RuntimeError("only live permission probes take a group")
+        command = contract.get(kind + "_command")
+        if not isinstance(command, str) or not command.strip():
+            raise RuntimeError("permission probe requires an approved command")
+    return {"effect": "none", "command": command, "command_valid": True,
+            "host_permission": "unknown", "owner_allow_rule_required": True}
+
+
+def check_blocked_commands(result: dict) -> list[dict]:
+    """A reader's commands the host refused, each named as blocked_by_permission rather than left unrun."""
+    blocked = result.get("blocked_commands", [])
+    if (not isinstance(blocked, list) or any(
+            not isinstance(row, dict) or set(row) != {"command", "outcome", "reason"}
+            or row["outcome"] != BLOCKED_BY_PERMISSION
+            or not all(isinstance(row[key], str) and row[key].strip() for key in ("command", "reason"))
+            for row in blocked)):
+        raise RuntimeError("blocked_commands entries declare only command, reason and outcome"
+                           f" {BLOCKED_BY_PERMISSION}")
+    return blocked
 
 
 def status_summary(root: Path, run: str | None = None) -> dict:
@@ -3825,6 +4725,8 @@ def status_summary(root: Path, run: str | None = None) -> dict:
             "candidate_hash": current["candidate_hash"], "product_commit": current["product_commit"],
             "workers": {role: worker["state"] for role, worker in session["workers"].items()},
             "unresolved_findings": len(session.get("unresolved_findings", [])),
+            BLOCKED_BY_PERMISSION: [{**row, "role": role} for role, worker in session["workers"].items()
+                                    for row in worker.get("result", {}).get("blocked_commands", [])],
             "metrics": session["metrics"], "runs": {
                 kind: record if kind in progress and "identity" not in record else run_summary(root, record)
                 for kind, record in runs.items()}}
@@ -3834,10 +4736,13 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", required=True)
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map", "repair-live"):
+    for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map",
+                 "repair-live", "permission-preflight"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
+    rebind = subs.add_parser("rebind-unit-run")
+    rebind.add_argument("--delivery", required=True)
     subs.choices["freeze"].add_argument("--fresh", action="store_true")
     for name in ("freeze", "manifest"):
         subs.choices[name].add_argument("--remote", default="origin",
@@ -3845,12 +4750,22 @@ def main(argv=None) -> int:
     for name in ("manifest",):
         subs.choices[name].add_argument("--role", choices=ROLES, required=True)
         subs.choices[name].add_argument("--mode", required=True)
+    start = subs.add_parser("start-pass")
+    start.add_argument("--delivery", required=True)
+    start.add_argument("--story", required=True)
+    start.add_argument("--review-mode", choices=("review_initial", "review_repair"))
+    start.add_argument("--qa-mode", choices=("qa_final", "qa_diagnostic"), default="qa_final")
+    start.add_argument("--fresh", action="store_true")
+    start.add_argument("--remote", default="origin")
     result = subs.add_parser("result")
     result.add_argument("--file", required=True)
     calibrate = subs.add_parser("calibrate")
     calibrate.add_argument("--file", required=True)
     panel_result = subs.add_parser("panel-result")
     panel_result.add_argument("--file", required=True)
+    probe = subs.add_parser("permission-probe")
+    probe.add_argument("--kind", choices=RUN_KINDS, required=True)
+    probe.add_argument("--group")
     subs.add_parser("merge-panel")
     run = subs.add_parser("run")
     run.add_argument("--kind", choices=RUN_KINDS, required=True)
@@ -3861,6 +4776,7 @@ def main(argv=None) -> int:
     run.add_argument("--selection-file", type=Path)
     run.add_argument("--spot-run-file", type=Path)
     run.add_argument("--fresh", action="store_true")
+    run.add_argument("--resume", action="store_true")
     environment = subs.add_parser("environment")
     environment.add_argument("--verb", required=True, choices=("down", "up", "seed", "logs", "url"))
     environment.add_argument("--value")
@@ -3885,6 +4801,7 @@ def main(argv=None) -> int:
             context.add_argument("--reason", required=True)
             context.add_argument("--ref", action="append")
     subs.add_parser("resume-qa")
+    subs.add_parser("prepare-repair")
     status = subs.add_parser("status")
     status.add_argument("--summary", action="store_true")
     status.add_argument("--run", help="one recorded run: " + ", ".join(RUN_KINDS[:-1]) + ", live_test:<group> or pre_handoff")
@@ -3894,6 +4811,11 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     root = Path(args.worktree).resolve()
     try:
+        if args.command == "start-pass":
+            value = start_pass(root, args.delivery, args.story, review_mode=args.review_mode, qa_mode=args.qa_mode,
+                               fresh=args.fresh, remote=args.remote)
+            print(json.dumps(value, indent=2))
+            return 0 if value["ok"] else 1
         if args.command == "freeze":
             value = freeze(root, args.delivery, args.story, fresh=args.fresh, remote=args.remote)
         elif args.command == "inspect-context":
@@ -3915,12 +4837,18 @@ def main(argv=None) -> int:
             value = run_environment(root, args.verb, args.value)
         elif args.command == "lane-run":
             value = lane_run(root, args.delivery, args.story, args.role, args.kind, args.verb, args.value)
+        elif args.command == "rebind-unit-run":
+            value = rebind_unit_run(root, args.delivery)
         elif args.command == "regression-selection":
             value = regression_selection(root, args.delivery, args.story)
         elif args.command == "regression-run":
             value = regression_run(root, args.delivery, args.story)
         elif args.command == "repair-live":
             value = repair_live(root, args.delivery, args.story)
+        elif args.command == "permission-probe":
+            value = permission_probe(root, args.kind, args.group)
+        elif args.command == "permission-preflight":
+            value = permission_preflight(root, args.delivery, args.story)
         elif args.command == "assertion-map":
             value = assertion_map_status(root, args.delivery, args.story)
         elif args.command == "inspect":
@@ -3929,11 +4857,13 @@ def main(argv=None) -> int:
             value = candidate_diff(root, args.path)
         elif args.command == "resume-qa":
             value = resume_qa(root)
+        elif args.command == "prepare-repair":
+            value = prepare_repair(root)
         elif args.command == "wait":
             value = wait_for_release(root, args.role, args.seconds)
         elif args.command == "run":
             value = run_check(root, args.kind, fresh=args.fresh, selection_file=args.selection_file,
-                              spot_file=args.spot_run_file, group=",".join(args.group) if args.group else None)
+                              spot_file=args.spot_run_file, group=",".join(args.group) if args.group else None, resume=args.resume)
         elif args.command == "manifest":
             value = manifest(root, args.delivery, args.story, args.role, args.mode, args.remote)
         elif args.summary or args.run:
@@ -3941,7 +4871,7 @@ def main(argv=None) -> int:
         else:
             value = read_session(root)
         print(json.dumps({"ok": True, **value}, indent=2))
-        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run", "repair-live"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
+        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run", "repair-live", "rebind-unit-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2))
         return 2

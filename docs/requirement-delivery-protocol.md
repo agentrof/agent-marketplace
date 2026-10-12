@@ -248,7 +248,7 @@ the switches that flow owns: `code_review_panel`, `context_pack`,
 `execution_planning`, `implementation_schedule`, `item_cost_report`,
 `item_qa_tier`, `item_review_scale`, `lane_isolation`, `lane_table`,
 `level_change_map`, `own_target_reuse`, `owner_gates`,
-`pre_handoff_regression`, `provisional_claims`, `qa_gate_order`,
+`pre_handoff_regression`, `provisional_claims`, `qa_gate_order`, `regression_plan_revision`,
 `review_loop`, `review_scope`, `step_budgets`, `step_timing`, `test_engines`
 and `test_group_report`. A switch no
 Delivery flow owns, such as
@@ -543,8 +543,15 @@ targets, evidence approval checks that the Delivery runs `spot_run`, that both
 sets are disjoint automation targets of the Item's own Test Plan and that no
 reused id overlaps a target the command had to run, and
 `approve-item-evidence` writes both sets into the Item's verification record.
-Without a pre-handoff run, at `pre_handoff_regression` `off`, nothing is
-reused.
+At `accept_record`, QA's final test run takes every own target from the
+accepted run with no spot-run selection, runs none of them itself and checks
+only that the record binds the exact frozen candidate; when no accepted run
+binds it, the approved test command runs every target itself. Evidence
+approval checks that the Delivery runs `accept_record`, that every own
+automation target is reused and that none is spot-run. A reused case the
+accepted run deferred to its live group keeps that deferral for the default
+run's coverage audit, as a fresh default run would. Without a pre-handoff run,
+at `pre_handoff_regression` `off`, nothing is reused.
 
 Process switch `qa_gate_order` decides when QA starts its first test command
 of a round. At `plan_first`, the default, QA plans and maps every check before

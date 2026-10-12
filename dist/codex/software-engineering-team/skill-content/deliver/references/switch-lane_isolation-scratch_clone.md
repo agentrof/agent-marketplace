@@ -25,3 +25,19 @@ lane.
    --run <run> --main <main checkout>` refuses when its branch differs from the
    one recorded.
 5. A lane pushes its branch before its clone is removed.
+
+## Repair beside an active reader
+
+When a registered open finding is ready to fix while QA still reads the frozen
+candidate, the coordinator may call `delivery_verification.py --worktree
+<item-root> prepare-repair`. It returns a private repair checkout outside the
+Item, its frozen base commit and the registered findings. Repeating the command
+returns that same checkout without resetting the writer's work. No unregistered
+finding authorizes an overlapping repair.
+
+The writer changes only the repair checkout and does not run commands against
+the shared QA environment. The frozen Item remains protected by its reader
+barrier. Keep the repair commits there until both original readers settle; then
+reconcile the final findings and bring the reviewed repair commits to the Item
+through its normal repair flow before freezing the next candidate. Never replace
+QA's current candidate or reuse its evidence for the repair tree.

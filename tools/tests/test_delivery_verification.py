@@ -656,6 +656,29 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         with self.assertRaisesRegex(RuntimeError, "missing or changed"):
             verification.validate(self.root, "DLV-001", "AUTH-01")
 
+    def test_every_command_reads_the_candidate_delivery_and_item_ids_whatever_the_shell_exports(self):
+        """A reader's shell can export no variable, so an approved command that needs the Delivery and Item ids
+        reads them from the runner, set from the frozen candidate over any inherited value, and every run
+        identity covers both."""
+        script = "import os; print(os.environ['AGENTROF_DELIVERY_ID'], os.environ['AGENTROF_ITEM_ID'])"
+        arguments = [sys.executable, "-c", script]
+        path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(path)
+        contract["test_command"] = self.command = (subprocess.list2cmdline(arguments) if os.name == "nt"
+                                                   else shlex.join(arguments))
+        self.write(path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
+        self.commit()
+        self.freeze()
+        verification.register_result(self.root, self.result())
+        with mock.patch.dict(os.environ, {"AGENTROF_DELIVERY_ID": "DLV-999"}):
+            os.environ.pop("AGENTROF_ITEM_ID", None)
+            raw = verification.run_check(self.root, "test")
+        self.assertEqual(raw["exit_code"], 0)
+        output = verification.raw_output_path(self.root, raw["output_file"]).read_text(encoding="utf-8")
+        self.assertIn("DLV-001 AUTH-01", output)
+        self.assertLessEqual({"AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID"}, set(raw["identity"]["environment_variables"]))
+        self.assertLessEqual({"AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID"}, set(verification.RUNNER_VARIABLES))
+
     def test_the_tracked_environment_hash_checks_no_guess_of_a_declared_value(self):
         """Evidence approval writes QA's checks, the run identity's environment hash among them, into the Item's
         tracked verification record. A hash of a few guessable values would let anyone who reads that record
@@ -665,7 +688,7 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.freeze()
         with mock.patch.dict(os.environ, {"ITEM_TOKEN": "7319"}):
             self.settle()
-            environment = verification.command_environment(self.root)
+            environment = verification.command_environment(self.root, verification.read_session(self.root)["candidate"])
         identity = verification.read_session(self.root)["raw_evidence"]["test"]["identity"]
         # Every covered value known and the declared one guessed right: the guess still checks nothing.
         values = {name: verification.variable_value(environment, name) for name in identity["environment_variables"]}

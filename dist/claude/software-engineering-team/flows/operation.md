@@ -109,6 +109,14 @@ Requirement stage and it does not alter product-stage package hashes.
    `skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
    defines.
 
+Verification may declare opt-in live test groups that QA runs one at a time:
+`live_test_command`, which contains the literal placeholder `{group}` exactly
+once, `live_test_workdir` (`.` for the repository root) and `live_groups`, the
+ordered, unique group names of letters, digits, `.`, `_` and `-`. The three
+are declared together or not at all, and their approval follows the normal
+revision lifecycle. Delivery runs a group with `run --kind live_test --group
+<group>`; groups never become required checks by themselves.
+
 Verification may declare an optional `diagnostic_test_command` adapter for
 failed or affected tests, with `diagnostic_test_workdir` defaulting to `.` only
 at execution. Add it through the normal revision and approval lifecycle.
@@ -135,4 +143,7 @@ that carries the hash checks no guess of a value, and a variable left out
 never binds the evidence. The contract check refuses a name of the runner's
 own `AGENTROF_` namespace: the runner sets those variables, and run evidence
 binds them without a declaration, a selection file the runner writes by its
-content. Add the field through the normal revision and approval lifecycle.
+content. Every command it runs reads the frozen candidate's Delivery id in
+`AGENTROF_DELIVERY_ID` and its Item id in `AGENTROF_ITEM_ID`, so a command that
+needs them reads those two and never asks a reader to export them. Add the
+field through the normal revision and approval lifecycle.

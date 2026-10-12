@@ -14,6 +14,7 @@ import platform
 import re
 import secrets
 import shlex
+import shutil
 import stat
 import time
 from pathlib import Path, PurePosixPath
@@ -980,6 +981,20 @@ def clone_private_checkout(root: Path, execution_root: Path, commit: str) -> Non
     git(root, "clone", "--config", "core.longpaths=true", "--no-local", "--no-hardlinks", "--no-checkout",
         "--", str(root), str(execution_root))
     git(execution_root, "checkout", "--detach", commit)
+
+
+# The one private runtime checkout of an Item, kept across verification sessions.
+RUNTIME_CHECKOUT = "runtime"
+
+
+def repin_private_checkout(root: Path, execution_root: Path, commit: str) -> None:
+    """Recreate private repository state while preserving the environment's checkout pathname."""
+    safe_runtime_path(root, execution_root)
+    def remove_readonly(function, path, _error):
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+        function(path)
+    shutil.rmtree(execution_root, onerror=remove_readonly)
+    clone_private_checkout(root, execution_root, commit)
 
 
 # How many paths a checkout difference names before it counts the rest.
@@ -2577,13 +2592,22 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 raise RuntimeError("fresh runtime requires a successful down before up")
             if verb in {"seed", "logs", "url"} and not state["active"]:
                 raise RuntimeError("runtime must be up before seed, logs or url")
-            # Legacy disposable sessions retain their old path for teardown.
-            # New attempts always have independent checkouts and raw output.
-            namespace = state.get("attempt_id", session["session_id"])
-            execution_root = safe_runtime_path(root, session_path(root).parent / "scratch" / ("runtime-" + namespace))
+            # Every attempt of this Item runs in one kept checkout path, because
+            # a project environment may bind an Item instance to the checkout
+            # that created it. Each attempt's first command re-pins it to that
+            # attempt's candidate as a fresh clone would hold it; raw output
+            # stays per attempt. A session started by an older package keeps
+            # its own per-attempt path until its teardown.
+            scratch = session_path(root).parent / "scratch"
+            first_command = not state["events"] and not state.get("pending")
+            legacy = scratch / ("runtime-" + state.get("attempt_id", session["session_id"]))
+            kept = "attempt_id" in state and (first_command or not legacy.exists())
+            execution_root = safe_runtime_path(root, scratch / RUNTIME_CHECKOUT if kept else legacy)
             if not execution_root.exists():
                 execution_root.parent.mkdir(parents=True, exist_ok=True)
                 clone_private_checkout(root, execution_root, current["product_commit"])
+            elif kept and first_command and not execution_root.is_symlink():
+                repin_private_checkout(root, execution_root, current["product_commit"])
             if execution_root.is_symlink() or (verb != "down" and git(execution_root, "rev-parse", "HEAD") != current["product_commit"]):
                 raise RuntimeError("runtime checkout no longer binds the frozen candidate")
             workdir = (execution_root / str(contract.get("env_workdir", "."))).resolve()

@@ -2131,221 +2131,111 @@ def valid_git_experience_sync_result(payload: dict, project: Path,
         return False
 
 
-# While verification readers hold an Item, only writes that can change the
-# frozen candidate or its verification session are refused. Shell intent is
-# not fully parseable, so a command passes only when every simple command in
-# it is a known read-only form or stays wholly outside the protected roots.
-READ_ONLY_COMMANDS = {"cat", "head", "tail", "ls", "wc", "grep", "rg", "jq", "ps", "date", "find",
-                      "git", "docker", "gh", "cd"}
-SAFE_FILE_COMMANDS = {"touch", "mkdir", "rmdir", "rm", "cp", "mv"}
-READ_ONLY_GIT = {"diff", "log", "show", "status", "rev-parse", "ls-files", "cat-file"}
-READ_ONLY_DOCKER = {("ps",), ("inspect",), ("logs",), ("images",), ("volume", "ls"), ("volume", "inspect")}
-READ_ONLY_GH = {("issue", "view"), ("issue", "list"), ("pr", "view"), ("pr", "list"), ("pr", "checks")}
+# While verification readers hold an Item, the filesystem keeps the frozen
+# candidate's tracked files and the session record read-only and the
+# integrity check restores and flags any change that still lands. This hook
+# refuses only an explicit write to a protected path it can read from the
+# call; every other command runs.
+SHELL_OPERATORS = {";", "&&", "||", "|", "&", "|&", "(", ")", ";;"}
+SHELL_WRITE_REDIRECTS = {">", ">>", ">|", "&>", "&>>", "<>"}
+SHELL_READ_REDIRECTS = {"<", "<<", "<<<", ">&", "<&"}
+# Words that run the rest of the simple command as the command itself.
+SHELL_PREFIXES = {"env", "command", "builtin", "nice", "nohup", "time", "sudo", "doas", "exec"}
+# Commands that write every path argument, or only their destination.
+WRITE_EVERY_PATH = {"rm", "rmdir", "unlink", "touch", "chmod", "chown", "chgrp", "truncate", "shred", "tee",
+                    "mv"}
+WRITE_DESTINATION = {"cp", "install", "ln", "rsync"}
+# Git commands that write a worktree's index, HEAD, refs or tracked files.
+GIT_WRITE_COMMANDS = {"add", "am", "apply", "branch", "checkout", "checkout-index", "cherry-pick", "clean",
+                      "commit", "merge", "mv", "pull", "read-tree", "rebase", "reset", "restore", "revert",
+                      "rm", "stash", "switch", "update-index", "update-ref"}
 FIND_WRITE_ACTIONS = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
-# Commands that run text or stdin as another command defeat argument inspection.
-INDIRECT_COMMANDS = {"xargs", "eval", "exec", "source", ".", "parallel", "sh", "bash", "zsh", "dash",
-                     "ksh", "fish", "csh", "tcsh", "sudo", "doas", "su"}
-SHELL_SEPARATORS = {";", "&&", "||", "|", "&", "|&"}
-SHELL_REDIRECTS = {">", ">>", ">|", "&>", "&>>", "<", ">&", "<&"}
 
 
-def _shell_words(command: str) -> list[tuple[str, bool]] | None:
-    """Split one POSIX command into (word, is_operator); refuse expansions and subshells."""
-    words: list[tuple[str, bool]] = []
-    current: list[str] = []
-    started = False
-    quote = ""
-    index = 0
-
-    def flush() -> None:
-        nonlocal current, started
-        if started:
-            words.append(("".join(current), False))
-        current, started = [], False
-
-    while index < len(command):
-        char = command[index]
-        if quote == "'":
-            if char == "'":
-                quote = ""
-            else:
-                current.append(char)
-        elif quote == '"':
-            if char == '"':
-                quote = ""
-            elif char in "$`":
-                return None
-            elif char == "\\" and index + 1 < len(command) and command[index + 1] in '"\\':
-                index += 1
-                current.append(command[index])
-            else:
-                current.append(char)
-        elif char in "'\"":
-            quote, started = char, True
-        elif char == "\\":
-            if index + 1 >= len(command) or command[index + 1] in "\n\r":
-                return None
-            index += 1
-            current.append(command[index])
-            started = True
-        elif char in " \t":
-            flush()
-        elif char in "$`(){}\n\r":
-            return None
-        elif char in ";&|<>":
-            # A file descriptor number written against its redirect is not a word.
-            if char in "<>" and started and "".join(current).isdigit():
-                current, started = [], False
-            flush()
-            end = index
-            while end < len(command) and command[end] in ";&|<>":
-                end += 1
-            operator = command[index:end]
-            if operator not in SHELL_SEPARATORS | SHELL_REDIRECTS:
-                return None
-            words.append((operator, True))
-            index = end
-            continue
-        else:
-            current.append(char)
-            started = True
-        index += 1
-    if quote:
+def _shell_tokens(command: str) -> list[str] | None:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>()")
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        return list(lexer)
+    except ValueError:
         return None
-    flush()
-    return words
 
 
-def _touches(path: Path, roots: list[Path], scratch: Path) -> bool:
-    """A path inside, equal to or above a protected root, scratch excepted."""
-    candidates = {Path(os.path.normpath(path))}
-    with contextlib.suppress(OSError, RuntimeError):
-        candidates.add(path.resolve())
-    for candidate in candidates:
-        if _path_within(candidate, scratch):
-            continue
-        if any(_path_within(candidate, root) or _path_within(root, candidate) for root in roots):
-            return True
-    return False
+def _literal(word: str) -> bool:
+    return not any(mark in word for mark in "$`*?[{~")
 
 
-def _word_touches(word: str, cwds: list[Path], roots: list[Path], scratch: Path) -> bool:
-    values = [word]
-    if word.startswith("-") and "=" in word:
-        values.append(word.split("=", 1)[1])
-    for value in values:
-        if any(str(root) in value for root in roots):
-            return True
-        if "*" in value or "?" in value or "[" in value:
-            prefix = re.split(r"[*?\[]", value, maxsplit=1)[0]
-            value = prefix[:prefix.rfind("/") + 1] or "."
-        value = os.path.expanduser(value) if value.startswith("~") else value
-        if any(_touches(cwd / value, roots, scratch) for cwd in cwds):
-            return True
-    return False
+def shell_write_targets(payload: dict) -> list[Path]:
+    """Literal paths a POSIX command explicitly writes; a Git write names its repository's .git.
 
-
-def _read_only_command(words: list[str]) -> bool:
-    name, args = words[0], words[1:]
-    if name not in READ_ONLY_COMMANDS:
-        return False
-    if name == "git":
-        safe_monitor = False
-        no_pager = False
-        while args and args[0] in {"-C", "--no-pager", "-P", "-c"}:
-            option = args[0]
-            if option in {"-C", "-c"}:
-                if len(args) < 2:
-                    return False
-                if option == "-c":
-                    if args[1] != "core.fsmonitor=false":
-                        return False
-                    safe_monitor = True
-                args = args[2:]
-            else:
-                no_pager = True
-                args = args[1:]
-        if not args or args[0] not in READ_ONLY_GIT or not safe_monitor or not no_pager:
-            return False
-        if any(arg.startswith(("--output", "--ext-diff", "--textconv", "--filters")) for arg in args):
-            return False
-        return args[0] not in {"diff", "log", "show"} or {"--no-ext-diff", "--no-textconv"} <= set(args)
-    if name == "rg":
-        return "--no-config" in args and not any(arg == "--pre" or arg.startswith("--pre=") for arg in args)
-    if name == "find":
-        return not FIND_WRITE_ACTIONS.intersection(args)
-    if name == "date":
-        return all(arg.startswith("+") or arg in {"-u", "-R", "--utc", "--rfc-2822"}
-                   or arg.startswith(("-I", "--iso-8601", "--rfc-3339")) for arg in args)
-    if name == "docker":
-        return tuple(args[:1]) in READ_ONLY_DOCKER or tuple(args[:2]) in READ_ONLY_DOCKER
-    if name == "gh":
-        return tuple(args[:2]) in READ_ONLY_GH
-    return True
-
-
-def _inside(path: Path, roots: list[Path], scratch: Path) -> bool:
-    return not _path_within(path, scratch) and any(_path_within(path, root) for root in roots)
-
-
-def shell_outside_verification(payload: dict, roots: list[Path], scratch: Path) -> bool:
-    """True when a POSIX shell command cannot write to the protected roots."""
-    if sys.platform == "win32" or payload.get("raw_tool_name") == "PowerShell" \
-            or payload.get("shell_family", "posix") != "posix":
-        return False
+    Words with expansions are not paths the hook can know; the filesystem
+    modes and the integrity check cover them.
+    """
     command, error = canonical_shell_command(payload.get("tool_input", {}))
-    words = None if error else _shell_words(command)
-    if not words:
-        return False
-    cwds = [Path(str(payload.get("cwd") or ".")).resolve()]
+    tokens = None if error else _shell_tokens(command)
+    if not tokens:
+        return []
+    cwd: Path | None = Path(str(payload.get("cwd") or ".")).resolve()
+    targets: list[Path] = []
+
+    def resolve(word: str) -> None:
+        if cwd is not None and _literal(word) and word:
+            targets.append(Path(os.path.normpath(cwd / word)))
+
     segment: list[str] = []
-    piped = False
-    index = 0
-    while True:
-        word, operator = words[index] if index < len(words) else (";", True)
-        if operator and word in SHELL_REDIRECTS:
-            index += 1
-            if index >= len(words) or words[index][1]:
-                return False
-            target = words[index][0]
-            index += 1
-            if word in {"<", "<&"} or word == ">&" and target.isdigit() or target == "/dev/null":
-                continue
-            if _word_touches(target, cwds, roots, scratch):
-                return False
+    for index, token in enumerate([*tokens, ";"]):
+        if token in SHELL_WRITE_REDIRECTS and index + 1 < len(tokens):
+            resolve(tokens[index + 1])
             continue
-        if not operator:
-            segment.append(word)
-            index += 1
+        if token not in SHELL_OPERATORS:
+            segment.append(token)
             continue
-        assignments = []
-        while segment and SHELL_ASSIGNMENT_RE.fullmatch(segment[0]):
-            assignments.append(segment.pop(0))
-        if not segment:
-            return False
-        sanctioned = all(SANCTIONED_SHELL_ASSIGNMENTS.get(item.split("=", 1)[0]) == item.split("=", 1)[1]
-                         for item in assignments)
-        if not sanctioned:
-            return False
-        if segment[0] == "cd" and not assignments:
-            if len(segment) > 2 or segment[1:] == ["-"]:
-                return False
-            target = os.path.expanduser(segment[1] if len(segment) == 2 else "~")
-            moved = [(cwd / target).resolve() for cwd in cwds]
-            # A failed cd keeps the old directory unless && stops the chain.
-            cwds = moved if word == "&&" else cwds + moved if word == ";" else cwds
-        elif sanctioned and "/" not in segment[0] and _read_only_command(segment):
-            pass
-        elif (segment[0] not in SAFE_FILE_COMMANDS or piped) or os.path.basename(segment[0]) in INDIRECT_COMMANDS \
-                or any(_inside(cwd, roots, scratch) for cwd in cwds) \
-                or any(_word_touches(item.split("=", 1)[1], cwds, roots, scratch) for item in assignments) \
-                or any(_word_touches(item, cwds, roots, scratch) for item in segment):
-            return False
-        if index >= len(words):
-            return True
-        piped = word in {"|", "|&"}
+        # Drop the word after each redirect operator: a redirect target or here-document word.
+        words = [word for position, word in enumerate(segment)
+                 if word not in SHELL_WRITE_REDIRECTS | SHELL_READ_REDIRECTS
+                 and (position == 0 or segment[position - 1] not in SHELL_WRITE_REDIRECTS | SHELL_READ_REDIRECTS)]
         segment = []
-        index += 1
+        while words and (SHELL_ASSIGNMENT_RE.fullmatch(words[0]) or words[0] in SHELL_PREFIXES):
+            words.pop(0)
+        if not words:
+            continue
+        name, args = os.path.basename(words[0]), words[1:]
+        paths = [arg for arg in args if not arg.startswith("-") or "=" in arg and arg.startswith("--")]
+        paths = [arg.split("=", 1)[1] if arg.startswith("--") else arg for arg in paths]
+        if name == "cd":
+            target = args[0] if args else str(Path.home())
+            cwd = (cwd / target).resolve() if cwd is not None and _literal(target) else None
+        elif name in WRITE_EVERY_PATH or name == "sed" and any(arg.startswith(("-i", "--in-place")) for arg in args):
+            for path in paths:
+                resolve(path)
+        elif name in WRITE_DESTINATION:
+            directory = next((arg[len("--target-directory="):] for arg in args
+                              if arg.startswith("--target-directory=")), None)
+            if "-t" in args and args.index("-t") + 1 < len(args):
+                directory = args[args.index("-t") + 1]
+            for path in [directory] if directory else paths[-1:]:
+                resolve(path)
+        elif name == "find" and FIND_WRITE_ACTIONS.intersection(args):
+            for path in args:
+                if path.startswith(("-", "(", "!")):
+                    break
+                resolve(path)
+        elif name == "git":
+            repository = cwd
+            while args and args[0].startswith("-"):
+                option = args.pop(0)
+                if option == "-C" and args:
+                    location = args.pop(0)
+                    repository = (repository / location).resolve() if repository is not None \
+                        and _literal(location) else None
+                elif option == "-c" and args:
+                    args.pop(0)
+            top = next((path for path in ([repository, *repository.parents] if repository else [])
+                        if (path / ".git").exists()), None)
+            if args and args[0] in GIT_WRITE_COMMANDS and top is not None:
+                targets.append(top / ".git")
+    return targets
 
 
 def verification_scope(project: Path) -> tuple[list[Path], Path]:
@@ -2358,21 +2248,36 @@ def verification_scope(project: Path) -> tuple[list[Path], Path]:
 def readers_active_message(message: str, roots: list[Path], scratch: Path) -> str:
     if not message.startswith("DELIVERY_VERIFICATION_READERS_ACTIVE"):
         return message
-    return (message + ". Allowed meanwhile: the bound delivery_verification.py command;"
-            " read-only commands (git diff/log/show/status/rev-parse/ls-files/cat-file, grep, rg, jq,"
-            " cat, head, tail, ls, wc, date, ps, docker ps/inspect/logs/images/volume ls|inspect,"
-            " gh issue|pr view/list, gh pr checks, find without -delete or -exec);"
-            " Git needs -P -c core.fsmonitor=false and diff/log/show also need --no-ext-diff --no-textconv;"
-            " rg needs --no-config. Only literal file operations (touch/mkdir/rmdir/rm/cp/mv) whose"
-            " working directory and every path argument stay outside "
-            + " and ".join(str(root) for root in roots)
-            + "; Edit and Write outside them, or under " + str(scratch))
+    return (message + ". Protected: the tracked files of " + str(roots[0]) + ", its Git index, HEAD and refs,"
+            " and the session record under " + str(roots[1]) + " outside " + str(scratch) + "."
+            " Refused: Edit and Write of a protected path, a redirect into one, rm/mv/touch/chmod/tee/sed -i"
+            " or a cp/install/ln destination naming one, find -delete or -exec under one, and git commands"
+            " that write the index, HEAD or refs of the Item worktree. Every other command runs, including"
+            " make, python, pipes, variables and command substitution; the filesystem keeps protected files"
+            " read-only and a check after each command restores a changed protected file and marks the pass"
+            " candidate_intact false")
+
+
+def delivery_integrity(payload: dict) -> int:
+    """Restore and flag a protected file a command changed while readers ran."""
+    from delivery_verification import check_integrity
+    try:
+        project = shell_project(payload).resolve()
+        finding = check_integrity(project)
+    except (OSError, RuntimeError, ValueError):
+        return 0
+    if finding is None:
+        return 0
+    return deny("DELIVERY_VERIFICATION_CANDIDATE_MUTATED: " + finding["summary"])
 
 
 def delivery_reader_barrier(payload: dict) -> int:
-    """Readers freeze only the Item worktree and its verification session."""
+    """Readers refuse only explicit writes to the frozen candidate and its session record."""
     from delivery_verification import guard_write
     project = shell_project(payload).resolve()
+    integrity = delivery_integrity(payload)
+    if integrity:
+        return integrity
     paths = None
     if payload.get("tool_name") == "Bash":
         parsed = trusted_python_script_tokens(payload)
@@ -2390,6 +2295,10 @@ def delivery_reader_barrier(payload: dict) -> int:
                                     "expand-context", "diff", "environment",
                                     "permission-preflight", "permission-probe", "prepare-repair", "wait", "await-owner-step"}):
                 return 0
+        # Without a POSIX parser no explicit write is known; the filesystem and the integrity check remain.
+        posix = not (sys.platform == "win32" or payload.get("raw_tool_name") == "PowerShell"
+                     or payload.get("shell_family", "posix") != "posix")
+        paths = shell_write_targets(payload) if posix else []
     elif payload.get("file_targets") and not payload.get("patch_parse_error"):
         cwd = Path(str(payload.get("cwd") or project))
         paths = [Path(str(target.get("file_path", "")))
@@ -2397,15 +2306,9 @@ def delivery_reader_barrier(payload: dict) -> int:
         paths = [path if path.is_absolute() else cwd / path for path in paths]
     try:
         if paths is None:
-            try:
-                guard_write(project, None)
-            except RuntimeError:
-                roots, scratch = verification_scope(project)
-                if payload.get("tool_name") == "Bash" and shell_outside_verification(payload, roots, scratch):
-                    return 0
-                raise
+            guard_write(project, None)
             return 0
-        # A file tool may address another Item by an absolute path while its
+        # A tool may address another Item by an absolute path while its
         # caller stays in the main checkout; that Item's readers own it too.
         by_project: dict[Path, list[Path]] = {project: []}
         for path in paths:
@@ -2423,6 +2326,10 @@ def delivery_reader_barrier(payload: dict) -> int:
             message = readers_active_message(message, *verification_scope(project))
         return deny(message)
     return 0
+
+
+def _inside(path: Path, roots: list[Path], scratch: Path) -> bool:
+    return not _path_within(path, scratch) and any(_path_within(path, root) for root in roots)
 
 
 def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
@@ -4846,9 +4753,15 @@ def main() -> int:
         }))
         return code
     payload = normalize(payload)
+
+    def checked(code: int) -> int:
+        # After a command, a protected file it changed is restored and the pass flagged.
+        integrity = delivery_integrity(payload)
+        return code or integrity
+
     if payload.get("shell_command_error"):
         if mode == "post" and payload.get("tool_name") == "Bash":
-            return shell_verify(payload)
+            return checked(shell_verify(payload))
         return deny(
             "the shell payload is ambiguous ("
             + str(payload["shell_command_error"])
@@ -4865,10 +4778,10 @@ def main() -> int:
         if mode == "pre":
             code = registration_guard(payload)
             return code if code else shell_snapshot(payload)
-        return shell_verify(payload)
+        return checked(shell_verify(payload))
     if payload.get("tool_name") not in ("Write", "Edit"):
         return 0
-    return pre(payload) if mode == "pre" else post(payload)
+    return pre(payload) if mode == "pre" else checked(post(payload))
 
 
 if __name__ == "__main__":

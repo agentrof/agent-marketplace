@@ -38,7 +38,7 @@ import delivery_result  # noqa: E402
 import delivery_verification as verification  # noqa: E402
 import process_policy  # noqa: E402
 import task_inputs  # noqa: E402
-from git_fixture import init_repository, remove_temporary  # noqa: E402
+from git_fixture import init_repository, make_writable, remove_temporary  # noqa: E402
 
 SWITCH = "pre_handoff_regression"
 OWN_SWITCH = "own_target_reuse"
@@ -257,7 +257,7 @@ class CandidateTests(unittest.TestCase):
     def write(self, relative: str, text: str) -> None:
         path = self.root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        make_writable(path).write_text(text, encoding="utf-8")
 
     def note(self, relative: str, props: dict, body: str = "# Record\n\nFixture record.\n") -> None:
         self.write(relative, delivery.frontmatter(props, body))
@@ -1157,7 +1157,7 @@ class CandidateTests(unittest.TestCase):
         original = verification.session_path(self.root).read_bytes()
         for label, reason, context, change in cases:
             with self.subTest(binding=label):
-                verification.session_path(self.root).write_bytes(original)
+                make_writable(verification.session_path(self.root)).write_bytes(original)
                 if change is not None:
                     self.rewrite_session(change)
                 with context():
@@ -1168,7 +1168,7 @@ class CandidateTests(unittest.TestCase):
                 self.assertIn("REUSE=False", output)
                 for target in earlier:
                     self.assertIn("PASS " + target, output)
-        verification.session_path(self.root).write_bytes(original)
+        make_writable(verification.session_path(self.root)).write_bytes(original)
         raw = verification.run_check(self.root, "test")
         self.assertEqual(raw["identity"]["reused_pre_handoff"]["evidence_hash"], passed["evidence_hash"])
 
@@ -1195,7 +1195,7 @@ class CandidateTests(unittest.TestCase):
                 ("names its reused test ids apart from their earlier stories",
                  lambda reuse: reuse.update(test_ids=[]))):
             with self.subTest(message=message):
-                verification.session_path(self.root).write_bytes(original)
+                make_writable(verification.session_path(self.root)).write_bytes(original)
                 self.forge_test_evidence(lambda identity: change(identity["reused_pre_handoff"]))
                 with self.assertRaisesRegex(RuntimeError, re.escape("full_test_suite evidence " + message)):
                     self.validate()
@@ -1210,11 +1210,11 @@ class CandidateTests(unittest.TestCase):
                 ("reuses a pre-handoff run of another declared environment",
                  {"environment_hash": "hmac-sha256:" + "0" * 64})):
             with self.subTest(message=message, receipt=changes):
-                verification.session_path(self.root).write_bytes(original)
+                make_writable(verification.session_path(self.root)).write_bytes(original)
                 self.rewrite_session(lambda session: session["pre_handoff"].update(changes))
                 with self.assertRaisesRegex(RuntimeError, "^" + re.escape("full_test_suite evidence " + message) + "$"):
                     self.validate()
-        verification.session_path(self.root).write_bytes(original)
+        make_writable(verification.session_path(self.root)).write_bytes(original)
         self.validate()
 
     def test_no_earlier_target_that_prefixes_an_own_target_is_reused(self):
@@ -1449,11 +1449,11 @@ class CandidateTests(unittest.TestCase):
                 ("reuses a test id that is, prefixes or lies under one of the Item's own Test Plan targets that QA's"
                  " final test run spot-runs or keeps with them", {"test_ids": [prefix], "spot_test_ids": [total]})):
             with self.subTest(message=message, own=own):
-                verification.session_path(self.root).write_bytes(original)
+                make_writable(verification.session_path(self.root)).write_bytes(original)
                 self.forge_test_evidence(own_reuse(own))
                 with self.assertRaisesRegex(RuntimeError, re.escape("full_test_suite evidence " + message)):
                     self.validate()
-        verification.session_path(self.root).write_bytes(original)
+        make_writable(verification.session_path(self.root)).write_bytes(original)
         self.validate()
 
     def test_approval_refuses_an_own_target_reuse_outside_spot_run(self):
@@ -1546,11 +1546,11 @@ class CandidateTests(unittest.TestCase):
                    " none, which this reuse does not")
         for own in ({"test_ids": [more], "spot_test_ids": []}, {"test_ids": [more], "spot_test_ids": [total]}):
             with self.subTest(own=own):
-                verification.session_path(self.root).write_bytes(original)
+                make_writable(verification.session_path(self.root)).write_bytes(original)
                 self.forge_test_evidence(own_reuse(own))
                 with self.assertRaisesRegex(RuntimeError, re.escape("full_test_suite evidence " + refusal)):
                     self.validate()
-        verification.session_path(self.root).write_bytes(original)
+        make_writable(verification.session_path(self.root)).write_bytes(original)
         self.validate()
 
     def test_the_command_line_reports_the_run_and_the_refusal(self):

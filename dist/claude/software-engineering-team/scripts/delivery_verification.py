@@ -466,7 +466,209 @@ def read_session(root: Path, *, required: bool = True) -> dict | None:
 def write_session(root: Path, value: dict) -> None:
     value = {key: item for key, item in value.items() if key != "digest"}
     value["digest"] = digest(value)
-    atomic_file.replace_text(safe_runtime(root), json.dumps(value, indent=2, sort_keys=True) + "\n")
+    text = json.dumps(value, indent=2, sort_keys=True) + "\n"
+    # The guard copy is what the integrity check restores a changed session record from.
+    atomic_file.replace_text(session_guard_path(root), text)
+    atomic_file.replace_text(safe_runtime(root), text)
+    sync_protection(root, value)
+
+
+def session_guard_path(root: Path) -> Path:
+    return safe_runtime_path(root, safe_runtime(root).with_name("session.guard"), file_only=True)
+
+
+def protection_path(root: Path) -> Path:
+    return safe_runtime_path(root, safe_runtime(root).with_name("protection.json"), file_only=True)
+
+
+WRITE_BITS = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+
+
+def read_protection(root: Path) -> dict:
+    try:
+        value = json.loads(protection_path(root).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except ValueError as exc:
+        raise RuntimeError(f"verification protection record is invalid: {exc}") from exc
+    return value if isinstance(value, dict) else {}
+
+
+def git_metadata_dir(root: Path) -> Path:
+    """The Git directory of a checkout, following a linked worktree's .git file."""
+    metadata = root / ".git"
+    with contextlib.suppress(OSError, IndexError):
+        if metadata.is_file():
+            metadata = root / metadata.read_text(encoding="utf-8").split("gitdir:", 1)[1].strip()
+    return metadata
+
+
+def protection_targets(root: Path, value: dict) -> list[Path]:
+    """Files kept read-only while readers run: tracked candidate files, HEAD and index, the session record.
+
+    A worktree without an index protects no tracked file here. Windows keeps the
+    session record writable, because it refuses to replace a read-only file and the
+    runner replaces that record at every step; the integrity check still covers it.
+    """
+    reports = set(value.get("candidate", {}).get("report_paths", []))
+    files = []
+    metadata = git_metadata_dir(root)
+    if (metadata / "index").is_file():
+        files = [root / name for name in git(root, "ls-files", "-z").split("\0") if name and name not in reports]
+        files += [metadata / "HEAD", metadata / "index"]
+    if os.name != "nt":
+        files += [session_path(root), session_guard_path(root)]
+    return files
+
+
+def protected_generation(record: dict, path: Path) -> list[int]:
+    """The file's generation, with the runner's own mode changes mapped back to the frozen one."""
+    generation = source_file_generation(path)
+    row = record.get("files", {}).get(str(path))
+    return row["frozen"] if row and row.get("frozen") and generation in row["aliases"] else generation
+
+
+def apply_protection(root: Path, value: dict) -> None:
+    """Make the protected files read-only, recording their exact modes first."""
+    previous = read_protection(root)
+    held = previous.get("state") in {"applying", "applied"}
+    record = {"state": "applying", "session_id": value.get("session_id"), "files": {}}
+    for path in protection_targets(root, value):
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISREG(metadata.st_mode):
+            old = previous.get("files", {}).get(str(path), {})
+            mode = old["mode"] if held and "mode" in old else stat.S_IMODE(metadata.st_mode)
+            record["files"][str(path)] = {"mode": mode, "frozen": protected_generation(previous, path),
+                                          "aliases": []}
+    atomic_file.replace_text(protection_path(root), json.dumps(record, sort_keys=True) + "\n")
+    for name, row in record["files"].items():
+        with contextlib.suppress(FileNotFoundError):
+            os.chmod(name, row["mode"] & ~WRITE_BITS)
+            row["aliases"].append(source_file_generation(Path(name)))
+    record["state"] = "applied"
+    atomic_file.replace_text(protection_path(root), json.dumps(record, sort_keys=True) + "\n")
+
+
+def restore_protection(root: Path) -> None:
+    """Give the protected files back their recorded modes; a changed file keeps its change visible."""
+    record = read_protection(root)
+    if record.get("state") not in {"applying", "applied"}:
+        return
+    for name, row in record["files"].items():
+        with contextlib.suppress(FileNotFoundError):
+            unchanged = source_file_generation(Path(name)) in row["aliases"]
+            os.chmod(name, row["mode"])
+            row["aliases"] = [*row["aliases"], source_file_generation(Path(name))] if unchanged else []
+    record["state"] = "restored"
+    atomic_file.replace_text(protection_path(root), json.dumps(record, sort_keys=True) + "\n")
+
+
+def sync_protection(root: Path, value: dict) -> None:
+    """Protect while a reader runs and restore once none does, from the session state just written."""
+    running = any(worker.get("state") == "running" for worker in value.get("workers", {}).values())
+    record = read_protection(root)
+    if running and not (record.get("state") == "applied" and record.get("session_id") == value.get("session_id")):
+        apply_protection(root, value)
+    elif not running:
+        restore_protection(root)
+
+
+def candidate_drift(root: Path, current: dict) -> list[str]:
+    """What differs from the frozen candidate: HEAD, a tracked file's generation or the index."""
+    drift = [] if git(root, "rev-parse", "HEAD") == current["product_commit"] else ["HEAD"]
+    reports = set(current.get("report_paths", []))
+    expected = current.get("source_observations", {})
+    record = read_protection(root)
+    names = {name for name in git(root, "ls-files", "-z").split("\0") if name and name not in reports}
+    for name in sorted(names | set(expected)):
+        try:
+            generation = protected_generation(record, root / name)
+        except FileNotFoundError:
+            generation = None
+        # A file this check already restored keeps a new generation, so the candidate stays changed.
+        restored = record.get("files", {}).get(str(root / name), {}).get("restored")
+        if generation != expected.get(name) and generation != restored:
+            drift.append(name)
+    staged = git(root, "diff", "--cached", "--name-only", "--no-renames", "-z", current["product_commit"])
+    drift.extend(name for name in staged.split("\0") if name and name not in reports and name not in drift)
+    return drift
+
+
+def restore_candidate(root: Path, current: dict, drift: list[str]) -> None:
+    """Put HEAD, the index and the changed tracked files back to the frozen commit, read-only again."""
+    commit = current["product_commit"]
+    if "HEAD" in drift:
+        try:
+            git(root, "update-ref", git(root, "symbolic-ref", "-q", "HEAD"), commit)
+        except RuntimeError:
+            git(root, "update-ref", "--no-deref", "HEAD", commit)
+    specs = [":(literal)" + name for name in drift if name != "HEAD"]
+    if not specs:
+        return
+    git(root, "reset", "-q", commit, "--", *specs)
+    kept = [name for name in git(root, "ls-tree", "-r", "--name-only", "-z", commit, "--", *specs).split("\0") if name]
+    if kept:
+        git(root, "checkout", commit, "--", *(":(literal)" + name for name in kept))
+    record = read_protection(root)
+    if record.get("state") == "applied":
+        for name in kept:
+            row = record["files"].get(str(root / name))
+            if row:
+                os.chmod(root / name, row["mode"] & ~WRITE_BITS)
+                row["restored"] = source_file_generation(root / name)
+        atomic_file.replace_text(protection_path(root), json.dumps(record, sort_keys=True) + "\n")
+
+
+def check_integrity(root: Path) -> dict | None:
+    """While readers run, restore a changed session record or candidate and mark the pass not intact.
+
+    The finding is recorded in the session as integrity_findings with
+    candidate_intact false, so no reader result passes and validate refuses.
+    """
+    root = Path(root).resolve()
+    path = session_path(root)
+    if not (root / ".git").exists() or not path.is_file():
+        return None
+    with locked(root):
+        guard = session_guard_path(root)
+        saved = guard.read_bytes() if guard.is_file() else path.read_bytes()
+        try:
+            value = json.loads(saved)
+        except ValueError:
+            return None
+        if not any(worker.get("state") == "running" for worker in value.get("workers", {}).values()):
+            return None
+        changed = []
+        if path.read_bytes() != saved:
+            atomic_file.replace_bytes(path, saved)
+            changed.append("session record")
+        current = value.get("candidate")
+        if current:
+            drift = candidate_drift(root, current)
+            if drift:
+                restore_candidate(root, current, drift)
+                changed.extend(drift)
+        if not changed:
+            return None
+        shown = ", ".join(changed[:20]) + (f" and {len(changed) - 20} more" if len(changed) > 20 else "")
+        finding = {"id": "CANDIDATE_MUTATED", "paths": changed, "detected_at": time.time(),
+                   "summary": f"a command changed {shown} while readers ran; restored from the frozen candidate"
+                              " and session record, and this pass is marked candidate_intact false: cancel"
+                              " both readers and freeze again"}
+        value = read_session(root)
+        value.setdefault("integrity_findings", []).append(finding)
+        value["candidate_intact"] = False
+        write_session(root, value)
+        return finding
+
+
+def require_intact(value: dict) -> None:
+    if value.get("candidate_intact") is False:
+        raise RuntimeError("candidate_intact is false: " + "; ".join(
+            finding["summary"] for finding in value.get("integrity_findings", [])))
 
 
 def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
@@ -482,11 +684,16 @@ def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
         return
     value = read_session(root, required=False)
     readers = bool(value) and any(worker["state"] == "running" for worker in value["workers"].values())
+    if not readers:
+        # Readers that settled in a process that ended before its restore leave the modes to restore here.
+        restore_protection(root)
     if not readers and not command_active(root):
         return
     scratch = session_path(root).parent / "scratch"
     if paths and all(scratch in (path if path.is_absolute() else root / path).resolve().parents
                      for path in paths):
+        return
+    if readers and paths and not protected_paths(root, paths):
         return
     if not readers:
         # Each command holds the environment lock around the command lock, so
@@ -499,11 +706,50 @@ def guard_write(worktree: Path, paths: list[Path] | None = None) -> None:
         raise RuntimeError("DELIVERY_ENVIRONMENT_BUSY: the Item environment is held by "
                            + describe_environment_holder(holder or {})
                            + f"; writes to the Item worktree wait until {wait}")
-    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before writing."
-                       " Until then Bash runs only the reader manifest's command_form, one direct"
-                       " `<python> [-B] <bound delivery_verification.py> --worktree <worktree> <verb> ...` with no"
-                       " pipe, redirect, variable or prefix but PYTHONDONTWRITEBYTECODE=1; read files with the host's"
-                       " Read tool or the CLI's inspect, inspect-context and diff, and write only under allowed_writes")
+    raise RuntimeError("DELIVERY_VERIFICATION_READERS_ACTIVE: settle or confirm cancellation of both readers before"
+                       " writing the frozen candidate's tracked files, its Git index, HEAD or refs, or the"
+                       " verification session record. Untracked, ignored and runtime files of the Item worktree and"
+                       " the session scratch stay writable; the bound"
+                       " `<python> [-B] <bound delivery_verification.py> --worktree <worktree> <verb> ...` runs"
+                       " verification commands, including `environment --verb <name>` for a QA verb the"
+                       " Verification Contract declares")
+
+
+def protected_paths(worktree: Path, paths: list[Path]) -> list[Path]:
+    """The paths among *paths* whose write could change the frozen candidate or its session records.
+
+    They are the Item worktree's Git metadata and tracked files, a directory that holds one, and
+    the verification session directory outside its scratch. A worktree whose tracked files cannot
+    be listed protects every path inside it.
+    """
+    root = Path(worktree).resolve()
+    session = session_path(root).parent
+    found = []
+    for raw in paths:
+        path = raw if raw.is_absolute() else root / raw
+        for candidate in {Path(os.path.normpath(path)), path.resolve()}:
+            if candidate.is_relative_to(session / "scratch"):
+                continue
+            if (candidate.is_relative_to(session) or session.is_relative_to(candidate)
+                    or root.is_relative_to(candidate) or tracked_path(root, candidate)):
+                found.append(raw)
+                break
+    return found
+
+
+def tracked_path(root: Path, path: Path) -> bool:
+    if not path.is_relative_to(root):
+        return False
+    relative = path.relative_to(root).as_posix()
+    if relative.casefold().split("/")[0] == ".git":
+        return True
+    if not (git_metadata_dir(root) / "index").is_file():
+        return True
+    try:
+        # icase: a case-insensitive file system writes a tracked file through any spelling.
+        return bool(git(root, "ls-files", "-z", "--", ":(literal,icase)" + relative))
+    except RuntimeError:
+        return True
 
 
 def command_form(root: Path) -> str:
@@ -617,9 +863,10 @@ def candidate(root: Path, delivery_id: str, story: str, *, allow_evidence: bool 
     changed = sorted(set(part for part in git(root, "diff", "--name-only", "--no-renames", "-z", base, head).split("\0") if part))
     code = mutation_scope(root, changed)
     observations = {}
+    protection = read_protection(root)
     for name in git(root, "ls-files", "-z").split("\0"):
         if name and name not in reports:
-            observations[name] = source_file_generation(root / name)
+            observations[name] = protected_generation(protection, root / name)
     value = {"schema_version": 1, "delivery": delivery_id, "story": story,
              "source_observations": observations,
              "product_commit": head, "integration_base_commit": base,
@@ -3435,7 +3682,10 @@ def register_result(root: Path, result: dict) -> dict:
     root = root.resolve()
     with locked(root):
         wait_for_own_command(root, str(result.get("role")), "settling its reader")
-        return settle_result(root, read_session(root), result)
+        value = read_session(root)
+        if result.get("verdict") == "passed":
+            require_intact(value)
+        return settle_result(root, value, result)
 
 
 def settle_result(root: Path, value: dict, result: dict, *, merged: bool = False) -> dict:
@@ -3840,6 +4090,7 @@ def validate(root: Path, delivery_id: str, story: str) -> dict:
     if command_active(root):
         raise RuntimeError("verification command is still running")
     value = read_session(root)
+    require_intact(value)
     current = require_current(root, value, allow_evidence=True)
     if current["delivery"] != delivery_id or current["story"] != story:
         raise RuntimeError("verification session belongs to another Item")
@@ -3884,7 +4135,7 @@ def fresh_runtime_problem(session: dict, evidence: dict | None = None) -> bool:
     state = session.get("runtime", {})
     events = state.get("events", [])
     attempt_id = state.get("attempt_id")
-    verbs = [event["verb"] for event in events if event.get("exit_code") == 0]
+    verbs = [event["verb"] for event in events if event.get("exit_code") == 0 and event["verb"] in ENVIRONMENT_VERBS]
     return bool(not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id)
                 or runtime_needs_cleanup(session) or state.get("interrupted_commands")
                 or state.get("lifecycle", FRESH) != FRESH
@@ -3945,11 +4196,29 @@ def runtime_environment_identity(root: Path, current: dict) -> dict:
     return environment_identity(root, command_environment(root, current))
 
 
+ENVIRONMENT_VERBS = operation_compile.ENVIRONMENT_VERBS
+
+
+def declared_qa_verbs(root: Path) -> dict[str, dict]:
+    """The QA Verbs an unchanged approved Verification Contract declares, by verb."""
+    props, body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
+    verbs, errors = operation_compile.qa_verbs(body)
+    if verbs and (props.get("status") != "approved"
+                  or props.get("source_hash") != operation_compile.receipt_hash(props, body)):
+        errors.append("QA Verbs requires an unchanged approved Verification Contract")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    return {row["verb"]: row for row in verbs}
+
+
 def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
-    """Invoke only the approved environment contract in a persistent private clone."""
+    """Invoke only the approved environment contract, or a declared QA verb, in a persistent private clone."""
     root = root.resolve()
-    if verb not in {"down", "up", "seed", "logs", "url"}:
-        raise RuntimeError("unsupported environment verb")
+    declared = None
+    if verb not in ENVIRONMENT_VERBS:
+        declared = declared_qa_verbs(root).get(verb)
+        if declared is None:
+            raise RuntimeError("unsupported environment verb; declare it in the Verification Contract's QA Verbs")
     with environment_lock(root, "qa_engineer", "environment --verb " + verb), \
             command_lock(root, "qa_engineer", "environment --verb " + verb):
         with locked(root):
@@ -3972,6 +4241,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                     raise RuntimeError("environment argument must be an exact approved scenario or service identifier")
             elif value is not None:
                 raise RuntimeError("this environment verb does not accept a value")
+            if declared:
+                command, contract = declared["command"], {"env_workdir": declared["workdir"]}
             state = session.get("runtime", {"attempt_id": uuid.uuid4().hex, "events": [], "active": False})
             if state.get("pending") and verb != "down":
                 raise RuntimeError("interrupted runtime command requires teardown before another command")
@@ -3981,7 +4252,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                     and runtime_lifecycle(root, session)["mode"] == LONG_LIVED):
                 state["lifecycle"] = LONG_LIVED
             long_lived = state.get("lifecycle") == LONG_LIVED
-            successful = [event["verb"] for event in state["events"] if event["exit_code"] == 0]
+            successful = [event["verb"] for event in state["events"]
+                          if event["exit_code"] == 0 and event["verb"] in ENVIRONMENT_VERBS]
             if verb == "up" and not long_lived and (not successful or successful[-1] != "down"):
                 raise RuntimeError("fresh runtime requires a successful down before up")
             if verb in {"seed", "logs", "url"} and not state["active"]:
@@ -4031,7 +4303,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             write_session(root, session)
         # Only fixed verbs and declared identifier tokens enter this argument
         # suffix; project command bytes remain the approved contract's bytes.
-        command = command + " " + verb + (" " + value if value else "")
+        if not declared:
+            command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
         with host_awake(host_guard(root)["keep_awake"]) as awake:
             completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
@@ -4942,7 +5215,7 @@ def require_lifecycle_ready(root: Path, session: dict) -> None:
         return
     state = session.get("runtime", {})
     events = state.get("events", [])
-    verbs = [event.get("verb") for event in events]
+    verbs = [event.get("verb") for event in events if event.get("verb") in ENVIRONMENT_VERBS]
     up = max((i for i, verb in enumerate(verbs) if verb == "up"), default=-1)
     long_lived = (state.get("lifecycle") == LONG_LIVED if events
                   else runtime_lifecycle(root, session)["mode"] == LONG_LIVED)
@@ -4965,7 +5238,7 @@ def require_runtime_evidence(root: Path, session: dict, evidence: dict, environm
     state = session.get("runtime", {})
     events = state.get("events", [])
     attempt_id = state.get("attempt_id")
-    verbs = [event["verb"] for event in events if event.get("exit_code") == 0]
+    verbs = [event["verb"] for event in events if event.get("exit_code") == 0 and event["verb"] in ENVIRONMENT_VERBS]
     required = runtime_lifecycle(root, session)
     recorded = {event.get("lifecycle", FRESH) for event in events} | {state.get("lifecycle", FRESH)}
     if recorded != {required["mode"]}:
@@ -5617,7 +5890,7 @@ def permission_preflight(root: Path, delivery_id: str, story: str) -> dict:
     for group in groups if isinstance(groups, list) else []:
         forms.append((f"live_test:{group}", cli_form(root, "run", "--kind", "live_test", "--group", str(group))))
     if item.get("runtime_required"):
-        for verb in ("up", "seed", "logs", "url", "down"):
+        for verb in ("up", "seed", "logs", "url", "down", *declared_qa_verbs(root)):
             forms.append((f"environment:{verb}", cli_form(root, "environment", "--verb", verb)))
     if qa_preflight(root, delivery_id):
         forms.append(("rehearse", cli_form(root, "rehearse", "--delivery", delivery_id, "--story", story)))
@@ -5765,7 +6038,8 @@ def main(argv=None) -> int:
     run.add_argument("--fresh", action="store_true")
     run.add_argument("--resume", action="store_true")
     environment = subs.add_parser("environment")
-    environment.add_argument("--verb", required=True, choices=("down", "up", "seed", "logs", "url"))
+    environment.add_argument("--verb", required=True,
+                             help="down, up, seed, logs, url or a QA verb the Verification Contract declares")
     environment.add_argument("--value")
     lane = subs.add_parser("lane-run")
     lane.add_argument("--delivery", required=True)

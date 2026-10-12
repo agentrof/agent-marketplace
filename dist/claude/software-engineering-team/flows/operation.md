@@ -137,6 +137,15 @@ every row must pass before final QA passes. The compiler exposes these rows as
 `runner: owner`. The table is optional and follows normal contract review and
 approval. Do not include credentials or unresolved tokens in a command.
 
+Verification may also declare a `QA Verbs` table for read-only or runtime
+commands QA runs itself, such as a recorded-results reader. Its columns are
+`Verb`, `Command` and `Workdir`: a unique literal verb other than `down`, `up`,
+`seed`, `logs` and `url`, the exact command and a repository-relative working
+directory. QA runs a row with `environment --verb <verb>` in the private
+runtime checkout; the runner records its exit code, output digest and
+`candidate_intact` like any environment verb. Without the table only the fixed verbs exist. Keep a step
+in `Owner Steps` only when the owner alone may run it.
+
 QA reaches a row with `delivery_verification.py --worktree <item>
 await-owner-step --step <id>`. The coordinator relays the returned command to
 the owner; it never executes or confirms it for them. The owner runs the

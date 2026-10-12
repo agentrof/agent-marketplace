@@ -29,7 +29,7 @@ import delivery_verification as verification  # noqa: E402
 import operation_compile  # noqa: E402
 import test_pre_handoff_regression as base  # noqa: E402
 import test_test_group_report as grouped  # noqa: E402
-from git_fixture import remove_temporary  # noqa: E402
+from git_fixture import make_writable, remove_temporary  # noqa: E402
 
 SWITCH = "test_engines"
 VALUE = "partitioned"
@@ -400,7 +400,7 @@ class PartitionedRunTests(unittest.TestCase):
                 ("does not run the approved command in its approved workdir",
                  lambda record: record["identity"].update(command=base.PYTHON + " run_all.py"))):
             with self.subTest(message=message):
-                verification.session_path(self.root).write_bytes(original)
+                make_writable(verification.session_path(self.root)).write_bytes(original)
                 self.forge(change)
                 with self.assertRaisesRegex(RuntimeError, "full_test_suite evidence " + re.escape(message)):
                     self.validate()

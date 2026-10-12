@@ -273,7 +273,8 @@
         "tools.tests.test_performance_contracts.*",
         "tools.tests.test_live_test_groups.*",
         "tools.tests.test_qa_preflight.*",
-        "tools.tests.test_qa_owner_steps.*"
+        "tools.tests.test_qa_owner_steps.*",
+        "tools.tests.test_qa_verbs.*"
       ],
       "depends_on": [
         "contracts"
@@ -492,7 +493,7 @@
         "tools.tests.test_test_engines.PartitionedRunTests.test_every_partition_runs_in_its_own_clone_and_one_record_merges_them",
         "tools.tests.test_test_engines.PartitionedRunTests.test_partitions_run_concurrently_and_never_share_an_exclusive_engine",
         "tools.tests.test_vault_hook.AutopilotRuntimeGuardTests.test_the_packaged_autopilot_script_may_write_its_runtime",
-        "tools.tests.test_vault_hook.VaultHookPrototypeTests.test_delivery_reader_barrier_only_permits_scratch_and_exact_coordinator",
+        "tools.tests.test_vault_hook.VaultHookPrototypeTests.test_delivery_reader_barrier_refuses_only_protected_writes_and_owner_results",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_all_writer_consumers_accept_cmd_alias",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_cmd_pre_and_command_post_preserve_official_config_change",
         "tools.tests.test_vault_hook.VaultHookShellContractTests.test_composed_host_hooks_enforce_writer_support_boundaries",
@@ -687,6 +688,7 @@
     "tools.tests.test_python_entry",
     "tools.tests.test_qa_preflight",
     "tools.tests.test_qa_owner_steps",
+    "tools.tests.test_qa_verbs",
     "tools.tests.test_reader_waves",
     "tools.tests.test_release",
     "tools.tests.test_release_publish",

@@ -150,7 +150,7 @@ class VaultHookPrototypeTests(unittest.TestCase):
             self.assertIn("unresolved wikilink", output.getvalue())
             self.assertTrue(first.exists())
 
-    def test_delivery_reader_barrier_only_permits_scratch_and_exact_coordinator(self):
+    def test_delivery_reader_barrier_refuses_only_protected_writes_and_owner_results(self):
         import delivery_verification
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary).resolve()
@@ -158,6 +158,7 @@ class VaultHookPrototypeTests(unittest.TestCase):
             delivery_verification.write_session(project, {"schema_version": 1, "workers": {
                 "code_reviewer": {"state": "running"}, "qa_engineer": {"state": "running"}}})
             scratch = delivery_verification.session_path(project).parent / "scratch/result.json"
+            # Without a readable index every path of the worktree counts as tracked.
             for path, expected in ((project / "product.py", 2), (project / "workspace/docs/report.md", 2),
                                    (delivery_verification.session_path(project), 2), (scratch, 0)):
                 with self.subTest(path=path), redirect_stderr(io.StringIO()):
@@ -167,51 +168,20 @@ class VaultHookPrototypeTests(unittest.TestCase):
             def shell_payload(value):
                 return {"cwd": str(project), "tool_name": "Bash", "shell_family": "cmd" if os.name == "nt" else "posix",
                         "tool_input": {"command": value}}
-            # A reader waits through wait while both readers run.
-            for verb in ("status", "inspect", "inspect-context", "expand-context", "diff", "environment",
-                         "permission-preflight", "permission-probe", "wait", "await-owner-step"):
+            for verb in ("status", "inspect", "diff", "environment", "wait", "await-owner-step"):
                 routed = [*command[:-1], verb]
                 routed_text = subprocess.list2cmdline(routed) if os.name == "nt" else shlex.join(routed)
-                self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(routed_text)), 0)
-            # A code review panel registers, calibrates and merges while both readers run,
-            # under the checks result passes: the installed script and one --worktree.
-            for verb, *arguments in (("result", "--file", str(scratch)), ("panel-result", "--file", str(scratch)),
-                                     ("inspect-context", "--plan", str(scratch)),
-                                     ("expand-context", "--plan", str(scratch), "--reason", "Missing constraint"),
-                                     ("calibrate", "--file", str(scratch)), ("merge-panel",), ("prepare-repair",),
-                                     ("permission-preflight",), ("permission-probe",)):
-                routed = [*command[:-1], verb, *arguments]
-                for value, expected in ((routed, 0), ([*routed, "--worktree", str(project)], 2),
-                                        ([*routed[:2], str(project / "delivery_verification.py"), *routed[3:]], 2)):
-                    text = subprocess.list2cmdline(value) if os.name == "nt" else shlex.join(value)
-                    for shell, outcome in ((text, expected), (text + " && echo unsafe", 2)):
-                        with self.subTest(command=shell), redirect_stderr(io.StringIO()):
-                            self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(shell)), outcome)
-            command_text = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
+                for value in (routed_text, routed_text + " && echo done"):
+                    with self.subTest(command=value), redirect_stderr(io.StringIO()):
+                        self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(value)), 0)
             owner_result = [*command[:-1], "owner-step-result", "--file", str(scratch)]
             owner_text = subprocess.list2cmdline(owner_result) if os.name == "nt" else shlex.join(owner_result)
             with redirect_stderr(io.StringIO()):
                 self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(owner_text)), 2)
-                for argv in (owner_result,
-                             [*command[:3], "--worktree=" + str(project), *owner_result[-3:]],
-                             [*command[:3], "--worktree", str(project.parent), *owner_result[3:]]):
-                    outside = shell_payload(subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv))
-                    outside["cwd"] = str(project.parent)
-                    self.assertEqual(self.hook.delivery_reader_barrier(outside), 2)
-            diagnostic = [*command[:-1], "run", "--kind", "diagnostic_test", "--selection-file", str(scratch.parent / "selection.json")]
-            diagnostic_text = subprocess.list2cmdline(diagnostic) if os.name == "nt" else shlex.join(diagnostic)
-            for value, expected in ((command_text, 0), (command_text + " && echo unsafe", 2),
-                                    (diagnostic_text, 0), (diagnostic_text + " && echo unsafe", 2),
-                                    ("git -P -c core.fsmonitor=false status", 2 if os.name == "nt" else 0), ("git commit -qm change", 2)):
-                with self.subTest(command=value), redirect_stderr(io.StringIO()):
-                    self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(value)), expected)
-            unknown_shell = shell_payload(command_text)
+            unknown_shell = shell_payload("make test")
             unknown_shell["shell_family"] = "unknown"
             with redirect_stderr(io.StringIO()):
-                self.assertEqual(self.hook.delivery_reader_barrier(unknown_shell), 2)
-                if os.name == "nt":
-                    unknown_shell.pop("shell_family")
-                    self.assertEqual(self.hook.delivery_reader_barrier(unknown_shell), 2)
+                self.assertEqual(self.hook.delivery_reader_barrier(unknown_shell), 0)
             other = project / "another-checkout"
             (other / ".git").mkdir(parents=True)
             for tool in ("Write", "Edit", "apply_patch"):
@@ -219,59 +189,166 @@ class VaultHookPrototypeTests(unittest.TestCase):
                     self.assertEqual(self.hook.delivery_reader_barrier({"cwd": str(other), "tool_name": tool,
                                                                       "file_targets": [{"file_path": str(project / "product.py") }]}), 2)
 
-    @unittest.skipIf(os.name == "nt", "the narrowed shell scope parses POSIX commands only")
-    def test_active_readers_refuse_only_writes_into_the_item_and_its_session(self):
+    @unittest.skipIf(os.name == "nt", "the hook reads explicit write targets from POSIX commands only")
+    def test_active_readers_refuse_only_explicit_writes_to_tracked_files_and_session_records(self):
         import delivery_verification
-        with tempfile.TemporaryDirectory() as temporary:
+        tracked = {"src/product.py", ".gitignore"}
+
+        def git(root, *args):
+            # The index lists tracked files; a pathspec names a file or the directory above files.
+            self.assertEqual(args[:3], ("ls-files", "-z", "--"))
+            spec = args[3].split(")", 1)[1].casefold()
+            return "\0".join(name for name in sorted(tracked)
+                              if name.casefold() == spec or name.casefold().startswith(spec + "/"))
+
+        with tempfile.TemporaryDirectory() as temporary, \
+                mock.patch.object(delivery_verification, "git", side_effect=git), \
+                mock.patch.object(delivery_verification, "protection_targets", return_value=[]):
             base = Path(temporary).resolve()
             project, unrelated = base / "item", base / "unrelated"
-            for root in (project, unrelated):
-                (root / ".git").mkdir(parents=True)
+            (project / ".git").mkdir(parents=True)
+            (project / ".git/index").write_bytes(b"")
+            (unrelated / ".git").mkdir(parents=True)
             delivery_verification.write_session(project, {"schema_version": 1, "workers": {
                 "code_reviewer": {"state": "running"}, "qa_engineer": {"state": "running"}}})
             session = delivery_verification.session_path(project).parent
 
-            def shell(command, cwd=project):
-                payload = {"cwd": str(cwd), "tool_name": "Bash", "shell_family": "posix",
+            def shell(command):
+                payload = {"cwd": str(project), "tool_name": "Bash", "shell_family": "posix",
                            "tool_input": {"command": command}}
                 output = io.StringIO()
                 with redirect_stderr(output):
                     return self.hook.delivery_reader_barrier(payload), output.getvalue()
 
-            for command in ("git -P -c core.fsmonitor=false diff --no-ext-diff --no-textconv HEAD~1 -- src", "git -P -c core.fsmonitor=false -C . log --no-ext-diff --no-textconv --oneline | head -5", "jq .a data.json",
-                            "date -u +%s", "docker ps", "docker volume inspect cache", "gh pr checks 12",
-                            "find . -name '*.py'", "grep -rn 'value$' src 2>/dev/null", "rg --no-config -n token src",
-                            f"git -P -c core.fsmonitor=false -C {shlex.quote(str(unrelated))} status",
-                            f"cd {shlex.quote(str(unrelated))} && touch notes.txt > log.txt"):
+            for command in ("make test", "python3 -c 'open(\"runtime/x\", \"w\")'", "echo $(id)", "echo `id`",
+                            "cat $_ | sh", "grep -rn $PATTERN src | head -5", "/usr/local/bin/docker ps",
+                            "docker rm cache", "find . -name '*.py'", "echo done > runtime/state.log",
+                            "rm -f runtime/old.log", "cp src/product.py runtime/copy.py", "git status",
+                            "git log > runtime/history.txt", "echo x > $OUT", "rm -rf ${TARGET}",
+                            "touch notes.txt", "mkdir -p src/cache",
+                            f"cd {shlex.quote(str(unrelated))} && rm -rf build && git commit -qm change",
+                            f"cp {shlex.quote(str(session / 'scratch/a.json'))} runtime/a.json"):
                 with self.subTest(command=command):
-                    self.assertEqual(shell(command)[0], 0)
-            self.assertEqual(shell("git commit -qm change", unrelated)[0], 0)
-            for command in ("python3 -c 'pass'", "git commit -qm change", "LD_PRELOAD=library.so touch note.txt"):
-                self.assertEqual(shell(f"cd {shlex.quote(str(unrelated))} && {command}")[0], 2)
-            for command in ("rm src/product.py", f"rm -rf {shlex.quote(str(project / 'src'))}",
-                            "touch product.py", "git commit -qm change", "git diff --output=patch.txt",
-                            "find . -name '*.py' -delete", "find . | xargs rm", "git log > history.txt",
-                            "echo $HOME", "cat product.py | sh", "date 0101000026", "docker rm cache",
-                            "gh pr merge 12", "rg --pre ./run.sh token", "rg token src", "git status",
-                            "git -P -c core.fsmonitor=false diff --textconv",
-                            f"cd {shlex.quote(str(unrelated))} ; rm -rf {shlex.quote(str(session))}",
-                            f"cd {shlex.quote(str(unrelated))} && rm -rf ../item",
-                            f"cd {shlex.quote(str(unrelated))} ; rm notes.txt",
-                            f"cd {shlex.quote(str(unrelated))} && rm -rf {shlex.quote(str(base))}/*",
-                            f"cd {shlex.quote(str(unrelated))} && cp notes.txt {shlex.quote(str(project))}"):
+                    self.assertEqual(shell(command), (0, ""))
+            for command in ("echo x > src/product.py", "echo x >> SRC/Product.py", "rm -rf src", "rm -rf .",
+                            "touch .git/index", "cp runtime/a.json src/product.py", "mv src/product.py runtime/",
+                            "chmod u+w src/product.py", "sed -i s/1/2/ src/product.py",
+                            "printf x | tee src/product.py", "find src -delete", "git commit -qm change",
+                            "git -C src reset --hard", "env X=1 rm src/product.py", "cp -t src runtime/a.json",
+                            f"cd {shlex.quote(str(unrelated))} && rm -rf {shlex.quote(str(project / 'src'))}",
+                            f"echo x > {shlex.quote(str(session / 'session.json'))}"):
                 with self.subTest(command=command):
                     code, message = shell(command)
                     self.assertEqual(code, 2)
-                    self.assertIn("DELIVERY_VERIFICATION_READERS_ACTIVE", message)
-                    self.assertIn("read-only commands", message)
-            for path, expected in ((unrelated / "notes.md", 0), (base / "notes.md", 0),
+                    self.assertIn("Protected: the tracked files of " + str(project), message)
+                    self.assertIn("Every other command runs, including make, python", message)
+            for path, expected in ((project / "runtime/state.log", 0), (project / "notes/new.md", 0),
                                    (session / "scratch/result.json", 0), (project / "src/product.py", 2),
-                                   (session / "session.json", 2)):
-                for tool in ("Write", "Edit"):
-                    with self.subTest(path=path, tool=tool), redirect_stderr(io.StringIO()):
-                        self.assertEqual(self.hook.delivery_reader_barrier({
-                            "cwd": str(project), "tool_name": tool,
-                            "file_targets": [{"file_path": str(path)}]}), expected)
+                                   (project / ".git/HEAD", 2), (session / "session.json", 2)):
+                with self.subTest(path=path), redirect_stderr(io.StringIO()):
+                    self.assertEqual(self.hook.delivery_reader_barrier({
+                        "cwd": str(project), "tool_name": "Write",
+                        "file_targets": [{"file_path": str(path)}]}), expected)
+            delivery_verification.guard_write(project, [project / "runtime/state.log", Path("notes.txt")])
+            with self.assertRaisesRegex(RuntimeError, "READERS_ACTIVE: .* tracked files"):
+                delivery_verification.guard_write(project, [project / "runtime/state.log", Path("src/product.py")])
+
+    @integration
+    def test_active_readers_make_the_candidate_read_only_and_restore_changes_that_land(self):
+        import delivery_verification as verification
+        with temporary_directory() as temporary:
+            project = Path(temporary).resolve() / "item"
+            project.mkdir()
+            init_repository(project)
+            (project / ".gitignore").write_text("runtime/\n.agentrof/\n", encoding="utf-8")
+            (project / "src").mkdir()
+            product = project / "src/product.py"
+            product.write_text("value = 1\n", encoding="utf-8")
+            for args in (("add", "-A"), ("-c", "user.name=Test", "-c", "user.email=test@example.com",
+                                         "commit", "-qm", "Candidate")):
+                subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
+            names = ["src/product.py", ".gitignore"]
+            original = {name: stat.S_IMODE((project / name).stat().st_mode) for name in names}
+            current = {"product_commit": verification.git(project, "rev-parse", "HEAD"), "report_paths": [],
+                       "source_observations": {name: verification.source_file_generation(project / name)
+                                               for name in names}}
+            running = {"schema_version": 1, "session_id": "pass", "candidate": current, "workers": {
+                "code_reviewer": {"state": "running"}, "qa_engineer": {"state": "running"}}}
+            verification.write_session(project, running)
+            record = verification.read_protection(project)
+            # Read-only modes applied; the candidate observations stay those of the freeze.
+            self.assertEqual(record["state"], "applied")
+            for name in names:
+                self.assertFalse(stat.S_IMODE((project / name).stat().st_mode) & 0o222)
+                self.assertEqual(verification.protected_generation(record, project / name),
+                                 current["source_observations"][name])
+            self.assertFalse(verification.session_path(project).stat().st_mode & 0o222)
+            (project / "runtime").mkdir()
+            (project / "runtime/state.log").write_text("runtime state\n", encoding="utf-8")
+            self.assertIsNone(verification.check_integrity(project))
+            write = [sys.executable, "-c", "open('src/product.py', 'w').write('value = 2\\n')"]
+            if os.name == "nt" or os.geteuid() != 0:
+                # A python write to a tracked file is stopped by the filesystem.
+                self.assertNotEqual(subprocess.run(write, cwd=project, capture_output=True).returncode, 0)
+                self.assertEqual(product.read_text(encoding="utf-8"), "value = 1\n")
+            # A change that slips through is restored and flags the pass.
+            os.chmod(product, 0o644)
+            product.write_text("value = 3\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(project), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                            "commit", "-qam", "Slipped through"], check=True, capture_output=True)
+            payload = {"cwd": str(project), "tool_name": "Bash", "shell_family": "posix",
+                       "tool_input": {"command": "python3 tool.py"}}
+            output = io.StringIO()
+            with redirect_stderr(output):
+                self.assertEqual(self.hook.delivery_integrity(payload), 2)
+            self.assertIn("DELIVERY_VERIFICATION_CANDIDATE_MUTATED", output.getvalue())
+            self.assertEqual(product.read_text(encoding="utf-8"), "value = 1\n")
+            self.assertEqual(verification.git(project, "rev-parse", "HEAD"), current["product_commit"])
+            self.assertFalse(stat.S_IMODE(product.stat().st_mode) & 0o222)
+            session = verification.read_session(project)
+            self.assertIs(session["candidate_intact"], False)
+            self.assertEqual(session["integrity_findings"][0]["id"], "CANDIDATE_MUTATED")
+            with self.assertRaisesRegex(RuntimeError, "candidate_intact is false"):
+                verification.require_intact(session)
+            # A changed session record is restored from the runner's own copy.
+            path = verification.session_path(project)
+            os.chmod(path, 0o644)
+            path.write_text("{}", encoding="utf-8")
+            self.assertEqual(verification.check_integrity(project)["paths"], ["session record"])
+            self.assertEqual(verification.read_session(project)["session_id"], "pass")
+            # Settling restores the exact recorded modes; a crash before that is recovered by the next guard.
+            settled = verification.read_session(project)
+            settled["workers"] = {role: {"state": "settled"} for role in settled["workers"]}
+            text = json.dumps({**settled, "digest": verification.digest(
+                {key: item for key, item in settled.items() if key != "digest"})}, indent=2, sort_keys=True) + "\n"
+            for target in (path, verification.session_guard_path(project)):
+                os.chmod(target, 0o644)
+                target.write_text(text, encoding="utf-8")
+            verification.guard_write(project, None)
+            self.assertEqual(verification.read_protection(project)["state"], "restored")
+            self.assertEqual(stat.S_IMODE((project / ".gitignore").stat().st_mode), original[".gitignore"])
+            self.assertEqual(stat.S_IMODE(product.stat().st_mode), original["src/product.py"])
+            self.assertEqual(verification.protected_generation(verification.read_protection(project),
+                                                               project / ".gitignore"),
+                             current["source_observations"][".gitignore"])
+
+    def test_settled_readers_restore_the_recorded_modes(self):
+        import delivery_verification as verification
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary).resolve()
+            (project / ".git").mkdir()
+            tracked = project / "tracked.txt"
+            tracked.write_text("frozen\n", encoding="utf-8")
+            os.chmod(tracked, 0o640)
+            workers = {"code_reviewer": {"state": "running"}, "qa_engineer": {"state": "running"}}
+            with mock.patch.object(verification, "protection_targets", return_value=[tracked]):
+                verification.write_session(project, {"schema_version": 1, "session_id": "pass", "workers": workers})
+                self.assertEqual(stat.S_IMODE(tracked.stat().st_mode) & 0o222, 0)
+                self.assertEqual(verification.read_protection(project)["files"][str(tracked)]["mode"], 0o640)
+                verification.write_session(project, {"schema_version": 1, "session_id": "pass", "workers": {
+                    role: {"state": "cancelled"} for role in workers}})
+            self.assertEqual(stat.S_IMODE(tracked.stat().st_mode), 0o640)
+            self.assertEqual(verification.read_protection(project)["state"], "restored")
 
     def test_safe_os_metadata_never_changes_the_guard_inventory(self):
         with tempfile.TemporaryDirectory() as temporary:

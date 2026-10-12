@@ -3532,7 +3532,7 @@ class DeliveryGitTests(unittest.TestCase):
             reserved = delivery_git.reserve_delivery(project, "DLV-001")
             # Approve only what the Item pins: publication refuses an approved contract no
             # Item pins while the Integration holds another revision of it.
-            pinned = [("verification", "test_command")] + ([("environment", "env_command")] if runtime else [])
+            pinned = ([("environment", "env_command")] if runtime else []) + [("verification", "test_command")]
             for kind, command in pinned:
                 path = operation_compile.contract_path(docs, kind)
                 props, body = operation_compile.parse(path)
@@ -6007,6 +6007,9 @@ class DeliveryGitTests(unittest.TestCase):
                     self.assertIn("status: draft", held_copy)
                 receipt = self.approve_environment_revision(docs)
                 self.assertEqual(receipt["revision"], 1)
+                self.assertEqual(operation_compile.repair_pairing(type("Args", (), {"docs": str(docs)})), 0)
+                self.assertEqual(delivery_compile.approve_execution(
+                    type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
                 self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(project, "DLV-001")), (
                     "DELIVERY_OPERATION_UNCARRIED",
                     f"no Item pins the approved Environment Contract revision 1, and the Integration holds {held} "
@@ -6020,6 +6023,9 @@ class DeliveryGitTests(unittest.TestCase):
         """The refusal's first route: record the revision on the target, refresh, then publish."""
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         receipt = self.approve_environment_revision(docs)
+        self.assertEqual(operation_compile.repair_pairing(type("Args", (), {"docs": str(docs)})), 0)
+        self.assertEqual(delivery_compile.approve_execution(
+            type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
         with self.assertRaisesRegex(RuntimeError, "^DELIVERY_OPERATION_UNCARRIED: "):
             delivery_git.publish_execution_plan(project, "DLV-001")
         contract = "workspace/docs/operation/environment-contract.md"
@@ -6076,6 +6082,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(manifest["unpinned_revisions"], ["operation/environment-contract.md"])
         self.assertEqual(manifest["readers"], ["qa-engineer"])
         self.assertEqual(operation_compile.approve(args), 0)
+        self.assertEqual(operation_compile.repair_pairing(type("Args", (), {"docs": str(docs)})), 0)
         self.assertEqual(delivery_compile.approve_execution(scope), 0)
         # A manifest recomputed after approval, as a resumed session does, still
         # names the revision, and keeps it until the Integration holds it.

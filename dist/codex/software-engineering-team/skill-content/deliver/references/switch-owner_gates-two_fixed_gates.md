@@ -92,6 +92,10 @@ log's table.
   names `Verification Contract revision N`, `Environment Contract revision N`,
   `Delivery Governance revision N` or `execution plan approval N`, as the
   refusal names it.
+- A pairing-only `operation_compile.py re-pair` uses the answered row for
+  `Environment Contract revision N` that it pairs to. Include the repair in
+  that same approval step; unchanged Verification content needs no second
+  owner question or contract revision.
 
 ## At-once classes
 

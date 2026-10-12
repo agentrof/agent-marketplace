@@ -556,7 +556,7 @@ def user_decision_findings(body: str, stories: list[str]) -> list[str]:
     return errors
 
 
-def operation_contract_snapshot(docs: Path, kind: str) -> tuple[dict, list[str]]:
+def operation_contract_snapshot(docs: Path, kind: str, *, check_pairing: bool = True) -> tuple[dict, list[str]]:
     """Resolve one approved Operation Contract without trusting caller input.
 
     Operation is deliberately not a product-stage dependency.  It becomes
@@ -567,6 +567,8 @@ def operation_contract_snapshot(docs: Path, kind: str) -> tuple[dict, list[str]]
     receipt, errors = operation_compile.check_contract(docs, kind)
     if errors or not receipt.get("current"):
         return {}, [f"approved current {kind} contract is required: " + "; ".join(errors)]
+    if check_pairing and kind == "verification" and (pairing_errors := operation_compile.pairing_findings(docs, receipt)):
+        return {}, pairing_errors
     return {
         f"{kind}_contract_ref": f"operation/{kind}-contract",
         f"{kind}_contract_hash": str(receipt["source_hash"]),
@@ -1729,7 +1731,8 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path,
     # current source contracts are approved and current. A kind in *pending* is an
     # open revision that the gate showing this plan approves before approval runs.
     if "verification" not in pending:
-        _verification, verification_errors = operation_contract_snapshot(docs, "verification")
+        _verification, verification_errors = operation_contract_snapshot(
+            docs, "verification", check_pairing="environment" not in pending)
         errors.extend(verification_errors)
     if "environment" not in pending and any(split_note(path)[0].get("runtime_required", False)
                                             for path in sorted(root.glob("items/*/item.md"))):
@@ -2285,7 +2288,7 @@ def reused_contract_receipts(docs: Path, runtime: bool) -> tuple[list[dict], lis
     must be approved and current.
     """
     receipts: list[dict] = []
-    problems: list[str] = []
+    problems: list[str] = operation_compile.pairing_findings(docs)
     for kind in ("verification", "environment"):
         title = f"{kind.title()} Contract"
         needed = kind == "verification" or runtime

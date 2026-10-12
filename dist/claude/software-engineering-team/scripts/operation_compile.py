@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shlex
 import sys
@@ -21,7 +22,7 @@ from pathlib import Path, PurePosixPath
 
 import atomic_file
 from ba_compile import (
-    frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
+    frontmatter_item, frontmatter_scalar, parse_frontmatter, restamp_frontmatter, without_generated_relations,
 )
 import stage_package
 
@@ -521,16 +522,20 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
     value = {"path": str(path), "kind": kind, "status": props.get("status"),
              "revision": props.get("revision"), "source_hash": digest,
              "current": not errors and props.get("status") == "approved"}
-    if kind == "verification" and "paired_environment_source_hash" in props:
-        # Advisory: an Environment Contract approved after this receipt was
-        # stamped shows as drift until the next Verification Contract approval.
+    if kind == "verification" and props.get("status") == "approved":
         environment = paired_environment(docs)
-        value["paired_environment"] = {
-            "revision": props.get("paired_environment_revision"),
-            "source_hash": props.get("paired_environment_source_hash"),
-            "current": environment is not None
-            and environment == (props.get("paired_environment_revision"), props.get("paired_environment_source_hash")),
-        }
+        if environment is not None or any(field in props for field in PAIRED_FIELDS):
+            pairing = {
+                "revision": props.get("paired_environment_revision"),
+                "source_hash": props.get("paired_environment_source_hash"),
+                "current": environment is not None
+                and environment == (props.get("paired_environment_revision"), props.get("paired_environment_source_hash")),
+            }
+            if not pairing["current"]:
+                parts = [sys.executable, str(Path(__file__).resolve()), "re-pair", "--docs", str(docs)]
+                pairing["repair_command"] = ("& " + " ".join("'" + part.replace("'", "''") + "'" for part in parts) if os.name == "nt"
+                                             else shlex.join(parts))
+            value["paired_environment"] = pairing
     return value, errors
 
 
@@ -545,6 +550,56 @@ def paired_environment(docs: Path) -> tuple[int, str] | None:
     if errors or not environment.get("current"):
         return None
     return environment["revision"], environment["source_hash"]
+
+
+def pairing_findings(docs: Path, receipt: dict | None = None) -> list[str]:
+    """Refuse stale pairing at execution boundaries, without reapproving authored text."""
+    if receipt is None:
+        receipt, _errors = check_contract(docs, "verification")
+    pairing = receipt.get("paired_environment")
+    if pairing is None or pairing["current"]:
+        return []
+    return ["Verification Contract is not paired with the current approved Environment Contract; "
+            "run: " + pairing["repair_command"]]
+
+
+def repair_pairing(args) -> int:
+    docs = docs_root(args.docs)
+    path = contract_path(docs, "verification")
+    environment_path = contract_path(docs, "environment")
+    original = path.read_bytes()
+    environment_original = environment_path.read_bytes()
+    text = original.decode("utf-8")
+    receipt, errors = check_contract(docs, "verification", text)
+    environment, environment_errors = check_contract(docs, "environment", environment_original.decode("utf-8"))
+    if errors or not receipt.get("current"):
+        raise ValueError("re-pair requires an unchanged approved Verification Contract: " + "; ".join(errors))
+    if environment_errors or not environment.get("current"):
+        raise ValueError("re-pair requires an approved current Environment Contract: " + "; ".join(environment_errors))
+    if not pairing_findings(docs, receipt):
+        print(json.dumps({**receipt, "repaired": False}, sort_keys=True))
+        return 0
+    props, body = parse_text(text, path)
+    stamps = dict(zip(PAIRED_FIELDS, (environment["revision"], environment["source_hash"])))
+    stamps["source_hash"] = source_hash({**props, **stamps}, body)
+    updated = restamp_frontmatter(text, stamps)
+    value, errors = check_contract(docs, "verification", updated)
+    if errors:
+        raise ValueError("re-pair check failed: " + "; ".join(errors))
+    import delivery_compile
+    # Pairing is covered by the same ruling that approved this Environment revision.
+    refusals = delivery_compile.between_gates_refusals(
+        docs, f"Environment Contract revision {environment['revision']}")
+    if refusals:
+        raise ValueError("; ".join(refusals))
+
+    def unchanged() -> None:
+        if path.read_bytes() != original or environment_path.read_bytes() != environment_original:
+            raise ValueError("Operation contracts changed during re-pair; retry against the current contracts")
+
+    atomic_file.replace_bytes(path, updated.encode("utf-8"), before_replace=unchanged)
+    print(json.dumps({**value, "repaired": True}, sort_keys=True))
+    return 0
 
 
 def initial_props(kind: str, refs: list[str]) -> dict:
@@ -651,6 +706,13 @@ def approve(args) -> int:
     if refusals:
         raise ValueError("; ".join(refusals))
     contract_path(docs, args.kind).write_bytes(text.encode("utf-8"))
+    if args.kind == "environment":
+        verification, verification_errors = check_contract(docs, "verification")
+        if verification.get("paired_environment"):
+            value["verification_pairing"] = {"path": verification["path"],
+                                             **verification["paired_environment"]}
+            if verification_errors:
+                value["verification_pairing"]["errors"] = verification_errors
     print(json.dumps(value, sort_keys=True))
     return 0
 
@@ -788,6 +850,8 @@ def main(argv: list[str] | None = None) -> int:
         entry.add_argument("--json", action="store_true")
         if name == "init":
             entry.add_argument("--constrained-by", action="append")
+    repair_parser = sub.add_parser("re-pair", help="refresh only an unchanged approved Verification Contract's pairing")
+    repair_parser.add_argument("--docs")
     render_ci_parser = sub.add_parser("render-ci")
     render_ci_parser.add_argument("--docs")
     render_ci_parser.add_argument("--output", required=True)
@@ -805,6 +869,8 @@ def main(argv: list[str] | None = None) -> int:
             return revise(args)
         if args.command == "approve":
             return approve(args)
+        if args.command == "re-pair":
+            return repair_pairing(args)
         if args.command == "render-ci":
             return render_ci(args)
         if args.command == "render-closure-ci":

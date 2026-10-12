@@ -177,5 +177,59 @@ class RehearsalTests(unittest.TestCase):
                 verification.require_runtime_evidence(self.root, missing, evidence)
 
 
+    def approve(self, events):
+        verification.register_result(self.root, self.result())
+        final = self.result("qa_engineer", "qa_final")
+        final["checks"]["fresh_runtime"]["event_hashes"] = [event["evidence_hash"] for event in events]
+        verification.register_result(self.root, final)
+        verification.validate(self.root, "DLV-001", "AUTH-01")
+
+    def test_long_lived_passes_reuse_fresh_evidence_of_the_same_environment_code(self):
+        self.declare(runtime=True)
+        with mock.patch.object(verification, "runtime_lifecycle_policy", return_value=("long_lived", ["deploy/*"])):
+            first = self.freeze()
+            self.assertEqual(verification.runtime_lifecycle(self.root, first)["reason"], "fresh_evidence_missing")
+            with self.assertRaisesRegex(RuntimeError, "fresh runtime requires a successful down before up"):
+                verification.run_environment(self.root, "up")
+            for verb, value in (("down", None), ("up", None), ("seed", "baseline"), ("logs", None), ("down", None)):
+                verification.run_environment(self.root, verb, value)
+            self.approve(verification.read_session(self.root)["runtime"]["events"])
+
+            self.write("src/product.py", "value = 3\n")
+            self.commit()
+            second = self.freeze()
+            self.assertEqual(verification.runtime_lifecycle(self.root, second)["reason"], "fresh_evidence_held")
+            with mock.patch.object(verification, "qa_preflight", return_value=True), \
+                    self.assertRaisesRegex(RuntimeError, "up/seed/logs on the long-lived instance first"):
+                verification.run_check(self.root, "live_test", group="smoke")
+            for verb, value in (("up", None), ("seed", "baseline"), ("logs", None)):
+                self.assertEqual(verification.run_environment(self.root, verb, value)["exit_code"], 0)
+            session = verification.read_session(self.root)
+            events = session["runtime"]["events"]
+            self.assertEqual({event["lifecycle"] for event in events}, {"long_lived"})
+            self.assertTrue(session["runtime"]["active"])
+            self.assertFalse(verification.runtime_needs_cleanup(session))
+            evidence = {"event_hashes": [event["evidence_hash"] for event in events]}
+            unseeded = copy.deepcopy(session)
+            del unseeded["runtime"]["events"][1]
+            with self.assertRaisesRegex(RuntimeError, "long-lived runtime evidence requires recorded up/seed/logs"):
+                verification.require_runtime_evidence(self.root, unseeded, {"event_hashes": [
+                    event["evidence_hash"] for event in unseeded["runtime"]["events"]]})
+            unproven = copy.deepcopy(session)
+            del unproven["fresh_runtime_history"]
+            with self.assertRaisesRegex(RuntimeError, r"follows the long_lived lifecycle but this candidate requires"
+                                                      r" fresh \(fresh_evidence_missing\)"):
+                verification.require_runtime_evidence(self.root, unproven, evidence)
+            self.approve(events)
+
+            self.write("deploy/values.yaml", "replicas: 2\n")
+            self.commit()
+            third = self.freeze()
+            self.assertEqual(verification.runtime_lifecycle(self.root, third),
+                             {"mode": "fresh", "reason": "environment_code_changed",
+                              "matched_paths": ["deploy/values.yaml"]})
+            with self.assertRaisesRegex(RuntimeError, "fresh runtime requires a successful down before up"):
+                verification.run_environment(self.root, "up")
+
 if __name__ == "__main__":
     unittest.main()

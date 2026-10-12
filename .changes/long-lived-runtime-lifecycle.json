@@ -1,0 +1,4 @@
+{
+  "summary": "Add opt-in runtime_lifecycle long_lived, which lets QA reset and reuse one running product environment instead of tearing it down for each candidate, once an earlier candidate of the Item holds fresh runtime evidence on the same environment code, and document manual scenario order and command-by-command recording.",
+  "components": {"software-engineering-team": "minor"}
+}

@@ -88,8 +88,8 @@ before regression work, then runs configured regressions, `freeze`, manifests
 and `templates/reader-launch-prompts.json` prompts, including lens assignments.
 Modes default to `review_repair` after an earlier candidate and `qa_final`;
 `--review-mode` and `--qa-mode` override them. The first failing step stops the chain.
-Switch `qa_preflight`: at `lifecycle_first`, follow
-`skill-content/qa-verification/references/switch-qa_preflight-lifecycle_first.md`.
+Switch `qa_preflight`: at `lifecycle_first`, follow `skill-content/qa-verification/references/switch-qa_preflight-lifecycle_first.md`.
+Switch `runtime_lifecycle`: at `long_lived`, follow `skill-content/qa-verification/references/switch-runtime_lifecycle-long_lived.md`.
 Put the manifest's `command_form` verbatim into every reader prompt: while
 readers are active, Bash admits only that one direct invocation followed by a
 verb, and readers read files with the host's Read tool.

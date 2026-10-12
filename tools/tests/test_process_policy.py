@@ -552,6 +552,7 @@ RELEASED_DEFAULTS = {
     "requirement_fact_check": "off",
     "review_scope_record": "off",
     "root_review_scope": "full",
+    "runtime_lifecycle": "fresh",
     "source_decision_gate": "two_gates",
     "source_rebind": "reviewed_revision",
     "step_baseline": "off",
@@ -573,6 +574,14 @@ SAFETY_RULES = {
             "Unapproved or stale contracts cannot waive a target",
             "This evidence never replaces QA's full live run or its final assessment",
             "Required repair review still comes before any rehearsal command",
+        ),
+    },
+    "runtime_lifecycle": {
+        f"{SKILLS}/qa-verification/references/switch-runtime_lifecycle-long_lived.md": (
+            "Without it every environment command is refused",
+            "A long-lived instance is trusted only once a fresh one has proven the same environment code",
+            "so no Item is approved on long-lived evidence without fresh evidence of its environment code",
+            "An interrupted command still requires `down` before anything else",
         ),
     },
     "repair_review": {

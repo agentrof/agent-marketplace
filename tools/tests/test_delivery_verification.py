@@ -2673,5 +2673,60 @@ class LiveStepTimingTests(unittest.TestCase):
         self.assertFalse((self.root / ".agentrof/agent-marketplace/timing").exists())
 
 
+class RuntimeLifecycleTests(unittest.TestCase):
+    """Which runtime lifecycle a candidate's environment evidence must follow."""
+
+    def setUp(self):
+        self.root = Path.cwd()
+        self.session = {"candidate": {"delivery": "DLV-001", "candidate_hash": "sha256:" + "c" * 64,
+                                      "product_commit": "c" * 40}}
+
+    def lifecycle(self, value="long_lived", globs=("deploy/*",), changed=""):
+        with mock.patch.object(verification, "runtime_lifecycle_policy", return_value=(value, list(globs))), \
+                mock.patch.object(verification, "git", return_value=changed) as git:
+            return verification.runtime_lifecycle(self.root, self.session), git
+
+    def fresh(self, commit="a"):
+        events = [{"verb": verb, "exit_code": 0, "candidate_intact": True, "evidence_hash": f"sha256:{verb}{index}"}
+                  for index, verb in enumerate(("down", "up", "seed", "logs", "down"))]
+        return {"candidate": {"candidate_hash": "sha256:" + commit * 64, "product_commit": commit * 40},
+                "runtime": {"attempt_id": "f" * 32, "active": False, "cleanup_required": False, "events": events}}
+
+    def test_default_stays_fresh_and_long_lived_needs_environment_paths(self):
+        self.assertEqual(self.lifecycle("fresh")[0], {"mode": "fresh", "reason": "switch"})
+        with self.assertRaisesRegex(RuntimeError, "runtime_lifecycle long_lived needs parameter 'environment_paths'"):
+            self.lifecycle(globs=())
+
+    def test_long_lived_needs_earlier_fresh_evidence_on_the_same_environment_code(self):
+        self.assertEqual(self.lifecycle()[0], {"mode": "fresh", "reason": "fresh_evidence_missing"})
+        self.session["fresh_runtime_history"] = verification.fresh_runtime_history(self.fresh())
+        result, git = self.lifecycle(changed="src/product.py\0")
+        self.assertEqual(result, {"mode": "long_lived", "reason": "fresh_evidence_held",
+                                  "fresh_candidate": "sha256:" + "a" * 64})
+        self.assertEqual(git.call_args.args[-2:], ("a" * 40, "c" * 40))
+        self.assertEqual(self.lifecycle(changed="src/product.py\0deploy/chart/values.yaml\0")[0],
+                         {"mode": "fresh", "reason": "environment_code_changed",
+                          "matched_paths": ["deploy/chart/values.yaml"]})
+
+    def test_only_a_complete_intact_fresh_lifecycle_enters_the_history(self):
+        self.assertEqual(len(verification.fresh_runtime_history(self.fresh())), 1)
+        for change in (lambda session: session["runtime"].update(active=True),
+                       lambda session: session["runtime"]["events"].pop(),
+                       lambda session: session["runtime"].update(lifecycle="long_lived"),
+                       lambda session: session["runtime"]["events"][2].update(candidate_intact=False)):
+            session = self.fresh()
+            change(session)
+            self.assertEqual(verification.fresh_runtime_history(session), [])
+        carried = {**self.fresh("b"), "fresh_runtime_history": verification.fresh_runtime_history(self.fresh())}
+        carried["runtime"] = {"events": []}
+        self.assertEqual([row["product_commit"] for row in verification.fresh_runtime_history(carried)], ["a" * 40])
+
+    def test_long_lived_instance_needs_cleanup_only_after_an_interrupted_command(self):
+        state = {"active": True, "cleanup_required": True}
+        self.assertTrue(verification.runtime_needs_cleanup({"runtime": state}))
+        self.assertFalse(verification.runtime_needs_cleanup({"runtime": {**state, "lifecycle": "long_lived"}}))
+        self.assertTrue(verification.runtime_needs_cleanup(
+            {"runtime": {**state, "lifecycle": "long_lived", "pending": {"verb": "up"}}}))
+
 if __name__ == "__main__":
     unittest.main()

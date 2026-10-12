@@ -47,6 +47,15 @@ post-readiness log checks must pass first; the runner refuses live groups
 without their current, intact records. The short declared rehearsal target
 already exercised any project-specific stopped-node restart before freeze.
 
+At `runtime_lifecycle: long_lived`, a long-lived candidate runs `up`, `seed`
+and `logs` on the running instance instead, as
+`switch-runtime_lifecycle-long_lived.md` defines.
+
+Manual scenarios and owner-run steps come next, before the long live groups:
+record each step command by command with its timestamps and output digest,
+and send a step the agent cannot run through `await-owner-step` instead of
+registering a result, as `runtime-protocol.md` Step 1a describes.
+
 Run the selected live groups, then repeat the log check for state they left
 behind and finish the existing runtime assessment and teardown. Final runtime
 evidence requires a log record after the last live run. Starting the suite early

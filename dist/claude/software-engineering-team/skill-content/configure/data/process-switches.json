@@ -1162,6 +1162,35 @@
         "threshold": "Fewer lifecycle failures discovered after long live runs and lower total verification time, without missed defects, with every shared quality guard holding and the owner's approval."
       }
     },
+    "runtime_lifecycle": {
+      "summary": "Whether QA's runtime evidence tears the product environment down and brings it up for every verification candidate or reuses one long-lived instance reset to the candidate.",
+      "issue": 544,
+      "flows": ["delivery-execution"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {"id": "fresh", "tradeoffs": "Every runtime candidate records down, up, seed and logs and ends with down. Each pass pays the full environment bring-up, which can dominate a short story's verification time."},
+        {"id": "long_lived", "tradeoffs": "QA brings the running instance to the candidate with an idempotent up, resets state with seed and checks logs, with no teardown. Faster passes; leftover state the reset misses can hide or cause a defect, so an Item's first runtime pass and every pass whose environment paths differ from all of its fresh-proven candidates still take the fresh path."}
+      ],
+      "default": "fresh",
+      "parameters": {
+        "summary": "Owner-set environment code globs at long_lived: a candidate whose matching paths differ from every candidate with fresh runtime evidence takes the fresh down/up path. The package sets none, and long_lived refuses runtime commands without them.",
+        "values": ["long_lived"],
+        "declared_by": {
+          "path": "skill-content/qa-verification/data/runtime-lifecycle.json",
+          "key": "parameters"
+        },
+        "type": "glob_list",
+        "min_count": 1
+      },
+      "value_data": {
+        "long_lived": ["skill-content/qa-verification/data/runtime-lifecycle.json"]
+      },
+      "metric": "Per runtime verification pass: environment command seconds, the lifecycle taken and why, and runtime defects found later on a fresh instance that the long-lived instance missed.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with runtime verification.",
+        "threshold": "Lower environment time per pass with no defect found only on a fresh instance, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "repair_review": {
       "summary": "Whether a repair diff receives an independent correctness review before the next verification candidate is frozen.",
       "issue": 533,

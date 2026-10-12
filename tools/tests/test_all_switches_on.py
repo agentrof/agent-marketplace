@@ -73,7 +73,8 @@ ITEM_COST = "deliver/references/switch-item_cost_report-per_step.md"
 LANE_TABLE = "deliver/references/switch-lane_table-recorded.md"
 LANE_ISOLATION = "deliver/references/switch-lane_isolation-scratch_clone.md"
 LEVEL_CHANGE = "deliver/references/switch-level_change_map-assertion_map.md"
-DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE, LEVEL_CHANGE)
+DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE, LEVEL_CHANGE,
+           "qa-verification/references/switch-qa_preflight-lifecycle_first.md")
 EXPECTED = {
     **{f"{entry}:{role}": [] for entry, role in (
         ("business-analysis", "analysis-challenger"), ("business-analysis", "business-analyst"),

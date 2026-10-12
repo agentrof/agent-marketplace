@@ -257,6 +257,40 @@ def live_test_problems(props: dict) -> list[str]:
 TEST_PARTITIONS = "Test Partitions"
 TEST_PARTITION_COLUMNS = ("partition", "groups", "profile")
 PARTITION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+VERIFICATION_REHEARSALS = "Verification Rehearsals"
+
+
+def verification_rehearsals(props: dict, body: str) -> tuple[list[dict], list[str]]:
+    """Approved short live targets to rehearse before a full verification pass."""
+    import backlog_compile
+
+    if VERIFICATION_REHEARSALS not in backlog_compile.headings(body):
+        return [], []
+    rows, errors = backlog_compile.structured_table(
+        backlog_compile.section(body, VERIFICATION_REHEARSALS),
+        ("step", "phase", "group", "target", "waiver"), "verification contract", VERIFICATION_REHEARSALS)
+    if not props.get("live_diagnostic_command"):
+        errors.append("Verification Rehearsals requires live_diagnostic_command")
+    seen, targets, plan = set(), set(), []
+    for row in rows:
+        row = {key: value.strip().strip("`") for key, value in row.items()}
+        step, phase, group, target = (row[key] for key in ("step", "phase", "group", "target"))
+        if not PARTITION_ID_RE.fullmatch(step) or step in seen:
+            errors.append("Verification Rehearsals requires unique step ids")
+        if phase not in {"lifecycle", "live"}:
+            errors.append("Verification Rehearsals phase must be lifecycle or live")
+        if not isinstance(props.get("live_groups"), list) or group not in props["live_groups"]:
+            errors.append("Verification Rehearsals group must be a declared live group")
+        if not literal_id(target) or (group, target) in targets:
+            errors.append("Verification Rehearsals requires unique literal test targets per group")
+        if row["waiver"] != "-" and not backlog_compile.meaningful_text(row["waiver"]):
+            errors.append("Verification Rehearsals waiver must be '-' or an explicit owner reason")
+        seen.add(step)
+        targets.add((group, target))
+        plan.append(row)
+    if not plan:
+        errors.append("Verification Rehearsals must declare at least one step")
+    return sorted(plan, key=lambda row: row["phase"] != "lifecycle"), errors
 
 
 def partition_ids(values: object) -> bool:
@@ -452,6 +486,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
             errors.append(problem)
         errors.extend(test_group_problems(props))
         errors.extend(live_test_problems(props))
+        errors.extend(verification_rehearsals(props, body)[1])
         errors.extend(test_partition_plan(props, body)[1])
         source, provider = pull_request_checks(props)
         if source not in PULL_REQUEST_CHECK_SOURCES:

@@ -115,6 +115,13 @@ and conformance lenses; with none triggered the official reviewer reads
 alone, as
 `code-review/references/switch-code_review_panel-risk_scoped.md` defines.
 
+Process switch `qa_preflight` keeps the current order at `off`. At
+`lifecycle_first`, short declared targets must be rehearsed before freeze,
+runtime lifecycle checks precede live groups and the final log check follows
+them. Only an approved Verification Contract can waive a rehearsal; full QA
+evidence stays required. The steps are in
+`qa-verification/references/switch-qa_preflight-lifecycle_first.md`.
+
 Process switch `repair_review` decides when a corrected candidate receives an
 independent correctness review. `after_freeze`, the default, keeps the review
 inside the next full pass. At `before_freeze`, a fresh reader checks the repair

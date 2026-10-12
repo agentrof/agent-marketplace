@@ -78,7 +78,6 @@ the path, as
 defines.
 
 ## Parallel verification
-
 Follow the Item's `verification_schedule`, or sequential when absent. At
 `parallel_snapshot_v1`, commit the product/test candidate and use the packaged
 `scripts/delivery_verification.py --worktree <item-root> freeze --delivery
@@ -91,6 +90,8 @@ before regression work, then runs configured regressions, `freeze`, manifests
 and `templates/reader-launch-prompts.json` prompts, including lens assignments.
 Modes default to `review_repair` after an earlier candidate and `qa_final`;
 `--review-mode` and `--qa-mode` override them. The first failing step stops the chain.
+Switch `qa_preflight`: at `lifecycle_first`, follow
+`skill-content/qa-verification/references/switch-qa_preflight-lifecycle_first.md`.
 Put the manifest's `command_form` verbatim into every reader prompt: while
 readers are active, Bash admits only that one direct invocation followed by a
 verb, and readers read files with the host's Read tool.
@@ -286,7 +287,6 @@ Successful down, up, seed, logs and final down are required, alongside the
 independent runtime assessment. A non-runtime Item starts no environment.
 
 ## Activation and publication
-
 Activation writes an ignored pending writer receipt before the atomic Item,
 Slot, Integration and Fence transaction. The receipt is promoted only after
 both Item and Slot refs equal the candidate OID, then the coordinator

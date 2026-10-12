@@ -536,6 +536,7 @@ RELEASED_DEFAULTS = {
     "regression_plan_revision": "integrated",
     "provisional_claims": "after_approval",
     "qa_gate_order": "plan_first",
+    "qa_preflight": "off",
     "reader_waves": "as_slots_free",
     "rebind_review_scope": "full",
     "remediation_bookkeeping": "writer",
@@ -565,6 +566,14 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "qa_preflight": {
+        f"{SKILLS}/qa-verification/references/switch-qa_preflight-lifecycle_first.md": (
+            "Only the owner may approve a waiver",
+            "Unapproved or stale contracts cannot waive a target",
+            "This evidence never replaces QA's full live run or its final assessment",
+            "Required repair review still comes before any rehearsal command",
+        ),
+    },
     "repair_review": {
         f"{SKILLS}/code-review/references/switch-repair_review-before_freeze.md": (
             "The repair writer never reviews its own fix",

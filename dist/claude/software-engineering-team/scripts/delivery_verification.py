@@ -768,6 +768,7 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
         current = candidate(root, delivery_id, story, allow_evidence=True)
         repair_review = require_repair_review(root, previous, current)
         live_repair = require_live_repairs(root, previous, current)
+        rehearsals = require_rehearsals(root, delivery_id, story)
         if current.get("assertion_map", {}).get("problems"):
             raise RuntimeError("assertion map: " + "; ".join(current["assertion_map"]["problems"]))
         require_published_claims(root, current, remote)
@@ -824,6 +825,8 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
             value["repair_review"] = repair_review
         if live_repair is not None:
             value["live_repair"] = live_repair
+        if rehearsals is not None:
+            value["verification_rehearsals"] = rehearsals
         controls = finding_control_history(previous)
         if controls:
             value["finding_control_bindings"] = controls
@@ -1516,6 +1519,124 @@ def live_groups_selected(group: str) -> list[str]:
     return [name.strip() for name in group.split(",")]
 
 
+def qa_preflight(root: Path, delivery_id: str) -> bool:
+    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, "qa_preflight") == "lifecycle_first"
+
+
+def rehearsal_status(root: Path, delivery_id: str, story: str) -> dict:
+    """List untried approved targets without starting a verification session."""
+    if not qa_preflight(root, delivery_id):
+        return {"required": False, "steps": []}
+    current = candidate(root, delivery_id, story, allow_evidence=True)
+    text = git(root, "show", current["product_commit"] + ":workspace/docs/operation/verification-contract.md")
+    contract, body = operation_compile.parse_text(text, Path("verification-contract.md"))
+    if (not current["runtime_required"] and not contract.get("live_groups")
+            and operation_compile.VERIFICATION_REHEARSALS not in backlog_compile.headings(body)):
+        return {"required": False, "steps": []}
+    rows, problems = operation_compile.verification_rehearsals(contract, body)
+    problems.extend(operation_compile.live_test_problems(contract))
+    if problems or not rows:
+        raise RuntimeError("qa_preflight needs valid Verification Rehearsals: " + "; ".join(problems or ["no steps"]))
+    if (contract.get("status") != "approved" or not contract.get("approved_at_utc")
+            or contract.get("source_hash") != operation_compile.receipt_hash(contract, body)):
+        raise RuntimeError("rehearsals and owner waivers require the current approved Verification Contract")
+    if current["runtime_required"] and not any(row["phase"] == "lifecycle" for row in rows):
+        raise RuntimeError("runtime rehearsal plan must include its lifecycle checks")
+    path = raw_output_path(root, "scratch/rehearsals.json")
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8")) if path.stat().st_size <= 2 * 1024 * 1024 else {}
+    except (FileNotFoundError, ValueError):
+        saved = {}
+    if not isinstance(saved, dict):
+        saved = {}
+    environment = command_environment(root, current)
+    environment["AGENTROF_LIVE_TESTS"] = str(raw_output_path(root, "scratch/rehearsal-selection.json"))
+    declared = environment_identity(root, environment, contract)
+    steps = []
+    for row in rows:
+        command = contract["live_diagnostic_command"].replace(operation_compile.LIVE_GROUP_PLACEHOLDER, row["group"])
+        identity = {"candidate_hash": current["candidate_hash"], "step": row, "command": command,
+                    "workdir": contract.get("live_test_workdir", "."), **declared}
+        entry = {**row, "identity": identity, "state": "pending"}
+        if row["waiver"] != "-":
+            entry.update(state="waived", approval_hash=contract["source_hash"])
+        else:
+            record = saved.get(row["step"], {})
+            try:
+                output = raw_output_path(root, record["output_file"])
+                passed = (record["identity"] == identity and record["exit_code"] == 0
+                          and record["candidate_intact"] is True and fresh_record(record)
+                          and record["cases"] == {row["target"]: "passed"}
+                          and record["evidence_hash"] == digest({k: v for k, v in record.items() if k != "evidence_hash"})
+                          and hashlib.sha256(output.read_bytes()).hexdigest() == record["output_sha256"])
+            except (KeyError, TypeError, OSError, ValueError):
+                passed = False
+            if passed:
+                entry.update(state="passed", evidence_hash=record["evidence_hash"])
+        steps.append(entry)
+    return {"required": True, "candidate_hash": current["candidate_hash"], "steps": steps}
+
+
+def require_rehearsals(root: Path, delivery_id: str, story: str) -> dict | None:
+    status = rehearsal_status(root, delivery_id, story)
+    if not status["required"]:
+        return None
+    pending = [row["step"] for row in status["steps"] if row["state"] == "pending"]
+    if pending:
+        raise RuntimeError("untried verification steps need rehearse or an approved owner waiver: " + ", ".join(pending))
+    return status
+
+
+def rehearse(root: Path, delivery_id: str, story: str) -> dict:
+    """Run only unproven short targets through the approved live diagnostic command."""
+    root = root.resolve()
+    guard_write(root)
+    with environment_lock(root, PRE_HANDOFF_HOLDER, "rehearse"), command_lock(root, PRE_HANDOFF_HOLDER, "rehearse"):
+        current = candidate(root, delivery_id, story, allow_evidence=True)
+        require_repair_review(root, read_session(root, required=False), current)
+        status = rehearsal_status(root, delivery_id, story)
+        if not status["required"]:
+            raise RuntimeError("rehearse requires qa_preflight lifecycle_first")
+        saved_path = raw_output_path(root, "scratch/rehearsals.json")
+        try:
+            saved = json.loads(saved_path.read_text(encoding="utf-8")) if saved_path.stat().st_size <= 2 * 1024 * 1024 else {}
+        except (FileNotFoundError, ValueError):
+            saved = {}
+        if not isinstance(saved, dict):
+            saved = {}
+        for row in status["steps"]:
+            if row["state"] != "pending":
+                continue
+            selection = raw_output_path(root, "scratch/rehearsal-selection.json")
+            data = json.dumps({"candidate_hash": current["candidate_hash"], "group": row["group"],
+                               "selected_test_ids": [row["target"]]}, sort_keys=True) + "\n"
+            atomic_file.replace_text(selection, data)
+            generation = source_file_generation(selection)
+            raw_output_path(root, "scratch/live-case-report.json").unlink(missing_ok=True)
+            environment = command_environment(root, current)
+            environment["AGENTROF_LIVE_TESTS"] = str(selection)
+            identity = row["identity"]
+            result, intact, _difference, _dropped, _ran = private_checkout_run(
+                root, selection.parent, current["product_commit"], identity["workdir"], identity["command"], environment)
+            cases = live_case_report(root).get(row["group"], {})
+            intact = (intact and selection.read_text(encoding="utf-8") == data
+                      and source_file_generation(selection) == generation)
+            output_name = "scratch/rehearsal-" + uuid.uuid4().hex + ".log"
+            atomic_file.replace_bytes(raw_output_path(root, output_name), result.stdout)
+            record = {"identity": identity, "exit_code": result.returncode, "candidate_intact": intact,
+                      "cases": cases, "completed_at": time.time(), "output_file": output_name,
+                      "output_sha256": hashlib.sha256(result.stdout).hexdigest()}
+            record["evidence_hash"] = digest(record)
+            saved[row["step"]] = record
+            atomic_file.replace_text(saved_path, json.dumps(saved, indent=2) + "\n")
+            if result.returncode != 0 or not intact or cases != {row["target"]: "passed"}:
+                return {**rehearsal_status(root, delivery_id, story), "exit_code": 1, "failed_step": row["step"]}
+        if candidate(root, delivery_id, story, allow_evidence=True)["candidate_hash"] != current["candidate_hash"]:
+            raise RuntimeError("rehearsal candidate changed while its targets ran")
+        final = rehearsal_status(root, delivery_id, story)
+        return {**final, "exit_code": int(any(row["state"] == "pending" for row in final["steps"]))}
+
+
 def live_test_command(contract: dict, group: str) -> str:
     """The approved live test command for the declared groups *group* names, comma-separated.
 
@@ -1587,6 +1708,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         if group is not None:
             group = live_record_group(contract, group)
             record_key = f"{kind}:{group}"
+            require_lifecycle_ready(root, session)
         prior = session["raw_evidence"].get(record_key) if resume else None
         if resume:
             if (not resumable_live_run(prior, current) or "live_resume_command" not in contract
@@ -4150,6 +4272,40 @@ def pre_handoff_history(root: Path, session: dict | None, delivery_id: str, stor
     return history
 
 
+def runtime_event_environment(root: Path, session: dict, event: dict, contract: dict) -> dict:
+    path = raw_output_path(root, event["output_file"])
+    if (event.get("exit_code") != 0 or event.get("candidate_intact") is not True
+            or event.get("candidate_hash") != session["candidate"]["candidate_hash"]
+            or event.get("attempt_id") != session.get("runtime", {}).get("attempt_id")
+            or not fresh_record(event)
+            or event.get("evidence_hash") != digest({key: value for key, value in event.items() if key != "evidence_hash"})
+            or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != event["output_sha256"]):
+        raise RuntimeError("runtime command evidence is failed, stale or missing")
+    identity = event.get("environment_identity")
+    problem = environment_problem(identity, contract)
+    if problem:
+        raise RuntimeError(f"runtime command evidence {problem}")
+    return {key: identity[key] for key in ENVIRONMENT_FIELDS}
+
+
+def require_lifecycle_ready(root: Path, session: dict) -> None:
+    current = session["candidate"]
+    if not current["runtime_required"] or not qa_preflight(root, current["delivery"]):
+        return
+    state = session.get("runtime", {})
+    events = state.get("events", [])
+    verbs = [event.get("verb") for event in events]
+    up = max((i for i, verb in enumerate(verbs) if verb == "up"), default=-1)
+    if (state.get("active") is not True or state.get("pending") or state.get("interrupted_commands")
+            or up < 1 or verbs[up - 1] != "down" or "seed" not in verbs[up + 1:]
+            or "logs" not in verbs[up + 1:] or verbs.index("logs", up + 1) < verbs.index("seed", up + 1)):
+        raise RuntimeError("live groups require successful lifecycle down/up/seed/logs first")
+    contract = verification_contract(root)
+    expected = runtime_environment_identity(root, current)
+    if any(runtime_event_environment(root, session, event, contract) != expected for event in events):
+        raise RuntimeError("lifecycle preflight ran in another environment")
+
+
 def require_runtime_evidence(root: Path, session: dict, evidence: dict, environment: dict | None = None) -> None:
     """Check the fresh runtime events as recorded: every event of the attempt shares one complete
     environment identity, the one *environment* names when QA's final command evidence gives it, and
@@ -4167,23 +4323,18 @@ def require_runtime_evidence(root: Path, session: dict, evidence: dict, environm
     contract = verification_contract(root)
     shared = None
     for event in events:
-        path = raw_output_path(root, event["output_file"])
-        if (event.get("exit_code") != 0 or event.get("candidate_intact") is not True or event.get("candidate_hash") != session["candidate"]["candidate_hash"]
-                or event.get("attempt_id") != attempt_id
-                or not fresh_record(event)
-                or event.get("evidence_hash") != digest({key: value for key, value in event.items() if key != "evidence_hash"})
-                or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != event["output_sha256"]):
-            raise RuntimeError("runtime command evidence is failed, stale or missing")
-        identity = event.get("environment_identity")
-        problem = environment_problem(identity, contract)
-        if problem:
-            raise RuntimeError(f"runtime command evidence {problem}")
+        identity = runtime_event_environment(root, session, event, contract)
         if shared is None:
-            shared = {key: identity[key] for key in ENVIRONMENT_FIELDS}
-        elif {key: identity[key] for key in ENVIRONMENT_FIELDS} != shared:
+            shared = identity
+        elif identity != shared:
             raise RuntimeError("runtime command evidence ran in more than one environment")
     if environment is not None and shared is not None and shared != environment:
         raise RuntimeError("runtime command evidence ran in another environment than full_test_suite evidence")
+    if qa_preflight(root, session["candidate"]["delivery"]):
+        live = [record["completed_at"] for record in session.get("raw_evidence", {}).values()
+                if record.get("identity", {}).get("kind") == "live_test"]
+        if live and not any(event["verb"] == "logs" and event["completed_at"] >= max(live) for event in events):
+            raise RuntimeError("runtime evidence requires a final log check after the live groups")
 
 
 def inspect_instruction(root: Path, relative: str) -> dict:
@@ -4561,6 +4712,12 @@ def start_pass(root: Path, delivery_id: str, story: str, *, review_mode: str | N
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         return stopped("repair-review", str(exc))
     try:
+        rehearsals = require_rehearsals(root, delivery_id, story)
+        if rehearsals is not None:
+            steps.append({"step": "rehearsals", "ok": True, "steps": rehearsals["steps"]})
+    except (RuntimeError, ValueError, OSError, KeyError) as exc:
+        return stopped("rehearsals", str(exc))
+    try:
         regression = pre_handoff_regression(root, delivery_id)
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         return stopped("regression-selection", str(exc))
@@ -4758,6 +4915,8 @@ def permission_preflight(root: Path, delivery_id: str, story: str) -> dict:
     if item.get("runtime_required"):
         for verb in ("up", "seed", "logs", "url", "down"):
             forms.append((f"environment:{verb}", cli_form(root, "environment", "--verb", verb)))
+    if qa_preflight(root, delivery_id):
+        forms.append(("rehearse", cli_form(root, "rehearse", "--delivery", delivery_id, "--story", story)))
     extra = contract.get("live_permission_commands", [])
     if not isinstance(extra, list) or any(not isinstance(command, str) or not command.strip() for command in extra):
         raise RuntimeError("live_permission_commands must list exact nonempty commands")
@@ -4848,7 +5007,8 @@ def main(argv=None) -> int:
     parser.add_argument("--worktree", required=True)
     subs = parser.add_subparsers(dest="command", required=True)
     for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map",
-                 "repair-live", "repair-review-manifest", "repair-review-result", "permission-preflight"):
+                 "repair-live", "repair-review-manifest", "repair-review-result", "permission-preflight",
+                 "rehearse", "rehearsal-status"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
@@ -4961,6 +5121,10 @@ def main(argv=None) -> int:
             value = register_repair_review(root, args.delivery, args.story, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "repair-live":
             value = repair_live(root, args.delivery, args.story)
+        elif args.command == "rehearse":
+            value = rehearse(root, args.delivery, args.story)
+        elif args.command == "rehearsal-status":
+            value = rehearsal_status(root, args.delivery, args.story)
         elif args.command == "permission-probe":
             value = permission_probe(root, args.kind, args.group)
         elif args.command == "permission-preflight":
@@ -4987,7 +5151,7 @@ def main(argv=None) -> int:
         else:
             value = read_session(root)
         print(json.dumps({"ok": True, **value}, indent=2))
-        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run", "repair-live", "rebind-unit-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
+        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run", "repair-live", "rehearse", "rebind-unit-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2))
         return 2

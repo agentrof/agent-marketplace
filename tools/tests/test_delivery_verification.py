@@ -388,6 +388,21 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertEqual(set(checks["full_test_suite"]), {"passed", "evidence", "command", "exit_code", "environment", "raw_evidence_hash"})
         self.assertFalse(checks["full_test_suite"]["passed"])
 
+    def test_the_code_reviewer_manifest_offers_no_command_and_names_the_recorded_runs(self):
+        self.prepare_diagnostic()
+        review = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_initial")
+        self.assertNotIn("diagnostic_interface", review)
+        evidence = review["verification_evidence"]
+        self.assertEqual(evidence["rule"], verification.REVIEWER_COMMAND_RULE)
+        self.assertIsNone(evidence["pre_handoff_run"])
+        self.assertEqual(evidence["qa_runs"], {})
+        self.assertNotIn("carried_findings", review)
+        # QA's recorded run reaches the reviewer's next manifest as a summary, never as a command to repeat.
+        raw = verification.run_check(self.root, "test")
+        runs = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer",
+                                     "review_initial")["verification_evidence"]["qa_runs"]
+        self.assertEqual(runs["test"]["evidence_hash"], raw["evidence_hash"])
+
     def test_legacy_schedule_preserves_bytes_and_hash(self):
         props = {"role_sequence": ["backend_developer", "code_reviewer", "qa_engineer"]}
         original = copy.deepcopy(props)
@@ -1341,7 +1356,8 @@ print(sys.argv[2])
         for phrase in (f"`wait_bound_seconds`, {bound} seconds, in any one tool call",
                        "never through a sleep, a polling loop or a long timeout of its own",
                        "`wait --role <role>` returns once that reader's own verification command has exited",
-                       "The code reviewer runs no command, so it registers its finished result at once and returns"):
+                       "The code reviewer runs no command, not even a diagnostic test",
+                       "It registers its finished result at once and returns"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, flow)
         for host in ("claude", "codex"):
@@ -2221,6 +2237,53 @@ print(sys.argv[1])
         repair = self.result(mode="review_repair")
         repair["findings"] = [self.claim(status="resolved"), follow_up]
         verification.register_result(self.root, repair)
+
+    def test_blocking_delta_repair_reexamines_only_findings_whose_code_changed(self):
+        self.review_loop()
+        self.write("src/other.py", "def helper_name():\n    return 1\n")
+        self.commit()
+        self.freeze()
+
+        def minor(identifier, anchor, description):
+            return {"id": identifier, "severity": "minor", "status": "open", "verification": "Read the line",
+                    "file": anchor, "description": description, "owner_role": "backend_developer",
+                    "revisit_trigger": "Revisit at the next change to the anchored file."}
+
+        findings = [minor("CR-1", "src/product.py:1", "The name value hides its unit."),
+                    minor("CR-2", "src/other.py:1", "`helper_name` returns a bare constant."),
+                    minor("CR-3", "src/other.py:2", "The caller mirrors `value` without a bound."),
+                    minor("CR-4", "repository", "The reported behavior needs a resolvable anchor.")]
+        result = self.result()
+        result["findings"] = findings
+        verification.register_result(self.root, result)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        self.freeze()
+        rows = {row["id"]: row for row in verification.manifest(
+            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["carried_findings"]}
+        self.assertEqual({identifier: row["action"] for identifier, row in rows.items()},
+                         {"CR-1": "reexamine", "CR-2": "carry", "CR-3": "reexamine", "CR-4": "reexamine"})
+        self.assertEqual(rows["CR-1"]["changed_files"], ["src/product.py"])
+        self.assertEqual((rows["CR-2"]["named_files"], rows["CR-2"]["named_symbols"], rows["CR-2"]["changed_files"],
+                          rows["CR-2"]["changed_symbols"]), (["src/other.py"], ["helper_name"], [], []))
+        self.assertEqual((rows["CR-3"]["changed_files"], rows["CR-3"]["changed_symbols"]), ([], ["value"]))
+        # A first review has no previous candidate to compare, and review_initial lists nothing.
+        self.assertNotIn("carried_findings", verification.manifest(
+            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_initial"))
+
+    def test_current_lists_no_carried_findings(self):
+        self.freeze()
+        result = self.result()
+        result["findings"] = [{"id": "CR-2", "severity": "minor", "status": "open", "verification": "Rename it"}]
+        verification.register_result(self.root, result)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        self.freeze()
+        repair = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")
+        self.assertNotIn("carried_findings", repair)
+        self.assertEqual(repair["unresolved_findings"][0]["id"], "CR-2")
 
     def test_current_ignores_calibration_rows(self):
         self.freeze()

@@ -3743,6 +3743,12 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
         "If context is insufficient, use frozen inspect/diff on your initiative or parent direction "
         "and report context_findings with sources, impact, recovery and proposed fix to the parent. "
         "Only the parent offers an anonymous issue through issue-report after exact-payload user approval.")
+    if role == "code_reviewer":
+        # The code reviewer runs no command: it reads the freeze record and QA's results instead.
+        del result["diagnostic_interface"]
+        result["verification_evidence"] = reviewer_evidence(root, value)
+        if review_loop(root, delivery_id) == "blocking_delta" and mode == "review_repair":
+            result["carried_findings"] = carried_findings(root, value, current, scope_expanded)
     panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
     if panel is not None:
         # Every reader of the panel pass receives this same manifest and one assignment.
@@ -3764,6 +3770,82 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
             "The frozen inspect-context command loads this bound reading plan.")
         result["project_reading"] = {key: reading[key] for key in ("status", "coverage") if key in reading}
     return result
+
+
+REVIEWER_COMMAND_RULE = ("The code reviewer starts no test, diagnostic or other verification command and no"
+                         " regression-run; it reads the frozen candidate's recorded runs with status instead.")
+# A finding names a repository path as a token with a slash or a file extension, and a
+# symbol as an identifier inside backticks.
+NAMED_PATH_RE = re.compile(r"(?<![\w.-])((?:[\w.-]+/)*[\w-][\w.-]*\.[A-Za-z0-9]+|(?:[\w.-]+/)+[\w.-]+)")
+BACKTICK_RE = re.compile(r"`([^`\n]+)`")
+IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+
+
+def reviewer_evidence(root: Path, session: dict) -> dict:
+    """What the code reviewer reads in place of a test run: the freeze record and QA's recorded runs."""
+    pre_handoff = session.get("pre_handoff")
+    return {"rule": REVIEWER_COMMAND_RULE,
+            "pre_handoff_run": run_summary(root, pre_handoff) if isinstance(pre_handoff, dict) else None,
+            "qa_runs": {kind: run_summary(root, record)
+                        for kind, record in sorted(session.get("raw_evidence", {}).items())},
+            "read": "status --summary; status --run pre_handoff|test|mutation|dependency_audit|diagnostic_test"}
+
+
+def finding_names(finding: dict) -> tuple[list[str], list[str]]:
+    """The repository paths and the code symbols a finding names, read as data from its text fields."""
+    anchor = str(finding.get("file") or "")
+    paths = {anchor.rsplit(":", 1)[0] if re.search(r":\d+(?:-\d+)?$", anchor) else anchor} - {""}
+    symbols = set()
+    for key in ("file", "description", "impact", "fix", "verification"):
+        text = str(finding.get(key) or "")
+        paths.update(match.rstrip(".") for match in NAMED_PATH_RE.findall(text))
+        for quoted in BACKTICK_RE.findall(text):
+            if not NAMED_PATH_RE.fullmatch(quoted.strip()):
+                symbols.update(IDENTIFIER_RE.findall(quoted))
+    return sorted(paths), sorted(symbols)
+
+
+def carried_findings(root: Path, session: dict, current: dict, scope_expanded: bool) -> list[dict]:
+    """Which unresolved code review findings a repair review re-examines and which it carries.
+
+    At review_loop blocking_delta a carried finding is re-examined only when a
+    file or symbol it names changed between the previous candidate and this
+    one; otherwise its status is carried from the record. Without a previous
+    candidate, or when the bound inputs or instructions changed, every one is
+    re-examined.
+    """
+    findings = [finding for finding in session.get("unresolved_findings", []) if finding.get("role") == "code_reviewer"]
+    previous = session.get("previous_candidate") or {}
+    changed_files: set[str] = set()
+    known_files: set[str] = set()
+    changed_lines: list[str] = []
+    whole = scope_expanded or not previous.get("product_commit")
+    if not whole and findings:
+        old, new = previous["product_commit"], current["product_commit"]
+        try:
+            known_files = {part for commit in (old, new)
+                           for part in git(root, "ls-tree", "-r", "--name-only", "-z", commit).split("\0") if part}
+            changed_files = {part for part in git(root, "diff", "--name-only", "--no-renames", "-z", old, new)
+                             .split("\0") if part}
+            changed_lines = [line[1:] for line in git(root, "diff", "--no-renames", "--unified=0", old, new)
+                             .splitlines() if line[:1] in {"+", "-"} and line[:3] not in {"+++", "---"}]
+        except RuntimeError:
+            whole = True
+    rows = []
+    for finding in findings:
+        paths, symbols = finding_names(finding)
+        touched = sorted(path for path in paths if path in changed_files
+                         or any(changed.startswith(path.rstrip("/") + "/") for changed in changed_files))
+        moved = sorted(symbol for symbol in symbols
+                       if any(re.search(rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?![A-Za-z0-9_])", line)
+                              for line in changed_lines))
+        anchored = any(path in known_files or any(name.startswith(path.rstrip("/") + "/") for name in known_files)
+                       for path in paths)
+        reexamine = whole or not anchored or bool(touched or moved)
+        rows.append({"id": finding["id"], "severity": finding.get("severity"), "status": finding.get("status"),
+                     "named_files": paths, "named_symbols": symbols, "changed_files": touched,
+                     "changed_symbols": moved, "action": "reexamine" if reexamine else "carry"})
+    return rows
 
 
 RUN_SUMMARY_FIELDS = ("live_group", "exit_code", "candidate_intact", "selection_intact", "evidence_scope", "reused_pre_handoff", "duration_seconds",

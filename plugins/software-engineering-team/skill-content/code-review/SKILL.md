@@ -74,12 +74,16 @@ updated set for the orchestrator to record.
   trail across cycles, not a fresh dump per pass.
 - DON'T renumber, delete, or re-open findings without new evidence.
 - On re-review, re-check what changed plus anything a fix could have
-  touched; do not re-litigate untouched, already-passed code.
+  touched; do not re-litigate untouched, already-passed code. Where the
+  verification manifest lists `carried_findings`, a finding whose `action`
+  is `carry` named no file or symbol that changed since the previous
+  candidate: keep its status from the record and do not re-examine it.
 
 ## The Three Passes
 
 Fixed order, all three on every cycle. Security is never optional. Full
-checklists per pass live in the passes reference.
+checklists per pass live in the passes reference. Follow the
+[verification bounds](references/passes.md#verification). Read when planning verification in any review cycle.
 
 1. **Correctness:** logic, edge cases, error propagation, type safety.
 2. **Conformance:** the change against the declared interface contract, data
@@ -87,10 +91,6 @@ checklists per pass live in the passes reference.
    architectural impact rating (high, medium, low).
 3. **Security:** authentication and authorization, input validation, data
    protection, common vulnerability classes.
-
-## Verification
-
-DO follow the [verification bounds](references/passes.md#verification). Read when planning verification in any review cycle.
 
 ## Architecture-Implicating Findings
 

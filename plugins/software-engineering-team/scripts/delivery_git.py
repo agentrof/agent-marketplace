@@ -3385,8 +3385,8 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     """Abort only an acquired handoff whose external write never began or took no effect.
 
     Past a target-update intent, only the host whose receipt holds the current
-    direct attempt still prepared can abort, and only while the target does not
-    contain the carrier head. It holds that receipt's lock throughout, so no
+    attempt still prepared can abort, and only while the target does not
+    contain the carrier head; a draft PR carrier must also still be open. It holds that receipt's lock throughout, so no
     update call can start meanwhile.
     """
     root = main_worktree(project_root.resolve())
@@ -3400,9 +3400,23 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
             held.enter_context(receipt_lock(lock_path))
             receipt = (_validate_target_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
                        if receipt_path.exists() else None)
-            if (values["Target-Carrier-Kind"] != "direct_target" or receipt is None
+            carrier = values["Target-Carrier-Kind"]
+            took_no_effect = False
+            if carrier == "direct_target":
+                took_no_effect = direct_update_took_no_effect(root, remote, values["Target-Carrier-Head"])
+            elif carrier == "github_pr" and receipt is not None and receipt["state"] == "prepared":
+                # A prepared PR carrier never reached the provider merge: abortable while
+                # the PR is still open and the target does not hold its head.
+                from delivery_provider import GitHubProvider
+                repository = values["Target-Repository"].removeprefix("github:")
+                number = values["Target-Carrier-Object"].removeprefix("pr:")
+                observed = GitHubProvider(root, remote).inspect_pull_request(
+                    f"https://github.com/{repository}/pull/{number}")
+                took_no_effect = (str(observed.get("state", "")).upper() == "OPEN"
+                                  and direct_update_took_no_effect(root, remote, values["Target-Carrier-Head"]))
+            if (carrier not in {"direct_target", "github_pr"} or receipt is None
                     or receipt["attempt"] != attempt or receipt["state"] != "prepared"
-                    or not direct_update_took_no_effect(root, remote, values["Target-Carrier-Head"])):
+                    or not took_no_effect):
                 raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: abort after a target-update intent "
                                    "requires this host's prepared direct attempt, absent from the target")
         values.update({"Mode": "open", "Epoch": epoch_token(), "Source-Kind": "none",

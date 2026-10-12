@@ -1401,6 +1401,43 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(self.target_update_state(project), "call_started")
 
     @integration
+    def test_abort_releases_an_authorized_draft_pr_carrier_only_while_the_pr_is_open(self):
+        """A prepared PR carrier whose PR is still open never reached the provider merge, so the handoff
+        aborts and clears its intent; a merged PR may have changed the target, so the abort is refused."""
+        for pr_state in ("OPEN", "MERGED"):
+            with self.subTest(pr_state=pr_state):
+                temporary, project = self.make_project()
+                self.addCleanup(remove_temporary, temporary)
+                delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+                base = delivery_git.run_git(project, "rev-parse", "HEAD")
+                (project / "handoff.txt").write_text("target candidate\n", encoding="utf-8")
+                candidate = delivery_git.commit_tree(project, base, ["handoff.txt"], "Target candidate", {})
+                carrier = "refs/heads/handoff-carrier"
+                delivery_git.atomic_push(project, "origin", [(carrier, "", candidate)])
+                delivery_git.authorize_target_update(project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                                                     "github_pr", carrier, "pr:17", candidate, base,
+                                                     "github:agentrof/example")
+                provider = mock.Mock()
+                provider.return_value.inspect_pull_request.return_value = {
+                    "url": "https://github.com/agentrof/example/pull/17", "state": pr_state,
+                    "isDraft": pr_state == "OPEN", "headRefOid": candidate}
+                with mock.patch("delivery_provider.GitHubProvider", provider):
+                    if pr_state == "OPEN":
+                        self.assertEqual(delivery_git.abort_source_handoff(project)["mode"], "open")
+                        _ref, _fence, values = delivery_git._fence_context(project, "origin")
+                        self.assertEqual(values["Target-Update-Intent"], "none")
+                        self.assertEqual(self.target_update_state(project), "absent")
+                    else:
+                        self.assertEqual(self.refused_finding(lambda: delivery_git.abort_source_handoff(project)),
+                                         ("DELIVERY_TARGET_UPDATE_UNCERTAIN",
+                                          "abort after a target-update intent requires this host's "
+                                          "prepared direct attempt, absent from the target"))
+                        self.assertEqual(self.target_update_state(project), "prepared")
+                provider.return_value.inspect_pull_request.assert_called_once_with(
+                    "https://github.com/agentrof/example/pull/17")
+                self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), base)
+
+    @integration
     def test_authorization_whose_fence_push_may_have_landed_keeps_its_receipt(self):
         """A Fence that holds the authorized candidate, or moved on from it, may carry the intent, so the
         prepared receipt stays and the handoff goes on; a Fence that never took it lets the receipt go."""

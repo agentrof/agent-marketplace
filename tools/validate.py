@@ -2770,7 +2770,9 @@ PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants", "parameters", "value_
 # skill holds them, declares this reference_scope.
 SWITCH_REFERENCE_SCOPES = {"owning_flows"}
 SWITCH_PARAMETER_KEYS = {"summary", "values", "declared_by", "type", "min_count"}
-SWITCH_PARAMETER_TYPES = {"positive_integer"}
+SWITCH_PARAMETER_TYPES = {"positive_integer", "glob_list"}
+# A package limit is a number; a promotion ships no glob list.
+SWITCH_LIMIT_TYPES = {"positive_integer"}
 VALUE_DATA_RE = re.compile(r"^skill-content/[a-z0-9]+(?:-[a-z0-9]+)*/data/[a-z0-9]+(?:-[a-z0-9]+)*\.json$")
 AGENT_VARIANT_KEYS = {"suffix", "tier", "description", "agents"}
 MECHANICAL_PASS_SWITCH = "mechanical_pass_tier"
@@ -2930,6 +2932,11 @@ def parameter_problems(where: str, parameters: object, values: list[str], defaul
                 problems.append(f"{where}: declared_by {relative} key {source['key']!r} must map"
                                 " snake_case parameter ids to a summary")
                 declared = None
+            else:
+                for key, item in sorted(declared.items()):
+                    if "type" in item and item["type"] not in SWITCH_PARAMETER_TYPES:
+                        problems.append(f"{where}: parameter {key!r} type {item['type']!r} is not one of"
+                                        f" {sorted(SWITCH_PARAMETER_TYPES)}")
     minimum = parameters["min_count"]
     if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 0 \
             or (declared is not None and minimum > len(declared)):
@@ -2940,7 +2947,10 @@ def parameter_problems(where: str, parameters: object, values: list[str], defaul
     if not isinstance(limits, dict) or any(
             isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
             for limit in limits.values()) or (
-            declared is not None and set(limits) - set(declared)):
+            declared is not None and set(limits) - set(declared)) or (
+            declared is not None and isinstance(limits, dict) and any(
+                declared[key].get("type", parameters["type"]) not in SWITCH_LIMIT_TYPES
+                for key in set(limits) & set(declared))):
         problems.append(f"{where}: package_limits must map declared parameter ids to"
                         " positive whole numbers")
     return problems

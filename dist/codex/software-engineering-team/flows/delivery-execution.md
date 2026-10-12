@@ -79,14 +79,25 @@ defines.
 
 ## Parallel verification
 
-Follow the approved Item's `verification_schedule`. An older Item with no
-field retains the sequential protocol. For `parallel_snapshot_v1`, commit
-the complete product/test candidate and use the packaged
+Follow the approved Item's `verification_schedule`; a missing field keeps
+the sequential protocol. At `parallel_snapshot_v1`, commit the complete
+product/test candidate and use the packaged
 `scripts/delivery_verification.py --worktree <item-root> freeze --delivery
 DLV-### --story <story>` before invoking the two readers. The resulting
 candidate and session identities bind all source and instruction inputs.
 Generate each role's `manifest` with `--role code_reviewer|qa_engineer` and
 `--mode review_initial|review_repair|qa_diagnostic|qa_final`.
+`start-pass --delivery DLV-### --story <story>` chains the pass: at
+`pre_handoff_regression` `touched_suites`, `regression-selection` and
+`regression-run` precede `freeze`. It saves both manifests and each reader's
+launch prompt from `templates/reader-launch-prompts.json`, lens assignments
+included. Modes default to `review_repair` after an earlier candidate and
+`qa_final`; `--review-mode` and `--qa-mode` override them. The first failing
+step stops the chain and returns its error.
+
+Put the manifest's `command_form` verbatim into every reader prompt: while
+readers are active, Bash admits only that one direct invocation followed by a
+verb, and readers read files with the host's Read tool.
 Every verification manifest includes the default `project_reading` plan. Start
 with `inspect-context --plan <saved verification manifest>` to batch-read its
 units from the frozen Git candidate. Preserve all `full_read` obligations and
@@ -95,10 +106,8 @@ for continuation; `--ref` adds a reference. If context is insufficient or wrong,
 and `diff` on the reader's initiative or parent direction, and return
 `context_findings` with recovery and proposed fix when known. The parent offers
 an anonymous issue through `issue-report` only with exact-payload user approval.
-While readers are active, use the same CLI's `inspect --path <file>` and
-`diff [--path <file>]` to read the frozen Git candidate. `inspect --base`
-selects its exact integration base. These interfaces permit source inspection
-without opening a general shell writer through the barrier.
+Read the frozen candidate with `inspect --path <file>` and
+`diff [--path <file>]`; `inspect --base` selects its exact integration base.
 Use `inspect --instruction <package-relative-file>` for bound package instructions.
 Switch `level_change_map`: at `assertion_map`, the writer maps the assertions
 of each scenario whose Test Plan level the Item converts, `freeze` refuses an
@@ -114,6 +123,9 @@ defines.
 Switch `own_target_reuse`: at `spot_run`, QA's final test run also takes the
 Item's own Test Plan targets from that run, but for the ones QA spot-runs, as
 `skill-content/deliver/references/switch-own_target_reuse-spot_run.md`
+defines; at `accept_record` it takes every own target from that run and runs
+none of them itself, as
+`skill-content/deliver/references/switch-own_target_reuse-accept_record.md`
 defines.
 
 Invoke Code Review and QA independently through the host's native agent
@@ -123,16 +135,21 @@ their cancellation is confirmed. Readers return separate JSON results through
 reports after the barrier. A reader registers as soon as it finishes, also
 while the other reader's verification command runs: the runner records which
 role runs each command, and a registration waits only for the settling
-reader's own command to exit. The code reviewer runs no command, so it
-registers its finished result at once and returns. A reader whose result is
-refused until a step only another role takes, such as a calibration, does not
-wait for it: it returns the result unregistered for the coordinator. A
+reader's own command to exit. The code reviewer runs no command, not even a
+diagnostic test: its manifest names the freeze record and QA's recorded runs
+as `verification_evidence` instead. It registers its finished result at once
+and returns. A reader waiting on another role's step, such as calibration,
+returns its result unregistered for the coordinator. A
 cancelled or diagnostic result cannot approve an Item. Code, test, contract or
 instruction drift invalidates the candidate.
 Switch `code_review_panel`: at `beside_official`, a lens panel reads the frozen
 candidate beside the official code reviewer and `merge-panel` registers the
 one code review result, as
 `skill-content/code-review/references/switch-code_review_panel-beside_official.md`
+defines.
+At `risk_scoped`, a lens reader joins the official code reviewer only when the
+frozen change triggers its lens by the owner's parameters, as
+`skill-content/code-review/references/switch-code_review_panel-risk_scoped.md`
 defines.
 Switch `item_review_scale`: at `by_change_size`, the official code reviewer
 reads alone an Item whose frozen change is within the owner's size limits, as
@@ -167,6 +184,15 @@ every run with the session identity through `status --summary`; plain
 `status` prints the whole session, bindings included.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
+QA runs each declared `live_groups` entry with `run --kind live_test --group <group>`,
+substituting `{group}` in `live_test_command` in `live_test_workdir`.
+The frozen clone, locks, environment binding and raw evidence match `run --kind test`.
+The Test Plan selects live groups; they never join required checks automatically.
+Read each record with `status --run live_test:<group>` and cite its `evidence_hash`.
+At `live_group_run: combined`, pass all selected groups in one call, as
+`--group a,b` or `--group a --group b`. Names are substituted in `live_groups`
+order; the one record is read with `status --run live_test:a,b`.
+Without `combined`, multiple groups in one call are refused.
 Switch `qa_gate_order`: at `gate_first`, QA starts its first test command of a
 round before it plans and drafts its result, as
 `skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md`
@@ -186,6 +212,15 @@ change-level tier the Verification Contract declares, and the Delivery runs
 its integration tier once before its pull request, as
 `skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md`
 defines.
+Before an Item's first QA round, run `permission-preflight --delivery <id>
+--story <id>` and show the owner its `commands` and `allow_rules`: the exact
+packaged forms QA runs, live groups and runtime verbs included. The owner
+allows them once in the host's permission settings; the package never edits
+them. A QA reader whose command the host refuses lists it in
+`blocked_commands` with outcome `blocked_by_permission` and settles as a
+diagnostic or failed result, never a passed final one. `status --summary`
+shows those rows; ask the owner at once, then `resume-qa` reruns only the
+blocked commands on the same candidate.
 For failed or affected tests first, an optional approved
 `diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
 <scratch-selection.json>`. Copy the selector schema from the QA manifest,
@@ -194,34 +229,42 @@ manifest's scratch directory. The runner validates the candidate binding and
 passes normalized selection data through `AGENTROF_DIAGNOSTIC_TESTS`; it never
 appends those identifiers to shell text. The compiler-owned JSON adds
 `selected_test_ids`, the sorted union of the failed and affected identifiers.
+An open inherited finding may list `negative_control_test_ids`. Its
+`finding_controls: [{finding_id, test_ids}]` selects only prescribed ids in
+changed test files, without a Test Plan scenario binding. The runner adds
+these to `selected_test_ids`, passes `finding_control_test_ids` and
+`evidence_scope: finding_diagnostic`, and records finding-scoped evidence QA
+cites when resolving the finding. It never counts as acceptance evidence.
+Test Plan selection and approved row values stay unchanged; the backlog
+absorbs these controls at its next ordinary revision.
 Only diagnostic commands receive this environment variable; final checks,
 runtime commands and lane commands remove it, including any inherited value.
-A changed selection cannot reuse an
-older diagnostic run. Without this approved adapter, use the full approved
-test command or revise the Operation Contract through its normal approval.
+A changed selection cannot reuse an older diagnostic run. Without this
+adapter, use the full approved test command or revise the Operation Contract
+through its normal approval.
 Diagnostic command evidence never satisfies the final full-suite gate.
 Commands run in an independent scratch checkout of the frozen product commit,
 with no shared Git objects or mutable working files. The runner exposes an
-output directory through `AGENTROF_VERIFICATION_SCRATCH`. Provision dependencies through
+output directory through `AGENTROF_VERIFICATION_SCRATCH` and the candidate's
+Delivery and Item ids through `AGENTROF_DELIVERY_ID` and `AGENTROF_ITEM_ID`,
+whatever the caller's shell exports. Provision dependencies through
 approved commands and environment, never by borrowing the writer's ignored
 files. Tests and mutation cannot temporarily edit the reviewer's source.
-The runner stores raw output under ignored runtime and binds it to the
-candidate, the command and the variables that can change its result: `PATH`,
-`HOME`, `LANG`, `LC_*`, `TZ`, every `AGENTROF_*` variable but a selection file
-the runner writes, which the run binds by its content, and the variables the
-approved Verification Contract names in `command_variables`. The run identity names
-them and keeps only a hash of their values, keyed with a random key that never
-leaves the Item's verification runtime, so a shell or session variable such as
-`PWD` never binds it, no secret value is written, and the hash QA's result
-carries into the tracked verification record checks no guess of a value. The
-runner reuses only identical successful evidence, these values included.
+Raw output stays under ignored runtime, bound to the candidate, command and
+result-affecting variables: `PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `AGENTROF_*`
+and the Verification Contract's `command_variables`. Runner-written selection
+files bind by content. Each named value is hashed with a random key kept only
+in the Item's verification runtime; `PWD` and other session variables do not
+bind it. No secret value is written, and the tracked hash checks no guess of
+one. The runner reuses only identical successful evidence, these values included.
 `--fresh` explicitly reruns a command. Evidence approval and `push-item` check
 each identity as recorded: complete, running the approved command, and shared
 by every final run and runtime event of the session. They never compare it
 with their own shell, so the coordinator approves evidence QA recorded in
 another. The mutation command reads the exact
 JSON file scope through `AGENTROF_MUTATION_FILES`; no shell path interpolation
-is permitted. The QA result names the raw evidence identities and records
+is permitted. A scope that holds no file launches no command: `run --kind
+mutation` records `scope empty, not run` as a passed run with zero duration. The QA result names the raw evidence identities and records
 coverage, right-reason and all applicable final checks. A diagnostic returns
 quick findings without terminal eligibility; `resume-qa` allows final QA on
 the same unchanged candidate while preserving its independent review.
@@ -248,8 +291,10 @@ exact direct-parent binding. Runtime verification is mandatory exactly when
 the approved Item declares `runtime_required: true`.
 For that Item, run the approved Environment Contract through
 `environment --verb down|up|seed|logs|url [--value <approved-identifier>]`.
-Its persistent private checkout supports the existing fresh-runtime protocol;
-return the recorded event hashes with the full per-surface runtime findings.
+Every verification session of the Item uses that one checkout path, preserving
+the environment instance's path binding. Its first command re-pins the checkout
+to the session's candidate and removes untracked and ignored files. Return
+recorded event hashes with the full per-surface runtime findings.
 Successful down, up, seed, logs and final down are required, alongside the
 independent runtime assessment. A non-runtime Item starts no environment.
 
@@ -283,7 +328,13 @@ that Integration commit's Delivery controls byte for byte and record the commit
 as its `integration_base_commit`. The commit must lie on the Integration's own
 line after the Item's previous base and be contained in the product tip, and
 the Item record keeps the commit's plan-owned fields with only its own status,
-stamp and base.
+stamp and base. `delivery_git.py converge-item --delivery DLV-### --story
+<story>` converges the clean Item worktree in one step: it merges the current
+Integration, gives every Delivery control path the Integration's bytes, writes
+the Item record in that converged form, renders the relation views again with
+`vault_check.py render-relations` and commits. A conflict in any other path
+aborts the merge, leaves the worktree at its tip and names each path for a
+manual merge.
 `push-item` also rejects a product or test path outside the Item's path claims,
 which cover their paths and everything below them. Vault paths keep the
 control, Architecture and projection rules, and a path held exactly as the
@@ -353,3 +404,21 @@ lease it lost, or a remote without atomic push support, from the refetched
 refs. One whose refetched refs hold its candidate, or moved on from it, may
 have landed and reports `DELIVERY_TRANSACTION_UNCERTAIN` instead. Release
 Management is intentionally not part of this flow.
+
+With `live_environment_plan: effect_ordered_v1` in the approved Verification
+Contract, regression selection exports `live_environment_plan` to the project
+adapter. It deduplicates targets, lists special builds before the one shared
+environment, then fixtures, parallel readers, serial changes with readiness
+checks, resets and removals with reset/residue checks. Missing metadata is
+reported and executes as serial `changes`. The approved adapter must implement
+these phases and report its per-phase setup counts; it owns service commands.
+
+A permission probe validates without execution; host authorization remains
+unknown. Show the exact allow rules to the owner. The Verification Contract's
+optional `live_permission_commands` names service or container commands needing
+that review. Permission-only resume keeps successful evidence and lists only
+refused commands in `resume_commands`.
+
+Finding-control bindings persist in the Item verification record and Delivery
+Review. After merge, the next ordinary backlog revision lists unabsorbed
+targets and requires them in the owning Test Plan before approval.

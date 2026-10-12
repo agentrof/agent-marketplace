@@ -1,0 +1,6 @@
+{
+  "summary": "Add converge-item, which takes the Delivery Integration into an Item worktree after a plan revision in one command, and start-pass, which chains the pre-handoff regression, freeze, both reader manifests and their launch prompts; a mutation run with an empty scope now records scope empty, not run as a passed run instead of launching the command.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

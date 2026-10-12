@@ -52,8 +52,10 @@ PRE_HANDOFF_HISTORY_FIELDS = ("evidence_hash", "candidate_tree", "kind", "exit_c
 # At own_target_reuse spot_run QA's final test run also takes the Item's own Test
 # Plan targets from the accepted pre-handoff run, but for the spot-run targets QA
 # names, which the approved test command runs with every target the run did not cover.
+# At accept_record it takes every own target from that run and spot-runs none.
 OWN_TARGET_SWITCH = "own_target_reuse"
 SPOT_RUN = "spot_run"
+ACCEPT_RECORD = "accept_record"
 # At test_group_report refuse_missing_groups a test run also reads the group
 # report its approved command writes, where the Verification Contract declares one.
 GROUP_REPORT_SWITCH = "test_group_report"
@@ -1099,12 +1101,15 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         if session["workers"]["qa_engineer"]["state"] != "running":
             raise RuntimeError("verification commands require the active QA reader")
         spot = None
+        own_value = own_target_reuse(root, current["delivery"]) if kind == "test" else None
         if spot_file is not None:
-            value = own_target_reuse(root, current["delivery"])
-            if value != SPOT_RUN:
+            if own_value != SPOT_RUN:
                 raise RuntimeError(f"run --spot-run-file serves only process switch {OWN_TARGET_SWITCH} {SPOT_RUN};"
-                                   f" {current['delivery']} runs it at {value}")
+                                   f" {current['delivery']} runs it at {own_value}")
             spot = spot_run_selection(root, Path(spot_file), current)
+        elif own_value == ACCEPT_RECORD and not fresh:
+            # No own target is kept for the command: the accepted run supplies them all.
+            spot = []
         contract, contract_body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
         command = live_test_command(contract, group) if group is not None else contract.get(kind + "_command")
         if not isinstance(command, str) or not command.strip() or "{{" in command or "}}" in command:
@@ -1139,11 +1144,14 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         # Without a spot-run file the run says so even when it reuses nothing else; with one that
         # reuses nothing, its pre_handoff_reuse refusal says why.
         if (kind == "test" and (reuse is None and spot is None or reuse is not None and "own_targets" not in reuse)
-                and own_target_reuse(root, current["delivery"]) == SPOT_RUN):
+                and own_value == SPOT_RUN):
             own_note = ("no --spot-run-file names the own targets QA runs itself, so the run reuses none of the"
                         " Item's own targets" if spot is None else
                         "the spot-run targets, with every own target that is, prefixes or lies under one of them,"
                         " cover every own target, so the run reuses none of them")
+        elif kind == "test" and own_value == ACCEPT_RECORD and (reuse is None or "own_targets" not in reuse):
+            own_note = ("no accepted pre-handoff run binds the frozen candidate for the Item's own targets, so the"
+                        " approved test command runs every one of them itself")
         identity = {"candidate_hash": current["candidate_hash"], "kind": kind, "command": command,
                     "workdir": workdir, **declared, "execution_isolation": "private_clone_v1"}
         if selection is not None:
@@ -1184,7 +1192,17 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             clear_group_report(scratch, groups)
     started = time.monotonic()
     partition_records = None
-    if partitions is not None:
+    accepted_full = (own_value == ACCEPT_RECORD and reuse is not None and not fresh
+                     and session["pre_handoff"].get("kind") == "test"
+                     and session["pre_handoff"].get("command") == command
+                     and session["pre_handoff"].get("workdir") == workdir
+                     and groups is None and partitions is None)
+    if accepted_full:
+        completed = subprocess.CompletedProcess(command, 0,
+            ("Accepted full-suite pre-handoff evidence " + reuse["evidence_hash"] + "\n"
+             + "".join("REUSED " + target + "\n" for target in reuse["test_ids"])).encode("utf-8"))
+        intact, difference, group_report = True, "", None
+    elif partitions is not None:
         partition_records = run_partitions(root, scratch, current, workdir, partitions, environment,
                                            reuse["test_ids"] if reuse is not None else [], groups)
         intact, difference = all(record["candidate_intact"] is True for record in partition_records), ""
@@ -1234,6 +1252,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         record = {"identity": identity, "exit_code": completed.returncode, "candidate_intact": intact,
                   "output_file": output_name, "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
                   "duration_seconds": time.monotonic() - started, "completed_at": time.time()}
+        if accepted_full:
+            record["execution_mode"] = "accepted_pre_handoff"
         if difference:
             record["checkout_difference"] = difference
         if selection is not None:
@@ -1608,7 +1628,8 @@ def pre_handoff_reuse(root: Path, session: dict, current: dict, environment: dic
     nothing. With *spot*, the own targets QA names at own_target_reuse
     spot_run, the run also covers every other own target, and only those
     *spot* keeps with kept_own_targets stay QA's, with every target that
-    overlaps one. At any other value it returns (None, None), or with *spot*
+    overlaps one; at accept_record *spot* is empty and the run covers every
+    own target. At any other value it returns (None, None), or with *spot*
     why it reuses nothing.
     """
     value = pre_handoff_regression(root, current["delivery"])
@@ -1672,7 +1693,8 @@ def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> 
     targets is valid only at own_target_reuse spot_run, with its spot-run
     targets and its reused own targets disjoint automation targets of the
     Item's own Test Plan, and no reused id overlaps a target kept_own_targets
-    keeps for the command instead.
+    keeps for the command instead, or at accept_record, with every own target
+    reused and none spot-run.
     """
     reuse, receipt = identity["reused_pre_handoff"], session.get("pre_handoff")
     if (not isinstance(reuse, dict) or not isinstance(receipt, dict)
@@ -1682,7 +1704,7 @@ def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> 
     own_reuse = reuse.get("own_targets")
     if own_reuse is not None and (
             not isinstance(own_reuse, dict) or set(own_reuse) != {"test_ids", "spot_test_ids"}
-            or any(not isinstance(own_reuse[key], list) or not own_reuse[key]
+            or any(not isinstance(own_reuse[key], list) or (key == "test_ids" and not own_reuse[key])
                    or any(not isinstance(test, str) for test in own_reuse[key])
                    or own_reuse[key] != sorted(set(own_reuse[key])) for key in own_reuse)):
         return "names its reused own targets apart from its spot-run targets"
@@ -1708,10 +1730,15 @@ def reuse_problem(root: Path, session: dict, identity: dict, contract: dict) -> 
     own = own_plan_targets(root, current)
     if own_reuse is not None:
         value = own_target_reuse(root, current["delivery"])
-        if value != SPOT_RUN:
+        if value not in {SPOT_RUN, ACCEPT_RECORD}:
             return (f"reuses the Item's own Test Plan targets, which only process switch {OWN_TARGET_SWITCH}"
-                    f" {SPOT_RUN} allows; {current['delivery']} runs it at {value}")
+                    f" {SPOT_RUN} or {ACCEPT_RECORD} allows; {current['delivery']} runs it at {value}")
         spot = own_reuse["spot_test_ids"]
+        if value == SPOT_RUN and not spot:
+            return "names its reused own targets apart from its spot-run targets"
+        if value == ACCEPT_RECORD and (spot or reused_own != sorted(set(own))):
+            return (f"at {OWN_TARGET_SWITCH} {ACCEPT_RECORD} reuses every own Test Plan target of the Item and"
+                    " spot-runs none, which this reuse does not")
         if not set(spot) | set(reused_own) <= set(own) or set(spot) & set(reused_own):
             return ("names spot-run targets or reused own targets that are no automation targets of the Item's own"
                     " Test Plan, or one target as both")
@@ -3171,7 +3198,8 @@ def derive_regression(root: Path, delivery_id: str, story: str, current: dict) -
         resolved = isinstance(command, str) and command.strip() and "{{" not in command and "}}" not in command
         return command if resolved else None
 
-    kind = "diagnostic_test" if selected and approved("diagnostic_test") else "test"
+    accept_full = own_target_reuse(root, delivery_id) == ACCEPT_RECORD
+    kind = "diagnostic_test" if selected and approved("diagnostic_test") and not accept_full else "test"
     command = approved(kind)
     if command is None:
         raise RuntimeError("approved verification command is missing or contains unresolved parameters")

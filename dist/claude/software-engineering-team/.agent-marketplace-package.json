@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "c35e7579e521c0c844304f0b5fd50b17c4ee24918762eab66f53304e9e61c69b"
+      "e144694c32a2e039e43433d122d2715cee4efb7e3ed596ff41ce3d2544dd227b"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -185,7 +185,7 @@
       "73b210d3acdffaa912802807dbf11d47f068ba2c635d300bd051142310e05633"
     ,
     "scripts/delivery_compile.py":
-      "86ab219783d12fc496f7b3ee35edb942e7dd66c50d6282a8e10ac60d08987288"
+      "dca044af7f2dd5e76463ac297203039e59dfad1b2d9d66a8b4a4db2a6a1f23ec"
     ,
     "scripts/delivery_git.py":
       "195314cbbbbf6a1993290d556eef293df356e5b96dbf6a36392e75d84d186334"
@@ -200,7 +200,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "8d5f45e36342f250c9f176bb784ff44e55409eeddf0ed9bfb052755cacbca4ef"
+      "f926068c4d9899717961b82d1396717542b3b82eda096ea391533fcf60217fec"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -446,7 +446,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "20973b2f9cc74881c8913b36db7058d157f6f1a8dffdebf64ea3d3e66d01f2cb"
+      "1e4d85800d79bcd7715c26392745b848b4e0c667cac80824d683314711338401"
     ,
     "skill-content/configure/data/step-budgets.json":
       "c63c5e90e1726b573c681f28008aa627575600f2d81dc8f8c0851b768e1b04fc"
@@ -507,6 +507,9 @@
     ,
     "skill-content/deliver/references/switch-level_change_map-assertion_map.md":
       "35de974de8307022aa984d97140214342336abde13ea0cd3d48ce04a63306b78"
+    ,
+    "skill-content/deliver/references/switch-own_target_reuse-accept_record.md":
+      "92471101200125cb5f88745ced99bddcb01887fe6d63537a36be72a3a8a0f3f0"
     ,
     "skill-content/deliver/references/switch-own_target_reuse-spot_run.md":
       "04cbf0a3cee8377d9a9ffe783b7372f7dda9ca5dac1fe5b853ffe65b01b900f0"

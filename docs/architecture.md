@@ -59,7 +59,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     A scenario may state `environment_effect`, how it affects the shared
     test environment (`builds`, `builds_shared`, `builds_fixture`, `reads`,
     `changes`, `resets` or `removes`), and, only at `changes`, the names it
-    `touches`, which `check` validates.
+    `touches`, which `check` validates; `builds_fixture:<rank>` takes a rank
+    from 0 to 999, 50 when omitted. A parallel test target may list one
+    effect per parameter case, `builds_shared [core], builds [full]`;
+    `touches` then needs any item at `changes`.
     A scenario may state `rows`, a positive integer, and `row_split`,
     `serial`, `sharded` or `grouped`; process switch `test_cost_budget` at
     `flag_serial_rows` flags one that runs more rows serially than the

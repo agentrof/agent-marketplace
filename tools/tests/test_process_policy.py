@@ -768,6 +768,13 @@ SAFETY_RULES = {
             "the audit then reports them as NO-TEST and fails, which is a finding for the Verification Contract",
             "a skip, a retry or a warning it cannot explain is a finding",
         ),
+        f"{SKILLS}/deliver/references/switch-own_target_reuse-accept_record.md": (
+            "with no spot-run file, which the runner refuses at this value",
+            "Its only check of the reuse is that the record binds the exact frozen candidate",
+            "the approved test command runs the same selection itself",
+            "it is not NO-TEST for the default run",
+            "never a reason to rerun the suite with `--fresh` or to drop the audit",
+        ),
     },
     "pre_handoff_regression": {
         f"{SKILLS}/deliver/references/switch-pre_handoff_regression-touched_suites.md": (
@@ -895,6 +902,10 @@ SAFETY_RULES = {
             "Credentials or secrets that reach a client artifact or a log stay critical",
             "Neither the claiming reviewer nor the writer changes a severity",
             "QA keeps its own blocking severities",
+            "A carried finding is re-examined only when its code changed",
+            "Return it on its id with the status, severity and follow-up fields the record holds, and do not"
+            " re-examine it",
+            "The reviewer starts no test or diagnostic run in any cycle",
         ),
     },
     "review_rounds": {

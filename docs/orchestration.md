@@ -335,7 +335,10 @@ allows it. `deliver/references/switch-pre_handoff_regression-touched_suites.md`
 defines the run. At process switch `own_target_reuse` `spot_run`, QA's final
 test run also takes the Item's own Test Plan targets from that run, but for the
 ones QA names to spot-run itself, as
-`deliver/references/switch-own_target_reuse-spot_run.md` defines.
+`deliver/references/switch-own_target_reuse-spot_run.md` defines. At
+`accept_record` it takes every own target from that run, runs none of them
+itself and checks only that the record binds the frozen candidate, as
+`deliver/references/switch-own_target_reuse-accept_record.md` defines.
 
 When QA starts its first test command of a round is process switch
 `qa_gate_order`. At `plan_first`, the default, QA plans and maps every check

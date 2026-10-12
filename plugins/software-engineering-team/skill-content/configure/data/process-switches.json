@@ -408,7 +408,7 @@
       }
     },
     "own_target_reuse": {
-      "summary": "Whether QA's final test run on a frozen candidate runs every own Test Plan target of the Item itself, or takes them, but for the ones QA spot-runs, from the pre-handoff regression run that passed on the same tree.",
+      "summary": "Whether QA's final test run on a frozen candidate runs every own Test Plan target of the Item itself, takes them, but for the ones QA spot-runs, from the pre-handoff regression run that passed on the same tree, or takes every one of them from that run and runs none itself.",
       "issue": 383,
       "flows": ["delivery-execution"],
       "values": [
@@ -419,12 +419,16 @@
         {
           "id": "spot_run",
           "tradeoffs": "Where the freeze accepted a pre-handoff run at pre_handoff_regression touched_suites, QA's final test run also takes the Item's own Test Plan targets from it, under the bindings the earlier stories' targets need: the frozen tree, the selection and approved command derived for it, the declared environment of QA's run and the age final evidence may have. QA names at least one own target in a spot-run selection, and the approved test command runs those, every own target that overlaps them and every target the run did not cover. QA's gate stops repeating the new story's cases the run covered, while a flaky own test outside the spot run passes on one green run, QA's coverage audit needs the accepted run's results, so the approved commands must keep each run's JUnit apart, and at pre_handoff_regression off nothing is reused."
+        },
+        {
+          "id": "accept_record",
+          "tradeoffs": "Where the freeze accepted a pre-handoff run at pre_handoff_regression touched_suites, QA's final test run takes every own Test Plan target of the Item and every earlier story's target from it, under the bindings spot_run checks, spot-runs none and takes no spot-run selection; QA checks only that the record binds the exact frozen candidate, and where no accepted run binds it the approved test command runs every target itself. The pre-freeze run becomes the one run of the candidate's own and touched suites in a pass, while a flaky own test passes on that one green run with no second chance to fail, QA's coverage audit reads the accepted run's results, so the approved commands must keep each run's JUnit apart, and at pre_handoff_regression off nothing is reused."
         }
       ],
       "default": "off",
       "metric": "Per Delivery: the wall clock of QA's final test run, the own targets it reused and spot-ran per Item, and every defect found after a passing QA gate, in a later review round, in the Delivery Review or after merge, in an own target that gate reused.",
       "promotion": {
-        "unit": "At least 3 Deliveries run with spot_run, each with pre_handoff_regression at touched_suites.",
+        "unit": "At least 3 Deliveries run with spot_run or accept_record, each with pre_handoff_regression at touched_suites.",
         "threshold": "No defect found after a passing QA gate in an own target that gate reused, and a median wall clock of QA's final test run at most half of the project's final test runs at off for stories of a similar suite, with every shared quality guard holding and the owner's approval."
       }
     },

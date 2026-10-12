@@ -264,7 +264,8 @@ class AllSwitchesOnBindingTests(unittest.TestCase):
                     if "/references/switch-" in path)
         self.maxDiff = None
         self.assertEqual(bound, {key: sorted(value) for key, value in EXPECTED.items()})
-        # Every switch reference the package ships reaches at least one task.
+        # Every switch reference the package ships reaches at least one task, apart from the references
+        # of values this run does not select, which their own switch's tests bind.
         shipped = {path.relative_to(ROOT / "plugins/software-engineering-team/skill-content")
                    .as_posix() for path in (ROOT / "plugins/software-engineering-team/skill-content")
                    .glob("*/references/switch-*.md")}
@@ -346,7 +347,8 @@ class AllSwitchesOnTests(unittest.TestCase):
                     if "/references/switch-" in path)
         self.maxDiff = None
         self.assertEqual(bound, {key: sorted(value) for key, value in EXPECTED.items()})
-        # Every switch reference the package ships reaches at least one task.
+        # Every switch reference the package ships reaches at least one task, apart from the references
+        # of values this run does not select, which their own switch's tests bind.
         shipped = {path.relative_to(ROOT / "plugins/software-engineering-team/skill-content")
                    .as_posix() for path in (ROOT / "plugins/software-engineering-team/skill-content")
                    .glob("*/references/switch-*.md")}

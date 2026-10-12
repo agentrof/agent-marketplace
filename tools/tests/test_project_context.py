@@ -69,6 +69,25 @@ class ProjectContextTests(unittest.TestCase):
         params.update(kwargs)
         return project_context.resolve_context(self.project, self.index(), **params)
 
+    @integration
+    def test_small_review_prioritizes_changed_sections_with_a_unit_cap(self):
+        body = "\n\n".join(f"## Part {n}\n\nneedle-{n}" for n in range(100))
+        self.write("backlog/example.md", note("story", "Example task", extra="id: ST-901", body=body))
+        init_repository(self.project)
+        subprocess.run(["git", "-C", str(self.project), "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.project), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                        "commit", "-qm", "Base"], check=True, capture_output=True)
+        self.write("backlog/example.md", note("story", "Example task", extra="id: ST-901", body=body.replace("needle-50", "fixed-50")))
+        plan = project_context.task_context(self.project, entry="deliver", role="qa-engineer", mode="review",
+                                           paths={"workspace/docs/backlog/example.md"}, no_cache=True)
+        self.assertNotEqual(plan["status"], "unavailable", plan)
+        self.assertEqual(plan["reading_kind"], "ranked_advice")
+        self.assertLessEqual(len(plan["must_read"]), 12)
+        read = project_context.read_plan(self.project, project_context.load_index(self.project, no_cache=True), plan)
+        text = str(read)
+        self.assertIn("fixed-50", text)
+        self.assertNotIn("needle-1\\n", text)
+
     def test_primary_and_constraints_do_not_expand_all_epic_siblings(self):
         plan = self.plan()
         self.assertEqual({row["path"] for row in plan["must_read"]},

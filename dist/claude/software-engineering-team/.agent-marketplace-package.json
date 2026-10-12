@@ -95,7 +95,7 @@
       "4d392c04a01efa757b47e327dcd42e937a47a60cf69926dfacdf5f5cb1c72c52"
     ,
     "constitution.md":
-      "a980d74e7460071f12237b8432d43e819f523374238679c98cec1abb98ed6fd9"
+      "9ab4dd0b8df2fde66c82556e9a743a347294034035a73e6746f4bb12292ff00b"
     ,
     "flows/backlog-planning.md":
       "d77eb8e4d6086766a9462eff3c31abb02f36efd50f9eaa718e3800e638d555ac"
@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "ed7d47e3f454f419f729f86a2ef91f0286f3b58902a573653181dbcce15f4cd7"
+      "8b88eaf75cc42e1c1df84df5383a5e7dfb5bf4402c90ce7a75437a14effdbe69"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -125,7 +125,7 @@
       "c964a5acf445e6bed890365402d24888188cd2c4ee21dc5d169cfeea622bb512"
     ,
     "flows/operation.md":
-      "85e90e3bab409806a2040af842fcc0e02af82075fcebefc680356b7a840c3a47"
+      "984043fc8466e529d9307dc70a5998207a208cc206dd436c02d1b3d19ad529fb"
     ,
     "flows/requirement.md":
       "7528573f9fa14f3fc724d7a12972ad3b548409d1085a95c2c2e2024b4a46d04c"
@@ -197,7 +197,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "e80d77c8f84351ed0bfc03320ba3ff4e1ccf5b8c58787f68d48e6947ee27ede1"
+      "027e90c83b08f041acbbfd93acf8ee625d7ed69f065392b5f56e6d479f4d790a"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -251,7 +251,7 @@
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
     ,
     "scripts/project_context.py":
-      "bf21e9bf8c7886022a786363f9e30db7ec66dcb8f796355c6bcd012408e46fbc"
+      "0b13efa0b6d9ccc906f3b54cad289d2a69e3172afb2e6e939cafbc2739974313"
     ,
     "scripts/project_instructions.py":
       "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
@@ -281,7 +281,7 @@
       "b7f2cad266008812a38779f0b2208596e5d5fddf8fd9a47354706406f03ca655"
     ,
     "scripts/task_inputs.py":
-      "a95ca026d628c95cf20d313cbe1ef8faed78815b78744e8ec077b462a14067a1"
+      "ad6272c71742152ba46115ddcc559fffd1accf4585e7174404fb63a19ff66eb9"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -1040,7 +1040,7 @@
       "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
     ,
     "templates/project-context-policy.json":
-      "e05e4ac021470f303ee20d13b2f741a5870679d23ceca9c850c7a50f91c69e31"
+      "df76bb2701006cbde36c1ac96dec9d15338a21854c8041ca0a698e2826dd7412"
     ,
     "templates/project-instruction-surfaces.json":
       "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c"
@@ -1058,7 +1058,7 @@
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
     ,
     "templates/task-input-contract.md":
-      "adf4f3c92f2522f35b90706f28b659e9e18d51896b81b8b3bbe8c8a26db20a26"
+      "a1e14667ea11bd2989b2ed59055ed4a37da59b20411a4af60f6dc84ad5e3c03a"
     ,
     "templates/task-input-policy.json":
       "a388f65395aa5d8b62c12b82fc2635e8efd37fac9cb28718293874af330fff69"

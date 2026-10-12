@@ -135,4 +135,7 @@ that carries the hash checks no guess of a value, and a variable left out
 never binds the evidence. The contract check refuses a name of the runner's
 own `AGENTROF_` namespace: the runner sets those variables, and run evidence
 binds them without a declaration, a selection file the runner writes by its
-content. Add the field through the normal revision and approval lifecycle.
+content. Every command it runs reads the frozen candidate's Delivery id in
+`AGENTROF_DELIVERY_ID` and its Item id in `AGENTROF_ITEM_ID`, so a command that
+needs them reads those two and never asks a reader to export them. Add the
+field through the normal revision and approval lifecycle.

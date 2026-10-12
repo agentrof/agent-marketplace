@@ -134,10 +134,10 @@
       "8e84b0aff71e5da4c399d17abcc944ccf97f84b4429844e58bd9635b674f7f64"
     ,
     "hooks/hooks.json":
-      "6907f6c826873e160a411f49ef34e346b7bbf4db046f50b46528184ace2d604a"
+      "d8f59a3b7f2a956263e77f87b9ae2a2977093e19d6b41f4f81cf21f77f6900f0"
     ,
     "host-contract.md":
-      "6628132fe1fba5a1b55cb859055cb4eb3a5b17174cc625929bf8524590046dd0"
+      "7710dbb96e556da4362e6aa1cbe6177e30268f08849fc2cac7da4984b03f364d"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -308,13 +308,25 @@
       "2278dfc155f1c18d13262f1a6aff22893c17f8ee4791594ba4059448a9801138"
     ,
     "skill-content/autopilot/SKILL.md":
-      "d87ad2e18c1b6b1dd834eb8fa240fb9186389f936cf8f8a660b97a56ad0d1b07"
+      "071a08e687d7169d377160c91ae0e3eb1a8e815437f54eba64b8bc6e4882eb24"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
-      "d63a6ad7930086ea018b4825ead12fd58f53317d32bf3cac08750d131ad23a2d"
+      "a89fe73d565a15949287c8b7235e55a36e0ff3b3888e3cd63e48ef7c8bdc1a55"
+    ,
+    "skill-content/autopilot/references/transport-recovery.md":
+      "7a3ea3f0b5b5235315d2532f8c44427e27d3f30790491330d24246c1421b87b2"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "86e53965bc7ae7d5e801650377f01fdf4cdfbb189c0443dbb382cd764e4c574b"
+      "aa8ab6fb36e601d49673dc46da6af4ee393d28270d0b204d4cd1f07b9febd26d"
+    ,
+    "skill-content/autopilot/scripts/autopilot_recovery.py":
+      "80f96c50339cf002d9ca9d3ef5c9a7d0d9d6806c1950f61ddb793acf917b3e56"
+    ,
+    "skill-content/autopilot/scripts/native_recovery.py":
+      "f304a97f94a65e4ca4cc94e7448dbf5c7c062606513a05dcb8dff88fdffe1802"
+    ,
+    "skill-content/autopilot/scripts/transport_recovery_host.py":
+      "05b57df14c4d46d311129887b9a4537c68dfcc5ee96f26e54f5862cf01b8946e"
     ,
     "skill-content/backlog-plan/SKILL.md":
       "f4314b20877593f179f92b726b93dc88e82e33781603599db0af98fe43349643"

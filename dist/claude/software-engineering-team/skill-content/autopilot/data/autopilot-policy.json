@@ -62,7 +62,10 @@
       "description": "Until one Delivery reaches a terminal status: merged or cancelled.",
       "end": {
         "compiler": "scripts/delivery_compile.py",
-        "terminal_statuses": ["merged", "cancelled"]
+        "terminal_statuses": [
+          "merged",
+          "cancelled"
+        ]
       }
     },
     {
@@ -70,7 +73,12 @@
       "description": "Until one Requirement ends its planning: incorporated into the approved backlog, resolved with no change, superseded or withdrawn.",
       "end": {
         "compiler": "scripts/requirement_compile.py",
-        "terminal_statuses": ["incorporated", "resolved_no_change", "superseded", "withdrawn"]
+        "terminal_statuses": [
+          "incorporated",
+          "resolved_no_change",
+          "superseded",
+          "withdrawn"
+        ]
       }
     },
     {
@@ -78,5 +86,21 @@
       "description": "A free-text goal that no compiler can read. It ends only through complete, off or its cap.",
       "end": "none"
     }
-  ]
+  ],
+  "transport_interval_seconds": 600,
+  "transport_max_attempts": 3,
+  "transport_error_codes": [
+    "ENOTFOUND",
+    "ECONNRESET",
+    "ETIMEDOUT",
+    "overloaded_error",
+    "HTTP 502",
+    "HTTP 503",
+    "HTTP 504"
+  ],
+  "native_arming_wait_seconds": 600,
+  "native_watch_seconds": 259200,
+  "native_poll_seconds": 2,
+  "native_retry_delay_seconds": 5,
+  "native_permit_ttl_seconds": 300
 }

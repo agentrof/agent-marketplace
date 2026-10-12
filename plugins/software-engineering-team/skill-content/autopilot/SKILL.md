@@ -86,8 +86,9 @@ session to asking.
 1. Run the packaged `skill-content/autopilot/scripts/autopilot.py` with the
    typed verb. On a host that arms, run `on` without options: the script takes
    them from the typed command. Pass every other verb's options as typed.
-2. Show the script's output as it prints it. A refusal names what is wrong;
-   never retry `on` with options of your own.
+2. Show the script's human status. Consume a machine `native_recovery_enrollment`
+   internally as the recovery reference directs; do not display its scheduling
+   payload. A refusal names what is wrong; never retry `on` with options of your own.
 3. While a grant is active, the host contract's autopilot procedure governs
    every question of the orchestrating session. Each decision is recorded with
    `record` before it is applied, and `record` and `queue` refuse once the
@@ -102,3 +103,9 @@ run `autopilot.py --project-root <root> waiting`. It submits one desktop
 notification per unchanged queue; a failed submission is reported, not treated
 as delivered. With independent work left, keep working and do not call it.
 `report --json` includes each queued question's age in seconds.
+
+## Transport recovery
+
+With `on --recover-transport`, follow [transport recovery](references/transport-recovery.md).
+Native continuation stays in the same conversation, is bound to the grant and
+requires no additional program, SDK, API key or service installation.

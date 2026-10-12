@@ -1,4 +1,0 @@
-{
-  "summary": "Add opt-in lifecycle-first QA with current-candidate rehearsals or approved owner waivers before freeze and final log checks after live groups.",
-  "components": {"software-engineering-team": "minor"}
-}

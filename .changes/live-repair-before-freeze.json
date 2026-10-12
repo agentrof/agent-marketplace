@@ -1,6 +1,0 @@
-{
-  "summary": "Require targeted proof of registered failed live cases on the repaired candidate before freezing another QA round.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "Add user-armed native session recovery through existing host wakeups and thread tools, with grant-bounded retries, same-context continuation and CLI fallback.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

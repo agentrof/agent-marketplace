@@ -1,6 +1,0 @@
-{
-  "summary": "Let environment_effect builds_fixture carry a rank, builds_fixture:<rank> with an integer from 0 to 999 and 50 when omitted, also inside a parameter list; the backlog compiler refuses a rank on any other effect and one out of range.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "Add an opt-in correctness review of repair diffs before freezing a new verification candidate, with bound evidence and carried minor findings.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

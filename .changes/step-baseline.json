@@ -1,6 +1,0 @@
-{
-  "summary": "Compare a timed step with the median of its own last runs under process switch step_baseline, and time QA live runs, live steps and rehearsal commands.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

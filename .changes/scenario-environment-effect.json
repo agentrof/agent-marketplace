@@ -1,6 +1,0 @@
-{
-  "summary": "Let a Test Plan scenario state its environment_effect on the shared test environment, builds, builds_shared, builds_fixture, reads, changes, resets or removes, and, only at changes, the names it touches; the backlog compiler refuses any other value.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

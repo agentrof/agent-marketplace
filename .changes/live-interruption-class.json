@@ -1,6 +1,0 @@
-{
-  "summary": "Let a Verification Contract opt in to a keep-awake inhibitor and to host sleep and network loss classification of live runs, which a failed run records as interrupted_by and the live resume accepts.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

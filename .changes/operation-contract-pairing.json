@@ -1,4 +1,0 @@
-{
-  "summary": "Offer receipt-only Verification Contract re-pairing after Environment approval and refuse stale pairs before plan binding or verification starts.",
-  "components": {"software-engineering-team": "patch"}
-}

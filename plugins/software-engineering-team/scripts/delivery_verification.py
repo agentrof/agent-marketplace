@@ -3428,14 +3428,14 @@ def runtime_environment_identity(root: Path, current: dict) -> dict:
 def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
     """Invoke only the approved environment contract in a persistent private clone."""
     root = root.resolve()
-    if verb != "down":
-        require_owner_step_progress(root, read_session(root))
     if verb not in {"down", "up", "seed", "logs", "url"}:
         raise RuntimeError("unsupported environment verb")
     with environment_lock(root, "qa_engineer", "environment --verb " + verb), \
             command_lock(root, "qa_engineer", "environment --verb " + verb):
         with locked(root):
             session = read_session(root)
+            if verb != "down":
+                require_owner_step_progress(root, session)
             current = session["candidate"] if verb == "down" else require_current(root, session, allow_evidence=True)
             if not current["runtime_required"] or session["workers"]["qa_engineer"]["state"] != "running":
                 raise RuntimeError("environment commands require an active runtime QA reader")

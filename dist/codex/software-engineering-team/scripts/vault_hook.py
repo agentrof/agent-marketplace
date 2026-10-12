@@ -2385,7 +2385,7 @@ def delivery_reader_barrier(payload: dict) -> int:
                     and args[2] in {"freeze", "result", "panel-result", "calibrate", "merge-panel", "status",
                                     "manifest", "validate", "run", "resume-qa", "inspect", "inspect-context",
                                     "expand-context", "diff", "environment",
-                                    "permission-preflight", "permission-probe", "wait"}):
+                                    "permission-preflight", "permission-probe", "prepare-repair", "wait"}):
                 return 0
     elif payload.get("file_targets") and not payload.get("patch_parse_error"):
         cwd = Path(str(payload.get("cwd") or project))

@@ -178,7 +178,8 @@ class VaultHookPrototypeTests(unittest.TestCase):
             for verb, *arguments in (("result", "--file", str(scratch)), ("panel-result", "--file", str(scratch)),
                                      ("inspect-context", "--plan", str(scratch)),
                                      ("expand-context", "--plan", str(scratch), "--reason", "Missing constraint"),
-                                     ("calibrate", "--file", str(scratch)), ("merge-panel",)):
+                                     ("calibrate", "--file", str(scratch)), ("merge-panel",), ("prepare-repair",),
+                                     ("permission-preflight",), ("permission-probe",)):
                 routed = [*command[:-1], verb, *arguments]
                 for value, expected in ((routed, 0), ([*routed, "--worktree", str(project)], 2),
                                         ([*routed[:2], str(project / "delivery_verification.py"), *routed[3:]], 2)):

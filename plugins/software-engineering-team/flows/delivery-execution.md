@@ -130,16 +130,16 @@ defines.
 
 Invoke Code Review and QA independently through the host's native agent
 mechanism. Keep the implementation writer idle until both readers finish or
-their cancellation is confirmed. Readers return separate JSON results through
+their cancellation is confirmed, except for a private repair checkout prepared
+under `lane_isolation` `scratch_clone` for registered open findings. Readers return separate JSON results through
 `result --file <result.json>`; the existing owner alone persists canonical
 reports after the barrier. A reader registers as soon as it finishes, also
 while the other reader's verification command runs: the runner records which
 role runs each command, and a registration waits only for the settling
 reader's own command to exit. The code reviewer runs no command, not even a
-diagnostic test: its manifest names the freeze record and QA's recorded runs
-as `verification_evidence` instead. It registers its finished result at once
-and returns. A reader waiting on another role's step, such as calibration,
-returns its result unregistered for the coordinator. A
+diagnostic test. Its `verification_evidence` names the freeze record and QA runs.
+It registers its finished result at once and returns. A reader waiting for another role,
+such as calibration, returns its result unregistered for the coordinator. A
 cancelled or diagnostic result cannot approve an Item. Code, test, contract or
 instruction drift invalidates the candidate.
 Switch `code_review_panel`: at `beside_official`, a lens panel reads the frozen

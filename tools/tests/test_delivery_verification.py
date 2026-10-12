@@ -891,6 +891,12 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         manifest = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")
         size = len(json.dumps({"ok": True, **manifest}, indent=2).encode())
         self.assertLess(size, 64 * 1024, f"reader manifest is {size} bytes")
+        self.assertIn("project_reading_file", manifest)
+        reading = Path(manifest["project_reading_file"]["path"])
+        self.assertEqual(verification.digest(json.loads(reading.read_text())),
+                         manifest["project_reading_file"]["sha256"])
+        inspected = verification.inspect_context(self.root, manifest)
+        self.assertEqual(inspected["candidate_hash"], frozen["candidate"]["candidate_hash"])
         self.assertNotIn("source_observations", manifest)
         observations = manifest["source_observations_file"]
         self.assertEqual(json.loads(Path(observations["path"]).read_text()),

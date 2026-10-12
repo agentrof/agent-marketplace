@@ -3428,6 +3428,15 @@ def inspect_context(root: Path, payload: dict, *, reason: str | None = None,
     if payload.get("product_commit", current["product_commit"]) != current["product_commit"]:
         raise RuntimeError("context manifest names another candidate commit")
     plan = payload.get("project_reading")
+    if "project_reading_file" in payload:
+        reference = payload["project_reading_file"]
+        path = safe_runtime_path(root, session_path(root).parent / "manifest/project-reading.json", file_only=True)
+        try:
+            plan = json.loads(path.read_text(encoding="utf-8"))
+            if reference.get("path") != str(path) or digest(plan) != reference.get("sha256"):
+                raise ValueError("context attachment differs")
+        except (OSError, ValueError, TypeError, AttributeError):
+            raise RuntimeError("project reading attachment changed or is unavailable") from None
     if not isinstance(plan, dict) or "request" not in plan:
         raise RuntimeError("resolve context or use frozen inspect reads before continuing")
     def addressed(index):
@@ -3681,6 +3690,12 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                                       "findings": []},
             "registration": "Every reader registers its own result with panel-result --file <result.json>;"
                             " merge-panel then registers the one code review result"}
+    budget = json.loads(project_context.POLICY.read_text(encoding="utf-8"))["reader_manifest_bytes"]
+    if len(json.dumps(result, indent=2).encode("utf-8")) > budget:
+        reading = result["project_reading"]
+        result["project_reading_file"] = reader_attachment(
+            root, "project-reading.json", reading, "The frozen inspect-context command loads this bound reading plan.")
+        result["project_reading"] = {key: reading[key] for key in ("status", "coverage") if key in reading}
     return result
 
 

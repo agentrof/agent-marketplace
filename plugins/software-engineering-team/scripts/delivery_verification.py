@@ -3537,7 +3537,9 @@ def rebind_unit_run(root: Path, delivery_id: str) -> dict:
             return {"exit_code": 0, "candidate_intact": True, "needed": False}
         path = rebind_unit_record(root, delivery_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        environment = command_environment(root, diagnostic=selection["kind"] == "diagnostic_test")
+        # This Delivery-wide run has no single Item identity.
+        environment = command_environment(root, {"delivery": delivery_id, "story": ""},
+                                          diagnostic=selection["kind"] == "diagnostic_test")
         data = {"schema_version": 1, "candidate_hash": digest(selection), "failed_test_ids": [],
                 "affected_test_ids": selection["selected_test_ids"], "selected_test_ids": selection["selected_test_ids"]}
         selector = raw_output_path(root, "scratch/rebound-unit-selection.json")

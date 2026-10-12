@@ -134,8 +134,9 @@ is confirmed, except an isolated `lane_isolation` `scratch_clone` repair of
 registered findings. Each reader registers `result --file <result.json>` when
 finished, also while another reader's command runs; registration waits only for
 its own command. The owner alone persists canonical reports after the barrier.
-The code reviewer runs no command, including diagnostics; `verification_evidence`
-names the freeze record and QA runs. A reader waiting for another role's step
+The code reviewer runs no command, not even a diagnostic test.
+Its `verification_evidence` names the freeze record and QA runs.
+It registers its finished result at once and returns. A reader waiting for another role's step
 returns its result unregistered. Cancelled or diagnostic results cannot approve
 an Item. Code, test, contract or instruction drift invalidates the candidate.
 Switch `code_review_panel`: at `beside_official`, a lens panel reads the frozen

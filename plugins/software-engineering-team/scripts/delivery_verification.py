@@ -3037,6 +3037,10 @@ def settle_result(root: Path, value: dict, result: dict, *, merged: bool = False
                                    " and resolve blocking findings")
         # Refuses an open minor finding that is not a complete follow-up.
         open_follow_ups(result, item)
+    if role == "qa_engineer" and verdict == "cancelled":
+        for row in value.get("owner_steps", []):
+            if row["state"] == "awaiting_owner_step":
+                row.update(state="cancelled", completed_at=time.time())
     stored = dict(result)
     if role == "qa_engineer" and value.get("owner_steps"):
         stored["owner_steps"] = owner_step_progress(value)

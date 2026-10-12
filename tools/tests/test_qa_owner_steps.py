@@ -121,6 +121,18 @@ class OwnerStepTests(unittest.TestCase):
                 verification.record_owner_step(self.root, self.output())
         self.assertEqual(verification.read_session(self.root), before)
 
+    def test_confirmed_cancellation_releases_the_owner_wait(self):
+        verification.await_owner_step(self.root, "stop-holder")
+        result = {"role": "qa_engineer", "mode": "qa_final", "verdict": "cancelled",
+                  "session_id": "frozen-pass", "candidate_hash": "sha256:candidate",
+                  "report": "Owner cancelled this pass"}
+        with self.assertRaisesRegex(RuntimeError, "cancellation must be confirmed"):
+            verification.register_result(self.root, result)
+        value = verification.register_result(self.root, {**result, "cancellation_confirmed": True})
+        self.assertEqual(value["owner_steps"][0]["state"], "cancelled")
+        with mock.patch.object(verification, "wait_holder", return_value=None):
+            self.assertTrue(verification.wait_for_release(self.root, "qa_engineer", 0.01)["released"])
+
     def test_failed_output_and_timeout_cannot_pass(self):
         for changes in ({"exit_code": 1}, {"output": "holder still running"}):
             with self.subTest(changes=changes):

@@ -214,6 +214,20 @@ LIVE_GROUP_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 # command must accept.
 LIVE_GROUP_RUN = "live_group_run"
 LIVE_GROUP_RUNS = ("per_group", "combined")
+# At live_case_reuse delta_since_green the impact map that proves a live group
+# unchanged since its base run: "<group>=<glob>" entries, where group "*" names
+# catch-all paths that change every group. Globs match as fnmatch, "*" crossing "/".
+LIVE_GROUP_PATHS = "live_group_paths"
+LIVE_ALL_GROUPS = "*"
+
+
+def live_impact_map(props: dict) -> dict[str, list[str]]:
+    """The declared live_group_paths as group -> sorted globs, the catch-all under "*"."""
+    impact: dict[str, list[str]] = {}
+    for entry in props.get(LIVE_GROUP_PATHS) or []:
+        group, _, glob = str(entry).partition("=")
+        impact.setdefault(group, []).append(glob)
+    return {group: sorted(globs) for group, globs in sorted(impact.items())}
 
 
 # A Verification Contract may opt in to a host guard for long verification
@@ -244,7 +258,8 @@ def live_test_problems(props: dict) -> list[str]:
         return ([f"{LIVE_GROUP_RUN} needs live_test_command, live_test_workdir and live_groups"]
                 if LIVE_GROUP_RUN in props else []) + (["live_diagnostic_command needs live test groups"]
                 if "live_diagnostic_command" in props else []) + (["live_resume_command needs live test groups"]
-                if "live_resume_command" in props else [])
+                if "live_resume_command" in props else []) + ([f"{LIVE_GROUP_PATHS} needs live test groups"]
+                if LIVE_GROUP_PATHS in props else [])
     errors = []
     if not all(name in props for name in LIVE_TEST_FIELDS):
         errors.append("live_test_command, live_test_workdir and live_groups are declared together or not at all")
@@ -270,6 +285,14 @@ def live_test_problems(props: dict) -> list[str]:
         resume = props["live_resume_command"]
         if not isinstance(resume, str) or not resume.strip() or resume.count(LIVE_GROUP_PLACEHOLDER) != 1:
             errors.append("live_resume_command must contain {group} exactly once")
+    if LIVE_GROUP_PATHS in props:
+        entries = props[LIVE_GROUP_PATHS]
+        known = set(groups) if isinstance(groups, list) else set()
+        if (not isinstance(entries, list) or not entries or len(set(map(str, entries))) != len(entries)
+                or any(not isinstance(entry, str) or entry.partition("=")[0] not in known | {LIVE_ALL_GROUPS}
+                       or not entry.partition("=")[2].strip() for entry in entries)):
+            errors.append(f"{LIVE_GROUP_PATHS} must list unique '<group>=<glob>' entries naming a declared live"
+                          " group or '*'")
     return errors
 
 

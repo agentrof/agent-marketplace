@@ -130,6 +130,13 @@ the Item holds fresh runtime evidence on the same `environment_paths` bytes,
 so the first pass and any environment code change still take the fresh path.
 The steps are in `qa-verification/references/switch-runtime_lifecycle-long_lived.md`.
 
+Process switch `live_case_reuse` reruns every selected live group at `off`.
+At `delta_since_green`, each passing live run becomes the base of its groups,
+and a later pass reruns only the groups whose approved `live_group_paths`, or a
+catch-all path, changed since that base; the others take the base run's
+passed cases under bindings QA's final evidence check enforces. The steps are
+in `qa-verification/references/switch-live_case_reuse-delta_since_green.md`.
+
 Process switch `repair_review` decides when a corrected candidate receives an
 independent correctness review. `after_freeze`, the default, keeps the review
 inside the next full pass. At `before_freeze`, a fresh reader checks the repair

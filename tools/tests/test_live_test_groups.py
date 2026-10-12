@@ -18,6 +18,7 @@ import tempfile
 import unittest
 import threading
 import time
+from unittest import mock
 try:
     from tools.tests.levels import integration
 except ModuleNotFoundError:  # run as a script from tools/tests
@@ -80,11 +81,201 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(self.errors(live_group_run="combined"),
                          ["live_group_run needs live_test_command, live_test_workdir and live_groups"])
 
+    def test_live_group_paths_name_declared_groups_or_the_catch_all(self):
+        paths = ["smoke=src/smoke/*", "billing=src/billing/*", "*=Makefile"]
+        self.assertEqual(self.errors(**LIVE, live_group_paths=paths), [])
+        self.assertEqual(operation_compile.live_impact_map({"live_group_paths": paths}),
+                         {"*": ["Makefile"], "billing": ["src/billing/*"], "smoke": ["src/smoke/*"]})
+        message = ("live_group_paths must list unique '<group>=<glob>' entries naming a declared live group or '*'")
+        for value in ([], ["audit=src/*"], ["smoke="], ["smoke"], ["smoke=a", "smoke=a"], "smoke=a", [3]):
+            with self.subTest(live_group_paths=value):
+                self.assertEqual(self.errors(**LIVE, live_group_paths=value), [message])
+        self.assertEqual(self.errors(live_group_paths=paths), ["live_group_paths needs live test groups"])
+
     def test_the_fields_bind_the_approved_source_hash(self):
         props = operation_compile.initial_props("verification", []) | LIVE
         changed = props | {"live_groups": ["smoke"]}
         self.assertNotEqual(operation_compile.source_hash(props, "# Body"),
                             operation_compile.source_hash(changed, "# Body"))
+
+
+REUSE = {**LIVE, "live_test_command": "live {group}", "live_group_run": "combined",
+         "live_group_paths": ["smoke=src/smoke/*", "billing=src/billing/*", "*=live.py"]}
+ENVIRONMENT = {"environment_variables": ["AGENTROF_ITEM_ID"], "environment_hash": "hmac-sha256:" + "0" * 64,
+               "python": "3", "platform": "host", "git": "git"}
+
+
+def base_entry(**fields) -> dict:
+    """A passing combined base run of both groups, recorded as record_live_base keeps it."""
+    entry = {"product_commit": "a" * 40, "candidate_hash": "sha256:base",
+             "map_hash": verification.digest(operation_compile.live_impact_map(REUSE)),
+             "evidence_hash": "sha256:evidence", "live_group": "smoke,billing", "command": "live smoke,billing",
+             "workdir": ".", **ENVIRONMENT, "exit_code": 0, "candidate_intact": True,
+             "output_file": "scratch/base.log", "output_sha256": "0" * 64, "completed_at": time.time(),
+             "cases": {"tests/live.py::test_billing": "passed"}}
+    entry.update(fields)
+    return entry
+
+
+class LiveBaseProblemTests(unittest.TestCase):
+    """At live_case_reuse delta_since_green a group reuses its base run only while every binding holds."""
+
+    def problem(self, entry=None, group="billing", contract=REUSE, ancestor=True, changed=("src/smoke/a.py",),
+                environment=ENVIRONMENT):
+        return verification.live_base_problem(base_entry() if entry is None else entry, group, contract,
+                                              ancestor=ancestor, changed=None if changed is None else list(changed),
+                                              environment=environment)
+
+    def test_a_delta_that_leaves_the_group_untouched_reuses_its_base(self):
+        self.assertIsNone(self.problem())
+        self.assertIsNone(self.problem(changed=["docs/readme.md"], environment=None))
+
+    def test_each_broken_binding_is_refused_by_name(self):
+        cases = {
+            "has no recorded passing base run": {"entry": {}},
+            "did not pass intact": {"entry": base_entry(exit_code=1)},
+            "expired": {"entry": base_entry(completed_at=0)},
+            "live_group_paths changed": {"contract": {**REUSE, "live_group_paths": ["billing=src/*"]}},
+            "approved live command changed": {"contract": {**REUSE, "live_test_command": "other {group}"}},
+            "ran in another declared environment": {"environment": {**ENVIRONMENT, "python": "4"}},
+            "is no ancestor": {"ancestor": False},
+            "cannot be read": {"changed": None},
+            "src/billing/b.py changed since the base run of live group billing and matches one of its live paths":
+                {"changed": ["src/billing/b.py"]},
+            "live.py changed since the base run of live group billing and matches a catch-all live path":
+                {"changed": ["live.py"]},
+        }
+        for message, arguments in cases.items():
+            with self.subTest(message):
+                self.assertIn(message, self.problem(**arguments) or "")
+        unmapped = {**REUSE, "live_group_paths": ["smoke=src/smoke/*"]}
+        entry = base_entry(map_hash=verification.digest(operation_compile.live_impact_map(unmapped)))
+        self.assertIn("declares no live_group_paths", self.problem(entry, contract=unmapped))
+
+    def test_a_reuse_record_names_each_group_with_its_base_run(self):
+        entry = base_entry()
+        raw = {"identity": {"kind": "live_test", "live_group": "smoke", **ENVIRONMENT,
+                            "reused_live_base": {"billing": "sha256:other"}},
+               "reused_live_base": {"billing": entry}}
+        raw["evidence_hash"] = verification.digest(raw)
+        session = {"candidate": {"delivery": "delivery", "product_commit": "b" * 40}}
+        with mock.patch.object(verification, "live_case_reuse", return_value=True):
+            self.assertEqual(verification.live_reuse_problem(Path("."), session, raw, REUSE),
+                             "names reused live groups apart from their base runs")
+        with mock.patch.object(verification, "live_case_reuse", return_value=False):
+            self.assertIn("only process switch live_case_reuse delta_since_green",
+                          verification.live_reuse_problem(Path("."), session, raw, REUSE))
+
+    def test_a_live_only_finding_closes_on_reused_evidence_while_its_files_are_unchanged(self):
+        finding = {"id": "QA-1", "role": "qa_engineer", "severity": "minor", "status": "open",
+                   "live_group": "billing", "file": "src/billing/b.py", "verification": "billing live case"}
+        plan = {"groups": {"billing": {"reusable": True, "base_evidence_hash": "sha256:evidence",
+                                       "changed_paths": ["src/smoke/a.py"]}}}
+        session = {"unresolved_findings": [finding], "previous_candidate": None}
+        row, = verification.carried_findings(Path("."), session, {}, False, plan)
+        self.assertEqual((row["action"], row["live_base_evidence_hash"]), ("close_on_reused_live", "sha256:evidence"))
+        plan["groups"]["billing"]["changed_paths"] = ["src/billing/b.py"]
+        self.assertEqual(verification.carried_findings(Path("."), session, {}, False, plan)[0]["action"], "reexamine")
+        plan["groups"]["billing"] = {"reusable": False, "reason": "selected"}
+        self.assertEqual(verification.carried_findings(Path("."), session, {}, False, plan)[0]["action"], "reexamine")
+        self.assertEqual(verification.carried_findings(Path("."), session, {}, False), [])
+
+
+@integration
+class LiveCaseReuseTests(unittest.TestCase):
+    setUp = base.VerificationTests.setUp
+    write = base.VerificationTests.write
+    note = base.VerificationTests.note
+    commit = base.VerificationTests.commit
+    freeze = base.VerificationTests.freeze
+    result = base.VerificationTests.result
+    settle = base.VerificationTests.settle
+
+    def enable(self, value="delta_since_green"):
+        original = delivery.delivery_switch_value
+        patch = mock.patch.object(delivery, "delivery_switch_value", side_effect=lambda docs, identifier, name:
+                                  value if name == "live_case_reuse" else original(docs, identifier, name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        return patch
+
+    def declare(self) -> dict:
+        executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
+        path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(path)
+        contract.update(REUSE, live_test_command=executable + " live.py {group}")
+        self.write(path.relative_to(self.root), delivery.frontmatter(contract, body))
+        self.write("live.py", "import json, os, pathlib, sys\n"
+                   "groups = sys.argv[1].split(',')\n"
+                   "report = {g: {'tests/live.py::test_' + g: 'passed'} for g in groups}\n"
+                   "pathlib.Path(os.environ['AGENTROF_VERIFICATION_SCRATCH'], 'live-case-report.json')"
+                   ".write_text(json.dumps({'schema_version': 1, 'groups': report}))\n"
+                   "print('BASE', os.environ.get('AGENTROF_LIVE_BASE_COMMIT', '-'))\n")
+        self.write("src/smoke/a.txt", "1\n")
+        self.write("src/billing/b.txt", "1\n")
+        self.commit()
+        return contract
+
+    def test_a_nightly_run_of_an_ancestor_commit_is_a_base(self):
+        self.declare()
+        nightly = verification.git(self.root, "rev-parse", "HEAD")
+        item = (delivery.split_note(self.root / self.directory / "delivery.md")[0]["id"],
+                delivery.split_note(self.root / self.item_path)[0]["story_id"])
+        with self.assertRaisesRegex(RuntimeError, "live-base serves only process switch live_case_reuse"):
+            verification.live_base_run(self.root, *item, nightly, "smoke,billing")
+        self.enable()
+        recorded = verification.live_base_run(self.root, *item, nightly, "smoke,billing")
+        self.assertEqual((recorded["exit_code"], recorded["candidate_intact"]), (0, True))
+        self.write("src/smoke/a.txt", "2\n")
+        self.commit()
+        self.freeze()
+        plan = verification.manifest(self.root, *item, "qa_engineer", "qa_final")["live_reuse"]
+        self.assertEqual((plan["selected_groups"], plan["base_commit"]), (["smoke"], nightly))
+        self.assertIsNone(plan["groups"]["billing"]["base_candidate_hash"])
+        run = verification.run_check(self.root, "live_test", group="smoke")
+        self.assertEqual(run["identity"]["reused_live_base"], {"billing": recorded["evidence_hash"]})
+
+    def test_a_pass_reuses_the_groups_its_delta_leaves_untouched_and_refuses_a_changed_base(self):
+        self.enable()
+        contract = self.declare()
+        frozen = self.freeze()
+        item = (frozen["candidate"]["delivery"], frozen["candidate"]["story"])
+        first = verification.run_check(self.root, "live_test", group="smoke,billing")
+        self.assertNotIn("reused_live_base", first["identity"])
+        self.settle()
+        base_commit = frozen["candidate"]["product_commit"]
+
+        self.write("src/smoke/a.txt", "2\n")
+        self.commit()
+        self.freeze()
+        plan = verification.manifest(self.root, *item, "qa_engineer", "qa_final")["live_reuse"]
+        self.assertEqual((plan["selected_groups"], plan["reusable_groups"], plan["base_commit"]),
+                         (["smoke"], ["billing"], base_commit))
+        second = verification.run_check(self.root, "live_test", group="smoke")
+        self.assertEqual(second["identity"]["reused_live_base"], {"billing": first["evidence_hash"]})
+        self.assertEqual(second["reused_live_base"]["billing"]["cases"], {"tests/live.py::test_billing": "passed"})
+        self.assertIn("BASE " + base_commit, verification.raw_output_path(self.root, second["output_file"]).read_text())
+        session = verification.read_session(self.root)
+        recorded = session["raw_evidence"]["live_test:smoke"]
+        self.assertIsNone(verification.live_reuse_problem(self.root, session, recorded, contract))
+        output = verification.raw_output_path(self.root, first["output_file"])
+        kept = output.read_bytes()
+        checks = self.result("qa_engineer", "qa_final")["checks"]
+        session = verification.read_session(self.root)
+        verification.require_raw_evidence(self.root, session, checks)
+        output.write_bytes(b"changed")
+        with self.assertRaisesRegex(RuntimeError, "live_test:smoke evidence reuses a base run of live group billing"
+                                                  " whose output is missing or changed"):
+            verification.require_raw_evidence(self.root, session, checks)
+        output.write_bytes(kept)
+        self.settle()
+
+        self.write("live.py", self.root.joinpath("live.py").read_text() + "# catch-all change\n")
+        self.commit()
+        self.freeze()
+        plan = verification.manifest(self.root, *item, "qa_engineer", "qa_final")["live_reuse"]
+        self.assertEqual(plan["selected_groups"], ["smoke", "billing"])
+        self.assertIn("matches a catch-all live path", plan["groups"]["billing"]["reason"])
 
 
 @integration

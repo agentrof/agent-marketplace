@@ -528,6 +528,7 @@ RELEASED_DEFAULTS = {
     "item_review_scale": "fixed",
     "lane_isolation": "shared_checkout",
     "lane_table": "off",
+    "live_case_reuse": "off",
     "level_change_map": "off",
     "mechanical_pass_tier": "role_tier",
     "own_target_reuse": "off",
@@ -568,6 +569,15 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "live_case_reuse": {
+        f"{SKILLS}/qa-verification/references/switch-live_case_reuse-delta_since_green.md": (
+            "A group with no entry is never reused",
+            "never reused from an earlier green run",
+            "only an ancestor of the Item's candidate is accepted",
+            "QA's final evidence check refuses a broken binding by name",
+            "Reuse never replaces QA's independent assessment",
+        ),
+    },
     "qa_preflight": {
         f"{SKILLS}/qa-verification/references/switch-qa_preflight-lifecycle_first.md": (
             "Only the owner may approve a waiver",

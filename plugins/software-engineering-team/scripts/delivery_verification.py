@@ -64,6 +64,13 @@ PRE_HANDOFF_HISTORY_FIELDS = ("evidence_hash", "candidate_tree", "kind", "exit_c
 # names, which the approved test command runs with every target the run did not cover.
 # At accept_record it takes every own target from that run and spot-runs none.
 OWN_TARGET_SWITCH = "own_target_reuse"
+# At live_case_reuse delta_since_green a live run may satisfy the groups the delta
+# since their last green run does not select with that run's passed cases.
+LIVE_REUSE_SWITCH, DELTA_SINCE_GREEN = "live_case_reuse", "delta_since_green"
+LIVE_BASE = "live-base.json"
+LIVE_BASE_FIELDS = ("product_commit", "candidate_hash", "map_hash", "evidence_hash", "live_group", "command", "workdir",
+                    *("environment_variables", "environment_hash", "python", "platform", "git"),
+                    "exit_code", "candidate_intact", "output_file", "output_sha256", "completed_at")
 SPOT_RUN = "spot_run"
 ACCEPT_RECORD = "accept_record"
 # At test_group_report refuse_missing_groups a test run also reads the group
@@ -128,7 +135,7 @@ RUNNER_VARIABLES = ("AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID", "AGENTROF_MUTATI
 # names neither the variable nor its path. A partitioned test run hands each
 # partition its own file and engine, which its record names, never the identity.
 PARTITION_VARIABLES = ("AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE")
-SELECTION_VARIABLES = ("AGENTROF_LIVE_RESUME", "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
+SELECTION_VARIABLES = ("AGENTROF_LIVE_BASE", "AGENTROF_LIVE_BASE_COMMIT", "AGENTROF_LIVE_RESUME", "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
 # At touched_suites QA's final test run names here the earlier-story targets the
 # accepted pre-handoff run covered, for the approved test command to skip (#354).
 REUSED_TESTS = "reused-tests.json"
@@ -766,6 +773,19 @@ def require_repair_review(root: Path, previous: dict | None, current: dict) -> d
     return record
 
 
+def review_baseline(previous: dict | None) -> dict | None:
+    """The last candidate a code reviewer settled on, the baseline of the next repair review.
+
+    A session whose code reviewer was cancelled reviewed nothing, so it passes
+    its own baseline forward instead of becoming one.
+    """
+    if not previous:
+        return None
+    if previous.get("workers", {}).get("code_reviewer", {}).get("state") == "settled":
+        return previous.get("candidate")
+    return previous.get("previous_candidate")
+
+
 def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, remote: str = "origin") -> dict:
     started = time.monotonic()
     root = root.resolve()
@@ -824,7 +844,7 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
                 retained[("code_reviewer", finding["id"])] = {**finding, "role": "code_reviewer"}
         findings = [retained[key] for key in sorted(retained)]
         value = {"schema_version": 1, "session_id": uuid.uuid4().hex, "candidate": current,
-                 "previous_candidate": previous.get("candidate") if previous else None,
+                 "previous_candidate": review_baseline(previous),
                  "unresolved_findings": findings,
                  "workers": {role: {"state": "running", "started_at": time.time()} for role in ROLES},
                  "metrics": {"freeze_seconds": time.monotonic() - started, "command_cache_hits": 0,
@@ -1701,6 +1721,197 @@ def live_groups_selected(group: str) -> list[str]:
     return [name.strip() for name in group.split(",")]
 
 
+def live_case_reuse(root: Path, delivery_id: str) -> bool:
+    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, LIVE_REUSE_SWITCH) == DELTA_SINCE_GREEN
+
+
+def live_base_path(root: Path) -> Path:
+    return safe_runtime_path(root, session_path(root).parent / LIVE_BASE, file_only=True)
+
+
+def read_live_base(root: Path) -> dict:
+    """Each live group's last passing run in this Item worktree, kept across verification sessions."""
+    try:
+        value = json.loads(live_base_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    groups = value.get("groups") if isinstance(value, dict) and value.get("schema_version") == 1 else None
+    return groups if isinstance(groups, dict) else {}
+
+
+def record_live_base(root: Path, record: dict, product_commit: str, candidate_hash: str | None,
+                     contract: dict) -> None:
+    """Keep a passing intact live run as the base of every group it ran; a run that did not pass drops them.
+
+    A group that failed after its last green run is never reused from that run.
+    """
+    groups = read_live_base(root)
+    identity = record["identity"]
+    passed = record["exit_code"] == 0 and record["candidate_intact"] is True
+    cases = record.get("live_case_report", {})
+    for name in live_groups_selected(identity["live_group"]):
+        groups.pop(name, None)
+        if passed:
+            groups[name] = {"product_commit": product_commit, "candidate_hash": candidate_hash,
+                            "map_hash": digest(operation_compile.live_impact_map(contract)),
+                            **{key: identity[key] for key in ("live_group", "command", "workdir", *ENVIRONMENT_FIELDS)},
+                            **{key: record[key] for key in ("evidence_hash", "exit_code", "candidate_intact",
+                                                            "output_file", "output_sha256", "completed_at")},
+                            "cases": cases.get(name, {})}
+    atomic_file.replace_text(live_base_path(root), json.dumps({"schema_version": 1, "groups": groups},
+                                                              indent=2, sort_keys=True) + "\n")
+
+
+def commit_delta(root: Path, base: str, commit: str) -> tuple[bool, list[str] | None]:
+    """Whether *base* is an ancestor of *commit*, and the paths that differ between them, or None when unreadable."""
+    ancestor = subprocess.run(["git", "-C", str(root), "merge-base", "--is-ancestor", base, commit],
+                              capture_output=True).returncode == 0
+    try:
+        return ancestor, sorted(part for part in git(root, "diff", "--name-only", "--no-renames", "-z", base, commit)
+                                .split("\0") if part)
+    except RuntimeError:
+        return ancestor, None
+
+
+def live_base_problem(entry: object, group: str, contract: dict, *, ancestor: bool, changed: list[str] | None,
+                      environment: dict | None = None) -> str | None:
+    """Why *group* cannot take its cases from its base run *entry* on a candidate *changed* paths away, or None.
+
+    The base passed intact, is as fresh as final evidence must be, ran the
+    approved command for its groups under the approved impact map (and, with
+    *environment*, in that declared environment) on an ancestor of the
+    candidate, and no changed path matches a catch-all glob or a glob of the group.
+    """
+    if not isinstance(entry, dict) or any(key not in entry for key in LIVE_BASE_FIELDS):
+        return f"live group {group} has no recorded passing base run"
+    if entry["exit_code"] != 0 or entry["candidate_intact"] is not True:
+        return f"the base run of live group {group} did not pass intact"
+    if not fresh_record(entry):
+        return f"the base run of live group {group} expired"
+    impact = operation_compile.live_impact_map(contract)
+    if entry["map_hash"] != digest(impact):
+        return f"the approved {operation_compile.LIVE_GROUP_PATHS} changed since the base run of live group {group}"
+    try:
+        command = live_test_command(contract, entry["live_group"])
+    except RuntimeError:
+        command = None
+    if (group not in live_groups_selected(str(entry["live_group"])) or entry["command"] != command
+            or entry["workdir"] != contract.get("live_test_workdir", ".")):
+        return f"the approved live command changed since the base run of live group {group}"
+    if environment is not None and {key: entry[key] for key in ENVIRONMENT_FIELDS} != environment:
+        return f"the base run of live group {group} ran in another declared environment"
+    if not ancestor:
+        return f"the base commit of live group {group} is no ancestor of the frozen candidate"
+    if changed is None:
+        return f"the paths changed since the base run of live group {group} cannot be read"
+    if not impact.get(group):
+        return f"live group {group} declares no {operation_compile.LIVE_GROUP_PATHS}, so no delta proves it unchanged"
+    for path in changed:
+        if any(fnmatch.fnmatchcase(path, glob) for glob in impact.get(operation_compile.LIVE_ALL_GROUPS, [])):
+            return f"{path} changed since the base run of live group {group} and matches a catch-all live path"
+        if any(fnmatch.fnmatchcase(path, glob) for glob in impact[group]):
+            return f"{path} changed since the base run of live group {group} and matches one of its live paths"
+    return None
+
+
+def live_reuse_plan(root: Path, current: dict, contract: dict, environment: dict | None = None) -> dict:
+    """Which declared live groups the delta since their base run selects, and which may reuse that run."""
+    base, deltas, groups = read_live_base(root), {}, {}
+    for group in contract.get("live_groups") or []:
+        entry = base.get(group)
+        commit = entry.get("product_commit") if isinstance(entry, dict) else None
+        if isinstance(commit, str) and commit not in deltas:
+            deltas[commit] = commit_delta(root, commit, current["product_commit"])
+        ancestor, changed = deltas.get(commit, (False, None))
+        problem = live_base_problem(entry, group, contract, ancestor=ancestor, changed=changed, environment=environment)
+        groups[group] = ({"reusable": True, "base_commit": commit, "base_candidate_hash": entry["candidate_hash"],
+                          "base_evidence_hash": entry["evidence_hash"], "changed_paths": changed}
+                         if problem is None else {"reusable": False, "reason": problem,
+                                                  **({"base_commit": commit} if commit else {})})
+    commits = sorted({row["base_commit"] for row in groups.values() if row.get("base_commit")})
+    return {"switch": f"{LIVE_REUSE_SWITCH} {DELTA_SINCE_GREEN}", "groups": groups,
+            "selected_groups": [group for group, row in groups.items() if not row["reusable"]],
+            "reusable_groups": [group for group, row in groups.items() if row["reusable"]],
+            "base_commit": commits[0] if len(commits) == 1 else None,
+            "rule": "Run the selected groups; a run records the reusable groups it does not run as reused_live_base"
+                    " with their base runs' passed cases, and run --fresh reuses none."}
+
+
+def live_base_run(root: Path, delivery_id: str, story: str, commit: str, group: str) -> dict:
+    """Run the approved live command on an ancestor of the Item's candidate, such as a nightly build, as a base.
+
+    It runs outside any reader, holds the environment like repair-live, and a
+    passing intact run becomes the base of each group it ran, as a pass's own
+    run would; one that does not pass drops their bases.
+    """
+    root = root.resolve()
+    guard_write(root)
+    with environment_lock(root, PRE_HANDOFF_HOLDER, "live-base"), command_lock(root, PRE_HANDOFF_HOLDER, "live-base"):
+        if not live_case_reuse(root, delivery_id):
+            raise RuntimeError(f"live-base serves only process switch {LIVE_REUSE_SWITCH} {DELTA_SINCE_GREEN}")
+        current = candidate(root, delivery_id, story, allow_evidence=True)
+        commit = git(root, "rev-parse", "--verify", commit + "^{commit}")
+        if not commit_delta(root, commit, current["product_commit"])[0]:
+            raise RuntimeError("live-base records only an ancestor of the Item's candidate")
+        contract = verification_contract(root)
+        command = live_test_command(contract, group)
+        group = live_record_group(contract, group)
+        workdir = str(contract.get("live_test_workdir", "."))
+        scratch = session_path(root).parent / "scratch"
+        scratch.mkdir(parents=True, exist_ok=True)
+        environment = command_environment(root, current)
+        declared = environment_identity(root, environment, contract)
+        raw_output_path(root, "scratch/live-case-report.json").unlink(missing_ok=True)
+        started = time.monotonic()
+        completed, intact, difference, _dropped, _ran = private_checkout_run(
+            root, safe_runtime_path(root, scratch), commit, workdir, command, environment)
+        output_name = "scratch/live-base-" + uuid.uuid4().hex + ".log"
+        atomic_file.replace_bytes(raw_output_path(root, output_name), completed.stdout)
+        record = {"identity": {"base_commit": commit, "kind": "live_test", "command": command, "workdir": workdir,
+                               **declared, "execution_isolation": "private_clone_v1", "live_group": group},
+                  "exit_code": completed.returncode, "candidate_intact": intact, "output_file": output_name,
+                  "output_sha256": hashlib.sha256(completed.stdout).hexdigest(),
+                  "duration_seconds": time.monotonic() - started, "completed_at": time.time(),
+                  "live_case_report": live_case_report(root)}
+        if difference:
+            record["checkout_difference"] = difference
+        record["evidence_hash"] = digest(record)
+        record_live_base(root, record, commit, None, contract)
+        return record
+
+
+def live_reuse_problem(root: Path, session: dict, raw: dict, contract: dict) -> str | None:
+    """Why the base runs a live record reuses do not bind the frozen candidate any more, or None."""
+    if not live_case_reuse(root, session["candidate"]["delivery"]):
+        return f"reuses a live base run, which only process switch {LIVE_REUSE_SWITCH} {DELTA_SINCE_GREEN} allows"
+    identity, reused = raw["identity"], raw.get("reused_live_base")
+    ran = live_groups_selected(identity.get("live_group", ""))
+    if (not isinstance(reused, dict) or not reused or not isinstance(identity["reused_live_base"], dict)
+            or set(reused) != set(identity["reused_live_base"])
+            or any(not isinstance(entry, dict) or identity["reused_live_base"][group] != entry.get("evidence_hash")
+                   or group in ran or group not in (contract.get("live_groups") or [])
+                   for group, entry in reused.items())
+            or raw.get("evidence_hash") != digest({key: value for key, value in raw.items() if key != "evidence_hash"})):
+        return "names reused live groups apart from their base runs"
+    environment = {key: identity.get(key) for key in ENVIRONMENT_FIELDS}
+    for group, entry in sorted(reused.items()):
+        try:
+            output = raw_output_path(root, str(entry.get("output_file")))
+            intact = (output.is_file() and not output.is_symlink()
+                      and hashlib.sha256(output.read_bytes()).hexdigest() == entry.get("output_sha256"))
+        except (OSError, RuntimeError):
+            intact = False
+        if not intact:
+            return f"reuses a base run of live group {group} whose output is missing or changed"
+        commit = entry.get("product_commit")
+        ancestor, changed = (commit_delta(root, commit, session["candidate"]["product_commit"])
+                             if isinstance(commit, str) else (False, None))
+        problem = live_base_problem(entry, group, contract, ancestor=ancestor, changed=changed, environment=environment)
+        if problem:
+            return "cannot reuse its base: " + problem
+    return None
+
+
 def qa_preflight(root: Path, delivery_id: str) -> bool:
     return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, "qa_preflight") == "lifecycle_first"
 
@@ -1952,6 +2163,25 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             checkpoint_path.unlink()
         if kind == "mutation" and not current["mutation_files"]:
             return record_empty_mutation(root, session, current, command, workdir, declared)
+        live_reuse = live_reuse_on = None
+        if group is not None and live_case_reuse(root, current["delivery"]):
+            live_reuse_on = True
+            plan = live_reuse_plan(root, current, contract, declared)
+            ran = live_groups_selected(group)
+            base = read_live_base(root)
+            # run --fresh and a resumed attempt reuse nothing.
+            live_reuse = ({name: base[name] for name in plan["reusable_groups"] if name not in ran}
+                          if not fresh and not resume else {})
+            base_file = raw_output_path(root, "scratch/live-base-selection.json")
+            atomic_file.replace_text(base_file, json.dumps(
+                {"schema_version": 1, "candidate_hash": current["candidate_hash"],
+                 "base_commits": {name: row["base_commit"] for name, row in plan["groups"].items()
+                                  if row.get("base_commit")},
+                 "selected_groups": plan["selected_groups"], "reused_groups": sorted(live_reuse)},
+                indent=2, sort_keys=True) + "\n")
+            environment["AGENTROF_LIVE_BASE"] = str(base_file)
+            if plan["base_commit"]:
+                environment["AGENTROF_LIVE_BASE_COMMIT"] = plan["base_commit"]
         reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
                           if kind == "test" else (None, None))
         own_note = None
@@ -1976,6 +2206,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             identity["live_resume_hash"] = digest(resume_input)
         if reuse is not None:
             identity["reused_pre_handoff"] = reuse
+        if live_reuse:
+            identity["reused_live_base"] = {name: entry["evidence_hash"] for name, entry in sorted(live_reuse.items())}
         groups = (group_report_declaration(root, current["delivery"], contract)
                   if kind in {"test", "diagnostic_test"} else None)
         if groups is not None:
@@ -2099,6 +2331,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                   "duration_seconds": time.monotonic() - started, "completed_at": time.time()}
         if group is not None:
             record["live_case_report"] = live_case_report(root)
+        if live_reuse:
+            record["reused_live_base"] = live_reuse
         if checkpoint is not None:
             record["live_checkpoint"] = checkpoint
         if interrupted_by:
@@ -2132,6 +2366,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                                              "output_sha256": hashlib.sha256(entry["output"]).hexdigest()})
         record["evidence_hash"] = digest(record)
         session["raw_evidence"][record_key] = record
+        if live_reuse_on:
+            record_live_base(root, record, current["product_commit"], current["candidate_hash"], contract)
         if record.get("diagnostic_selection", {}).get("finding_controls"):
             session["finding_control_bindings"] = finding_control_history(session)
         session["metrics"]["command_seconds"] += record["duration_seconds"]
@@ -2699,6 +2935,11 @@ def require_raw_evidence(root: Path, session: dict, checks: dict) -> dict | None
         if (not output.is_file() or output.is_symlink()
                 or hashlib.sha256(output.read_bytes()).hexdigest() != raw.get("output_sha256")):
             raise RuntimeError(f"{check} raw command output is missing or changed")
+    for key, raw in sorted(session["raw_evidence"].items()):
+        if raw.get("identity", {}).get("kind") == "live_test" and "reused_live_base" in raw["identity"]:
+            problem = live_reuse_problem(root, session, raw, contract)
+            if problem:
+                raise RuntimeError(f"{key} evidence {problem}")
     return shared[1] if shared else None
 
 
@@ -5077,12 +5318,21 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
         "If context is insufficient, use frozen inspect/diff on your initiative or parent direction "
         "and report context_findings with sources, impact, recovery and proposed fix to the parent. "
         "Only the parent offers an anonymous issue through issue-report after exact-payload user approval.")
+    live_plan = (live_reuse_plan(root, current, contract)
+                 if contract.get("live_groups") and live_case_reuse(root, delivery_id) else None)
+    if live_plan is not None:
+        result["live_reuse"] = live_plan
+        live_rows = ([row for row in carried_findings(root, value, current, scope_expanded, live_plan)
+                      if row.get("live_group")] if role == "qa_engineer" else [])
+        if live_rows:
+            result["carried_findings"] = live_rows
     if role == "code_reviewer":
         # The code reviewer runs no command: it reads the freeze record and QA's results instead.
         del result["diagnostic_interface"]
         result["verification_evidence"] = reviewer_evidence(root, value)
         if review_loop(root, delivery_id) == "blocking_delta" and mode == "review_repair":
-            result["carried_findings"] = carried_findings(root, value, current, scope_expanded)
+            result["carried_findings"] = [row for row in carried_findings(root, value, current, scope_expanded, live_plan)
+                                          if row.get("role", "code_reviewer") == "code_reviewer"]
     panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
     if panel is None and role == "code_reviewer" and code_review_panel(root, current["delivery"]) == RISK_SCOPED:
         result["lens_selection"] = lens_selection(root, current, panel_assignments())[1]
@@ -5219,8 +5469,12 @@ def start_pass(root: Path, delivery_id: str, story: str, *, review_mode: str | N
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         return stopped("launch prompts", str(exc))
     steps.append({"step": "launch prompts", "ok": True, "readers": sorted(prompts)})
-    return {"ok": True, "session_id": frozen["session_id"], "candidate_hash": frozen["candidate"]["candidate_hash"],
-            "steps": steps, "manifests": paths, "prompts": prompts}
+    value = {"ok": True, "session_id": frozen["session_id"], "candidate_hash": frozen["candidate"]["candidate_hash"],
+             "steps": steps, "manifests": paths, "prompts": prompts}
+    plan = manifests["qa_engineer"].get("live_reuse")
+    if plan is not None:
+        value["live_reuse"] = {key: plan[key] for key in ("base_commit", "selected_groups", "reusable_groups")}
+    return value
 
 
 
@@ -5257,16 +5511,21 @@ def finding_names(finding: dict) -> tuple[list[str], list[str]]:
     return sorted(paths), sorted(symbols)
 
 
-def carried_findings(root: Path, session: dict, current: dict, scope_expanded: bool) -> list[dict]:
+def carried_findings(root: Path, session: dict, current: dict, scope_expanded: bool,
+                     live_plan: dict | None = None) -> list[dict]:
     """Which unresolved code review findings a repair review re-examines and which it carries.
 
     At review_loop blocking_delta a carried finding is re-examined only when a
     file or symbol it names changed between the previous candidate and this
     one; otherwise its status is carried from the record. Without a previous
     candidate, or when the bound inputs or instructions changed, every one is
-    re-examined.
+    re-examined. With *live_plan*, at live_case_reuse delta_since_green, a
+    finding of either reader that names its live_group joins: while that group
+    reuses its base run and no file the finding names changed since that base,
+    it may close on the reused evidence.
     """
-    findings = [finding for finding in session.get("unresolved_findings", []) if finding.get("role") == "code_reviewer"]
+    findings = [finding for finding in session.get("unresolved_findings", [])
+                if finding.get("role") == "code_reviewer" or (live_plan and finding.get("live_group"))]
     previous = session.get("previous_candidate") or {}
     changed_files: set[str] = set()
     known_files: set[str] = set()
@@ -5294,13 +5553,22 @@ def carried_findings(root: Path, session: dict, current: dict, scope_expanded: b
         anchored = any(path in known_files or any(name.startswith(path.rstrip("/") + "/") for name in known_files)
                        for path in paths)
         reexamine = whole or not anchored or bool(touched or moved)
-        rows.append({"id": finding["id"], "severity": finding.get("severity"), "status": finding.get("status"),
-                     "named_files": paths, "named_symbols": symbols, "changed_files": touched,
-                     "changed_symbols": moved, "action": "reexamine" if reexamine else "carry"})
+        row = {"id": finding["id"], "severity": finding.get("severity"), "status": finding.get("status"),
+               "named_files": paths, "named_symbols": symbols, "changed_files": touched,
+               "changed_symbols": moved, "action": "reexamine" if reexamine else "carry"}
+        group = finding.get("live_group") if live_plan else None
+        if group:
+            base = live_plan["groups"].get(group, {})
+            since = base.get("changed_paths") or []
+            row.update(live_group=group, role=finding.get("role"))
+            if base.get("reusable") and not any(path == changed or changed.startswith(path.rstrip("/") + "/")
+                                                for path in paths for changed in since):
+                row.update(action="close_on_reused_live", live_base_evidence_hash=base["base_evidence_hash"])
+        rows.append(row)
     return rows
 
 
-RUN_SUMMARY_FIELDS = ("live_group", "resume_count", "resume_of", "exit_code", "candidate_intact", "selection_intact", "evidence_scope", "reused_pre_handoff", "duration_seconds",
+RUN_SUMMARY_FIELDS = ("live_group", "resume_count", "resume_of", "exit_code", "candidate_intact", "selection_intact", "evidence_scope", "reused_pre_handoff", "reused_live_base", "duration_seconds",
                       "completed_at", "evidence_hash", "environment_hash", "checkout_difference", "earlier_stories",
                       "output_file")
 
@@ -5311,6 +5579,9 @@ def run_summary(root: Path, record: dict) -> dict:
     value = {key: fields[key] for key in RUN_SUMMARY_FIELDS if key in fields}
     if "reused_pre_handoff" in value:
         value["reused_pre_handoff"] = value["reused_pre_handoff"].get("evidence_hash")
+    if "reused_live_base" in value:
+        value["reused_live_base"] = {group: entry.get("evidence_hash") if isinstance(entry, dict) else entry
+                                     for group, entry in value["reused_live_base"].items()}
     if "output_file" in value:
         value["output_path"] = str(raw_output_path(root, value["output_file"]))
     return value
@@ -5444,11 +5715,15 @@ def main(argv=None) -> int:
     subs = parser.add_subparsers(dest="command", required=True)
     for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map",
                  "repair-live", "repair-review-manifest", "repair-review-result", "permission-preflight",
-                 "rehearse", "rehearsal-status"):
+                 "rehearse", "rehearsal-status", "live-base"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
     subs.choices["repair-review-result"].add_argument("--file", required=True)
+    subs.choices["live-base"].add_argument("--commit", required=True,
+                                           help="an ancestor of the Item's candidate, such as a nightly build")
+    subs.choices["live-base"].add_argument("--group", required=True,
+                                           help="the live groups to run, comma-separated as run --kind live_test takes them")
     rebind = subs.add_parser("rebind-unit-run")
     rebind.add_argument("--delivery", required=True)
     subs.choices["freeze"].add_argument("--fresh", action="store_true")
@@ -5565,6 +5840,8 @@ def main(argv=None) -> int:
             value = register_repair_review(root, args.delivery, args.story, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "repair-live":
             value = repair_live(root, args.delivery, args.story)
+        elif args.command == "live-base":
+            value = live_base_run(root, args.delivery, args.story, args.commit, args.group)
         elif args.command == "rehearse":
             value = rehearse(root, args.delivery, args.story)
         elif args.command == "rehearsal-status":
@@ -5597,7 +5874,7 @@ def main(argv=None) -> int:
         print(json.dumps({"ok": True, **value}, indent=2))
         if args.command == "owner-step-result":
             return 0 if value["state"] == "passed" else 1
-        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run", "repair-live", "rehearse", "rebind-unit-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
+        return 0 if args.command not in {"run", "environment", "lane-run", "regression-run", "repair-live", "live-base", "rehearse", "rebind-unit-run"} or (value["exit_code"] == 0 and value.get("candidate_intact", True)) else 1
     except (RuntimeError, ValueError, OSError, KeyError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2))
         return 2

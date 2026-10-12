@@ -1,0 +1,6 @@
+{
+  "summary": "Report live group heartbeats, streaming output and optional adapter case progress while verification is running.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 sys.path.insert(0, str(ROOT / "tools/tests"))
 import delivery_compile as delivery
+import backlog_compile
 import delivery_verification as verification
 import file_lock
 import context_catalog
@@ -242,6 +243,79 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         parsed = verification.diagnostic_selection(self.root, selector, verification.read_session(self.root)["candidate"])
         self.assertEqual(parsed["failed_test_ids"], literal["failed_test_ids"])
 
+    def test_open_finding_runs_its_prescribed_negative_controls_as_finding_diagnostic(self):
+        self.prepare_diagnostic()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [{"id": "CR-1", "severity": "major", "status": "open", "verification": "Run the controls",
+                               "negative_control_test_ids": ["focused_tests.Focused.test_affected",
+                                                             "untouched.Suite.test_control"]},
+                              {"id": "CR-2", "severity": "minor", "status": "open", "verification": "Review"}]
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        frozen = self.freeze()
+        selector = verification.session_path(self.root).parent / "scratch/controls.json"
+        base = {"schema_version": 1, "candidate_hash": frozen["candidate"]["candidate_hash"],
+                "failed_test_ids": [], "affected_test_ids": []}
+        refusals = (([{"finding_id": "CR-9", "test_ids": ["focused_tests.Focused.test_affected"]}], "no open inherited"),
+                    ([{"finding_id": "CR-2", "test_ids": ["focused_tests.Focused.test_affected"]}], "prescribes no"),
+                    ([{"finding_id": "CR-1", "test_ids": ["focused_tests.Focused.test_failed"]}], "prescribes no"),
+                    ([{"finding_id": "CR-1", "test_ids": ["untouched.Suite.test_control"]}], "test files the Item changed"),
+                    ([{"finding_id": "CR-1", "test_ids": []}], "unique nonempty"),
+                    ([{"finding_id": "CR-1"}], "only finding_id and test_ids"))
+        for controls, message in refusals:
+            with self.subTest(controls=controls):
+                selector.write_text(json.dumps({**base, "finding_controls": controls}), encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, message):
+                    verification.run_check(self.root, "diagnostic_test", selection_file=selector)
+        controls = [{"finding_id": "CR-1", "test_ids": ["focused_tests.Focused.test_affected"]}]
+        selector.write_text(json.dumps({**base, "finding_controls": controls}), encoding="utf-8")
+        raw = verification.run_check(self.root, "diagnostic_test", selection_file=selector)
+        self.assertEqual((raw["exit_code"], raw["candidate_intact"], raw["selection_intact"]), (0, True, True))
+        self.assertIn("Ran 1 test", verification.raw_output_path(self.root, raw["output_file"]).read_text())
+        self.assertEqual(raw["evidence_scope"], "finding_diagnostic")
+        rows = verification.finding_control_history(verification.read_session(self.root))
+        self.assertEqual(rows, [{"finding_id": "CR-1", "test_ids": ["focused_tests.Focused.test_affected"],
+                                "candidate_hash": frozen["candidate"]["candidate_hash"], "evidence_hash": raw["evidence_hash"]}])
+        self.assertEqual(verification.finding_control_history({"finding_control_bindings": rows}), rows)
+        self.assertEqual(verification.read_session(self.root)["finding_control_bindings"], rows)
+        second = copy.deepcopy(raw)
+        second["diagnostic_selection"]["finding_controls"][0]["finding_id"] = "CR-2"
+        combined = verification.finding_control_history({"finding_control_bindings": rows,
+                                                         "raw_evidence": {"diagnostic_test": second}})
+        self.assertEqual([row["finding_id"] for row in combined], ["CR-1", "CR-2"])
+        recorded = raw["diagnostic_selection"]
+        self.assertEqual((recorded["finding_controls"], recorded["finding_control_test_ids"], recorded["selected_test_ids"]),
+                         (controls, ["focused_tests.Focused.test_affected"], ["focused_tests.Focused.test_affected"]))
+        # Finding-scoped evidence never stands in for the acceptance suite.
+        result = self.result("qa_engineer", "qa_diagnostic")
+        result["mode"] = "qa_final"
+        result["checks"]["full_test_suite"].update(command=self.command, exit_code=0,
+            environment=raw["identity"]["environment_hash"], raw_evidence_hash=raw["evidence_hash"])
+        with self.assertRaisesRegex(RuntimeError, "same-candidate command evidence"):
+            verification.register_result(self.root, result)
+
+        self.note("workspace/docs/delivery/deliveries/dlv-000/delivery.md", {"id": "DLV-000", "status": "merged"})
+        self.note("workspace/docs/delivery/deliveries/dlv-000/delivery-review.md",
+                  {"finding_control_bindings": json.dumps([{"story": "AUTH-01", **rows[0]}])})
+        record = {"stories": [{"id": "AUTH-01", "test_body": ""}]}
+        self.assertEqual(backlog_compile.pending_finding_controls(self.root / "workspace/docs", record)[0]["test_ids"],
+                         ["focused_tests.Focused.test_affected"])
+        record["stories"][0]["test_body"] = "## AUTH-01-TS-001\n- automation_target: focused_tests.Focused.test_affected\n"
+        self.assertEqual(backlog_compile.pending_finding_controls(self.root / "workspace/docs", record), [])
+
+    def test_negative_control_ids_of_a_finding_are_literal_test_ids(self):
+        for controls in ([], ["-k"], ["same", "same"], "tests/test_x.py::test_y"):
+            with self.subTest(controls=controls), self.assertRaisesRegex(RuntimeError, "negative_control_test_ids"):
+                verification.check_findings([{"id": "CR-1", "severity": "major", "status": "open",
+                                              "verification": "Run", "negative_control_test_ids": controls}])
+        verification.check_findings([{"id": "CR-1", "severity": "major", "status": "open", "verification": "Run",
+                                      "negative_control_test_ids": ["tests/test_x.py::test_y"]}])
+        self.assertTrue(verification.test_id_in_file("tests/test_x.py::test_y", "tests/test_x.py"))
+        self.assertTrue(verification.test_id_in_file("tests.test_x.Case.test_y", "tests/test_x.py"))
+        self.assertFalse(verification.test_id_in_file("tests.test_xy.Case.test_y", "tests/test_x.py"))
+
     def test_diagnostic_selector_edit_and_restore_invalidates_command_evidence(self):
         selector, _ = self.prepare_diagnostic()
         contract, _ = delivery.split_note(self.root / "workspace/docs/operation/verification-contract.md")
@@ -259,6 +333,23 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertFalse(raw["selection_intact"])
         self.assertFalse(raw["candidate_intact"])
         self.assertFalse(verification.run_check(self.root, "diagnostic_test", selection_file=selector)["reused"])
+
+    def test_the_manifest_and_the_active_reader_refusal_name_the_one_allowed_command_form(self):
+        """A reader told only that writes wait loses its run to refused shell calls, so the manifest carries the
+        literal invocation and the refusal names its form and where files are read instead."""
+        self.freeze()
+        form = verification.manifest(self.root, "DLV-001", "AUTH-01", "qa_engineer", "qa_final")["command_form"]
+        self.assertTrue(form.startswith(verification.command_form(self.root) + " "), form)
+        tokens = (shlex.split(form) if os.name != "nt" else form.split())[:5]
+        self.assertEqual(Path(tokens[2]).name, "delivery_verification.py")
+        self.assertEqual(tokens[1], "-B")
+        self.assertEqual(tokens[3:5], ["--worktree", str(self.root)])
+        with self.assertRaises(RuntimeError) as refused:
+            verification.guard_write(self.root, [self.root / "src/product.py"])
+        message = str(refused.exception)
+        self.assertTrue(message.startswith("DELIVERY_VERIFICATION_READERS_ACTIVE: "), message)
+        for part in ("command_form", "no pipe, redirect, variable or prefix", "Read tool", "allowed_writes"):
+            self.assertIn(part, message)
 
     def test_frozen_manifest_defaults_to_resolver_and_batches_exact_candidate_text(self):
         self.freeze()
@@ -296,6 +387,21 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertEqual(set(checks), set(final["required_checks"]))
         self.assertEqual(set(checks["full_test_suite"]), {"passed", "evidence", "command", "exit_code", "environment", "raw_evidence_hash"})
         self.assertFalse(checks["full_test_suite"]["passed"])
+
+    def test_the_code_reviewer_manifest_offers_no_command_and_names_the_recorded_runs(self):
+        self.prepare_diagnostic()
+        review = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_initial")
+        self.assertNotIn("diagnostic_interface", review)
+        evidence = review["verification_evidence"]
+        self.assertEqual(evidence["rule"], verification.REVIEWER_COMMAND_RULE)
+        self.assertIsNone(evidence["pre_handoff_run"])
+        self.assertEqual(evidence["qa_runs"], {})
+        self.assertNotIn("carried_findings", review)
+        # QA's recorded run reaches the reviewer's next manifest as a summary, never as a command to repeat.
+        raw = verification.run_check(self.root, "test")
+        runs = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer",
+                                     "review_initial")["verification_evidence"]["qa_runs"]
+        self.assertEqual(runs["test"]["evidence_hash"], raw["evidence_hash"])
 
     def test_legacy_schedule_preserves_bytes_and_hash(self):
         props = {"role_sequence": ["backend_developer", "code_reviewer", "qa_engineer"]}
@@ -518,6 +624,57 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
             code = verification.main(["--worktree", str(self.root), "status", *arguments])
         return code, json.loads(output.getvalue())
 
+    def test_permission_preflight_names_every_command_qa_runs_before_the_first_round(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = verification.main(["--worktree", str(self.root), "permission-preflight",
+                                      "--delivery", "DLV-001", "--story", "AUTH-01"])
+        plain = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual([row["purpose"] for row in plain["commands"]], ["full_test_suite"])
+        prefix = verification.cli_form(self.root)
+        self.assertIn(str(Path(verification.__file__).resolve()), prefix)
+        self.assertEqual(plain["commands"][0]["command"], prefix + " run --kind test")
+        self.assertEqual(plain["allow_rules"]["command_prefixes"], [prefix + " run", prefix + " environment"])
+        self.assertIn("blocked_by_permission", plain["next_action"])
+        with mock.patch.object(verification.subprocess, "run", side_effect=AssertionError("probe executed a command")):
+            probe = verification.permission_probe(self.root, "test")
+        self.assertEqual((probe["effect"], probe["host_permission"]), ("none", "unknown"))
+        contract_path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(contract_path)
+        contract.update(diagnostic_test_command="make diagnose", mutation_disposition="required",
+                        live_groups=["lifecycle", "restart"])
+        self.write(contract_path.relative_to(self.root), delivery.frontmatter(contract, body))
+        props, item_body = delivery.split_note(self.root / self.item_path)
+        self.write(self.item_path, delivery.frontmatter({**props, "runtime_required": True}, item_body))
+        full = verification.permission_preflight(self.root, "DLV-001", "AUTH-01")
+        self.assertEqual([row["purpose"] for row in full["commands"]],
+                         ["full_test_suite", "diagnostic_test", "mutation", "live_test:lifecycle", "live_test:restart",
+                          "environment:up", "environment:seed", "environment:logs", "environment:url",
+                          "environment:down"])
+        self.assertIn(prefix + " run --kind live_test --group restart", full["allow_rules"]["exact_commands"])
+
+    def test_a_permission_refused_command_is_recorded_and_never_passes_final_qa(self):
+        self.freeze()
+        blocked = [{"command": "run --kind live_test --group restart", "reason": "host permission check refused it",
+                    "outcome": "blocked_by_permission"}]
+        verification.register_result(self.root, self.result())
+        final = self.result("qa_engineer", "qa_final")
+        final["blocked_commands"] = blocked
+        with self.assertRaisesRegex(RuntimeError, "cannot leave a blocked_by_permission command unrun"):
+            verification.register_result(self.root, final)
+        diagnostic = self.result("qa_engineer", "qa_diagnostic")
+        for rows in ([{**blocked[0], "outcome": "skipped"}], [{"command": "run"}], "run", [{**blocked[0], "reason": " "}]):
+            with self.subTest(rows=rows), self.assertRaisesRegex(RuntimeError, "blocked_commands"):
+                verification.register_result(self.root, {**diagnostic, "blocked_commands": rows})
+        verification.register_result(self.root, {**diagnostic, "blocked_commands": blocked})
+        code, summary = self.status("--summary")
+        self.assertEqual(code, 0)
+        self.assertEqual(summary["blocked_by_permission"], [{**blocked[0], "role": "qa_engineer"}])
+        verification.resume_qa(self.root)
+        _code, resumed = self.status("--summary")
+        self.assertEqual(resumed["blocked_by_permission"], [])
+
     def test_status_summary_prints_run_outcomes_without_the_session_bindings(self):
         frozen = self.freeze()
         raw = verification.run_check(self.root, "test")
@@ -656,6 +813,29 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         with self.assertRaisesRegex(RuntimeError, "missing or changed"):
             verification.validate(self.root, "DLV-001", "AUTH-01")
 
+    def test_every_command_reads_the_candidate_delivery_and_item_ids_whatever_the_shell_exports(self):
+        """A reader's shell can export no variable, so an approved command that needs the Delivery and Item ids
+        reads them from the runner, set from the frozen candidate over any inherited value, and every run
+        identity covers both."""
+        script = "import os; print(os.environ['AGENTROF_DELIVERY_ID'], os.environ['AGENTROF_ITEM_ID'])"
+        arguments = [sys.executable, "-c", script]
+        path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(path)
+        contract["test_command"] = self.command = (subprocess.list2cmdline(arguments) if os.name == "nt"
+                                                   else shlex.join(arguments))
+        self.write(path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
+        self.commit()
+        self.freeze()
+        verification.register_result(self.root, self.result())
+        with mock.patch.dict(os.environ, {"AGENTROF_DELIVERY_ID": "DLV-999"}):
+            os.environ.pop("AGENTROF_ITEM_ID", None)
+            raw = verification.run_check(self.root, "test")
+        self.assertEqual(raw["exit_code"], 0)
+        output = verification.raw_output_path(self.root, raw["output_file"]).read_text(encoding="utf-8")
+        self.assertIn("DLV-001 AUTH-01", output)
+        self.assertLessEqual({"AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID"}, set(raw["identity"]["environment_variables"]))
+        self.assertLessEqual({"AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID"}, set(verification.RUNNER_VARIABLES))
+
     def test_the_tracked_environment_hash_checks_no_guess_of_a_declared_value(self):
         """Evidence approval writes QA's checks, the run identity's environment hash among them, into the Item's
         tracked verification record. A hash of a few guessable values would let anyone who reads that record
@@ -663,13 +843,14 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         leaves the Item's verification runtime, where every identity is compared (#356)."""
         self.declare_variables("ITEM_TOKEN")
         self.freeze()
-        with mock.patch.dict(os.environ, {"ITEM_TOKEN": "7319"}):
+        # A hex-only canary can coincidentally appear inside an unrelated digest.
+        with mock.patch.dict(os.environ, {"ITEM_TOKEN": "p1n!"}):
             self.settle()
-            environment = verification.command_environment(self.root)
+            environment = verification.command_environment(self.root, verification.read_session(self.root)["candidate"])
         identity = verification.read_session(self.root)["raw_evidence"]["test"]["identity"]
         # Every covered value known and the declared one guessed right: the guess still checks nothing.
         values = {name: verification.variable_value(environment, name) for name in identity["environment_variables"]}
-        self.assertEqual(values["ITEM_TOKEN"], "7319")
+        self.assertEqual(values["ITEM_TOKEN"], "p1n!")
         canonical = json.dumps(values, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()
         self.assertNotEqual(identity["environment_hash"], "sha256:" + hashlib.sha256(canonical).hexdigest())
         key = verification.session_path(self.root).parent / "identity.key"
@@ -683,7 +864,7 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
             self.assertEqual(delivery.approve_item_evidence(args), 0)
         record = (self.root / self.directory / "items/auth-01/verification.md").read_text(encoding="utf-8")
         self.assertIn(identity["environment_hash"], record)
-        self.assertNotIn("7319", record)
+        self.assertNotIn("p1n!", record)
 
     def test_a_contract_that_names_a_runner_variable_refuses_before_any_command_runs(self):
         """A run identity drops a selection file the runner writes and binds it by content, so a contract that
@@ -752,6 +933,93 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
                                                           " the full test suite does$"):
                     verification.validate(self.root, "DLV-001", "AUTH-01")
 
+    def test_overlapping_repair_is_isolated_and_needs_a_registered_finding(self):
+        from unittest import mock
+        self.freeze()
+        with mock.patch.object(delivery, "delivery_switch_value", return_value="scratch_clone"):
+            with self.assertRaisesRegex(RuntimeError, "registered open finding"):
+                verification.prepare_repair(self.root)
+            failed = self.result(verdict="failed")
+            failed["findings"] = [{"id": "CR-1", "severity": "major", "verification": "Run regression",
+                                   "status": "open", "file": "src/product.py"}]
+            verification.register_result(self.root, failed)
+            prepared = verification.prepare_repair(self.root)
+            checkout = Path(prepared["path"])
+            self.addCleanup(__import__("shutil").rmtree, checkout.parent)
+            self.assertNotIn(self.root, checkout.parents)
+            frozen = (self.root / "src/product.py").read_bytes()
+            (checkout / "src/product.py").write_text("value = 5\n", encoding="utf-8")
+            self.assertEqual((self.root / "src/product.py").read_bytes(), frozen)
+            self.assertEqual(verification.read_session(self.root)["workers"]["qa_engineer"]["state"], "running")
+            verification.git(checkout, "remote", "set-url", "origin", "changed-origin")
+            with self.assertRaisesRegex(RuntimeError, "repository identity changed"):
+                verification.prepare_repair(self.root)
+            verification.git(checkout, "remote", "set-url", "origin", str(self.root))
+            self.assertTrue(verification.prepare_repair(self.root)["reused"])
+            self.assertEqual((checkout / "src/product.py").read_text(), "value = 5\n")
+            self.assertEqual(prepared["findings"][0]["id"], "CR-1")
+            verification.require_current(self.root, verification.read_session(self.root))
+            with self.assertRaisesRegex(RuntimeError, "DELIVERY_VERIFICATION_READERS_ACTIVE"):
+                verification.guard_write(self.root)
+
+    def test_reader_manifest_stays_small_and_references_its_bulky_data(self):
+        for index in range(2500):
+            self.write(f"vendor/lib/module_{index:04d}.js", f"export const v{index} = {index};\n")
+        self.commit()
+        base = verification.git(self.root, "rev-parse", "HEAD")
+        props, body = delivery.split_note(self.root / self.item_path)
+        self.write(self.item_path, delivery.frontmatter({**props, "integration_base_commit": base}, body))
+        for index in range(200):
+            self.write(f"src/feature/component_{index:03d}.py", f"value_{index} = {index}\n")
+        self.commit()
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [{"id": f"CR-{index}", "severity": "minor", "status": "open",
+                               "file": f"src/feature/component_{index:03d}.py",
+                               "verification": "Rerun the targeted check",
+                               "description": f"Finding {index} headline\n" + "Detail. " * 300}
+                              for index in range(1, 71)]
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        self.write("src/feature/component_000.py", "value_0 = -1\n")
+        self.commit()
+        frozen = self.freeze()
+        manifest = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")
+        size = len(json.dumps({"ok": True, **manifest}, indent=2).encode())
+        self.assertLess(size, 64 * 1024, f"reader manifest is {size} bytes")
+        self.assertIn("project_reading_file", manifest)
+        reading = Path(manifest["project_reading_file"]["path"])
+        self.assertEqual(verification.digest(json.loads(reading.read_text())),
+                         manifest["project_reading_file"]["sha256"])
+        # The other reader's different plan must not replace this attachment.
+        verification.manifest(self.root, "DLV-001", "AUTH-01", "qa_engineer", "qa_final")
+        inspected = verification.inspect_context(self.root, manifest)
+        self.assertEqual(inspected["candidate_hash"], frozen["candidate"]["candidate_hash"])
+        self.assertNotIn("source_observations", manifest)
+        observations = manifest["source_observations_file"]
+        self.assertEqual(json.loads(Path(observations["path"]).read_text()),
+                         frozen["candidate"]["source_observations"])
+        self.assertEqual(observations["sha256"], verification.digest(frozen["candidate"]["source_observations"]))
+        self.assertGreater(observations["entries"], 2700)
+        self.assertEqual(manifest["candidate_hash"], frozen["candidate"]["candidate_hash"])
+        self.assertEqual(manifest["repair_delta"], ["src/feature/component_000.py"])
+        summary = manifest["unresolved_findings"][0]
+        self.assertEqual(summary, {"id": "CR-1", "role": "code_reviewer", "severity": "minor", "status": "open",
+                                   "file": "src/feature/component_001.py", "title": "Finding 1 headline"})
+        full = json.loads(Path(manifest["unresolved_findings_file"]["path"]).read_text())
+        self.assertEqual(full, frozen["unresolved_findings"])
+        self.assertEqual(manifest["unresolved_findings_file"]["sha256"], verification.digest(full))
+        # The CLI still refuses a stale snapshot, whatever the reader's copy says.
+        self.write("vendor/lib/module_0000.js", "export const v0 = -1;\n")
+        self.commit()
+        with self.assertRaisesRegex(RuntimeError, "verification candidate or source bindings changed"):
+            verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")
+
+    def test_repair_delta_names_changed_files_when_the_whole_change_is_new(self):
+        self.freeze()
+        manifest = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_initial")
+        self.assertEqual(manifest["repair_delta"], "changed_files")
+
     def test_repair_preserves_finding_ids_and_requires_explicit_resolution(self):
         self.freeze()
         failed = self.result(verdict="failed")
@@ -790,6 +1058,98 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         with self.assertRaisesRegex(RuntimeError, "every compiler-selected"):
             verification.register_result(self.root, result)
 
+
+    def test_an_empty_mutation_scope_records_a_passed_run_without_launching_it(self):
+        """With no compiler-selected file, run --kind mutation records `scope empty, not run` with zero
+        duration and exit 0, never launching the approved command, and QA's final result passes on it."""
+        executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
+        failing = executable + ' -c "import sys; sys.exit(3)"'
+        contract_path = "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(self.root / contract_path)
+        contract.update(mutation_disposition="required", mutation_command=failing)
+        self.write(contract_path, delivery.frontmatter(contract, body))
+        self.commit()
+        with mock.patch.object(verification, "mutation_scope", return_value=[]), \
+                mock.patch.object(verification, "private_checkout_run",
+                                  side_effect=AssertionError("an empty scope launches no command")) as launched:
+            frozen = self.freeze()
+            self.assertEqual(frozen["candidate"]["mutation_files"], [])
+            verification.register_result(self.root, self.result())
+            raw = verification.run_check(self.root, "mutation")
+            self.assertEqual((raw["exit_code"], raw["candidate_intact"], raw["duration_seconds"], raw["not_run"]),
+                             (0, True, 0, "scope empty, not run"))
+            self.assertEqual(raw["identity"]["command"], failing)
+            self.assertEqual(verification.raw_output_path(self.root, raw["output_file"]).read_text(encoding="utf-8"),
+                             "scope empty, not run\n")
+            launched.assert_not_called()
+        with mock.patch.object(verification, "mutation_scope", return_value=[]):
+            result = self.result("qa_engineer", "qa_final")
+            result["checks"]["mutation_whole_changed_files"].update(files=[], raw_evidence_hash=raw["evidence_hash"])
+            verification.register_result(self.root, result)
+            verification.validate(self.root, "DLV-001", "AUTH-01")
+
+    def test_start_pass_freezes_writes_both_manifests_and_their_launch_prompts(self):
+        """start-pass skips the pre-handoff regression at its default, freezes, saves each reader's manifest
+        as manifest prints it and writes each reader's launch prompt from the package templates."""
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = verification.main(["--worktree", str(self.root), "start-pass", "--delivery", "DLV-001",
+                                      "--story", "AUTH-01"])
+        value = json.loads(output.getvalue())
+        self.assertEqual(code, 0, value)
+        self.assertEqual([step["step"] for step in value["steps"]],
+                         ["regression-selection", "regression-run", "freeze", "manifest code_reviewer",
+                          "manifest qa_engineer", "launch prompts"])
+        self.assertIn("skipped", value["steps"][0])
+        session = verification.read_session(self.root)
+        self.assertEqual(value["session_id"], session["session_id"])
+        for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_final")):
+            saved = json.loads(Path(value["manifests"][role]).read_text(encoding="utf-8"))
+            self.assertEqual(saved, verification.manifest(self.root, "DLV-001", "AUTH-01", role, mode))
+            prompt = value["prompts"][role]
+            self.assertEqual(Path(prompt["path"]).read_text(encoding="utf-8"), prompt["text"])
+            for text in (value["manifests"][role], session["session_id"], session["candidate"]["candidate_hash"],
+                         f"mode {mode}", "inspect-context --plan", " result --file <result.json>"):
+                self.assertIn(text, prompt["text"])
+            self.assertNotRegex(prompt["text"], r"\{[a-z_]+\}")
+        self.assertEqual(sorted(value["prompts"]), ["code_reviewer", "qa_engineer"])
+
+    def test_start_pass_writes_a_launch_prompt_per_lens_assignment_beside_the_official_reviewer(self):
+        """At code_review_panel beside_official the official reviewer registers through panel-result and
+        every lens assignment of the manifest gets its own prompt with its lens and id prefix."""
+        with mock.patch.object(verification, "code_review_panel", return_value=verification.BESIDE_OFFICIAL):
+            value = verification.start_pass(self.root, "DLV-001", "AUTH-01")
+        self.assertTrue(value["ok"], value)
+        assignments = json.loads(Path(value["manifests"]["code_reviewer"]).read_text(
+            encoding="utf-8"))["code_review_panel"]["assignments"]
+        lenses = {name: prompt["text"] for name, prompt in value["prompts"].items() if "lens" in name}
+        self.assertEqual(len(lenses), len(assignments))
+        for assignment in assignments:
+            text = lenses["code_reviewer_lens-" + assignment["id_prefix"].rstrip("-")]
+            for part in (", ".join(assignment["lens"]), assignment["id_prefix"], "panel-result --file"):
+                self.assertIn(part, text)
+        self.assertIn(" panel-result --file", value["prompts"]["code_reviewer"]["text"])
+        self.assertIn(" result --file", value["prompts"]["qa_engineer"]["text"])
+
+    def test_start_pass_stops_at_the_first_failing_step(self):
+        """A failing pre-handoff run stops the chain before the freeze, and a refused freeze before any
+        manifest; each names its step and error."""
+        with mock.patch.object(verification, "pre_handoff_regression", return_value=verification.TOUCHED_SUITES), \
+                mock.patch.object(verification, "regression_selection", return_value={"selection_file": "s.json"}), \
+                mock.patch.object(verification, "regression_run",
+                                  return_value={"exit_code": 1, "candidate_intact": True, "output_file": "o.log"}), \
+                mock.patch.object(verification, "freeze") as freeze:
+            value = verification.start_pass(self.root, "DLV-001", "AUTH-01")
+            freeze.assert_not_called()
+        self.assertEqual((value["ok"], value["failed_step"]), (False, "regression-run"))
+        self.assertEqual([step["step"] for step in value["steps"]], ["regression-selection", "regression-run"])
+        self.assertRegex(value["errors"][0], r"^regression-run: exit code 1, ")
+        self.assertTrue(verification.start_pass(self.root, "DLV-001", "AUTH-01")["ok"])
+        value = verification.start_pass(self.root, "DLV-001", "AUTH-01")
+        self.assertEqual((value["ok"], value["failed_step"]), (False, "freeze"))
+        self.assertEqual(value["errors"], ["freeze: settle or cancel the existing readers before freezing a new"
+                                           " candidate"])
+        self.assertNotIn("manifests", value)
 
     def test_mutation_scope_excludes_environment_assets_config_and_tests_but_expands_approved_paths(self):
         names = ["src/settings.json", "tests/test_product.py", "web/logo.svg", "workspace/environment/start.py", "src/new.unknown"]
@@ -1118,7 +1478,8 @@ print(sys.argv[2])
         for phrase in (f"`wait_bound_seconds`, {bound} seconds, in any one tool call",
                        "never through a sleep, a polling loop or a long timeout of its own",
                        "`wait --role <role>` returns once that reader's own verification command has exited",
-                       "The code reviewer runs no command, so it registers its finished result at once and returns"):
+                       "The code reviewer runs no command, not even a diagnostic test",
+                       "It registers its finished result at once and returns"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, flow)
         for host in ("claude", "codex"):
@@ -1184,6 +1545,52 @@ print(sys.argv[2])
         verification.register_result(self.root, self.result())
         verification.validate(self.root, "DLV-001", "AUTH-01")
 
+
+    def test_every_verification_session_of_an_item_runs_in_one_kept_runtime_checkout(self):
+        """A project environment may bind an Item instance to the checkout that created it, so a
+        new session's up must run where the last one did, re-pinned to the new candidate as a
+        fresh clone would hold it."""
+        item, body = delivery.split_note(self.root / self.item_path)
+        item.update(runtime_required=True, environment_contract_ref="operation/environment-contract")
+        self.write(self.item_path, delivery.frontmatter(item, body))
+        self.note("workspace/docs/operation/environment-contract.md", {"status": "approved", "env_command": self.command, "env_workdir": ".", "scenarios": ["baseline"], "service_catalog": []})
+        self.commit()
+        self.freeze()
+        original = subprocess.run
+        directories = []
+
+        def record(command, *args, **kwargs):
+            if isinstance(command, str) and command.startswith(self.command):
+                directories.append(Path(kwargs["cwd"]))
+                if command.endswith(" up"):
+                    (Path(kwargs["cwd"]) / "src/product.py").write_text("left by the last session")
+                    (Path(kwargs["cwd"]) / "build-output").write_text("ignored or untracked output")
+                    verification.git(Path(kwargs["cwd"]), "config", "review.stale", "true")
+                    (Path(kwargs["cwd"]) / ".git/hooks/review-stale").write_text("stale hook")
+            return original(command, *args, **kwargs)
+
+        with mock.patch.object(verification.subprocess, "run", side_effect=record):
+            for verb in ("down", "up", "down"):
+                verification.run_environment(self.root, verb)
+            verification.register_result(self.root, self.result())
+            cancelled = self.result("qa_engineer", "qa_final", "cancelled")
+            cancelled["cancellation_confirmed"] = True
+            verification.register_result(self.root, cancelled)
+            self.write("src/product.py", "value = 3\n")
+            self.commit()
+            self.freeze()
+            events = [verification.run_environment(self.root, "down")]
+            self.assertFalse((directories[-1] / "build-output").exists())
+            self.assertFalse((directories[-1] / ".git/hooks/review-stale").exists())
+            self.assertNotIn("review.stale", verification.git(directories[-1], "config", "--list"))
+            events.append(verification.run_environment(self.root, "up"))
+        self.assertEqual(len(set(directories)), 1, directories)
+        checkout = directories[0]
+        self.assertEqual(checkout.name, verification.RUNTIME_CHECKOUT)
+        self.assertEqual(verification.git(checkout, "rev-parse", "HEAD"),
+                         verification.read_session(self.root)["candidate"]["product_commit"])
+        self.assertEqual([event["candidate_intact"] for event in events], [True, False])
+        self.assertEqual(events[0]["exit_code"], 0)
 
     def test_runtime_mutation_invalidates_evidence_but_teardown_remains_available(self):
         item, body = delivery.split_note(self.root / self.item_path)
@@ -1562,7 +1969,7 @@ print(sys.argv[1])
         self.write(contract_path.relative_to(self.root).as_posix(), delivery.frontmatter(contract, body))
         self.commit()
         # The partition variables of switch test_engines partitioned are per-run inputs too (#386).
-        self.assertEqual(names, ("AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS",
+        self.assertEqual(names, ("AGENTROF_LIVE_RESUME", "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS",
                                  "AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE"))
         with mock.patch.dict(os.environ, {"AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json",
                                           "AGENTROF_REUSED_TESTS": "inherited-reuse.json",
@@ -1680,7 +2087,8 @@ print(sys.argv[1])
             events.append(verification.run_environment(self.root, verb, value))
         self.assertNotEqual(events[0]["attempt_id"], old_runtime["attempt_id"])
         self.assertTrue(all(event["candidate_intact"] for event in events))
-        self.assertEqual((old_checkout[0] / "src/product.py").read_text(), "partial runtime preparation")
+        # The retry re-pins the one kept checkout, so the failed attempt's change is gone.
+        self.assertEqual((old_checkout[0] / "src/product.py").read_text(), "value = 2\n")
         self.assertFalse(set(old_outputs) & {event["output_file"] for event in events})
         for name, content in old_outputs.items():
             self.assertEqual(verification.raw_output_path(self.root, name).read_bytes(), content)
@@ -1931,8 +2339,9 @@ print(sys.argv[1])
         self.write("src/product.py", "value = 3\n")
         self.commit()
         self.freeze()
-        unresolved = {finding["id"]: finding for finding in verification.manifest(
-            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["unresolved_findings"]}
+        attached = verification.manifest(
+            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["unresolved_findings_file"]
+        unresolved = {finding["id"]: finding for finding in json.loads(Path(attached["path"]).read_text())}
         self.assertEqual(sorted(unresolved), ["CR-1", "CR-2"])
         self.assertEqual((unresolved["CR-1"]["severity"], unresolved["CR-1"]["calibrated_severity"]),
                          ("major", "major"))
@@ -1950,6 +2359,53 @@ print(sys.argv[1])
         repair = self.result(mode="review_repair")
         repair["findings"] = [self.claim(status="resolved"), follow_up]
         verification.register_result(self.root, repair)
+
+    def test_blocking_delta_repair_reexamines_only_findings_whose_code_changed(self):
+        self.review_loop()
+        self.write("src/other.py", "def helper_name():\n    return 1\n")
+        self.commit()
+        self.freeze()
+
+        def minor(identifier, anchor, description):
+            return {"id": identifier, "severity": "minor", "status": "open", "verification": "Read the line",
+                    "file": anchor, "description": description, "owner_role": "backend_developer",
+                    "revisit_trigger": "Revisit at the next change to the anchored file."}
+
+        findings = [minor("CR-1", "src/product.py:1", "The name value hides its unit."),
+                    minor("CR-2", "src/other.py:1", "`helper_name` returns a bare constant."),
+                    minor("CR-3", "src/other.py:2", "The caller mirrors `value` without a bound."),
+                    minor("CR-4", "repository", "The reported behavior needs a resolvable anchor.")]
+        result = self.result()
+        result["findings"] = findings
+        verification.register_result(self.root, result)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        self.freeze()
+        rows = {row["id"]: row for row in verification.manifest(
+            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["carried_findings"]}
+        self.assertEqual({identifier: row["action"] for identifier, row in rows.items()},
+                         {"CR-1": "reexamine", "CR-2": "carry", "CR-3": "reexamine", "CR-4": "reexamine"})
+        self.assertEqual(rows["CR-1"]["changed_files"], ["src/product.py"])
+        self.assertEqual((rows["CR-2"]["named_files"], rows["CR-2"]["named_symbols"], rows["CR-2"]["changed_files"],
+                          rows["CR-2"]["changed_symbols"]), (["src/other.py"], ["helper_name"], [], []))
+        self.assertEqual((rows["CR-3"]["changed_files"], rows["CR-3"]["changed_symbols"]), ([], ["value"]))
+        # A first review has no previous candidate to compare, and review_initial lists nothing.
+        self.assertNotIn("carried_findings", verification.manifest(
+            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_initial"))
+
+    def test_current_lists_no_carried_findings(self):
+        self.freeze()
+        result = self.result()
+        result["findings"] = [{"id": "CR-2", "severity": "minor", "status": "open", "verification": "Rename it"}]
+        verification.register_result(self.root, result)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        self.freeze()
+        repair = verification.manifest(self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")
+        self.assertNotIn("carried_findings", repair)
+        self.assertEqual(repair["unresolved_findings"][0]["id"], "CR-2")
 
     def test_current_ignores_calibration_rows(self):
         self.freeze()

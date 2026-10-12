@@ -107,6 +107,13 @@ reviewer's, which `approve-item-evidence` keeps for every pass in the Item's
 code review record.
 `code-review/references/switch-code_review_panel-beside_official.md` defines
 the steps.
+At `risk_scoped`, the same panel reads, but a lens reader joins only when the
+frozen change fires its trigger in `code-review/data/lens-triggers.json`: a
+changed path matching the owner's risk path globs brings in the security
+lens, and changed lines above the owner's threshold bring in the correctness
+and conformance lenses; with none triggered the official reviewer reads
+alone, as
+`code-review/references/switch-code_review_panel-risk_scoped.md` defines.
 
 What a backlog epic reviewer reads is process switch `review_manifest_scope`.
 At `transitive`, the default, every note the epic's manifest includes expands
@@ -328,7 +335,10 @@ allows it. `deliver/references/switch-pre_handoff_regression-touched_suites.md`
 defines the run. At process switch `own_target_reuse` `spot_run`, QA's final
 test run also takes the Item's own Test Plan targets from that run, but for the
 ones QA names to spot-run itself, as
-`deliver/references/switch-own_target_reuse-spot_run.md` defines.
+`deliver/references/switch-own_target_reuse-spot_run.md` defines. At
+`accept_record` it takes every own target from that run, runs none of them
+itself and checks only that the record binds the frozen candidate, as
+`deliver/references/switch-own_target_reuse-accept_record.md` defines.
 
 When QA starts its first test command of a round is process switch
 `qa_gate_order`. At `plan_first`, the default, QA plans and maps every check

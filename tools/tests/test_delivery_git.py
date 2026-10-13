@@ -7821,6 +7821,35 @@ class DeliveryGitDecisionTests(unittest.TestCase):
             f"the Integration holds execution plan {published['plan_hash']} and no Verification Contract, which this "
             f"checkout's approval of execution plan sha256:{'1' * 64} does not supersede; {remedy}"))
 
+    def test_publication_accepts_a_contract_only_re_paired_at_the_same_revision(self):
+        """re-pair after an Environment approval keeps the Verification revision and restamps only
+        its pairing and source_hash, so publication takes it; any other same-revision change, or a
+        pairing that is not later, is still a different approval."""
+        contract = "workspace/docs/operation/verification-contract.md"
+        kinds = {contract: "verification"}
+        plan = {"plan_hash": "sha256:" + "2" * 64, "source_hash": "sha256:" + "b" * 64}
+        held = {"status": "approved", "revision": 2, "source_hash": "sha256:" + "c" * 64, "title": "Verification",
+                "paired_environment_revision": 3, "paired_environment_source_hash": "sha256:" + "5" * 64}
+        re_paired = {**held, "source_hash": "sha256:" + "d" * 64,
+                     "paired_environment_revision": 4, "paired_environment_source_hash": "sha256:" + "6" * 64}
+        self.assertIsNone(delivery_git.require_unsuperseded_approval(
+            kinds, plan, {"plan_hash": plan["plan_hash"]}, {contract: held}, {contract: re_paired}.get))
+        message = (f"the Integration holds execution plan {plan['plan_hash']} and the Verification Contract approved "
+                   f"at revision 2, which this checkout would replace with a different approved revision 2; "
+                   f"{DeliveryGitTests.SUPERSEDED_REMEDY}")
+        for label, local in (
+            ("another field", {**re_paired, "title": "Changed"}),
+            ("an added field", {**re_paired, "owner": "someone"}),
+            ("same pairing", {**re_paired, "paired_environment_revision": 3}),
+            ("lower pairing", {**re_paired, "paired_environment_revision": 2}),
+            ("no pairing", {key: value for key, value in re_paired.items()
+                            if key != "paired_environment_revision"}),
+        ):
+            with self.subTest(refused=label):
+                self.assertEqual(self.refused_finding(lambda: delivery_git.require_unsuperseded_approval(
+                    kinds, plan, {"plan_hash": plan["plan_hash"]}, {contract: held}, {contract: local}.get)),
+                    ("DELIVERY_PLAN_SUPERSEDED", message))
+
 
 # Changing an environment or any setup callable cannot silently reuse a seed
 # produced outside that context. Tests can also request use_cache=False.

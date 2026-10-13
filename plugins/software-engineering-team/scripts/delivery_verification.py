@@ -2494,12 +2494,19 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                      and session["pre_handoff"].get("kind") == "test"
                      and session["pre_handoff"].get("command") == command
                      and session["pre_handoff"].get("workdir") == workdir
-                     and groups is None and partitions is None)
+                     # A group-reported run takes its group report from the accepted run, which must show
+                     # every group the contract declares now passed.
+                     and (groups is None or group_report_problem(
+                         {"identity": {"test_group_report": session["pre_handoff"].get("test_group_report")},
+                          "test_groups": session["pre_handoff"].get("test_groups")}, groups) is None)
+                     and partitions is None)
     if accepted_full:
         completed = subprocess.CompletedProcess(command, 0,
             ("Accepted full-suite pre-handoff evidence " + reuse["evidence_hash"] + "\n"
              + "".join("REUSED " + target + "\n" for target in reuse["test_ids"])).encode("utf-8"))
-        intact, difference, group_report = True, "", None
+        intact, difference = True, ""
+        group_report = (None if groups is None else
+                        {"test_groups": session["pre_handoff"]["test_groups"], "missing_test_groups": []})
     elif partitions is not None:
         partition_records = run_partitions(root, scratch, current, workdir, partitions, environment,
                                            reuse["test_ids"] if reuse is not None else [], groups)
@@ -5132,7 +5139,7 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
             if selection_intact is not None:
                 record["selection_intact"] = selection_intact
             if group_report is not None:
-                record.update(group_report)
+                record.update(group_report, test_group_report=groups)
             record["evidence_hash"] = digest(record)
             atomic_file.replace_text(pre_handoff_record_path(root), json.dumps(
                 {"schema_version": 1, "runs": [*runs, record]}, indent=2, sort_keys=True) + "\n")
@@ -5172,6 +5179,7 @@ def accepted_pre_handoff(root: Path, delivery_id: str, story: str, current: dict
                                             "candidate_intact", "duration_seconds", "completed_at")}
     # A run recorded before runs named their declared environment has none, so QA reuses no such run.
     receipt.update({key: latest[key] for key in ENVIRONMENT_FIELDS if key in latest})
+    receipt.update({key: latest[key] for key in ("test_group_report", "test_groups") if key in latest})
     return receipt
 
 

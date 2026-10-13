@@ -1,0 +1,6 @@
+{
+  "summary": "Document the order of a backlog revision during an active Delivery: source handoff verbs, plan revision barrier, then refresh-target.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

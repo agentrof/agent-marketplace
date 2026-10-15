@@ -261,6 +261,8 @@ An unchanged candidate with unchanged source bindings and instructions reuses
 its existing independent role results without another dispatch.
 Switch `review_loop`: at `blocking_delta`, the code review loop follows
 `skill-content/code-review/references/switch-review_loop-blocking_delta.md`.
+Switch `item_verification`: at `single_verifier`, one verifier registers both results in one pass, as
+`skill-content/deliver/references/switch-item_verification-single_verifier.md` defines.
 Switch `repair_pass`: at `scoped_repair`, a reviewed repair of findings below critical settles with its
 touched-suites run, as `skill-content/deliver/references/switch-repair_pass-scoped_repair.md` defines.
 Switch `finding_disposition`: at `follow_up_issue`, only a critical finding blocks; each one below it is

@@ -3475,7 +3475,63 @@ def critical(finding: dict) -> bool:
 
 
 def follow_up_disposition(root: Path, delivery_id: str) -> bool:
-    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, FINDING_DISPOSITION) == FOLLOW_UP_ISSUE
+    """Whether findings below critical are follow-ups: at follow_up_issue, and always for a single verifier."""
+    docs = delivery.docs_root(root)
+    return (delivery.delivery_switch_value(docs, delivery_id, FINDING_DISPOSITION) == FOLLOW_UP_ISSUE
+            or delivery.delivery_switch_value(docs, delivery_id, ITEM_VERIFICATION) == SINGLE_VERIFIER)
+
+
+# Switch item_verification at single_verifier: one fresh verifier reads the frozen
+# candidate, runs QA's approved commands and registers both results in one pass.
+ITEM_VERIFICATION, SINGLE_VERIFIER = "item_verification", "single_verifier"
+SINGLE_VERIFIER_FIELDS = ("candidate_hash", "session_id", "verifier", "verdict", "report",
+                          "review_checks", "qa_checks", "findings")
+
+
+def register_single_verifier(root: Path, payload: dict) -> dict:
+    """Split one verifier's result into the code review and QA results and settle both readers together.
+
+    Both results pass every check a separate reader's result passes, so
+    evidence approval and integration read them unchanged. Nothing is written
+    unless both are accepted.
+    """
+    root = root.resolve()
+    with locked(root):
+        wait_for_own_command(root, "qa_engineer", "settling its reader")
+        value = read_session(root)
+        current = value["candidate"]
+        docs = delivery.docs_root(root)
+        if delivery.delivery_switch_value(docs, current["delivery"], ITEM_VERIFICATION) != SINGLE_VERIFIER:
+            raise RuntimeError("single-verifier-result runs at switch item_verification single_verifier")
+        if code_review_panel(root, current["delivery"]) != "single_reader" or review_loop(root, current["delivery"]) == "blocking_delta":
+            raise RuntimeError("item_verification single_verifier needs code_review_panel single_reader and a"
+                               " review_loop other than blocking_delta: one verifier is no panel and no calibration")
+        if not isinstance(payload, dict) or set(payload) - {*SINGLE_VERIFIER_FIELDS, "blocked_commands"} \
+                or any(key not in payload for key in SINGLE_VERIFIER_FIELDS):
+            raise RuntimeError("a single verifier result holds exactly: " + ", ".join(SINGLE_VERIFIER_FIELDS))
+        if not isinstance(payload["verifier"], str) or not payload["verifier"].strip():
+            raise RuntimeError("a single verifier result names its native reader identity in verifier")
+        findings = payload["findings"] if isinstance(payload["findings"], list) else None
+        if findings is None or any(not isinstance(finding, dict) or finding.get("role", "code_reviewer") not in ROLES
+                                   for finding in findings):
+            raise RuntimeError("each single verifier finding names role code_reviewer or qa_engineer")
+        common = {key: payload[key] for key in ("candidate_hash", "session_id", "verdict", "report", "verifier")}
+        if "blocked_commands" in payload:
+            common["blocked_commands"] = payload["blocked_commands"]
+        split = lambda role: [{key: item for key, item in finding.items() if key != "role"}
+                              for finding in findings if finding.get("role", "code_reviewer") == role]
+        results = [{**common, "role": "code_reviewer",
+                    "mode": "review_repair" if value.get("previous_candidate") else "review_initial",
+                    "checks": payload["review_checks"], "findings": split("code_reviewer")},
+                   {**common, "role": "qa_engineer", "mode": "qa_final",
+                    "checks": payload["qa_checks"], "findings": split("qa_engineer")}]
+        if payload["verdict"] == "passed":
+            require_intact(value)
+        for result in results:
+            check_result(root, value, result)
+        for result in results:
+            value = settle_result(root, value, result)
+        return value
 
 
 def gate_severities(root: Path, delivery_id: str) -> set[str]:
@@ -6205,6 +6261,7 @@ def main(argv=None) -> int:
     start.add_argument("--remote", default="origin")
     result = subs.add_parser("result")
     result.add_argument("--file", required=True)
+    subs.add_parser("single-verifier-result").add_argument("--file", required=True)
     owner_wait = subs.add_parser("await-owner-step")
     owner_wait.add_argument("--step", required=True)
     owner_result = subs.add_parser("owner-step-result")
@@ -6276,6 +6333,8 @@ def main(argv=None) -> int:
                                     reason=args.reason, refs=args.ref)
         elif args.command == "result":
             value = register_result(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
+        elif args.command == "single-verifier-result":
+            value = register_single_verifier(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "await-owner-step":
             value = await_owner_step(root, args.step)
         elif args.command == "owner-step-result":

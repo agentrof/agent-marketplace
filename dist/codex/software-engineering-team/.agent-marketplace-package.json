@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "02928b253b1c2001c7bdcab826c3375dee02027bb872aa9a62ade8b1b13495d4"
+      "3ba7c19be413ec66b2afc53baaf9c2c73d9f9bc9776fc9e4234eb2670431d0b9"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -203,7 +203,7 @@
       "1ca45984c3c373674dc79e6272686847a89cd56366596c4cd3f836e3c8dc75d5"
     ,
     "scripts/delivery_verification.py":
-      "47a8bd857d27bcc2af607ab4eef78c23a220f2c6075582a2b6289b463723a001"
+      "1a55be0ebc39b2469c93eb0d4f1812fc733e5b844c9112bc7c5853fdf3965ecd"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -470,7 +470,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "4f62e3d2b77b6f5cfc3dda52b1b08ceb57e72256f818c0f41e9280e04d2fc475"
+      "1e64c0e90d860f41c2510c4073e13ad939724eecb20b3bec841d8aa15dff8905"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -528,6 +528,9 @@
     ,
     "skill-content/deliver/references/switch-item_cost_report-per_step.md":
       "672c1048caeb63e8f8b96bcaeb3146641f49e885cedcaa0b5881b6f11068bc13"
+    ,
+    "skill-content/deliver/references/switch-item_verification-single_verifier.md":
+      "68eab21ce07986d909142013dd26f5dd8b301892939ff124052ba371bd570312"
     ,
     "skill-content/deliver/references/switch-lane_isolation-scratch_clone.md":
       "3920124ab9a7e4eaef529604e4f0e2cc5d67bf9cf435f1516864047ed82e07a9"

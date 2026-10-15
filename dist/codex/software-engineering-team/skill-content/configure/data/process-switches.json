@@ -1317,6 +1317,26 @@
         "unit": "At least 5 scoped repairs across at least 2 Deliveries.",
         "threshold": "Median repair-to-integration time at most a third of the full_pass baseline and no defect traced to a scoped repair, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "item_verification": {
+      "summary": "Whether a frozen Item candidate is verified by an independent code reviewer and an independent QA reader, or by one fresh verifier that reviews the diff, runs QA's approved commands and registers both results in one pass.",
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "separate",
+          "tradeoffs": "A code reviewer, with its panel when one is selected, and a QA reader each read the candidate and register their own result; a major finding of either starts a repair pass unless finding_disposition says otherwise. Today's behaviour: two readers' context and wait per pass."
+        },
+        {
+          "id": "single_verifier",
+          "tradeoffs": "One fresh qa-engineer verifier reads the candidate diff against the story and Test Plan with the code review lenses, runs the approved test command or the change-level tier item_qa_tier selects, and registers the code review and QA results together; only a critical finding blocks and every major and minor finding is a follow-up issue. Halves the readers per pass and removes the read barrier, while review and test judgement are no longer independent of each other, it needs code_review_panel single_reader and a review_loop other than blocking_delta, and the verifier's blind spots reach both records."
+        }
+      ],
+      "default": "separate",
+      "metric": "Per Item: verification wall time from freeze to validated results, reader passes and tokens, follow-ups filed, and defects found after integration in code a single verifier passed, against separate Items of comparable size.",
+      "promotion": {
+        "unit": "At least 5 Items verified by a single verifier across at least 2 Deliveries.",
+        "threshold": "Median freeze-to-validated time at most half of the separate baseline and no post-integration defect a separate code review would have blocked, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

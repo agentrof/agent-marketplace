@@ -525,6 +525,7 @@ RELEASED_DEFAULTS = {
     "finding_disposition": "next_pass",
     "implementation_schedule": "sequential_v1",
     "item_cost_report": "off",
+    "item_verification": "separate",
     "item_qa_tier": "full_per_item",
     "item_review_scale": "fixed",
     "lane_isolation": "shared_checkout",
@@ -867,6 +868,13 @@ SAFETY_RULES = {
         f"{SKILLS}/deliver/references/switch-item_cost_report-per_step.md": (
             "A step whose start or end is not recorded is `missing`, never an estimate",
             "The table reports; it changes no gate, no verdict and no evidence",
+        ),
+    },
+    "item_verification": {
+        f"{SKILLS}/deliver/references/switch-item_verification-single_verifier.md": (
+            "The implementation writer never verifies its own candidate",
+            "Only a critical finding or a failing check makes the verdict `failed`",
+            "each result passing every check a separate reader's result passes, or neither does",
         ),
     },
     "item_qa_tier": {

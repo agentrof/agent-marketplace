@@ -145,6 +145,14 @@ blocking result prevents freeze; passing minor findings carry into the full
 review. The regular reader panel, calibration and QA still run.
 `code-review/references/switch-repair_review-before_freeze.md` defines the steps.
 
+Process switch `item_verification` decides who verifies a frozen Item
+candidate. `separate`, the default, keeps an independent code reviewer and an
+independent QA reader. At `single_verifier`, one fresh verifier reviews the
+diff, runs QA's approved commands and registers both results together; only
+a critical finding blocks and every other finding is a follow-up issue.
+`deliver/references/switch-item_verification-single_verifier.md` defines the
+steps.
+
 Process switch `repair_pass` decides what a repaired candidate re-runs.
 `full_pass`, the default, runs the full code review and QA again. At
 `scoped_repair`, a repair of findings below critical whose pre-freeze repair

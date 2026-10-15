@@ -1,0 +1,6 @@
+{
+  "summary": "The Delivery runner now names each Item's kept runtime checkout runtime-<delivery>-<story> and each command clone checkout-<suffix>, so environments named after the checkout folder no longer collide when several Items are verified at once.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

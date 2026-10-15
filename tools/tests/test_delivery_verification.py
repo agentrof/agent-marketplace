@@ -1601,7 +1601,7 @@ print(sys.argv[2])
             events.append(verification.run_environment(self.root, "up"))
         self.assertEqual(len(set(directories)), 1, directories)
         checkout = directories[0]
-        self.assertEqual(checkout.name, verification.RUNTIME_CHECKOUT)
+        self.assertEqual(checkout.name, "runtime-dlv-001-auth-01")
         self.assertEqual(verification.git(checkout, "rev-parse", "HEAD"),
                          verification.read_session(self.root)["candidate"]["product_commit"])
         self.assertEqual([event["candidate_intact"] for event in events], [True, False])

@@ -1570,6 +1570,19 @@ def clone_private_checkout(root: Path, execution_root: Path, commit: str) -> Non
 RUNTIME_CHECKOUT = "runtime"
 
 
+def runtime_checkout_name(scratch: Path, delivery_id: str, story: str) -> str:
+    """The kept runtime checkout's folder name, distinct per Item.
+
+    A project environment may name its instance after the checkout folder, as
+    the docker-compose skill's entry point does, so Items running at once need
+    distinct names. A checkout an older package kept under the shared name
+    keeps it, so its running instance is still torn down.
+    """
+    if (scratch / RUNTIME_CHECKOUT).exists():
+        return RUNTIME_CHECKOUT
+    return "-".join([RUNTIME_CHECKOUT, *re.findall(r"[a-z0-9]+", f"{delivery_id}-{story}".lower())])
+
+
 def repin_private_checkout(root: Path, execution_root: Path, commit: str) -> None:
     """Recreate private repository state while preserving the environment's checkout pathname."""
     safe_runtime_path(root, execution_root)
@@ -1664,7 +1677,8 @@ def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, c
     the command runs.
     """
     with tempfile.TemporaryDirectory(prefix="candidate-", dir=scratch) as temporary:
-        execution_root = Path(temporary) / "checkout"
+        # A distinct folder name per run keeps an environment named after it apart from other runs.
+        execution_root = Path(temporary) / ("checkout-" + Path(temporary).name.removeprefix("candidate-").lower())
         # A private repository gives mutation tools their own index, objects and
         # files; no transient mutant can enter the independent reviewer's view.
         clone_private_checkout(root, execution_root, commit)
@@ -4514,7 +4528,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             first_command = not state["events"] and not state.get("pending")
             legacy = scratch / ("runtime-" + state.get("attempt_id", session["session_id"]))
             kept = "attempt_id" in state and (first_command or not legacy.exists())
-            execution_root = safe_runtime_path(root, scratch / RUNTIME_CHECKOUT if kept else legacy)
+            name = runtime_checkout_name(scratch, current["delivery"], current["story"])
+            execution_root = safe_runtime_path(root, scratch / name if kept else legacy)
             if not execution_root.exists():
                 execution_root.parent.mkdir(parents=True, exist_ok=True)
                 clone_private_checkout(root, execution_root, current["product_commit"])

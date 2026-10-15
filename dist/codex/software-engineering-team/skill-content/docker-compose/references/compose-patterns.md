@@ -64,6 +64,7 @@ export COMPOSE_PROJECT_NAME="$(basename "$root" \
 The trailing sed strips the hyphens the sanitizer mints at the edges (the newline becomes one); a compose project name must start with a lowercase letter or digit. The definition must never carry a top-level `name:` key, and the entry point aborts if the sanitized name comes out empty: the exported variable wins when set, but a committed name or an empty derivation silently funnels every instance into one shared namespace, defeating the isolation the naming exists for.
 
 - Compose namespaces containers, networks and volumes by project name. Sibling worktrees have distinct basenames, so their environments are disjoint without any caller flag.
+- The Delivery runner keeps each Item's runtime checkout as `runtime-<delivery>-<story>` and clones each command run into its own `checkout-<suffix>` folder, so Items verified at once derive distinct names too.
 - `up` = `docker compose up -d --build --wait`, then seed the default scenario; any unhealthy service fails the verb.
 - `down` = `docker compose down -v --remove-orphans` (data volumes included; from-scratch means from scratch).
 - `url <service>` = `docker compose port <service> <container-port>` rendered as a base URL.

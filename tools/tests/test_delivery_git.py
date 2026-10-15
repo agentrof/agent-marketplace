@@ -3157,6 +3157,56 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
 
     @integration
+    def test_claim_items_keeps_its_own_earlier_claims_and_claims_only_added_items(self):
+        """A plan revision that added an Item ran claim-items again, which refused on the first
+        Item the same Delivery had already claimed, so the added Item never got its ref and
+        start-item failed. Claims this Delivery holds are kept, only the added Item is claimed,
+        and another Delivery's claim is still refused."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs, "AUTH-01", "AUTH-02")
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_dod(dod), 0)
+            self.assertEqual(delivery_compile.approve_dod(dod), 0)
+            self.assertEqual(delivery_compile.init_delivery(type("Args", (), {
+                "docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication", "outcome": None,
+                "target_branch": "main", "story": ["AUTH-01", "AUTH-02"]})), 0)
+            self.assertEqual(delivery_compile.approve_scope(scope), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve the scope")
+        delivery_git.run_git(project, "push", "-q")
+        delivery_git.reserve_delivery(project, "DLV-001")
+        self.author_execution_topology(docs)
+        later = delivery_compile.find_delivery(docs, "DLV-001") / "items" / "auth-02" / "item.md"
+        props, body = delivery_compile.split_note(later)
+        props["path_claims"] = ["src/session.py"]
+        delivery_compile.atomic_text(later, delivery_compile.frontmatter(props, body))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-01", "AUTH-02"])
+        first, added = (delivery_git.canonical_refs("DLV-001", story)["item"] for story in ("AUTH-01", "AUTH-02"))
+        kept = delivery_git.remote_oid(project, "origin", first)
+        # AUTH-02 stands for an Item the plan revision added: it has no ref yet.
+        delivery_git.atomic_push(project, "origin", [(added, delivery_git.remote_oid(project, "origin", added), "")])
+        self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-02"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", first), kept)
+        self.assertTrue(delivery_git.remote_oid(project, "origin", added))
+        # A claim another Delivery holds is still a conflict.
+        foreign = delivery_git.commit_tree(project, kept, [], "Claim AUTH-01 for DLV-009",
+                                           {"Record": "item-claim-v1", "Protocol": "1", "Delivery": "DLV-009",
+                                            "Story": "AUTH-01"})
+        delivery_git.atomic_push(project, "origin", [(first, kept, foreign)])
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        with self.assertRaisesRegex(RuntimeError, "DELIVERY_CLAIM_CONFLICT: story is already claimed by DLV-009: AUTH-01"):
+            delivery_git.claim_items(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
+    @integration
     def test_the_next_delivery_reserves_on_a_child_of_the_fence_a_merged_one_left(self):
         """A merged Delivery drops its refs and leaves the idle project Fence, which the next
         reservation takes over: a Fence child with a new Epoch and the target tip as its Target,

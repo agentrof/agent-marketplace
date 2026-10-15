@@ -4051,6 +4051,9 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
         claimed, holder = item_claim(root, remote, delivery_id, story)
+        if claimed and holder == delivery_id:
+            # A plan revision that adds Items keeps this Delivery's earlier claims.
+            continue
         require_claimable(story, claimed, holder, delivered)
         item_props, item_body = split_note(item_path)
         item_props["integration_base_commit"] = marker

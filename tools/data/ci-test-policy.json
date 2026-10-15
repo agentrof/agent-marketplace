@@ -190,6 +190,7 @@
         "tools.tests.test_test_cost_budget.*",
         "tools.tests.test_test_levels.*",
         "tools.tests.test_lane_table.*",
+        "tools.tests.test_await_outputs.*",
         "tools.tests.test_context_pack.*",
         "tools.tests.test_step_timing.*",
         "tools.tests.test_impact_closure.*",
@@ -613,6 +614,7 @@
   "known_test_modules": [
     "tools.tests.test_adapter_registry",
     "tools.tests.test_all_switches_on",
+    "tools.tests.test_await_outputs",
     "tools.tests.test_approval_history",
     "tools.tests.test_architecture_compile",
     "tools.tests.test_artifact_snapshot_metadata",

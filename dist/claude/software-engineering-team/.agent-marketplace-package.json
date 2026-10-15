@@ -41,7 +41,7 @@
       "526e4584ee617868e56ad1bdff90b0ed2cc2d1f5fa6c377d9f4d7630d75797b2"
     ,
     "agents/delivery-coordinator.md":
-      "2cf81aef9fa59c126d5adf62b4106436285b53d2a90238e5ea2351e813d60adb"
+      "21fed3f2b564b9dbf0acc2ffeedbb2b7d309a8ed9b85045df0b1b32f534dba1a"
     ,
     "agents/design-system-reviewer-lens.md":
       "abf8774b1c8b35b89f9dbf565c6b69885156f028ced35d8047fc09b82d08cf57"
@@ -98,7 +98,7 @@
       "9ab4dd0b8df2fde66c82556e9a743a347294034035a73e6746f4bb12292ff00b"
     ,
     "flows/backlog-planning.md":
-      "d77eb8e4d6086766a9462eff3c31abb02f36efd50f9eaa718e3800e638d555ac"
+      "e3541a13378e48608d5ab645f686ffe8925966126db7b2a2e67ddf82bb2b7163"
     ,
     "flows/business-analysis.md":
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
@@ -137,7 +137,7 @@
       "c9c89e9b225215bcc6b9681111d83a70151214968c2bee4e5234d82e79c8be7a"
     ,
     "host-contract.md":
-      "71e5da2cd257add066a64ef0fd6c2d5b453e9c89ed92c495e825efb56c93a483"
+      "f7c0bbe67a14aee2f199c4ccbdd4c0ea542bb2f79972a7bcbc532eef2301b977"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -153,6 +153,9 @@
     ,
     "scripts/autopilot_provenance.py":
       "0d519c668272376b009da01e1e4a9a959a7f8c7939e327e9a0d63344fcee144a"
+    ,
+    "scripts/await_outputs.py":
+      "a05fb85979416b9eec3a40c43ccfbd328d2337882dcfe3c95615e2e62c4eac8f"
     ,
     "scripts/ba_compile.py":
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"

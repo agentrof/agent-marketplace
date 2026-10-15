@@ -246,13 +246,11 @@ defines.
 
 ### Recovery that removes only operating-system metadata
 
-An approved backlog may reuse its existing epic review evidence when the only
-upstream change is an approved application successor from the explicit
-schema-v4 artifact recovery path. The recovery proof must show no added,
-changed or meaningfully removed artifact: the successor inventory equals the
-predecessor inventory minus the exact schema-policy metadata rows. Process
-receipt refs and hashes, BA, Solution, Design System and any Requirement
-semantic hash must remain identical.
+An approved backlog may reuse its existing epic review evidence when the only upstream change is an
+approved application successor from the explicit schema-v4 artifact recovery path. The recovery
+proof must show no added, changed or meaningfully removed artifact: the successor inventory equals
+the predecessor inventory minus the exact schema-policy metadata rows. Process receipt refs and
+hashes, BA, Solution, Design System and any Requirement semantic hash must remain identical.
 
 Before rebinding, record the committed predecessor HEAD and the complete path and byte inventory of
 every epic, story, test plan and historical review. After rebinding, historical reviews, stories and
@@ -267,21 +265,23 @@ retain their original bytes, stamps and hashes; do not create new epic approval 
 proof or meaningful delta returns to the normal review flow below. This exception does not apply to
 other application-only revisions or general artifact loss.
 
-The Product Owner finishes the candidate source documents. Review notes may
-still contain their initialized placeholders: requiring completed reviews
-before their readers run would prevent the first review. For each epic, run
-the packaged read-only manifest helper; it validates source, coverage and
-dependency inputs while leaving review-completion checks to the final gate.
-An epic's manifest fails on a source finding, a `stub-epic` or `stub-story`
-placeholder included, only in a path it names or when the finding concerns the
-backlog as a whole, such as a dependency cycle; it lists the findings of other
-backlog notes in `check.scaffold_findings`, so a finished epic's review can
-start while another epic's writer still works. The root manifest and approval
-still need every source finished:
+The Product Owner finishes the candidate source documents. Review notes may still contain their
+initialized placeholders: requiring completed reviews before their readers run would prevent the
+first review. For each epic, run the packaged read-only manifest helper; it validates source,
+coverage and dependency inputs while leaving review-completion checks to the final gate. An epic's
+manifest fails on a source finding, a `stub-epic` or `stub-story` placeholder included, only in a
+path it names or when the finding concerns the backlog as a whole, such as a dependency cycle; it
+lists the findings of other backlog notes in `check.scaffold_findings`, so a finished epic's review
+can start while another epic's writer still works. The root manifest and approval still need every
+source finished:
 
 ```text
 backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID>
 ```
+
+Before the first manifest the writer runs `backlog_compile.py precheck --docs <workspace>/docs`, which
+writes nothing, and fixes each finding it names, as `product-planning/references/structured-records.md`
+defines, so no reader is spent on a mechanical inconsistency.
 
 Switch `review_manifest_scope`: at `bounded`, an epic reader's manifest reads the epic's dependency
 closure, the notes it links to or cites and their front-matter relations, as

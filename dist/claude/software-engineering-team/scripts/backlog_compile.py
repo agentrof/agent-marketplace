@@ -4068,6 +4068,120 @@ def status_tag(props: dict, status: str) -> None:
     props["status"] = status
 
 
+# The pre-review check: mechanical consistency a reader would otherwise spend a
+# round on. Each rule reads only an explicit marker, so authored prose without
+# one is never guessed at.
+ACCEPTANCE_ITEM_RE = re.compile(r"^\s*-\s+\[[ xX]\]\s+\S", re.MULTILINE)
+CRITERIA_LIST_RE = re.compile(r"^\s*([1-9][0-9]*(?:\s*-\s*[1-9][0-9]*)?)"
+                              r"(?:\s*,\s*([1-9][0-9]*(?:\s*-\s*[1-9][0-9]*)?))*\s*$")
+# A row list starts the Given or When text with "rows:", or follows "in rows:".
+ROW_LIST_RE = re.compile(r"(?:^|\bin\s)rows:\s*(.+)$", re.IGNORECASE | re.DOTALL)
+SUPPLIES_RE = re.compile(r"^Supplies:\s*(.+)$", re.MULTILINE)
+ROOT_STORY_COUNT_RE = re.compile(r"\b([0-9]+) stories with ([0-9]+) (?:sibling )?test plans\b")
+ROOT_EPIC_COUNT_RE = re.compile(r"\b(?:retains|contains|holds) ([0-9]+) epics\b")
+WIKILINK_TARGET_RE = re.compile(r"\[\[([^\[\]|#\n]+)")
+
+
+def story_criterion_numbers(value: str) -> set[int] | None:
+    """The story Acceptance item numbers a scenario's story_criteria lists, or None when malformed."""
+    if not CRITERIA_LIST_RE.fullmatch(value):
+        return None
+    numbers: set[int] = set()
+    for part in value.split(","):
+        low, _, high = part.strip().partition("-")
+        first, last = int(low), int(high or low)
+        if last < first:
+            return None
+        numbers.update(range(first, last + 1))
+    return numbers
+
+
+def precheck_findings(record: dict) -> list[str]:
+    """Return the mechanical findings a review would otherwise spend a round on.
+
+    - every story Acceptance item is verified by a scenario once any scenario of
+      its Test Plan declares story_criteria, and no listed number is missing;
+    - a scenario's declared rows equal the items of the row list its Given or
+      When text holds;
+    - every story note the Dependencies section links, in prose too, is declared
+      in depends_on; check already requires a reason line per declared edge;
+    - no deliverable key is named on a Supplies line of two stories;
+    - the root backlog's stated epic, story and test plan counts equal the package.
+    """
+    findings: list[str] = []
+    by_target = {story["path"].removesuffix(".md"): story for story in record["stories"]}
+    suppliers: dict[str, list[str]] = {}
+    for story in record["stories"]:
+        sid, plan = story["id"], story["test_plan"]
+        items = len(ACCEPTANCE_ITEM_RE.findall(section(story["body"], "Acceptance")))
+        covered: set[int] = set()
+        declared = False
+        for scenario, block in scenario_blocks(story.get("test_body", "")):
+            fields = scenario_fields(block)[0]
+            if "story_criteria" in fields:
+                declared = True
+                numbers = story_criterion_numbers(fields["story_criteria"])
+                if numbers is None:
+                    findings.append(f"{plan} scenario {scenario} story_criteria must list Acceptance item"
+                                    f" numbers such as 1, 3-5: {fields['story_criteria']}")
+                    continue
+                for number in sorted(n for n in numbers if n > items):
+                    findings.append(f"{plan} scenario {scenario} cites story criterion {number}, but {sid}"
+                                    f" Acceptance holds {items}")
+                covered |= numbers
+            if ROWS_RE.fullmatch(fields.get("rows", "")):
+                for field in ("Given", "When"):
+                    listed = ROW_LIST_RE.search(fields.get(field, ""))
+                    if listed is None:
+                        continue
+                    count = len([row for row in listed.group(1).split(";") if row.strip()])
+                    if count != int(fields["rows"]):
+                        findings.append(f"{plan} scenario {scenario} declares rows: {fields['rows']}, but"
+                                        f" its {field} lists {count} rows")
+        if declared:
+            for number in sorted(set(range(1, items + 1)) - covered):
+                findings.append(f"{story['path']} Acceptance item {number} has no scenario whose"
+                                " story_criteria traces to it")
+        linked = {target.strip().removesuffix(".md")
+                  for target in WIKILINK_TARGET_RE.findall(section(story["body"], "Dependencies"))}
+        linked = {target for target in linked
+                  if target in by_target and target != story["path"].removesuffix(".md")}
+        for target in sorted(linked - set(story["dependency_targets"])):
+            findings.append(f"{story['path']} Dependencies links {by_target[target]['id']}, which depends_on"
+                            " does not declare")
+        for line in SUPPLIES_RE.findall(story["body"]):
+            for key in sorted(set(re.findall(r"`([^`\n]+)`", line))):
+                suppliers.setdefault(key, []).append(sid)
+    for key, owners in sorted(suppliers.items()):
+        if len(owners) > 1:
+            findings.append(f"deliverable `{key}` is supplied by more than one story: {', '.join(owners)}")
+    backlog = record.get("backlog") or {}
+    body = backlog.get("body", "")
+    stories, epics = len(record["stories"]), len(record["epics"])
+    for stated_stories, stated_plans in ROOT_STORY_COUNT_RE.findall(body):
+        if (int(stated_stories), int(stated_plans)) != (stories, stories):
+            findings.append(f"{backlog.get('path', 'backlog')} states {stated_stories} stories with"
+                            f" {stated_plans} test plans; the package holds {stories} of each")
+    for stated in ROOT_EPIC_COUNT_RE.findall(body):
+        if int(stated) != epics:
+            findings.append(f"{backlog.get('path', 'backlog')} states {stated} epics; the package holds {epics}")
+    return findings
+
+
+def precheck(args) -> int:
+    """Run the mechanical pre-review check; nothing is written."""
+    docs = docs_root(args.docs)
+    try:
+        with stage_package.candidate_session(), experience_validation_session():
+            record, _errors = collect(docs, review_inputs=True)
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "findings": [str(exc)]}, indent=2, ensure_ascii=False))
+        return 1
+    findings = precheck_findings(record)
+    print(json.dumps({"ok": not findings, "findings": findings}, indent=2, ensure_ascii=False))
+    return 1 if findings else 0
+
+
 def check(args) -> int:
     docs = docs_root(args.docs)
     try:
@@ -5540,6 +5654,9 @@ def main(argv=None) -> int:
     command.add_argument("--render", action="store_true")
     command.add_argument("--json", action="store_true")
     command.set_defaults(func=check)
+    command = sub.add_parser("precheck", help="Mechanical pre-review check; run before a review manifest")
+    command.add_argument("--docs", default=None)
+    command.set_defaults(func=precheck)
     command = sub.add_parser("status")
     command.add_argument("--docs", default=None)
     command.add_argument("--json", action="store_true")

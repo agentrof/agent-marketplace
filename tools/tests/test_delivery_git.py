@@ -4675,6 +4675,35 @@ class DeliveryGitTests(unittest.TestCase):
         return candidate, finished["fence"]
 
     @integration
+    def test_aborted_governance_handoff_keeps_the_hash_it_replaced(self):
+        """An abort never reached the target, so the Fence keeps the old hash and the handoff can be retried."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        fence_ref = delivery_git.canonical_refs("DLV-000")["fence"]
+
+        def fence_hash():
+            oid = delivery_git.remote_oid(project, "origin", fence_ref)
+            return delivery_git.trailer(delivery_git.commit_message(project, oid), "Governance-Hash")
+
+        before = fence_hash()
+        args = type("Args", (), {"docs": str(docs)})
+        self.assertEqual(delivery_governance.begin_revision(args), 0)
+        governance = delivery_governance.path_for(docs)
+        props, body = delivery_governance.read(governance)
+        props["max_parallel"] += 1
+        governance.write_text(delivery_governance.render(props, body), encoding="utf-8")
+        self.assertEqual(delivery_governance.approve(args), 0)
+        desired = delivery_governance.status(docs)[0]["governance_hash"]
+        self.assertNotEqual(desired, before)
+        self.assertTrue(delivery_git.apply_governance(project)["changed"])
+        self.assertEqual(fence_hash(), desired)
+
+        self.assertEqual(delivery_git.abort_source_handoff(project)["mode"], "open")
+        self.assertEqual(fence_hash(), before)
+        retried = delivery_git.apply_governance(project)
+        self.assertTrue(retried["changed"])
+        self.assertEqual(retried["handoff"]["governance_hash"], desired)
+
+    @integration
     def test_governance_handoff_refreshes_each_integration_and_preserves_published_contracts(self):
         project, docs, directory, _item, reserved = self.prepare_execution_with_draft_reserved_contracts()
         first = delivery_git.publish_execution_plan(project, "DLV-001")

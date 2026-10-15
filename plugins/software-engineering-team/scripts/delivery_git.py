@@ -3381,6 +3381,15 @@ def finish_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     return {"ok": True, "mode": "open", "fence": candidate, "target": target}
 
 
+def prior_governance_hash(root: Path, fence_oid: str) -> str:
+    """The Governance-Hash of the newest first-parent Fence commit outside governance mode."""
+    for oid in run_git(root, "rev-list", "--first-parent", fence_oid).split():
+        message = commit_message(root, oid)
+        if trailer(message, "Mode") != "governance":
+            return trailer(message, "Governance-Hash") or "none"
+    return "none"
+
+
 def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     """Abort only an acquired handoff whose external write never began or took no effect.
 
@@ -3394,6 +3403,7 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     if values["Mode"] not in {"source_handoff", "governance", "upgrade"}:
         raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
     receipt_path, lock_path = target_receipt_paths(root, values["Mode"])
+    was_governance = values["Mode"] == "governance"
     intent, attempt = values["Target-Update-Intent"], values["Target-Update-Attempt"]
     with contextlib.ExitStack() as held:
         if intent != "none":
@@ -3428,6 +3438,9 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
                        "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
                        "Upgrade-Phase": "none",
                        "Upgrade-Contract": "none", "Handoff-Target": "none"})
+        if was_governance:
+            # An aborted governance handoff never reached the target: keep the hash it replaced.
+            values["Governance-Hash"] = prior_governance_hash(root, fence_oid)
         candidate = _fence_child(root, fence_oid, values, "Abort source handoff")
         atomic_push(root, remote, [(ref, fence_oid, candidate)])
         if intent != "none":

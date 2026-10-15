@@ -285,6 +285,7 @@
       "tests": [
         "tools.tests.test_backlog_compile.*",
         "tools.tests.test_backlog_precheck.*",
+        "tools.tests.test_single_pass_rounds.*",
         "tools.tests.test_backlog_approval_preservation.*",
         "tools.tests.test_backlog_input_coverage.*",
         "tools.tests.test_backlog_requirement_bindings.*",
@@ -627,6 +628,7 @@
     "tools.tests.test_backlog_approval_preservation",
     "tools.tests.test_backlog_compile",
     "tools.tests.test_backlog_precheck",
+    "tools.tests.test_single_pass_rounds",
     "tools.tests.test_backlog_headless_handoff",
     "tools.tests.test_backlog_input_coverage",
     "tools.tests.test_backlog_level_revision_intake",

@@ -1541,6 +1541,68 @@ def recheck_rows(docs: Path, body: str, path: str) -> tuple[list[dict[str, str]]
     return rows, errors
 
 
+SINGLE_PASS_RULE = ("switch review_rounds single_pass starts a recheck or a new round only for a writer"
+                    " pass that fixes a critical finding; record a major or minor finding as an"
+                    " accepted follow-up instead")
+
+
+def single_pass_recheck_findings(docs: Path, body: str, path: str) -> list[str]:
+    """At review_rounds single_pass, refuse Recheck Closures that close no critical finding.
+
+    A writer pass that fixes only major or minor findings is the round the
+    value removes; its rechecks are its record. A recheck of a major or minor
+    finding stays allowed beside a critical one, in the pass that carries it.
+    """
+    if RECHECK_CLOSURES not in headings(body):
+        return []
+    try:
+        loop = session_read(("review_loop", docs.resolve()), lambda: review_loop_value(docs))
+    except ValueError as exc:
+        return [f"{path} needs the review_rounds value of the Process Policy: {exc}"]
+    if loop != SINGLE_PASS_LOOP:
+        return []
+    returned = (returned_findings(docs, body, path)[0]
+                if RETURNED_FINDINGS in headings(body) else {})
+    closed = sorted({row["finding"] for row in recheck_rows(docs, body, path)[0]})
+    if any(returned.get(identifier) == "critical" for identifier in closed):
+        return []
+    return [f"{path} records rechecks of {', '.join(closed) or 'no finding'} without a critical"
+            f" finding among them; {SINGLE_PASS_RULE}"]
+
+
+def single_pass_round_findings(docs: Path, reviews: list[dict]) -> list[str]:
+    """At review_rounds single_pass, refuse a draft round whose draft predecessor returned no critical.
+
+    Both rounds unapproved under one Process Policy pin are passes of the same
+    review; a round written under another pin is the fresh round a policy
+    change opens, and an approved predecessor belongs to an earlier revision.
+    """
+    current = latest(reviews)
+
+    def stamped(review: dict) -> bool:
+        props = review["props"]
+        return bool(props.get("status") == "approved" or props.get("source_hash")
+                    or props.get("approved_at_utc"))
+
+    if current is None or stamped(current):
+        return []
+    earlier = [review for review in reviews if review["round"] < current["round"]]
+    previous = latest(earlier)
+    if (previous is None or stamped(previous) or RETURNED_FINDINGS not in headings(previous["body"])
+            or recorded_pin(previous["props"]) != recorded_pin(current["props"])):
+        return []
+    if "critical" in returned_findings(docs, previous["body"], previous["path"])[0].values():
+        return []
+    try:
+        loop = session_read(("review_loop", docs.resolve()), lambda: review_loop_value(docs))
+    except ValueError as exc:
+        return [f"{current['path']} needs the review_rounds value of the Process Policy: {exc}"]
+    if loop != SINGLE_PASS_LOOP:
+        return []
+    return [f"{current['path']} opens round {current['round']} after {previous['path']}, which"
+            f" returned no critical finding; {SINGLE_PASS_RULE}"]
+
+
 def recheck_closure_record(docs: Path, body: str, path: str, props: dict) -> list[str]:
     """Validate a review note's Recheck Closures when the compiler writes them.
 
@@ -1557,7 +1619,7 @@ def recheck_closure_record(docs: Path, body: str, path: str, props: dict) -> lis
         return [f"{path} needs the remediation_bookkeeping value of the Process Policy: {exc}"]
     if value != COMPILER_BOOKKEEPING:
         return []
-    return recheck_rows(docs, body, path)[1]
+    return recheck_rows(docs, body, path)[1] + single_pass_recheck_findings(docs, body, path)
 
 
 def table_cell(value: str) -> str:
@@ -1698,6 +1760,7 @@ def record_rechecks(args) -> int:
             errors.append(f"{path}: {exc}")
             continue
         errors.extend(recheck_rows(docs, with_recheck_section(body, rows), path)[1])
+        errors.extend(single_pass_recheck_findings(docs, with_recheck_section(body, rows), path))
         written[path] = (note, original, text.encode("utf-8"))
     if errors:
         return fail(errors)
@@ -3108,7 +3171,7 @@ def global_criterion_coverage_findings(record: dict, docs: Path, *,
 
 def review_completion_findings(docs: Path, reviews: list[dict], sections: list[str],
                                contract: dict) -> list[str]:
-    errors = []
+    errors = single_pass_round_findings(docs, reviews)
     current = latest(reviews)
     for review in reviews:
         if review is not current and review["props"].get("status") != "approved" and not (

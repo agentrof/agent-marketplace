@@ -2913,7 +2913,8 @@ def integration_item_paths(root: Path, directory: Path, integration: str) -> lis
 
 
 def target_input_bindings(root: Path, directory: Path, integration: str,
-                          target: str, changed: list[str]) -> dict[str, dict]:
+                          target: str, changed: list[str],
+                          barrier_pins: dict[str, str] | None = None) -> dict[str, dict]:
     """Reject changed pinned inputs while leaving unchanged target drafts alone."""
     import backlog_compile
     import operation_compile
@@ -2952,6 +2953,10 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
         if path not in changed:
             continue
         props, digest = split_remote_note(root, target, path, reader)
+        if (barrier_pins and barrier_pins.get(relative) == digest
+                and props.get("status") == status and props.get("source_hash") == digest):
+            # The held plan revision already re-pinned this input to the target's bytes.
+            continue
         require_pinned_input(path, props, digest, expected, status)
     # The Process Policy pin is compared only while a new execution approval can
     # re-pin it. From the Delivery Review on it records the policy the Delivery
@@ -2967,6 +2972,9 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
                                      capture_output=True, check=False).returncode == 0
             if present:
                 props, body = split_remote_note(root, target, path, process_policy.parse)
+                held = (barrier_pins or {}).get(relative)
+                if held:
+                    pinned = held
                 current = (props.get("status") == "approved" and pinned is not None
                            and props.get("source_hash") == pinned == process_policy.policy_hash(props, body))
             else:
@@ -3024,6 +3032,24 @@ def refreshed_claim_updates(root: Path, remote: str, delivery_id: str, directory
     return updates
 
 
+def plan_revision_pins(directory: Path, fence_message: str) -> dict[str, str]:
+    """Story and Test Plan pins of the locally approved Item records while a plan revision is held."""
+    if (trailer(fence_message, "Barrier-Kind") or "none") != "plan-revision":
+        return {}
+    from delivery_compile import split_note
+    pins: dict[str, str] = {}
+    delivery, _body = split_note(directory / "delivery.md")
+    if delivery.get("process_policy_source_hash"):
+        pins[str(delivery.get("process_policy_path") or "delivery/process-policy.md")] = str(
+            delivery["process_policy_source_hash"])
+    for item in sorted((directory / "items").glob("*/item.md")):
+        props, _body = split_note(item)
+        for kind in ("story", "test_plan"):
+            if props.get(kind + "_path") and props.get(kind + "_source_hash"):
+                pins[str(props[kind + "_path"])] = str(props[kind + "_source_hash"])
+    return pins
+
+
 def refresh_target(project_root: Path, delivery_id: str,
                    remote: str = "origin") -> dict:
     """Merge a fresh target tip into one open Delivery under the Fence lease.
@@ -3065,7 +3091,9 @@ def refresh_target(project_root: Path, delivery_id: str,
     if not integrated:
         previous_target = unique_merge_base(root, integration_oid, target)
     changed = _changed_target_paths(root, previous_target, target)
-    operation_bindings = target_input_bindings(root, directory, integration_oid, target, changed)
+    barrier_pins = plan_revision_pins(directory, fence_message)
+    operation_bindings = target_input_bindings(root, directory, integration_oid, target, changed,
+                                               barrier_pins)
     claimed: dict[str, str] = {}
     item_records: dict[str, dict] = {}
     for item_path in integration_item_paths(root, directory, integration_oid):
@@ -3094,6 +3122,9 @@ def refresh_target(project_root: Path, delivery_id: str,
          "Target-Impact-Hash": "none", "Refresh-Kind": "disjoint"},
         delivery_projections=True, operation_bindings=operation_bindings,
         preserve_delivery=directory,
+        # Inputs the held plan revision re-pinned to the target take the target's bytes.
+        prefer_second=tuple(sorted("workspace/docs/" + path for path in barrier_pins
+                                   if "workspace/docs/" + path in changed)),
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Refresh project target",

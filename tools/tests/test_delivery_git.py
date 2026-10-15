@@ -5332,6 +5332,41 @@ class DeliveryGitTests(unittest.TestCase):
                          process_policy.path_for(docs).read_text(encoding="utf-8"))
 
     @integration
+    def test_target_refresh_takes_inputs_a_held_plan_revision_repinned(self):
+        """A backlog and Process Policy revision approved mid-Delivery reached the target, but
+        refresh-target compared it with the published pins that only publish-execution-plan, which
+        needs those bytes on the Integration, would move. Under a held plan revision the locally
+        re-pinned story and policy are accepted and taken from the target; without it they are not."""
+        project, docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-001")
+        item_props, _body = delivery_compile.split_note(item)
+        story = docs / item_props["story_path"]
+        self.revise_selected_story(docs)
+        new_hash = backlog_compile.digest(story)
+        self.assertNotEqual(item_props["story_source_hash"], new_hash)
+        self.change_process_policy(docs, ("implementation_schedule", "parallel_lanes_v1"))
+        plan = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            self.assertEqual(delivery_compile.approve_execution(plan), 0, output.getvalue())
+        self.assertEqual(delivery_compile.split_note(item)[0]["story_source_hash"], new_hash)
+        policy = process_policy.path_for(docs).relative_to(project).as_posix()
+        story_path = story.relative_to(project).as_posix()
+        target, fence = self.governance_target_handoff(project, docs, [story_path, policy])
+        with self.assertRaisesRegex(RuntimeError, "changed a pinned source or Operation receipt"):
+            delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        refreshed = delivery_git.refresh_target(project, "DLV-001")
+        # The story's generated relation section is re-rendered on the Integration; its authored bytes are the target's.
+        carried_story = delivery_git.run_git(project, "show", f"{refreshed['integration']}:{story_path}") + "\n"
+        self.assertEqual(backlog_compile.digest_text(carried_story), new_hash)
+        self.assertEqual(delivery_git.run_git(project, "show", f"{refreshed['integration']}:{policy}"),
+                         delivery_git.run_git(project, "show", f"{target}:{policy}"))
+
+    @integration
     def test_reservation_carries_the_process_policy_its_scope_pinned(self):
         """An Item worktree reads the switch values from its own tree, so reservation carries the
         policy scope approval pinned onto the Integration, as publication carries a pinned Operation

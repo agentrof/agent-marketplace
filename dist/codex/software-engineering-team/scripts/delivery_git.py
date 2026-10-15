@@ -4173,7 +4173,7 @@ def require_architecture_delta(architecture: Path, item_props: dict, story_id: s
         if findings:
             raise RuntimeError("Item Architecture sealed records are invalid: " + "; ".join(findings))
         components = set(item_props.get("architecture_components", []))
-        kinds = set(item_props.get("architecture_record_kinds", []))
+        kinds = architecture_compile.record_types(item_props.get("architecture_record_kinds", []))
         if not delta.get("records") or not components or not kinds:
             raise RuntimeError("Item Architecture requires a nonempty claimed delta")
         for row in delta["records"]:

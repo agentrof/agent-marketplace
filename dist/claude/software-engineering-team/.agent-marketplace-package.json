@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "3ba7c19be413ec66b2afc53baaf9c2c73d9f9bc9776fc9e4234eb2670431d0b9"
+      "5a7f0187c86ad1c28cb8bfc7f3e1406537755a70273b6b0c98faf0e45440398f"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -473,7 +473,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "1e64c0e90d860f41c2510c4073e13ad939724eecb20b3bec841d8aa15dff8905"
+      "5d632e67d343c47097abaf4a20cf6cb0443c7b2b0b9bc6dcac86caafda9babcd"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -485,7 +485,7 @@
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "2cc60d93e8947de4a5b1f4c07e5d3332e1931bb5b34d058d1f770b04de8ae206"
+      "02e7ae750af3d0d43af06a235c8a2e8b310f271875de8f4bd335367677fc535a"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -740,7 +740,7 @@
       "ac56808afa550eada9c15099b4233ffa7456a42f9da23e3508f128a3e1b493c5"
     ,
     "skill-content/qa-verification/SKILL.md":
-      "3742e3d0f81ee86a610a9d6ae0d4ab7075eb3f27e35403f0c414e21af579ef6c"
+      "bd1ed92067fbd371f153ae937f2f3c9da719ba3ce77cb47251d6e20813882648"
     ,
     "skill-content/qa-verification/data/runtime-lifecycle.json":
       "eb763f3c91ea9a6fd60b14a3415d19604acd2b4af73d9ea91069ad5efbf4126c"
@@ -760,11 +760,17 @@
     "skill-content/qa-verification/references/runtime-protocol.md":
       "92c5f40b09b1129b51ab0a6c4690276ca8049ee975a1e97f74508f4bcce325a4"
     ,
+    "skill-content/qa-verification/references/switch-item_live_gate-tooling_items.md":
+      "11a5756a7c190c377f21189b7479801a92a88e5f4b450886ca45f7b1be6af193"
+    ,
     "skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md":
       "549947c59c6a87988af1fc6a646414d85177c1f68c8249a05d9522bd99f47b74"
     ,
     "skill-content/qa-verification/references/switch-live_case_reuse-delta_since_green.md":
       "f2fa961e2f18c72a5a54db840fa1f3bb652dc10ea4b1c7cc2ae892aba6f3c3e4"
+    ,
+    "skill-content/qa-verification/references/switch-live_verification-delivery_integration.md":
+      "ed6466d9de716ec45f7be300d68aaaed903e7866e5a8cb23b87aa6430f0149d8"
     ,
     "skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md":
       "77ec83ef7c481c79826ca6627c6b45a7cdb7450144ed8b67f28e5443bbb5073f"

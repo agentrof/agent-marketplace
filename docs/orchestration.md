@@ -137,6 +137,15 @@ catch-all path, changed since that base; the others take the base run's
 passed cases under bindings QA's final evidence check enforces. The steps are
 in `qa-verification/references/switch-live_case_reuse-delta_since_green.md`.
 
+Process switch `live_verification` runs the live groups in every story QA pass
+at `every_pass`. At `delivery_integration`, a pass runs no live test and records
+`live: deferred_to_integration`; the Delivery runs one impact-selected live run
+after every Item integrates. Switch `item_live_gate` adds no Item live run at
+`off`; at `tooling_items`, an Item that changes environment tooling runs its
+affected live groups once before merge. The steps are in
+`qa-verification/references/switch-live_verification-delivery_integration.md`
+and `qa-verification/references/switch-item_live_gate-tooling_items.md`.
+
 Process switch `repair_review` decides when a corrected candidate receives an
 independent correctness review. `after_freeze`, the default, keeps the review
 inside the next full pass. At `before_freeze`, a fresh reader checks the repair

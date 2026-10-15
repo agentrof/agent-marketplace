@@ -525,12 +525,14 @@ RELEASED_DEFAULTS = {
     "finding_disposition": "next_pass",
     "implementation_schedule": "sequential_v1",
     "item_cost_report": "off",
+    "item_live_gate": "off",
     "item_verification": "separate",
     "item_qa_tier": "full_per_item",
     "item_review_scale": "fixed",
     "lane_isolation": "shared_checkout",
     "lane_table": "off",
     "live_case_reuse": "off",
+    "live_verification": "every_pass",
     "level_change_map": "off",
     "mechanical_pass_tier": "role_tier",
     "own_target_reuse": "off",
@@ -572,6 +574,16 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "item_live_gate": {
+        f"{SKILLS}/qa-verification/references/switch-item_live_gate-tooling_items.md": (
+            "a failure blocks the merge",
+        ),
+    },
+    "live_verification": {
+        f"{SKILLS}/qa-verification/references/switch-live_verification-delivery_integration.md": (
+            "Every finding is repaired and re-run by impact before the Delivery closes",
+        ),
+    },
     "live_case_reuse": {
         f"{SKILLS}/qa-verification/references/switch-live_case_reuse-delta_since_green.md": (
             "A group with no entry is never reused",

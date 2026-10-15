@@ -1337,6 +1337,48 @@
         "unit": "At least 5 Items verified by a single verifier across at least 2 Deliveries.",
         "threshold": "Median freeze-to-validated time at most half of the separate baseline and no post-integration defect a separate code review would have blocked, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "live_verification": {
+      "summary": "When live tests run: in every story QA pass, or once, impact-selected, when the Delivery integrates its Items.",
+      "flows": ["delivery-execution"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "every_pass",
+          "tradeoffs": "Every story QA pass runs the live groups its Test Plan names and its final verdict needs that live run. Today's behaviour and the baseline: in one measured project one pass of the live plan took up to about two hours, also for stories that changed no environment tooling."
+        },
+        {
+          "id": "delivery_integration",
+          "tradeoffs": "No story QA pass runs live tests and a final verdict needs no live run; the pass records live: deferred_to_integration. The Delivery integration step runs one live run of the groups whose paths changed since their last green run and every case not yet passed. Story passes stop waiting on live tests, while environment defects of several Items surface together at integration."
+        }
+      ],
+      "default": "every_pass",
+      "metric": "Per Delivery: story pass wall clock, integration live run wall clock, and defects the integration live run found that a per-pass live run would have found earlier.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with live groups.",
+        "threshold": "Lower median story pass time with no defect escaping the integration live run, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "item_live_gate": {
+      "summary": "Whether an Item that changes environment tooling runs its affected live groups once before merge while live verification runs at Delivery integration.",
+      "flows": ["delivery-execution"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "No Item runs live tests before the integration live run; an environment-tooling defect surfaces only there."
+        },
+        {
+          "id": "tooling_items",
+          "tradeoffs": "An Item whose changed paths a tooling-class rule of the project's live impact map covers runs only its affected live groups, once before merge, outside the QA pass loop. Earlier proof for tooling changes at the cost of one live run per such Item."
+        }
+      ],
+      "default": "off",
+      "metric": "Per tooling Item: gate wall clock and defects it found before the integration live run.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with tooling Items.",
+        "threshold": "Defects the gate found before integration outweigh its time, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

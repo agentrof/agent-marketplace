@@ -90,6 +90,8 @@ Modes default to `review_repair` after an earlier candidate and `qa_final`;
 Switch `qa_preflight`: at `lifecycle_first`, follow `skill-content/qa-verification/references/switch-qa_preflight-lifecycle_first.md`.
 Switch `runtime_lifecycle`: at `long_lived`, follow `skill-content/qa-verification/references/switch-runtime_lifecycle-long_lived.md`.
 Switch `live_case_reuse`: at `delta_since_green`, follow `skill-content/qa-verification/references/switch-live_case_reuse-delta_since_green.md`.
+Switch `live_verification`: at `delivery_integration`, follow `skill-content/qa-verification/references/switch-live_verification-delivery_integration.md`.
+Switch `item_live_gate`: at `tooling_items`, follow `skill-content/qa-verification/references/switch-item_live_gate-tooling_items.md`.
 Put the manifest's `command_form` verbatim into every reader prompt: while
 readers are active, Bash admits only that one direct invocation followed by a
 verb, and readers read files with the host's Read tool.
@@ -167,6 +169,7 @@ every run with the session identity through `status --summary`; plain
 `status` prints the whole session, bindings included.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
+Unless switch `live_verification` defers live runs to Delivery integration,
 QA runs each declared `live_groups` entry with `run --kind live_test --group <group>`,
 substituting `{group}` in `live_test_command` in `live_test_workdir`.
 The frozen clone, locks, environment binding and raw evidence match `run --kind test`.

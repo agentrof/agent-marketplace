@@ -46,7 +46,7 @@ parameter the table leaves unset. A switch that only reports, such as
    `delivery-execution` flow owns: `code_review_panel`, `context_pack`,
    `execution_planning`, `implementation_schedule`,
    `item_qa_tier`, `item_review_scale`, `lane_isolation`,
-   `level_change_map`, `live_case_reuse`, `own_target_reuse`, `owner_gates`,
+   `item_live_gate`, `level_change_map`, `live_case_reuse`, `live_verification`, `own_target_reuse`, `owner_gates`,
    `pre_handoff_regression`, `provisional_claims`, `qa_gate_order`, `qa_preflight`, `regression_plan_revision`,
    `repair_review`, `review_loop`, `review_scope`, `runtime_lifecycle`,
    `test_engines` and `test_group_report`.

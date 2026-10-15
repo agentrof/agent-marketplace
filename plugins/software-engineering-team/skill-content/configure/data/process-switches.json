@@ -498,6 +498,7 @@
       }
     },
     "review_scope_record": {
+      "measurement_only": true,
       "summary": "Whether each backlog epic review records how large its read set is under both review_manifest_scope values, which of its blocking findings cite a note outside the bounded read set, and flags a transitive read set over the owner's budget before its readers start.",
       "issue": 395,
       "flows": ["backlog-planning"],
@@ -814,6 +815,7 @@
       }
     },
     "item_cost_report": {
+      "measurement_only": true,
       "summary": "Whether the Delivery Review reports the Delivery as a whole, or also each Item's fixed cost step by step: code review, QA gate, evidence records, integration and architecture delta.",
       "issue": 432,
       "flows": ["delivery-execution"],
@@ -856,6 +858,7 @@
       }
     },
     "lane_table": {
+      "measurement_only": true,
       "summary": "Whether the coordinator tracks parallel lanes in its own context only, or records each lane's start and finish in a lane table under the project-local runtime directory that a restarted session reads before it launches anything.",
       "issue": 332,
       "flows": ["delivery-execution"],
@@ -986,6 +989,7 @@
       }
     },
     "step_timing": {
+      "measurement_only": true,
       "summary": "Whether the coordinator records the start and end of each flow step and role spawn, with its reading, writing, review and waiting phases, in a durable per-run timing record, or records no step timing.",
       "issue": 441,
       "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
@@ -1008,6 +1012,7 @@
       }
     },
     "step_budgets": {
+      "measurement_only": true,
       "summary": "Whether each flow step and role spawn is timed against a maximum in minutes and every step that exceeds its maximum is reported at once with its breakdown, or steps run without a budget report. A budget is a maximum, never an expectation: a step may finish well under it, and a budget never blocks, fails or shortens a step.",
       "issue": 441,
       "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
@@ -1215,6 +1220,7 @@
       }
     },
     "step_baseline": {
+      "measurement_only": true,
       "summary": "Whether a timed step is also compared with its own history, the median of its last recorded runs, so a step whose length depends on the project, such as a QA live run, is reported when it runs far past its usual time, or only with a fixed maximum. A baseline only reports: it never blocks, fails or shortens a step.",
       "issue": 543,
       "flows": ["delivery-execution"],

@@ -404,7 +404,7 @@ refuses a review it approves that ran with another value, parameters included, o
 backlog-planning flow owns, read from the current policy or its Git history, or whose pinned
 revision it cannot read back, naming the remedy: a new review round rerun under the current policy,
 or a policy revision that sets those values back. A revision that changes only other switches, such
-as a Delivery's, leaves the reviews valid. Each round keeps its own pin, so a revision and its
+as a Delivery's or a measurement-only one, leaves the reviews valid. Each round keeps its own pin, so a revision and its
 reviews name the switch values they ran under. Without a policy nothing is recorded; a draft or
 invalid policy refuses the approval. Existing valid unchanged source approvals retain their
 timestamps, hashes and bytes; previously approved reviews are immutable and changes require a new

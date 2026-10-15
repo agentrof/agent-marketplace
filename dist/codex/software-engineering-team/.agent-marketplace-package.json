@@ -98,7 +98,7 @@
       "9ab4dd0b8df2fde66c82556e9a743a347294034035a73e6746f4bb12292ff00b"
     ,
     "flows/backlog-planning.md":
-      "e3541a13378e48608d5ab645f686ffe8925966126db7b2a2e67ddf82bb2b7163"
+      "3526f3c62edbbb08f20335e77570592ff44f84c48aec0affd8ecc2b621b5d895"
     ,
     "flows/business-analysis.md":
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
@@ -161,7 +161,7 @@
       "2020a777bc0b552a0acfa6be2771ee00c040c500a6d9a368dfe700a5b5bec423"
     ,
     "scripts/backlog_compile.py":
-      "5ee1a0e4feb7ba1418da022169a351c06c2255c52310433134d6dfd9b93630eb"
+      "10536273cb2457ef3ea648861fabb91047af5bd1cd841e7405d76a83c2da92ee"
     ,
     "scripts/backlog_input_policy.py":
       "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
@@ -251,7 +251,7 @@
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
     ,
     "scripts/process_policy.py":
-      "2c4cd76d5d95c3b6669d7210cd95a880718afd3282bcb77052c75437adf16900"
+      "dcb7a089eed087d240272473b34192e5d4dd80c0a86cc1dc9d06bec70f9d4f02"
     ,
     "scripts/project_config.py":
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
@@ -470,7 +470,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "e756dfb49bb52c9c24c29a8d3077e0048ca5aae1ded618e09143feecda2b819e"
+      "b30134675a1dfa554c6fb0f506194bf28e25fb7e82f3b11e78a5c2432d30572c"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -482,7 +482,7 @@
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "08670da6a91f9a5aff586e17db1056c5af1e576dfa25d2ca04eaa3cae5a605fb"
+      "2cc60d93e8947de4a5b1f4c07e5d3332e1931bb5b34d058d1f770b04de8ae206"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"

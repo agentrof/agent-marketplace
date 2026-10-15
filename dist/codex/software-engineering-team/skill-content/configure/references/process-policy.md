@@ -44,14 +44,15 @@ parameter the table leaves unset. A switch that only reports, such as
    it still reads the delta changes. A scope-approved Delivery reads every
    switch a Delivery flow owns; an execution-approved one reads only those its
    `delivery-execution` flow owns: `code_review_panel`, `context_pack`,
-   `execution_planning`, `implementation_schedule`, `item_cost_report`,
-   `item_qa_tier`, `item_review_scale`, `lane_isolation`, `lane_table`,
+   `execution_planning`, `implementation_schedule`,
+   `item_qa_tier`, `item_review_scale`, `lane_isolation`,
    `level_change_map`, `live_case_reuse`, `own_target_reuse`, `owner_gates`,
    `pre_handoff_regression`, `provisional_claims`, `qa_gate_order`, `qa_preflight`, `regression_plan_revision`,
-   `repair_review`, `review_loop`, `review_scope`, `runtime_lifecycle`, `step_baseline`, `step_budgets`, `step_timing`,
+   `repair_review`, `review_loop`, `review_scope`, `runtime_lifecycle`,
    `test_engines` and `test_group_report`.
-   A switch no Delivery flow owns is read from the current policy and stops
-   no Delivery.
+   A switch no Delivery flow owns, and a `measurement_only` switch of the
+   registry, which only records time or cost, is read from the current policy
+   and stops no Delivery and invalidates no review round.
    Such a Delivery runs under the values it pinned, so after the new
    revision is approved its checks refuse it until its execution plan is
    revised and approved again, which pins the new revision. Name that path in

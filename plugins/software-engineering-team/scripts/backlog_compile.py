@@ -4354,7 +4354,8 @@ def review_pin_findings(record: dict, docs: Path, pin: dict,
 
     registry = process_policy.load_registry()
     switches = sorted(switch for switch, entry in registry.items()
-                      if BACKLOG_FLOW in (entry["spec"].get("flows") or []))
+                      if BACKLOG_FLOW in (entry["spec"].get("flows") or [])
+                      and process_policy.binds_work(entry))
     values = process_policy.effective_values(docs)[0]
     findings = []
     reviews = [latest(record["backlog_reviews"])] + [latest(epic["reviews"])
@@ -4817,7 +4818,8 @@ def pending_review_policy_matches(docs: Path, props: dict, pin: dict) -> bool:
     return all((ran[switch]["value"], ran[switch].get("parameters"))
                == (current[switch]["value"], current[switch].get("parameters"))
                for switch, entry in registry.items()
-               if BACKLOG_FLOW in (entry["spec"].get("flows") or []))
+               if BACKLOG_FLOW in (entry["spec"].get("flows") or [])
+               and process_policy.binds_work(entry))
 
 
 def stub_review(docs: Path, slug: str | None = None) -> int:

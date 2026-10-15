@@ -1130,6 +1130,118 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
 
 
 
+# Switch repair_pass at scoped_repair: a repair of fixable findings below critical
+# is settled by its pre-freeze repair review and the touched-suites run, without
+# a new full reader pass over unchanged scope.
+REPAIR_PASS, SCOPED_REPAIR = "repair_pass", "scoped_repair"
+
+
+def is_test_path(name: str) -> bool:
+    rules = policy()["mutation_scope"]
+    path = PurePosixPath(name)
+    return (any(part in rules["test_path_segments"] for part in path.parts[:-1])
+            or any(fnmatch.fnmatchcase(path.name, pattern) for pattern in rules["test_name_patterns"]))
+
+
+def scoped_repair_refusal(root: Path, delivery_id: str, story: str, previous: dict | None,
+                          current: dict) -> str | None:
+    """Why the repaired candidate needs a full pass, or None when a scoped repair may settle it."""
+    docs = delivery.docs_root(root)
+    value = lambda name: delivery.delivery_switch_value(docs, delivery_id, name)
+    if value(REPAIR_PASS) != SCOPED_REPAIR:
+        return "scoped-repair runs at switch repair_pass scoped_repair"
+    if value("repair_review") != "before_freeze":
+        return "scoped_repair needs repair_review before_freeze, whose reader reviews the repair diff"
+    if pre_handoff_regression(root, delivery_id) != TOUCHED_SUITES:
+        return "scoped_repair needs pre_handoff_regression touched_suites, which runs the touched suites"
+    if previous is None or previous.get("candidate") == current:
+        return "scoped_repair settles a repaired candidate of an earlier verification pass"
+    old = previous["candidate"]
+    if (old["delivery"], old["story"]) != (delivery_id, story):
+        return "the earlier verification pass belongs to another Item"
+    if current["runtime_required"]:
+        # shortcut: a runtime Item always takes a full pass; upgrade when live evidence can be scoped.
+        return "a runtime_required Item needs a full pass with fresh runtime evidence"
+    results = []
+    for role in ROLES:
+        worker = previous["workers"][role]
+        result = worker.get("result", {})
+        if worker.get("state") != "settled" or result.get("mode") not in policy()["final_modes"][role]:
+            return f"the earlier pass has no settled final {role} result"
+        results.append(result)
+    if all(result.get("verdict") == "passed" for result in results):
+        return "the earlier pass passed; there is nothing to repair"
+    findings = [finding for result in results for finding in result.get("findings", [])]
+    findings += previous.get("unresolved_findings", [])
+    if any(critical(finding) for finding in findings if finding.get("status") != "resolved"):
+        return "a critical finding needs a full verification pass"
+    delta = sorted(set(filter(None, git(root, "diff", "--name-only", "--no-renames", "-z",
+                                        old["product_commit"], current["product_commit"]).split("\0"))))
+    derived = derive_regression(root, delivery_id, story, current)
+    if derived["kind"] != "test":
+        selected = derived["affected_test_ids"]
+        missed = [name for name in delta if is_test_path(name)
+                  and not any(identifier == name or identifier.startswith(name + "::") for identifier in selected)]
+        if missed:
+            return "the touched-suites run selects no test of " + ", ".join(missed)
+    return None
+
+
+def scoped_repair(root: Path, delivery_id: str, story: str, remote: str = "origin") -> dict:
+    """Freeze a repaired candidate and settle both readers from its repair review and touched-suites run."""
+    root = root.resolve()
+    previous = read_session(root, required=False)
+    current = candidate(root, delivery_id, story, allow_evidence=True)
+    refusal = scoped_repair_refusal(root, delivery_id, story, previous, current)
+    if refusal:
+        raise RuntimeError(f"DELIVERY_SCOPED_REPAIR_REFUSED: {refusal}")
+    frozen = freeze(root, delivery_id, story, fresh=True, remote=remote)
+    with locked(root):
+        value = read_session(root)
+        if value["session_id"] != frozen["session_id"] or not value.get("repair_review") or not value.get("pre_handoff"):
+            raise RuntimeError("DELIVERY_SCOPED_REPAIR_REFUSED: the frozen session lacks its repair review"
+                               " or touched-suites run")
+        record = {"source_session_id": previous["session_id"], "candidate_hash": current["candidate_hash"],
+                  "repair_review_evidence_hash": value["repair_review"]["evidence_hash"],
+                  "pre_handoff_evidence_hash": value["pre_handoff"]["evidence_hash"]}
+        record["evidence_hash"] = digest(record)
+        value["scoped_repair"] = record
+        evidence = (f"Scoped repair: repair review {record['repair_review_evidence_hash']} passed on the"
+                    f" repair diff and the touched-suites run {record['pre_handoff_evidence_hash']} passed;"
+                    f" unchanged scope keeps the results of session {previous['session_id']}.")
+        for role in ROLES:
+            earlier = previous["workers"][role]["result"]
+            findings = [{**finding, "status": "resolved"} if blocking(finding) and finding["status"] == "open"
+                        else finding for finding in earlier.get("findings", [])]
+            if role == "code_reviewer":
+                findings += value["repair_review"]["result"]["findings"]
+                checks = {name: {"passed": True, "evidence": evidence} for name in policy()["review_checks"]}
+            else:
+                checks = {"scoped_regression": {"passed": True, "evidence": evidence,
+                                                "raw_evidence_hash": record["pre_handoff_evidence_hash"]}}
+            result = {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
+                      "role": role, "mode": SCOPED_REPAIR, "verdict": "passed", "checks": checks,
+                      "findings": findings, "scoped_repair_hash": record["evidence_hash"],
+                      "report": f"{evidence}\n\nEarlier {role} report:\n\n{earlier['report']}"}
+            result["result_hash"] = digest(result)
+            value["workers"][role] = {"state": "settled", "result": result, "completed_at": time.time(),
+                                      "reader_elapsed_seconds": 0.0}
+        write_session(root, value)
+        return value
+
+
+def scoped_repair_problem(value: dict, result: dict) -> str | None:
+    """Why a scoped_repair result does not stand on its session's repair review and touched-suites run."""
+    record = value.get("scoped_repair") or {}
+    if (record.get("evidence_hash") != digest({key: item for key, item in record.items() if key != "evidence_hash"})
+            or result.get("scoped_repair_hash") != record.get("evidence_hash")
+            or record.get("candidate_hash") != value["candidate"]["candidate_hash"]
+            or record.get("repair_review_evidence_hash") != (value.get("repair_review") or {}).get("evidence_hash")
+            or record.get("pre_handoff_evidence_hash") != (value.get("pre_handoff") or {}).get("evidence_hash")):
+        return "scoped repair result does not bind this session's repair review and touched-suites run"
+    return None
+
+
 def prepare_repair(root: Path) -> dict:
     """Create an independent repair checkout without changing the frozen Item."""
     root = root.resolve()
@@ -4180,6 +4292,11 @@ def validate(root: Path, delivery_id: str, story: str) -> dict:
                 or result.get("session_id") != value["session_id"]
                 or result.get("result_hash") != digest({key: item for key, item in result.items() if key != "result_hash"})):
             raise RuntimeError(f"same-candidate final passed {role} result is required")
+        if result.get("mode") == SCOPED_REPAIR:
+            problem = scoped_repair_problem(value, result)
+            if problem:
+                raise RuntimeError(problem)
+            continue
         if role == "qa_engineer":
             require_owner_step_progress(root, value, final=True)
             environment = require_raw_evidence(root, value, result["checks"])
@@ -6061,7 +6178,7 @@ def main(argv=None) -> int:
     subs = parser.add_subparsers(dest="command", required=True)
     for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map",
                  "repair-live", "repair-review-manifest", "repair-review-result", "permission-preflight",
-                 "rehearse", "rehearsal-status", "live-base", "follow-up-issues"):
+                 "rehearse", "rehearsal-status", "live-base", "follow-up-issues", "scoped-repair"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
@@ -6171,6 +6288,8 @@ def main(argv=None) -> int:
             value = merge_panel(root)
         elif args.command == "validate":
             value = validate(root, args.delivery, args.story)
+        elif args.command == "scoped-repair":
+            value = scoped_repair(root, args.delivery, args.story)
         elif args.command == "follow-up-issues":
             value = follow_up_issues(root, args.delivery, args.story)
         elif args.command == "environment":

@@ -543,6 +543,7 @@ RELEASED_DEFAULTS = {
     "rebind_review_scope": "full",
     "remediation_bookkeeping": "writer",
     "remediation_writers": "single_writer",
+    "repair_pass": "full_pass",
     "repair_review": "after_freeze",
     "review_loop": "current",
     "review_fanout": "single_reader",
@@ -593,6 +594,13 @@ SAFETY_RULES = {
             "A long-lived instance is trusted only once a fresh one has proven the same environment code",
             "so no Item is approved on long-lived evidence without fresh evidence of its environment code",
             "An interrupted command still requires `down` before anything else",
+        ),
+    },
+    "repair_pass": {
+        f"{SKILLS}/deliver/references/switch-repair_pass-scoped_repair.md": (
+            "no open finding of it is critical",
+            "the Item is not `runtime_required`",
+            "freezes nothing, and the coordinator runs the ordinary full pass",
         ),
     },
     "repair_review": {

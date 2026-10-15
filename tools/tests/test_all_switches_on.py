@@ -75,6 +75,7 @@ LANE_ISOLATION = "deliver/references/switch-lane_isolation-scratch_clone.md"
 LEVEL_CHANGE = "deliver/references/switch-level_change_map-assertion_map.md"
 DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE, LEVEL_CHANGE,
            "deliver/references/switch-finding_disposition-follow_up_issue.md",
+           "deliver/references/switch-repair_pass-scoped_repair.md",
            "qa-verification/references/switch-qa_preflight-lifecycle_first.md",
            "deliver/references/switch-step_baseline-median.md",
            "qa-verification/references/switch-runtime_lifecycle-long_lived.md",

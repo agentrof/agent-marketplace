@@ -1297,6 +1297,26 @@
         "unit": "At least 3 Deliveries with follow_up_issue selected.",
         "threshold": "Median passes per Item at most 1.2, no follow-up later reclassified critical, every follow-up issue filed, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "repair_pass": {
+      "summary": "Whether a candidate repaired after a verification pass with only fixable findings below critical runs a new full reader and QA pass, or is settled by its pre-freeze repair review and the touched-suites run.",
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "full_pass",
+          "tradeoffs": "Every repaired candidate runs the full code review and QA again, full suite, mutation and live checks included. Today's behaviour: in one measured project a one-line repair cost a further pass of more than an hour."
+        },
+        {
+          "id": "scoped_repair",
+          "tradeoffs": "When the earlier pass returned findings below critical only, repair_review before_freeze reviewed the repair diff and pre_handoff_regression touched_suites ran the touched suites with every test file the repair changed, scoped-repair freezes the candidate and settles both readers from that evidence, so it integrates without a new full pass. Saves a full pass per repair, while the full suite, mutation and any reader judgement of unchanged scope are not rerun on the repaired candidate, and a runtime Item or a critical finding still takes the full pass."
+        }
+      ],
+      "default": "full_pass",
+      "metric": "Per repaired Item: wall time from the repair commit to integration, scoped repairs against full passes, and defects later traced to code a scoped repair changed, against full_pass repairs of comparable size.",
+      "promotion": {
+        "unit": "At least 5 scoped repairs across at least 2 Deliveries.",
+        "threshold": "Median repair-to-integration time at most a third of the full_pass baseline and no defect traced to a scoped repair, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "16ead8369453f6394075d5d63bfd1dcbbc023e229986344af9075c30b4a73567"
+      "02928b253b1c2001c7bdcab826c3375dee02027bb872aa9a62ade8b1b13495d4"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -200,10 +200,10 @@
       "6332887c15451a8695e6c911a6e3073d691b049d092f4f06d399b1777dc8a506"
     ,
     "scripts/delivery_result.py":
-      "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
+      "1ca45984c3c373674dc79e6272686847a89cd56366596c4cd3f836e3c8dc75d5"
     ,
     "scripts/delivery_verification.py":
-      "0e24b55aa1e369f1b8350f897ed593f3c7e4f838a75426a5761f46b3428694bc"
+      "47a8bd857d27bcc2af607ab4eef78c23a220f2c6075582a2b6289b463723a001"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -473,7 +473,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "4c9e47641716410d2ee5d85c41a1e060993e8fd4182a9dff8843a36e48f0ada9"
+      "4f62e3d2b77b6f5cfc3dda52b1b08ceb57e72256f818c0f41e9280e04d2fc475"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -515,10 +515,10 @@
       "4b47d51cd4c24d0aa448c2ccd5aef23c48da807c226543b2868f8b0c86e6e731"
     ,
     "skill-content/deliver/data/delivery-result-contract.json":
-      "ab8ef657afa5d92b173b1ace78d40af5d3d1eadb31b47e3dd59f3d22bffefb7b"
+      "aed924d779a393fa090f27af3c46e8c9bfa3dab37ed4a78669fbe149abf99385"
     ,
     "skill-content/deliver/data/delivery-verification-policy.json":
-      "3924072da5f53446cf4e0c32f431053032ff8ce6fbd32b83efc8eb4fe6bab892"
+      "be1cb41ff4f2855f4a0812783febaabc48bd56e7a950c14b94f6637c8308b49e"
     ,
     "skill-content/deliver/data/owner-decision-classes.json":
       "ce9f4eb4c264c77cc1e80f949b6ba36444dd508f86d95edbbc30aa60e3e00495"
@@ -558,6 +558,9 @@
     ,
     "skill-content/deliver/references/switch-regression_plan_revision-current_approved.md":
       "487cedfffcba65c9c333f0153b57bfa7fb346e6bcc03e00ca599adf72f5d2b62"
+    ,
+    "skill-content/deliver/references/switch-repair_pass-scoped_repair.md":
+      "52112f6d123b364b9d16b40b2860e0ce9c8b4d930ae6fba80ff1f4346bbc9f66"
     ,
     "skill-content/deliver/references/switch-step_baseline-median.md":
       "96516e846ae45bc97219d2b000fbb544d3bbe1dbd8ef3609e4d60a27946a427d"

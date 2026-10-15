@@ -3848,7 +3848,8 @@ def check_delivery_contract_shape(
     if (verification.get("review_checks") != ["correctness", "conformance", "security"]
             or verification.get("qa_checks") != ["full_test_suite", "coverage", "right_reason"]
             or verification.get("role_modes") != {"code_reviewer": ["review_initial", "review_repair"], "qa_engineer": ["qa_diagnostic", "qa_final"]}
-            or verification.get("final_modes") != {"code_reviewer": ["review_initial", "review_repair"], "qa_engineer": ["qa_final"]}):
+            or verification.get("final_modes") != {"code_reviewer": ["review_initial", "review_repair", "scoped_repair"],
+                                                   "qa_engineer": ["qa_final", "scoped_repair"]}):
         problems.append("verification final gates or independent role modes are invalid")
     age = verification.get("raw_evidence_max_age_seconds")
     if not isinstance(age, int) or isinstance(age, bool) or not 0 < age <= 86400:

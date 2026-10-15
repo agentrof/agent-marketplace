@@ -145,6 +145,14 @@ blocking result prevents freeze; passing minor findings carry into the full
 review. The regular reader panel, calibration and QA still run.
 `code-review/references/switch-repair_review-before_freeze.md` defines the steps.
 
+Process switch `repair_pass` decides what a repaired candidate re-runs.
+`full_pass`, the default, runs the full code review and QA again. At
+`scoped_repair`, a repair of findings below critical whose pre-freeze repair
+review and touched-suites run passed is frozen and settled from that evidence,
+with no new reader pass over unchanged scope; a runtime Item or a critical
+finding still takes the full pass.
+`deliver/references/switch-repair_pass-scoped_repair.md` defines the steps.
+
 Process switch `finding_disposition` decides what a Delivery finding below
 critical costs. `next_pass`, the default, repairs every blocking finding and
 runs a new verification pass. At `follow_up_issue` only a critical finding

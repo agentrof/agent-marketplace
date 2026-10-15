@@ -16,6 +16,10 @@
     "P1",
     "P2"
   ],
+  "critical_severities": [
+    "critical",
+    "P0"
+  ],
   "review_checks": [
     "correctness",
     "conformance",

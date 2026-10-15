@@ -522,6 +522,7 @@ RELEASED_DEFAULTS = {
     "dependent_rebind_gate": "separate",
     "epic_review_cadence": "wait_per_panel",
     "execution_planning": "per_document",
+    "finding_disposition": "next_pass",
     "implementation_schedule": "sequential_v1",
     "item_cost_report": "off",
     "item_qa_tier": "full_per_item",
@@ -845,6 +846,13 @@ SAFETY_RULES = {
             " the Verification Contract",
             "A group that fails to collect is a failed group: name it in a finding with its collection error, never"
             " leave it out of the result",
+        ),
+    },
+    "finding_disposition": {
+        f"{SKILLS}/deliver/references/switch-finding_disposition-follow_up_issue.md": (
+            "Only a finding of a `critical_severities` severity",
+            "a failing test, mutation or runtime check is never a follow-up",
+            "never in the package's upstream repository",
         ),
     },
     "item_cost_report": {

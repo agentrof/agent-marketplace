@@ -656,6 +656,7 @@ class CodeReviewPanelRuleTests(unittest.TestCase):
         for name, seam in (("require_current", lambda root, value, allow_evidence=False: value["candidate"]),
                            ("code_review_panel", lambda root, delivery_id: verification.BESIDE_OFFICIAL),
                            ("review_loop", lambda root, delivery_id: self.loop),
+                           ("follow_up_disposition", lambda root, delivery_id: False),
                            ("item_record", lambda root, delivery_id, story: {"role_sequence": ROLE_SEQUENCE}),
                            ("candidate_line_count", lambda root, commit, path: lines.get(path))):
             patcher = mock.patch.object(verification, name, seam)

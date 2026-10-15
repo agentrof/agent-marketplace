@@ -1277,6 +1277,26 @@
         "unit": "At least 3 Deliveries with repaired verification candidates and live groups.",
         "threshold": "No defect found later in a live group a pass reused, and a median live wall clock per repair pass at most half of the off baseline, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "finding_disposition": {
+      "summary": "Whether a Delivery code review or QA finding below critical starts a repair and a new verification pass, or becomes a tracked follow-up issue while the Item integrates.",
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "next_pass",
+          "tradeoffs": "Every blocking finding, critical or major, starts a repair, a fresh candidate and a new verification pass before the Item integrates. Today's behaviour: each major finding costs a full pass, in one measured project often more than an hour."
+        },
+        {
+          "id": "follow_up_issue",
+          "tradeoffs": "Only a critical finding blocks; every major and minor finding is recorded in the code review record and the Delivery Review and filed as one project issue, and the Item integrates in the same pass. Saves a pass per non-critical finding, while a major defect ships and stays open until its issue is picked up, and a finding under-rated as major escapes the gate."
+        }
+      ],
+      "default": "next_pass",
+      "metric": "Per Item: verification passes, wall time from first freeze to integration, follow-up issues filed, and follow-ups later reclassified as critical or reopened as defects, against next_pass Items of comparable size.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with follow_up_issue selected.",
+        "threshold": "Median passes per Item at most 1.2, no follow-up later reclassified critical, every follow-up issue filed, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

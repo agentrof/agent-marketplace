@@ -3353,6 +3353,71 @@ def blocking(finding: dict) -> bool:
     return finding["severity"].casefold() in {value.casefold() for value in policy()["blocking_severities"]}
 
 
+# Switch finding_disposition at follow_up_issue: only a critical finding blocks an
+# Item; every open finding below it is a complete follow-up the coordinator files.
+FINDING_DISPOSITION, FOLLOW_UP_ISSUE = "finding_disposition", "follow_up_issue"
+
+
+def critical(finding: dict) -> bool:
+    return finding["severity"].casefold() in {value.casefold() for value in policy()["critical_severities"]}
+
+
+def follow_up_disposition(root: Path, delivery_id: str) -> bool:
+    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, FINDING_DISPOSITION) == FOLLOW_UP_ISSUE
+
+
+def gate_severities(root: Path, delivery_id: str) -> set[str]:
+    """The severities that keep a result from passing: critical alone at follow_up_issue."""
+    key = "critical_severities" if follow_up_disposition(root, delivery_id) else "blocking_severities"
+    return {value.casefold() for value in policy()[key]}
+
+
+def disposition_follow_ups(results: list[dict], item: dict) -> list[dict]:
+    """Every open finding below critical of the final results, each a complete follow-up.
+
+    The owner role is one of the Item's implementation roles, who fixes it
+    later; QA's findings carry it as the code reviewer's do.
+    """
+    findings = [{**finding, "role": result["role"]} for result in results
+                for finding in (calibrated_findings(result) if result["role"] == "code_reviewer"
+                                else result.get("findings", []))
+                if finding.get("status") == "open" and not critical(finding)]
+    roles = follow_up_roles(item)
+    problems = []
+    for finding in findings:
+        for key in ("file", "description"):
+            if not isinstance(finding.get(key), str) or not finding[key].strip():
+                problems.append(f"{finding['id']} needs its {key}")
+        if finding.get("owner_role") not in roles:
+            problems.append(f"{finding['id']} owner_role must be one of: {', '.join(roles)}")
+        if not isinstance(finding.get("revisit_trigger"), str) or not meaningful_text(finding["revisit_trigger"]):
+            problems.append(f"{finding['id']} needs a concrete revisit_trigger")
+    if problems:
+        raise RuntimeError("finding_disposition follow_up_issue: every finding below critical is a follow-up;"
+                           " " + "; ".join(problems))
+    return sorted(findings, key=lambda finding: (finding["role"], finding["id"]))
+
+
+def follow_up_issues(root: Path, delivery_id: str, story: str) -> dict:
+    """The project issue each follow-up of the validated Item becomes, for the coordinator to file."""
+    if not follow_up_disposition(root, delivery_id):
+        raise RuntimeError("follow-up-issues runs at switch finding_disposition follow_up_issue")
+    session = validate(root, delivery_id, story)
+    results = [session["workers"][role]["result"] for role in ROLES]
+    issues = [{"finding": finding["id"], "role": finding["role"], "severity": finding["severity"],
+               "title": f"{story} follow-up {finding['id']}: "
+                        + finding["description"].strip().splitlines()[0][:120],
+               "body": "\n".join([f"Found by the {finding['role']} on candidate"
+                                  f" {session['candidate']['candidate_hash']} of {delivery_id}.", "",
+                                  f"File: {finding['file']}", f"Severity: {finding['severity']}",
+                                  f"Owner role: {finding['owner_role']}",
+                                  f"Revisit trigger: {finding['revisit_trigger']}", "",
+                                  finding["description"].strip(), "",
+                                  f"Verification: {finding['verification']}"])}
+              for finding in disposition_follow_ups(results, item_record(root, delivery_id, story))]
+    return {"delivery": delivery_id, "story": story, "issues": issues}
+
+
 def calibrated_findings(result: dict) -> list[dict]:
     """A code review result's findings with its calibration rows applied.
 
@@ -3660,7 +3725,13 @@ def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dic
                            " settle as a diagnostic or failed result, and resume once the owner allows it")
     findings = result.get("findings", [])
     check_findings(findings)
-    blocking_severities = {severity.casefold() for severity in policy()["blocking_severities"]}
+    inherited_open = [finding for finding in value.get("unresolved_findings", [])
+                      if finding["role"] == role and blocking(finding)]
+    # The switch is read only when a finding it could let pass is present.
+    gated = (verdict == "passed" and mode != "qa_diagnostic"
+             and (any(finding["status"] == "open" for finding in findings) or inherited_open))
+    blocking_severities = ({severity.casefold() for severity in policy()["blocking_severities"]}
+                           if not gated else gate_severities(root, current["delivery"]))
     if verdict == "passed" and any(finding["severity"].casefold() in blocking_severities
                                    and finding["status"] == "open" for finding in findings):
         raise RuntimeError("passing verification cannot retain an open blocking finding")
@@ -3675,6 +3746,8 @@ def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dic
                    and dispositions[identifier]["status"] != "resolved"
                    for identifier, finding in inherited.items())):
         raise RuntimeError("final result must explicitly disposition every inherited finding and resolve blocking findings")
+    if gated and follow_up_disposition(root, current["delivery"]):
+        disposition_follow_ups([result], item_record(root, current["delivery"], current["story"]))
     return current, inherited, dispositions
 
 
@@ -5988,7 +6061,7 @@ def main(argv=None) -> int:
     subs = parser.add_subparsers(dest="command", required=True)
     for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map",
                  "repair-live", "repair-review-manifest", "repair-review-result", "permission-preflight",
-                 "rehearse", "rehearsal-status", "live-base"):
+                 "rehearse", "rehearsal-status", "live-base", "follow-up-issues"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
@@ -6098,6 +6171,8 @@ def main(argv=None) -> int:
             value = merge_panel(root)
         elif args.command == "validate":
             value = validate(root, args.delivery, args.story)
+        elif args.command == "follow-up-issues":
+            value = follow_up_issues(root, args.delivery, args.story)
         elif args.command == "environment":
             value = run_environment(root, args.verb, args.value)
         elif args.command == "lane-run":

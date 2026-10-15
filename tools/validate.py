@@ -3837,7 +3837,7 @@ def check_delivery_contract_shape(
         problems.append("control-record and subject registries differ")
     verification = contracts["delivery-verification-policy.json"]
     expected_keys = {"schema_version", "raw_evidence_max_age_seconds", "schedules", "legacy_schedule", "new_schedule",
-                     "blocking_severities", "nonblocking_severities", "review_checks", "qa_checks", "role_modes", "final_modes", "mutation_scope",
+                     "blocking_severities", "critical_severities", "nonblocking_severities", "review_checks", "qa_checks", "role_modes", "final_modes", "mutation_scope",
                      "wait_bound_seconds"}
     if set(verification) != expected_keys or verification.get("schema_version") != 1:
         problems.append("verification policy has an unsupported schema or field set")

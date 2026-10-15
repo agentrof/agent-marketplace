@@ -145,6 +145,15 @@ blocking result prevents freeze; passing minor findings carry into the full
 review. The regular reader panel, calibration and QA still run.
 `code-review/references/switch-repair_review-before_freeze.md` defines the steps.
 
+Process switch `finding_disposition` decides what a Delivery finding below
+critical costs. `next_pass`, the default, repairs every blocking finding and
+runs a new verification pass. At `follow_up_issue` only a critical finding
+blocks: each major or minor finding is a complete follow-up that the
+evidence records and the Delivery Review list, the coordinator files it as a
+project issue, and the Item integrates in the same pass.
+`deliver/references/switch-finding_disposition-follow_up_issue.md` defines
+the steps.
+
 What a backlog epic reviewer reads is process switch `review_manifest_scope`.
 At `transitive`, the default, every note the epic's manifest includes expands
 its own links, so the read set follows the vault. At `bounded`, links are

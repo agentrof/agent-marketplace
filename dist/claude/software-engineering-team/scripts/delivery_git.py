@@ -4253,7 +4253,11 @@ def require_carried_control_paths(changed: list[str], relative_item: str, carrie
 def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, str, dict, str],
                           published: tuple[str, str, dict, str] | None = None) -> None:
     """Permit an Item record change only as its Architecture stamp, or as the record of the
-    converged Integration commit whose control note is *published*, keeping its lifecycle and stamp."""
+    converged Integration commit whose control note is *published*, keeping its lifecycle and stamp.
+
+    The generated relation block is not compared: render-relations owns it, and the
+    stamp's source_hash already leaves it out."""
+    from ba_compile import without_generated_relations
     from delivery_compile import content_hash
     if published is None:
         versions = []
@@ -4269,7 +4273,7 @@ def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, 
                 raise RuntimeError("Item publication frontmatter is invalid: no closing delimiter line")
             header, body_text = parts
             header = re.sub(r"(?m)^(?:architecture_delta_hash|source_hash):[^\n]*\n?", "", header)
-            versions.append((mode, header.rstrip("\n"), body_text))
+            versions.append((mode, header.rstrip("\n"), without_generated_relations(body_text).rstrip()))
         if versions[0] != versions[1]:
             raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp")
         return
@@ -4281,7 +4285,8 @@ def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, 
     if (props.get("architecture_delta_hash") != previous.get("architecture_delta_hash")
             and props.get("architecture_impact") != "required"):
         raise RuntimeError("only a required Architecture Item may publish its stamp")
-    if (mode != previous_mode or body != published_body
+    if (mode != previous_mode
+            or without_generated_relations(body).rstrip() != without_generated_relations(published_body).rstrip()
             or plan_owned_item_fields(props) != plan_owned_item_fields(published)
             or item_lifecycle(props) != item_lifecycle(previous)):
         raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp "

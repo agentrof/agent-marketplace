@@ -857,6 +857,28 @@
         "threshold": "Zero Requirement revisions forced during Backlog Planning with no more than one added reader step per Requirement, with every shared quality guard holding and the owner's approval."
       }
     },
+    "pr_proof": {
+      "issue": 606,
+      "summary": "What proves a fast-lane task's checks before its pull request opens: the project's remote CI after the push, or a local record showing that the project's declared proof commands passed on the exact clean HEAD being pushed.",
+      "flows": ["fast-lane"],
+      "values": [
+        {
+          "id": "remote_ci",
+          "tradeoffs": "open-pr checks nothing locally and the project's CI proves the change after the push. Today's behaviour; a project with its CI turned off opens and merges pull requests whose tests nobody ran."
+        },
+        {
+          "id": "local_record",
+          "tradeoffs": "task_lane.py prove runs the project's declared proof commands, by default its test command and the vault gate, on HEAD and records each command's exit code and duration with the HEAD commit and a clean-tree flag; open-pr refuses before pushing when the record is missing, ran on another commit or a dirty tree, or holds a red command, and adds the record to the pull request body. A project without remote CI still opens only tested pull requests, while the proof is only as good as the declared commands and is run and reported by one machine, never re-run by an independent runner."
+        }
+      ],
+      "default": "remote_ci",
+      "reference_scope": "owning_flows",
+      "metric": "Per fast-lane task: open-pr refusals by cause (no record, stale HEAD, dirty tree, red command), prove minutes, and every defect found on the target branch after a merge whose pull request carried a local proof.",
+      "promotion": {
+        "unit": "At least 20 fast-lane tasks run with local_record.",
+        "threshold": "No escaped defect a declared proof command covers, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "lane_table": {
       "measurement_only": true,
       "summary": "Whether the coordinator tracks parallel lanes in its own context only, or records each lane's start and finish in a lane table under the project-local runtime directory that a restarted session reads before it launches anything.",

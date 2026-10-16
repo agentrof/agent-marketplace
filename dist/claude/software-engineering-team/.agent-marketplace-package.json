@@ -125,7 +125,7 @@
       "fa05e6f3b4edb8c8891461e142694b61d0f02fa27fab2a140987bdf80c92c830"
     ,
     "flows/fast-lane.md":
-      "0ff79f8221eac156fbf501ba54e5ea4e55427144fd1110766fa24f4c3a1483dd"
+      "205e2d9a2cf5fa475725af0aaa1f7f06e5f75ccffa03f4d975efffa62a41af28"
     ,
     "flows/operation.md":
       "26b336ebc9fb9737b681e76e6ef87886b331ac40588dfc8457b7c8584e7c9d64"
@@ -308,7 +308,7 @@
       "558130072c8195299922a7e1c41a46a0ba151a8b0d016fa2bf4192f3a0c1a0df"
     ,
     "scripts/task_lane.py":
-      "bdf39f9b74644fb777205124c9aa677a3ca5212c5916b11889c940f1916c5396"
+      "17d36b716ec7d5b1a7dcc0d8822198ca9c34f700f52742d0cae7a7e31f0084e6"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -491,7 +491,7 @@
       "bad92d40cf4f3761e5c967618e43ef8ac061e6e34d4ae3964a3717c5f922f4cf"
     ,
     "skill-content/configure/data/process-switches.json":
-      "1b749bd2cac1b0d7e9f24302de90ebd4b34ab0c50a05064f7bbf22547f0a78e6"
+      "5fff3d9f113ae52d756c1df51f75c31ab373c5b46bf9486a0f6262e941adc639"
     ,
     "skill-content/configure/data/purpose-variants.json":
       "cc60fba8d1f514ad3ba3917b4b6a6b053ad829090be02ef4aa98062f12c3e30b"
@@ -582,6 +582,9 @@
     ,
     "skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md":
       "eb0e0b39f5dfa30cd0eaeff1f3114a13094c6672e386a63e463605fd3e6876e0"
+    ,
+    "skill-content/deliver/references/switch-pr_proof-local_record.md":
+      "74fffb6893e144f59f5c16fffc15ec281c199639b1a4dbe418f53966becbbfb5"
     ,
     "skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md":
       "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"

@@ -1,0 +1,6 @@
+{
+  "summary": "Add process switch `pr_proof` (`remote_ci` | `local_record`): at `local_record`, the new `task_lane.py prove` runs the project's declared proof commands (`.agentrof/local-proof.json`, by default the test command and the vault gate) on HEAD and records each exit code and duration with the HEAD commit and a clean-tree flag, and fast-lane `open-pr` refuses before pushing unless that record is green for the clean HEAD, then adds it to the pull request body as a Local proof section.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

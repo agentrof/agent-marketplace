@@ -27,6 +27,11 @@ import process_policy  # noqa: E402
 import task_lane  # noqa: E402
 import vault_check  # noqa: E402
 
+try:
+    from tools.tests.levels import integration
+except ImportError:
+    from levels import integration
+
 TASK = """---
 type: task
 title: "Export invoices"
@@ -427,6 +432,119 @@ class RoleRoutingTests(unittest.TestCase):
         data = task_lane.report([row], "latest 20")
         self.assertEqual(data["targets"]["build"]["role_checks"], {"tasks": 1, "checks": 2, "minutes": 3.5})
         self.assertIn("Role checks build: 2 on 1 of 1 tasks, 3.5 min", task_lane.render(data))
+
+
+@integration
+class LocalProofTests(unittest.TestCase):
+    """Switch `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""
+
+    def project(self, value: str | None = "local_record") -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        (root / task_lane.TASKS).mkdir(parents=True)
+        (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
+        docs = root / "workspace" / "docs"
+        (docs / "delivery").mkdir(parents=True)
+        if value:
+            run_policy(docs, "init")
+            run_policy(docs, "set", "--switch", "pr_proof", "--value", value)
+            run_policy(docs, "approve")
+        self.git(root, "init", "-q")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-qm", "start")
+        return root
+
+    def git(self, root: Path, *args: str) -> str:
+        return task_lane.run("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args, cwd=root)
+
+    def declare(self, root: Path, *commands: str) -> None:
+        (root / ".agentrof").mkdir(exist_ok=True)
+        (root / task_lane.PROJECT_PROOF).write_text(json.dumps({"commands": list(commands)}), encoding="utf-8")
+
+    def prove(self, root: Path) -> dict:
+        return task_lane.cmd_prove(SimpleNamespace(task="TK-004", base="main"), root)
+
+    def open_pr(self, root: Path) -> tuple[dict, list]:
+        real, calls = task_lane.run, []
+
+        def run(*args, **kwargs):
+            calls.append(args)
+            if args[:2] == ("git", "push") or (args[:2] == ("git", "diff") and "--cached" not in args):
+                return ""
+            if args[:3] == ("gh", "pr", "list"):
+                return "[]"
+            if args[:3] == ("gh", "pr", "create"):
+                return "https://github.com/acme/shop/pull/9"
+            if args[:2] == ("git", "commit"):
+                return real("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args[1:], **kwargs)
+            return real(*args, **kwargs)
+        with mock.patch.object(task_lane, "run", side_effect=run):
+            result = task_lane.cmd_open_pr(SimpleNamespace(task="TK-004", base="main"), root)
+        return result, calls
+
+    def body(self, calls: list) -> str:
+        create = next(call for call in calls if call[:3] == ("gh", "pr", "create"))
+        return create[create.index("--body") + 1]
+
+    def test_the_switch_defaults_to_remote_ci(self):
+        spec = process_policy.load_registry()["pr_proof"]
+        self.assertEqual((spec["default"], spec["values"]), ("remote_ci", ["remote_ci", "local_record"]))
+
+    def test_the_default_opens_the_pull_request_without_a_record(self):
+        for value in (None, "remote_ci"):
+            root = self.project(value)
+            result, calls = self.open_pr(root)
+            self.assertEqual(result["pr"], "9")
+            self.assertNotIn("Local proof", self.body(calls))
+
+    def test_open_pr_refuses_without_a_record_before_pushing(self):
+        root = self.project()
+        real = task_lane.run
+        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: "" if a[:2] == ("git", "diff") else real(*a, **k)), \
+                self.assertRaisesRegex(task_lane.Refused, "no local proof record; run prove --task TK-004"):
+            task_lane.cmd_open_pr(SimpleNamespace(task="TK-004", base="main"), root)
+        self.assertEqual(task_lane.task_props(task_lane.task_path(root, "TK-004"))["status"], "active")
+
+    def test_a_record_of_an_older_head_is_stale(self):
+        root = self.project()
+        self.declare(root, "true")
+        self.assertTrue(self.prove(root)["ok"])
+        (root / "src.txt").write_text("change", encoding="utf-8")
+        self.git(root, "add", "src.txt")
+        self.git(root, "commit", "-qm", "change")
+        with self.assertRaisesRegex(task_lane.Refused, "the proof ran on [0-9a-f]{12}, HEAD is"):
+            self.open_pr(root)
+
+    def test_a_red_command_or_a_dirty_tree_refuses(self):
+        root = self.project()
+        self.declare(root, "true", "echo boom; exit 3")
+        record = self.prove(root)
+        self.assertFalse(record["ok"])
+        self.assertEqual([item["exit_code"] for item in record["commands"]], [0, 3])
+        self.assertIn("boom", record["commands"][1]["tail"])
+        with self.assertRaisesRegex(task_lane.Refused, "`echo boom; exit 3` exited 3"):
+            self.open_pr(root)
+        self.declare(root, "true")
+        task_lane.task_path(root, "TK-004").write_text(TASK + "\n", encoding="utf-8")
+        self.assertFalse(self.prove(root)["tree_clean"])
+        with self.assertRaisesRegex(task_lane.Refused, "uncommitted changes"):
+            self.open_pr(root)
+
+    def test_a_green_record_of_head_opens_the_pull_request_with_its_proof(self):
+        root = self.project()
+        self.declare(root, "true", "echo {base}")
+        head = self.git(root, "rev-parse", "HEAD")
+        record = self.prove(root)
+        self.assertTrue(record["ok"])
+        self.assertEqual(record["head"], head)
+        self.assertEqual(record["commands"][1]["command"], "echo main")
+        saved = json.loads((root / task_lane.PROOFS / "TK-004.json").read_text(encoding="utf-8"))
+        self.assertTrue({"exit_code", "seconds", "started_at", "finished_at"} <= set(saved["commands"][0]))
+        result, calls = self.open_pr(root)
+        self.assertEqual(result["pr"], "9")
+        body = self.body(calls)
+        self.assertIn(f"## Local proof\n\nEvery check passed on HEAD `{head}` with a clean tree", body)
+        self.assertIn("| `echo main` | pass |", body)
 
 
 class FastLaneOwnershipTests(unittest.TestCase):

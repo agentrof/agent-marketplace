@@ -5982,7 +5982,7 @@ def status_summary(root: Path, run: str | None = None) -> dict:
     return result
 
 
-def main(argv=None) -> int:
+def argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", required=True)
     subs = parser.add_subparsers(dest="command", required=True)
@@ -6069,7 +6069,11 @@ def main(argv=None) -> int:
     wait = subs.add_parser("wait")
     wait.add_argument("--role", choices=ROLES)
     wait.add_argument("--seconds", type=float)
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv=None) -> int:
+    args = argument_parser().parse_args(argv)
     root = Path(args.worktree).resolve()
     try:
         if args.command == "start-pass":

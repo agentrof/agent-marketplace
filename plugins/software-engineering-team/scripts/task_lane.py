@@ -72,7 +72,7 @@ SIZES = ("s", "m", "l")
 RIGORS = ("normal", "high")
 # A request naming one of these proposes rigor high; the owner confirms on the task.
 HIGH_RIGOR_RE = re.compile(
-    r"\b(auth\w*|login|password\w*|credential\w*|secret\w*|token\w*|api[ -]?key\w*|"
+    r"\b(auth(?!orit)\w*|login|password\w*|credential\w*|secret\w*|token\w*|api[ -]?key\w*|"
     r"permission\w*|delet\w*|drop\w*|purg\w*|wip\w*|truncat\w*|irreversib\w*|migrat\w*)\b",
     re.IGNORECASE)
 ID_RE = re.compile(r"^TK-[0-9]{3,}$")

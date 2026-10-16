@@ -366,6 +366,8 @@ def gate(project_root: Path, root: Path, base: str | None = None) -> dict:
         approved = frontmatter_status(backlog) == "approved" and not fast
         if approved:
             command.insert(-1, "--approved")
+        if fast:
+            command.insert(-1, "--trust-bindings")
         queue(command, "backlog:approved" if approved else "backlog:draft", backlog.parent)
     with ThreadPoolExecutor(max_workers=max(1, min(len(jobs), os.cpu_count() or 1))) as pool:
         results.extend(pool.map(lambda job: run(*job), jobs))

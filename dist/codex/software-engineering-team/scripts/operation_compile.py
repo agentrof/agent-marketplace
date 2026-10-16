@@ -493,6 +493,10 @@ def accepted_solution_ref(docs: Path, value: object) -> bool:
         props, _body = parse(candidate)
     except (OSError, ValueError):
         return False
+    # At fast_lane the decision file on the target branch is in force; the package hash is not re-verified.
+    import process_policy
+    if process_policy.fast_lane(docs):
+        return props.get("status") == "accepted"
     _receipt, package_errors = stage_package.verify(
         docs, "solution-design", "solution-design/landscape"
     )

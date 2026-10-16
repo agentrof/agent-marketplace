@@ -153,6 +153,11 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(task_lane.proposed_rigor("Rotate the API key secrets")[0], "high")
         self.assertEqual(task_lane.proposed_rigor("Add a CSV export button")[0], "normal")
 
+    def test_authority_is_a_business_term_not_an_auth_risk(self):
+        self.assertEqual(task_lane.proposed_rigor("Show the approving authority")[0], "normal")
+        self.assertEqual(task_lane.proposed_rigor("Add authentication to the export")[0], "high")
+        self.assertEqual(task_lane.proposed_rigor("Authorize the reviewer role")[0], "high")
+
     def test_ids_follow_tasks_and_remote_task_branches(self):
         names = ["workspace/docs/backlog/tasks/tk-003-a.md", "origin/task/tk-011-b"]
         self.assertEqual(task_lane.next_id(names), "TK-012")

@@ -889,6 +889,31 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
         errors = self.manual_binding_findings("sha256:" + "0" * 64)
         self.assertIn("backlog/backlog.md input binding: solution-design/landscape package hash is stale or does not match expected hash", errors)
 
+    @integration
+    def test_check_trust_bindings_parses_a_stale_binding_without_reverifying_it(self):
+        self.approved_solution()
+        stale = "sha256:" + "0" * 64
+        finding = ("backlog/backlog.md input binding: solution-design/landscape package hash is stale"
+                   " or does not match expected hash")
+        self.assertIn(finding, self.manual_binding_findings(stale))
+        self.addCleanup(setattr, backlog_compile, "TRUST_BINDINGS", False)
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            backlog_compile.main(["check", "--docs", str(self.docs), "--trust-bindings", "--json"])
+        self.assertTrue(backlog_compile.TRUST_BINDINGS)
+        self.assertNotIn(finding, self.manual_binding_findings(stale))
+        # A story's constrained_by landscape whose package hash went stale.
+        self.landscape.write_text(self.landscape.read_text(encoding="utf-8") + "\nEdited.\n",
+                                  encoding="utf-8")
+        trusted = []
+        status = backlog_compile.planning_source_status_and_type(
+            self.docs, "solution-design/landscape", "story", trusted)
+        self.assertEqual((status, trusted), (("approved", "landscape"), []))
+        backlog_compile.TRUST_BINDINGS = False
+        verified = []
+        backlog_compile.planning_source_status_and_type(
+            self.docs, "solution-design/landscape", "story", verified)
+        self.assertTrue(verified)
+
     def revise_solution(self):
         """Open, change and re-approve the committed solution package; return (old, new) hashes."""
         old = backlog_compile.parse_front_matter(self.landscape)[0]["package_hash"]

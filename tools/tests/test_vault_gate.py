@@ -9,6 +9,7 @@ import sys
 import tempfile
 import tokenize
 import unittest
+from unittest import mock
 try:
     from tools.tests.levels import integration
 except ModuleNotFoundError:  # run as a script from tools/tests
@@ -245,6 +246,30 @@ class FastLaneScopeTests(unittest.TestCase):
     def test_an_unreadable_policy_reads_governed(self):
         with tempfile.TemporaryDirectory() as temporary:
             self.assertEqual(self.gate.process_profile(PLUGIN / "scripts", Path(temporary)), "governed")
+
+
+class FastLaneBacklogBindingTests(unittest.TestCase):
+    def test_only_the_fast_lane_backlog_check_trusts_its_input_bindings(self):
+        sys.path.insert(0, str(PLUGIN / "scripts"))
+        self.addCleanup(sys.path.remove, str(PLUGIN / "scripts"))
+        import vault_gate
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            backlog = project / "workspace/docs/backlog/backlog.md"
+            backlog.parent.mkdir(parents=True)
+            backlog.write_text("---\nstatus: approved\n---\n", encoding="utf-8")
+            for profile, present, absent in (("fast_lane", "--trust-bindings", "--approved"),
+                                             ("governed", "--approved", "--trust-bindings")):
+                commands = []
+                with self.subTest(profile=profile), \
+                        mock.patch.object(vault_gate, "process_profile", return_value=profile), \
+                        mock.patch.object(vault_gate, "run", side_effect=lambda command, name: (
+                            commands.append(command) or {"name": name, "ok": True})):
+                    vault_gate.gate(project, PLUGIN)
+                    backlog_check = next(command for command in commands
+                                         if command[1].endswith("backlog_compile.py"))
+                    self.assertIn(present, backlog_check)
+                    self.assertNotIn(absent, backlog_check)
 
 
 if __name__ == "__main__":

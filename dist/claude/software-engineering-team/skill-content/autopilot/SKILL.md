@@ -57,7 +57,11 @@ can allow. The classes, goal kinds, default duration, default goal cap and
 maximum duration are data in `data/autopilot-policy.json`. Under a grant,
 classify the question by every effect of its recommended option: any never
 effect makes it never, an excluded effect the grant does not allow queues it,
-and doubt queues it. `record` takes `--class` once per class a decision
+and doubt queues it with `queue --hold "<reason>"`. Without an explicit hold,
+`queue` records the recommendation as a decision when every named class is
+allowed; copy that decision and its reason into the owning flow's decision
+record before continuing. Keep an excluded effect in its own question when
+it is independent of an allowed decision. `record` takes `--class` once per class a decision
 touches and refuses when one of them is not allowed.
 
 ## Only the user arms a grant

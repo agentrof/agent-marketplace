@@ -1025,14 +1025,28 @@ def cmd_queue(args: argparse.Namespace, now: datetime) -> int:
     with locked(directory):
         grant = active_grant(directory, now, Path(args.project_root))
         names = declared_classes(policy, args.class_)
+        if not args.recommendation.strip() or args.hold is not None and not args.hold.strip():
+            raise Refusal("the recommendation and an explicit hold reason must not be empty")
         if options and args.recommendation not in options:
             raise Refusal("the recommendation must be one of the options")
-        log(directory, now, grant, "queued", classes=names, question=args.question,
-            options=options, recommendation=args.recommendation, blocks=args.blocks or "")
+        defaults = {entry["id"]: entry["default"] for entry in policy["classes"]}
+        decided = args.hold is None and all(name in grant["classes"] and defaults[name] != "never"
+                                             for name in names)
+        if decided:
+            log(directory, now, grant, "decision", classes=names, question=args.question,
+                options=options, choice=args.recommendation,
+                reason="Every named class is allowed by the active grant.", target="owning decision record")
+        else:
+            log(directory, now, grant, "queued", classes=names, question=args.question,
+                options=options, recommendation=args.recommendation, blocks=args.blocks or "",
+                **({"hold": args.hold} if args.hold is not None else {}))
         number = sum(event.get("event") == "queued" for event in ledger(directory, grant["id"]))
-    doubt = all(name in grant["classes"] for name in names)
+    if decided:
+        print(f"autopilot: decided: {args.recommendation}; record the reason in the owning decision record"
+              f" marked {grant['id']} and continue")
+        return 0
     print(f"autopilot: queued question {number} under {grant['id']}"
-          + (", in doubt, though every class it names is allowed" if doubt else "")
+          + (f", held: {args.hold}" if args.hold is not None else "")
           + "; continue the work that does not depend on it")
     return 0
 
@@ -1177,7 +1191,7 @@ def denial(grant: dict, now: datetime) -> str:
         f" Do not ask the user. Run `{command} check` first; if it exits 1, ask the user as"
         " usual. Classify the question by every effect of its recommended option: any never"
         " effect makes it never, an excluded effect the grant does not allow queues it, and"
-        " doubt queues it. If every class it touches is allowed, take the recommended option"
+        " doubt queues it with --hold and a reason. If every class it touches is allowed, take the recommended option"
         " (answer an open question with the recommendation you would offer), first run"
         f" `{command} record` with --class once per class it touches, --question, --options,"
         " --choice, --reason and --target, then apply it and write the decision into the"
@@ -1397,6 +1411,7 @@ def parser() -> argparse.ArgumentParser:
     queue = verbs.add_parser("queue")
     queue.add_argument("--recommendation", required=True)
     queue.add_argument("--blocks")
+    queue.add_argument("--hold", metavar="REASON", help="keep the question pending despite an allowed recommendation")
     queue.set_defaults(handler=cmd_queue)
     for verb in (record, queue):
         verb.add_argument("--class", dest="class_", action="append", required=True,

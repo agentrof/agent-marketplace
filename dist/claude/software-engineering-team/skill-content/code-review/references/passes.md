@@ -187,3 +187,13 @@ End the pass with a short attack-surface summary: entry points touched by
 the change, which are protected versus public, and the data entry points
 introduced. A security finding that implicates the approved auth design
 follows the escalation route, same as conformance.
+
+## Production reachability
+
+Read the frozen manifest's `production_reachability` before judging a new
+function, command or record reader. Trace each reported symbol from a real
+production entry point and each record to its producer. A test-only caller is
+not wiring. The scan reports clues, not a pass: resolve callbacks, imports,
+dynamic paths, external producers and every `unassessed` path explicitly.
+Report missing wiring in the current Item so it does not become a later
+Item's unplanned work. Apply this check in a single-verifier pass as well.

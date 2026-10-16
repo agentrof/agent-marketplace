@@ -5600,6 +5600,9 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
         if live_rows:
             result["carried_findings"] = live_rows
     if role == "code_reviewer":
+        import production_reachability
+        result["production_reachability"] = production_reachability.inspect(
+            root, current["integration_base_commit"], current["product_commit"])
         # The code reviewer runs no command: it reads the freeze record and QA's results instead.
         del result["diagnostic_interface"]
         result["verification_evidence"] = reviewer_evidence(root, value)

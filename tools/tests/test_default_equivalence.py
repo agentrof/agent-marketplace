@@ -229,6 +229,9 @@ SHIPPED_GOLDEN = {
 # task hashes every package script and every file of the skills it selects,
 # because a tool or data file it can run shapes its result.
 SHIPPED_ADDITIONS = {
+    "scripts/production_reachability.py": (
+        72, "#594: frozen production-caller and record-writer clues for the review manifest;"
+            " every task binds the script with the package implementation."),
     "scripts/backlog_migration.py": (
         72, "#450: the closed schema receipt replay used by backlog and Delivery compilers;"
             " every task hashes package scripts, while no default-path step applies a migration."),

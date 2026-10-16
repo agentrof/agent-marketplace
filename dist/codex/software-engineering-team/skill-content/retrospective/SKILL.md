@@ -42,12 +42,14 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
    main session and any other record fall in every task window that holds
    them, split evenly. What no task claims is reported as unattributed.
    Prices come from `data/pricing.json` (USD per 1M tokens per model, with
-   its date, sources and assumptions); a project overrides or adds a model in
+   its date, sources and verification note; fast-mode calls cost the model's
+   `fast_multiplier`); a project overrides or adds a model in
    `.agentrof/pricing.json` with the same `models` shape. A model without a
    price counts tokens only and is listed as unpriced. Each run appends every
    merged task's cost and waits once to `.agentrof/retrospective/history.jsonl`
    and later runs read that row first, so cost survives the host's transcript
-   cleanup.
+   cleanup. `--rescan` prices every task from the transcripts again and
+   appends the result as its newest row; earlier rows stay.
 2. Return its text as it is:
    - task count; request-to-merge average, median and max against the target
      (15 minutes on average, 50 at most for a large task) and the previous

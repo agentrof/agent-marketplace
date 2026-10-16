@@ -826,16 +826,16 @@ def previous_run(root: Path, scope: str) -> dict | None:
 
 
 def kept_costs(root: Path) -> dict[str, dict]:
-    """The cost and waits each merged task had when first reported, by task id."""
+    """Each merged task's latest saved cost and waits, by task id; a rescan appends a newer row, never rewrites."""
     return {item["task_id"]: item for item in history(root) if item.get("type") == "task_cost"}
 
 
-def remember(root: Path, data: dict) -> None:
+def remember(root: Path, data: dict, rescan: bool = False) -> None:
     """Append this run's summary, the next retrospective's comparison point, and once per merged
     task its cost and waits, which outlive the host's transcripts (derived, git-ignored)."""
     total = data["request_to_merge_minutes"]
     spend = data.get("cost") or {}
-    kept = kept_costs(root)
+    kept = {} if rescan else kept_costs(root)
     path = root / HISTORY
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -859,7 +859,7 @@ def gather(root: Path, args) -> dict:
     rows = [task_row(task, pr_times(root, prs[task["id"]]["number"]) if task["id"] in prs else None)
             for task in chosen]
     unattributed = None
-    kept = kept_costs(root)
+    kept = {} if getattr(args, "rescan", False) else kept_costs(root)
     deep = getattr(args, "deep", False)
     fresh = [row for row in rows if row["task_id"] not in kept or row["total"] is None]
     if chosen and not getattr(args, "no_sessions", False) and (fresh or deep):
@@ -1121,7 +1121,7 @@ def cmd_merge(args, root: Path) -> dict:
 
 def cmd_report(args, root: Path):
     data = gather(root, args)
-    remember(root, data)
+    remember(root, data, getattr(args, "rescan", False))
     written = []
     if args.export:
         target = root / EXPORT / f"tasks.{args.export}"
@@ -1239,6 +1239,8 @@ def main(argv: list[str] | None = None) -> int:
     retro.add_argument("--json", action="store_true")
     retro.add_argument("--export", choices=("csv", "json"))
     retro.add_argument("--write-report", action="store_true")
+    retro.add_argument("--rescan", action="store_true",
+                       help="price every task from the transcripts again and save the result as its newest row")
     retro.add_argument("--deep", action="store_true",
                        help="also report files read 5 or more times and tool results over 200 KB")
     issues = sub.add_parser("file-issues")

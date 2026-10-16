@@ -889,6 +889,18 @@ class RetrospectiveDollarTests(unittest.TestCase):
             again = task_lane.gather(root, args)
         self.assertEqual(again["per_task"][0]["cost"]["usd"], 2.0)
         self.assertIn("$2.00 and 2066002 tokens per task", task_lane.render(again))
+        # A rescan prices from the transcripts again and appends a newer row; the old one stays.
+        fixed = {**again["per_task"][0]["cost"], "usd": 1.5}
+        with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
+                mock.patch.object(task_lane, "pr_times", return_value=pr(
+                    "2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")), \
+                mock.patch.object(task_lane, "attach_sessions",
+                                  side_effect=lambda rows, *rest: rows[0].update(cost=fixed, waits=None)) as scanned:
+            rescanned = task_lane.gather(root, SimpleNamespace(**{**vars(args), "rescan": True}))
+        scanned.assert_called_once()
+        task_lane.remember(root, rescanned, rescan=True)
+        self.assertEqual(sum(1 for item in task_lane.history(root) if item.get("type") == "task_cost"), 2)
+        self.assertEqual(task_lane.kept_costs(root)["TK-001"]["cost"]["usd"], 1.5)
 
 
 class GovernedRenameTests(unittest.TestCase):

@@ -1,5 +1,9 @@
 # Uncontested path claim amendments
 
+Use this procedure only when the approved Process Policy selects
+`provisional_claims` at `uncontested_delta`. Read the Delivery's pinned value
+with `process_policy.py value --switch provisional_claims --delivery DLV-###`.
+
 At `provisional_claims` value `uncontested_delta`, the coordinator may run
 `delivery_git.py amend-path-claims --delivery DLV-### --story <story> --path
 <path>`, repeating `--path` for the complete batch. The command requires an

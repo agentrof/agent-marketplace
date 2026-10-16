@@ -4502,7 +4502,7 @@ def amend_path_claims(project_root: Path, delivery_id: str, story_id: str, paths
                for claim in amended_path_claims(root, integration, other, props)):
             raise RuntimeError("DELIVERY_PROVISIONAL_CLAIM_REFUSED: another unfinished Item holds an overlapping path")
     receipt = commit_tree(root, integration, [], f"Grant uncontested paths to {story_id}",
-                          {"Record": CLAIM_AMENDMENT, "Protocol": "1", "Delivery": delivery_id,
+                          {"Record": "path-claim-amendment-v1", "Protocol": "1", "Delivery": delivery_id,
                            "Story": story_id, "Item-Path": relative, "Plan-Hash": published["item_plan_hash"],
                            "Claims-Hash": provisional_paths_hash(requested)}, body=json.dumps(requested))
     published["path_claim_amendments"] = [*published.get("path_claim_amendments", []), receipt]
@@ -4512,7 +4512,8 @@ def amend_path_claims(project_root: Path, delivery_id: str, story_id: str, paths
     fence_candidate = commit_tree(root, fence, [], f"Record path amendment for {delivery_id}",
                                  {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
                                   "Epoch": trailer(fence_message, "Epoch"), "Target": trailer(fence_message, "Target"),
-                                  "Governance-Hash": trailer(fence_message, "Governance-Hash")})
+                                  "Governance-Hash": trailer(fence_message, "Governance-Hash"),
+                                  **carried_fence_barrier(fence_message)})
     atomic_push(root, remote, [(refs["fence"], fence, fence_candidate),
                                (refs["integration"], integration, candidate)])
     return {"ok": True, "delivery": delivery_id, "story": story_id, "paths": requested,

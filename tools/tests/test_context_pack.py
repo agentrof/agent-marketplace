@@ -30,7 +30,7 @@ from git_fixture import init_repository, remove_temporary  # noqa: E402
 RULE_WORDS = re.compile(r"\b(must|never|always|refuses?|required|do not|cannot|shall)\b",
                         re.IGNORECASE)
 SAMPLE = [("backlog-plan", "product-owner"), ("backlog-plan", "backlog-reviewer"),
-          ("deliver", "code-reviewer"), ("deliver", None), ("requirement", "business-analyst"),
+          ("deliver-governed", "code-reviewer"), ("deliver-governed", None), ("requirement", "business-analyst"),
           ("execution-plan", "qa-engineer")]
 
 

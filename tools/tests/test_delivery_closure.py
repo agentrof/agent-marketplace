@@ -198,7 +198,7 @@ class DeliveryClosureTests(unittest.TestCase):
                 self.assertTrue(checked["managed"])
                 self.assertFalse(checked["ok"])
                 self.assertIn("DELIVERY_PR_HEAD_BASE_MISMATCH", self.codes(checked))
-                self.assertIn("recovery: close this PR and continue through /deliver DLV-001",
+                self.assertIn("recovery: close this PR and continue through /deliver-governed DLV-001",
                               " ".join(checked["errors"]))
 
     def test_a_pr_that_changes_a_claimed_path_is_managed_and_any_other_pr_passes(self):
@@ -276,7 +276,7 @@ class DeliveryClosureTests(unittest.TestCase):
         self.assertEqual((audited["ok"], outcome["outcome"]), (False, "awaiting_merge"))
         self.assertIn("each releases its Slot atomically", " ".join(outcome["readiness"]))
         finding = delivery_result.from_raw("closure-audit", audited)["findings"][0]
-        self.assertEqual((finding["code"], finding["next_entry"]), ("DELIVERY_CLOSURE_INCOMPLETE", "/deliver DLV-001"))
+        self.assertEqual((finding["code"], finding["next_entry"]), ("DELIVERY_CLOSURE_INCOMPLETE", "/deliver-governed DLV-001"))
 
     def test_a_proven_merge_whose_refs_stay_is_merged_cleanup_pending_until_verify_merge(self):
         project, _docs, _product, head, provider = self.recorded()
@@ -313,7 +313,7 @@ class DeliveryClosureTests(unittest.TestCase):
         outcome = self.outcome(project)
         self.assertEqual(outcome["outcome"], "external_product_merge")
         self.assertNotEqual(outcome["outcome"], "closed")
-        self.assertIn("/deliver DLV-001", outcome["recovery"])
+        self.assertIn("/deliver-governed DLV-001", outcome["recovery"])
         target = git(project, "rev-parse", "origin/main")
         self.assertIsNone(delivery_compile.merged_pr_record(project, "DLV-001", target))
 
@@ -402,7 +402,7 @@ class DeliveryClosureTests(unittest.TestCase):
         audited = delivery_closure.audit(project, "DLV-001")
         outcome = audited["deliveries"][0]
         self.assertEqual((audited["ok"], outcome["outcome"], outcome["next_entry"]),
-                         (False, "unproven_record_merge", "/deliver DLV-001"))
+                         (False, "unproven_record_merge", "/deliver-governed DLV-001"))
         self.assertIn("differs at src/auth.py", " ".join(outcome["evidence"]))
         self.assertEqual(delivery_result.from_raw("closure-audit", audited)["findings"][0]["code"],
                          "DELIVERY_EXTERNAL_MERGE")
@@ -479,7 +479,7 @@ class DeliveryClosureTests(unittest.TestCase):
         audited = delivery_closure.audit(project, "DLV-001")
         outcome = audited["deliveries"][0]
         self.assertEqual((audited["ok"], outcome["outcome"], outcome["next_entry"]),
-                         (False, "unproven_record_merge", "/deliver DLV-001"))
+                         (False, "unproven_record_merge", "/deliver-governed DLV-001"))
         self.assertIn(f"has since moved to {later}", " ".join(outcome["evidence"]))
         self.assertNotIn("verify-merge", outcome["recovery"].replace("verify-merge does not apply", ""))
 
@@ -1163,7 +1163,7 @@ class DeliveryClosureTests(unittest.TestCase):
         checked = self.check(project, head)
         self.assertEqual((checked["ok"], checked["managed"]), (False, True))
         self.assertIn("DELIVERY_CLOSURE_INCOMPLETE: AUTH-01 of DLV-001 holds a live provisional claim of src/verify.py"
-                      "; recovery: end the plan revision in /deliver DLV-001: finish-plan-revision promotes or"
+                      "; recovery: end the plan revision in /deliver-governed DLV-001: finish-plan-revision promotes or"
                       " orphans the claim, abort-plan-revision or withdraw-provisional-claim withdraws it",
                       checked["errors"])
 
@@ -1446,13 +1446,13 @@ class ClosureTextTests(unittest.TestCase):
         self.assertIn("agentrof/slots/001 (recovery: the Delivery whose Item it holds", message)
 
     def test_the_deliver_entry_reports_completion_only_from_a_closed_audit(self):
-        skill = self.text(PACKAGE / "skill-content/deliver/SKILL.md")
+        skill = self.text(PACKAGE / "skill-content/deliver-governed/SKILL.md")
         flow = self.text(PACKAGE / "flows/delivery-execution.md")
         for document in (skill, flow):
             self.assertIn("Report a Delivery complete only when `closure-audit` returns `closed`", document)
             self.assertIn("merge only through `merge-pr` on the recorded pr head", document.lower())
             self.assertIn("never waive", document)
-        self.assertIn("`/deliver DLV-### status` also runs `closure-audit --delivery DLV-###`", skill)
+        self.assertIn("`/deliver-governed DLV-### status` also runs `closure-audit --delivery DLV-###`", skill)
 
     def test_planning_reveals_an_incomplete_prior_closure_before_the_handoff(self):
         for path in (PACKAGE / "flows/delivery-planning.md", PACKAGE / "skill-content/delivery-plan/SKILL.md"):
@@ -1475,7 +1475,7 @@ class ClosureTextTests(unittest.TestCase):
         for text in ("`reopened` and `edited`", "red on `opened`", "re-run the failed check",
                      "vault_gate.py install", "CODEOWNERS", "DELIVERY_CLOSURE_GATE_CHANGED"):
             self.assertIn(text, bootstrap)
-        self.assertIn("re-run the failed check", self.text(PACKAGE / "skill-content/deliver/SKILL.md"))
+        self.assertIn("re-run the failed check", self.text(PACKAGE / "skill-content/deliver-governed/SKILL.md"))
 
     def test_the_trust_boundary_and_the_required_agentrof_ref_protection_are_stated(self):
         """Closure proves record shape and binding, never authorship, so the agentrof refs need protection."""

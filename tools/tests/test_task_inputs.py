@@ -70,7 +70,7 @@ class TaskInputTests(unittest.TestCase):
             self.assertIsNone(result["head"])
             self.assertEqual(result["changed_paths"], ["README.md"])
             with self.assertRaisesRegex(ValueError, "committed Git HEAD"):
-                task_inputs.manifest(entry="deliver", role="code-reviewer", mode="review", project=root)
+                task_inputs.manifest(entry="deliver-governed", role="code-reviewer", mode="review", project=root)
             with self.assertRaisesRegex(ValueError, "committed Git HEAD"):
                 task_inputs.manifest(**kwargs, base="HEAD")
             (root / "README.md").write_text("Changed project\n", encoding="utf-8")
@@ -188,7 +188,7 @@ class TaskInputTests(unittest.TestCase):
             item = self.note(root, "workspace/docs/delivery/deliveries/one/items/st-001/item.md",
                              "delivery-item", "backend_developer", "role_sequence:\n  - backend_developer\n  - code_reviewer\n  - qa_engineer\npath_claims:\n  - src\n  - tests\n  - workspace/docs\n  - .git\n")
             self.commit(root)
-            kwargs = dict(entry="deliver", role="backend-developer", mode="repair", project=root, inputs=[item])
+            kwargs = dict(entry="deliver-governed", role="backend-developer", mode="repair", project=root, inputs=[item])
             result = task_inputs.manifest(**kwargs)
             self.assertEqual(result["write_scope"]["allowed_write_area"], [
                 {"path": path, "coverage": "path_and_descendants", "source": item} for path in ("src", "tests")])
@@ -231,7 +231,7 @@ class TaskInputTests(unittest.TestCase):
             on = {("provisional_claims", "during_plan_revision")}
 
             def area(chosen=frozenset()):
-                scope = task_scope(root, "deliver", "backend-developer", "create", inputs=[item], chosen=chosen)
+                scope = task_scope(root, "deliver-governed", "backend-developer", "create", inputs=[item], chosen=chosen)
                 return [target["path"] for target in scope["allowed_write_area"]], scope["constraints"]
 
             self.assertEqual(area(), (["src/auth.py"], area()[1]))
@@ -248,7 +248,7 @@ class TaskInputTests(unittest.TestCase):
                     self.assertEqual(area(), (["src/auth.py"], area()[1]))
             subprocess.run(["git", "-C", str(root), "push", "-q", "origin", ":" + ref], check=True,
                            capture_output=True)
-            scope = task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
+            scope = task_scope(root, "deliver-governed", "backend-developer", "create", inputs=[item])
             self.assertEqual((scope["status"], scope["reason"]), ("unresolved", "DLV-001 has no Integration on origin"))
 
     def published_item_project(self, raw, remote_name="origin"):
@@ -310,7 +310,7 @@ class TaskInputTests(unittest.TestCase):
                 return [target["path"] for target in scope()["allowed_write_area"]]
 
             def scope():
-                return task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
+                return task_scope(root, "deliver-governed", "backend-developer", "create", inputs=[item])
 
             self.assertEqual(paths(), ["src/auth.py"])
             # Another host published a revision; this checkout's tracking ref still names the older record.
@@ -354,7 +354,7 @@ class TaskInputTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(root), "remote", "remove", "origin"], check=True)
 
             def scope():
-                return task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
+                return task_scope(root, "deliver-governed", "backend-developer", "create", inputs=[item])
 
             self.assertEqual([target["path"] for target in scope()["allowed_write_area"]],
                              ["src/auth.py", "src/unapproved.py"])
@@ -388,10 +388,10 @@ class TaskInputTests(unittest.TestCase):
                                       encoding="utf-8").stdout.split()
             for ref in tracking:
                 subprocess.run(["git", "-C", str(root), "update-ref", "-d", ref], check=True)
-            default = task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
+            default = task_scope(root, "deliver-governed", "backend-developer", "create", inputs=[item])
             self.assertEqual((default["status"], default["reason"]), (
                 "unresolved", "the checkout has no remote origin; name the Delivery's remote with --remote"))
-            named = task_scope(root, "deliver", "backend-developer", "create", inputs=[item], remote="upstream")
+            named = task_scope(root, "deliver-governed", "backend-developer", "create", inputs=[item], remote="upstream")
             self.assertEqual([target["path"] for target in named["allowed_write_area"]], ["src/auth.py"])
 
     @integration
@@ -411,10 +411,10 @@ class TaskInputTests(unittest.TestCase):
             converged.parent.mkdir(parents=True)
             converged.write_text(f"---\ntype: delivery-item\nintegration_base_commit: {published}\n---\n",
                                  encoding="utf-8")
-            default = task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
+            default = task_scope(root, "deliver-governed", "backend-developer", "create", inputs=[item])
             self.assertEqual((default["status"], default["reason"], default["allowed_write_area"]), (
                 "unresolved", "the checkout has no remote origin; name the Delivery's remote with --remote", []))
-            named = task_scope(root, "deliver", "backend-developer", "create", inputs=[item], remote="upstream")
+            named = task_scope(root, "deliver-governed", "backend-developer", "create", inputs=[item], remote="upstream")
             self.assertEqual([target["path"] for target in named["allowed_write_area"]], ["src/newer.py"])
             self.assertFalse(any(text.startswith("offline:") for text in named["constraints"]))
 
@@ -434,7 +434,7 @@ class TaskInputTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(root), "remote", "set-url", "origin", str(remote) + "-gone"], check=True)
 
             def scope():
-                return task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
+                return task_scope(root, "deliver-governed", "backend-developer", "create", inputs=[item])
 
             offline = scope()
             self.assertEqual([target["path"] for target in offline["allowed_write_area"]],
@@ -475,7 +475,7 @@ class TaskInputTests(unittest.TestCase):
             item = self.note(root, package + "/items/auth-01/item.md", "delivery-item", "backend_developer",
                              "story_id: AUTH-01\nrole_sequence:\n  - backend_developer\npath_claims:\n"
                              "  - src/auth.py\n  - Workspace/docs/x.md\n  - .Agentrof/x\n  - .GIT/hooks\n")
-            scope = task_scope(root, "deliver", "backend-developer", "create", inputs=[item])
+            scope = task_scope(root, "deliver-governed", "backend-developer", "create", inputs=[item])
             self.assertEqual([target["path"] for target in scope["allowed_write_area"]], ["src/auth.py"])
 
     def test_lane_roles_bind_only_their_lane_scope_while_the_architect_keeps_every_claim(self):
@@ -490,7 +490,7 @@ class TaskInputTests(unittest.TestCase):
                              "delivery-item", "backend_developer", lanes)
 
             def scope(role):
-                return task_scope(root, "deliver", role, "create", inputs=[item])
+                return task_scope(root, "deliver-governed", role, "create", inputs=[item])
 
             lane_note = [constraint for constraint in scope("backend-developer")["constraints"]
                          if constraint.startswith("parallel lane:")]
@@ -523,9 +523,9 @@ class TaskInputTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()
             tasks = (("execution-plan", "software-architect", planning),
-                     ("deliver", "backend-developer", execution),
-                     ("deliver", "code-reviewer", execution),
-                     ("deliver", None, execution))
+                     ("deliver-governed", "backend-developer", execution),
+                     ("deliver-governed", "code-reviewer", execution),
+                     ("deliver-governed", None, execution))
 
             def bound(entry, role):
                 required, hashed = instruction_paths(root, entry, role)
@@ -631,7 +631,7 @@ class TaskInputTests(unittest.TestCase):
             self.make_project(root)
             (root / "brief.md").write_text("Uncommitted change", encoding="utf-8")
             (root / "new.py").write_text("new = True\n", encoding="utf-8")
-            kwargs = dict(entry="deliver", role="code-reviewer", mode="review", project=root, base="HEAD")
+            kwargs = dict(entry="deliver-governed", role="code-reviewer", mode="review", project=root, base="HEAD")
             result = task_inputs.manifest(**kwargs)
             self.assertEqual(result["changed_paths"], ["brief.md", "new.py"])
             (root / "new.py").write_text("new = False\n", encoding="utf-8")
@@ -668,7 +668,7 @@ class TaskInputTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             text = "---\ntype: decision\nstatus: proposed\nmethod_skills:\n  - python-fastapi\n---\n\n# API\n"
             path.write_text(text, encoding="utf-8")
-            kwargs = dict(entry="deliver", role="code-reviewer", mode="review", project=root,
+            kwargs = dict(entry="deliver-governed", role="code-reviewer", mode="review", project=root,
                           skills=["python-fastapi"], inputs=[path.relative_to(root).as_posix()])
             for value in (text, text.replace("proposed", "accepted")):
                 path.write_text(value, encoding="utf-8")
@@ -678,7 +678,7 @@ class TaskInputTests(unittest.TestCase):
             result = task_inputs.manifest(**kwargs)
             self.assertEqual(result["method_bindings"]["python-fastapi"], [path.relative_to(root).as_posix()])
             with self.assertRaisesRegex(ValueError, "internal skills"):
-                task_inputs.manifest(entry="deliver", role="code-reviewer", mode="review", skills=["setup"])
+                task_inputs.manifest(entry="deliver-governed", role="code-reviewer", mode="review", skills=["setup"])
 
     @integration
     def test_technology_binding_rejects_git_clean_crlf_bytes_that_differ_from_head(self):
@@ -694,7 +694,7 @@ class TaskInputTests(unittest.TestCase):
             self.commit(root)
             self.assertEqual(subprocess.check_output(["git", "-C", str(root), "show", "HEAD:" + relative]), committed)
             self.assertEqual(subprocess.check_output(["git", "-C", str(root), "status", "--porcelain", "--", relative]), b"")
-            kwargs = dict(entry="deliver", role="code-reviewer", mode="review", project=root,
+            kwargs = dict(entry="deliver-governed", role="code-reviewer", mode="review", project=root,
                           skills=["python-fastapi"], inputs=[relative])
             with self.assertRaisesRegex(ValueError, "committed accepted"):
                 task_inputs.manifest(**kwargs)
@@ -711,13 +711,13 @@ class TaskInputTests(unittest.TestCase):
                 self.assertFalse(result["approval_authority"])
 
     def test_method_skills_are_explicit_and_required_checklists_are_full_reads(self):
-        result = task_inputs.manifest(entry="deliver", role="code-reviewer", mode="repair", skills=["python-fastapi"])
+        result = task_inputs.manifest(entry="deliver-governed", role="code-reviewer", mode="repair", skills=["python-fastapi"])
         self.assertIn("skill-content/code-review/references/passes.md", result["required_reads"])
         self.assertIn("skill-content/python-fastapi/references/review-checklist.md", result["required_reads"])
-        backend = task_inputs.manifest(entry="deliver", role="backend-developer", mode="create")
+        backend = task_inputs.manifest(entry="deliver-governed", role="backend-developer", mode="create")
         self.assertNotIn("skill-content/sql-database-design/SKILL.md", backend["required_reads"])
         self.assertNotIn("skill-content/nosql-database-design/SKILL.md", backend["required_reads"])
-        qa = task_inputs.manifest(entry="deliver", role="qa-engineer", mode="create")
+        qa = task_inputs.manifest(entry="deliver-governed", role="qa-engineer", mode="create")
         self.assertEqual(qa["write_boundary"], "read_only")
 
     def test_review_panel_protocol_is_bound_only_at_lens_panel(self):
@@ -833,7 +833,7 @@ class TaskInputTests(unittest.TestCase):
             pinned = process_policy.path_for(docs).read_bytes()
 
             def bound(**kwargs):
-                result = task_inputs.manifest(entry="deliver", role="backend-developer",
+                result = task_inputs.manifest(entry="deliver-governed", role="backend-developer",
                                               mode="create", project=root, **kwargs)
                 return set(result["required_reads"])
 
@@ -852,7 +852,7 @@ class TaskInputTests(unittest.TestCase):
                     bound(**kwargs)
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                code = task_inputs.main(["--entry", "deliver", "--role", "backend-developer",
+                code = task_inputs.main(["--entry", "deliver-governed", "--role", "backend-developer",
                                          "--mode", "create", "--project-root", str(root),
                                          "--delivery", "DLV-001"])
             self.assertEqual(code, 1)

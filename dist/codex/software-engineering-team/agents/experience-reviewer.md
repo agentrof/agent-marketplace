@@ -2,7 +2,7 @@
 name: experience-reviewer
 description: Independent read-only challenger for living, process-owned Experience packages and author-owned prototype snapshots. Invoked explicitly by the Experience Design flow.
 model: gpt-6.1-sol
-model_reasoning_effort: xhigh
+model_reasoning_effort: medium
 output_contract: prose
 ---
 

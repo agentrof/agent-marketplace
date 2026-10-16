@@ -1,9 +1,8 @@
 """Process switch mechanical_pass_tier: writer fix passes on the writers' variants.
 
 At `role_tier`, the default, nothing a task binds changes. At `mechanical`,
-the owning writer's `-mechanical` variant, on the `low` tier like every
-generated variant, applies the fixes a review names and compiler steps run
-without a role, while every review, re-check and calibration keeps its tier.
+the owning writer's `-mechanical` variant, on the `mechanical` class, applies the fixes a review names and compiler steps run
+without a role, while every review, re-check and calibration keeps its class.
 """
 
 from __future__ import annotations
@@ -81,11 +80,11 @@ class InstructionTests(unittest.TestCase):
 
 
 class CodexTierTests(unittest.TestCase):
-    """On Codex a variant keeps its writer's model and effort until the
-    variants' frozen-task A/B sets a lower one (#404), and every fix pass
-    starts the variant and records the model and effort that ran it."""
+    """On Codex every variant runs the `mechanical` class's model and effort,
+    and every fix pass starts the variant and records the model and effort
+    that ran it."""
 
-    def test_every_codex_variant_runs_its_writers_model_and_effort(self):
+    def test_every_codex_variant_runs_the_mechanical_class(self):
         profile = json.loads((ROOT / "platforms/codex/execution-profiles.json").read_text(
             encoding="utf-8"))["profiles"]["auto"]
         agents = ROOT / "dist/codex/software-engineering-team/agents"
@@ -95,17 +94,18 @@ class CodexTierTests(unittest.TestCase):
             return (re.search(r"^model: (.+)$", text, re.M)[1],
                     re.search(r"^model_reasoning_effort: (.+)$", text, re.M)[1])
 
-        self.assertEqual(profile["low"], {"model": "gpt-6.1-sol", "effort": "xhigh"})
-        self.assertEqual(setting("product-owner-mechanical"),
-                         (profile["low"]["model"], profile["low"]["effort"]))
+        mechanical = profile["mechanical"]
+        self.assertEqual(mechanical, {"model": "gpt-6-luna", "effort": "high"})
         for writer in WRITERS:
             with self.subTest(writer=writer):
-                self.assertEqual(setting(f"{writer}-mechanical"), setting(writer))
+                self.assertEqual(setting(f"{writer}-mechanical"),
+                                 (mechanical["model"], mechanical["effort"]))
+                self.assertNotEqual(setting(writer), setting(f"{writer}-mechanical"))
         contract = " ".join((ROOT / "platforms/codex/software-engineering-team/host-contract.md")
                             .read_text(encoding="utf-8").split())
-        self.assertIn("a lower low-tier effort waits for that A/B (#404)", contract)
+        self.assertIn("on the `mechanical` class, `gpt-6-luna` at effort `high`", contract)
 
-    def test_a_resumed_writer_pass_is_recorded_on_its_own_tier(self):
+    def test_a_resumed_writer_pass_is_recorded_on_its_own_class(self):
         text = " ".join(read(REFERENCE).split())
         self.assertIn("whether it ran on the `-mechanical` variant or as the resumed base writer,"
                       " the model and effort that ran it", text)
@@ -117,7 +117,7 @@ class CodexTierTests(unittest.TestCase):
 
 class ValidatorTests(unittest.TestCase):
     """The validator refuses a mechanical variant on a reader, a missing
-    variant declaration and a host table that omits or mis-maps the tier."""
+    variant declaration and a host table that omits or mis-maps the class."""
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -151,7 +151,7 @@ class ValidatorTests(unittest.TestCase):
                 self.assertIn((
                     "process_switches",
                     f"'mechanical' agent variant '{reader}' is a read-only reviewer or challenger;"
-                    " its reviews, re-checks and calibrations keep their tier"),
+                    " its reviews, re-checks and calibrations keep their class"),
                     {(finding.check, finding.message) for finding in findings})
 
     def test_every_variant_a_switch_reference_names_is_declared(self):
@@ -325,7 +325,7 @@ class PassKindTests(unittest.TestCase):
             "a review, re-check or calibration": dict(mode="review"),
             "a read-only reviewer": dict(entry="backlog-plan", role="backlog-reviewer",
                                          inputs=["brief.md"]),
-            "a code repair": dict(entry="deliver", role="backend-developer", mode="repair",
+            "a code repair": dict(entry="deliver-governed", role="backend-developer", mode="repair",
                                   skills=[]),
             "a repair pass": dict(mode="repair"),
             "a writer without a variant": dict(role="delivery-coordinator"),

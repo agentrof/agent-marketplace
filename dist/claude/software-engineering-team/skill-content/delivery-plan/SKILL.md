@@ -2,6 +2,7 @@
 name: delivery-plan
 description: Create or resume one scope-bound Delivery proposal and prepare its offline Delivery records.
 exposure: entry
+user_invocable: false
 ---
 
 # Delivery Planning
@@ -9,6 +10,11 @@ exposure: entry
 Before delegating a role, follow the packaged `templates/task-input-contract.md`
 and derive its inputs with `scripts/task_inputs.py --entry delivery-plan`.
 Use the owning compiler's exact scope and source bindings.
+
+At Process Policy `process_profile` `fast_lane` this entry starts no new
+work: tell the user the fast lane is on and to use `/deliver` or
+`/requirement`, and stop. A Delivery opened before the switch finishes
+under the values it pinned.
 
 ## When to Use
 

@@ -59,7 +59,7 @@ record that fails, such as one pushed by hand, stops the read with
 
 ## What a claim lets the writer do
 
-The implementer's task, derived with `task_inputs.py --entry deliver`, adds
+The implementer's task, derived with `task_inputs.py --entry deliver-governed`, adds
 each live provisional path of its Item to the write scope as a path and its
 descendants, with the constraint that it is not freezable or pushable before
 the approved plan publishes it. The writer commits the change in the Item

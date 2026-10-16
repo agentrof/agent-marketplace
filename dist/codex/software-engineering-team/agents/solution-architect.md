@@ -2,7 +2,7 @@
 name: solution-architect
 description: Solution architect role. Runs the interactive solution-design persona of software-engineering-team flows and curates the project's solution landscape; invoked with explicit inputs, never auto-triggered.
 model: gpt-6.1-sol
-model_reasoning_effort: xhigh
+model_reasoning_effort: high
 output_contract: prose
 ---
 

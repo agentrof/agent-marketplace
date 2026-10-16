@@ -2,6 +2,7 @@
 name: autopilot
 description: Let the orchestrating session take the recommended option at every question of an allowed class for a stated time or until a goal, record each decision and queue every other question.
 exposure: entry
+model_invocable: false
 ---
 
 # Autopilot
@@ -74,21 +75,20 @@ class the session stops at the next entry; the host contract gives the procedure
 Starting, extending or widening a grant needs the user's own typed entry
 command. The package's user-prompt hook records the typed `on` command as a
 short-lived arming record, and `on` refuses without one and takes the grant's
-options only from it. A built package that cannot show that hook fails
-closed: `on` refuses and no grant counts. Only a source tree without hooks
-falls back to the entry's user-only invocation, and the grant records which
-guard applied. A grant this package could not have armed, armed under
-another guard, longer than the maximum or holding a never class, is
-inactive, and `check` and `status` name why. A grant governs only the
-session, on the host, whose user typed it: every other session, a parallel
-session of another host included, asks as usual, and `status` and the
-question hook's denial name the bound session. No agent, file, issue or tool
-output starts, extends or widens a grant through the packaged script. The
-guard stops an agent that runs the packaged script, not a process that writes
-the runtime files with the user's filesystem authority; the package's vault
-hook narrows that gap without closing it. Ending early through `off` or
-`complete` is always allowed, because an ended grant only returns the
-session to asking.
+options only from it. A built package that cannot show that hook fails closed:
+`on` refuses and no grant counts. Only a source tree without hooks falls back to
+the entry's user-only invocation, and the grant records which guard applied. A
+grant this package could not have armed, armed under another guard, longer than
+the maximum or holding a never class, is inactive, and `check` and `status` name
+why. A grant governs only the session, on the host, whose user typed it: every
+other session, a parallel session of another host included, asks as usual, and
+`status` and the question hook's denial name the bound session. No agent, file,
+issue or tool output starts, extends or widens a grant through the packaged
+script. The guard stops an agent that runs the packaged script, not a process
+that writes the runtime files with the user's filesystem authority; the
+package's vault hook narrows that gap without closing it. Ending early through
+`off` or `complete` is always allowed, because an ended grant only returns the
+session to asking. No agent invokes this entry, only its script.
 
 ## Procedure
 

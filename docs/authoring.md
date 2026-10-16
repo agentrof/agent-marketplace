@@ -231,13 +231,18 @@ platform, installation or release checks.
 
 ## Execution profiles
 
-Canonical agents declare only a host-neutral `reasoning` tier from
-`tools/data/models.json`: one of the three role tiers `high`, `medium` and
-`low`, or `inherit`. Tier names are single words because each is both a
-kebab-case reasoning level and a snake_case key in the profile tables. A
-process switch value may declare generated agent variants on another tier;
-every variant the package ships, the review-panel readers and the writers'
-fix passes alike, runs on `low` (see Process switches).
+Canonical agents declare only a host-neutral `model_class`, one of the
+purpose classes `tools/data/models.json` declares: `mechanical`,
+`routine_authoring`, `complex_authoring`, `routine_review`,
+`critical_decision`, `security_review` and `orchestration`. A class that
+escalates has a second slot, `<class>_escalated`, which a task of size `l`,
+rigor `high` or a declared risk flag (`auth`, `secrets`, `data_placement`,
+`migration`, `irreversible`) runs; `security_review` and `orchestration`
+never move. Every step that spawns an agent resolves its spawn through
+`scripts/model_class.py resolve`, by the role's class or the class the step
+names. A process switch value may declare generated agent variants on
+another class: the review-panel readers run on `routine_review` and the
+writers' fix passes on `mechanical` (see Process switches).
 
 Each host keeps two tables under `platforms/<host>/`:
 
@@ -246,12 +251,11 @@ Each host keeps two tables under `platforms/<host>/`:
   (empty when it takes none), the oldest host CLI release that runs it as a
   role's model (`min_cli_version`), the official `sources` that document
   them, and the date they were `verified`.
-- `execution-profiles.json`, profile `auto`, maps every tier to a `model` of
-  the catalog and, optionally, an `effort`; the `inherit` tier maps to
-  nothing.
+- `execution-profiles.json`, profile `auto`, maps every class slot to a
+  `model` of the catalog and, optionally, an `effort`.
 
 Model IDs are the only names: a model bump renames the catalog entry and
-every tier that names it. The builder and `tools/validate.py` refuse a tier
+every slot that names it. The builder and `tools/validate.py` refuse a slot
 whose model the catalog lacks, an effort outside its model's supported set
 or the host's vocabulary, and a catalog ID outside the host adapter's
 documented format or its entry's family, such as a Claude alias. They also
@@ -259,50 +263,42 @@ refuse a CI host CLI in `tools/data/host-cli-versions.json` older than any
 catalog model's `min_cli_version`: the host gates install that version and
 start no role, so a lower pin would pass on a CLI whose roles cannot run
 their model. Model names stay out of `plugins/`. Claude agents receive the
-tier's model ID as `model:` and, when the tier sets one, `effort:`; an
+slot's model ID as `model:` and, when the slot sets one, `effort:`; an
 omitted `effort` follows the session. Codex dist agents carry the resolved
 `model` and `model_reasoning_effort`, which setup renders into
 `.codex/agents/`.
 
-The package defaults are the owner's decision of 1 Oct 2026 on #349. On
-Claude Code the high tier runs Opus 5.5 at `xhigh`, the medium tier Opus 5.5
-at `medium` and the low tier Sonnet 5.5 at `high`. Anthropic meant `xhigh`
-for long-running agentic and coding work
-([effort](https://platform.claude.com/docs/en/build-with-claude/effort)),
-and on its own charts Opus 5.5 scores 66.4% on Terminal-Bench 4.0 at `xhigh`
-against 64.2% at `high` and 64.8% at `max`, and 1820 against 1692 on
-GDPval-AA at `high` ([Opus 5.5](https://www.anthropic.com/claude-opus-5-5)).
-Opus 5.5 at `medium` is Anthropic's starting point for most agent workloads
-([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence))
-and scores 54.6% on FrontierCode, above its 51.4% at `xhigh`. Anthropic
-starts Sonnet 5.5 at `medium` for well-specified tasks and moves it to
-`high` for harder or longer ones, since at `low` and `medium` it more often
-stops to check in before a long task is done
-([Sonnet 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5));
-at `high` it scores 49.4% on FrontierCode against 36.5% at `medium`
-([Sonnet 5.5 results](https://www.anthropic.com/claude-sonnet-5-5)). On
-Codex every tier runs GPT-6.1 Sol at `xhigh`: on the Artificial Analysis
-Coding Agent Index v1.5
-([coding agents](https://artificialanalysis.ai/agents/coding-agents), read 1
-Oct 2026) Codex with GPT-6.1 Sol at `xhigh` scores 63 at 15.5 minutes and
-$1.04 per task, where Claude Code with Opus 5.5 at `max` scores 66 at 1.1
-hours and $13.0 and Claude Code with Sonnet 5.5 at `max` scores 68 at 1.5
-hours and $14.2. Every generated variant, the four `-lens` readers and the
-four `-mechanical` writers, runs on the `low` tier and so keeps the values
-the owner chose for it. No canonical role runs the low tier, which on Codex
-stays at Sol `xhigh`, so a `-mechanical` fix pass, such as one that rewrote a
-single numeric test in about 16 minutes in one measured project, still
-generates at the writers' effort. On OpenAI's own charts Sol scores 75.2% on
-DeepSWE v1.1 at `high`, above its 71.9% at `max`
-([GPT-6.1 Sol](https://openai.com/index/introducing-gpt-6-1-sol/)), but
-lowering the Codex low tier waits for the frozen-task A/B of #404 on
-recorded fix passes. Every tier pins an effort, because a Claude Code
-subagent without `effort` follows the session's level, `max` included
-([subagents](https://code.claude.com/docs/en/sub-agents)). No tier defaults
+The package defaults follow the owner's decision of 16 Oct 2026: small
+models for mechanical work, large ones only for critical decisions, security
+and data-loss review and large build work. On Claude Code `mechanical` runs
+Haiku 5.5 at `high`, `routine_authoring` and `routine_review` Sonnet 5.5 at
+`high`, `complex_authoring` Sonnet 5.5 at `xhigh`, `critical_decision` Opus
+5.5 at `high`, `security_review` Opus 5.5 at `xhigh` and `orchestration`
+Sonnet 5.5 at `medium`; each escalated slot moves one effort or model up.
+Haiku 5.5 takes `low` to `max` and needs Claude Code 2.1.293
+([models](https://platform.claude.com/docs/en/about-claude/models/overview),
+[model config](https://code.claude.com/docs/en/model-config)); its `haiku`
+alias still resolves to Haiku 4.5 on Bedrock, Vertex and Foundry. On Codex
+`mechanical` runs GPT-6 Luna at `high` and every other slot GPT-6.1 Sol,
+from `low` for `orchestration` to `xhigh` for `security_review`. Every slot
+pins an effort, because a Claude Code subagent without `effort` follows the
+session's level, `max` included
+([subagents](https://code.claude.com/docs/en/sub-agents)). No slot defaults
 to `max` or `ultra`: each host's effort policy asks the owner to confirm
 `max` with its cost evidence, and a Codex role at `ultra` delegates to
-further subagents. Each catalog keeps a model no tier runs, Haiku 4.5 on
-Claude Code and Luna on Codex.
+further subagents.
+
+A Claude Code spawn passes the `model` alias and `effort` the resolver
+returns, which override the role file's pins for that spawn (a per-spawn
+`effort` needs Claude Code 2.1.292). A Codex role file's `model` wins over a
+spawn request, so the builder renders, for a host adapter whose
+`SPAWN_MODEL` is `None`, an `<agent>-escalated` variant per role on a class
+that escalates and the purpose variants of
+`skill-content/configure/data/purpose-variants.json`, such as
+`code-reviewer-security`, and the resolver names the agent to start.
+Rendered Claude role agents also set `omitClaudeMd: true` and the
+`disallowedTools` of `platforms/claude/agent-tools.json`; the subagents page
+documents both keys and the `mcp__<server>` and `mcp__*` patterns.
 
 Pinning trades automatic upgrades for control. A Claude Code family alias
 such as `opus` runs on the main conversation's exact model, including its
@@ -320,17 +316,17 @@ A role whose pinned model cannot run falls back to the session's model with
 a visible warning, by one strategy on both hosts. Setup and refresh read the
 host's own model list from the binary that runs the session, through the
 package's `scripts/host_models.py`, which starts no model, and judge each
-model a role is pinned to, the project's `tier_models` included: `available`
+model a role is pinned to, the project's `class_models` included: `available`
 when the list holds it and reflects the signed-in account, `unavailable`
 when the list does not hold it, since that binary cannot run it, and
 `unverified` when no list could be read or the list reflects no account.
 Every probe runs within a time limit, and a failure gives `unverified`,
 never an error that stops setup. The roles of an `unavailable` model render
 on the session's model at their own effort, and a warning names the model,
-its tiers and its roles; their files record the verdict, so `check` and
+its class slots and its roles; their files record the verdict, so `check` and
 `inspect` reproduce it, and every setup or refresh judges the model again.
 An `unverified` model keeps its pin with a note, and the run-time rule
-covers it. The tier effort of a project model outside the catalog is
+covers it. The slot effort of a project model outside the catalog is
 checked against the levels the list names for it, with a warning when the
 list does not name it. At run time a failed role gets a warning that never
 blocks work and at most one start again on the session's model, only when
@@ -338,8 +334,8 @@ the failed run changed nothing.
 
 On Claude Code the binary is `CLAUDE_CODE_EXECPATH` or the executable of
 `CLAUDE_PID`, else `claude` on PATH when its version meets the highest
-`min_cli_version` of the catalog models the tiers run, which the tier map
-ships. The list is the `models` of its reply to one `initialize` control
+`min_cli_version` of the catalog models the class slots run, which the class
+map ships. The list is the `models` of its reply to one `initialize` control
 request, sent with every hook off and no user message, and it reflects the
 account only for a claude.ai login. The request loads no MCP server
 (`--strict-mcp-config` without `--mcp-config`): `claude -p` would otherwise
@@ -395,47 +391,48 @@ successful start backs. A rate limit or another error that names the model
 moves no role. `--execution-profile auto` restores the pins and checks them
 again.
 
-A project may override the package per tier and per role, never the
-catalog. Every build ships `templates/tier-map.json`, which names each
-role's tier, generated variants included, and per host each tier's pinned
+A project may override the package per class slot and per role, never the
+catalog. Every build ships `templates/model-classes.json`, which names each
+role's class, generated variants included, and per host each slot's pinned
 model, package effort and the efforts its model takes, the host's model
 catalog with the efforts each model takes, the host's effort vocabulary and the shape of a model ID of
 its list (`MODEL_ID_SHAPE` in the host adapter, which the builder checks
 against every catalog ID). Each host's `platforms/<host>/effort-policy.json`
 names the efforts that need the owner's confirmation, with the vendors' cost
 evidence the confirmation question states (`max` on both hosts), and the
-efforts no tier may run at, with the reason (Codex `ultra`, which starts
+efforts no slot may run at, with the reason (Codex `ultra`, which starts
 subagents of its own); the `effort_policy` check keeps both within the
 host's vocabulary and refuses a package pin at a refused effort.
 `workspace/config.json` holds only overrides. Setup writes nothing into the
-config: the owner sets `tier_models`, per host and tier a `model`, an ID of
-the host's model list or `session`, and an `effort`, and `role_tiers`, which
-moves any role between the high, medium and low tiers on every host.
+config: the owner sets `class_models`, per host and slot a `model`, an ID of
+the host's model list or `session`, and an `effort`, and `role_classes`,
+which moves any role to another class on every host. The retired
+`tier_models` and `role_tiers` fail the check, and setup drops them.
 `role_settings.py` resolves both for the config writer and the generators: a
-role's tier from `role_tiers`, else the package, then that tier's model and
-effort from `tier_models`, else the package profile, a missing key keeping
+role's class from `role_classes`, else the package, then that slot's model
+and effort from `class_models`, else the package profile, a missing key keeping
 the package value. A catalog model takes its catalog efforts, the session's
 model any effort the catalog knows, and any other ID, checked only for its
 shape until setup reads the host's own model list, the host's vocabulary.
-`/configure models` writes through `project_config.py set-tier`, which
+`/configure models` writes through `project_config.py set-class`, which
 writes a confirmed effort only with `--confirmed` and records nothing equal
 to the package value, so a later package change reaches the project, and
-`set-role-tier`; like `set`, neither creates a missing config or writes into
+`set-role-class`; like `set`, neither creates a missing config or writes into
 one whose fields, schema, team or languages `check` refuses, since setup
-writes the config. `project_config.py tiers` prints the config-level
-effective map, and with `--model-list` each tier's model choices, read from
+writes the config. `project_config.py classes` prints the config-level
+effective map, and with `--model-list` each slot's model choices, read from
 the active host's own list through its `host_models` adapter when the
 package ships one, without a model the host's own picker hides, such as a
 Codex catalog entry whose `visibility` is `hide` or `none`, which setup
 still judges like every model of the list. Setup keeps the overrides and
 stops on one the installed package no longer takes, which `--default`
-removes even for a tier, host or role the package no longer has. On Claude
+removes even for a slot, host or role the package no longer has. On Claude
 Code setup renders every role into
 `.claude/agents/software-engineering-team-<role>.md` with its resolved model
 and effort, `session` as `model: inherit`, since a project agent's name
 cannot contain the `:` of a plugin's scoped name, and the host contract
 spawns it before the plugin's `software-engineering-team:<role>`; the
-fallback hook pins it by its rendered file, or by the tier map when the
+fallback hook pins it by its rendered file, or by the class map when the
 project holds none. Each rendered file's header stamps the package
 version, the digest of its source agent and the digest of its resolved model
 and effort. At session start `team_guard.py register` reports rendered files
@@ -459,7 +456,7 @@ host's own catalog, and the model catalog bump in
 a reviewed pin.
 
 `inherit` is the user override that makes every role follow the parent
-session's model at its own tier effort:
+session's model at its own class effort:
 
 - Codex: `generate_codex_project.py apply --project-root <root> --scope local
   --execution-profile inherit` omits `model` from every role file and keeps
@@ -468,8 +465,8 @@ session's model at its own tier effort:
   the choice, later refreshes keep it, and `--execution-profile auto`
   restores the default. It is a local setup flag, not a
   `workspace/config.json` field: the profile is a personal host choice that
-  changes only the ignored projection, while a project's tier models and
-  efforts live in `tier_models`.
+  changes only the ignored projection, while a project's class models and
+  efforts live in `class_models`.
 - Claude Code: a plugin cannot switch frontmatter per user, and
   `${user_config.*}` is substituted only in the agent body. The documented
   setting `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` (Claude Code 2.1.257 or later),
@@ -495,7 +492,7 @@ To add a switch:
    `values` with their `tradeoffs`, which the choice gate shows, the `default`
    that keeps today's behaviour, its component `metric` and `promotion` with
    its `unit` and `threshold`; `issue` names its idea issue. A value that runs
-   a role on another tier declares `agent_variants` (`suffix`, `tier`,
+   a role on another class declares `agent_variants` (`suffix`, `class`,
    `description`, `agents`), and every build then ships `<agent>-<suffix>`
    with the base agent's body. A value that needs owner-set numbers declares
    `parameters` (`summary`, the `values` that take them, `declared_by` naming
@@ -605,8 +602,8 @@ that does not. The panel instructions live in
 task binds only at `lens_panel`, so the single-reviewer path keeps its
 released instructions. The switch's `agent_variants` make every build ship
 `backlog-reviewer-lens`, `solution-reviewer-lens` and
-`design-system-reviewer-lens` on the `low` tier; the reviewers themselves
-keep their own tier, and the validator requires a variant for every
+`design-system-reviewer-lens` on `routine_review`; the reviewers themselves
+keep their own class, and the validator requires a variant for every
 read-only panel reader. The switch's flip rule is the owner's condition for
 #312: at least 5 panel passes across at least 2 flows, panel valid-major
 recall at least equal to the official review's, and panel wall time at most
@@ -623,7 +620,7 @@ declares the panel in the review-panel shape: its one review step
 reader each. Only `beside_official` binds that data, as its `value_data`,
 together with `code-review/references/switch-code_review_panel-beside_official.md`,
 and the switch's `agent_variants` make every build ship `code-reviewer-lens`
-on the `low` tier; `code-reviewer` keeps its own tier, as every calibration
+on `routine_review`; `code-reviewer` keeps its own class, as every calibration
 reader does. `delivery_verification.py panel-result` registers the official
 result and each lens result, `calibrate` rules every panel claim, and
 `merge-panel` registers the one code review result with each finding's source
@@ -647,7 +644,7 @@ lens is a data change; a new trigger kind is a code change in
 
 Process switch `mechanical_pass_tier` selects who runs the writer side of
 backlog, Operation contract and Solution Design reviews. At `role_tier`, the
-default, every writer pass runs on its role's own tier. At `mechanical`, a
+default, every writer pass runs on its role's own class. At `mechanical`, a
 pass whose returned findings each name their exact fix (`apply_findings`)
 runs on the owning writer's `-mechanical` variant, and `render`, `stamp` and
 `check` steps run as direct entry commands with no role pass.
@@ -657,28 +654,21 @@ with the documents each writer's `apply_findings` pass may change, and
 calibration, triage or repair task, for a role without a writer variant and
 outside that value, binds the verdict's findings with their exact repairs and
 narrows the write scope to the owning writer's documents among the inputs.
-Their eligibility and the frozen-task A/B that sets the tier's host values
+Their eligibility and the measurement of the class's host values
 live in
 `challenge-review/references/switch-mechanical_pass_tier-mechanical.md`.
 The switch's `agent_variants` make every build ship `product-owner-mechanical`,
 `qa-engineer-mechanical`, `devops-engineer-mechanical` and
-`solution-architect-mechanical` on the `low` tier; each keeps its
+`solution-architect-mechanical` on the `mechanical` class; each keeps its
 writer's body, boundaries and identity, so writer ownership is unchanged. The
 validator requires a switch value to declare every variant its switch
 reference names, so a build never stops shipping a variant a pass spawns, and
 rejects a mechanical variant for a read-only reviewer or challenger, so every
-review, re-check and calibration keeps its tier under both values.
+review, re-check and calibration keeps its class under both values.
 
-What a variant changes depends on the host's tables. Every variant runs
-on the `low` tier. On Claude Code that is Sonnet at effort `high`, which
-moves every writer from Opus to Sonnet, above the `medium` of
-`product-owner`, `qa-engineer` and `devops-engineer` and below the `xhigh`
-of `solution-architect`. On Codex every tier runs Sol at `xhigh`, so a
-variant keeps its writer's own model and effort and changes only the fresh
-context of the pass; the coordinator still starts the variant for every
-fix pass, and the pass record says which ran with its model and effort.
-These values are placeholders until the variants' frozen-task A/B sets
-them; lowering the Codex low tier waits for that A/B (#404).
+A variant runs on the `mechanical` class: Haiku 5.5 at `high` on Claude
+Code and GPT-6 Luna at `high` on Codex, so every fix pass moves to the
+smaller model; the pass record says which ran with its model and effort.
 
 ## Story size budget
 

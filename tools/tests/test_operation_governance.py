@@ -122,6 +122,29 @@ class OperationGovernanceTests(unittest.TestCase):
         }), encoding="utf-8")
         return "solution-design/decisions/api-decision"
 
+    def test_fast_lane_reads_the_decision_without_reverifying_a_stale_package(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+        import process_policy
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace" / "docs"
+            accepted = self.approved_solution(docs)
+            superseded = "solution-design/decisions/old-decision"
+            (docs / (superseded + ".md")).write_text(frontmatter({
+                "type": "decision", "status": "superseded", "aliases": ["SD-002"],
+                "decision_kind": "technology-selection", "applies_to": ["api"],
+            }), encoding="utf-8")
+            landscape = docs / "solution-design" / "landscape.md"
+            landscape.write_text(frontmatter({
+                "type": "landscape", "package_status": "approved",
+                "package_hash": "sha256:" + "0" * 64,
+            }), encoding="utf-8")
+            with mock.patch.object(process_policy, "fast_lane", return_value=True):
+                self.assertTrue(operation_compile.accepted_solution_ref(docs, accepted))
+                self.assertFalse(operation_compile.accepted_solution_ref(docs, superseded))
+            with mock.patch.object(process_policy, "fast_lane", return_value=False):
+                self.assertFalse(operation_compile.accepted_solution_ref(docs, accepted))
+
     @integration
     def test_verification_contract_approval_and_ci_render(self):
         self.real_process = True

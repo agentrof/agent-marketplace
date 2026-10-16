@@ -387,8 +387,12 @@ def approved_dod_source(docs: Path) -> tuple[dict, list[str]]:
     errors = check_dod(path)
     if errors:
         return {}, [f"Definition of Done: {error}" for error in errors]
-    props, _ = split_note(path)
-    if props.get("status") != "approved":
+    props, body = split_note(path)
+    if process_policy.fast_lane(docs):
+        # The text in force is its own pin; nothing stamps or re-pins it.
+        props = {**props, "source_hash": content_hash(props, body),
+                 "revision": props.get("revision") if isinstance(props.get("revision"), int) else 1}
+    elif props.get("status") != "approved":
         return {}, ["Definition of Done must be approved"]
     source_hash = props.get("source_hash")
     if not isinstance(source_hash, str) or not source_hash:
@@ -602,14 +606,16 @@ def item_operation_findings(docs: Path, props: dict) -> list[str]:
     if not isinstance(runtime, bool):
         errors.append("runtime_required must be boolean")
         return errors
+    # At fast_lane an Item runs the contracts in force; a plain pull request moves them.
+    pinned = not process_policy.fast_lane(docs)
     verification, verification_errors = operation_contract_snapshot(docs, "verification")
     errors.extend(verification_errors)
-    if verification and any(props.get(key) != value for key, value in verification.items()):
+    if pinned and verification and any(props.get(key) != value for key, value in verification.items()):
         errors.append("Verification Contract binding is stale or missing")
     if runtime:
         environment, environment_errors = operation_contract_snapshot(docs, "environment")
         errors.extend(environment_errors)
-        if environment and any(props.get(key) != value for key, value in environment.items()):
+        if pinned and environment and any(props.get(key) != value for key, value in environment.items()):
             errors.append("Environment Contract binding is stale or missing")
     elif props.get("environment_contract_ref") or props.get("environment_contract_hash"):
         errors.append("non-runtime Item must not bind an Environment Contract")
@@ -687,7 +693,7 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
             errors.extend(f"Delivery backlog pin receipt skipped: {note}" for note in skipped)
         else:
             migration_pins, rebind_impacted = chain.aliases, chain.impacted
-    for key in DOD_SOURCE_FIELDS:
+    for key in DOD_SOURCE_FIELDS if not process_policy.fast_lane(docs) else ():
         if delivery_props.get(key) != dod[key]:
             errors.append(f"Delivery {key} is stale against the approved Definition of Done")
     # Scope approval writes the pin, and only a new execution approval can
@@ -766,10 +772,13 @@ def check_dod(path: Path) -> list[str]:
         errors.append("DoD id must be DOD")
     if props.get("status") not in {"draft", "approved"}:
         errors.append("DoD status must be draft or approved")
-    missing = sorted(set(DOD_SECTIONS) - sections(body))
+    # At fast_lane the DoD is plain text a pull request changes: no fixed headings, no stamp.
+    fast = process_policy.fast_lane(path.parent.parent if path.parent.name == "delivery" else None)
+    missing = sorted(set(DOD_SECTIONS) - sections(body) - ({"Commands", "Evidence Rules", "Quality Gates"}
+                                                            if fast else set()))
     if missing:
         errors.append(f"DoD missing sections: {', '.join(missing)}")
-    if props.get("status") == "approved":
+    if props.get("status") == "approved" and not fast:
         expected = content_hash(props, body)
         if props.get("source_hash") != expected:
             errors.append("approved DoD source_hash is stale")
@@ -1821,6 +1830,9 @@ def between_gates_refusals(docs: Path, document: str, delivery_id: str | None = 
     between its gates; an execution plan asks only its own Delivery.
     """
     errors = []
+    # At fast_lane a shared contract or Governance change lands by plain pull request.
+    if delivery_id is None and process_policy.fast_lane(docs):
+        return errors
     for directory in delivery_dirs(docs):
         try:
             props, body = split_note(directory / "delivery.md")

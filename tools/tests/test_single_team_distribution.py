@@ -767,12 +767,11 @@ def shipped_models(host: str) -> dict:
 
 
 def shipped_profile(host: str) -> dict:
-    """A host's shipped default profile: tier to model ID and effort, None for no effort.
+    """A host's shipped default profile: class slot to model ID and effort, None for no effort.
     By the owner's decision of 1 Oct 2026 on #349 a profile names its model directly."""
     auto = json.loads(build_distributions.execution_profile_path(
         fixtures.REAL_REPOSITORY, host).read_text(encoding="utf-8"))["profiles"]["auto"]
-    return {tier: (setting["model"], setting.get("effort"))
-            for tier, setting in auto.items() if "model" in setting}
+    return {slot: (setting["model"], setting.get("effort")) for slot, setting in auto.items()}
 
 
 # Read from the shipped tables, so a model bump changes no test.
@@ -780,21 +779,25 @@ AUTO_MODELS = {host: shipped_profile(host) for host in ("claude", "codex")}
 
 
 def catalog_model(host: str, *, besides: tuple = (), effort: str | None = None,
-                  untiered: bool = False, effortless: bool = False,
+                  unused: bool = False, effortless: bool = False,
                   lacking: str | None = None) -> str:
     """The first shipped catalog model of ``host`` with the traits a case needs."""
-    tiered = {model for model, _effort in AUTO_MODELS[host].values()}
+    used = {model for model, _effort in AUTO_MODELS[host].values()}
     for model, entry in sorted(shipped_models(host).items()):
-        if model in besides or (untiered and model in tiered) or (effortless and entry["efforts"]) \
+        if model in besides or (unused and model in used) or (effortless and entry["efforts"]) \
                 or (effort is not None and effort not in entry["efforts"]) \
                 or (lacking is not None and lacking in entry["efforts"]):
             continue
         return model
     raise AssertionError(f"the {host} catalog pins no model this case needs")
-# The owner's decisions on #349 of 1 Oct 2026: no role defaults to these
-# efforts, and every generated variant runs on the low tier.
+# The owner's decisions on #349 of 1 Oct 2026: no role defaults to these efforts.
 UNPINNED_EFFORTS = {"max", "ultra"}
-VARIANT_TIER = "low"
+# The class of the review panel readers and of the fix-pass writers.
+LENS_CLASS, MECHANICAL_CLASS = "routine_review", "mechanical"
+# The class a code-reviewer runs a security review on.
+SECURITY_CLASS = "security_review"
+DECLARED_CLASSES = json.loads((fixtures.REAL_REPOSITORY / "tools/data/models.json").read_text(
+    encoding="utf-8"))["model_classes"]
 # Generated review panel reader variant: its canonical agent.
 LENS_VARIANTS = {
     "backlog-reviewer-lens": "backlog-reviewer",
@@ -803,7 +806,7 @@ LENS_VARIANTS = {
 }
 # Generated reader variant of the code review panel: its canonical agent.
 CODE_REVIEW_LENS_VARIANTS = {"code-reviewer-lens": "code-reviewer"}
-# Generated mechanical-tier writer variant: its canonical agent.
+# Generated mechanical writer variant: its canonical agent.
 MECHANICAL_VARIANTS = {
     "devops-engineer-mechanical": "devops-engineer",
     "product-owner-mechanical": "product-owner",
@@ -813,19 +816,17 @@ MECHANICAL_VARIANTS = {
 REGISTRY = "skill-content/configure/data/process-switches.json"
 
 
-def setting_lines(root: Path, host: str, tier: str) -> list[str]:
-    """The model and effort frontmatter lines a dist agent on the tier carries."""
-    if tier == "inherit":
-        return ["model: inherit"] if host == "claude" else []
-    model, effort = AUTO_MODELS[host][tier]
+def setting_lines(root: Path, host: str, slot: str) -> list[str]:
+    """The model and effort frontmatter lines a dist agent on the slot carries."""
+    model, effort = AUTO_MODELS[host][slot]
     key = "effort" if host == "claude" else "model_reasoning_effort"
     return [f"model: {model}"] + ([f"{key}: {effort}"] if effort else [])
 
 
-def role_lines(root: Path, tier: str) -> list[str]:
-    """The settings lines of a generated Codex role file on the tier."""
+def role_lines(root: Path, slot: str) -> list[str]:
+    """The settings lines of a generated Codex role file on the slot."""
     return [f'{key} = "{value}"' for key, value in (
-        line.split(": ", 1) for line in setting_lines(root, "codex", tier))]
+        line.split(": ", 1) for line in setting_lines(root, "codex", slot))]
 
 
 def frontmatter_lines(path: Path) -> list[str]:
@@ -838,8 +839,9 @@ def role_settings(text: str) -> list[str]:
 
 
 def codex_fast_model() -> str:
-    """The Codex catalog model the high tier moves to in the codex_high_fast build."""
-    return catalog_model("codex", besides=(AUTO_MODELS["codex"]["high"][0],), effort="max")
+    """The Codex catalog model critical_decision moves to in the codex_decision_fast build."""
+    return catalog_model("codex", besides=(AUTO_MODELS["codex"]["critical_decision"][0],),
+                         effort="max")
 
 
 def edit_json(path: Path, mutate) -> None:
@@ -850,10 +852,10 @@ def edit_json(path: Path, mutate) -> None:
 
 # Shared builds of one source change each, read by several tests.
 SHARED_VARIANTS = {
-    "codex_high_fast": lambda root: edit_json(
+    "codex_decision_fast": lambda root: edit_json(
         build_distributions.execution_profile_path(root, "codex"),
         lambda table: table["profiles"]["auto"].update(
-            high={"model": codex_fast_model(), "effort": "max"})),
+            critical_decision={"model": codex_fast_model(), "effort": "max"})),
     "no_mechanical_switch": lambda root: edit_json(
         root / "plugins" / fixtures.PLUGIN / REGISTRY,
         lambda data: data["switches"].pop("mechanical_pass_tier")),
@@ -862,8 +864,8 @@ SHARED_VARIANTS = {
 
 @integration
 class ExecutionProfileTests(unittest.TestCase):
-    """Per-host catalogs pin each class; profile tables map tiers to a class
-    and effort; inherit omits the model and keeps the effort."""
+    """Per-host catalogs pin each model; profile tables map each class slot to
+    a model and effort; inherit omits the model and keeps the effort."""
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -902,7 +904,7 @@ class ExecutionProfileTests(unittest.TestCase):
         target = Path(self.temporary.name) / f"rendered-{host}"
         shutil.rmtree(target, ignore_errors=True)
         build_distributions.generate_agents(
-            self.root / "plugins" / fixtures.PLUGIN, target, adapter,
+            self.root, self.root / "plugins" / fixtures.PLUGIN, target, adapter,
             build_distributions.load_execution_profile(self.root, adapter))
         return target / "agents"
 
@@ -913,10 +915,10 @@ class ExecutionProfileTests(unittest.TestCase):
             build_distributions.load_execution_profile(self.root, adapter)
         build_distributions.require_host_cli_versions(self.root, adapters)
 
-    def tiers(self) -> dict[str, str]:
+    def classes(self) -> dict[str, str]:
         agents = self.root / "plugins" / fixtures.PLUGIN / "agents"
         return {
-            path.stem: build_distributions.parse_frontmatter(path)[0]["reasoning"]
+            path.stem: build_distributions.parse_frontmatter(path)[0]["model_class"]
             for path in sorted(agents.glob("*.md"))
         }
 
@@ -932,11 +934,20 @@ class ExecutionProfileTests(unittest.TestCase):
         mutate(data["switches"]["review_panels"]["agent_variants"]["lens_panel"], data)
         self.registry().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
-    def rendered_tiers(self) -> dict[str, str]:
-        """Every generated agent's tier: canonical agents and their variants."""
-        return {**self.tiers(), **{variant: VARIANT_TIER for variant in LENS_VARIANTS},
-                **{variant: VARIANT_TIER for variant in CODE_REVIEW_LENS_VARIANTS},
-                **{variant: VARIANT_TIER for variant in MECHANICAL_VARIANTS}}
+    def rendered_classes(self, host: str = "claude") -> dict[str, str]:
+        """Every agent ``host`` renders with its class slot: canonical agents and
+        their switch variants, and on a host whose role file decides the model
+        an escalated variant per agent on a class that escalates and the
+        security review variant."""
+        rendered = {**self.classes(), **{variant: LENS_CLASS for variant in LENS_VARIANTS},
+                    **{variant: LENS_CLASS for variant in CODE_REVIEW_LENS_VARIANTS},
+                    **{variant: MECHANICAL_CLASS for variant in MECHANICAL_VARIANTS}}
+        if host == "codex":
+            rendered.update({f"{name}-escalated": f"{slot}_escalated"
+                             for name, slot in list(rendered.items())
+                             if DECLARED_CLASSES[slot]["escalates"]})
+            rendered["code-reviewer-security"] = SECURITY_CLASS
+        return rendered
 
     def edit_table(self, host: str, mutate) -> None:
         self.assert_own_root()
@@ -945,9 +956,9 @@ class ExecutionProfileTests(unittest.TestCase):
         mutate(table)
         path.write_text(json.dumps(table, indent=2) + "\n", encoding="utf-8")
 
-    def set_tier(self, host: str, tier: str, setting: dict) -> None:
+    def set_slot(self, host: str, slot: str, setting: dict) -> None:
         self.edit_table(host, lambda table: table["profiles"]["auto"].update(
-            {tier: setting}
+            {slot: setting}
         ))
 
     def edit_catalog(self, host: str, mutate) -> None:
@@ -987,27 +998,24 @@ class ExecutionProfileTests(unittest.TestCase):
 
     def test_default_tables_render_the_declared_role_settings(self):
         for host in AUTO_MODELS:
-            self.assertEqual(json.loads(self.tables[host])["profiles"]["auto"]["inherit"], {}, host)
-        tiers = self.rendered_tiers()
-        for name, tier in tiers.items():
-            with self.subTest(agent=name):
-                claude = frontmatter_lines(self.dist_agent("claude", name))
-                self.assertEqual(claude[2], setting_lines(self.root, "claude", tier)[0])
-                self.assertEqual(
-                    [line for line in claude if line.startswith(("model", "effort"))],
-                    setting_lines(self.root, "claude", tier),
-                )
-                codex = frontmatter_lines(self.dist_agent("codex", name))
-                self.assertEqual(
-                    [line for line in codex if line.startswith(("model", "reasoning"))],
-                    setting_lines(self.root, "codex", tier),
-                )
+            rendered = self.rendered_classes(host)
+            self.assertEqual({path.stem for path in self.dist_agent(host, "x").parent.glob("*.md")},
+                             set(rendered), host)
+            for name, slot in rendered.items():
+                with self.subTest(host=host, agent=name):
+                    lines = frontmatter_lines(self.dist_agent(host, name))
+                    self.assertEqual(lines[2], setting_lines(self.root, host, slot)[0])
+                    self.assertEqual(
+                        [line for line in lines if line.startswith(("model", "effort"))],
+                        setting_lines(self.root, host, slot),
+                    )
+        classes = self.rendered_classes("codex")
         generated = self.codex_json("apply", "--scope", "local")
         self.assertEqual(generated["execution_profile"], "auto")
         files = self.role_files()
-        self.assertEqual(set(files), set(tiers))
+        self.assertEqual(set(files), set(classes))
         for name, text in files.items():
-            self.assertEqual(role_settings(text), role_lines(self.root, tiers[name]), name)
+            self.assertEqual(role_settings(text), role_lines(self.root, classes[name]), name)
         challenger = files["analysis-challenger"].splitlines()
         self.assertEqual(challenger[0], "# Generated by Agent Marketplace"
                                         " software-engineering-team; do not edit by hand.")
@@ -1018,51 +1026,52 @@ class ExecutionProfileTests(unittest.TestCase):
                                         r" settings sha256:[0-9a-f]{64}$")
         self.assertEqual(challenger[2], 'name = "analysis-challenger"')
         self.assertEqual(challenger[4:7],
-                         role_lines(self.root, "high") + ['sandbox_mode = "read-only"'])
+                         role_lines(self.root, classes["analysis-challenger"])
+                         + ['sandbox_mode = "read-only"'])
         self.assertTrue(challenger[7].startswith("developer_instructions = "))
 
     def test_claude_frontmatter_writes_effort_only_when_the_table_sets_one(self):
         self.use_copy()
-        strong = catalog_model("claude", besides=(AUTO_MODELS["claude"]["high"][0],), effort="xhigh")
-        self.set_tier("claude", "high", {"model": strong, "effort": "xhigh"})
+        strong = catalog_model("claude", besides=(AUTO_MODELS["claude"]["critical_decision"][0],),
+                               effort="xhigh")
+        self.set_slot("claude", "critical_decision", {"model": strong, "effort": "xhigh"})
         agents = self.render_agents("claude")
-        tiers = self.rendered_tiers()
-        for name, tier in tiers.items():
+        for name, slot in self.rendered_classes().items():
             with self.subTest(agent=name):
                 lines = frontmatter_lines(agents / f"{name}.md")
-                if tier == "high":
+                if slot == "critical_decision":
                     self.assertEqual(lines[2:4], [f"model: {strong}", "effort: xhigh"])
                     self.assertTrue(lines[4].startswith("output_contract:"))
                 else:
                     self.assertEqual(
                         [line for line in lines if line.startswith(("model", "effort"))],
-                        setting_lines(self.root, "claude", tier),
+                        setting_lines(self.root, "claude", slot),
                     )
 
-    def test_codex_role_files_carry_the_tier_model_and_effort(self):
-        self.root = shared_root("codex_high_fast")
+    def test_codex_role_files_carry_the_class_model_and_effort(self):
+        self.root = shared_root("codex_decision_fast")
         fast = codex_fast_model()
         self.assertEqual(
-            frontmatter_lines(self.dist_agent("codex", "code-reviewer"))[2:4],
+            frontmatter_lines(self.dist_agent("codex", "software-architect"))[2:4],
             [f"model: {fast}", "model_reasoning_effort: max"],
         )
         self.codex_json("apply", "--scope", "local")
-        tiers = self.rendered_tiers()
+        classes = self.rendered_classes("codex")
         for name, text in self.role_files().items():
             self.assertEqual(
                 role_settings(text),
                 [f'model = "{fast}"', 'model_reasoning_effort = "max"']
-                if tiers[name] == "high" else role_lines(self.root, tiers[name]),
+                if classes[name] == "critical_decision" else role_lines(self.root, classes[name]),
                 name,
             )
 
-    def test_a_model_bump_moves_every_tier_that_names_the_model(self):
-        # A bump renames the catalog entry and every tier that names it.
+    def test_a_model_bump_moves_every_slot_that_names_the_model(self):
+        # A bump renames the catalog entry and every slot that names it.
         self.use_copy()
         committed = shared_root() / "dist" / "claude" / fixtures.PLUGIN / "agents"
         self.assertEqual(build_distributions.compare_dirs(committed, self.render_agents("claude")),
                          [])
-        pinned = AUTO_MODELS["claude"][VARIANT_TIER][0]
+        pinned = AUTO_MODELS["claude"][MECHANICAL_CLASS][0]
         family, version = build_distributions.load_adapters(self.root)["claude"].module.model_version(
             pinned)
         bumped = f"claude-{family}-{version[0] + 1}"
@@ -1079,30 +1088,34 @@ class ExecutionProfileTests(unittest.TestCase):
         agents = self.render_agents("claude")
         self.assertTrue(any("out of sync" in problem for problem in
                             build_distributions.compare_dirs(committed, agents)))
-        on_bumped = {tier for tier, (model, _effort) in AUTO_MODELS["claude"].items()
+        on_bumped = {slot for slot, (model, _effort) in AUTO_MODELS["claude"].items()
                      if model == pinned}
-        for name, tier in self.rendered_tiers().items():
+        for name, slot in self.rendered_classes().items():
             with self.subTest(agent=name):
                 model = frontmatter_lines(agents / f"{name}.md")[2]
-                if tier in on_bumped:
+                if slot in on_bumped:
                     self.assertEqual(model, f"model: {bumped}")
                 else:
-                    self.assertEqual(model, setting_lines(self.root, "claude", tier)[0])
+                    self.assertEqual(model, setting_lines(self.root, "claude", slot)[0])
                     self.assertNotEqual(model, f"model: {bumped}")
 
-    def test_single_reviewers_keep_their_tier_beside_their_lens_variants(self):
-        self.root = shared_root("codex_high_fast")
+    def test_single_reviewers_keep_their_class_beside_their_lens_variants(self):
+        self.root = shared_root("codex_decision_fast")
         fast = codex_fast_model()
-        # No canonical agent runs on the variants' tier by default.
-        self.assertEqual({name for name, tier in self.tiers().items() if tier == VARIANT_TIER}, set())
+        classes = self.classes()
+
+        def codex_lines(agent: str) -> list[str]:
+            return ([f'model = "{fast}"', 'model_reasoning_effort = "max"']
+                    if classes[agent] == "critical_decision" else role_lines(self.root, classes[agent]))
+
         for variant, agent in sorted({**LENS_VARIANTS, **CODE_REVIEW_LENS_VARIANTS}.items()):
             with self.subTest(variant=variant):
                 base = frontmatter_lines(self.dist_agent("claude", agent))
-                self.assertEqual(base[2:4], setting_lines(self.root, "claude", "high"))
+                self.assertEqual(base[2:4], setting_lines(self.root, "claude", classes[agent]))
                 claude = frontmatter_lines(self.dist_agent("claude", variant))
                 self.assertEqual(claude[0], f"name: {variant}")
                 self.assertEqual(claude[1], f"{base[1]} Lens reader variant for review panels.")
-                self.assertEqual(claude[2:4], setting_lines(self.root, "claude", VARIANT_TIER))
+                self.assertEqual(claude[2:4], setting_lines(self.root, "claude", LENS_CLASS))
                 self.assertEqual(claude[4:], base[4:])
                 # The variant keeps the role's body, boundaries and identity.
                 body = self.dist_agent("claude", agent).read_text(encoding="utf-8").split("\n---\n", 1)[1]
@@ -1111,16 +1124,15 @@ class ExecutionProfileTests(unittest.TestCase):
                     body)
                 codex = frontmatter_lines(self.dist_agent("codex", variant))
                 self.assertEqual(
-                    [line for line in codex if line.startswith(("model", "reasoning"))],
-                    setting_lines(self.root, "codex", VARIANT_TIER),
+                    [line for line in codex if line.startswith("model")],
+                    setting_lines(self.root, "codex", LENS_CLASS),
                 )
         self.codex_json("apply", "--scope", "local")
         files = self.role_files()
         for variant, agent in sorted({**LENS_VARIANTS, **CODE_REVIEW_LENS_VARIANTS}.items()):
             with self.subTest(codex=variant):
-                self.assertEqual(role_settings(files[variant]), role_lines(self.root, VARIANT_TIER))
-                self.assertEqual(role_settings(files[agent]),
-                                 [f'model = "{fast}"', 'model_reasoning_effort = "max"'])
+                self.assertEqual(role_settings(files[variant]), role_lines(self.root, LENS_CLASS))
+                self.assertEqual(role_settings(files[agent]), codex_lines(agent))
                 # A variant keeps its base role's sandbox: the document reviewers read only.
                 self.assertEqual('sandbox_mode = "read-only"' in files[variant],
                                  'sandbox_mode = "read-only"' in files[agent])
@@ -1130,16 +1142,17 @@ class ExecutionProfileTests(unittest.TestCase):
     def test_builder_refuses_agent_variants_it_cannot_render(self):
         self.use_copy(with_dist=True)
         source = self.root / "plugins" / fixtures.PLUGIN
-        tiers = set(json.loads((self.root / "tools/data/models.json").read_text(
-            encoding="utf-8"))["reasoning_levels"])
+        classes = set(json.loads((self.root / "tools/data/models.json").read_text(
+            encoding="utf-8"))["model_classes"])
         self.assertEqual(
-            [name for _agent, name, _tier, _text in build_distributions.agent_variants(source, tiers)],
+            [name for _agent, name, _class, _text in build_distributions.agent_variants(source, classes)],
             sorted(CODE_REVIEW_LENS_VARIANTS) + sorted(MECHANICAL_VARIANTS) + sorted(LENS_VARIANTS))
         original = self.registry().read_bytes()
         for mutate, fragment in (
                 (lambda variant, _data: variant.update(agents=["ghost-reviewer"]),
                  "names unknown agent 'ghost-reviewer'"),
-                (lambda variant, _data: variant.update(tier="extreme"), "names unknown tier 'extreme'"),
+                (lambda variant, _data: variant.update({"class": "extreme"}),
+                 "names unknown class 'extreme'"),
                 (lambda variant, _data: variant.update(description="Lens: reader"),
                  "needs a one-line description without a colon"),
                 (lambda variant, _data: variant.update(agents=["backlog-reviewer", "backlog-reviewer"]),
@@ -1149,22 +1162,22 @@ class ExecutionProfileTests(unittest.TestCase):
                 self.registry().write_bytes(original)
                 self.edit_variants(mutate)
                 with self.assertRaisesRegex(ValueError, fragment):
-                    build_distributions.agent_variants(source, tiers)
+                    build_distributions.agent_variants(source, classes)
         # The build refuses before it removes the generated tree.
         with self.assertRaisesRegex(ValueError, "agent_variants must declare"):
             build_distributions.replace_generated(self.root, self.root / "dist")
         self.assertTrue(self.dist_agent("claude", "backlog-reviewer-lens").is_file())
         self.registry().unlink()
-        self.assertEqual(build_distributions.agent_variants(source, tiers), [])
+        self.assertEqual(build_distributions.agent_variants(source, classes), [])
 
-    def test_lens_tier_panel_data_and_variants_are_build_inputs(self):
+    def test_lens_class_panel_data_and_variants_are_build_inputs(self):
         self.use_copy()
         before = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.set_tier("claude", VARIANT_TIER, {
-            "model": catalog_model("claude", besides=(AUTO_MODELS["claude"][VARIANT_TIER][0],),
+        self.set_slot("claude", LENS_CLASS, {
+            "model": catalog_model("claude", besides=(AUTO_MODELS["claude"][LENS_CLASS][0],),
                                    effort="high"), "effort": "high"})
-        retiered = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.assertNotEqual(retiered, before)
+        reclassed = build_distributions.marketplace_snapshot(self.root)["build_id"]
+        self.assertNotEqual(reclassed, before)
         panels = (
             self.root / "plugins" / fixtures.PLUGIN
             / "skill-content/challenge-review/data/review-panels.json"
@@ -1176,19 +1189,19 @@ class ExecutionProfileTests(unittest.TestCase):
         ]]
         panels.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         regrouped = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.assertNotEqual(regrouped, retiered)
+        self.assertNotEqual(regrouped, reclassed)
         self.edit_variants(lambda variant, _data: variant["agents"].remove("solution-reviewer"))
         self.assertNotEqual(
             build_distributions.marketplace_snapshot(self.root)["build_id"], regrouped,
         )
 
-    def test_writers_keep_their_tier_beside_their_mechanical_variants(self):
-        settings = {host: setting_lines(self.root, host, VARIANT_TIER)
+    def test_writers_keep_their_class_beside_their_mechanical_variants(self):
+        settings = {host: setting_lines(self.root, host, MECHANICAL_CLASS)
                     for host in build_distributions.HOSTS}
         suffix = " Writer variant for passes that apply only the fixes a review verdict names."
-        tiers = self.tiers()
+        classes = self.classes()
         for variant, agent in sorted(MECHANICAL_VARIANTS.items()):
-            self.assertNotEqual(tiers[agent], VARIANT_TIER)
+            self.assertNotEqual(classes[agent], MECHANICAL_CLASS)
             for host in build_distributions.HOSTS:
                 with self.subTest(variant=variant, host=host):
                     base_text = self.dist_agent(host, agent).read_text(encoding="utf-8")
@@ -1207,8 +1220,8 @@ class ExecutionProfileTests(unittest.TestCase):
         files = self.role_files()
         for variant, agent in sorted(MECHANICAL_VARIANTS.items()):
             with self.subTest(codex=variant):
-                self.assertEqual(role_settings(files[variant]), role_lines(self.root, VARIANT_TIER))
-                self.assertEqual(role_settings(files[agent]), role_lines(self.root, tiers[agent]))
+                self.assertEqual(role_settings(files[variant]), role_lines(self.root, MECHANICAL_CLASS))
+                self.assertEqual(role_settings(files[agent]), role_lines(self.root, classes[agent]))
                 self.assertNotIn("sandbox_mode", files[variant])
                 instructions = [line for line in files[variant].splitlines()
                                 if line.startswith("developer_instructions")]
@@ -1221,6 +1234,11 @@ class ExecutionProfileTests(unittest.TestCase):
                 (root / "dist" / host / fixtures.PLUGIN / "agents").glob("*.md"))}
                 for host in build_distributions.HOSTS}
 
+        # A Codex build also renders each variant's escalated variant.
+        mechanical = {host: set(MECHANICAL_VARIANTS) | ({f"{variant}-escalated" for variant
+                                                        in MECHANICAL_VARIANTS}
+                                                       if host == "codex" else set())
+                      for host in build_distributions.HOSTS}
         self.codex_json("apply", "--scope", "local")
         with_switch, role_files = agents(self.root), self.role_files()
         # The same sources built without the mechanical_pass_tier switch.
@@ -1229,14 +1247,15 @@ class ExecutionProfileTests(unittest.TestCase):
         for host in build_distributions.HOSTS:
             with self.subTest(host=host):
                 self.assertEqual(set(with_switch[host]) - set(without[host]),
-                                 {f"{variant}.md" for variant in MECHANICAL_VARIANTS})
+                                 {f"{variant}.md" for variant in mechanical[host]})
                 self.assertEqual({name: with_switch[host][name] for name in without[host]},
                                  without[host])
         self.codex_json("apply", "--scope", "local", root=without_root)
         after = self.role_files()
         self.assertEqual({name: text for name, text in role_files.items()
-                          if name not in MECHANICAL_VARIANTS},
-                         {name: after[name] for name in role_files if name not in MECHANICAL_VARIANTS})
+                          if name not in mechanical["codex"]},
+                         {name: after[name] for name in role_files
+                          if name not in mechanical["codex"]})
 
     def test_inherit_profile_omits_the_model_keeps_the_effort_and_survives_refresh(self):
         self.codex_json("apply", "--scope", "local")
@@ -1248,13 +1267,13 @@ class ExecutionProfileTests(unittest.TestCase):
         )
         self.assertEqual(inherited["execution_profile"], "inherit")
         self.assertEqual(len(inherited["written"]), len(auto_files))
-        tiers = self.rendered_tiers()
+        classes = self.rendered_classes("codex")
         for name, text in self.role_files().items():
             lines = text.splitlines()
             self.assertEqual(lines[1], "# Execution profile: inherit", name)
             # Without its effort a role would run the parent's, `low` by
             # default for Sol in Codex 0.159.
-            self.assertEqual(role_settings(text), role_lines(self.root, tiers[name])[1:], name)
+            self.assertEqual(role_settings(text), role_lines(self.root, classes[name])[1:], name)
             self.assertEqual(
                 [line for line in lines if line.startswith("sandbox_mode")],
                 [line for line in auto_files[name].splitlines()
@@ -1309,12 +1328,13 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertEqual(self.role_files(), inherited)
 
         agent = self.dist_agent("codex", "analysis-challenger")
+        slot = self.classes()["analysis-challenger"]
         agent.write_text(agent.read_text(encoding="utf-8").replace(
-            setting_lines(self.root, "codex", "high")[1], "reasoning: high",
+            setting_lines(self.root, "codex", slot)[1], f"model_class: {slot}",
         ), encoding="utf-8")
         stale = self.codex("check", "--scope", "local")
         self.assertNotEqual(stale.returncode, 0)
-        self.assertIn("unresolved reasoning tier", stale.stderr)
+        self.assertIn("unresolved model class", stale.stderr)
 
     def test_unreadable_role_target_reports_a_collision_not_a_traceback(self):
         (self.project / ".codex/agents/analysis-challenger.toml").mkdir(parents=True)
@@ -1326,8 +1346,8 @@ class ExecutionProfileTests(unittest.TestCase):
     def test_tables_are_build_inputs_and_invalid_tables_fail_the_build(self):
         self.use_copy()
         before = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.set_tier("claude", "medium", {
-            "model": catalog_model("claude", besides=(AUTO_MODELS["claude"]["medium"][0],),
+        self.set_slot("claude", "routine_authoring", {
+            "model": catalog_model("claude", besides=(AUTO_MODELS["claude"]["routine_authoring"][0],),
                                    effort="medium"), "effort": "medium"})
         self.assertNotEqual(
             build_distributions.marketplace_snapshot(self.root)["build_id"], before,
@@ -1338,50 +1358,53 @@ class ExecutionProfileTests(unittest.TestCase):
             for problem in build_distributions.check(self.root, shared_root() / "dist")
         ))
 
-        def tier(name: str, setting: dict):
+        def slot(name: str, setting: dict):
             return lambda table: table["profiles"]["auto"].update({name: setting})
 
         def pin(model: str, **fields):
             return lambda catalog: catalog["models"][model].update(fields)
 
         def rename(model: str, to: str):
-            """A catalog whose entry for ``model`` is keyed ``to``; no tier names it."""
+            """A catalog whose entry for ``model`` is keyed ``to``."""
             return lambda catalog: catalog.update(models={
                 (to if name == model else name): entry
                 for name, entry in catalog["models"].items()})
 
         # Models of the shipped catalogs with the traits each case needs.
-        claude_pinned = AUTO_MODELS["claude"]["high"][0]
-        effortless = catalog_model("claude", untiered=True, effortless=True)
-        codex_pinned = AUTO_MODELS["codex"]["high"][0]
-        codex_untiered = catalog_model("codex", untiered=True, lacking="ultra")
+        claude_pinned = AUTO_MODELS["claude"]["critical_decision"][0]
+        effortless = catalog_model("claude", unused=True, effortless=True)
+        codex_pinned = AUTO_MODELS["codex"]["critical_decision"][0]
+        # Every Codex catalog model runs a class, so a rename also strands its slots.
+        codex_other = catalog_model("codex", besides=(codex_pinned,), lacking="ultra")
         family = shipped_models("claude")[claude_pinned]["family"]
         other_family = next(entry["family"] for _model, entry in sorted(shipped_models("claude").items())
                             if entry["family"] != family)
         profile_cases = (
-            ("claude", tier("high", {"model": "claude-ghost-9"}),
+            ("claude", slot("critical_decision", {"model": "claude-ghost-9"}),
              "unknown model 'claude-ghost-9'; the catalog pins"),
-            ("claude", tier("high", {"class": "frontier"}),
+            ("claude", slot("critical_decision", {"class": "frontier"}),
              "may hold only non-empty string model and effort"),
-            ("claude", tier("medium", {"effort": "high"}), "must name a model"),
-            ("claude", tier("low", {"model": effortless, "effort": "high"}),
+            ("claude", slot("routine_authoring", {"effort": "high"}), "must name a model"),
+            ("claude", slot("mechanical", {"model": effortless, "effort": "high"}),
              "effort 'high' is not supported by .*, which takes no effort"),
-            ("claude", tier("low", {"model": effortless, "effort": "extreme"}),
+            ("claude", slot("mechanical", {"model": effortless, "effort": "extreme"}),
              "effort must be one of"),
-            ("claude", tier("inherit", {"model": claude_pinned}), "inherit tier"),
-            ("codex", tier("high", {"model": codex_pinned, "effort": "extreme"}),
+            ("claude", slot("inherit", {"model": claude_pinned}),
+             "must map exactly the model class slots"),
+            ("codex", slot("critical_decision", {"model": codex_pinned, "effort": "extreme"}),
              "effort must be one of"),
-            ("codex", tier("low", {"model": codex_untiered, "effort": "ultra"}),
+            ("codex", slot("mechanical", {"model": codex_other, "effort": "ultra"}),
              "effort 'ultra' is not supported by"),
-            ("codex", tier("inherit", {"effort": "low"}), "inherit tier"),
-            ("codex", lambda t: t["profiles"]["auto"]["medium"].update(temperature="1"),
+            ("codex", slot("security_review_escalated", {"model": codex_pinned}),
+             "must map exactly the model class slots"),
+            ("codex", lambda t: t["profiles"]["auto"]["routine_authoring"].update(temperature="1"),
              "may hold only"),
-            ("codex", lambda t: t["profiles"]["auto"].pop("low"),
-             "must map exactly the reasoning tiers"),
+            ("codex", lambda t: t["profiles"]["auto"].pop("mechanical"),
+             "must map exactly the model class slots"),
             ("claude", lambda t: t["profiles"].update(fast={}),
              "must define exactly 'auto'"),
-            ("claude", lambda t: t.update(schema_version=2),
-             "schema_version 3"),
+            ("claude", lambda t: t.update(schema_version=3),
+             "schema_version 4"),
         )
         catalog_cases = (
             ("claude", rename(effortless, "opus"), "'opus' is not a pinned model ID"),
@@ -1391,8 +1414,8 @@ class ExecutionProfileTests(unittest.TestCase):
             ("claude", rename(effortless, "gpt-6.1-sol"), "is not a pinned model ID"),
             ("claude", pin(claude_pinned, family=other_family),
              f"belongs to family '{family}', not '{other_family}'"),
-            ("codex", rename(codex_untiered, "gpt-5.5"), "'gpt-5.5' is not a pinned model ID"),
-            ("codex", rename(codex_untiered, "gpt 6 luna"), "is not a pinned model ID"),
+            ("codex", rename(codex_other, "gpt-5.5"), "'gpt-5.5' is not a pinned model ID"),
+            ("codex", rename(codex_other, "gpt 6 luna"), "is not a pinned model ID"),
             ("codex", pin(codex_pinned, efforts=["turbo"]), "efforts must list distinct values"),
             ("codex", pin(codex_pinned, efforts=["high", "high"]), "efforts must list distinct values"),
             ("claude", pin(claude_pinned, sources=[]), "sources must list"),
@@ -1400,7 +1423,7 @@ class ExecutionProfileTests(unittest.TestCase):
             ("claude", pin(claude_pinned, verified="01.10.2026"), "verified must be"),
             ("claude", pin(claude_pinned, verified="2026-02-30"), "verified must be"),
             ("claude", pin(effortless, min_cli_version="2.1"), "min_cli_version must be"),
-            ("codex", pin(codex_untiered, min_cli_version="v0.157.0"), "min_cli_version must be"),
+            ("codex", pin(codex_other, min_cli_version="v0.157.0"), "min_cli_version must be"),
             ("codex", lambda c: c["models"][codex_pinned].pop("min_cli_version"), "must hold exactly"),
             ("claude", pin(claude_pinned, id=claude_pinned), "must hold exactly"),
             # CI installs the pinned CLI and starts no role, so the build refuses
@@ -1490,40 +1513,43 @@ class ExecutionProfileTests(unittest.TestCase):
                       " because without an active grant its hooks exit silently, no task binds it",
                       invariant)
 
-    def test_every_tier_pins_the_owners_effort_and_the_docs_say_why(self):
+    def test_every_class_pins_the_owners_effort_and_the_docs_say_why(self):
         # A Claude Code role without `effort` follows the session's level,
-        # `max` included, so every tier whose model takes an effort pins one.
+        # `max` included, so every slot whose model takes an effort pins one.
         # By the owner's decisions of 1 Oct 2026 on #349 none defaults to max
-        # or ultra, and only the high, medium and low tiers remain.
+        # or ultra; by the owner's decision of 16 Oct 2026 every purpose class
+        # and escalated slot is mapped.
         repository = fixtures.REAL_REPOSITORY
+        slots = set(build_distributions.class_slots(DECLARED_CLASSES))
         for host in build_distributions.HOSTS:
             models = json.loads(build_distributions.model_catalog_path(
                 repository, host).read_text(encoding="utf-8"))["models"]
             auto = json.loads(build_distributions.execution_profile_path(
                 repository, host).read_text(encoding="utf-8"))["profiles"]["auto"]
-            self.assertEqual(set(auto), {"high", "medium", "low", "inherit"}, host)
-            for tier, setting in auto.items():
-                if tier == "inherit":
-                    continue
-                with self.subTest(host=host, tier=tier):
+            self.assertEqual(set(auto), slots, host)
+            for slot, setting in auto.items():
+                with self.subTest(host=host, slot=slot):
                     self.assertEqual("effort" in setting, bool(models[setting["model"]]["efforts"]))
                     self.assertNotIn(setting.get("effort"), UNPINNED_EFFORTS)
-            # Every catalog model stays, the ones no tier runs included.
-            self.assertTrue(set(models) - {setting.get("model") for setting in auto.values()},
-                            host)
         # Each host contract states the shipped profile.
         contracts = {host: " ".join((repository / "platforms" / host / fixtures.PLUGIN
                                      / "host-contract.md").read_text(encoding="utf-8").split())
                      for host in build_distributions.HOSTS}
         claude, codex = AUTO_MODELS["claude"], AUTO_MODELS["codex"]
-        self.assertIn(f"The high tier runs `{claude['high'][0]}` at effort `{claude['high'][1]}`, the"
-                      f" medium tier `{claude['medium'][0]}` at effort `{claude['medium'][1]}` and the"
-                      f" low tier `{claude['low'][0]}` at effort `{claude['low'][1]}`", contracts["claude"])
-        # Every Codex tier stays on one effort; lowering the low tier, which
-        # only the generated variants run, waits for the frozen-task A/B (#404).
-        self.assertEqual(set(codex.values()), {codex["high"]})
-        self.assertIn(f"The high, medium and low tiers all run `{codex['high'][0]}` at effort"
-                      f" `{codex['high'][1]}`", contracts["codex"])
+        for fragment in (
+                f"`mechanical` runs `{claude['mechanical'][0]}` at `{claude['mechanical'][1]}`",
+                f"`critical_decision` `{claude['critical_decision'][0]}` at"
+                f" `{claude['critical_decision'][1]}`",
+                f"`security_review` `{claude['security_review'][0]}` at"
+                f" `{claude['security_review'][1]}`",
+                f"`orchestration` `{claude['orchestration'][0]}` at"
+                f" `{claude['orchestration'][1]}`"):
+            self.assertIn(fragment, contracts["claude"])
+        # On Codex only the mechanical class leaves the frontier model.
+        self.assertEqual({model for slot, (model, _effort) in codex.items()
+                          if slot != MECHANICAL_CLASS}, {codex["critical_decision"][0]})
+        self.assertIn(f"`mechanical` runs `{codex['mechanical'][0]}` at `{codex['mechanical'][1]}`;"
+                      f" every other slot runs `{codex['critical_decision'][0]}`", contracts["codex"])
 
     def test_host_contracts_state_the_oldest_cli_the_pinned_models_need(self):
         adapters = build_distributions.load_adapters(self.root)

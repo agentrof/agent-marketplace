@@ -17,6 +17,7 @@ PACKAGE = Path(__file__).resolve().parents[1]
 POLICY = "templates/task-input-policy.json"
 # process_policy.REGISTRY; the catalog reads it without importing the compiler.
 SWITCH_REGISTRY = "skill-content/configure/data/process-switches.json"
+CLASS_MAP = "templates/model-classes.json"
 # Entries whose tasks author what an execution approval then pins: the scope,
 # the Item topology and the Operation contracts a plan revises.
 PLANNING_ENTRIES = frozenset({"delivery-plan", "execution-plan", "configure"})
@@ -464,22 +465,32 @@ def identity(root: Path, paths) -> list[dict]:
 
 
 def agent_variants(package: Path) -> dict[str, str]:
-    """Return each generated agent variant the switch registry declares, with its base role.
+    """Return each generated agent variant the switch registry or class map declares, with its base.
 
     A build writes the variants beside their base agents, but a task always
     runs as the base role, so the role catalog leaves the variants out.
     """
+    variants = {}
     path = package / SWITCH_REGISTRY
-    if not path.is_file():
-        return {}
-    try:
-        switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
-        return {f"{agent}-{variant['suffix']}": agent
-                for _switch, spec in sorted(switches.items())
-                for _value, variant in sorted((spec.get("agent_variants") or {}).items())
-                for agent in variant["agents"]}
-    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
-        raise ValueError(f"process switch registry cannot be read: {exc}") from exc
+    if path.is_file():
+        try:
+            switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
+            variants = {f"{agent}-{variant['suffix']}": agent
+                        for _switch, spec in sorted(switches.items())
+                        for _value, variant in sorted((spec.get("agent_variants") or {}).items())
+                        for agent in variant["agents"]}
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+            raise ValueError(f"process switch registry cannot be read: {exc}") from exc
+    # A host that cannot set a model at spawn time ships escalated and purpose variants.
+    path = package / CLASS_MAP
+    if path.is_file():
+        try:
+            hosts = json.loads(path.read_text(encoding="utf-8"))["hosts"]
+            variants.update({name: variant["agent"] for host in hosts.values()
+                             for name, variant in host["variants"].items()})
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+            raise ValueError(f"class map cannot be read: {exc}") from exc
+    return variants
 
 
 def catalog(package: Path = PACKAGE) -> dict:
@@ -531,6 +542,12 @@ def catalog(package: Path = PACKAGE) -> dict:
             raise ValueError("task input entry names an unknown role")
         if type(entry.get("project_state")) is not bool:
             raise ValueError("task input entry needs an explicit project state boundary")
+        # A renamed entry may keep its switch references in the skill folder it
+        # shared before the rename; its tasks bind them without that SKILL.md.
+        shared = entry.get("reference_skills", [])
+        if (not isinstance(shared, list) or not all(isinstance(skill, str) for skill in shared)
+                or set(shared) - skills):
+            raise ValueError("task input entry reference skills must be installed skills")
         if type(entry.get("allow_unborn_head", False)) is not bool:
             raise ValueError("task input unborn HEAD policy must be boolean")
         scope = entry.get("write_scope", {})
@@ -590,7 +607,7 @@ def mechanical_pass(policy: dict, registry: dict[str, dict], kind: str, *, entry
 
     A mechanical pass decides nothing, so a review, re-check, calibration,
     triage or repair task, and every role without a writer variant, keeps its
-    role's tier.
+    role's class.
     """
     kinds = policy["pass_kinds"]
     spec = kinds.get(kind)
@@ -604,17 +621,17 @@ def mechanical_pass(policy: dict, registry: dict[str, dict], kind: str, *, entry
     owners = set(registry.get(spec["switch"], {}).get("flows") or [])
     if not owners & set(route["flows"]):
         raise ValueError(f"pass kind {kind} belongs to the flows switch {spec['switch']} owns;"
-                         f" a {entry} task, a code repair included, keeps its role's tier")
+                         f" a {entry} task, a code repair included, keeps its role's class")
     if read_only:
         raise ValueError(f"pass kind {kind} never serves a review, re-check or calibration: this"
-                         f" {mode} task of {role} keeps its role's tier")
+                         f" {mode} task of {role} keeps its role's class")
     if mode not in spec["modes"]:
         raise ValueError(f"pass kind {kind} runs in mode {' or '.join(spec['modes'])}; a {mode}"
-                         " task, authoring or repair, keeps its role's tier")
+                         " task, authoring or repair, keeps its role's class")
     if role not in spec["documents"]:
         raise ValueError(f"pass kind {kind} runs only as a writer whose variant switch"
                          f" {spec['switch']} declares ({', '.join(sorted(spec['documents']))});"
-                         f" {role} keeps its tier")
+                         f" {role} keeps its class")
     if (spec["switch"], spec["value"]) not in chosen:
         raise ValueError(f"pass kind {kind} runs only at switch {spec['switch']} {spec['value']}")
     if findings is None or project is None:
@@ -1205,6 +1222,7 @@ def instruction_reads(policy: dict, package: Path, route: dict, role: str | None
             path = f"skill-content/{skill}/references/{stack_reference}"
             if (package / path).is_file():
                 required.add(path)
+    for skill in sorted(selected_skills | set(route.get("reference_skills", []))):
         switch_root = package / "skill-content" / skill / "references"
         for path in sorted(switch_root.glob("switch-*.md")) if switch_root.is_dir() else []:
             pair = switch_reference(package, path)
@@ -1221,7 +1239,8 @@ def instruction_reads(policy: dict, package: Path, route: dict, role: str | None
     # Tools and data influence the role's result even when they are not prose
     # reads. Bind them without turning an input index into extra reading work.
     implementation_roots = [package / "scripts", *(
-        package / "skill-content" / skill for skill in selected_skills)]
+        package / "skill-content" / skill
+        for skill in selected_skills | set(route.get("reference_skills", [])))]
     for root in implementation_roots:
         # A switch reference or switch value data of a value the project did not
         # choose is neither read nor hashed, so the default path binds exactly

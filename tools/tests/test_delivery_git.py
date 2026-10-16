@@ -7829,7 +7829,7 @@ class DeliveryGitDecisionTests(unittest.TestCase):
             ({}, lambda: "a" * 40 + "\trefs/heads/agentrof/deliveries/dlv-001",
              ("DELIVERY_REF_COLLISION", held + "agentrof/deliveries/dlv-001 (recovery: closure-audit --delivery"
                                                " DLV-001 names its outcome; merge-pr merges its recorded PR,"
-                                               " verify-merge drops the refs of a proven merge, or /deliver DLV-001"
+                                               " verify-merge drops the refs of a proven merge, or /deliver-governed DLV-001"
                                                " finishes or cancels it)")),
             ({}, lambda: "a" * 40 + "\trefs/heads/agentrof/slots/001",
              ("DELIVERY_REF_COLLISION", held + "agentrof/slots/001 (recovery: the Delivery whose Item it holds,"

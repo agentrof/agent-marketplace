@@ -65,12 +65,12 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
 4. Run the generated host project `inspect`, resolve every declared
    preserve/discard choice for user-owned instruction companions, then run its
    `apply` and `check`. Never overwrite companions silently. This host adapter
-   projection is no project truth. Present the `roles` table: role, tier,
+   projection is no project truth. Present the `roles` table: role, class,
    model, effort and source, any `kept` file and the `notice` it reports.
 5. Read the `obsidian-vault` skill completely. Refresh materializes its vault
    payload under `workspace/docs/`, rebuilds the closed `workspace/config.json`
-   shape, preserves valid language values and the `tier_models` and
-   `role_tiers` overrides, and converges compiler-owned relation reports.
+   shape, preserves valid language values and the `class_models` and
+   `role_classes` overrides, and converges compiler-owned relation reports.
    Retired command fields migrate to draft `docs/operation/` contracts and a
    valid legacy `max_parallel` becomes Governance revision 1; authored notes
    are never edited. The policy includes the fixed backlog keys `backlog`,

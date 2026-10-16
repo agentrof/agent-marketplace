@@ -178,13 +178,13 @@ class DeliveryPolicyPinTests(unittest.TestCase):
         self.assertEqual(result.get("pinned_revision_commit"), pinned_commit)
         self.assertEqual(delivery_compile.delivery_switch_value(self.docs, DELIVERY, "review_loop"),
                          "blocking_delta")
-        self.assertIn(CODE_REVIEW_LOOP, self.task("deliver", "code-reviewer", "review",
+        self.assertIn(CODE_REVIEW_LOOP, self.task("deliver-governed", "code-reviewer", "review",
                                                   delivery=DELIVERY))
         # Outside the Delivery the approved policy is in force.
-        self.assertNotIn(CODE_REVIEW_LOOP, self.task("deliver", "code-reviewer", "review"))
+        self.assertNotIn(CODE_REVIEW_LOOP, self.task("deliver-governed", "code-reviewer", "review"))
         # An Item reopened after the Review runs under the same pin.
         self.set_status(self.project / ITEM, "active")
-        self.assertIn(CODE_REVIEW_LOOP, self.task("deliver", "code-reviewer", "review",
+        self.assertIn(CODE_REVIEW_LOOP, self.task("deliver-governed", "code-reviewer", "review",
                                                   inputs=[ITEM]))
         # A pin that neither the policy nor its Git history holds is refused.
         props, body = delivery_compile.split_note(self.delivery_note())
@@ -196,7 +196,7 @@ class DeliveryPolicyPinTests(unittest.TestCase):
                       result["errors"][0])
         self.assertIn("fetch the history that holds it", result["errors"][0])
         with self.assertRaisesRegex(ValueError, "neither the current policy nor an approved file"):
-            self.task("deliver", "code-reviewer", "review", delivery=DELIVERY)
+            self.task("deliver-governed", "code-reviewer", "review", delivery=DELIVERY)
 
     def test_a_malformed_git_batch_reads_as_no_pinned_revision(self):
         self.revise_policy(review_loop="blocking_delta")
@@ -225,7 +225,7 @@ class DeliveryPolicyPinTests(unittest.TestCase):
         self.assertEqual(self.findings(), [])
         self.assertEqual(quiet(delivery_compile.check_delivery, self.plan)[0], 0)
         self.assertEqual(self.value("review_loop")[1]["value"], "current")
-        self.assertNotIn(DELIVER_LANES, self.task("deliver", "backend-developer", delivery=DELIVERY))
+        self.assertNotIn(DELIVER_LANES, self.task("deliver-governed", "backend-developer", delivery=DELIVERY))
         # A switch that no Delivery flow owns changes nothing the Delivery runs.
         self.revise_policy(review_manifest_scope="bounded")
         self.assertEqual(self.findings(), [])
@@ -241,7 +241,7 @@ class DeliveryPolicyPinTests(unittest.TestCase):
             " revision that sets them back through /configure process"])
         self.assertEqual(self.value("review_loop")[0], 1)
         with self.assertRaisesRegex(ValueError, "Delivery runs switch review_loop at current"):
-            self.task("deliver", "backend-developer", delivery=DELIVERY)
+            self.task("deliver-governed", "backend-developer", delivery=DELIVERY)
         # Setting the value back is the other way out.
         self.revise_policy(review_loop="default")
         self.assertEqual(self.findings(), [])
@@ -304,7 +304,7 @@ class DeliveryPolicyPinTests(unittest.TestCase):
         code, result = self.value("mechanical_pass_tier")
         self.assertEqual((code, result["value"]), (0, "mechanical"), result)
         self.task("configure", "qa-engineer", "revise", delivery=DELIVERY)
-        self.task("deliver", "backend-developer", delivery=DELIVERY)
+        self.task("deliver-governed", "backend-developer", delivery=DELIVERY)
         # From the Review on a Delivery switch reads the pinned revision, the other the current policy.
         self.set_status(self.delivery_note(), "review")
         self.revise_policy(review_loop="default")
@@ -361,7 +361,7 @@ class DeliveryPolicyPinTests(unittest.TestCase):
                 " it under the approved policy, revise its execution plan in order:"
                 " begin-plan-revision,"), self.findings())
             # Without the barrier no task of the Delivery binds either policy.
-            for task in (architect, dict(entry="deliver", role="backend-developer", inputs=[ITEM])):
+            for task in (architect, dict(entry="deliver-governed", role="backend-developer", inputs=[ITEM])):
                 with self.subTest(task=task["entry"]), self.assertRaisesRegex(
                         ValueError, "begin-plan-revision, the execution-plan tasks"):
                     self.task(**task)
@@ -370,7 +370,7 @@ class DeliveryPolicyPinTests(unittest.TestCase):
             # revision's approval pins; the Items still wait for that approval.
             self.assertNotIn(PLAN_LANES, self.task(**architect))
             with self.assertRaisesRegex(ValueError, "Delivery runs switch implementation_schedule"):
-                self.task("deliver", "backend-developer", inputs=[ITEM])
+                self.task("deliver-governed", "backend-developer", inputs=[ITEM])
             refreshed = self.approve_execution(**{**lanes, "implementation_schedule": "sequential_v1",
                                                   "lane_scopes": [], "lane_seams": []})
             self.assertEqual(refreshed["refreshed_delivery_pins"],
@@ -379,7 +379,7 @@ class DeliveryPolicyPinTests(unittest.TestCase):
             self.commit("Approve the revised DLV-001 execution plan")
             delivery_git.publish_execution_plan(self.project, DELIVERY)
             delivery_git.finish_plan_revision(self.project, DELIVERY)
-            self.assertNotIn(DELIVER_LANES, self.task("deliver", "backend-developer", inputs=[ITEM]))
+            self.assertNotIn(DELIVER_LANES, self.task("deliver-governed", "backend-developer", inputs=[ITEM]))
             self.assertNotIn(PLAN_LANES, self.task(**architect))
 
 

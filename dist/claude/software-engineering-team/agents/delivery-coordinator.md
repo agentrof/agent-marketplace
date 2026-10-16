@@ -1,9 +1,11 @@
 ---
 name: delivery-coordinator
 description: Delivery Coordinator role invoked by software-engineering-team flows with explicit project-local inputs; not auto-triggered.
-model: claude-opus-5-5
+model: claude-sonnet-5-5
 effort: medium
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, mcp__*
+omitClaudeMd: true
 ---
 
 # Delivery Coordinator

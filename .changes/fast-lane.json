@@ -1,0 +1,6 @@
+{
+  "summary": "Add process switch process_profile with a fast_lane value: the deliver entry turns a request into one task (knowledge or build, sized against targets.json), one branch and one pull request verified by CI and one reviewer (two at rigor high) with auto-merge, and the Item-based flow stays as deliver-governed; the retrospective reports time, API-equivalent cost, quality and rework causes per task kind, writes recurring causes to a lessons file and files approved proposals as issues; spawns pick their model by purpose class; impact-based role routing requires the software architect on structural build tasks; backlog-plan, delivery-plan, execution-plan and deliver-governed leave the user's menu.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

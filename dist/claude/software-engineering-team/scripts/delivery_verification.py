@@ -2405,8 +2405,7 @@ def rehearsal_status(root: Path, delivery_id: str, story: str) -> dict:
     problems.extend(operation_compile.live_test_problems(contract))
     if problems or not rows:
         raise RuntimeError("qa_preflight needs valid Verification Rehearsals: " + "; ".join(problems or ["no steps"]))
-    if (contract.get("status") != "approved" or not contract.get("approved_at_utc")
-            or contract.get("source_hash") != operation_compile.receipt_hash(contract, body)):
+    if not operation_compile.contract_in_force(delivery.docs_root(root), contract, body, stamped=True):
         raise RuntimeError("rehearsals and owner waivers require the current approved Verification Contract")
     if current["runtime_required"] and not any(row["phase"] == "lifecycle" for row in rows):
         raise RuntimeError("runtime rehearsal plan must include its lifecycle checks")
@@ -4333,8 +4332,7 @@ def merge_panel(root: Path) -> dict:
 def declared_owner_steps(root: Path) -> list[dict]:
     props, body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
     steps, errors = operation_compile.owner_steps(body)
-    if steps and (props.get("status") != "approved"
-                  or props.get("source_hash") != operation_compile.receipt_hash(props, body)):
+    if steps and not operation_compile.contract_in_force(delivery.docs_root(root), props, body):
         errors.append("Owner Steps requires an unchanged approved Verification Contract")
     if errors:
         raise RuntimeError("; ".join(errors))
@@ -4597,8 +4595,7 @@ def declared_qa_verbs(root: Path) -> dict[str, dict]:
     """The QA Verbs an unchanged approved Verification Contract declares, by verb."""
     props, body = delivery.split_note(delivery.docs_root(root) / "operation/verification-contract.md")
     verbs, errors = operation_compile.qa_verbs(body)
-    if verbs and (props.get("status") != "approved"
-                  or props.get("source_hash") != operation_compile.receipt_hash(props, body)):
+    if verbs and not operation_compile.contract_in_force(delivery.docs_root(root), props, body):
         errors.append("QA Verbs requires an unchanged approved Verification Contract")
     if errors:
         raise RuntimeError("; ".join(errors))
@@ -5992,7 +5989,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                        CLOSURE_VALUE: closure["scope"]})
     import project_context
     seeds = {path for path in current["inputs"] if path.endswith("/item.md")}
-    result["project_reading"] = project_context.task_context(root, entry="deliver",
+    result["project_reading"] = project_context.task_context(root, entry="deliver-governed",
         role=role.replace("_", "-"), mode="review", paths=seeds | set(current["changed_files"]), no_cache=True,
         change_base=current["integration_base_commit"])
     result["read_interface"]["context"] = "inspect-context --plan <saved verification manifest>"

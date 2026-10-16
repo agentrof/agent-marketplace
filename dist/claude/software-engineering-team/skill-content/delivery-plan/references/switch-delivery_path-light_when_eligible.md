@@ -69,7 +69,7 @@ is eligible only while every condition holds:
    `light-path-check` passes: `delivery_compile.py approve-scope`,
    `delivery_git.py reserve-delivery`, `delivery_compile.py approve-execution`,
    `delivery_git.py publish-execution-plan` and `delivery_git.py claim-items`.
-   Then hand over to `/deliver DLV-###`.
+   Then hand over to `/deliver-governed DLV-###`.
 6. A rejection writes nothing the gate would have authorized. Revise the scope
    or the topology, check again and present the gate again.
 

@@ -183,6 +183,20 @@
       }
     },
     {
+      "query": "tag:#doc/task",
+      "color": {
+        "a": 1,
+        "rgb": 1349210
+      }
+    },
+    {
+      "query": "tag:#doc/retrospective",
+      "color": {
+        "a": 1,
+        "rgb": 13408614
+      }
+    },
+    {
       "query": "tag:#doc/requirement",
       "color": {
         "a": 1,

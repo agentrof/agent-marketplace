@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
 
@@ -23,7 +24,7 @@ COMPILER_SCRIPTS = (
     "design_system_compile.py", "backlog_compile.py",
     "requirement_compile.py", "requirement_route.py", "stage_package.py",
     "operation_compile.py", "delivery_governance.py", "marketplace_paths.py",
-    "delivery_closure.py",
+    "delivery_closure.py", "process_policy.py",
 )
 DATA_PATHS = (
     "skill-content/obsidian-vault/data",
@@ -198,53 +199,92 @@ def frontmatter_status(path: Path) -> str:
     return ""
 
 
-def gate(project_root: Path, root: Path) -> dict:
+def process_profile(scripts: Path, docs: Path) -> str:
+    completed = subprocess.run(
+        [sys.executable, str(scripts / "process_policy.py"), "value", "--docs", str(docs),
+         "--switch", "process_profile"], capture_output=True, text=True, check=False)
+    try:
+        return json.loads(completed.stdout).get("value", "governed")
+    except (ValueError, AttributeError):
+        return "governed"
+
+
+def changed_docs(project_root: Path, docs: Path, base: str | None) -> set[str] | None:
+    """Vault-relative paths changed since *base*; None runs every package check."""
+    if not base:
+        return None
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(project_root), *args],
+                              capture_output=True, text=True, check=False)
+    fork = git("merge-base", base, "HEAD")
+    # Against the fork point, so uncommitted and untracked edits count too.
+    listed = [git("diff", "--name-only", fork.stdout.strip()),
+              git("ls-files", "--others", "--exclude-standard")]
+    if fork.returncode != 0 or any(item.returncode != 0 for item in listed):
+        return None
+    prefix = docs.relative_to(project_root).as_posix() + "/"
+    return {line[len(prefix):] for item in listed for line in item.stdout.splitlines()
+            if line.startswith(prefix)}
+
+
+def gate(project_root: Path, root: Path, base: str | None = None) -> dict:
     workspace, workspace_findings = workspace_for(project_root, root)
     docs = workspace / "docs"
     scripts = root / "scripts"
+    # At fast_lane the file on the target branch is in force: approval stamps are not re-verified.
+    fast = process_profile(scripts, docs) == "fast_lane"
+    changed = changed_docs(project_root, docs, base)
+    jobs: list[tuple[list[str], str]] = []
     results = [{
         "name": "workspace-contract", "ok": not workspace_findings,
         "returncode": 1 if workspace_findings else 0,
         "stdout": "\n".join(workspace_findings), "stderr": "",
-    }, run([
+    }]
+
+    def queue(command: list[str], name: str, scope: Path) -> None:
+        relative = scope.relative_to(docs).as_posix()
+        if changed is None or any(path == relative or path.startswith(relative + "/") for path in changed):
+            jobs.append((command, name))
+
+    jobs.append(([
         sys.executable, str(scripts / "vault_check.py"), "check",
         "--vault", str(docs), "--json",
-    ], "closed-vault-schema-and-relations")]
+    ], "closed-vault-schema-and-relations"))
     ba_root = docs / "business-analysis"
     if ba_root.is_dir():
         for space in sorted(ba_root.iterdir()):
             if (space / "space.md").is_file():
-                results.append(run([
+                queue([
                     sys.executable, str(scripts / "ba_compile.py"), "check",
                     "--space", str(space), "--vault-root", str(docs),
-                    "--gate", "approval", "--json",
-                ], f"business-analysis:{space.name}"))
+                    *([] if fast else ["--gate", "approval"]), "--json",
+                ], f"business-analysis:{space.name}", space)
     solution = docs / "solution-design"
     if (solution / "landscape.md").is_file():
-        results.append(run([
+        queue([
             sys.executable, str(scripts / "landscape_check.py"),
             "--tree", str(solution),
-        ], "solution-design"))
+        ], "solution-design", solution)
     design_system = docs / "design-system"
     if (design_system / "MASTER.md").is_file():
-        results.append(run([
+        queue([
             sys.executable, str(scripts / "design_system_compile.py"),
             "check", "--root", str(design_system),
-        ], "design-system"))
+        ], "design-system", design_system)
     operation = docs / "operation"
     for kind, filename in (("verification", "verification-contract.md"),
                            ("environment", "environment-contract.md")):
         if (operation / filename).is_file():
-            results.append(run([
+            queue([
                 sys.executable, str(scripts / "operation_compile.py"), "check",
                 "--kind", kind, "--docs", str(docs), "--json",
-            ], f"operation:{kind}"))
+            ], f"operation:{kind}", operation)
     governance = docs / "delivery" / "governance" / "governance.md"
     if governance.is_file():
-        results.append(run([
+        queue([
             sys.executable, str(scripts / "delivery_governance.py"), "check",
             "--docs", str(docs), "--json",
-        ], "delivery-governance"))
+        ], "delivery-governance", governance.parent)
     experience = docs / "experience-design"
     experience_identity_errors: list[str] = []
     if experience.is_symlink():
@@ -282,11 +322,11 @@ def gate(project_root: Path, root: Path) -> dict:
     receipt_state = experience / "_ledger" / "application-revisions.json"
     if (experience_packages or receipt_state.exists()
             or receipt_state.is_symlink()):
-        results.append(run([
+        queue([
             sys.executable,
             str(scripts / "experience_application_check.py"),
-            "check", "--root", str(experience), "--gate", "--json",
-        ], "experience-application"))
+            "check", "--root", str(experience), *([] if fast else ["--gate"]), "--json",
+        ], "experience-application", experience)
     if packages.is_dir():
         for package in sorted(
                 path for path in packages.iterdir()
@@ -296,38 +336,41 @@ def gate(project_root: Path, root: Path) -> dict:
                                 "returncode": 1,
                                 "stdout": "Experience process slugs must not use the retired exp- prefix", "stderr": ""})
             if (package / "experience.md").is_file():
-                results.append(run([
+                queue([
                     sys.executable, str(scripts / "experience_compile.py"),
-                    "check", "--experience-root", str(package), "--gate", "--json",
-                ], f"experience:{package.name}"))
+                    "check", "--experience-root", str(package),
+                    *([] if fast else ["--gate"]), "--json",
+                ], f"experience:{package.name}", package)
     requirements = docs / "requirements"
     if requirements.is_dir() and any(requirements.glob("req-*.md")):
-        results.append(run([
+        queue([
             sys.executable, str(scripts / "requirement_compile.py"), "check",
             "--docs", str(docs), "--json",
-        ], "requirements"))
+        ], "requirements", requirements)
     architecture = docs / "system-architecture"
     legacy_architecture = [name for name in ("api-contract.md", "data-model.md", "threat-model.md", "environment.md") if (architecture / name).exists()]
     if legacy_architecture:
         results.append({"name": "legacy-system-architecture-hard-cut", "ok": False, "returncode": 1,
                         "stdout": "legacy root architecture records are forbidden: " + ", ".join(legacy_architecture), "stderr": ""})
     if (architecture / "architecture.md").is_file():
-        results.append(run([
+        queue([
             sys.executable, str(scripts / "architecture_compile.py"), "check",
             "--docs", str(docs), "--json",
-        ], "system-architecture"))
+        ], "system-architecture", architecture)
     backlog = docs / "backlog" / "backlog.md"
     if backlog.is_file():
         command = [
             sys.executable, str(scripts / "backlog_compile.py"), "check",
             "--docs", str(docs), "--json",
         ]
-        approved = frontmatter_status(backlog) == "approved"
+        approved = frontmatter_status(backlog) == "approved" and not fast
         if approved:
             command.insert(-1, "--approved")
-        results.append(run(
-            command, "backlog:approved" if approved else "backlog:draft"
-        ))
+        if fast:
+            command.insert(-1, "--trust-bindings")
+        queue(command, "backlog:approved" if approved else "backlog:draft", backlog.parent)
+    with ThreadPoolExecutor(max_workers=max(1, min(len(jobs), os.cpu_count() or 1))) as pool:
+        results.extend(pool.map(lambda job: run(*job), jobs))
     return {
         "ok": all(item["ok"] for item in results),
         "project_root": str(project_root), "vault": str(docs),
@@ -340,9 +383,9 @@ def cmd_check(args) -> int:
         with tempfile.TemporaryDirectory(prefix="vault-gate-") as temporary:
             with zipfile.ZipFile(sys.argv[0]) as archive:
                 archive.extractall(temporary)
-            result = gate(args.project_root.resolve(), Path(temporary))
+            result = gate(args.project_root.resolve(), Path(temporary), args.changed_from)
     else:
-        result = gate(args.project_root.resolve(), package_root())
+        result = gate(args.project_root.resolve(), package_root(), args.changed_from)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
@@ -441,6 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
     check = sub.add_parser("check")
     check.add_argument("--project-root", type=Path, required=True)
     check.add_argument("--json", action="store_true")
+    check.add_argument("--changed-from", help="base ref: run only the package checks whose tree changed since it")
     check.set_defaults(func=cmd_check)
     closure = sub.add_parser("delivery-closure")
     closure.add_argument("--project-root", type=Path, required=True)

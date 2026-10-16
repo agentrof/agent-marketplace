@@ -2342,7 +2342,7 @@ def fence_holder_recovery(holder: str) -> str:
     if match:
         delivery_id = match.group(1).upper()
         return (f"{holder} (recovery: closure-audit --delivery {delivery_id} names its outcome; merge-pr merges"
-                f" its recorded PR, verify-merge drops the refs of a proven merge, or /deliver {delivery_id}"
+                f" its recorded PR, verify-merge drops the refs of a proven merge, or /deliver-governed {delivery_id}"
                 " finishes or cancels it)")
     return (f"{holder} (recovery: the Delivery whose Item it holds, which closure-audit --all names, finishes"
             " the Item with integrate-item or cancels it with cancel-delivery; each releases the Slot atomically)")
@@ -4130,6 +4130,11 @@ def governed_governance_hash(root: Path) -> str:
 
 def project_max_parallel(root: Path, expected_hash: str | None = None) -> int:
     receipt, errors = delivery_governance.status(root / "workspace" / "docs")
+    import process_policy
+    # At fast_lane Governance is optional: without it Items activate one at a time.
+    if (process_policy.fast_lane(root / "workspace" / "docs")
+            and any(error.startswith("missing delivery governance:") for error in errors)):
+        return 1
     if errors or not receipt.get("current"):
         raise RuntimeError("approved/current Delivery Governance is required before Item activation")
     value = receipt.get("max_parallel")

@@ -557,7 +557,9 @@ def smoke_codex(
         expected_skills = {
             f"{TEAM}:{path.parent.name}"
             for path in (root / "plugins" / TEAM / "skill-content").glob("*/SKILL.md")
-            if "exposure: entry" in path.read_text(encoding="utf-8")
+            if "exposure: entry" in (text := path.read_text(encoding="utf-8"))
+            # Codex renders an entry with user_invocable false as an internal skill.
+            and "user_invocable: false" not in text
         }
         names = codex_skill_names(env, project)
         if not expected_skills <= names:

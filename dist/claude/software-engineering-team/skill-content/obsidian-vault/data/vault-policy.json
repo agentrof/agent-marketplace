@@ -15,6 +15,7 @@
     "backlog"
   ],
   "extra_maps": [],
+  "navigation_exempt_types": ["task", "retrospective"],
   "machine_dirs": [
     "_generated",
     "_relations",
@@ -160,6 +161,16 @@
       "rgb": 2278750
     },
     {
+      "id": "task",
+      "query": "tag:#doc/task",
+      "rgb": 1349210
+    },
+    {
+      "id": "retrospective",
+      "query": "tag:#doc/retrospective",
+      "rgb": 13408614
+    },
+    {
       "id": "requirement",
       "query": "tag:#doc/requirement",
       "rgb": 9323693
@@ -281,6 +292,15 @@
     "status": "text",
     "owner_role": "text",
     "approved_at": "date",
+    "requested_at": "datetime",
+    "size": "text",
+    "rigor": "text",
+    "roles": "text",
+    "task_kind": "text",
+    "epic": "text",
+    "source_story": "text",
+    "covers": "multitext",
+    "delivery": "text",
     "decided_at": "date",
     "superseded_by": "text",
     "supersedes": "text",
@@ -568,9 +588,9 @@
     "system_architecture": ["decision", "system-architecture"],
     "design_system": ["design-master", "page-override"],
     "experience_design": ["experience"],
-    "backlog": ["backlog", "backlog-review", "epic", "epic-review", "story", "test-plan"],
+    "backlog": ["backlog", "backlog-review", "epic", "epic-review", "story", "test-plan", "task"],
     "requirements": ["requirement"],
-    "delivery": ["definition-of-done", "delivery", "execution-plan", "delivery-item", "code-review", "verification", "delivery-review", "delivery-governance", "process-policy"],
+    "delivery": ["definition-of-done", "delivery", "execution-plan", "delivery-item", "code-review", "verification", "delivery-review", "delivery-governance", "process-policy", "retrospective"],
     "operation": ["operation"]
   },
   "extra_doc_types": [
@@ -604,6 +624,8 @@
     "epic-review",
     "story",
     "test-plan",
+    "task",
+    "retrospective",
     "requirement",
     "definition-of-done",
     "delivery",
@@ -649,6 +671,8 @@
     "epic_review": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/reviews/round-[0-9]+-epic-review\\.md$"],
     "story": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/story\\.md$"],
     "test_plan": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/test-plan\\.md$"],
+    "task": ["^backlog/tasks/tk-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"],
+    "retrospective": ["^delivery/retrospectives/dlv-[0-9]{3,}-retrospective\\.md$"],
     "requirement": ["^requirements/req-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"],
     "definition_of_done": ["^delivery/definition-of-done\\.md$"],
     "delivery": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/delivery\\.md$"],
@@ -675,6 +699,8 @@
     "epic_review": ["draft", "changes_requested", "approved"],
     "story": ["planned", "retired"],
     "test_plan": ["draft", "approved", "superseded", "retired"],
+    "task": ["active", "delivered", "dropped"],
+    "retrospective": ["final"],
     "requirement": ["draft", "approved", "resolved_no_change", "superseded", "withdrawn"],
     "definition_of_done": ["draft", "approved"],
     "delivery": ["scope_proposed", "scope_approved", "execution_approved", "active", "review", "pr_handoff", "awaiting_merge", "merged", "cancelled"],

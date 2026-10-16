@@ -1,0 +1,7 @@
+{
+  "description": "Request-to-merge targets in minutes per task kind (knowledge: documents; build: code, devops, tests) and size, plus the kind's maximum and average target. A project may tune them here; the retrospective compares every merged task with its own kind and size.",
+  "kinds": {
+    "build": {"s": 5, "m": 15, "l": 30, "max": 60, "average": 15},
+    "knowledge": {"s": 1, "m": 3, "l": 5, "max": 15, "average": 5}
+  }
+}

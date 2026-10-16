@@ -9,6 +9,7 @@ import sys
 import tempfile
 import tokenize
 import unittest
+from unittest import mock
 try:
     from tools.tests.levels import integration
 except ModuleNotFoundError:  # run as a script from tools/tests
@@ -212,6 +213,63 @@ class PortableVaultGateTests(unittest.TestCase):
             self.assertEqual((envelope["ok"], envelope["operation"]), (True, "closure-check"))
             self.assertIn({"kind": "ref", "target": "closure/classification", "value": "not_managed"},
                           envelope["observations"])
+
+
+@integration
+class FastLaneScopeTests(unittest.TestCase):
+    def setUp(self):
+        sys.path.insert(0, str(PLUGIN / "scripts"))
+        self.addCleanup(sys.path.remove, str(PLUGIN / "scripts"))
+        import vault_gate
+        self.gate = vault_gate
+
+    def test_only_changed_vault_paths_since_the_fork_count(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            init_repository(project)
+            docs = project / "workspace/docs"
+            (docs / "backlog").mkdir(parents=True)
+            (docs / "backlog/backlog.md").write_text("a\n", encoding="utf-8")
+            git = ["git", "-C", str(project), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+            subprocess.run([*git, "add", "-A"], check=True)
+            subprocess.run([*git, "commit", "-qm", "base"], check=True)
+            subprocess.run([*git, "branch", "base"], check=True)
+            (docs / "backlog/backlog.md").write_text("b\n", encoding="utf-8")
+            (docs / "requirements").mkdir()
+            (docs / "requirements/new.md").write_text("n\n", encoding="utf-8")
+            (project / "README.md").write_text("r\n", encoding="utf-8")
+            self.assertEqual(self.gate.changed_docs(project, docs, "base"),
+                             {"backlog/backlog.md", "requirements/new.md"})
+            self.assertIsNone(self.gate.changed_docs(project, docs, None))
+            self.assertIsNone(self.gate.changed_docs(project, docs, "no-such-ref"))
+
+    def test_an_unreadable_policy_reads_governed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            self.assertEqual(self.gate.process_profile(PLUGIN / "scripts", Path(temporary)), "governed")
+
+
+class FastLaneBacklogBindingTests(unittest.TestCase):
+    def test_only_the_fast_lane_backlog_check_trusts_its_input_bindings(self):
+        sys.path.insert(0, str(PLUGIN / "scripts"))
+        self.addCleanup(sys.path.remove, str(PLUGIN / "scripts"))
+        import vault_gate
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            backlog = project / "workspace/docs/backlog/backlog.md"
+            backlog.parent.mkdir(parents=True)
+            backlog.write_text("---\nstatus: approved\n---\n", encoding="utf-8")
+            for profile, present, absent in (("fast_lane", "--trust-bindings", "--approved"),
+                                             ("governed", "--approved", "--trust-bindings")):
+                commands = []
+                with self.subTest(profile=profile), \
+                        mock.patch.object(vault_gate, "process_profile", return_value=profile), \
+                        mock.patch.object(vault_gate, "run", side_effect=lambda command, name: (
+                            commands.append(command) or {"name": name, "ok": True})):
+                    vault_gate.gate(project, PLUGIN)
+                    backlog_check = next(command for command in commands
+                                         if command[1].endswith("backlog_compile.py"))
+                    self.assertIn(present, backlog_check)
+                    self.assertNotIn(absent, backlog_check)
 
 
 if __name__ == "__main__":

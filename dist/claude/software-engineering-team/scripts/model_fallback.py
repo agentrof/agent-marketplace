@@ -6,7 +6,7 @@ PostToolUseFailure. A role's pinned model is the `model:` line of its agent
 file in this plugin. A role that setup rendered into the project as
 `<plugin>-<role>` is pinned by the `model:` line of that rendered file, which
 carries this plugin's generated header, or, when no such file is in the
-project's `.claude/agents/`, by the package tier map. The hook stays silent
+project's `.claude/agents/`, by the package class map. The hook stays silent
 unless the call spawned one of this plugin's roles, whose pin it found,
 without a per-invocation `model` and with CLAUDE_CODE_SUBAGENT_MODEL_FORCE
 off: a model the user chose never triggers it, and the re-spawn it asks for
@@ -34,7 +34,7 @@ from pathlib import Path
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-TIER_MAP = PLUGIN_ROOT / "templates" / "tier-map.json"
+CLASS_MAP = PLUGIN_ROOT / "templates" / "model-classes.json"
 RENDERED_AGENTS = Path(".claude") / "agents"
 ROLE_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 # A Claude model ID inside any provider form, such as
@@ -99,12 +99,12 @@ def pinned_model(role: str) -> str | None:
     return claude_id(fields.get("model")) if fields is not None else None
 
 
-def tier_map_pin(role: str) -> str | None:
-    """Return the model the package tier map pins the role's tier to, if any."""
+def class_map_pin(role: str) -> str | None:
+    """Return the model the package class map pins the role's class to, if any."""
     try:
-        data = json.loads(TIER_MAP.read_text(encoding="utf-8"))
-        tier = next(tier for tier, roles in data["roles"].items() if role in roles)
-        return claude_id(data["hosts"]["claude"]["tiers"][tier].get("model"))
+        data = json.loads(CLASS_MAP.read_text(encoding="utf-8"))
+        slot = next(slot for slot, roles in data["roles"].items() if role in roles)
+        return claude_id(data["hosts"]["claude"]["classes"][slot].get("model"))
     except (OSError, ValueError, KeyError, TypeError, AttributeError, StopIteration):
         return None
 
@@ -112,7 +112,7 @@ def tier_map_pin(role: str) -> str | None:
 def rendered_pin(plugin: str, role: str, payload: dict, environ) -> str | None:
     """Return the pin of the project's rendered role `<plugin>-<role>`.
 
-    Its own file decides: a refresh may not have reached it yet, so the tier
+    Its own file decides: a refresh may not have reached it yet, so the class
     map serves only when the project holds no file of that name. A file
     without this plugin's generated header is the user's own agent.
     """
@@ -133,7 +133,7 @@ def rendered_pin(plugin: str, role: str, payload: dict, environ) -> str | None:
                     or fields.get("name") != f"{plugin}-{role}":
                 return None
             return claude_id(fields.get("model"))
-    return tier_map_pin(role)
+    return class_map_pin(role)
 
 
 def names(text: str, model: str) -> bool:

@@ -36,7 +36,7 @@ panel.
   `backlog-reviewer-lens`, `solution-reviewer-lens` or
   `design-system-reviewer-lens` where the step's reader role is
   `backlog-reviewer`, `solution-reviewer` or `design-system-reviewer`. The
-  Operation counterparts run as themselves, on their own tier.
+  Operation counterparts run as themselves, on their own class.
 - Derive a reader's manifest with its reader role, as the step's flow does.
   A reader role that does not bind this skill, and the step's writer, add
   `--skill challenge-review`, so every panel task binds this file and the
@@ -148,7 +148,7 @@ before approval.
 The review panel `operation_verification` reviews a Verification Contract and
 review panel `operation_environment` an Environment Contract. Their lens
 readers are the non-writing counterpart role, read-only and on that role's
-own tier. Derive each reader's inputs with `task_inputs.py --entry configure
+own class. Derive each reader's inputs with `task_inputs.py --entry configure
 --role <counterpart> --mode review --skill challenge-review`. Every prompt
 includes the exact contract path, accepted Solution references, the reader's
 lens assignment and `SELF-CHECK`. Resolve every critical or major finding
@@ -164,7 +164,7 @@ that contract's counterpart: `devops-engineer`, the step's reader role, for the
 Verification Contract and `qa-engineer` for the Environment Contract. Its other
 assignments run once, as `devops-engineer`, or as `qa-engineer` when the bundle
 revises only the Environment Contract. Every reader stays on its role's own
-tier, receives the same bundle manifest and every path it names, and derives
+class, receives the same bundle manifest and every path it names, and derives
 its task as the bundle's instructions say. A rerun assignment runs under the
 role that ran it before.
 
@@ -182,7 +182,7 @@ A lens reader returns its role file's output contract for its assigned lens:
 ## Steps outside the panel data
 
 - Business Analysis already runs one lens or expert per reader from
-  `lens-bank.md` and `expert-casting.md`, on its roles' own tiers.
+  `lens-bank.md` and `expert-casting.md`, on its roles' own classes.
 - Solution risk specialists are extra readers that `challenge-lenses.md`
   selects; they are not panel assignments.
 - Delivery code review and QA, and the Experience attestation, keep one

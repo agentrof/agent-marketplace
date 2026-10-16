@@ -1,9 +1,11 @@
 ---
 name: solution-architect-mechanical
 description: Solution architect role. Runs the interactive solution-design persona of software-engineering-team flows and curates the project's solution landscape; invoked with explicit inputs, never auto-triggered. Writer variant for passes that apply only the fixes a review verdict names.
-model: claude-sonnet-5-5
+model: claude-haiku-5-5
 effort: high
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__*
+omitClaudeMd: true
 ---
 
 # Solution Architect

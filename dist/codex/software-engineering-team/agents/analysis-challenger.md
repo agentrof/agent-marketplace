@@ -2,7 +2,7 @@
 name: analysis-challenger
 description: Adversarial reviewer role for analysis spaces. Spawned fresh-context by the business-analysis entry with one lens or expert profile and scoped inputs; returns structured findings only.
 model: gpt-6.1-sol
-model_reasoning_effort: xhigh
+model_reasoning_effort: medium
 output_contract: prose
 tools: Read, Grep, Glob
 ---

@@ -44,7 +44,7 @@ REVIEW_TASKS = (
     ("backlog-plan", "product-owner", "revise", ["challenge-review"], DOCUMENT),
     ("solution-design", "solution-reviewer", "review", [], DOCUMENT),
     ("solution-design", "solution-architect", "revise", ["challenge-review"], DOCUMENT),
-    ("deliver", "code-reviewer", "review", [], CODE),
+    ("deliver-governed", "code-reviewer", "review", [], CODE),
 )
 # step: (entry, calibration reader role, added skills, the Operation contract kind)
 CALIBRATION_READERS = {
@@ -53,7 +53,7 @@ CALIBRATION_READERS = {
     "design_system": ("design-system", "design-system-reviewer", [], None),
     "operation_verification": ("configure", "devops-engineer", ["challenge-review"], "verification"),
     "operation_environment": ("configure", "qa-engineer", ["challenge-review"], "environment"),
-    "code_review": ("deliver", "code-reviewer", [], None),
+    "code_review": ("deliver-governed", "code-reviewer", [], None),
 }
 
 
@@ -130,17 +130,17 @@ class ReviewLoopReferenceTests(unittest.TestCase):
         self.assertNotIn("agent_variants", switch)
         # An Operation contract or bundle claim is calibrated by the contract's counterpart (rr-seams-10).
         reader = ("of the claiming reviewer's role, or for an Operation contract or bundle claim the"
-                  " counterpart of the contract it concerns, on that role's own tier")
+                  " counterpart of the contract it concerns, on that role's own class")
         self.assertIn(f"one fresh calibration reader {reader}, confirms it", switch["values"][1]["tradeoffs"])
         orchestration = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
         self.assertIn("It runs as the claiming reviewer's role, or for an Operation contract or bundle claim"
-                      " the counterpart of the contract it concerns, on that role's own tier, never as a"
+                      " the counterpart of the contract it concerns, on that role's own class, never as a"
                       " `-lens` or a `-mechanical` variant", orchestration)
-        # Every generated variant runs on `low`, a tier no calibration reader takes.
+        # Every fix-pass variant runs on `mechanical`, a class no calibration reader takes.
         for step, (_entry, role, _skills, _kind) in CALIBRATION_READERS.items():
             with self.subTest(step=step):
-                tier = re.search(r"(?m)^reasoning: (\S+)$", read(f"agents/{role}.md")).group(1)
-                self.assertNotIn(tier, {"low", "lens", "mechanical"})
+                tier = re.search(r"(?m)^model_class: (\S+)$", read(f"agents/{role}.md")).group(1)
+                self.assertNotEqual(tier, "mechanical")
 
     def test_default_path_instructions_name_no_review_loop_value(self):
         for path in TEAM.rglob("*.md"):

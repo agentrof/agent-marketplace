@@ -214,7 +214,7 @@ class TaskBindingTests(unittest.TestCase):
     def bound(self) -> dict:
         tasks = (("backlog-plan", "product-owner", "revise"), ("backlog-plan", "qa-engineer", "revise"),
                  ("backlog-plan", "backlog-reviewer", "review"), ("delivery-plan", "product-owner", "revise"),
-                 ("execution-plan", "qa-engineer", "revise"), ("deliver", "qa-engineer", "review"))
+                 ("execution-plan", "qa-engineer", "revise"), ("deliver-governed", "qa-engineer", "review"))
         bound = {}
         for task in tasks:
             reads = task_inputs.manifest(entry=task[0], role=task[1], mode=task[2],

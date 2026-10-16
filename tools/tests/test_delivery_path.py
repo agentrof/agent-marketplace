@@ -234,7 +234,7 @@ class DeliveryPathTaskInputTests(unittest.TestCase):
              ("delivery-plan", "product-owner"): {PLAN_REFERENCE},
              ("execution-plan", "software-architect"): {TOPOLOGY_REFERENCE},
              ("execution-plan", "delivery-coordinator"): {TOPOLOGY_REFERENCE},
-             ("deliver", "software-architect"): set(), ("deliver", "delivery-coordinator"): set(),
+             ("deliver-governed", "software-architect"): set(), ("deliver-governed", "delivery-coordinator"): set(),
              ("backlog-plan", "product-owner"): set(), ("configure", "delivery-coordinator"): set()}
 
     def setUp(self) -> None:

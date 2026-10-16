@@ -99,15 +99,15 @@ EXPECTED = {
     "backlog-plan:qa-engineer": [*BACKLOG, COST, LEVELS],
     **{f"configure:{role}": ["configure/references/switch-" + BUNDLE, OWNER_GATES]
        for role in ("delivery-coordinator", "devops-engineer", "qa-engineer")},
-    **{f"deliver:{role}": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES]
+    **{f"deliver-governed:{role}": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES]
        for role in ("backend-developer", "delivery-coordinator", "devops-engineer",
                     "frontend-developer")},
-    "deliver:qa-engineer": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GATE_FIRST, GROUPS, ENGINES],
-    "deliver:code-reviewer": ["code-review/references/switch-code_review_panel-beside_official.md",
+    "deliver-governed:qa-engineer": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GATE_FIRST, GROUPS, ENGINES],
+    "deliver-governed:code-reviewer": ["code-review/references/switch-code_review_panel-beside_official.md",
                               "code-review/references/switch-repair_review-before_freeze.md",
                               "code-review/references/switch-review_loop-blocking_delta.md",
                               LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES],
-    "deliver:software-architect": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES,
+    "deliver-governed:software-architect": [LANES, OWNER_GATES, PRE_HANDOFF, OWN_TARGETS, GROUPS, ENGINES,
                                    "software-architecture/references/switch-" + BUNDLE],
     "delivery-plan:delivery-coordinator": [
         OWNER_GATES, "delivery-plan/references/switch-delivery_path-light_when_eligible.md", COST],
@@ -147,13 +147,13 @@ EXPECTED = {key: sorted([*value, WAVES]) if key.split(":")[0] in WAVE_ENTRIES el
 # Every deliver task binds the deliver skill's fixed-cost, lane and level-change references;
 # QA and the code reviewer also bind their own skill's fixed-cost reference, and
 # the Requirement entry binds its fact-check reference.
-OWN_SKILL = {"deliver:qa-engineer": ["qa-verification/references/switch-item_qa_tier-change_tier_per_item.md"],
-             "deliver:code-reviewer": ["code-review/references/switch-item_review_scale-by_change_size.md"],
+OWN_SKILL = {"deliver-governed:qa-engineer": ["qa-verification/references/switch-item_qa_tier-change_tier_per_item.md"],
+             "deliver-governed:code-reviewer": ["code-review/references/switch-item_review_scale-by_change_size.md"],
              "requirement:business-analyst": [
                  "requirement/references/switch-requirement_fact_check-pre_approval_reader.md"]}
-EXPECTED = {key: sorted([*value, *(DELIVER if key.startswith("deliver:") else ()),
+EXPECTED = {key: sorted([*value, *(DELIVER if key.startswith("deliver-governed:") else ()),
                          *OWN_SKILL.get(key, ())])
-            if key.startswith("deliver:") or key in OWN_SKILL else value
+            if key.startswith("deliver-governed:") or key in OWN_SKILL else value
             for key, value in EXPECTED.items()}
 # The reading switches of #441 bind their references, all in challenge-review,
 # to every task of the entries whose flows own them: review_scope,
@@ -178,7 +178,7 @@ EXPECTED = {key: sorted([*value, MIGRATION]) if key.startswith("backlog-plan:") 
             for key, value in EXPECTED.items()}
 # provisional_claims binds its reference to every task of the entries whose flows own it.
 PROVISIONAL = "deliver/references/switch-provisional_claims-during_plan_revision.md"
-EXPECTED = {key: sorted([*value, PROVISIONAL]) if key.split(":")[0] in ("deliver", "execution-plan") else value
+EXPECTED = {key: sorted([*value, PROVISIONAL]) if key.split(":")[0] in ("deliver-governed", "execution-plan") else value
             for key, value in EXPECTED.items()}
 # source_rebind binds its backlog-plan reference to backlog-plan tasks and its
 # execution-plan reference to execution-plan tasks.
@@ -187,7 +187,12 @@ EXPECTED = {key: sorted([*value, key.split(":")[0] + "/" + REBIND])
             if key.split(":")[0] in ("backlog-plan", "execution-plan") else value
             for key, value in EXPECTED.items()}
 EXPECTED = {key: sorted([*value, "deliver/references/switch-regression_plan_revision-current_approved.md"])
-            if key.startswith("deliver:") else value for key, value in EXPECTED.items()}
+            if key.startswith("deliver-governed:") else value for key, value in EXPECTED.items()}
+# process_profile binds its fast-lane reference, held by the deliver skill, to deliver tasks.
+EXPECTED.update({f"deliver:{role}": sorted(["deliver/references/switch-process_profile-fast_lane.md",
+                                             *EVERY_FLOW])
+                 for role in ("backend-developer", "code-reviewer", "devops-engineer",
+                              "frontend-developer")})
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")
 
@@ -332,11 +337,11 @@ class AllSwitchesOnTests(unittest.TestCase):
 
     def test_a_derived_task_manifest_binds_the_references_of_its_flows_switches(self):
         """The one Git-backed derivation under every switch on."""
-        result = task_inputs.manifest(entry="deliver", role="code-reviewer", mode="review",
+        result = task_inputs.manifest(entry="deliver-governed", role="code-reviewer", mode="review",
                                       project=self.project)
         self.assertEqual(sorted(path.removeprefix("skill-content/") for path in result["required_reads"]
                                 if "/references/switch-" in path),
-                         sorted(EXPECTED["deliver:code-reviewer"]))
+                         sorted(EXPECTED["deliver-governed:code-reviewer"]))
 
     def test_every_shipped_task_binds_the_references_of_the_switches_its_flows_own(self):
         bound = {}

@@ -716,7 +716,7 @@ def integration_line_findings(root: Path, delivery_id: str, reviewed: str, stops
     names that merge, and must carry in its own tree the approved code review
     and passed verification of the product tip its seal names.
     """
-    resume = recovery(f"rebuild the Integration through /deliver {delivery_id}; only coordinator records may"
+    resume = recovery(f"rebuild the Integration through /deliver-governed {delivery_id}; only coordinator records may"
                       " change it")
     commits = line_commits(root, reviewed, stops)
     prefetch_deltas(root, line_delta_pairs(root, commits))
@@ -856,7 +856,7 @@ def record_binding_findings(root: Path, delivery_id: str, chain: dict, stops: li
     recomputed, since a later package release may write them differently,
     and every path the record changes must only stay outside the product.
     """
-    resume = recovery(f"close this PR; /deliver {delivery_id} records the PR again on the reviewed Integration")
+    resume = recovery(f"close this PR; /deliver-governed {delivery_id} records the PR again on the reviewed Integration")
     record, intent, review, reviewed = (chain[key] for key in ("record", "intent", "review", "reviewed_integration"))
     errors: list[str] = []
     package = package_directory(root, review, delivery_id)
@@ -894,7 +894,7 @@ def record_binding_findings(root: Path, delivery_id: str, chain: dict, stops: li
     if reviewed_note.get("reviewed_integration_commit") != reviewed:
         errors.append(f"DELIVERY_REVIEW_STALE: the published Review of {delivery_id} reviewed"
                       f" {reviewed_note.get('reviewed_integration_commit')}, not the Integration {reviewed} its record"
-                      " names" + recovery(f"approve and publish the Delivery Review again in /deliver {delivery_id}"))
+                      " names" + recovery(f"approve and publish the Delivery Review again in /deliver-governed {delivery_id}"))
     return errors + integration_line_findings(root, delivery_id, reviewed, stops)
 
 
@@ -910,14 +910,14 @@ def pr_record_chain(root: Path, head: str, delivery_id: str, url: str,
     """
     chain: dict = {}
     errors: list[str] = []
-    resume = recovery(f"/deliver {delivery_id} runs open-pr, which records this PR on the reviewed Integration head")
+    resume = recovery(f"/deliver-governed {delivery_id} runs open-pr, which records this PR on the reviewed Integration head")
 
     message = commit_message(root, head)
     if record_kind(message) != "pr_url_recorded_v1" or trailer(message, "Delivery") != delivery_id:
         return chain, [f"DELIVERY_CLOSURE_INCOMPLETE: the PR head {head} is not the PR record of {delivery_id}" + resume]
     if not delivery_git.binds_pr(message, url):
         errors.append(f"DELIVERY_PR_HEAD_BASE_MISMATCH: the PR record of {delivery_id} binds another PR than {url}"
-                      + recovery(f"merge only the PR that the record names, through merge-pr in /deliver {delivery_id}"))
+                      + recovery(f"merge only the PR that the record names, through merge-pr in /deliver-governed {delivery_id}"))
     intent = trailer(message, "Intent") or ""
     if parents(root, head) != [intent]:
         return chain, errors + [f"DELIVERY_COORDINATION_CORRUPT: the PR record of {delivery_id} is not the exact child"
@@ -934,7 +934,7 @@ def pr_record_chain(root: Path, head: str, delivery_id: str, url: str,
             or trailer(review_message, "Delivery") != delivery_id or parents(root, review) != [reviewed]):
         return chain, errors + [f"DELIVERY_REVIEW_STALE: the PR intent of {delivery_id} does not follow its published"
                                 " Delivery Review" + recovery(f"approve and publish the Delivery Review again in"
-                                                              f" /deliver {delivery_id}, then open-pr")]
+                                                              f" /deliver-governed {delivery_id}, then open-pr")]
     chain.update(record=head, intent=intent, review=review, reviewed_integration=reviewed,
                  approval_hash=trailer(review_message, "Approval-Hash"))
     return chain, errors + record_binding_findings(root, delivery_id, chain, stops, recompute_notes)
@@ -1027,12 +1027,12 @@ def proof_stops(root: Path, delivery_id: str, head: str, target: str, fence: str
     base = target_before_merge(root, head, target) if merged else target
     stops: set[str] = set()
     findings = []
-    resume = recovery(f"the project owner decides in /deliver {delivery_id}; the target never held this commit"
+    resume = recovery(f"the project owner decides in /deliver-governed {delivery_id}; the target never held this commit"
                       " before the Delivery's merge")
     if merged and not base:
         findings.append(f"DELIVERY_COORDINATION_CORRUPT: the target holds the recorded PR head of {delivery_id} on its"
                         " own first-parent line, as a fast-forward leaves it, so no target before its merge bounds"
-                        " its proof" + recovery(f"the project owner decides in /deliver {delivery_id}; merge-pr"
+                        " its proof" + recovery(f"the project owner decides in /deliver-governed {delivery_id}; merge-pr"
                                                 " merges the recorded head only with a two-parent merge"))
     for name, stop in (("target", base), ("Fence target", fence)):
         if not stop:
@@ -1043,7 +1043,7 @@ def proof_stops(root: Path, delivery_id: str, head: str, target: str, fence: str
             if not base or not is_ancestor(root, stop, base):
                 findings.append(f"DELIVERY_TARGET_DRIFT: the Fence target {stop} of {delivery_id} is not in the target"
                                 " history its recorded PR head is proven against"
-                                + recovery(f"run refresh-target through /deliver {delivery_id} against the Delivery's"
+                                + recovery(f"run refresh-target through /deliver-governed {delivery_id} against the Delivery's"
                                            " target"))
                 continue
         if own_line_stop(root, delivery_id, head, stop):
@@ -1094,7 +1094,7 @@ def item_findings(root: Path, head: str, delivery_id: str, story: str, item_path
     status = item_props.get("status")
     if status == "cancelled":
         return []
-    resume = recovery(f"finish {story} through /deliver {delivery_id}: integrate-item merges only an Item with"
+    resume = recovery(f"finish {story} through /deliver-governed {delivery_id}: integrate-item merges only an Item with"
                       " approved code review and passed verification, then approve and publish the Delivery Review")
     if status != "integrated":
         return [f"DELIVERY_ITEM_NOT_READY: {story} of {delivery_id} is {status or 'without a status'}, not integrated"
@@ -1211,7 +1211,7 @@ def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base:
         return live + [f"DELIVERY_PR_HEAD_BASE_MISMATCH: the PR head {head} is not the recorded Integration head of"
                 f" {delivery_id}, which has {where}; only the Delivery PR that open-pr records on the reviewed"
                 " Integration head can merge Delivery work"
-                + recovery(f"close this PR and continue through /deliver {delivery_id}")]
+                + recovery(f"close this PR and continue through /deliver-governed {delivery_id}")]
     fence = state.get("fence_target", "")
     # A Fence target the base lacks is reported below as drift, so only the other findings are taken here.
     stops, located = proof_stops(root, delivery_id, head, base_tip, fence)
@@ -1230,17 +1230,17 @@ def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base:
     status = delivery_props.get("status")
     if status not in {"awaiting_merge", "cancelled"}:
         errors.append(f"DELIVERY_CLOSURE_INCOMPLETE: {delivery_id} is {status} in the PR head, not awaiting_merge"
-                      " or cancelled" + recovery(f"approve the Delivery Review and run open-pr in /deliver {delivery_id}"))
+                      " or cancelled" + recovery(f"approve the Delivery Review and run open-pr in /deliver-governed {delivery_id}"))
     recomputed = delivery_compile.content_hash(review_props, review_body,
                                                exclude=delivery_compile.MUTABLE | {"approval_hash"})
     if (review_props.get("status") != "approved" or review_props.get("approval_hash") != recomputed
             or chain["approval_hash"] != recomputed):
         errors.append(f"DELIVERY_REVIEW_STALE: the Delivery Review of {delivery_id} in the PR head is not the approved"
                       " Review its published record binds"
-                      + recovery(f"approve and publish the Delivery Review again in /deliver {delivery_id}"))
+                      + recovery(f"approve and publish the Delivery Review again in /deliver-governed {delivery_id}"))
     if review_props.get("pull_request_url") != url:
         errors.append(f"DELIVERY_PR_HEAD_BASE_MISMATCH: the Delivery Review of {delivery_id} records another PR"
-                      + recovery(f"merge only the recorded PR, through merge-pr in /deliver {delivery_id}"))
+                      + recovery(f"merge only the recorded PR, through merge-pr in /deliver-governed {delivery_id}"))
     if status != "cancelled":
         for story, (path, props) in sorted(tree_items(root, head, directory).items()):
             errors.extend(item_findings(root, head, delivery_id, story, path, props))
@@ -1249,18 +1249,18 @@ def check_managed(root: Path, remote: str, *, delivery_id: str, head: str, base:
             errors.append(f"DELIVERY_CLOSURE_INCOMPLETE: {ref.removeprefix('refs/heads/')} still holds"
                           f" {slot['story'] or 'an Item'} of {delivery_id}"
                           + recovery(f"finish the Item with integrate-item or cancel it with cancel-delivery in"
-                                     f" /deliver {delivery_id}; each releases its Slot atomically"))
+                                     f" /deliver-governed {delivery_id}; each releases its Slot atomically"))
     pending = delivery_compile.pending_decisions(delivery_body)
     if pending:
         errors.append(f"DELIVERY_DECISION_PENDING: {delivery_compile.pending_rows_text(pending)} in {delivery_id}"
-                      + recovery(f"answer them at gate B of /deliver {delivery_id}"))
+                      + recovery(f"answer them at gate B of /deliver-governed {delivery_id}"))
     target_branch = delivery_props.get("target_branch")
     if isinstance(target_branch, str) and target_branch and target_branch != base:
         errors.append(f"DELIVERY_PR_HEAD_BASE_MISMATCH: the PR targets {base}, but {delivery_id} targets"
                       f" {target_branch}" + recovery(f"merge only the Delivery PR into {target_branch}"))
     if not fence or not is_ancestor(root, fence, base_tip):
         errors.append(f"DELIVERY_TARGET_DRIFT: the PR base {base} does not hold the Fence target of {delivery_id}"
-                      + recovery(f"run refresh-target through /deliver {delivery_id} against the Delivery's target"))
+                      + recovery(f"run refresh-target through /deliver-governed {delivery_id} against the Delivery's target"))
     if bindings:
         with materialized(root, head) as tree:
             errors.extend(binding_findings(tree, delivery_id))
@@ -1272,11 +1272,11 @@ def provisional_findings(root: Path, remote: str, delivery_id: str, integration:
     try:
         live = live_provisional_claims(root, remote, delivery_id, integration)
     except RuntimeError as exc:
-        return [str(exc) + recovery(f"the project owner decides in /deliver {delivery_id}; only the coordinator's"
+        return [str(exc) + recovery(f"the project owner decides in /deliver-governed {delivery_id}; only the coordinator's"
                                     " provisional-claim verbs write these records")]
     return [f"DELIVERY_CLOSURE_INCOMPLETE: {claim['story']} of {delivery_id} holds a live provisional claim of"
             f" {', '.join(claim['paths'])}" + recovery(
-                f"end the plan revision in /deliver {delivery_id}: finish-plan-revision promotes or orphans the"
+                f"end the plan revision in /deliver-governed {delivery_id}: finish-plan-revision promotes or orphans the"
                 " claim, abort-plan-revision or withdraw-provisional-claim withdraws it")
             for claim in live]
 
@@ -1340,7 +1340,7 @@ def check_pull_request(project_root: Path, *, head: str, base: str, url: str, he
     if not candidates:
         result["errors"] = ["DELIVERY_PR_HEAD_BASE_MISMATCH: the PR is managed because "
                             + "; ".join(classified["reasons"]) + ", but no open Delivery records it"
-                            + recovery("open Delivery work only through /deliver DLV-###, which opens its PR")]
+                            + recovery("open Delivery work only through /deliver-governed DLV-###, which opens its PR")]
     else:
         result["errors"] = [error for delivery_id in candidates for error in check_managed(
             root, remote, delivery_id=delivery_id, head=head, base=base, base_tip=base_tip, url=canonical,
@@ -1512,8 +1512,8 @@ def audit_delivery(root: Path, delivery_id: str, target: str, state: dict, remot
         if unproven:
             return {"delivery": delivery_id, "outcome": "unproven_record_merge", "record": record,
                     "evidence": unproven, "leftovers": [f"Slot {ref.removeprefix('refs/heads/')}" for ref in slots],
-                    "next_entry": f"/deliver {delivery_id}",
-                    "recovery": f"the project owner decides in /deliver {delivery_id}: the target merged a PR record"
+                    "next_entry": f"/deliver-governed {delivery_id}",
+                    "recovery": f"the project owner decides in /deliver-governed {delivery_id}: the target merged a PR record"
                                 " that is not the Delivery's current recorded head as the coordinator wrote it, so"
                                 " the Delivery is not merged and verify-merge does not apply"}
         leftovers = [f"Integration ref {canonical_refs(delivery_id)['integration'].removeprefix('refs/heads/')}"
@@ -1537,18 +1537,18 @@ def audit_delivery(root: Path, delivery_id: str, target: str, state: dict, remot
     if evidence:
         return {"delivery": delivery_id, "outcome": "external_product_merge", "evidence": evidence + signs,
                 "leftovers": [f"Slot {ref.removeprefix('refs/heads/')}" for ref in slots],
-                "next_entry": f"/deliver {delivery_id}",
-                "recovery": f"the project owner decides in /deliver {delivery_id}: the Delivery's product reached the"
+                "next_entry": f"/deliver-governed {delivery_id}",
+                "recovery": f"the project owner decides in /deliver-governed {delivery_id}: the Delivery's product reached the"
                             " target outside merge-pr, so it is not merged and never complete; a Slot is released"
                             " only by integrate-item or cancel-delivery"}
     qualified = {"signs": signs} if signs else {}
     if integration and record_kind(commit_message(root, integration)) == "pr_url_recorded_v1":
         readiness = recorded_head_readiness(root, remote, delivery_id, integration, branch, target, state)
         return {"delivery": delivery_id, "outcome": "awaiting_merge", "next_entry": None, "readiness": readiness,
-                **qualified, "recovery": f"merge-pr in /deliver {delivery_id} merges the recorded PR head"
+                **qualified, "recovery": f"merge-pr in /deliver-governed {delivery_id} merges the recorded PR head"
                 + (" once each readiness finding is resolved" if readiness else "")}
     return {"delivery": delivery_id, "outcome": "open", "next_entry": None, **qualified,
-            "recovery": f"continue the Delivery through /deliver {delivery_id}"}
+            "recovery": f"continue the Delivery through /deliver-governed {delivery_id}"}
 
 
 def merged_record_findings(root: Path, delivery_id: str, record: str, integration: str, target: str,
@@ -1618,15 +1618,15 @@ def audit(project_root: Path, delivery_id: str | None = None, remote: str = "ori
             results.append(outcome)
             if outcome.get("readiness"):
                 findings.append({"code": "DELIVERY_CLOSURE_INCOMPLETE", "severity": "blocker", "refs": [identifier],
-                                 "paths": [], "next_entry": f"/deliver {identifier}",
+                                 "paths": [], "next_entry": f"/deliver-governed {identifier}",
                                  "message": f"{identifier} is awaiting_merge, but its recorded PR head cannot close"
                                             " it: " + "; ".join(outcome["readiness"])})
             if outcome.get("signs"):
                 findings.append({"code": "DELIVERY_EXTERNAL_MERGE", "severity": "warning", "refs": [identifier],
-                                 "paths": [], "next_entry": f"/deliver {identifier}",
+                                 "paths": [], "next_entry": f"/deliver-governed {identifier}",
                                  "message": f"{identifier} is {outcome['outcome']}, and "
                                             + "; ".join(outcome["signs"]) + "; this alone proves no external merge,"
-                                            f" so the project owner checks it in /deliver {identifier}"})
+                                            f" so the project owner checks it in /deliver-governed {identifier}"})
             details = "; ".join(outcome.get("evidence", []) + outcome.get("leftovers", []))
             message = f"{identifier} is {outcome['outcome']}: {details}; recovery: {outcome.get('recovery')}"
             if outcome["outcome"] in {"external_product_merge", "unproven_record_merge"}:

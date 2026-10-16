@@ -20,7 +20,7 @@ review keeps its `review_loop` value.
 ## One reader
 
 Each review runs one fresh, read-only reader of the step's reader role on
-that role's own tier, also when `review_panels` is `lens_panel`: the reader
+that role's own class, also when `review_panels` is `lens_panel`: the reader
 covers every lens of the step in one pass, and no panel or second reader runs
 beside it. For Solution Design it is the primary reviewer alone; the
 risk-triggered specialists do not run. For an Operation contract it is the

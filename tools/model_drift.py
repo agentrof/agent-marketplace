@@ -2,7 +2,7 @@
 """Report host models that are newer than the pinned models.
 
 Each host pins its models by exact ID in ``platforms/<host>/model-catalog.json``,
-and each tier of its ``execution-profiles.json`` names one of them. This tool
+and each slot of its ``execution-profiles.json`` names one of them. This tool
 compares those pins with a copy of the host's own model catalog and prints a
 JSON report: pinned IDs the host no longer lists, newer models of each pinned
 family and changed effort support. ``--issue-body`` renders the upstream issue
@@ -124,21 +124,17 @@ def listed_models(path: Path, adapter) -> tuple[str, dict[str, list[str] | None]
     return form, known
 
 
-def roles_by_tier(root: Path) -> dict[str, list[str]]:
-    """Return every generated agent per tier: canonical agents and variants."""
+def roles_by_slot(root: Path) -> dict[str, list[str]]:
+    """Return every agent all hosts render per class: canonical agents and variants."""
     roles: dict[str, set[str]] = {}
     for source in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
-        for agent in sorted((source / "agents").glob("*.md")):
-            tier = build_distributions.parse_frontmatter(agent)[0].get("reasoning", "")
-            roles.setdefault(tier, set()).add(agent.stem)
-        for _agent, name, tier, _text in build_distributions.agent_variants(
-                source, build_distributions.CANONICAL_REASONING_LEVELS):
-            roles.setdefault(tier, set()).add(name)
-    return {tier: sorted(names) for tier, names in roles.items()}
+        for name, slot in build_distributions.package_roles(source).items():
+            roles.setdefault(slot, set()).add(name)
+    return {slot: sorted(names) for slot, names in roles.items()}
 
 
 def model_report(
-    model_id: str, entry: dict, tiers: list[str], roles: list[str],
+    model_id: str, entry: dict, slots: list[str], roles: list[str],
     listed: dict[str, list[str] | None], adapter,
 ) -> dict:
     family, version = adapter.module.model_version(model_id)
@@ -154,7 +150,7 @@ def model_report(
         "listed": model_id in listed,
         "newer": [{"id": candidate, "efforts": efforts}
                   for _version, candidate, efforts in newer],
-        "tiers": tiers,
+        "slots": slots,
         "roles": roles,
     }
     listed_efforts = listed.get(model_id)
@@ -212,7 +208,7 @@ def drift_report(
     for host in sorted(cli_versions):
         if bundled_source(adapters[host]) is None:
             raise ValueError(f"--cli-version names {host}, whose catalog capture comes from no CLI")
-    tier_roles = roles_by_tier(root)
+    slot_roles = roles_by_slot(root)
     hosts = {}
     for host in sorted(catalogs):
         adapter = adapters[host]
@@ -222,9 +218,9 @@ def drift_report(
         auto = table["profiles"][build_distributions.AUTO_EXECUTION_PROFILE]
         models = {}
         for model_id, entry in catalog["models"].items():
-            tiers = [tier for tier, setting in auto.items() if setting.get("model") == model_id]
-            roles = sorted({role for tier in tiers for role in tier_roles.get(tier, [])})
-            models[model_id] = model_report(model_id, entry, tiers, roles, listed, adapter)
+            slots = [slot for slot, setting in auto.items() if setting.get("model") == model_id]
+            roles = sorted({role for slot in slots for role in slot_roles.get(slot, [])})
+            models[model_id] = model_report(model_id, entry, slots, roles, listed, adapter)
         hosts[host] = {
             "catalog": {"path": str(catalogs[host]), "format": form, "models": len(listed),
                         "cli_version": cli},
@@ -290,7 +286,7 @@ def catalog_diff(root: Path, host: str, models: dict, today: str, context: int =
 
 
 def profile_diff(root: Path, host: str, models: dict, context: int = 3) -> str:
-    """The execution profile change that points every tier on a moved pin at its
+    """The execution profile change that points every slot on a moved pin at its
     new ID, in the table's own layout."""
     path = build_distributions.execution_profile_path(root, host)
     current = path.read_text(encoding="utf-8")
@@ -321,19 +317,19 @@ def finding_text(host: str, report: dict) -> str:
     elif not report["listed"]:
         text = (f"{host}: the catalog pins {pinned}, which the host catalog no longer"
                 f" lists, and no newer `{report['family']}` model is listed. The owner"
-                " decides whether its tiers move to another model.")
+                " decides whether its slots move to another model.")
     else:
         text = f"{host}: the catalog pins {pinned}."
     if "efforts" in report:
         text += (f" The host catalog lists the efforts {listing(report['efforts']['listed'])}"
                  f" for {pinned}; the pinned catalog records"
                  f" {listing(report['efforts']['pinned'])}.")
-    return (f"- {text} Tiers on it: {listing(report['tiers'])}. Roles on them:"
+    return (f"- {text} Class slots on it: {listing(report['slots'])}. Roles on them:"
             f" {listing(report['roles'])}.")
 
 
 def effort_warnings(table: dict, report: dict) -> list[str]:
-    """Name each tier whose effort the bumped model does not list."""
+    """Name each slot whose effort the bumped model does not list."""
     if report["newer"]:
         model_id, efforts = report["newer"][0]["id"], report["newer"][0]["efforts"]
     elif "efforts" in report:
@@ -344,10 +340,10 @@ def effort_warnings(table: dict, report: dict) -> list[str]:
         return [f"- Confirm the efforts of `{model_id}` on its official page before merging."]
     auto = table["profiles"][build_distributions.AUTO_EXECUTION_PROFILE]
     return [
-        f"- Tier `{tier}` runs effort `{auto[tier]['effort']}`, which `{model_id}` does"
-        " not list: change that tier in `execution-profiles.json` with the bump."
-        for tier in report["tiers"]
-        if "effort" in auto[tier] and auto[tier]["effort"] not in efforts
+        f"- Class slot `{slot}` runs effort `{auto[slot]['effort']}`, which `{model_id}` does"
+        " not list: change that slot in `execution-profiles.json` with the bump."
+        for slot in report["slots"]
+        if "effort" in auto[slot] and auto[slot]["effort"] not in efforts
     ]
 
 
@@ -388,7 +384,7 @@ def issue_body(root: Path, report: dict, today: str) -> str:
     lines += [(
         "The pull request confirms each new ID, its efforts and its `min_cli_version`, the"
         " oldest host CLI that runs it, on the model's official pages, sets `sources` to"
-        " them, points every tier on the old ID at the new one in"
+        " them, points every slot on the old ID at the new one in"
         " `execution-profiles.json`, raises `tools/data/host-cli-versions.json` to any"
         " newer minimum,"
         " regenerates `dist/` with `python3 tools/build_distributions.py` and adds a"
@@ -404,14 +400,14 @@ def issue_body(root: Path, report: dict, today: str) -> str:
     else:
         lines += [
             "The pull request carries this comparison of the pinned and the candidate"
-            " model for every tier on a moving pin. It follows the Measurement section"
+            " model for every slot on a moving pin. It follows the Measurement section"
             f" of `{AB_REFERENCE}` with the two models as the only candidates:",
             "",
-            "1. Freeze at least one task per tier from Git history. For a writer tier"
+            "1. Freeze at least one task per slot from Git history. For a writer slot"
             " the task is a fix pass: the commit before it, the findings it applied and"
-            " the accepted fix commit. For a reviewer tier it is a review: the commit it"
+            " the accepted fix commit. For a reviewer slot it is a review: the commit it"
             " read and the accepted review's valid critical and major findings.",
-            "2. Run each task once per model on an unchanged checkout, each tier at its"
+            "2. Run each task once per model on an unchanged checkout, each slot at its"
             " table effort:",
         ]
         lines += [
@@ -421,18 +417,18 @@ def issue_body(root: Path, report: dict, today: str) -> str:
             for host in sorted({host for host, _item in candidates})
         ]
         lines += [
-            "3. A fresh, read-only judge on the strongest tier compares each result with"
+            "3. A fresh, read-only judge on the strongest class compares each result with"
             " the reference: for a writer, every finding applied, no unrelated edit and"
             " compilers green; for a reviewer, the valid critical and major findings"
             " found and none invalid. Record wall time and output tokens per run.",
             "4. Record the results:",
             "",
-            "| Host | Tier | Task | Model | Quality | Wall time | Output tokens |",
+            "| Host | Class slot | Task | Model | Quality | Wall time | Output tokens |",
             "| --- | --- | --- | --- | --- | --- | --- |",
         ]
         for host, item in candidates:
-            for tier in item["tiers"]:
-                lines += [f"| {host} | {tier} | | `{model}` | | | |"
+            for slot in item["slots"]:
+                lines += [f"| {host} | {slot} | | `{model}` | | | |"
                           for model in (item["pinned"], item["newer"][0]["id"])]
         lines += [
             "",

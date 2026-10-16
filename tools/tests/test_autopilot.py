@@ -1475,7 +1475,7 @@ class ContractTests(unittest.TestCase):
 
     def test_no_task_binds_the_autopilot_entry(self):
         policy = task_inputs.catalog()
-        self.assertEqual(policy["session_entries"], ["autopilot"])
+        self.assertEqual(policy["session_entries"], ["autopilot", "retrospective"])
         self.assertNotIn("autopilot", policy["entries"])
         self.assertFalse(any("autopilot" in skills for skills in policy["role_skills"].values()))
         self.assertFalse((PACKAGE / "scripts" / "autopilot.py").exists())
@@ -1486,7 +1486,7 @@ class ContractTests(unittest.TestCase):
             shutil.copytree(PACKAGE, package, ignore=shutil.ignore_patterns("__pycache__"))
             path = package / "templates/task-input-policy.json"
             value = json.loads(path.read_text(encoding="utf-8"))
-            value["session_entries"] = []
+            value["session_entries"] = ["retrospective"]
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "every current role and entry"):
                 task_inputs.catalog(package)

@@ -76,8 +76,8 @@ class CodeReviewPanelRegistryTests(unittest.TestCase):
         self.assertEqual(step["default_panel"], [[lens] for lens in LENSES])
         self.assertTrue(all(lens["focus"].strip() for lens in step["lenses"]))
 
-    def test_the_official_reviewer_and_every_calibration_reader_keep_their_tier(self):
-        self.assertRegex(read("agents/code-reviewer.md"), r"(?m)^reasoning: high$")
+    def test_the_official_reviewer_and_every_calibration_reader_keep_their_class(self):
+        self.assertRegex(read("agents/code-reviewer.md"), r"(?m)^model_class: routine_review$")
         # Only the review panel switches ship lens variants; review_loop ships none.
         switches = json.loads(read(REGISTRY))["switches"]
         self.assertNotIn("agent_variants", switches["review_loop"])
@@ -100,7 +100,7 @@ class CodeReviewPanelTaskInputTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name).resolve()
         catalog = task_inputs.catalog()
-        route = catalog["entries"]["deliver"]
+        route = catalog["entries"]["deliver-governed"]
 
         def bound(role: str) -> dict:
             """The task's required reads and hashed instructions, as task_inputs.manifest derives
@@ -108,7 +108,7 @@ class CodeReviewPanelTaskInputTests(unittest.TestCase):
             chosen, _policy_inputs = task_inputs.switch_choices(root, route, task_inputs.PACKAGE)
             _registry, _chosen, required, _conditional, hashed = task_inputs.instruction_reads(
                 catalog, task_inputs.PACKAGE, route, role,
-                task_inputs.task_skills(catalog, "deliver", role, None, route), chosen)
+                task_inputs.task_skills(catalog, "deliver-governed", role, None, route), chosen)
             return {"reads": required, "hashed": hashed}
 
         reviewer, writer = bound("code-reviewer"), bound("backend-developer")

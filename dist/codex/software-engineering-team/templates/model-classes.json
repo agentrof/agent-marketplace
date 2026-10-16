@@ -1,0 +1,579 @@
+{
+  "hosts": {
+    "claude": {
+      "classes": {
+        "complex_authoring": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-sonnet-5-5"
+        },
+        "complex_authoring_escalated": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-opus-5-5"
+        },
+        "critical_decision": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-opus-5-5"
+        },
+        "critical_decision_escalated": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-opus-5-5"
+        },
+        "mechanical": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-haiku-5-5"
+        },
+        "mechanical_escalated": {
+          "effort": "medium",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-sonnet-5-5"
+        },
+        "orchestration": {
+          "effort": "medium",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-sonnet-5-5"
+        },
+        "routine_authoring": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-sonnet-5-5"
+        },
+        "routine_authoring_escalated": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-sonnet-5-5"
+        },
+        "routine_review": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-sonnet-5-5"
+        },
+        "routine_review_escalated": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-sonnet-5-5"
+        },
+        "security_review": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "claude-opus-5-5"
+        }
+      },
+      "confirm": {
+        "max": {
+          "evidence": "On Anthropic's own charts Opus 5.5 at max scores at most 1.8 points above high on Terminal-Bench 4.0, FrontierCode and CursorBench for 2.9 to 5.7 times the cost per task; Sonnet 5.5 at max scores 46.2% on FrontierCode against 52.1% at xhigh for 13 times the cost and more often splits a review across subagents of its own; in Anthropic's effort post one build took 79 minutes at max against 33 at high.",
+          "sources": [
+            "https://www.anthropic.com/claude-opus-5-5",
+            "https://www.anthropic.com/claude-sonnet-5-5",
+            "https://claude.dev/blog/spending-your-effort/"
+          ],
+          "verified": "2026-10-01"
+        }
+      },
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "model_id_shape": "claude-(?P<family>[a-z]+)-(?P<major>[0-9]+)(?:-(?P<minor>[0-9]{1,2}))?(?:-(?P<snapshot>[0-9]{8}))?",
+      "models": {
+        "claude-haiku-4-5-20251001": {
+          "efforts": [],
+          "family": "haiku",
+          "min_cli_version": "2.1.74"
+        },
+        "claude-haiku-5-5": {
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "family": "haiku",
+          "min_cli_version": "2.1.293"
+        },
+        "claude-opus-5-5": {
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "family": "opus",
+          "min_cli_version": "2.1.280"
+        },
+        "claude-sonnet-5-5": {
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "family": "sonnet",
+          "min_cli_version": "2.1.284"
+        }
+      },
+      "refuse": {},
+      "spawn_model": "alias",
+      "variants": {}
+    },
+    "codex": {
+      "classes": {
+        "complex_authoring": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "complex_authoring_escalated": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "critical_decision": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "critical_decision_escalated": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "mechanical": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "model": "gpt-6-luna"
+        },
+        "mechanical_escalated": {
+          "effort": "low",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "orchestration": {
+          "effort": "low",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "routine_authoring": {
+          "effort": "medium",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "routine_authoring_escalated": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "routine_review": {
+          "effort": "medium",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "routine_review_escalated": {
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        },
+        "security_review": {
+          "effort": "xhigh",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "model": "gpt-6.1-sol"
+        }
+      },
+      "confirm": {
+        "max": {
+          "evidence": "On OpenAI's own charts GPT-6.1 Sol at max scores 71.9% on DeepSWE v1.1 against 75.2% at high for 2.4 times the cost per task, while GPT-6 Luna at max scores 66.6% against 59.3% at high for 2.6 times; OpenAI keeps max for its most complex tasks and says most tasks need neither Max nor Ultra.",
+          "sources": [
+            "https://openai.com/index/introducing-gpt-6-1-sol/",
+            "https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+            "https://developers.openai.com/api/docs/guides/reasoning",
+            "https://learn.chatgpt.com/docs/models"
+          ],
+          "verified": "2026-10-01"
+        }
+      },
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "model_id_shape": "[a-z0-9]+(?:[.-][a-z0-9]+)*",
+      "models": {
+        "gpt-6-luna": {
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "family": "luna",
+          "min_cli_version": "0.157.0"
+        },
+        "gpt-6.1-sol": {
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
+          ],
+          "family": "sol",
+          "min_cli_version": "0.159.1"
+        }
+      },
+      "refuse": {
+        "ultra": {
+          "reason": "Ultra runs a request at the model's multi-agent effort and splits the task across parallel subagents, so a role at ultra would start subagents of its own.",
+          "sources": [
+            "https://learn.chatgpt.com/docs/models",
+            "https://github.com/openai/codex/blob/rust-v0.159.3/codex-rs/protocol/src/openai_models/reasoning_effort.rs"
+          ],
+          "verified": "2026-10-01"
+        }
+      },
+      "spawn_model": null,
+      "variants": {
+        "analysis-challenger-escalated": {
+          "agent": "analysis-challenger",
+          "slot": "routine_review_escalated"
+        },
+        "backend-developer-escalated": {
+          "agent": "backend-developer",
+          "slot": "routine_authoring_escalated"
+        },
+        "backlog-reviewer-escalated": {
+          "agent": "backlog-reviewer",
+          "slot": "routine_review_escalated"
+        },
+        "backlog-reviewer-lens-escalated": {
+          "agent": "backlog-reviewer-lens",
+          "slot": "routine_review_escalated"
+        },
+        "business-analyst-escalated": {
+          "agent": "business-analyst",
+          "slot": "complex_authoring_escalated"
+        },
+        "code-reviewer-escalated": {
+          "agent": "code-reviewer",
+          "slot": "routine_review_escalated"
+        },
+        "code-reviewer-lens-escalated": {
+          "agent": "code-reviewer-lens",
+          "slot": "routine_review_escalated"
+        },
+        "code-reviewer-security": {
+          "agent": "code-reviewer",
+          "slot": "security_review"
+        },
+        "design-system-reviewer-escalated": {
+          "agent": "design-system-reviewer",
+          "slot": "routine_review_escalated"
+        },
+        "design-system-reviewer-lens-escalated": {
+          "agent": "design-system-reviewer-lens",
+          "slot": "routine_review_escalated"
+        },
+        "devops-engineer-escalated": {
+          "agent": "devops-engineer",
+          "slot": "routine_authoring_escalated"
+        },
+        "devops-engineer-mechanical-escalated": {
+          "agent": "devops-engineer-mechanical",
+          "slot": "mechanical_escalated"
+        },
+        "domain-expert-escalated": {
+          "agent": "domain-expert",
+          "slot": "routine_review_escalated"
+        },
+        "experience-reviewer-escalated": {
+          "agent": "experience-reviewer",
+          "slot": "routine_review_escalated"
+        },
+        "frontend-developer-escalated": {
+          "agent": "frontend-developer",
+          "slot": "routine_authoring_escalated"
+        },
+        "product-owner-escalated": {
+          "agent": "product-owner",
+          "slot": "routine_authoring_escalated"
+        },
+        "product-owner-mechanical-escalated": {
+          "agent": "product-owner-mechanical",
+          "slot": "mechanical_escalated"
+        },
+        "qa-engineer-escalated": {
+          "agent": "qa-engineer",
+          "slot": "routine_authoring_escalated"
+        },
+        "qa-engineer-mechanical-escalated": {
+          "agent": "qa-engineer-mechanical",
+          "slot": "mechanical_escalated"
+        },
+        "software-architect-escalated": {
+          "agent": "software-architect",
+          "slot": "critical_decision_escalated"
+        },
+        "solution-architect-escalated": {
+          "agent": "solution-architect",
+          "slot": "critical_decision_escalated"
+        },
+        "solution-architect-mechanical-escalated": {
+          "agent": "solution-architect-mechanical",
+          "slot": "mechanical_escalated"
+        },
+        "solution-reviewer-escalated": {
+          "agent": "solution-reviewer",
+          "slot": "critical_decision_escalated"
+        },
+        "solution-reviewer-lens-escalated": {
+          "agent": "solution-reviewer-lens",
+          "slot": "routine_review_escalated"
+        },
+        "ux-designer-escalated": {
+          "agent": "ux-designer",
+          "slot": "routine_authoring_escalated"
+        }
+      }
+    }
+  },
+  "model_classes": {
+    "complex_authoring": {
+      "escalates": true
+    },
+    "critical_decision": {
+      "escalates": true
+    },
+    "mechanical": {
+      "escalates": true
+    },
+    "orchestration": {
+      "escalates": false
+    },
+    "routine_authoring": {
+      "escalates": true
+    },
+    "routine_review": {
+      "escalates": true
+    },
+    "security_review": {
+      "escalates": false
+    }
+  },
+  "risk_flags": [
+    "auth",
+    "secrets",
+    "data_placement",
+    "migration",
+    "irreversible"
+  ],
+  "roles": {
+    "complex_authoring": [
+      "business-analyst"
+    ],
+    "critical_decision": [
+      "software-architect",
+      "solution-architect",
+      "solution-reviewer"
+    ],
+    "mechanical": [
+      "devops-engineer-mechanical",
+      "product-owner-mechanical",
+      "qa-engineer-mechanical",
+      "solution-architect-mechanical"
+    ],
+    "orchestration": [
+      "delivery-coordinator"
+    ],
+    "routine_authoring": [
+      "backend-developer",
+      "devops-engineer",
+      "frontend-developer",
+      "product-owner",
+      "qa-engineer",
+      "ux-designer"
+    ],
+    "routine_review": [
+      "analysis-challenger",
+      "backlog-reviewer",
+      "backlog-reviewer-lens",
+      "code-reviewer",
+      "code-reviewer-lens",
+      "design-system-reviewer",
+      "design-system-reviewer-lens",
+      "domain-expert",
+      "experience-reviewer",
+      "solution-reviewer-lens"
+    ],
+    "security_review": []
+  },
+  "schema_version": 3
+}

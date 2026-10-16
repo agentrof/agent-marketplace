@@ -95,19 +95,19 @@ def efforts(model_id: str, listing: object) -> Optional[list]:
 
 
 def pinned(settings: Mapping[str, dict], session: str, order: Iterable[str] = ()) -> dict:
-    """Each model the resolved roles run, the session's excluded, with its tiers
-    in ``order`` and its roles."""
-    rank = {tier: index for index, tier in enumerate(order)}
+    """Each model the resolved roles run, the session's excluded, with its class
+    slots in ``order`` and its roles."""
+    rank = {slot: index for index, slot in enumerate(order)}
     models: dict = {}
     for role, row in sorted(settings.items()):
         if row["model"] == session:
             continue
-        entry = models.setdefault(row["model"], {"tiers": [], "roles": []})
-        if row["tier"] not in entry["tiers"]:
-            entry["tiers"].append(row["tier"])
+        entry = models.setdefault(row["model"], {"classes": [], "roles": []})
+        if row["class"] not in entry["classes"]:
+            entry["classes"].append(row["class"])
         entry["roles"].append(role)
     for entry in models.values():
-        entry["tiers"].sort(key=lambda tier: (rank.get(tier, len(rank)), tier))
+        entry["classes"].sort(key=lambda slot: (rank.get(slot, len(rank)), slot))
     return models
 
 
@@ -126,23 +126,23 @@ def unavailable(check: dict) -> set:
             if value == "unavailable"}
 
 
-def effort_conflicts(listing: object, tiers: Mapping[str, dict], catalog) -> list:
-    """Each tier that runs a model outside the catalog at an effort the host's
-    list does not name for it; only a listed model has efforts to compare."""
+def effort_conflicts(listing: object, slots: Mapping[str, dict], catalog) -> list:
+    """Each class slot that runs a model outside the catalog at an effort the
+    host's list does not name for it; only a listed model has efforts to compare."""
     conflicts = []
-    for tier, setting in tiers.items():
+    for slot, setting in slots.items():
         model, effort = setting.get("model"), setting.get("effort")
         if not isinstance(model, str) or model in catalog or effort is None:
             continue
         levels = efforts(model, listing)
         if levels is not None and effort not in levels:
-            conflicts.append({"tier": tier, "model": model, "effort": effort, "efforts": levels})
+            conflicts.append({"class": slot, "model": model, "effort": effort, "efforts": levels})
     return conflicts
 
 
-def tier_words(tiers: list) -> str:
-    named = tiers[0] if len(tiers) == 1 else ", ".join(tiers[:-1]) + " and " + tiers[-1]
-    return f"the {named} tier" + ("s" if len(tiers) > 1 else "")
+def class_words(slots: list) -> str:
+    named = slots[0] if len(slots) == 1 else ", ".join(slots[:-1]) + " and " + slots[-1]
+    return f"the {named} class" + ("es" if len(slots) > 1 else "")
 
 
 def check_notes(prefix: str, check: dict, pins: Mapping[str, dict], fallen, conflicts: list,
@@ -158,8 +158,8 @@ def check_notes(prefix: str, check: dict, pins: Mapping[str, dict], fallen, conf
         why = (f"this host's own model list ({check.get('view')} view,"
                f" {check.get('binary')} {check.get('version')}) does not hold it"
                if check.get("status") == "ok" else "the last setup judged it unavailable")
-        whose = "Its" if len(entry["tiers"]) == 1 else "Their"
-        notes.append(f"{prefix}: warning: {model} is unavailable for {tier_words(entry['tiers'])}:"
+        whose = "Its" if len(entry["classes"]) == 1 else "Their"
+        notes.append(f"{prefix}: warning: {model} is unavailable for {class_words(entry['classes'])}:"
                      f" {why}. {whose} roles {', '.join(entry['roles'])} run on {session} at their"
                      " own effort; every setup or refresh judges it again.")
     kept = sorted(model for model, value in check.get("verdicts", {}).items()
@@ -171,7 +171,7 @@ def check_notes(prefix: str, check: dict, pins: Mapping[str, dict], fallen, conf
                      f" {'it' if one else 'them'}.")
     for conflict in conflicts:
         levels = ", ".join(conflict["efforts"]) or "it takes no effort"
-        notes.append(f"{prefix}: warning: the {conflict['tier']} tier runs {conflict['model']} at"
+        notes.append(f"{prefix}: warning: the {conflict['class']} class runs {conflict['model']} at"
                      f" effort {conflict['effort']}, which this host's own model list does not"
                      f" name for it ({levels}); choose another effort through /configure models.")
     return notes

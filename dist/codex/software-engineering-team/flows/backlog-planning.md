@@ -2,7 +2,7 @@
 
 The flow turns approved product knowledge into a versioned Markdown backlog under `workspace/docs/backlog/`.
 
-Spawn template: paste `{{constitution}}` into every role prompt; load `obsidian-vault` before touching docs, whose policy governs them.
+Switch `process_profile`: at `fast_lane`, follow `skill-content/deliver/references/switch-process_profile-fast_lane.md`. Spawn template: paste `{{constitution}}` into every role prompt; load `obsidian-vault` before touching docs, whose policy governs them.
 
 Vault first, per constitution section 5: every role starts from the default `project_reading` plan.
 Batch-read its units, using the frozen context reader for frozen candidates. When context is insufficient, wrong or unavailable, use manual search, reads and relationship discovery

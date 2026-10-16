@@ -663,7 +663,7 @@ class DeliveryCompilerTests(unittest.TestCase):
             "flows": ["delivery-execution"], "default": "current"}}}), encoding="utf-8")
         policy = package / process_policy.TASK_INPUT_POLICY
         policy.parent.mkdir(parents=True)
-        policy.write_text(json.dumps({"entries": {"deliver": {
+        policy.write_text(json.dumps({"entries": {"deliver_governed": {
             "flows": ["delivery-execution"], "scope_kind": "delivery"}}}), encoding="utf-8")
         with mock.patch.object(process_policy, "PACKAGE", package):
             self.policy("init")

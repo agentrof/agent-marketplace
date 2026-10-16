@@ -493,6 +493,10 @@ def accepted_solution_ref(docs: Path, value: object) -> bool:
         props, _body = parse(candidate)
     except (OSError, ValueError):
         return False
+    # At fast_lane the decision file on the target branch is in force; the package hash is not re-verified.
+    import process_policy
+    if process_policy.fast_lane(docs):
+        return props.get("status") == "accepted"
     _receipt, package_errors = stage_package.verify(
         docs, "solution-design", "solution-design/landscape"
     )
@@ -547,13 +551,17 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
     except (OSError, ValueError) as exc:
         return {}, [str(exc)]
     errors: list[str] = []
+    # At fast_lane a contract lands by plain pull request: its file on the target
+    # branch is in force, with no revision, stamp, Solution citation or pairing gate.
+    import process_policy
+    fast = process_policy.fast_lane(docs)
     if "live_environment_plan" in props and (kind != "verification" or props["live_environment_plan"] != "effect_ordered_v1"):
         errors.append("live_environment_plan must be effect_ordered_v1 on a Verification Contract")
     if props.get("type") != TYPE_FOR[kind]:
         errors.append(f"type must be {TYPE_FOR[kind]}")
     if props.get("status") not in {"draft", "approved"}:
         errors.append("status must be draft or approved")
-    if not isinstance(props.get("revision"), int) or props["revision"] < 1:
+    if not fast and (not isinstance(props.get("revision"), int) or props["revision"] < 1):
         errors.append("revision must be a positive integer")
     refs = props.get("constrained_by")
     if refs is not None and (not isinstance(refs, list)
@@ -580,7 +588,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
                 errors.append("diagnostic_test_workdir must be a normalized repository-relative path")
         elif "diagnostic_test_workdir" in props:
             errors.append("diagnostic_test_workdir requires diagnostic_test_command")
-        if props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
+        if not fast and props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
             errors.append("approved contract must cite at least one accepted Solution decision in constrained_by")
         if props.get("status") == "approved" and (not isinstance(props.get("test_command"), str) or not props["test_command"].strip()):
             errors.append("test_command is required")
@@ -623,7 +631,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
             steady_state_seconds(props)
         except ValueError as exc:
             errors.append(str(exc))
-        if props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
+        if not fast and props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
             errors.append("approved contract must cite at least one accepted Solution decision in constrained_by")
         if props.get("status") == "approved" and (not isinstance(props.get("env_command"), str) or not props["env_command"].strip()):
             errors.append("env_command is required")
@@ -637,15 +645,15 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
             errors.append("test_engines must list unique engine ids of letters, digits, '.', '_' and '-'")
     errors.extend(review_record_findings(docs, kind, props, body))
     digest = receipt_hash(props, body)
-    if props.get("status") == "approved":
+    if props.get("status") == "approved" and not fast:
         if props.get("source_hash") != digest:
             errors.append("approved contract source_hash is stale")
         if not isinstance(props.get("approved_at_utc"), str):
             errors.append("approved contract needs compiler-owned approved_at_utc")
     value = {"path": str(path), "kind": kind, "status": props.get("status"),
              "revision": props.get("revision"), "source_hash": digest,
-             "current": not errors and props.get("status") == "approved"}
-    if kind == "verification" and props.get("status") == "approved":
+             "current": not errors and (fast or props.get("status") == "approved")}
+    if kind == "verification" and props.get("status") == "approved" and not fast:
         environment = paired_environment(docs)
         if environment is not None or any(field in props for field in PAIRED_FIELDS):
             pairing = {
@@ -673,6 +681,16 @@ def paired_environment(docs: Path) -> tuple[int, str] | None:
     if errors or not environment.get("current"):
         return None
     return environment["revision"], environment["source_hash"]
+
+
+def contract_in_force(docs: Path, props: dict, body: str, *, stamped: bool = False) -> bool:
+    """Whether a contract's text is the one in force: approved and unchanged since its
+    stamp, or, at fast_lane, whatever the target branch holds."""
+    import process_policy
+    if process_policy.fast_lane(docs):
+        return True
+    return (props.get("status") == "approved" and props.get("source_hash") == receipt_hash(props, body)
+            and (not stamped or bool(props.get("approved_at_utc"))))
 
 
 def pairing_findings(docs: Path, receipt: dict | None = None) -> list[str]:

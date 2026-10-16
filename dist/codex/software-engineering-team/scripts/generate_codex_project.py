@@ -113,9 +113,9 @@ def agent_toml(
     description = fields.get("description", "")
     if not name or not description:
         raise ValueError("agent requires name and description")
-    if "reasoning" in fields:
+    if "model_class" in fields:
         raise ValueError(
-            f"agent {name!r} carries an unresolved reasoning tier; rebuild the package"
+            f"agent {name!r} carries an unresolved model class; rebuild the package"
         )
     if profile not in EXECUTION_PROFILES:
         raise ValueError(f"unsupported execution profile {profile!r}")
@@ -250,32 +250,32 @@ def stale_agents(project_root: Path, plugin_root: Path) -> tuple[list[str], int]
 def project_settings(
     plugin_root: Path, project_root: Path, workspace: str,
 ) -> tuple[dict, dict, dict[str, dict]]:
-    """Return the package tier map, the project config and each role's resolved
+    """Return the package class map, the project config and each role's resolved
     model and effort, refusing a config the package does not take."""
-    tier_map = role_settings.load_tier_map(plugin_root / "templates" / "tier-map.json")
-    if tier_map is None or HOST not in tier_map["hosts"]:
-        raise ValueError("the installed package ships no tier map for this host;"
+    class_map = role_settings.load_class_map(plugin_root / "templates" / "model-classes.json")
+    if class_map is None or HOST not in class_map["hosts"]:
+        raise ValueError("the installed package ships no class map for this host;"
                          " reinstall the package")
     try:
         config = project_config.load(project_root / workspace / "config.json")
     except (OSError, ValueError) as exc:
         raise ValueError(f"{workspace}/config.json is unreadable: {exc}") from exc
-    errors = role_settings.config_errors(config, tier_map)
+    errors = role_settings.config_errors(config, class_map)
     if errors:
         raise ValueError("; ".join(errors))
-    return tier_map, config, role_settings.resolve(tier_map, config, HOST)
+    return class_map, config, role_settings.resolve(class_map, config, HOST)
 
 
-def check_tier_map(plugin_root: Path, tier_map: dict) -> None:
-    """Refuse a package whose role files disagree with its tier map."""
-    roles = role_settings.package_tiers(tier_map)
+def check_class_map(plugin_root: Path, class_map: dict) -> None:
+    """Refuse a package whose role files disagree with its class map."""
+    roles = role_settings.package_classes(class_map, HOST)
     for source in sorted((plugin_root / "agents").glob("*.md")):
         fields = parse_agent(source)[0]
-        spec = tier_map["hosts"][HOST]["tiers"].get(roles.get(source.stem, ""), {})
+        spec = class_map["hosts"][HOST]["classes"].get(roles.get(source.stem, ""), {})
         if source.stem not in roles or fields.get("model") != spec.get("model") \
                 or fields.get("model_reasoning_effort") != spec.get("effort"):
             raise ValueError(
-                f"{source}: its model and effort differ from the package tier map;"
+                f"{source}: its model and effort differ from the package class map;"
                 " reinstall the package"
             )
 
@@ -290,14 +290,14 @@ def rendered_setting(setting: dict, profile: str, fallbacks) -> dict:
     return setting
 
 
-def tier_report(
-    tier_map: dict | None, config: dict, profile: str | None, fallbacks,
+def class_report(
+    class_map: dict | None, config: dict, profile: str | None, fallbacks,
 ) -> dict[str, dict]:
-    """Each tier's rendered model and effort, each with its source."""
-    if tier_map is None or profile is None:
+    """Each class slot's rendered model and effort, each with its source."""
+    if class_map is None or profile is None:
         return {}
-    return {tier: rendered_setting(setting, profile, fallbacks)
-            for tier, setting in role_settings.tier_settings(tier_map, config, HOST).items()}
+    return {slot: rendered_setting(setting, profile, fallbacks)
+            for slot, setting in role_settings.slot_settings(class_map, config, HOST).items()}
 
 
 def restart_notice(project_root: Path, written: list[Path]) -> str:
@@ -414,7 +414,7 @@ def preview(
         )
     agents_dir = project_root / AGENTS_DIR
     profile = None
-    # Each model a role is pinned to, the project's included, with its tiers and roles.
+    # Each model a role is pinned to, the project's included, with its classes and roles.
     pins: dict[str, dict] = {}
     # Each model of a run-time record with the reason that decides its warning.
     fallbacks: dict[str, str] = {}
@@ -422,15 +422,15 @@ def preview(
     unavailable: set[str] = set()
     conflicts: list = []
     check: dict = {"status": "not_run"}
-    tier_map = None
+    class_map = None
     config: dict = {}
     settings: dict[str, dict] = {}
     if scope in {"all", "local"}:
         profile = execution_profile or recorded_profile(agents_dir, team) \
             or DEFAULT_EXECUTION_PROFILE
-        tier_map, config, settings = project_settings(plugin_root, project_root, workspace)
+        class_map, config, settings = project_settings(plugin_root, project_root, workspace)
         pins = host_listing.pinned(settings, role_settings.SESSION,
-                                   role_settings.ROLE_TIER_CHOICES)
+                                   role_settings.class_slots(class_map, HOST))
         unknown = sorted((set(inherit_models) | set(restore_models)) - set(pins))
         if unknown:
             raise ValueError(
@@ -450,16 +450,16 @@ def preview(
             check = host_listing.model_check(listing, pins)
             unavailable = host_listing.unavailable(check)
             conflicts = host_listing.effort_conflicts(
-                listing, role_settings.tier_settings(tier_map, config, HOST),
-                tier_map["hosts"][HOST]["models"])
+                listing, role_settings.slot_settings(class_map, config, HOST),
+                class_map["hosts"][HOST]["models"])
         else:
             unavailable = judged & set(pins)
     rendered = render_agents(
         plugin_root, team, profile, frozenset(fallbacks), settings,
         unavailable=frozenset(unavailable),
     ) if profile is not None else {}
-    if tier_map is not None:
-        check_tier_map(plugin_root, tier_map)
+    if class_map is not None:
+        check_class_map(plugin_root, class_map)
     current_owner = owner(team)
     collisions: list[Path] = []
     if scope in {"all", "local"} and agents_dir.is_dir():
@@ -520,7 +520,7 @@ def preview(
     instructions["model_check"] = check
     instructions["model_fallbacks"] = {model: pins[model]["roles"] for model in sorted(fallen)}
     instructions["model_notes"] = model_notes(pins, fallbacks, unavailable, check, conflicts)
-    instructions["tier_map"] = tier_report(tier_map, config, profile, fallen)
+    instructions["class_map"] = class_report(class_map, config, profile, fallen)
     instructions["roles"] = {
         role: rendered_setting(setting, profile, fallen)
         for role, setting in settings.items()} if profile is not None else {}
@@ -680,7 +680,7 @@ def main() -> int:
         "model_fallbacks": result["model_fallbacks"],
         "current_surfaces": result["current_surfaces"],
         "target_surfaces": result["target_surfaces"],
-        "tier_map": result["tier_map"],
+        "class_map": result["class_map"],
         "roles": result["roles"],
         "written": [str(path) for path in written],
         "restart_required": bool(written),

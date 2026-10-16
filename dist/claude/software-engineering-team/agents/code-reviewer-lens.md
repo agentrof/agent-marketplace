@@ -4,6 +4,8 @@ description: Code reviewer role. Spawned by software-engineering-team flows afte
 model: claude-sonnet-5-5
 effort: high
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__*
+omitClaudeMd: true
 ---
 
 # Code Reviewer

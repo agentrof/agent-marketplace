@@ -35,7 +35,7 @@ FIELD_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):")
 # A project agent honours these fields and a plugin agent ignores them, so the
 # rendered role drops them to run as the plugin's role does.
 PLUGIN_IGNORED_FIELDS = ("hooks", "mcpServers", "permissionMode")
-# A tier set to the session's model renders this, which runs the role on the
+# A class slot set to the session's model renders this, which runs the role on the
 # main conversation's model.
 SESSION_MODEL = "inherit"
 # Apply judges every model the roles run against this Claude Code's own model
@@ -149,7 +149,7 @@ def render_agent(
     if field_value(fields, "model") != package.get("model", SESSION_MODEL) \
             or field_value(fields, "effort") != package.get("effort"):
         raise ValueError(
-            f"{source}: its model and effort differ from the package tier map;"
+            f"{source}: its model and effort differ from the package class map;"
             " reinstall the package"
         )
     model = SESSION_MODEL if setting["model"] == role_settings.SESSION or unavailable \
@@ -170,23 +170,23 @@ def render_agent(
 
 
 def project_settings(plugin_root: Path, project_root: Path, workspace: str) -> tuple[dict, dict]:
-    """Return the package tier map and the project config, refusing a config the
+    """Return the package class map and the project config, refusing a config the
     package does not take."""
-    tier_map = role_settings.load_tier_map(plugin_root / "templates" / "tier-map.json")
-    if tier_map is None or HOST not in tier_map["hosts"]:
-        raise ValueError("the installed package ships no tier map for this host;"
+    class_map = role_settings.load_class_map(plugin_root / "templates" / "model-classes.json")
+    if class_map is None or HOST not in class_map["hosts"]:
+        raise ValueError("the installed package ships no class map for this host;"
                          " reinstall the package")
     config = read_config(project_root, workspace)
-    errors = role_settings.config_errors(config, tier_map)
+    errors = role_settings.config_errors(config, class_map)
     if errors:
         raise ValueError("; ".join(errors))
-    return tier_map, config
+    return class_map, config
 
 
-def cli_floor(tier_map: dict, models) -> str | None:
+def cli_floor(class_map: dict, models) -> str | None:
     """The highest min_cli_version of the catalog models among ``models``, which
     a `claude` on PATH must meet to judge them."""
-    catalog = tier_map["hosts"][HOST]["models"]
+    catalog = class_map["hosts"][HOST]["models"]
     floors = [catalog[model].get("min_cli_version") for model in models if model in catalog]
     floors = [floor for floor in floors if host_listing.release(floor) is not None]
     return max(floors, key=host_listing.release, default=None)
@@ -227,40 +227,41 @@ def render_agents(
     plugin_root: Path, project_root: Path, team: str, workspace: str,
     model_listing: Callable[..., dict] | None = None,
 ) -> tuple[dict[str, str], dict[str, dict]]:
-    """Render every role of the package, and report this host's tiers, roles and
-    model check.
+    """Render every role of the package, and report this host's class slots,
+    roles and model check.
 
     ``model_listing`` reads this Claude Code's own model list; without it the
     render keeps what the rendered roles record.
     """
-    tier_map, config = project_settings(plugin_root, project_root, workspace)
-    rows = role_settings.resolve(tier_map, config, HOST)
-    tier_settings = role_settings.tier_settings(tier_map, config, HOST)
-    pins = host_listing.pinned(rows, role_settings.SESSION, role_settings.ROLE_TIER_CHOICES)
+    class_map, config = project_settings(plugin_root, project_root, workspace)
+    rows = role_settings.resolve(class_map, config, HOST)
+    slot_settings = role_settings.slot_settings(class_map, config, HOST)
+    pins = host_listing.pinned(rows, role_settings.SESSION,
+                               role_settings.class_slots(class_map, HOST))
     check: dict = {"status": "not_run"}
     conflicts: list = []
     if model_listing is not None:
-        listing = model_listing(min_version=cli_floor(tier_map, pins))
+        listing = model_listing(min_version=cli_floor(class_map, pins))
         check = host_listing.model_check(listing, pins)
         unavailable = host_listing.unavailable(check)
-        conflicts = host_listing.effort_conflicts(listing, tier_settings,
-                                                  tier_map["hosts"][HOST]["models"])
+        conflicts = host_listing.effort_conflicts(listing, slot_settings,
+                                                  class_map["hosts"][HOST]["models"])
     else:
         unavailable = recorded_unavailable(project_root, team) & set(pins)
-    package = role_settings.package_tiers(tier_map)
-    tiers = tier_map["hosts"][HOST]["tiers"]
+    package = role_settings.package_classes(class_map, HOST)
+    slots = class_map["hosts"][HOST]["classes"]
     sources = {path.stem: path for path in sorted((plugin_root / "agents").glob("*.md"))}
     if set(sources) != set(package):
-        raise ValueError("the package's agents differ from its tier map; reinstall the package")
+        raise ValueError("the package's agents differ from its class map; reinstall the package")
     version = package_version(plugin_root)
     rendered = {}
     for role, source in sources.items():
         rendered[f"{agent_name(team, role)}.md"] = render_agent(
-            source, team, tiers.get(package[role], {}), rows[role], plugin_root,
+            source, team, slots.get(package[role], {}), rows[role], plugin_root,
             project_root, version, rows[role]["model"] in unavailable)
     report = {
-        "tier_map": {tier: fallen_setting(setting, unavailable)
-                     for tier, setting in tier_settings.items()},
+        "class_map": {slot: fallen_setting(setting, unavailable)
+                      for slot, setting in slot_settings.items()},
         "roles": {role: fallen_setting(row, unavailable) for role, row in rows.items()},
         "model_check": check,
         "model_fallbacks": {model: pins[model]["roles"] for model in sorted(unavailable)},
@@ -297,9 +298,9 @@ def stale_agents(project_root: Path, plugin_root: Path) -> tuple[list[str], int]
         return [], 0
     version = package_version(plugin_root)
     try:
-        tier_map, config = project_settings(
+        class_map, config = project_settings(
             plugin_root, project_root, project_instructions.CANONICAL_WORKSPACE)
-        rows = role_settings.resolve(tier_map, config, HOST)
+        rows = role_settings.resolve(class_map, config, HOST)
     except (OSError, ValueError):
         rows = {}
     stale: list[str] = []
@@ -409,7 +410,7 @@ def preview(
             choices=choices,
             seed_user_files=seed_user_files,
         )
-    result.update({"tier_map": {}, "roles": {}, "kept": [], "model_check": {"status": "not_run"},
+    result.update({"class_map": {}, "roles": {}, "kept": [], "model_check": {"status": "not_run"},
                    "model_fallbacks": {}, "model_notes": []})
     if scope in {"all", "local"}:
         team = project_instructions.plugin_name(plugin_root)
@@ -538,7 +539,7 @@ def main() -> int:
         "choice_requests": result["choice_requests"],
         "current_surfaces": result["current_surfaces"],
         "target_surfaces": result["target_surfaces"],
-        "tier_map": result["tier_map"],
+        "class_map": result["class_map"],
         "roles": result["roles"],
         "model_check": result["model_check"],
         "model_fallbacks": result["model_fallbacks"],

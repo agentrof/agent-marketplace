@@ -537,6 +537,7 @@ RELEASED_DEFAULTS = {
     "mechanical_pass_tier": "role_tier",
     "own_target_reuse": "off",
     "pass_carry_over": "off",
+    "process_profile": "governed",
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
     "regression_plan_revision": "integrated",
@@ -575,6 +576,12 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "process_profile": {
+        f"{SKILLS}/deliver/references/switch-process_profile-fast_lane.md": (
+            "Only a critical finding blocks",
+            "every affected live group runs and the owner merges",
+        ),
+    },
     "pass_carry_over": {
         f"{SKILLS}/qa-verification/references/switch-pass_carry_over-per_item.md": (
             "A missing, foreign or malformed record never counts a case as passed",
@@ -738,16 +745,18 @@ SAFETY_RULES = {
             "No reader of the step gets another reader's reply, QA's output or evidence that"
             " appears after dispatch",
             "The implementation writer stays idle until `merge-panel` settles the code review",
-            "Spawn a fresh `code-reviewer` on its own tier, never a `code-reviewer-lens`",
+            "Spawn a fresh `code-reviewer` on its own class, never a `code-reviewer-lens`",
             "A duplicate never gates on its own",
         ),
         f"{SKILLS}/code-review/references/switch-code_review_panel-risk_scoped.md": (
             "the official `code-reviewer` always reads, exactly as at `single_reader`",
         ),
-        HOSTS["claude"]: ("only the code review panel under switch `code_review_panel` at"
-                          " `beside_official` or `risk_scoped` spawns it",),
-        HOSTS["codex"]: ("only the code review panel under switch `code_review_panel` at"
-                         " `beside_official` or `risk_scoped` starts it",),
+        HOSTS["claude"]: ("only review panels under switch `review_panels` at `lens_panel` and the code"
+                          " review panel under switch `code_review_panel` at `beside_official` or"
+                          " `risk_scoped` spawn them",),
+        HOSTS["codex"]: ("only review panels under switch `review_panels` at `lens_panel` and the code"
+                         " review panel under switch `code_review_panel` at `beside_official` or"
+                         " `risk_scoped` start them",),
     },
     "delivery_path": {
         f"{SKILLS}/delivery-plan/references/switch-delivery_path-light_when_eligible.md": (
@@ -764,7 +773,7 @@ SAFETY_RULES = {
             "The escalation clause of your role stays as it is",
         ),
         **{path: ("Delivery execution is available only through the exact public entries"
-                  " `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.",)
+                  " `/delivery-plan`, `/execution-plan DLV-###` and `/deliver-governed DLV-###`.",)
            for path in HOSTS.values()},
     },
     "execution_planning": {
@@ -992,7 +1001,7 @@ SAFETY_RULES = {
             "Never spawn a `-lens` or `-mechanical` variant for calibration",
         ),
         f"{SKILLS}/code-review/references/switch-review_loop-blocking_delta.md": (
-            "Spawn a fresh `code-reviewer` on its own tier, neither an implementation writer nor"
+            "Spawn a fresh `code-reviewer` on its own class, neither an implementation writer nor"
             " the reviewer that returned the claims",
             "Credentials or secrets that reach a client artifact or a log stay critical",
             "Neither the claiming reviewer nor the writer changes a severity",
@@ -1067,7 +1076,7 @@ SAFETY_RULES = {
             "Spawn `design-system-reviewer` read-only with MASTER, catalog, page overrides and"
             " the semantic token, accessibility and contradiction lens",),
         f"{FLOWS}/operation.md": ("Spawn the non-writing counterpart as a read-only reviewer",),
-        **{path: ("the reviewers themselves keep their own tier",) for path in HOSTS.values()},
+        **{path: ("the reviewers themselves keep their own class",) for path in HOSTS.values()},
     },
     "review_scope_record": {
         f"{SKILLS}/backlog-plan/references/switch-review_scope_record-both_scopes.md": (

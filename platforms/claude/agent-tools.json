@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "description": "Tools a rendered role never needs, removed through disallowedTools so their schemas stay out of its context, and the CLAUDE.md chain left out through omitClaudeMd: a role takes its rules from the constitution and the spawn prompt. mcp__<server> removes every tool of that server and mcp__* every MCP tool; built-in tools take exact names. A browser role keeps the preview browser and the other MCP servers it may use. Only a role that starts agents keeps Agent.",
+  "omit_claude_md": true,
+  "disallowed": ["Artifact", "ArtifactComments", "ArtifactData", "Workflow", "ScheduleWakeup", "CronCreate"],
+  "disallowed_mcp": ["mcp__*"],
+  "browser_disallowed_mcp": [
+    "mcp__claude-in-chrome",
+    "mcp__Claude_Code_iOS_Simulator",
+    "mcp__visualize",
+    "mcp__terminal",
+    "mcp__ccd_session",
+    "mcp__ccd_session_mgmt",
+    "mcp__ccd_connectors",
+    "mcp__ccd_directory",
+    "mcp__ccd_host",
+    "mcp__ccd_pr",
+    "mcp__ccd_settings",
+    "mcp__ccd_sidebar",
+    "mcp__ccd_view",
+    "mcp__ccd_window"
+  ],
+  "browser_agents": ["experience-reviewer", "frontend-developer", "qa-engineer", "ux-designer"],
+  "spawning_agents": ["delivery-coordinator"],
+  "sources": ["https://code.claude.com/docs/en/sub-agents"],
+  "verified": "2026-10-16"
+}

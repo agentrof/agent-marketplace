@@ -483,6 +483,8 @@ def planning_source_status_and_type(docs: Path, target: str, label: str,
     if type_name != "landscape":
         errors.append(f"{label} canonical Solution package must have type: landscape")
         return "", type_name
+    if TRUST_BINDINGS:
+        return str(props.get("package_status", status)), type_name
     receipt, package_errors = stage_package.verify(
         docs, "solution-design", target,
         require_strict_current=True, require_committed=True)
@@ -687,6 +689,10 @@ def planning_package_findings(
 INPUT_STAGES = ("business-analysis", "solution-design", "design-system", "experience-design")
 
 
+# At fast_lane the file on the target branch is in force: input bindings are parsed, never re-verified.
+TRUST_BINDINGS = False
+
+
 def verify_input_bindings(docs: Path, bindings: list[str], path: str, *,
                           allow_historical: bool = False) -> tuple[list[tuple[str, str, str]], list[str]]:
     """Parse compiler-owned stage|ref|sha256 bindings and verify each receipt."""
@@ -703,6 +709,8 @@ def verify_input_bindings(docs: Path, bindings: list[str], path: str, *,
             errors.append(f"{path} input_binding has unsupported stage {stage}")
             continue
         rows.append((stage, reference, digest))
+        if TRUST_BINDINGS:
+            continue
         _receipt, verify_errors = stage_package.verify(
             docs, stage, reference, digest, require_committed=True,
             require_strict_current=not allow_historical,
@@ -4297,6 +4305,8 @@ def precheck(args) -> int:
 
 
 def check(args) -> int:
+    global TRUST_BINDINGS
+    TRUST_BINDINGS = getattr(args, "trust_bindings", False)
     docs = docs_root(args.docs)
     try:
         # Collecting manual bindings resolves a recursive upstream graph. Keep
@@ -5767,6 +5777,8 @@ def main(argv=None) -> int:
                        help="Also run every check atomic approval runs before it writes")
     command.add_argument("--render", action="store_true")
     command.add_argument("--json", action="store_true")
+    command.add_argument("--trust-bindings", action="store_true",
+                         help="parse input bindings without re-verifying their packages (fast_lane)")
     command.set_defaults(func=check)
     command = sub.add_parser("precheck", help="Mechanical pre-review check; run before a review manifest")
     command.add_argument("--docs", default=None)

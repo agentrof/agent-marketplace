@@ -278,7 +278,8 @@ class DeliveryProtocolTests(unittest.TestCase):
         for path in (PLUGIN / "skill-content").glob("*/SKILL.md"):
             text = path.read_text(encoding="utf-8")
             header = text.split("---", 2)[1]
-            if re.search(r"(?m)^exposure:\s*entry\s*$", header):
+            if re.search(r"(?m)^exposure:\s*entry\s*$", header) and not re.search(
+                    r"(?m)^user_invocable:\s*false\s*$", header):
                 canonical.add(path.parent.name)
         self.assertEqual(documented, canonical)
 

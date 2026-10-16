@@ -149,7 +149,7 @@ class BindingTests(unittest.TestCase):
     bound = base.BindingTests.bound
 
     def test_only_delivery_execution_tasks_at_partitioned_bind_the_reference(self):
-        tasks = (("deliver", "delivery-coordinator"), ("deliver", "qa-engineer"),
+        tasks = (("deliver-governed", "delivery-coordinator"), ("deliver-governed", "qa-engineer"),
                  ("execution-plan", "qa-engineer"), ("configure", "qa-engineer"))
         for entry, role in tasks:
             with self.subTest(value="single", task=(entry, role)):
@@ -159,7 +159,7 @@ class BindingTests(unittest.TestCase):
         base.policy(self.docs, "approve")
         for entry, role in tasks:
             with self.subTest(value=VALUE, task=(entry, role)):
-                self.assertEqual(self.bound(entry, role, REFERENCE), entry == "deliver")
+                self.assertEqual(self.bound(entry, role, REFERENCE), entry == "deliver-governed")
 
 
 @integration

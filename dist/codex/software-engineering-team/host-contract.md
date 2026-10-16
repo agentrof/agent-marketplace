@@ -121,19 +121,24 @@
   definition, model and effort they were rendered with: the hook tells the
   user once per session to run setup, which renders them again, and the next
   start of a role reads its new file.
-- Role agents use the package's `auto` execution profile: each of the
-  three role tiers runs one model of the package's model catalog, named by
-  its exact model ID, at the tier's reasoning effort, and every role file
-  carries both `model` and `model_reasoning_effort`. The high, medium and low
-  tiers all run `gpt-6.1-sol` at effort `xhigh`; the catalog keeps
-  `gpt-6-luna`, which no tier runs. Every build also ships the `-lens`
-  variants of the read-only document reviewers on the `low` tier,
-  `gpt-6.1-sol` at effort `xhigh`; only review panels under switch
-  `review_panels` at `lens_panel` start them, and the reviewers themselves
-  keep their own tier.
-  Every build also ships `code-reviewer-lens` on the same tier; only the code
+- Role agents use the package's `auto` execution profile by purpose class:
+  each class slot runs one model of the package's model catalog, named by its
+  exact model ID, at the slot's reasoning effort, and every role file carries
+  both `model` and `model_reasoning_effort`. A class that escalates has a
+  second slot, `<class>_escalated`, for a task of size `l`, rigor `high` or a
+  risk flag. `mechanical` runs `gpt-6-luna` at `high`; every other slot runs
+  `gpt-6.1-sol`, from `low` for `orchestration` to `xhigh` for
+  `security_review`. A role file's `model` takes precedence over a spawn
+  request, so every build renders, besides each role on its own class, an
+  `<agent>-escalated` variant for every role on a class that escalates and
+  the purpose variant `code-reviewer-security` on `security_review`;
+  `model_class.py resolve` names the agent to start, and the spawn passes no
+  model. Every build also ships the `-lens` variants of the read-only
+  document reviewers and `code-reviewer-lens` on `routine_review`; only
+  review panels under switch `review_panels` at `lens_panel` and the code
   review panel under switch `code_review_panel` at `beside_official` or
-  `risk_scoped` starts it, and `code-reviewer` keeps its own tier.
+  `risk_scoped` start them, and the reviewers themselves keep their own
+  class.
   The pinned models need Codex 0.159.1 or later, the first release whose
   bundled model catalog lists `gpt-6.1-sol`; `gpt-6-luna` is bundled from
   0.157.0.
@@ -144,37 +149,38 @@
   every role file and keeps `model_reasoning_effort`; `--execution-profile
   auto` restores the pins and checks them again. The managed agent files
   record the choice and later refreshes keep it.
-- A project sets a tier's model and effort and a role's tier through
+- A project sets a class slot's model and effort and a role's class through
   `/configure models`, which records only overrides in
-  `workspace/config.json`: `tier_models`, per host and tier a `model`, an
+  `workspace/config.json`: `class_models`, per host and slot a `model`, an
   exact model ID of this host's model list or `session`, and an `effort`,
-  either one optional, and `role_tiers`, which moves any role, the generated
-  variants included, between the high, medium and low tiers on every host.
-  Setup writes neither key. A role's tier comes from `role_tiers`, else the
-  package; the tier's model and effort come from `tier_models`, else the
-  package's `auto` profile, and a missing key keeps the package value.
-  `session` renders the role file without a `model` key, so the role runs on
-  the parent session's model at the tier's `model_reasoning_effort`. Setup
-  and refresh render each role's resolved model and effort into its role
-  file under the `auto` profile, keep its effort under `inherit` and a model
-  fallback, and report each role's tier, model, effort and source;
-  `project_config.py tiers` prints the config-level effective map. Generated
-  role files are never edited by hand: `/configure models` renders them
-  again. A role file's `model` and `model_reasoning_effort` take precedence
-  over a spawn request and the `[agents]` defaults; `ultra` is refused for
-  every tier, because a role at `ultra` starts subagents of its own.
+  either one optional, and `role_classes`, which moves any role, the
+  generated variants included, to another class on every host. Setup writes
+  neither key and drops the retired `tier_models` and `role_tiers`. A role's
+  class comes from `role_classes`, else the package; the slot's model and
+  effort come from `class_models`, else the package's `auto` profile, and a
+  missing key keeps the package value. `session` renders the role file
+  without a `model` key, so the role runs on the parent session's model at
+  the slot's `model_reasoning_effort`. Setup and refresh render each role's
+  resolved model and effort into its role file under the `auto` profile,
+  keep its effort under `inherit` and a model fallback, and report each
+  role's class, model, effort and source; `project_config.py classes` prints
+  the config-level effective map. Generated role files are never edited by
+  hand: `/configure models` renders them again. A role file's `model` and
+  `model_reasoning_effort` take precedence over a spawn request and the
+  `[agents]` defaults; `ultra` is refused for every slot, because a role at
+  `ultra` starts subagents of its own.
 - A role whose pinned model cannot run falls back to this session's model
   with a visible warning, by one strategy on both hosts:
   - Setup and refresh read this host's own model list from the binary that
     runs this session, without a model request, and judge each model a role
-    is pinned to, the project's `tier_models` included: `available` when the
+    is pinned to, the project's `class_models` included: `available` when the
     list holds it and reflects the signed-in account,
     `unavailable` when the list does not hold it, since this binary cannot
     run it, and `unverified` when no list could be read or the list reflects
     no account. Every probe has a time limit, and one that fails gives
     `unverified`, never an error that stops setup.
   - The roles of an `unavailable` model run on this session's model at their
-    own effort, and setup prints a warning that names the model, its tiers
+    own effort, and setup prints a warning that names the model, its class slots
     and its roles; every setup or refresh judges the model again. An
     `unverified` model keeps its pin with a note, and the run-time rule
     covers it.
@@ -218,26 +224,22 @@
   record, then stop and report both errors.
 - Every build also ships the `-mechanical` variants of the document writers
   `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
-  on the `low` tier, `gpt-6.1-sol` at effort `xhigh`. Only switch
+  on the `mechanical` class, `gpt-6-luna` at effort `high`. Only switch
   `mechanical_pass_tier` at `mechanical` starts them, for a pass that applies
-  the fixes a review names; the writers themselves keep their own tier, and
-  no review, re-check or calibration runs on a variant. Every variant runs
-  its writer's own model and effort, so it changes only the fresh context of
-  the pass. Start the variant for every `apply_findings` pass; never resume
-  the base writer for one, so the pass record shows the variant's tier and
-  the A/B measures it. These values are placeholders until the variants'
-  frozen-task A/B sets them; a lower low-tier effort waits for that A/B
-  (#404). For that A/B, apply `--execution-profile inherit` in a scratch
-  copy of the project, set the candidate model as the session's `model`, and
-  set a candidate effort as `model_reasoning_effort` in that copy's
-  `-mechanical` role files.
+  the fixes a review names; the writers themselves keep their own class, and
+  no review, re-check or calibration runs on a variant. Start the variant for
+  every `apply_findings` pass; never resume the base writer for one, so the
+  pass record shows the variant's class. To measure another model, apply
+  `--execution-profile inherit` in a scratch copy of the project, set the
+  candidate model as the session's `model`, and set a candidate effort as
+  `model_reasoning_effort` in that copy's `-mechanical` role files.
 - Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
   is planned inside `/delivery-plan` with one owner gate, presented through
-  `request_user_input`, and handed over to `/deliver DLV-###`; `/execution-plan
+  `request_user_input`, and handed over to `/deliver-governed DLV-###`; `/execution-plan
   DLV-###` stays for a plan revision and for a Delivery that left the light
   path, so the public entries do not change.
 - Delivery execution is available only through the exact public entries
-  `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.
+  `/delivery-plan`, `/execution-plan DLV-###` and `/deliver-governed DLV-###`.
 
 ## Autopilot
 

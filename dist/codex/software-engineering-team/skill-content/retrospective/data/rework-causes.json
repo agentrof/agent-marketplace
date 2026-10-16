@@ -88,6 +88,13 @@
       "hints": ["missing (a )?tests?", "no tests? (for|covers)", "untested", "without (a )?tests?", "not covered by (a )?tests?"]
     },
     {
+      "id": "review-finding",
+      "owner": "project",
+      "description": "review found a defect the author missed",
+      "rule": "Before opening the PR, read the diff once against the reviewer's checklist (security, failure paths, data custody) and fix what it names.",
+      "hints": ["review(er)? (finding|found|flagged)", "security review", "from (the )?review", "address(es)? review"]
+    },
+    {
       "id": "test-failure",
       "owner": "project",
       "description": "a test failed",

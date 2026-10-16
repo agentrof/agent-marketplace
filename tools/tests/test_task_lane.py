@@ -1177,6 +1177,7 @@ class RetrospectiveReworkTests(unittest.TestCase):
                  "tests: FAILED tests/test_a.py::test_x - AssertionError": "test-failure",
                  "tests: re-run attempt 2": "flaky-test", "Merge branch 'main' into task/tk-1-x": "merge-conflict",
                  "review: missing test for the empty month": "review-missing-test",
+                 "fix: security review found the token kept in the checkout": "review-finding",
                  "no tests ran for the changed module": "test-impact", "wip": task_lane.UNCLASSIFIED}
         for text, category in cases.items():
             self.assertEqual(task_lane.cause_of(text, self.causes), category, text)
@@ -1344,7 +1345,8 @@ class RetrospectiveReworkTests(unittest.TestCase):
     def test_at_most_five_project_lessons_are_memory_candidates_and_process_causes_become_levers(self):
         project = [item["id"] for item in self.causes["categories"] if item["owner"] == "project"]
         texts = {"environment": "rate limit", "flaky-test": "flaky", "lint-format": "ruff", "type-error": "mypy",
-                 "docs-gate": "vault", "review-missing-test": "untested", "test-failure": "FAILED"}
+                 "docs-gate": "vault", "review-missing-test": "untested", "review-finding": "security review",
+                 "test-failure": "FAILED"}
         self.assertEqual(sorted(texts), sorted(project))
         items = [self.item(f"TK-00{n}", n, *texts.values(), "ambiguous", "ambiguous") for n in range(1, 4)]
         records = [task_lane.rework_record(item, self.causes) for item in items]

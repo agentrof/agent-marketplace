@@ -2569,10 +2569,24 @@ def require_unsuperseded_approval(kinds: dict[str, str], published: dict | None,
         props = local_contract(path)
         revision = props.get("revision") if isinstance(props.get("revision"), int) else 0
         if copy["revision"] > revision or (copy["revision"] == revision
-                                           and copy.get("source_hash") != props.get("source_hash")):
+                                           and copy.get("source_hash") != props.get("source_hash")
+                                           and not repaired_only(copy, props)):
             replacement = ("a different " if copy["revision"] == revision else "its ") + f"{props.get('status')} revision {revision}"
             raise RuntimeError(f"DELIVERY_PLAN_SUPERSEDED: {holds([path])}, which this checkout would replace "
                                f"with {replacement}; {remedy}")
+
+
+def repaired_only(copy: dict, props: dict) -> bool:
+    """Tell whether *props* is the Integration's *copy* re-paired with a later Environment Contract.
+
+    re-pair keeps the revision and restamps only the pairing and the source_hash, under the
+    ruling that approved the Environment revision, so it is not a different approval.
+    """
+    import operation_compile
+    held, pairing = copy.get(operation_compile.PAIRED_FIELDS[0]), props.get(operation_compile.PAIRED_FIELDS[0])
+    restamped = {"source_hash", *operation_compile.PAIRED_FIELDS}
+    return (isinstance(held, int) and isinstance(pairing, int) and pairing > held
+            and all(copy.get(key) == props.get(key) for key in (copy.keys() | props.keys()) - restamped))
 
 
 def sealed_item_records(root: Path, directory: Path, integration_oid: str) -> set[str]:

@@ -64,7 +64,7 @@ SECTIONS = {
     ),
 }
 DOD_SECTIONS = ("Commands", "Evidence Rules", "Quality Gates", "Navigation")
-MUTABLE = {"status", "approved_at_utc", "source_hash", "approval_hash", "pull_request_url"}
+MUTABLE = {"status", "approved_at_utc", "source_hash", "approval_hash", "pull_request_url", "path_claim_amendments"}
 SOURCE_ITEM_FIELDS = (
     "story_id", "story_path", "story_source_hash", "test_plan_path",
     "test_plan_source_hash", "owner_role", "supporting_roles",
@@ -1615,6 +1615,14 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path,
         after = _string_list(props.get("execution_after"), f"{story_id} execution_after", errors)
         waits_for = _string_list(props.get("waits_for"), f"{story_id} waits_for", errors)
         paths = _string_list(props.get("path_claims"), f"{story_id} path_claims", errors)
+        if props.get("path_claim_amendments"):
+            import delivery_git
+            try:
+                project = docs.parent.parent
+                paths = delivery_git.amended_path_claims(project, props["path_claim_amendments"][-1],
+                                                         item_path.relative_to(project).as_posix(), props)
+            except (RuntimeError, ValueError, TypeError, IndexError) as exc:
+                errors.append(f"{story_id} path claim amendments cannot be read: {exc}")
         contracts = _string_list(props.get("contract_claims"), f"{story_id} contract_claims", errors)
         roles = _string_list(props.get("role_sequence"), f"{story_id} role_sequence", errors)
         try:
@@ -2174,6 +2182,13 @@ def approve_execution(args) -> int:
     environment_binding, _ = operation_contract_snapshot(docs, "environment")
     for item_path in items:
         item_props, item_body = split_note(item_path)
+        if item_props.get("path_claim_amendments") and (
+                item_props.get("status") not in TERMINAL_ITEM_STATUSES or str(item_props.get("story_id")) in reopen):
+            import delivery_git
+            project = docs.parent.parent
+            item_props["path_claims"] = delivery_git.amended_path_claims(
+                project, item_props["path_claim_amendments"][-1], item_path.relative_to(project).as_posix(), item_props)
+            item_props.pop("path_claim_amendments")
         story = str(item_props["story_id"])
         item_ids.append(story)
         pins = item_source_pins(sources[story], story)

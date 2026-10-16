@@ -891,7 +891,7 @@ def require_published_claims(root: Path, current: dict, remote: str = "origin") 
     docs = delivery.docs_root(root)
     delivery_id, story = current["delivery"], current["story"]
     if delivery.delivery_switch_value(docs, delivery_id, delivery_git.PROVISIONAL_SWITCH) \
-            != delivery_git.PROVISIONAL_VALUE:
+            not in {delivery_git.PROVISIONAL_VALUE, delivery_git.UNCONTESTED_CLAIMS}:
         return
     item = delivery.find_delivery(docs, delivery_id) / "items" / delivery.id_slug(story) / "item.md"
     refs = delivery_git.canonical_refs(delivery_id, story)
@@ -914,7 +914,9 @@ def require_published_claims(root: Path, current: dict, remote: str = "origin") 
     except RuntimeError as exc:
         raise RuntimeError("the Item record that the Item's integration base publishes cannot be read: "
                            f"{exc}") from exc
-    refuse_unpublished_paths(root, delivery_id, story, published.get("path_claims"), current["changed_files"],
+    claims = delivery_git.amended_path_claims(root, current["integration_base_commit"],
+                                             item.relative_to(root).as_posix(), published)
+    refuse_unpublished_paths(root, delivery_id, story, claims, current["changed_files"],
                              remote)
 
 
@@ -4579,6 +4581,10 @@ def integrated_items(root: Path, delivery_id: str):
                 raise RuntimeError(f"{item_path.relative_to(root).as_posix()} cannot be read, so its suite"
                                    f" cannot be selected: {exc}") from exc
             if item.get("status") == "integrated":
+                if item.get("path_claim_amendments"):
+                    import delivery_git
+                    item["path_claims"] = delivery_git.amended_path_claims(
+                        root, git(root, "rev-parse", "HEAD"), item_path.relative_to(root).as_posix(), item)
                 yield identifier, current_delivery, item_path, item
 
 

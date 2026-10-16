@@ -4105,6 +4105,45 @@ class DeliveryGitTests(unittest.TestCase):
         with mock.patch.object(delivery_compile, "delivery_switch_value", value):
             yield
 
+    @integration
+    def test_uncontested_path_amendment_preserves_approval_and_replays_at_every_boundary(self):
+        import task_inputs
+        project, worktree, item, _active = self.prepare_stamped_architecture_item()
+        relative = item.relative_to(worktree).as_posix()
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
+        before = delivery_git.remote_oid(project, "origin", refs["integration"])
+        original, _ = delivery_git.split_remote_note(project, before, relative, delivery_compile.split_note)
+        other_path = relative.replace("auth-01/item.md", "auth-02/item.md")
+        other = {**original, "story_id": "AUTH-02", "status": "planned", "path_claims": ["src/taken.py"]}
+        with_other = delivery_git.commit_replacements(project, before,
+            {other_path: delivery_compile.frontmatter(other, "# Other Item\n")}, "Publish another Item",
+            {"Record": "execution-plan-published-v1", "Delivery": "DLV-001"})
+        delivery_git.atomic_push(project, "origin", [(refs["integration"], before, with_other)])
+        switch = delivery_compile.delivery_switch_value
+        def selected(docs, identifier, name):
+            return "uncontested_delta" if name == "provisional_claims" else switch(docs, identifier, name)
+        with mock.patch.object(delivery_compile, "delivery_switch_value", selected):
+            with self.assertRaisesRegex(RuntimeError, "overlapping path"):
+                delivery_git.amend_path_claims(project, "DLV-001", "AUTH-01", ["src/taken.py"])
+            granted = delivery_git.amend_path_claims(project, "DLV-001", "AUTH-01", ["src/verify.py"])
+            published, _ = delivery_git.split_remote_note(project, granted["integration"], relative, delivery_compile.split_note)
+            self.assertEqual(published["item_plan_hash"], original["item_plan_hash"])
+            self.assertEqual(published["path_claims"], original["path_claims"])
+            self.assertIn("src/verify.py", delivery_git.amended_path_claims(project, granted["integration"], relative, published))
+            self.assertTrue(delivery_git.amend_path_claims(project, "DLV-001", "AUTH-01", ["src/verify.py"])["reused"])
+            self.assertIsNone(delivery_git.held_plan_revision_epoch(project, "origin", "DLV-001"))
+            with self.assertRaisesRegex(RuntimeError, "another approval"):
+                delivery_git.amended_path_claims(project, granted["integration"], relative,
+                                                  {**published, "item_plan_hash": "sha256:other"})
+            with self.assertRaisesRegex(RuntimeError, "normalized product paths"):
+                delivery_git.amend_path_claims(project, "DLV-001", "AUTH-01", [".git/config"])
+            imported = task_inputs.published_item(worktree, relative, "origin")[0]
+            self.assertIn("src/verify.py", imported["path_claims"])
+            delivery_git.converge_item(project, "DLV-001", "AUTH-01")
+            product = self.commit_provisional_change(worktree)
+            delivery_git.require_item_path_claims(project, before, product, relative)
+
+
     def provisional_item(self, draft_claims=("src/auth.py", "src/verify.py")):
         """An active stamped Item under a held plan revision whose checkout draft adds *draft_claims*."""
         project, worktree, item, active = self.prepare_stamped_architecture_item()

@@ -1089,6 +1089,10 @@
         {
           "id": "during_plan_revision",
           "tradeoffs": "While its own plan-revision barrier is held, the coordinator records a provisional claim of paths the checkout's draft adds to an active Item's path claims, refused when another Item claims or provisionally claims an overlapping path, and the writer commits the change in the Item worktree at once; freeze, the reviews, push-item and integration refuse that change until the approved plan publishes the path and the writer converges on it, and an approval that drops or moves the path leaves the work orphaned for the writer to revert. The code moves off the revision's critical path without integrating anything early, while the writer may write code an approval later discards, and every host must run a package that knows the records before a Delivery pins this value."
+        },
+        {
+          "id": "uncontested_delta",
+          "tradeoffs": "An active serial Item can add unheld product paths through amend-path-claims. An immutable receipt binds the existing Item approval, and an atomic Fence and Integration update publishes it without a plan revision. Overlaps, authority paths, parallel-lane Items and active barriers are refused. Converge the Item before freezing or publishing; the next full approval folds the receipts into ordinary claims."
         }
       ],
       "default": "after_approval",

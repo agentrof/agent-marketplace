@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "a661c3cc0e6da54c812e07fc56ad454d209cff47f048decb9211b90bc57580f5"
+      "f528110ef97e4bb76eb3110320f645009962b0cfc03b05450c120927b3ec5df1"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -119,7 +119,7 @@
       "fe5af168a850e2d931b241616ac88095c092780acd4b786bec108c88ba5ed36d"
     ,
     "flows/execution-planning.md":
-      "84e5ab6461af23461e758db1bc0adabf7fe680aa093992f2c34941ad5d94dcaa"
+      "9eb30198555f787daa7de890cd85828603fd6d8856181cca6d3c3d833625c181"
     ,
     "flows/experience-design.md":
       "c964a5acf445e6bed890365402d24888188cd2c4ee21dc5d169cfeea622bb512"
@@ -185,10 +185,10 @@
       "73b210d3acdffaa912802807dbf11d47f068ba2c635d300bd051142310e05633"
     ,
     "scripts/delivery_compile.py":
-      "37b51e8b1ab2b6b3642a02d6ac114892f02b3126834e36b0c87fd9cb9a71e374"
+      "d5ad7c66080fcbabd9ece5a8f1dd81014ec31be18a95e5cb65fc468603e657cb"
     ,
     "scripts/delivery_git.py":
-      "46a4a848e86d70ce195c546cd951be8e7a4aaefe6b8fc45e1490d54e18ae3b76"
+      "127ee983d9c5ecc0997334f338383ee4e45d97f12bea6b28f0f83a18bf273e51"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
@@ -200,7 +200,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "194f2508abab1ea259acc631cebebf89623b9653f1bac40abb17d0c0948ce92d"
+      "a41bbc290634fb9bef0fe0cd703f8305e22d7598fb4a3c14e180ba9f2104a86d"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -287,7 +287,7 @@
       "9074dc24c1eb57a0c0b7ef9dde98a17bd5b79ea553233a600a54cbcb32a865c5"
     ,
     "scripts/task_inputs.py":
-      "d225fadc117b7a4cf0d7b6413b783fc214df7aca53dcb8b69ea1485a4cc2a4b6"
+      "e1351a3661f0dc0a694c64f111668a951e826592a7a775b381cf4583ec9ada9b"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -467,7 +467,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "e756dfb49bb52c9c24c29a8d3077e0048ca5aae1ded618e09143feecda2b819e"
+      "71a2f8b12af62826e3b8db3ef30402ff5affc2e0526b5eb92abf371caeff0802"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -607,6 +607,9 @@
     "skill-content/execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md":
       "de0d35734aa0f3af259cd6027e3fd691855d596ffdc8514de67a87dfdc3b69a9"
     ,
+    "skill-content/execution-plan/references/switch-provisional_claims-uncontested_delta.md":
+      "5dfef7b77370253feb3034da3c92a98b2d23d2a1fbd056fc8f61bd4e93bee007"
+    ,
     "skill-content/execution-plan/references/switch-source_rebind-receipt_when_unchanged.md":
       "96b378464c1c0b2ff8da6414487e4434e432376a3473659c2abb6d661bef9d25"
     ,
@@ -662,7 +665,7 @@
       "931c87622196a746700885aa5a78081954df37d0b6dc571ff54e70a93dcf9a05"
     ,
     "skill-content/obsidian-vault/data/vault-policy.json":
-      "e8023ae6dfc03d990f72b9f4e294604cfef70d1f385ae4f5ba7d0af267cf8d63"
+      "743081f518fbd916aa42d431955fc3817573e860d67f9256b9f2b7f094f9228c"
     ,
     "skill-content/obsidian-vault/references/graph.md":
       "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e"
@@ -1157,7 +1160,7 @@
       "46b840eaddc2c50abf29b4b0b145e1e0774c4760e89b4d09a7a9ce122b33bbbe"
     ,
     "templates/vault/.obsidian/types.json":
-      "d31b895c5f4f214bc72d7d6b3fe2cee8ae009ed8dece7f70fadf5da6475fddf3"
+      "2b6997d9fe314a6b8bbc1b4d196521f790245e5a9e2dd62046a13488ee61a56a"
     ,
     "templates/vault/home.md":
       "b62efb50cb11a9e14ea667a2e12cbff4789ec458c705cd226440c9d5d25b3397"

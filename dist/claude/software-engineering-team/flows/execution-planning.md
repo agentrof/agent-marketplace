@@ -165,3 +165,6 @@ reason. A required impact places `software_architect` first in the Item role
 sequence. The Software Architect uses `architecture_compile.py` only after the
 Item is claimed/active; the Item carries the compiler-stamped
 `architecture_delta_hash` into verification and integration.
+
+At switch `provisional_claims` value `uncontested_delta`, follow
+`skill-content/execution-plan/references/switch-provisional_claims-uncontested_delta.md` for an active Item that needs an unheld product path.

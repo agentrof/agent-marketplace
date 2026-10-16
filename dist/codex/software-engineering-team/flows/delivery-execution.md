@@ -90,6 +90,9 @@ Modes default to `review_repair` after an earlier candidate and `qa_final`;
 Switch `qa_preflight`: at `lifecycle_first`, follow `skill-content/qa-verification/references/switch-qa_preflight-lifecycle_first.md`.
 Switch `runtime_lifecycle`: at `long_lived`, follow `skill-content/qa-verification/references/switch-runtime_lifecycle-long_lived.md`.
 Switch `live_case_reuse`: at `delta_since_green`, follow `skill-content/qa-verification/references/switch-live_case_reuse-delta_since_green.md`.
+Switch `live_verification`: at `delivery_integration`, follow `skill-content/qa-verification/references/switch-live_verification-delivery_integration.md`.
+Switch `item_live_gate`: at `tooling_items`, follow `skill-content/qa-verification/references/switch-item_live_gate-tooling_items.md`.
+Switch `pass_carry_over`: at `per_item`, follow `skill-content/qa-verification/references/switch-pass_carry_over-per_item.md`.
 Put the manifest's `command_form` verbatim into every reader prompt: while
 readers are active, Bash admits only that one direct invocation followed by a
 verb, and readers read files with the host's Read tool.
@@ -127,34 +130,27 @@ none of them itself, as
 `skill-content/deliver/references/switch-own_target_reuse-accept_record.md`
 defines.
 
-Invoke Code Review and QA independently through the host's native agents.
-Keep the implementation writer idle until both readers finish or cancellation is confirmed,
-except isolated `lane_isolation` `scratch_clone` repairs of registered findings.
-Each reader registers `result --file <result.json>` when its own command ends,
-even while the other runs; the owner alone persists canonical reports after the barrier.
-The code reviewer runs no command, not even a diagnostic test.
-Its `verification_evidence` names the freeze record and QA runs.
-It registers its finished result at once and returns. A reader waiting for another role's step
-returns its result unregistered. Cancelled or diagnostic results cannot approve
-an Item. Code, test, contract or instruction drift invalidates the candidate.
-Switch `code_review_panel`: at `beside_official`, a lens panel reads the frozen
-candidate beside the official code reviewer and `merge-panel` registers the
-one code review result, as
-`skill-content/code-review/references/switch-code_review_panel-beside_official.md`
-defines.
-At `risk_scoped`, a lens reader joins the official code reviewer only when the
-frozen change triggers its lens by the owner's parameters, as
-`skill-content/code-review/references/switch-code_review_panel-risk_scoped.md`
-defines.
-Switch `item_review_scale`: at `by_change_size`, the official code reviewer
-reads alone an Item whose frozen change is within the owner's size limits, as
-`skill-content/code-review/references/switch-item_review_scale-by_change_size.md`
-defines.
-Switch `review_scope`: at `impact_closure`, run the structural check before any reader.
-Both readers use the frozen manifest's impact closure; approved unchanged notes
-outside it remain hash-bound summaries. Expand uncertain context and record why.
-The owning compiler repairs graph gaps and recomputes the closure; a confirmation
-re-review reads only the fix's delta, as
+Invoke Code Review and QA independently through the host's native agents. Keep the implementation
+writer idle until both readers finish or cancellation is confirmed, except isolated `lane_isolation`
+`scratch_clone` repairs of registered findings. Each reader registers `result --file <result.json>`
+when its own command ends, even while the other runs; the owner alone persists canonical reports
+after the barrier. The code reviewer runs no command, not even a diagnostic test. Its
+`verification_evidence` names the freeze record and QA runs. It registers its finished result at
+once and returns. A reader waiting for another role's step returns its result unregistered.
+Cancelled or diagnostic results cannot approve an Item. Code, test, contract or instruction drift
+invalidates the candidate. Switch `code_review_panel`: at `beside_official`, a lens panel reads the
+frozen candidate beside the official code reviewer and `merge-panel` registers the one code review
+result, as `skill-content/code-review/references/switch-code_review_panel-beside_official.md`
+defines. At `risk_scoped`, a lens reader joins the official code reviewer only when the frozen
+change triggers its lens by the owner's parameters, as
+`skill-content/code-review/references/switch-code_review_panel-risk_scoped.md` defines. Switch
+`item_review_scale`: at `by_change_size`, the official code reviewer reads alone an Item whose
+frozen change is within the owner's size limits, as
+`skill-content/code-review/references/switch-item_review_scale-by_change_size.md` defines. Switch
+`review_scope`: at `impact_closure`, run the structural check before any reader. Both readers use
+the frozen manifest's impact closure; approved unchanged notes outside it remain hash-bound
+summaries. Expand uncertain context and record why. The owning compiler repairs graph gaps and
+recomputes the closure; a confirmation re-review reads only the fix's delta, as
 `skill-content/challenge-review/references/switch-review_scope-impact_closure.md` defines.
 
 A role that waits inside its turn waits at most the Delivery verification
@@ -174,6 +170,7 @@ every run with the session identity through `status --summary`; plain
 `status` prints the whole session, bindings included.
 
 QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
+Unless switch `live_verification` defers live runs to Delivery integration,
 QA runs each declared `live_groups` entry with `run --kind live_test --group <group>`,
 substituting `{group}` in `live_test_command` in `live_test_workdir`.
 The frozen clone, locks, environment binding and raw evidence match `run --kind test`.
@@ -268,6 +265,12 @@ An unchanged candidate with unchanged source bindings and instructions reuses
 its existing independent role results without another dispatch.
 Switch `review_loop`: at `blocking_delta`, the code review loop follows
 `skill-content/code-review/references/switch-review_loop-blocking_delta.md`.
+Switch `item_verification`: at `single_verifier`, one verifier registers both results in one pass, as
+`skill-content/deliver/references/switch-item_verification-single_verifier.md` defines.
+Switch `repair_pass`: at `scoped_repair`, a reviewed repair of findings below critical settles with its
+touched-suites run, as `skill-content/deliver/references/switch-repair_pass-scoped_repair.md` defines.
+Switch `finding_disposition`: at `follow_up_issue`, only a critical finding blocks; each one below it is
+filed as a follow-up issue, as `skill-content/deliver/references/switch-finding_disposition-follow_up_issue.md` defines.
 
 `validate --delivery DLV-### --story <story>` must accept both final results
 before evidence approval. The existing compiler derives actual product HEAD
@@ -285,48 +288,38 @@ Successful down, up, seed, logs and final down are required, alongside the
 independent runtime assessment. A non-runtime Item starts no environment.
 
 ## Activation and publication
-Activation writes an ignored pending writer receipt before the atomic Item,
-Slot, Integration and Fence transaction. The receipt is promoted only after
-both Item and Slot refs equal the candidate OID, then the coordinator
-materializes the detached Item worktree from that exact OID. A missing receipt
-does not change remote semantic status, but it denies local writer readiness
-until the exact remote activation is re-verified or explicitly taken over.
-Takeover is an explicit host-loss decision; it reuses the existing Item and
-Slot refs, elects a new writer epoch under exact leases and never allocates a
-second Slot.
+Activation writes an ignored pending writer receipt before the atomic Item, Slot, Integration and
+Fence transaction. The receipt is promoted only after both Item and Slot refs equal the candidate
+OID, then the coordinator materializes the detached Item worktree from that exact OID. A missing
+receipt does not change remote semantic status, but it denies local writer readiness until the exact
+remote activation is re-verified or explicitly taken over. Takeover is an explicit host-loss
+decision; it reuses the existing Item and Slot refs, elects a new writer epoch under exact leases
+and never allocates a second Slot.
 
-After implementation, only the current Item's initialized Code Review and
-Verification reports may have uncommitted authoring changes. Evidence approval
-derives both reviewed and verified commits from that worktree's real `HEAD`;
-it never accepts caller-supplied commit text. The only permitted uncommitted
-files after approval are that Item's `code-review.md` and `verification.md`.
-Approval and publication reject tracked entries with `assume-unchanged` or
-`skip-worktree` flags, without modifying the index.
-`push-item` attaches those records to the committed product/test tip as one
-`item-evidence-v1` child and advances Item plus Slot together. It rejects a
-product commit that edits Delivery control files, except the current required
-Architecture Item's compiler-stamped delta hash and refreshed source hash.
-That exception preserves every other Item byte and control path, and requires
-the exact committed, sealed delta to remain within approved architecture claims.
-An Item whose writer converged it on a refreshed Integration may also carry
-that Integration commit's Delivery controls byte for byte and record the commit
-as its `integration_base_commit`. The commit must lie on the Integration's own
-line after the Item's previous base and be contained in the product tip, and
-the Item record keeps the commit's plan-owned fields with only its own status,
-stamp and base. `delivery_git.py converge-item --delivery DLV-### --story
-<story>` converges the clean Item worktree in one step: it merges the current
-Integration, gives every Delivery control path the Integration's bytes, writes
-the Item record in that converged form, renders the relation views again with
-`vault_check.py render-relations` and commits. A conflict in any other path
-aborts the merge, leaves the worktree at its tip and names each path for a
-manual merge.
-`push-item` also rejects a product or test path outside the Item's path claims,
-which cover their paths and everything below them. Vault paths keep the
-control, Architecture and projection rules, and a path held exactly as the
-Item's `integration_base_commit` holds it is not the Item's change.
-`integrate-item` reads the
-evidence from the remote Item ref and requires that its exact direct parent is
-the reviewed and verified product/test tip.
+After implementation, only the current Item's initialized Code Review and Verification reports may
+have uncommitted authoring changes. Evidence approval derives both reviewed and verified commits
+from that worktree's real `HEAD`; it never accepts caller-supplied commit text. The only permitted
+uncommitted files after approval are that Item's `code-review.md` and `verification.md`. Approval
+and publication reject tracked entries with `assume-unchanged` or `skip-worktree` flags, without
+modifying the index. `push-item` attaches those records to the committed product/test tip as one
+`item-evidence-v1` child and advances Item plus Slot together. It rejects a product commit that
+edits Delivery control files, except the current required Architecture Item's compiler-stamped delta
+hash and refreshed source hash. That exception preserves every other Item byte and control path, and
+requires the exact committed, sealed delta to remain within approved architecture claims. An Item
+whose writer converged it on a refreshed Integration may also carry that Integration commit's
+Delivery controls byte for byte and record the commit as its `integration_base_commit`. The commit
+must lie on the Integration's own line after the Item's previous base and be contained in the
+product tip, and the Item record keeps the commit's plan-owned fields with only its own status,
+stamp and base. `delivery_git.py converge-item --delivery DLV-### --story <story>` converges the
+clean Item worktree in one step: it merges the current Integration, gives every Delivery control
+path the Integration's bytes, writes the Item record in that converged form, renders the relation
+views again with `vault_check.py render-relations` and commits. A conflict in any other path aborts
+the merge, leaves the worktree at its tip and names each path for a manual merge. `push-item` also
+rejects a product or test path outside the Item's path claims, which cover their paths and
+everything below them. Vault paths keep the control, Architecture and projection rules, and a path
+held exactly as the Item's `integration_base_commit` holds it is not the Item's change.
+`integrate-item` reads the evidence from the remote Item ref and requires that its exact direct
+parent is the reviewed and verified product/test tip.
 
 The flow ends in one Delivery Review, one final PR and provider-neutral merged
 evidence. The Review is authored as a draft `delivery-review.md` in the

@@ -1,0 +1,6 @@
+{
+  "summary": "claim-items now keeps the Item claims its own Delivery already holds and claims only the Items a plan revision added, instead of refusing on the first existing claim and leaving the added Items without refs.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

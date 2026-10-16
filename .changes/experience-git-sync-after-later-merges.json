@@ -1,0 +1,6 @@
+{
+  "summary": "Attest the Experience Git restore and merge after later ordinary merges advance the target branch past the open Fence target, as long as the approved Experience tree is unchanged.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

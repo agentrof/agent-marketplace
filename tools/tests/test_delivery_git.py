@@ -3157,6 +3157,56 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
 
     @integration
+    def test_claim_items_keeps_its_own_earlier_claims_and_claims_only_added_items(self):
+        """A plan revision that added an Item ran claim-items again, which refused on the first
+        Item the same Delivery had already claimed, so the added Item never got its ref and
+        start-item failed. Claims this Delivery holds are kept, only the added Item is claimed,
+        and another Delivery's claim is still refused."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs, "AUTH-01", "AUTH-02")
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_dod(dod), 0)
+            self.assertEqual(delivery_compile.approve_dod(dod), 0)
+            self.assertEqual(delivery_compile.init_delivery(type("Args", (), {
+                "docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication", "outcome": None,
+                "target_branch": "main", "story": ["AUTH-01", "AUTH-02"]})), 0)
+            self.assertEqual(delivery_compile.approve_scope(scope), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve the scope")
+        delivery_git.run_git(project, "push", "-q")
+        delivery_git.reserve_delivery(project, "DLV-001")
+        self.author_execution_topology(docs)
+        later = delivery_compile.find_delivery(docs, "DLV-001") / "items" / "auth-02" / "item.md"
+        props, body = delivery_compile.split_note(later)
+        props["path_claims"] = ["src/session.py"]
+        delivery_compile.atomic_text(later, delivery_compile.frontmatter(props, body))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-01", "AUTH-02"])
+        first, added = (delivery_git.canonical_refs("DLV-001", story)["item"] for story in ("AUTH-01", "AUTH-02"))
+        kept = delivery_git.remote_oid(project, "origin", first)
+        # AUTH-02 stands for an Item the plan revision added: it has no ref yet.
+        delivery_git.atomic_push(project, "origin", [(added, delivery_git.remote_oid(project, "origin", added), "")])
+        self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-02"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", first), kept)
+        self.assertTrue(delivery_git.remote_oid(project, "origin", added))
+        # A claim another Delivery holds is still a conflict.
+        foreign = delivery_git.commit_tree(project, kept, [], "Claim AUTH-01 for DLV-009",
+                                           {"Record": "item-claim-v1", "Protocol": "1", "Delivery": "DLV-009",
+                                            "Story": "AUTH-01"})
+        delivery_git.atomic_push(project, "origin", [(first, kept, foreign)])
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        with self.assertRaisesRegex(RuntimeError, "DELIVERY_CLAIM_CONFLICT: story is already claimed by DLV-009: AUTH-01"):
+            delivery_git.claim_items(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
+    @integration
     def test_the_next_delivery_reserves_on_a_child_of_the_fence_a_merged_one_left(self):
         """A merged Delivery drops its refs and leaves the idle project Fence, which the next
         reservation takes over: a Fence child with a new Epoch and the target tip as its Target,
@@ -4675,6 +4725,35 @@ class DeliveryGitTests(unittest.TestCase):
         return candidate, finished["fence"]
 
     @integration
+    def test_aborted_governance_handoff_keeps_the_hash_it_replaced(self):
+        """An abort never reached the target, so the Fence keeps the old hash and the handoff can be retried."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        fence_ref = delivery_git.canonical_refs("DLV-000")["fence"]
+
+        def fence_hash():
+            oid = delivery_git.remote_oid(project, "origin", fence_ref)
+            return delivery_git.trailer(delivery_git.commit_message(project, oid), "Governance-Hash")
+
+        before = fence_hash()
+        args = type("Args", (), {"docs": str(docs)})
+        self.assertEqual(delivery_governance.begin_revision(args), 0)
+        governance = delivery_governance.path_for(docs)
+        props, body = delivery_governance.read(governance)
+        props["max_parallel"] += 1
+        governance.write_text(delivery_governance.render(props, body), encoding="utf-8")
+        self.assertEqual(delivery_governance.approve(args), 0)
+        desired = delivery_governance.status(docs)[0]["governance_hash"]
+        self.assertNotEqual(desired, before)
+        self.assertTrue(delivery_git.apply_governance(project)["changed"])
+        self.assertEqual(fence_hash(), desired)
+
+        self.assertEqual(delivery_git.abort_source_handoff(project)["mode"], "open")
+        self.assertEqual(fence_hash(), before)
+        retried = delivery_git.apply_governance(project)
+        self.assertTrue(retried["changed"])
+        self.assertEqual(retried["handoff"]["governance_hash"], desired)
+
+    @integration
     def test_governance_handoff_refreshes_each_integration_and_preserves_published_contracts(self):
         project, docs, directory, _item, reserved = self.prepare_execution_with_draft_reserved_contracts()
         first = delivery_git.publish_execution_plan(project, "DLV-001")
@@ -5301,6 +5380,48 @@ class DeliveryGitTests(unittest.TestCase):
         refreshed = delivery_git.refresh_target(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "show", f"{refreshed['integration']}:{policy}") + "\n",
                          process_policy.path_for(docs).read_text(encoding="utf-8"))
+
+    @integration
+    def test_target_refresh_takes_inputs_a_held_plan_revision_repinned(self):
+        """A backlog and Process Policy revision approved mid-Delivery reached the target, but
+        refresh-target compared it with the published pins that only publish-execution-plan, which
+        needs those bytes on the Integration, would move. Under a held plan revision the locally
+        re-pinned story and policy are accepted and taken from the target; without it they are not."""
+        project, docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-001")
+        item_props, _body = delivery_compile.split_note(item)
+        story = docs / item_props["story_path"]
+        self.revise_selected_story(docs)
+        new_hash = backlog_compile.digest(story)
+        self.assertNotEqual(item_props["story_source_hash"], new_hash)
+        self.change_process_policy(docs, ("implementation_schedule", "parallel_lanes_v1"))
+        plan = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            self.assertEqual(delivery_compile.approve_execution(plan), 0, output.getvalue())
+        self.assertEqual(delivery_compile.split_note(item)[0]["story_source_hash"], new_hash)
+        policy = process_policy.path_for(docs).relative_to(project).as_posix()
+        story_path = story.relative_to(project).as_posix()
+        target, fence = self.governance_target_handoff(project, docs, [story_path, policy])
+        with self.assertRaisesRegex(RuntimeError, "changed a pinned source or Operation receipt"):
+            delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        record = directory / "delivery.md"
+        saved = record.read_text(encoding="utf-8")
+        props, body = delivery_compile.split_note(record)
+        record.write_text(delivery_compile.frontmatter({**props, "status": "scope_approved"}, body), encoding="utf-8")
+        fence_text = delivery_git.commit_message(project, delivery_git.remote_oid(project, "origin", refs["fence"]))
+        self.assertEqual(delivery_git.plan_revision_pins(directory, fence_text), {})
+        record.write_text(saved, encoding="utf-8")
+        refreshed = delivery_git.refresh_target(project, "DLV-001")
+        # The story's generated relation section is re-rendered on the Integration; its authored bytes are the target's.
+        carried_story = delivery_git.run_git(project, "show", f"{refreshed['integration']}:{story_path}") + "\n"
+        self.assertEqual(backlog_compile.digest_text(carried_story), new_hash)
+        self.assertEqual(delivery_git.run_git(project, "show", f"{refreshed['integration']}:{policy}"),
+                         delivery_git.run_git(project, "show", f"{target}:{policy}"))
 
     @integration
     def test_reservation_carries_the_process_policy_its_scope_pinned(self):
@@ -7480,6 +7601,22 @@ class DeliveryGitDecisionTests(unittest.TestCase):
                     delivery_git.require_carried_control_paths(
                         [f"{DECISION_PACKAGE}/{path}", DECISION_ITEM], DECISION_ITEM, lambda _path: False)
 
+    def test_item_publication_accepts_a_rendered_relation_block_beside_the_architecture_stamp(self):
+        """render-relations may rewrite an active Item record's generated relation block during an
+        architect pass; the stamped record still passes, while an authored change beside it does not."""
+        block = (vault_check.RELATION_START + "\n\n- Reviewed by: [[delivery/items/auth-01/code-review|Code review]]\n"
+                 "- Verified by: [[delivery/items/auth-01/verification|Verification]]\n\n" + vault_check.RELATION_END)
+        rendered = vault_check.replace_relation_block(DECISION_BODY, block)
+        self.assertIn(vault_check.RELATION_START, rendered)
+        before = self.item_note(stamp=None)
+        self.assertIsNone(delivery_git.require_item_controls(before, self.item_note(body=rendered)))
+        republished = self.item_note(stamp=None, body=DECISION_BODY, integration_base_commit="b" * 40)
+        converged = self.item_note(body=rendered, integration_base_commit="c" * 40)
+        self.assertIsNone(delivery_git.require_item_controls(before, converged, republished))
+        tampered = self.item_note(body=vault_check.replace_relation_block(DECISION_BODY + "\nUnapproved change.\n", block))
+        with self.assertRaisesRegex(RuntimeError, "beyond its Architecture stamp$"):
+            delivery_git.require_item_controls(before, tampered)
+
     def test_item_publication_refuses_what_a_converged_item_record_does_not_carry(self):
         """A converged Item record holds the plan-owned fields and body of the Integration commit it
         took and keeps its own lifecycle and stamp; a control path it changed must be that commit's."""
@@ -7820,6 +7957,35 @@ class DeliveryGitDecisionTests(unittest.TestCase):
             "DELIVERY_PLAN_SUPERSEDED",
             f"the Integration holds execution plan {published['plan_hash']} and no Verification Contract, which this "
             f"checkout's approval of execution plan sha256:{'1' * 64} does not supersede; {remedy}"))
+
+    def test_publication_accepts_a_contract_only_re_paired_at_the_same_revision(self):
+        """re-pair after an Environment approval keeps the Verification revision and restamps only
+        its pairing and source_hash, so publication takes it; any other same-revision change, or a
+        pairing that is not later, is still a different approval."""
+        contract = "workspace/docs/operation/verification-contract.md"
+        kinds = {contract: "verification"}
+        plan = {"plan_hash": "sha256:" + "2" * 64, "source_hash": "sha256:" + "b" * 64}
+        held = {"status": "approved", "revision": 2, "source_hash": "sha256:" + "c" * 64, "title": "Verification",
+                "paired_environment_revision": 3, "paired_environment_source_hash": "sha256:" + "5" * 64}
+        re_paired = {**held, "source_hash": "sha256:" + "d" * 64,
+                     "paired_environment_revision": 4, "paired_environment_source_hash": "sha256:" + "6" * 64}
+        self.assertIsNone(delivery_git.require_unsuperseded_approval(
+            kinds, plan, {"plan_hash": plan["plan_hash"]}, {contract: held}, {contract: re_paired}.get))
+        message = (f"the Integration holds execution plan {plan['plan_hash']} and the Verification Contract approved "
+                   f"at revision 2, which this checkout would replace with a different approved revision 2; "
+                   f"{DeliveryGitTests.SUPERSEDED_REMEDY}")
+        for label, local in (
+            ("another field", {**re_paired, "title": "Changed"}),
+            ("an added field", {**re_paired, "owner": "someone"}),
+            ("same pairing", {**re_paired, "paired_environment_revision": 3}),
+            ("lower pairing", {**re_paired, "paired_environment_revision": 2}),
+            ("no pairing", {key: value for key, value in re_paired.items()
+                            if key != "paired_environment_revision"}),
+        ):
+            with self.subTest(refused=label):
+                self.assertEqual(self.refused_finding(lambda: delivery_git.require_unsuperseded_approval(
+                    kinds, plan, {"plan_hash": plan["plan_hash"]}, {contract: held}, {contract: local}.get)),
+                    ("DELIVERY_PLAN_SUPERSEDED", message))
 
 
 # Changing an environment or any setup callable cannot silently reuse a seed

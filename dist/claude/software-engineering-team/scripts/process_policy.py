@@ -498,6 +498,16 @@ def delivery_flows(package: Path | None = None) -> set[str]:
         raise ValueError(f"task input policy cannot be read: {exc}") from exc
 
 
+def binds_work(entry: dict) -> bool:
+    """Whether a switch changes the work a pinned review or Delivery ran.
+
+    A measurement-only switch records how long work took and changes no
+    review, finding or verdict, so a later revision that sets it never
+    invalidates a pin.
+    """
+    return entry["spec"].get("measurement_only") is not True
+
+
 def delivery_switches(registry: dict[str, dict], package: Path | None = None,
                       status: str | None = None) -> set[str]:
     """Return the switches a Delivery's flows read: those an owning flow of which a Delivery runs.
@@ -509,7 +519,7 @@ def delivery_switches(registry: dict[str, dict], package: Path | None = None,
     if status == EXECUTION_APPROVED:
         flows &= set(EXECUTION_FLOWS)
     return {switch for switch, entry in registry.items()
-            if flows & set(entry["spec"].get("flows") or [])}
+            if flows & set(entry["spec"].get("flows") or []) and binds_work(entry)}
 
 
 def pinned_revision(props: dict, body: str, pin: dict) -> bool:

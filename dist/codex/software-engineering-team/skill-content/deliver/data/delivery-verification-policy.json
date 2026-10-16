@@ -16,6 +16,10 @@
     "P1",
     "P2"
   ],
+  "critical_severities": [
+    "critical",
+    "P0"
+  ],
   "review_checks": [
     "correctness",
     "conformance",
@@ -39,10 +43,12 @@
   "final_modes": {
     "code_reviewer": [
       "review_initial",
-      "review_repair"
+      "review_repair",
+      "scoped_repair"
     ],
     "qa_engineer": [
-      "qa_final"
+      "qa_final",
+      "scoped_repair"
     ]
   },
   "mutation_scope": {

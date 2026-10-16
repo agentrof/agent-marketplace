@@ -616,6 +616,23 @@ def failure(log: str, limit: int) -> dict:
     return {"job": scrub(job, 80), "test": test[:200], "text": scrub(error or fallback, limit)}
 
 
+def failed_test_ids(output: str, limit: int = 50) -> list[str]:
+    """The distinct failing test ids a test run printed, in order, at most ``limit``; the tail
+    alone loses them when the summary runs long."""
+    found: list[str] = []
+    for line in output.splitlines():
+        for pattern in TEST_ID_RES:
+            if match := pattern.search(line):
+                name, owner = (match.groups() + ("",))[:2]
+                test = (owner if owner.endswith("." + name) else f"{owner}.{name}" if owner else name)[:200]
+                if test not in found:
+                    found.append(test)
+                break
+        if len(found) >= limit:
+            break
+    return found
+
+
 def red_events(root: Path, runs: list[dict], merged: str | None, logs: dict) -> list[dict]:
     """One rework event per red workflow run before the merge and per re-run attempt; the first
     ``max_calls_per_task`` red runs read their failed log for the test id and error line."""
@@ -1926,7 +1943,8 @@ def cmd_prove(args, root: Path) -> dict:
         results.append({"command": command, "exit_code": done.returncode,
                         "seconds": round((datetime.now(timezone.utc) - clock).total_seconds(), 1),
                         "started_at": started, "finished_at": now(),
-                        "tail": "" if done.returncode == 0 else scrub((done.stdout + done.stderr)[-2000:], 400)})
+                        "tail": "" if done.returncode == 0 else scrub((done.stdout + done.stderr)[-2000:], 400),
+                        "failed_tests": [] if done.returncode == 0 else failed_test_ids(done.stdout + done.stderr)})
     record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
               "ok": clean and all(item["exit_code"] == 0 for item in results), "commands": results}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1949,8 +1967,9 @@ def proof_problems(root: Path, task: str) -> tuple[list[str], dict]:
         problems.append("the proof ran on a tree with uncommitted changes; commit and run prove again")
     if not clean:
         problems.append("tracked files changed since HEAD; commit and run prove again")
-    problems += [f"`{item['command']}` exited {item['exit_code']}" for item in record.get("commands", [])
-                 if item.get("exit_code") != 0]
+    problems += [f"`{item['command']}` exited {item['exit_code']}"
+                 + (f"; failed: {', '.join(item['failed_tests'])}" if item.get("failed_tests") else "")
+                 for item in record.get("commands", []) if item.get("exit_code") != 0]
     if not record.get("commands"):
         problems.append("the proof record holds no command")
     return problems, record

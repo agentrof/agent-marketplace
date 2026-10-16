@@ -1,0 +1,6 @@
+{
+  "summary": "stamp-item and the Delivery architecture delta check now read a claimed record kind such as interface as its record type, so an Item that claims an interface record can stamp its architecture delta; a delta outside the claimed kinds still refuses.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

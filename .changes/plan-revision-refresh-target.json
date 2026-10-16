@@ -1,0 +1,6 @@
+{
+  "summary": "refresh-target now accepts a story, test plan or Process Policy that a held plan revision has already re-pinned locally to the target's bytes, and takes the target copy, so a backlog revision approved mid-Delivery no longer deadlocks publish-execution-plan against refresh-target.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

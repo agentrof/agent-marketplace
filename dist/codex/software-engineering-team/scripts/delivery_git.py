@@ -2569,10 +2569,24 @@ def require_unsuperseded_approval(kinds: dict[str, str], published: dict | None,
         props = local_contract(path)
         revision = props.get("revision") if isinstance(props.get("revision"), int) else 0
         if copy["revision"] > revision or (copy["revision"] == revision
-                                           and copy.get("source_hash") != props.get("source_hash")):
+                                           and copy.get("source_hash") != props.get("source_hash")
+                                           and not repaired_only(copy, props)):
             replacement = ("a different " if copy["revision"] == revision else "its ") + f"{props.get('status')} revision {revision}"
             raise RuntimeError(f"DELIVERY_PLAN_SUPERSEDED: {holds([path])}, which this checkout would replace "
                                f"with {replacement}; {remedy}")
+
+
+def repaired_only(copy: dict, props: dict) -> bool:
+    """Tell whether *props* is the Integration's *copy* re-paired with a later Environment Contract.
+
+    re-pair keeps the revision and restamps only the pairing and the source_hash, under the
+    ruling that approved the Environment revision, so it is not a different approval.
+    """
+    import operation_compile
+    held, pairing = copy.get(operation_compile.PAIRED_FIELDS[0]), props.get(operation_compile.PAIRED_FIELDS[0])
+    restamped = {"source_hash", *operation_compile.PAIRED_FIELDS}
+    return (isinstance(held, int) and isinstance(pairing, int) and pairing > held
+            and all(copy.get(key) == props.get(key) for key in (copy.keys() | props.keys()) - restamped))
 
 
 def sealed_item_records(root: Path, directory: Path, integration_oid: str) -> set[str]:
@@ -2605,14 +2619,15 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
                            remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
     refuse_merged_delivery(root, delivery_id, remote)
-    from delivery_compile import delivery_findings, docs_root
+    from delivery_compile import delivery_findings, docs_root, pending_owner_questions
     docs = docs_root(root)
     directory, findings = delivery_findings(docs, delivery_id)
     if directory is None or findings:
         raise RuntimeError("Delivery package is not portable: " + "; ".join(findings))
     delivery_path_value = directory / "delivery.md"
     from delivery_compile import split_note
-    props, _ = split_note(delivery_path_value)
+    props, body = split_note(delivery_path_value)
+    owner_questions = pending_owner_questions(body)
     if props.get("status") != "execution_approved":
         raise RuntimeError("publish-execution-plan requires execution_approved")
     refs = canonical_refs(delivery_id)
@@ -2651,6 +2666,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
                                (refs["integration"], integration_oid, integration_candidate)])
     return {"ok": True, "delivery": delivery_id, "fence": fence_candidate,
             "integration": integration_candidate, "operation_not_carried": not_carried,
+            **({"owner_questions": owner_questions} if owner_questions else {}),
             "refs": short_refs(delivery_id)}
 
 
@@ -2913,7 +2929,8 @@ def integration_item_paths(root: Path, directory: Path, integration: str) -> lis
 
 
 def target_input_bindings(root: Path, directory: Path, integration: str,
-                          target: str, changed: list[str]) -> dict[str, dict]:
+                          target: str, changed: list[str],
+                          barrier_pins: dict[str, str] | None = None) -> dict[str, dict]:
     """Reject changed pinned inputs while leaving unchanged target drafts alone."""
     import backlog_compile
     import operation_compile
@@ -2952,6 +2969,10 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
         if path not in changed:
             continue
         props, digest = split_remote_note(root, target, path, reader)
+        if (barrier_pins and barrier_pins.get(relative) == digest
+                and props.get("status") == status and props.get("source_hash") == digest):
+            # The held plan revision already re-pinned this input to the target's bytes.
+            continue
         require_pinned_input(path, props, digest, expected, status)
     # The Process Policy pin is compared only while a new execution approval can
     # re-pin it. From the Delivery Review on it records the policy the Delivery
@@ -2967,6 +2988,9 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
                                      capture_output=True, check=False).returncode == 0
             if present:
                 props, body = split_remote_note(root, target, path, process_policy.parse)
+                held = (barrier_pins or {}).get(relative)
+                if held:
+                    pinned = held
                 current = (props.get("status") == "approved" and pinned is not None
                            and props.get("source_hash") == pinned == process_policy.policy_hash(props, body))
             else:
@@ -3024,6 +3048,27 @@ def refreshed_claim_updates(root: Path, remote: str, delivery_id: str, directory
     return updates
 
 
+def plan_revision_pins(directory: Path, fence_message: str) -> dict[str, str]:
+    """Story and Test Plan pins of the locally approved Item records while a plan revision is held."""
+    if (trailer(fence_message, "Barrier-Kind") or "none") != "plan-revision":
+        return {}
+    from delivery_compile import split_note, delivery_findings
+    pins: dict[str, str] = {}
+    delivery, _body = split_note(directory / "delivery.md")
+    if delivery.get("status") != "execution_approved" or delivery_findings(
+            directory.parents[2], str(delivery.get("id", "")))[1]:
+        return {}
+    if delivery.get("process_policy_source_hash"):
+        pins[str(delivery.get("process_policy_path") or "delivery/process-policy.md")] = str(
+            delivery["process_policy_source_hash"])
+    for item in sorted((directory / "items").glob("*/item.md")):
+        props, _body = split_note(item)
+        for kind in ("story", "test_plan"):
+            if props.get(kind + "_path") and props.get(kind + "_source_hash"):
+                pins[str(props[kind + "_path"])] = str(props[kind + "_source_hash"])
+    return pins
+
+
 def refresh_target(project_root: Path, delivery_id: str,
                    remote: str = "origin") -> dict:
     """Merge a fresh target tip into one open Delivery under the Fence lease.
@@ -3065,7 +3110,13 @@ def refresh_target(project_root: Path, delivery_id: str,
     if not integrated:
         previous_target = unique_merge_base(root, integration_oid, target)
     changed = _changed_target_paths(root, previous_target, target)
-    operation_bindings = target_input_bindings(root, directory, integration_oid, target, changed)
+    barrier_pins = (plan_revision_pins(directory, fence_message)
+                    if trailer(fence_message, "Barrier-Kind") == "plan-revision"
+                    and held_plan_revision_epoch(root, remote, delivery_id,
+                                                  {refs["fence"]: fence_oid, refs["integration"]: integration_oid})
+                    else {})
+    operation_bindings = target_input_bindings(root, directory, integration_oid, target, changed,
+                                               barrier_pins)
     claimed: dict[str, str] = {}
     item_records: dict[str, dict] = {}
     for item_path in integration_item_paths(root, directory, integration_oid):
@@ -3094,6 +3145,9 @@ def refresh_target(project_root: Path, delivery_id: str,
          "Target-Impact-Hash": "none", "Refresh-Kind": "disjoint"},
         delivery_projections=True, operation_bindings=operation_bindings,
         preserve_delivery=directory,
+        # Inputs the held plan revision re-pinned to the target take the target's bytes.
+        prefer_second=tuple(sorted("workspace/docs/" + path for path in barrier_pins
+                                   if "workspace/docs/" + path in changed)),
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Refresh project target",
@@ -3381,6 +3435,15 @@ def finish_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     return {"ok": True, "mode": "open", "fence": candidate, "target": target}
 
 
+def prior_governance_hash(root: Path, fence_oid: str) -> str:
+    """The Governance-Hash of the newest first-parent Fence commit outside governance mode."""
+    for oid in run_git(root, "rev-list", "--first-parent", fence_oid).split():
+        message = commit_message(root, oid)
+        if trailer(message, "Mode") != "governance":
+            return trailer(message, "Governance-Hash") or "none"
+    return "none"
+
+
 def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     """Abort only an acquired handoff whose external write never began or took no effect.
 
@@ -3394,6 +3457,7 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     if values["Mode"] not in {"source_handoff", "governance", "upgrade"}:
         raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
     receipt_path, lock_path = target_receipt_paths(root, values["Mode"])
+    was_governance = values["Mode"] == "governance"
     intent, attempt = values["Target-Update-Intent"], values["Target-Update-Attempt"]
     with contextlib.ExitStack() as held:
         if intent != "none":
@@ -3428,6 +3492,9 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
                        "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
                        "Upgrade-Phase": "none",
                        "Upgrade-Contract": "none", "Handoff-Target": "none"})
+        if was_governance:
+            # An aborted governance handoff never reached the target: keep the hash it replaced.
+            values["Governance-Hash"] = prior_governance_hash(root, fence_oid)
         candidate = _fence_child(root, fence_oid, values, "Abort source handoff")
         atomic_push(root, remote, [(ref, fence_oid, candidate)])
         if intent != "none":
@@ -4007,6 +4074,9 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
         claimed, holder = item_claim(root, remote, delivery_id, story)
+        if claimed and holder == delivery_id:
+            # A plan revision that adds Items keeps this Delivery's earlier claims.
+            continue
         require_claimable(story, claimed, holder, delivered)
         item_props, item_body = split_note(item_path)
         item_props["integration_base_commit"] = marker
@@ -4126,7 +4196,7 @@ def require_architecture_delta(architecture: Path, item_props: dict, story_id: s
         if findings:
             raise RuntimeError("Item Architecture sealed records are invalid: " + "; ".join(findings))
         components = set(item_props.get("architecture_components", []))
-        kinds = set(item_props.get("architecture_record_kinds", []))
+        kinds = architecture_compile.record_types(item_props.get("architecture_record_kinds", []))
         if not delta.get("records") or not components or not kinds:
             raise RuntimeError("Item Architecture requires a nonempty claimed delta")
         for row in delta["records"]:
@@ -4239,7 +4309,11 @@ def require_carried_control_paths(changed: list[str], relative_item: str, carrie
 def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, str, dict, str],
                           published: tuple[str, str, dict, str] | None = None) -> None:
     """Permit an Item record change only as its Architecture stamp, or as the record of the
-    converged Integration commit whose control note is *published*, keeping its lifecycle and stamp."""
+    converged Integration commit whose control note is *published*, keeping its lifecycle and stamp.
+
+    The generated relation block is not compared: render-relations owns it, and the
+    stamp's source_hash already leaves it out."""
+    from ba_compile import without_generated_relations
     from delivery_compile import content_hash
     if published is None:
         versions = []
@@ -4255,7 +4329,7 @@ def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, 
                 raise RuntimeError("Item publication frontmatter is invalid: no closing delimiter line")
             header, body_text = parts
             header = re.sub(r"(?m)^(?:architecture_delta_hash|source_hash):[^\n]*\n?", "", header)
-            versions.append((mode, header.rstrip("\n"), body_text))
+            versions.append((mode, header.rstrip("\n"), without_generated_relations(body_text).rstrip()))
         if versions[0] != versions[1]:
             raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp")
         return
@@ -4267,7 +4341,8 @@ def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, 
     if (props.get("architecture_delta_hash") != previous.get("architecture_delta_hash")
             and props.get("architecture_impact") != "required"):
         raise RuntimeError("only a required Architecture Item may publish its stamp")
-    if (mode != previous_mode or body != published_body
+    if (mode != previous_mode
+            or without_generated_relations(body).rstrip() != without_generated_relations(published_body).rstrip()
             or plan_owned_item_fields(props) != plan_owned_item_fields(published)
             or item_lifecycle(props) != item_lifecycle(previous)):
         raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp "

@@ -137,6 +137,23 @@ catch-all path, changed since that base; the others take the base run's
 passed cases under bindings QA's final evidence check enforces. The steps are
 in `qa-verification/references/switch-live_case_reuse-delta_since_green.md`.
 
+Process switch `live_verification` runs the live groups in every story QA pass
+at `every_pass`. At `delivery_integration`, a pass runs no live test and records
+`live: deferred_to_integration`; the Delivery runs one impact-selected live run
+after every Item integrates. Switch `item_live_gate` adds no Item live run at
+`off`; at `tooling_items`, an Item that changes environment tooling runs its
+affected live groups once before merge. The steps are in
+`qa-verification/references/switch-live_verification-delivery_integration.md`
+and `qa-verification/references/switch-item_live_gate-tooling_items.md`.
+
+Process switch `pass_carry_over` keeps nothing between passes at `off`. At
+`per_item`, the runner adds every pass record the approved test or live
+command writes to the Item's carry-over record, failed passes included, and
+names that record to the next pass in `AGENTROF_CARRY_OVER_RECORD`; the
+project's command carries a case only on unchanged inputs, and a missing record
+counts no case as passed. The steps are in
+`qa-verification/references/switch-pass_carry_over-per_item.md`.
+
 Process switch `repair_review` decides when a corrected candidate receives an
 independent correctness review. `after_freeze`, the default, keeps the review
 inside the next full pass. At `before_freeze`, a fresh reader checks the repair
@@ -144,6 +161,31 @@ diff and previous findings before the candidate is frozen. A missing, stale or
 blocking result prevents freeze; passing minor findings carry into the full
 review. The regular reader panel, calibration and QA still run.
 `code-review/references/switch-repair_review-before_freeze.md` defines the steps.
+
+Process switch `item_verification` decides who verifies a frozen Item
+candidate. `separate`, the default, keeps an independent code reviewer and an
+independent QA reader. At `single_verifier`, one fresh verifier reviews the
+diff, runs QA's approved commands and registers both results together; only
+a critical finding blocks and every other finding is a follow-up issue.
+`deliver/references/switch-item_verification-single_verifier.md` defines the
+steps.
+
+Process switch `repair_pass` decides what a repaired candidate re-runs.
+`full_pass`, the default, runs the full code review and QA again. At
+`scoped_repair`, a repair of findings below critical whose pre-freeze repair
+review and touched-suites run passed is frozen and settled from that evidence,
+with no new reader pass over unchanged scope; a runtime Item or a critical
+finding still takes the full pass.
+`deliver/references/switch-repair_pass-scoped_repair.md` defines the steps.
+
+Process switch `finding_disposition` decides what a Delivery finding below
+critical costs. `next_pass`, the default, repairs every blocking finding and
+runs a new verification pass. At `follow_up_issue` only a critical finding
+blocks: each major or minor finding is a complete follow-up that the
+evidence records and the Delivery Review list, the coordinator files it as a
+project issue, and the Item integrates in the same pass.
+`deliver/references/switch-finding_disposition-follow_up_issue.md` defines
+the steps.
 
 What a backlog epic reviewer reads is process switch `review_manifest_scope`.
 At `transitive`, the default, every note the epic's manifest includes expands
@@ -614,6 +656,10 @@ option: the session records it with `autopilot.py record` first, then applies
 it and writes it where the flow records the user's answer, marked with the
 grant id. `record` and `queue` apply the grant's end conditions first, its goal
 included, and refuse once it has ended.
+An explicit `queue --hold "<reason>"` keeps an uncertain question pending.
+Without a hold, `queue` records an allowed recommendation as a decision, which
+the session writes into the governing document before applying it. Independent
+excluded effects stay in separate questions.
 Any other question is queued with `autopilot.py queue`, and the session
 continues the work that does not depend on it and stops only when every
 remaining task waits on a queued question. Roles are unaffected: they never
@@ -625,7 +671,13 @@ the flow's own merge step on its recorded PR head, never a provider or Git
 merge of another head; no grant waives evidence, integration, the PR record or
 Delivery closure, and a Delivery is complete only when `closure-audit` returns
 `closed`. `release` and
-`phase_start` are excluded by default, and a grant may allow them.
+`phase_start` are excluded by default, and a grant may allow them. An entry
+that ends by naming the next entry asks no question; under a grant that allows
+`phase_start` the session records `record --class phase_start --entry <next>
+--after <kind>:<id>` and then runs that entry. The policy's `phase_starts`
+lists each entry the session may start and the states the closed phase's
+owning compiler must read, so `record` refuses a start while that phase is
+still open. A grant never starts a new Requirement.
 `credentials`, `security_settings`, `spending`, `destructive` and
 `scope_or_rule`, which holds every decision a flow asks at once, are never
 delegated, and `on` refuses a grant that allows one. A grant ends at a time,

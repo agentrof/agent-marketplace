@@ -1,0 +1,6 @@
+{
+  "summary": "At review_rounds single_pass the backlog compiler now refuses a recheck record or a new draft review round that follows a pass with no critical finding, so a major or minor finding becomes a follow-up instead of another round.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -58,6 +58,10 @@ one, and read it once the command ends:
   taken before the declaration is never reused.
 - `freeze` refuses a pre-handoff run that is not intact and names the groups
   its report lacks.
+- At `own_target_reuse` `accept_record`, a final test run that accepts the
+  full-suite pre-handoff run without launching the command records that run's
+  group report, only when it binds the same declaration and every declared
+  group passed; otherwise the command runs and writes its own.
 - Evidence approval refuses a final test run whose identity does not bind
   the declared groups and report path, whose record lacks a declared group, or
   that records a group `missing`, `not_collected` or `failed`.

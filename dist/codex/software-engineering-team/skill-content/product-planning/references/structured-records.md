@@ -147,6 +147,19 @@ parameter, and no parameter is named twice; `touches` is allowed when any item
 is `changes`. Both fields are optional; `backlog_compile.py check` and
 `approve` refuse any other value.
 
+Three optional markers let `backlog_compile.py precheck` catch, before any
+reader runs, what a review round would otherwise be spent on.
+`story_criteria: 1, 3-5` names the story's Acceptance items, counted from 1,
+that a scenario verifies; once any scenario of a test plan declares it, every
+Acceptance item needs one and no number may exceed the list. A scenario that
+declares `rows: N` and lists its rows in its Given or When text after `rows:`
+or `in rows:`, separated by semicolons, lists exactly N. A story line
+`Supplies: \`<deliverable>\`` names a deliverable it alone supplies; two
+stories naming one key fail. `precheck` also refuses a story note linked in
+`Dependencies` but absent from `depends_on`, and a root backlog sentence
+"N epics" or "N stories with N sibling test plans" whose counts differ from
+the package.
+
 Only when switch `backlog_path` is at `light_when_eligible` and the backlog
 is in Requirement mode, `backlog_compile.py stub-story <epic> <slug> --docs
 <workspace>/docs --from-requirement` writes the story and its test plan from

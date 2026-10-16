@@ -279,6 +279,19 @@ class LiveCaseReuseTests(unittest.TestCase):
 
 
 
+class CarryOverShapeTests(unittest.TestCase):
+    def test_malformed_passes_do_not_become_carry_over_evidence(self):
+        entry = {"schema_version": 1, "project_key": "p", "delivery_id": "DLV-001", "item_id": "AUTH-01",
+                 "run_id": "r", "product_commit": "a" * 40, "candidate_hash": "sha256:" + "b" * 64,
+                 "carried": [], "fresh": [{"case_id": "tests/t.py::test_a", "outcome": "passed",
+                                           "input_paths": ["tests/t.py"], "input_digest": "sha256:" + "c" * 64}]}
+        self.assertTrue(verification.valid_carry_over_pass(entry))
+        for change in ({"fresh": [{}]}, {"product_commit": "foreign"}, {"candidate_hash": None},
+                       {"carried": entry["fresh"]}, {"schema_version": True}):
+            with self.subTest(change=change):
+                self.assertFalse(verification.valid_carry_over_pass({**entry, **change}))
+
+
 @integration
 class PassCarryOverTests(unittest.TestCase):
     """At pass_carry_over per_item the runner keeps each pass record, a failed pass's passed cases included,
@@ -303,7 +316,7 @@ class PassCarryOverTests(unittest.TestCase):
                    "print('RECORD', '-' if named is None else len(kept['passes']) if kept else 0)\n"
                    "head = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()\n"
                    "case = lambda name, outcome: {'case_id': 'tests/t.py::' + name, 'outcome': outcome,\n"
-                   "                              'input_paths': ['tests/t.py'], 'input_digest': 'sha256:1'}\n"
+                   "                              'input_paths': ['tests/t.py'], 'input_digest': 'sha256:' + '1' * 64}\n"
                    "pathlib.Path(os.environ['AGENTROF_VERIFICATION_SCRATCH'], 'carry-over-pass.json').write_text(\n"
                    "    json.dumps({'schema_version': 1, 'project_key': 'p', 'delivery_id': os.environ['AGENTROF_DELIVERY_ID'],\n"
                    "                'item_id': os.environ['AGENTROF_ITEM_ID'], 'run_id': head, 'product_commit': head,\n"
@@ -345,7 +358,7 @@ class PassCarryOverTests(unittest.TestCase):
                          verification.digest({**kept, "candidate_hash": second_candidate["candidate_hash"]}))
         passes = verification.read_carry_over_record(self.root)["passes"]
         self.assertEqual([row["candidate_hash"] for row in passes],
-                         [None, second_candidate["candidate_hash"]])
+                         [frozen["candidate"]["candidate_hash"], second_candidate["candidate_hash"]])
 
     def test_without_the_switch_no_record_is_named_or_kept(self):
         self.declare()
@@ -357,11 +370,11 @@ class PassCarryOverTests(unittest.TestCase):
         self.assertNotIn("AGENTROF_CARRY_OVER_RECORD", run["identity"]["environment_variables"])
 
     def test_a_pass_record_of_another_item_is_not_kept(self):
-        current = {"delivery": "DLV-001", "story": "AUTH-01", "candidate_hash": "sha256:c"}
+        current = {"delivery": "DLV-001", "story": "AUTH-01", "candidate_hash": "sha256:" + "c" * 64, "product_commit": "a" * 40}
         scratch = verification.session_path(self.root).parent / "scratch"
         scratch.mkdir(parents=True)
         entry = {"schema_version": 1, "project_key": "p", "delivery_id": "DLV-001", "item_id": "AUTH-02",
-                 "run_id": "r", "product_commit": "c", "carried": [], "fresh": []}
+                 "run_id": "r", "product_commit": "a" * 40, "carried": [], "fresh": []}
         (scratch / "carry-over-pass.json").write_text(json.dumps(entry))
         self.assertIsNone(verification.keep_carry_over_pass(self.root, current))
         (scratch / "carry-over-pass.json").write_text(json.dumps({**entry, "item_id": "AUTH-01"}))

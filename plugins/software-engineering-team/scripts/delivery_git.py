@@ -3036,9 +3036,12 @@ def plan_revision_pins(directory: Path, fence_message: str) -> dict[str, str]:
     """Story and Test Plan pins of the locally approved Item records while a plan revision is held."""
     if (trailer(fence_message, "Barrier-Kind") or "none") != "plan-revision":
         return {}
-    from delivery_compile import split_note
+    from delivery_compile import split_note, delivery_findings
     pins: dict[str, str] = {}
     delivery, _body = split_note(directory / "delivery.md")
+    if delivery.get("status") != "execution_approved" or delivery_findings(
+            directory.parents[2], str(delivery.get("id", "")))[1]:
+        return {}
     if delivery.get("process_policy_source_hash"):
         pins[str(delivery.get("process_policy_path") or "delivery/process-policy.md")] = str(
             delivery["process_policy_source_hash"])
@@ -3091,7 +3094,11 @@ def refresh_target(project_root: Path, delivery_id: str,
     if not integrated:
         previous_target = unique_merge_base(root, integration_oid, target)
     changed = _changed_target_paths(root, previous_target, target)
-    barrier_pins = plan_revision_pins(directory, fence_message)
+    barrier_pins = (plan_revision_pins(directory, fence_message)
+                    if trailer(fence_message, "Barrier-Kind") == "plan-revision"
+                    and held_plan_revision_epoch(root, remote, delivery_id,
+                                                  {refs["fence"]: fence_oid, refs["integration"]: integration_oid})
+                    else {})
     operation_bindings = target_input_bindings(root, directory, integration_oid, target, changed,
                                                barrier_pins)
     claimed: dict[str, str] = {}

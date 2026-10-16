@@ -1986,7 +1986,7 @@ print(sys.argv[1])
         # The partition variables of switch test_engines partitioned are per-run inputs too (#386).
         self.assertEqual(names, ("AGENTROF_LIVE_BASE", "AGENTROF_LIVE_BASE_COMMIT", "AGENTROF_LIVE_RESUME",
                                  "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS",
-                                 "AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE"))
+                                 "AGENTROF_CARRY_OVER_RECORD", "AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE"))
         with mock.patch.dict(os.environ, {"AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json",
                                           "AGENTROF_LIVE_BASE": "inherited-base.json",
                                           "AGENTROF_REUSED_TESTS": "inherited-reuse.json",

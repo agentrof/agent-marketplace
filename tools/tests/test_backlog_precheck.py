@@ -60,8 +60,9 @@ class PrecheckTests(unittest.TestCase):
         # A Test Plan that declares no story_criteria is never traced.
         self.assertEqual(backlog.precheck_findings(record(story("ST-001", A, scenarios=scenario(
             "ST-001", 1, Given="a precondition")))), [])
-        self.assertEqual(backlog.story_criterion_numbers("1, 3-5"), {1, 3, 4, 5})
-        self.assertIsNone(backlog.story_criterion_numbers("5-3"))
+        self.assertEqual(backlog.story_criterion_numbers("1, 3-5", 5), {1, 3, 4, 5})
+        self.assertIsNone(backlog.story_criterion_numbers("5-3", 5))
+        self.assertEqual(backlog.story_criterion_numbers("1-1000000000000", 3), {1, 2, 3, 1000000000000})
 
     def test_rows_must_match_the_row_list(self):
         plan = (scenario("ST-001", 1, rows="3", Given="three groups in rows: equal; one over")

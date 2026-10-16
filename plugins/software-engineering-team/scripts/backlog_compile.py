@@ -4145,7 +4145,7 @@ ROOT_EPIC_COUNT_RE = re.compile(r"\b(?:retains|contains|holds) ([0-9]+) epics\b"
 WIKILINK_TARGET_RE = re.compile(r"\[\[([^\[\]|#\n]+)")
 
 
-def story_criterion_numbers(value: str) -> set[int] | None:
+def story_criterion_numbers(value: str, maximum: int) -> set[int] | None:
     """The story Acceptance item numbers a scenario's story_criteria lists, or None when malformed."""
     if not CRITERIA_LIST_RE.fullmatch(value):
         return None
@@ -4155,7 +4155,9 @@ def story_criterion_numbers(value: str) -> set[int] | None:
         first, last = int(low), int(high or low)
         if last < first:
             return None
-        numbers.update(range(first, last + 1))
+        # Keep invalid endpoints for diagnostics without expanding an untrusted range.
+        numbers.update((first, last))
+        numbers.update(range(first, min(last, maximum) + 1))
     return numbers
 
 
@@ -4183,7 +4185,7 @@ def precheck_findings(record: dict) -> list[str]:
             fields = scenario_fields(block)[0]
             if "story_criteria" in fields:
                 declared = True
-                numbers = story_criterion_numbers(fields["story_criteria"])
+                numbers = story_criterion_numbers(fields["story_criteria"], items)
                 if numbers is None:
                     findings.append(f"{plan} scenario {scenario} story_criteria must list Acceptance item"
                                     f" numbers such as 1, 3-5: {fields['story_criteria']}")

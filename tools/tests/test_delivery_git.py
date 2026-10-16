@@ -5409,6 +5409,13 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
         delivery_git.begin_plan_revision(project, "DLV-001")
+        record = directory / "delivery.md"
+        saved = record.read_text(encoding="utf-8")
+        props, body = delivery_compile.split_note(record)
+        record.write_text(delivery_compile.frontmatter({**props, "status": "scope_approved"}, body), encoding="utf-8")
+        fence_text = delivery_git.commit_message(project, delivery_git.remote_oid(project, "origin", refs["fence"]))
+        self.assertEqual(delivery_git.plan_revision_pins(directory, fence_text), {})
+        record.write_text(saved, encoding="utf-8")
         refreshed = delivery_git.refresh_target(project, "DLV-001")
         # The story's generated relation section is re-rendered on the Integration; its authored bytes are the target's.
         carried_story = delivery_git.run_git(project, "show", f"{refreshed['integration']}:{story_path}") + "\n"

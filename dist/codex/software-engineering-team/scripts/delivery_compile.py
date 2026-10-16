@@ -3301,8 +3301,9 @@ def approve_review(args) -> int:
     delivery_path_value = root / "delivery.md"
     delivery_props, delivery_body = split_note(delivery_path_value)
     try:
+        from delivery_verification import follow_up_disposition
         review_loop = delivery_switch_value(docs, args.delivery, REVIEW_LOOP)
-        follow_up_issue = delivery_switch_value(docs, args.delivery, "finding_disposition") == "follow_up_issue"
+        follow_up_issue = follow_up_disposition(docs.parent.parent, args.delivery)
     except ValueError as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
     # Gate B presents the decision log and asks every queued question before this write.

@@ -1164,6 +1164,8 @@ def scoped_repair_refusal(root: Path, delivery_id: str, story: str, previous: di
     old = previous["candidate"]
     if (old["delivery"], old["story"]) != (delivery_id, story):
         return "the earlier verification pass belongs to another Item"
+    if any(old.get(key) != current.get(key) for key in ("inputs", "instruction_identity")):
+        return "changed source or instruction bindings need a full verification pass"
     if current["runtime_required"]:
         # shortcut: a runtime Item always takes a full pass; upgrade when live evidence can be scoped.
         return "a runtime_required Item needs a full pass with fresh runtime evidence"
@@ -2148,14 +2150,48 @@ def carry_over_record_path(root: Path) -> Path:
     return safe_runtime_path(root, session_path(root).parent / CARRY_OVER_RECORD, file_only=True)
 
 
-def read_carry_over_record(root: Path) -> dict | None:
+def valid_carry_over_pass(value: object) -> bool:
+    if not isinstance(value, dict) or type(value.get("schema_version")) is not int or value["schema_version"] != 1:
+        return False
+    if any(not isinstance(value.get(key), str) or not value[key].strip()
+           for key in (*CARRY_OVER_OWNER, "run_id", "product_commit", "candidate_hash")):
+        return False
+    if not re.fullmatch(r"[0-9a-f]{40,64}", value["product_commit"]):
+        return False
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", value["candidate_hash"]):
+        return False
+    for name in ("carried", "fresh"):
+        if not isinstance(value.get(name), list):
+            return False
+        for case in value[name]:
+            if (not isinstance(case, dict)
+                    or any(not isinstance(case.get(key), str) or not case[key].strip()
+                           for key in ("case_id", "outcome", "input_digest"))
+                    or not isinstance(case.get("input_paths"), list)
+                    or any(not isinstance(path, str) or not delivery._is_normalized_claim(path)
+                           for path in case["input_paths"])
+                    or not re.fullmatch(r"sha256:[0-9a-f]{64}", case["input_digest"])):
+                return False
+    identities = [case["case_id"] for name in ("carried", "fresh") for case in value[name]]
+    return len(set(identities)) == len(identities)
+
+
+def read_carry_over_record(root: Path, current: dict | None = None) -> dict | None:
     """The Item's carry-over record, kept across verification sessions, or None."""
     try:
         value = json.loads(carry_over_record_path(root).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return value if isinstance(value, dict) and value.get("schema_version") == 1 \
-        and isinstance(value.get("passes"), list) else None
+    if (not isinstance(value, dict) or value.get("schema_version") != 1
+            or not isinstance(value.get("passes"), list)
+            or any(not isinstance(value.get(key), str) or not value[key].strip() for key in CARRY_OVER_OWNER)
+            or not isinstance(value.get("candidate_hash"), str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", value["candidate_hash"])
+            or any(not valid_carry_over_pass(entry)
+                   or any(entry[key] != value[key] for key in CARRY_OVER_OWNER) for entry in value["passes"])
+            or current is not None and (value["delivery_id"], value["item_id"]) != (current["delivery"], current["story"])):
+        return None
+    return value
 
 
 def keep_carry_over_pass(root: Path, current: dict) -> dict | None:
@@ -2169,12 +2205,15 @@ def keep_carry_over_pass(root: Path, current: dict) -> dict | None:
         entry = json.loads(raw_output_path(root, CARRY_OVER_PASS).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if (not isinstance(entry, dict) or entry.get("schema_version") != 1
-            or any(not isinstance(entry.get(key), str) for key in (*CARRY_OVER_OWNER, "run_id", "product_commit"))
-            or any(not isinstance(entry.get(key), list) for key in ("carried", "fresh"))
-            or (entry["delivery_id"], entry["item_id"]) != (current["delivery"], current["story"])):
+    if (not isinstance(entry, dict)
+            or entry.get("product_commit") != current["product_commit"]
+            or entry.get("candidate_hash") is not None and entry.get("candidate_hash") != current["candidate_hash"]
+            or (entry.get("delivery_id"), entry.get("item_id")) != (current["delivery"], current["story"])):
         return None
-    record = read_carry_over_record(root)
+    entry["candidate_hash"] = current["candidate_hash"]
+    if not valid_carry_over_pass(entry):
+        return None
+    record = read_carry_over_record(root, current)
     if record is None or any(record.get(key) != entry[key] for key in CARRY_OVER_OWNER):
         record = {"schema_version": 1, **{key: entry[key] for key in CARRY_OVER_OWNER}, "passes": []}
     record["candidate_hash"] = current["candidate_hash"]
@@ -2605,11 +2644,13 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                 environment["AGENTROF_LIVE_BASE_COMMIT"] = plan["base_commit"]
         carry_over = kind in {"test", "live_test"} and pass_carry_over(root, current["delivery"])
         if carry_over:
-            kept = read_carry_over_record(root)
+            kept = read_carry_over_record(root, current)
             if kept is not None:
                 # The command copies the candidate it runs on from the record into its pass record.
                 kept["candidate_hash"] = current["candidate_hash"]
                 atomic_file.replace_text(carry_over_record_path(root), json.dumps(kept, indent=2, sort_keys=True) + "\n")
+            else:
+                carry_over_record_path(root).unlink(missing_ok=True)
             environment["AGENTROF_CARRY_OVER_RECORD"] = str(carry_over_record_path(root))
         reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
                           if kind == "test" else (None, None))

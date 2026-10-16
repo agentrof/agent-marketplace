@@ -1837,6 +1837,19 @@ def live_checkpoint(root: Path) -> dict | None:
         return None
 
 
+def live_interruptions(root: Path, record_key: str, exit_code: int) -> dict:
+    """The host interruptions a live run's progress saw: advisory on every run, interrupted_by only on a failure."""
+    try:
+        shown = json.loads(live_progress_path(root, record_key).read_text(encoding="utf-8"))
+        seen = sorted({row["kind"] for row in shown.get("interruptions", [])
+                       if isinstance(row, dict) and row.get("kind") in INTERRUPTION_KINDS})
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {}
+    if not seen:
+        return {}
+    return {"interruptions_seen": seen, **({"interrupted_by": seen} if exit_code != 0 else {})}
+
+
 def resumable_live_run(record: dict | None, current: dict) -> bool:
     """A preflight-only failure, or a run the host interrupted, with the command's valid checkpoint."""
     return bool(record and (record.get("exit_code") == 2 or record.get("interrupted_by"))
@@ -2554,15 +2567,9 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             selection_intact = False
     if selection_intact is not None:
         intact = intact and selection_intact
-    interrupted_by = []
-    if group is not None and completed.returncode != 0:
-        try:
-            shown = json.loads(live_progress_path(root, record_key).read_text(encoding="utf-8"))
-            interrupted_by = sorted({row["kind"] for row in shown.get("interruptions", [])
-                                     if isinstance(row, dict) and row.get("kind") in INTERRUPTION_KINDS})
-        except (OSError, ValueError, AttributeError, TypeError):
-            pass
-    checkpoint = (live_checkpoint(root) if group is not None and (completed.returncode == 2 or interrupted_by)
+    interruptions = live_interruptions(root, record_key, completed.returncode) if group is not None else {}
+    checkpoint = (live_checkpoint(root)
+                  if group is not None and (completed.returncode == 2 or interruptions.get("interrupted_by"))
                   else None)
     with locked(root):
         session = read_session(root)
@@ -2582,8 +2589,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             record["reused_live_base"] = live_reuse
         if checkpoint is not None:
             record["live_checkpoint"] = checkpoint
-        if interrupted_by:
-            record["interrupted_by"] = interrupted_by
+        record.update(interruptions)
         if getattr(completed, "host_awake", None):
             record["host_awake"] = completed.host_awake
         if resume:

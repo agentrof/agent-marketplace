@@ -215,9 +215,11 @@ and runs the command anyway. A live run's heartbeat then compares a clock that
 counts host sleep with one that does not and records a `host_sleep`
 interruption in its live progress. `reachability_probe: <host>:<port>` names
 a DNS and TCP target the live run probes every 30 seconds; while it fails, a
-`network_loss` interruption stays open. A failed live run that saw either
-records `interrupted_by`, and with a valid preflight checkpoint it takes the
-one resume above. Neither key is a product verdict or a required check.
+`network_loss` interruption stays open. Every live run record that saw either,
+a passing one included, names the kinds in the advisory `interruptions_seen`.
+A failed live run that saw either also records `interrupted_by`, and with a
+valid preflight checkpoint it takes the one resume above. Neither key is a
+product verdict or a required check.
 
 A Verification Contract may declare the live impact map a pass uses to reuse
 green live groups in `live_group_paths`: unique `<group>=<glob>` entries

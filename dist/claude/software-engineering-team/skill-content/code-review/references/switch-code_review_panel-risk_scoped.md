@@ -50,9 +50,12 @@ when any of its lenses does.
    its result with `result`, as at `single_reader`, and `panel-result` and
    `merge-panel` refuse.
 
-Each pass evaluates the triggers on the Item's whole frozen change against its
-base, so a repair round keeps every lens an earlier round brought in unless
-the repair shrinks the change below a trigger.
+The first pass evaluates the Item's whole frozen change against its base.
+A repair pass evaluates the delta from the last candidate whose code reviewer
+settled, including a failed review. A cancelled review is not a baseline.
+Changed source or instruction bindings, a missing commit or a baseline that is
+not an ancestor fall back to the whole Item. A repair that touches a risk path
+still brings in its matching lens; an unchanged risk path does not.
 
 ## Measurement
 

@@ -107,6 +107,27 @@ as the Integration holds them, and keeps its Item record unless the approval
 started from that sealed record, so take the sealed records from the
 Integration before approving a change to a sealed Item.
 
+A backlog revision that an active Delivery's Items pin, such as a Test Plan
+fix, runs in this order with `delivery_git.py`:
+
+1. `begin-source-handoff --source-kind backlog_revision` moves the open Fence
+   to `source_handoff`. While it is held, `start-item`, `resume-item`,
+   `reopen-item`, `takeover-item` and `refresh-target` refuse with
+   `DELIVERY_FENCE_MODE`.
+2. Author, review and approve the backlog revision in the source checkout and
+   open its pull request.
+3. `authorize-target-update` records that pull request as the carrier,
+   `apply-target-update` merges it and verifies the target, and
+   `finish-source-handoff` returns the Fence to `open`.
+4. `begin-plan-revision` needs that open Fence. Inside it, approve any
+   Operation revision the Items will pin, run `approve-execution` to re-pin
+   every Item's Story and Test Plan hashes from the revised backlog, then run
+   `refresh-target` to bring those exact inputs into the Integration. The
+   owning barrier and valid local approval authorize only those new pins;
+   without them changed pinned inputs still refuse. Publish with
+   `publish-execution-plan`, then run `finish-plan-revision`.
+5. Converge or resume the active Item.
+
 Switch `execution_planning`: at `single_source_bundle`, every execution-planning
 fact is written once, in the section that
 `skill-content/execution-plan/data/fact-ownership.json` names, and every other

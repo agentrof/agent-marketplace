@@ -522,16 +522,21 @@ RELEASED_DEFAULTS = {
     "dependent_rebind_gate": "separate",
     "epic_review_cadence": "wait_per_panel",
     "execution_planning": "per_document",
+    "finding_disposition": "next_pass",
     "implementation_schedule": "sequential_v1",
     "item_cost_report": "off",
+    "item_live_gate": "off",
+    "item_verification": "separate",
     "item_qa_tier": "full_per_item",
     "item_review_scale": "fixed",
     "lane_isolation": "shared_checkout",
     "lane_table": "off",
     "live_case_reuse": "off",
+    "live_verification": "every_pass",
     "level_change_map": "off",
     "mechanical_pass_tier": "role_tier",
     "own_target_reuse": "off",
+    "pass_carry_over": "off",
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
     "regression_plan_revision": "integrated",
@@ -542,6 +547,7 @@ RELEASED_DEFAULTS = {
     "rebind_review_scope": "full",
     "remediation_bookkeeping": "writer",
     "remediation_writers": "single_writer",
+    "repair_pass": "full_pass",
     "repair_review": "after_freeze",
     "review_loop": "current",
     "review_fanout": "single_reader",
@@ -569,6 +575,22 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "pass_carry_over": {
+        f"{SKILLS}/qa-verification/references/switch-pass_carry_over-per_item.md": (
+            "A missing, foreign or malformed record never counts a case as passed",
+            "carrying never replaces QA's independent assessment",
+        ),
+    },
+    "item_live_gate": {
+        f"{SKILLS}/qa-verification/references/switch-item_live_gate-tooling_items.md": (
+            "a failure blocks the merge",
+        ),
+    },
+    "live_verification": {
+        f"{SKILLS}/qa-verification/references/switch-live_verification-delivery_integration.md": (
+            "Every finding is repaired and re-run by impact before the Delivery closes",
+        ),
+    },
     "live_case_reuse": {
         f"{SKILLS}/qa-verification/references/switch-live_case_reuse-delta_since_green.md": (
             "A group with no entry is never reused",
@@ -592,6 +614,13 @@ SAFETY_RULES = {
             "A long-lived instance is trusted only once a fresh one has proven the same environment code",
             "so no Item is approved on long-lived evidence without fresh evidence of its environment code",
             "An interrupted command still requires `down` before anything else",
+        ),
+    },
+    "repair_pass": {
+        f"{SKILLS}/deliver/references/switch-repair_pass-scoped_repair.md": (
+            "no open finding of it is critical",
+            "the Item is not `runtime_required`",
+            "freezes nothing, and the coordinator runs the ordinary full pass",
         ),
     },
     "repair_review": {
@@ -847,10 +876,24 @@ SAFETY_RULES = {
             " leave it out of the result",
         ),
     },
+    "finding_disposition": {
+        f"{SKILLS}/deliver/references/switch-finding_disposition-follow_up_issue.md": (
+            "Only a finding of a `critical_severities` severity",
+            "a failing test, mutation or runtime check is never a follow-up",
+            "never in the package's upstream repository",
+        ),
+    },
     "item_cost_report": {
         f"{SKILLS}/deliver/references/switch-item_cost_report-per_step.md": (
             "A step whose start or end is not recorded is `missing`, never an estimate",
             "The table reports; it changes no gate, no verdict and no evidence",
+        ),
+    },
+    "item_verification": {
+        f"{SKILLS}/deliver/references/switch-item_verification-single_verifier.md": (
+            "The implementation writer never verifies its own candidate",
+            "Only a critical finding or a failing check makes the verdict `failed`",
+            "each result passing every check a separate reader's result passes, or neither does",
         ),
     },
     "item_qa_tier": {

@@ -2766,7 +2766,7 @@ PROCESS_SWITCHES_RELPATH = build_distributions.PROCESS_SWITCHES_RELPATH
 SWITCH_ANCHOR_RE = re.compile(r"\b[Ss]witch\s+`([a-z][a-z0-9_]*)`")
 SWITCH_REFERENCE_RE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}
-PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants", "parameters", "value_data",
+PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "measurement_only", "agent_variants", "parameters", "value_data",
                                 "reference_scope"}
 # A switch whose references every task of its owning flows binds, whichever
 # skill holds them, declares this reference_scope.
@@ -2979,6 +2979,8 @@ def process_switch_problems(data: object, flows: set[str], agents: set[str],
         unknown = sorted(set(spec) - PROCESS_SWITCH_KEYS - PROCESS_SWITCH_OPTIONAL_KEYS)
         if unknown:
             problems.append(f"{where}: unknown keys {unknown}")
+        if "measurement_only" in spec and spec["measurement_only"] is not True:
+            problems.append(f"{where}: measurement_only is true or absent")
         if not _nonblank(spec.get("summary")):
             problems.append(f"{where}: needs a summary of what it decides")
         if not _nonblank(spec.get("metric")):
@@ -3860,7 +3862,7 @@ def check_delivery_contract_shape(
         problems.append("control-record and subject registries differ")
     verification = contracts["delivery-verification-policy.json"]
     expected_keys = {"schema_version", "raw_evidence_max_age_seconds", "schedules", "legacy_schedule", "new_schedule",
-                     "blocking_severities", "nonblocking_severities", "review_checks", "qa_checks", "role_modes", "final_modes", "mutation_scope",
+                     "blocking_severities", "critical_severities", "nonblocking_severities", "review_checks", "qa_checks", "role_modes", "final_modes", "mutation_scope",
                      "wait_bound_seconds"}
     if set(verification) != expected_keys or verification.get("schema_version") != 1:
         problems.append("verification policy has an unsupported schema or field set")
@@ -3871,7 +3873,8 @@ def check_delivery_contract_shape(
     if (verification.get("review_checks") != ["correctness", "conformance", "security"]
             or verification.get("qa_checks") != ["full_test_suite", "coverage", "right_reason"]
             or verification.get("role_modes") != {"code_reviewer": ["review_initial", "review_repair"], "qa_engineer": ["qa_diagnostic", "qa_final"]}
-            or verification.get("final_modes") != {"code_reviewer": ["review_initial", "review_repair"], "qa_engineer": ["qa_final"]}):
+            or verification.get("final_modes") != {"code_reviewer": ["review_initial", "review_repair", "scoped_repair"],
+                                                   "qa_engineer": ["qa_final", "scoped_repair"]}):
         problems.append("verification final gates or independent role modes are invalid")
     age = verification.get("raw_evidence_max_age_seconds")
     if not isinstance(age, int) or isinstance(age, bool) or not 0 < age <= 86400:

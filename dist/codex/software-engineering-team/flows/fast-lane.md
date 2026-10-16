@@ -59,6 +59,22 @@ Each step names its `scripts/task_lane.py` verb. The task holds the
 request and approval times; GitHub holds the pull request, review, CI and
 merge times. Nothing is recorded after the merge.
 
+A task is `build` (code, devops, tests) or `knowledge` (documents only:
+analysis, design, architecture records, backlog, contracts). One request that
+needs both is two tasks, run side by side. Request-to-merge targets per kind
+and size are in `skill-content/deliver/data/targets.json` (knowledge 1/3/5,
+max 15 minutes; build 5/15/30, max 60) and `/retrospective` reports each task
+against its own.
+
+Knowledge task, the short path: `start --knowledge --size s|m|l`. The request
+is the approval: no criteria, no `approve`, no reviewer. The main session
+edits the documents itself and spawns the owning role only at size `l`;
+after a link change it runs `vault_check.py render-relations`, then the
+vault gate with `--changed-from origin/<base>`, `open-pr` and `merge`.
+Approval stamps are not re-verified at `fast_lane`: the file on the target
+branch is in force, and the gate checks schema, links and structure only for
+the trees the change touched.
+
 The task's `rigor` sets the verification:
 
 | Rigor | Reviewers | Live tests | Merge |

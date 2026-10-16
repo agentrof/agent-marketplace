@@ -8,6 +8,7 @@
     "requested_at": "datetime",
     "size": "text",
     "rigor": "text",
+    "task_kind": "text",
     "epic": "text",
     "source_story": "text",
     "covers": "multitext",

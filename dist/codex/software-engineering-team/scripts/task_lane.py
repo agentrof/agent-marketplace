@@ -63,10 +63,12 @@ STORIES = Path("workspace") / "docs" / "backlog" / "epics"
 BOARD = EXPORT / "board.md"
 DELIVERY_RE = re.compile(r"^DLV-[0-9]{3,}$")
 AC_RANGE = (3, 8)
-TARGET_MINUTES = 15
-# Request to merge targets in minutes: the average over every task, and the maximum
-# for a large (size l) task.
-TARGETS = {"average": 15, "large": 50}
+# knowledge: analysis, design, architecture, backlog and contract documents; build: code, devops, tests.
+KINDS = ("build", "knowledge")
+TARGETS_FILE = Path(__file__).resolve().parent.parent / "skill-content" / "deliver" / "data" / "targets.json"
+# Request to merge targets in minutes per kind: s, m, l, max and the average.
+TARGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["kinds"]
+TARGET_MINUTES = TARGETS["build"]["average"]
 HISTORY = EXPORT / "history.jsonl"
 LEDGER = Path(".agentrof") / "plugin-ledger.md"
 PENDING_UPSTREAM = "## Pending upstream"
@@ -159,8 +161,17 @@ def proposed_rigor(request: str) -> tuple[str, list[str]]:
 
 
 def task_text(task: str, title: str, request: str, requested_at: str, delivery: str,
-              rigor: str, epic: str = "", source_story: str = "", covers: list[int] | None = None) -> str:
+              rigor: str, epic: str = "", source_story: str = "", covers: list[int] | None = None,
+              kind: str = "build", size: str = "s") -> str:
     grouped = f"delivery: {delivery}\n" if delivery else ""
+    if kind == "knowledge":
+        # A knowledge task needs no separate approval: the owner's request is the approval.
+        return (f"---\ntype: {TASK_TYPE}\ntitle: {json.dumps(title)}\nstatus: active\nid: {task}\n"
+                f"task_kind: knowledge\nrequested_at: {requested_at}\napproved_at: {requested_at}\n"
+                f"size: {size}\nrigor: {rigor}\n{grouped}"
+                f"tags:\n  - doc/{TASK_TYPE}\n  - status/active\naliases:\n  - {task}\n---\n"
+                f"# {title}\n\n## Request\n\n{request.strip()}\n\n<!-- sec: nav -->\n## Navigation\n\n"
+                "- [[maps/backlog|Backlog]]\n")
     grouped += f"epic: {epic}\n" if epic else ""
     if source_story:
         grouped += f"source_story: {source_story}\ncovers:\n" + "".join(
@@ -199,6 +210,8 @@ def lint(path: Path) -> list[str]:
         errors.append(f"status must be one of {', '.join(TASK_STATUSES)}")
     if props.get("size") not in SIZES:
         errors.append(f"size must be one of {', '.join(SIZES)}")
+    if props.get("task_kind", "build") not in KINDS:
+        errors.append(f"task_kind must be one of {', '.join(KINDS)}")
     if props.get("rigor", "normal") not in RIGORS:
         errors.append(f"rigor must be one of {', '.join(RIGORS)}")
     for key in ("requested_at", "approved_at"):
@@ -224,6 +237,8 @@ def lint(path: Path) -> list[str]:
         errors.append("covers items must be positive criterion numbers")
     if not section(body, "Request"):
         errors.append("Request section is empty")
+    if props.get("task_kind") == "knowledge":
+        return errors
     criteria = [line for line in section(body, "Acceptance Criteria")
                 if re.match(r"^[0-9]+\.\s+\S", line)]
     if not AC_RANGE[0] <= len(criteria) <= AC_RANGE[1]:
@@ -367,6 +382,7 @@ def task_row(task: dict, pr: dict | None) -> dict:
     known = {step: value for step, value in steps.items() if value is not None}
     return {"task_id": task["id"], "title": task.get("title", ""), "size": task.get("size", ""),
             "rigor": task.get("rigor", "normal"), "delivery": task.get("delivery", ""),
+            "kind": task.get("task_kind", "build"),
             "pr": (pr or {}).get("pr", ""), **times,
             "total": minutes_between(times, "requested_at", "merged"), "steps": steps,
             "largest_step": max(known, key=known.get) if known else None,
@@ -527,12 +543,20 @@ def proposals(rows: list[dict]) -> list[dict]:
 
 
 def targets(rows: list[dict], totals: list[float]) -> dict:
-    large = [row["total"] for row in rows if row["size"] == "l" and row["total"] is not None]
-    average = round(statistics.mean(totals), 1) if totals else None
-    return {"average_target": TARGETS["average"], "average": average,
-            "average_met": average is not None and average <= TARGETS["average"],
-            "large_target": TARGETS["large"], "large_max": max(large) if large else None,
-            "large_met": all(value <= TARGETS["large"] for value in large)}
+    """Per kind: the average against its average target, and each merged task against the
+    target of its own size and the kind's maximum."""
+    result = {}
+    for kind, goal in TARGETS.items():
+        done = [row for row in rows if row.get("kind", "build") == kind and row["total"] is not None]
+        if not done:
+            continue
+        average = round(statistics.mean(row["total"] for row in done), 1)
+        over = [row["task_id"] for row in done if row["total"] > goal.get(row["size"] or "s", goal["max"])]
+        result[kind] = {"tasks": len(done), "average": average, "average_target": goal["average"],
+                        "average_met": average <= goal["average"], "max": max(row["total"] for row in done),
+                        "max_target": goal["max"], "max_met": all(row["total"] <= goal["max"] for row in done),
+                        "size_targets": {size: goal[size] for size in SIZES}, "over_size_target": over}
+    return result
 
 
 def report(rows: list[dict], scope: str, previous: dict | None = None) -> dict:
@@ -563,11 +587,12 @@ def render(data: dict) -> str:
         lines.append(f"- {row['task_id']} ({row['size'] or '-'}, {row['rigor']}) PR"
                      f" {row['pr'] or '-'}: {steps}"
                      f" = {row['total'] if row['total'] is not None else 'open'}")
-    goal = data.get("targets") or {}
-    if goal and goal["average"] is not None:
-        lines.append(f"Target: average {goal['average_target']} min ({'met' if goal['average_met'] else 'missed'}),"
-                     f" large tasks at most {goal['large_target']} min (max {goal['large_max']},"
-                     f" {'met' if goal['large_met'] else 'missed'})")
+    for kind, goal in (data.get("targets") or {}).items():
+        sizes = "/".join(str(goal["size_targets"][size]) for size in SIZES)
+        lines.append(f"Target {kind} ({goal['tasks']}): average {goal['average']} vs {goal['average_target']} min"
+                     f" ({'met' if goal['average_met'] else 'missed'}), max {goal['max']} vs"
+                     f" {goal['max_target']} ({'met' if goal['max_met'] else 'missed'}), s/m/l {sizes};"
+                     f" over size target: {', '.join(goal['over_size_target']) or 'none'}")
     if data.get("previous"):
         before = data["previous"]
         lines.append(f"Previous retrospective ({before['at']}): {before['merged']} merged, average"
@@ -831,7 +856,8 @@ def cmd_start(args, root: Path) -> dict:
     path = root / TASKS / f"{task.lower()}-{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(task_text(task, args.title, request, requested_at, args.delivery or "",
-                              rigor, epic, args.source_story or "", covers), encoding="utf-8")
+                              rigor, epic, args.source_story or "", covers,
+                              "knowledge" if args.knowledge else "build", args.size), encoding="utf-8")
     run("git", "push", "-u", "origin", "HEAD", cwd=root)
     return {"task_id": task, "branch": branch, "task": str(path.relative_to(root)),
             "proposed_rigor": rigor, "rigor_reasons": reasons}
@@ -995,6 +1021,9 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--epic", help="the epic the task belongs to, such as EP-003")
     start.add_argument("--source-story", help="the backlog story the task delivers part of, such as ST-012")
     start.add_argument("--covers", help="comma-separated criterion numbers of the source story")
+    start.add_argument("--knowledge", action="store_true",
+                       help="a knowledge task (documents only): the request is the approval, no criteria or reviewer")
+    start.add_argument("--size", choices=SIZES, default="s")
     criteria = sub.add_parser("criteria")
     criteria.add_argument("--story", required=True)
     criteria.add_argument("--base", default="main")

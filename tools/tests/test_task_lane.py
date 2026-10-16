@@ -615,14 +615,34 @@ class RetrospectiveCostTests(unittest.TestCase):
         owners = {item["id"]: item["cause_owner"] for item in task_lane.proposals([row])}
         self.assertEqual(owners.get("RETRO-WAIT-CI-WAIT"), "project")
 
+    def test_a_knowledge_task_is_measured_against_the_docs_targets(self):
+        row = task_lane.task_row({**RetrospectiveTests.task, "id": "TK-003", "size": "m",
+                                  "task_kind": "knowledge"},
+                                 pr("2026-10-16T10:01:00Z", None, None, "2026-10-16T10:02:30Z"))
+        goal = task_lane.targets([row], [row["total"]])
+        self.assertEqual(list(goal), ["knowledge"])
+        self.assertEqual((goal["knowledge"]["average_target"], goal["knowledge"]["over_size_target"]), (5, []))
+
+    def test_a_knowledge_task_is_approved_by_its_request_and_needs_no_criteria(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        path = root / "tk-009-fix-wording.md"
+        path.write_text(task_lane.task_text("TK-009", "Fix wording", "Reword rule 3.",
+                                            "2026-10-16T10:00:00Z", "", "normal", kind="knowledge"),
+                        encoding="utf-8")
+        self.assertEqual(task_lane.lint(path), [])
+        props = task_lane.task_props(path)
+        self.assertEqual((props["task_kind"], props["approved_at"]), ("knowledge", props["requested_at"]))
+
     def test_targets_and_the_previous_run_are_compared(self):
         rows = [task_lane.task_row({**RetrospectiveTests.task, "id": "TK-001", "size": "l"},
                                    pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T11:00:00Z")),
                 task_lane.task_row({**RetrospectiveTests.task, "id": "TK-002"},
                                    pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T10:10:00Z"))]
-        goal = task_lane.targets(rows, [row["total"] for row in rows])
+        goal = task_lane.targets(rows, [row["total"] for row in rows])["build"]
         self.assertEqual((goal["average"], goal["average_met"]), (35.0, False))
-        self.assertEqual((goal["large_max"], goal["large_met"]), (60.0, False))
+        self.assertEqual((goal["max"], goal["max_met"]), (60.0, True))
+        self.assertEqual(goal["over_size_target"], ["TK-001", "TK-002"])
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         data = task_lane.report(rows, "latest 20")
@@ -631,7 +651,8 @@ class RetrospectiveCostTests(unittest.TestCase):
         before = task_lane.previous_run(root, "latest 20")
         self.assertEqual((before["average"], before["merged"]), (35.0, 2))
         text = task_lane.render(task_lane.report(rows, "latest 20", before))
-        self.assertIn("Target: average 15 min (missed), large tasks at most 50 min (max 60.0, missed)", text)
+        self.assertIn("Target build (2): average 35.0 vs 15 min (missed), max 60.0 vs 60 (met), s/m/l 5/15/30;"
+                      " over size target: TK-001, TK-002", text)
         self.assertIn("Previous retrospective", text)
 
     def test_plugin_causes_go_to_the_ledger_and_known_issues_get_a_comment(self):

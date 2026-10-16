@@ -39,7 +39,14 @@ a story (source_story, covers) or stand alone.
   criteria, and the open tasks whose story changed. `--write` keeps it in the
   git-ignored `.agentrof/retrospective/board.md`; nothing commits it, so
   parallel tasks never conflict on it.
-- The stage entries keep their full method. Their reviews run one reader in
+- A change to an approved document is a knowledge task (`/deliver`, `start
+  --knowledge`): no stage entry, review panel, revision or rebind. Approval
+  stamps, package hashes and cross-package bindings (Experience
+  `application@rN`, landscape and backlog input refs) are not re-verified at
+  `fast_lane`; the vault gate checks schema, links and structure of the
+  touched trees, in parallel.
+- The stage entries keep their full method for new analysis or design a
+  request needs. Their reviews run one reader in
   a single pass and only a critical finding blocks; every other finding
   becomes an issue. Their approved documents reach the target branch by a
   plain pull request, with no Fence or source handoff.

@@ -125,7 +125,7 @@
       "fa05e6f3b4edb8c8891461e142694b61d0f02fa27fab2a140987bdf80c92c830"
     ,
     "flows/fast-lane.md":
-      "9e3f346b3f80f26c87147e78555cf7c57fbc76835bf4e5efe4decdd85c82fd85"
+      "7a76d689f823c6d0ca98cb29d1f504bbdcf97d46fa1b95e8602313591b8da590"
     ,
     "flows/operation.md":
       "2a48be3a2321e14a3f154494c812d245e3f3b2ee5061ac28e2d8e7025e53cb06"
@@ -302,7 +302,7 @@
       "4e4dac8ad7f01dec7f3e2d86f02746ff67297617789555d2211c3ab722b961b0"
     ,
     "scripts/task_lane.py":
-      "123718cf7209650f69b9bc2c4e8020fb4d5e025bbca7ea24d1a629b8aad86169"
+      "2408065f7dd8e04a9d81f08427513e482a2d11aa4a37f1beda26d4c714fe9d06"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -311,7 +311,7 @@
       "e0b711fc729edb86d236270b5c5614b7fe4a96bf2d9164f5dfee66581914dc4a"
     ,
     "scripts/vault_gate.py":
-      "5874e6fed717df6c29ad5d6888c8985690fca14ed83458b1f0e77af298e8da81"
+      "3018dffa62af0d49e674197b1a0a2036443c2a916aa7c1c73f1ffb529552adc2"
     ,
     "scripts/vault_hook.py":
       "12b90877550235da4f0d72ffe200d0d01105c3857769934ecd66e44d5d530374"
@@ -535,6 +535,9 @@
     "skill-content/deliver/data/owner-decision-classes.json":
       "ce9f4eb4c264c77cc1e80f949b6ba36444dd508f86d95edbbc30aa60e3e00495"
     ,
+    "skill-content/deliver/data/targets.json":
+      "c13f5b0a00877fb0bd8b7f7324a52d3deff55fadd2d5dda6597880debde58d77"
+    ,
     "skill-content/deliver/references/switch-finding_disposition-follow_up_issue.md":
       "66df82e9c43f34df2d50d9d121c74d672615fedf7f975a68f75718dd81f3e25e"
     ,
@@ -569,7 +572,7 @@
       "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
     ,
     "skill-content/deliver/references/switch-process_profile-fast_lane.md":
-      "6abc5e0ece8225ffc38cb98c1d4c6b7acd6550fb557691b7c1e247b0ee8d4cdd"
+      "85c5695a6fcd5a7575b96bacc68173e3d7dcafb34361ef79c33da325045da087"
     ,
     "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
       "ddc02ad48cbf5b91a33557b97363f6a2dfdc83245a4e71f3109bd93e5e612b45"
@@ -692,7 +695,7 @@
       "931c87622196a746700885aa5a78081954df37d0b6dc571ff54e70a93dcf9a05"
     ,
     "skill-content/obsidian-vault/data/vault-policy.json":
-      "e90e58a79e8036c881f4fd33e1e5dfb05284904676fe72119726cdef5d4eb349"
+      "3aa5119a58f2ce4905585343dce1f3a7ad0a4c5c4bcf849aa10f45f6ce1451b7"
     ,
     "skill-content/obsidian-vault/references/graph.md":
       "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e"
@@ -1202,7 +1205,7 @@
       "46b840eaddc2c50abf29b4b0b145e1e0774c4760e89b4d09a7a9ce122b33bbbe"
     ,
     "templates/vault/.obsidian/types.json":
-      "4cc6015995aa5891518216765c91580e2a27371802440eec2e9d4861a1735abb"
+      "95376cc82836316dde15d84c80f8e6c49e6b6bb1e15907bc99f4c45f92175e93"
     ,
     "templates/vault/home.md":
       "b62efb50cb11a9e14ea667a2e12cbff4789ec458c705cd226440c9d5d25b3397"

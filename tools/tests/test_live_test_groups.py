@@ -278,6 +278,110 @@ class LiveCaseReuseTests(unittest.TestCase):
         self.assertIn("matches a catch-all live path", plan["groups"]["billing"]["reason"])
 
 
+
+class CarryOverShapeTests(unittest.TestCase):
+    def test_malformed_passes_do_not_become_carry_over_evidence(self):
+        entry = {"schema_version": 1, "project_key": "p", "delivery_id": "DLV-001", "item_id": "AUTH-01",
+                 "run_id": "r", "product_commit": "a" * 40, "candidate_hash": "sha256:" + "b" * 64,
+                 "carried": [], "fresh": [{"case_id": "tests/t.py::test_a", "outcome": "passed",
+                                           "input_paths": ["tests/t.py"], "input_digest": "sha256:" + "c" * 64}]}
+        self.assertTrue(verification.valid_carry_over_pass(entry))
+        for change in ({"fresh": [{}]}, {"product_commit": "foreign"}, {"candidate_hash": None},
+                       {"carried": entry["fresh"]}, {"schema_version": True}):
+            with self.subTest(change=change):
+                self.assertFalse(verification.valid_carry_over_pass({**entry, **change}))
+
+
+@integration
+class PassCarryOverTests(unittest.TestCase):
+    """At pass_carry_over per_item the runner keeps each pass record, a failed pass's passed cases included,
+    and names the Item's record to the next pass; at off it names none."""
+    setUp = base.VerificationTests.setUp
+    write = base.VerificationTests.write
+    note = base.VerificationTests.note
+    commit = base.VerificationTests.commit
+    freeze = base.VerificationTests.freeze
+    result = base.VerificationTests.result
+    settle = base.VerificationTests.settle
+
+    def declare(self) -> None:
+        executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
+        path = self.root / "workspace/docs/operation/verification-contract.md"
+        contract, body = delivery.split_note(path)
+        contract.update(LIVE, live_test_command=executable + " live.py {group}")
+        self.write(path.relative_to(self.root), delivery.frontmatter(contract, body))
+        self.write("live.py", "import json, os, pathlib, subprocess\n"
+                   "named = os.environ.get('AGENTROF_CARRY_OVER_RECORD')\n"
+                   "kept = json.loads(pathlib.Path(named).read_text()) if named and os.path.isfile(named) else None\n"
+                   "print('RECORD', '-' if named is None else len(kept['passes']) if kept else 0)\n"
+                   "head = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()\n"
+                   "case = lambda name, outcome: {'case_id': 'tests/t.py::' + name, 'outcome': outcome,\n"
+                   "                              'input_paths': ['tests/t.py'], 'input_digest': 'sha256:' + '1' * 64}\n"
+                   "pathlib.Path(os.environ['AGENTROF_VERIFICATION_SCRATCH'], 'carry-over-pass.json').write_text(\n"
+                   "    json.dumps({'schema_version': 1, 'project_key': 'p', 'delivery_id': os.environ['AGENTROF_DELIVERY_ID'],\n"
+                   "                'item_id': os.environ['AGENTROF_ITEM_ID'], 'run_id': head, 'product_commit': head,\n"
+                   "                'candidate_hash': (kept or {}).get('candidate_hash'), 'carried': [],\n"
+                   "                'fresh': [case('a', 'passed'), case('b', 'failed')]}))\n"
+                   "raise SystemExit(1)\n")
+        self.commit()
+
+    def output(self, run) -> str:
+        return verification.raw_output_path(self.root, run["output_file"]).read_text()
+
+    def test_a_failed_pass_keeps_its_passed_cases_for_the_next_pass_of_the_item(self):
+        original = delivery.delivery_switch_value
+        mock.patch.object(delivery, "delivery_switch_value", side_effect=lambda docs, identifier, name:
+                          "per_item" if name == "pass_carry_over" else original(docs, identifier, name)).start()
+        self.addCleanup(mock.patch.stopall)
+        self.declare()
+        frozen = self.freeze()
+        first = verification.run_check(self.root, "live_test", group="smoke")
+        self.assertEqual(first["exit_code"], 1)
+        self.assertIn("RECORD 0", self.output(first))
+        self.assertNotIn("carry_over_record", first["identity"])
+        kept = verification.read_carry_over_record(self.root)
+        self.assertEqual({key: kept[key] for key in ("project_key", "delivery_id", "item_id", "candidate_hash")},
+                         {"project_key": "p", "delivery_id": "DLV-001", "item_id": "AUTH-01",
+                          "candidate_hash": frozen["candidate"]["candidate_hash"]})
+        self.assertEqual([(row["product_commit"], [(case["case_id"], case["outcome"]) for case in row["fresh"]])
+                          for row in kept["passes"]],
+                         [(frozen["candidate"]["product_commit"],
+                           [("tests/t.py::a", "passed"), ("tests/t.py::b", "failed")])])
+
+        self.settle()
+        self.write("src/next.txt", "2\n")
+        self.commit()
+        second_candidate = self.freeze()["candidate"]
+        second = verification.run_check(self.root, "live_test", group="smoke")
+        self.assertIn("RECORD 1", self.output(second))
+        self.assertEqual(second["identity"]["carry_over_record"],
+                         verification.digest({**kept, "candidate_hash": second_candidate["candidate_hash"]}))
+        passes = verification.read_carry_over_record(self.root)["passes"]
+        self.assertEqual([row["candidate_hash"] for row in passes],
+                         [frozen["candidate"]["candidate_hash"], second_candidate["candidate_hash"]])
+
+    def test_without_the_switch_no_record_is_named_or_kept(self):
+        self.declare()
+        self.freeze()
+        with mock.patch.dict(os.environ, {"AGENTROF_CARRY_OVER_RECORD": str(self.root / "foreign.json")}):
+            run = verification.run_check(self.root, "live_test", group="smoke")
+        self.assertIn("RECORD -", self.output(run))
+        self.assertIsNone(verification.read_carry_over_record(self.root))
+        self.assertNotIn("AGENTROF_CARRY_OVER_RECORD", run["identity"]["environment_variables"])
+
+    def test_a_pass_record_of_another_item_is_not_kept(self):
+        current = {"delivery": "DLV-001", "story": "AUTH-01", "candidate_hash": "sha256:" + "c" * 64, "product_commit": "a" * 40}
+        scratch = verification.session_path(self.root).parent / "scratch"
+        scratch.mkdir(parents=True)
+        entry = {"schema_version": 1, "project_key": "p", "delivery_id": "DLV-001", "item_id": "AUTH-02",
+                 "run_id": "r", "product_commit": "a" * 40, "carried": [], "fresh": []}
+        (scratch / "carry-over-pass.json").write_text(json.dumps(entry))
+        self.assertIsNone(verification.keep_carry_over_pass(self.root, current))
+        (scratch / "carry-over-pass.json").write_text(json.dumps({**entry, "item_id": "AUTH-01"}))
+        self.assertEqual(len(verification.keep_carry_over_pass(self.root, current)["passes"]), 1)
+        self.assertEqual(len(verification.keep_carry_over_pass(self.root, current)["passes"]), 1)
+
+
 @integration
 class LiveRunTests(unittest.TestCase):
     setUp = base.VerificationTests.setUp

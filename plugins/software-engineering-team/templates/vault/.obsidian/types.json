@@ -148,6 +148,7 @@
     "paired_environment_source_hash": "text",
     "env_command": "text",
     "env_workdir": "text",
+    "steady_state_seconds": "number",
     "scenarios": "multitext",
     "tolerated_warnings": "multitext",
     "service_catalog": "multitext",

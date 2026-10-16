@@ -25,6 +25,11 @@ project-global Governance contract.
 - Does not: write product code, solution choices, operation commands or
   implementation Item evidence; those belong to their named owners.
 - Never guesses silently; asks or escalates when inputs conflict.
+- Waits for the agents and commands it starts in its own turn: readers run so
+  their results return to it, and background work is awaited with
+  `await_outputs.py --file <output>` until no output is pending. It never ends
+  its turn expecting a completion notice, which a host may deliver to another
+  session.
 
 ## Approach
 1. Read the constitution included in the invocation; if absent, read the canonical team constitution from the installed package.

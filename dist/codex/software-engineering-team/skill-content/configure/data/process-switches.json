@@ -498,6 +498,7 @@
       }
     },
     "review_scope_record": {
+      "measurement_only": true,
       "summary": "Whether each backlog epic review records how large its read set is under both review_manifest_scope values, which of its blocking findings cite a note outside the bounded read set, and flags a transitive read set over the owner's budget before its readers start.",
       "issue": 395,
       "flows": ["backlog-planning"],
@@ -814,6 +815,7 @@
       }
     },
     "item_cost_report": {
+      "measurement_only": true,
       "summary": "Whether the Delivery Review reports the Delivery as a whole, or also each Item's fixed cost step by step: code review, QA gate, evidence records, integration and architecture delta.",
       "issue": 432,
       "flows": ["delivery-execution"],
@@ -856,6 +858,7 @@
       }
     },
     "lane_table": {
+      "measurement_only": true,
       "summary": "Whether the coordinator tracks parallel lanes in its own context only, or records each lane's start and finish in a lane table under the project-local runtime directory that a restarted session reads before it launches anything.",
       "issue": 332,
       "flows": ["delivery-execution"],
@@ -986,6 +989,7 @@
       }
     },
     "step_timing": {
+      "measurement_only": true,
       "summary": "Whether the coordinator records the start and end of each flow step and role spawn, with its reading, writing, review and waiting phases, in a durable per-run timing record, or records no step timing.",
       "issue": 441,
       "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
@@ -1008,6 +1012,7 @@
       }
     },
     "step_budgets": {
+      "measurement_only": true,
       "summary": "Whether each flow step and role spawn is timed against a maximum in minutes and every step that exceeds its maximum is reported at once with its breakdown, or steps run without a budget report. A budget is a maximum, never an expectation: a step may finish well under it, and a budget never blocks, fails or shortens a step.",
       "issue": 441,
       "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
@@ -1215,6 +1220,7 @@
       }
     },
     "step_baseline": {
+      "measurement_only": true,
       "summary": "Whether a timed step is also compared with its own history, the median of its last recorded runs, so a step whose length depends on the project, such as a QA live run, is reported when it runs far past its usual time, or only with a fixed maximum. A baseline only reports: it never blocks, fails or shortens a step.",
       "issue": 543,
       "flows": ["delivery-execution"],
@@ -1270,6 +1276,130 @@
       "promotion": {
         "unit": "At least 3 Deliveries with repaired verification candidates and live groups.",
         "threshold": "No defect found later in a live group a pass reused, and a median live wall clock per repair pass at most half of the off baseline, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "finding_disposition": {
+      "summary": "Whether a Delivery code review or QA finding below critical starts a repair and a new verification pass, or becomes a tracked follow-up issue while the Item integrates.",
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "next_pass",
+          "tradeoffs": "Every blocking finding, critical or major, starts a repair, a fresh candidate and a new verification pass before the Item integrates. Today's behaviour: each major finding costs a full pass, in one measured project often more than an hour."
+        },
+        {
+          "id": "follow_up_issue",
+          "tradeoffs": "Only a critical finding blocks; every major and minor finding is recorded in the code review record and the Delivery Review and filed as one project issue, and the Item integrates in the same pass. Saves a pass per non-critical finding, while a major defect ships and stays open until its issue is picked up, and a finding under-rated as major escapes the gate."
+        }
+      ],
+      "default": "next_pass",
+      "metric": "Per Item: verification passes, wall time from first freeze to integration, follow-up issues filed, and follow-ups later reclassified as critical or reopened as defects, against next_pass Items of comparable size.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with follow_up_issue selected.",
+        "threshold": "Median passes per Item at most 1.2, no follow-up later reclassified critical, every follow-up issue filed, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "repair_pass": {
+      "summary": "Whether a candidate repaired after a verification pass with only fixable findings below critical runs a new full reader and QA pass, or is settled by its pre-freeze repair review and the touched-suites run.",
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "full_pass",
+          "tradeoffs": "Every repaired candidate runs the full code review and QA again, full suite, mutation and live checks included. Today's behaviour: in one measured project a one-line repair cost a further pass of more than an hour."
+        },
+        {
+          "id": "scoped_repair",
+          "tradeoffs": "When the earlier pass returned findings below critical only, repair_review before_freeze reviewed the repair diff and pre_handoff_regression touched_suites ran the touched suites with every test file the repair changed, scoped-repair freezes the candidate and settles both readers from that evidence, so it integrates without a new full pass. Saves a full pass per repair, while the full suite, mutation and any reader judgement of unchanged scope are not rerun on the repaired candidate, and a runtime Item or a critical finding still takes the full pass."
+        }
+      ],
+      "default": "full_pass",
+      "metric": "Per repaired Item: wall time from the repair commit to integration, scoped repairs against full passes, and defects later traced to code a scoped repair changed, against full_pass repairs of comparable size.",
+      "promotion": {
+        "unit": "At least 5 scoped repairs across at least 2 Deliveries.",
+        "threshold": "Median repair-to-integration time at most a third of the full_pass baseline and no defect traced to a scoped repair, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "item_verification": {
+      "summary": "Whether a frozen Item candidate is verified by an independent code reviewer and an independent QA reader, or by one fresh verifier that reviews the diff, runs QA's approved commands and registers both results in one pass.",
+      "flows": ["delivery-execution"],
+      "values": [
+        {
+          "id": "separate",
+          "tradeoffs": "A code reviewer, with its panel when one is selected, and a QA reader each read the candidate and register their own result; a major finding of either starts a repair pass unless finding_disposition says otherwise. Today's behaviour: two readers' context and wait per pass."
+        },
+        {
+          "id": "single_verifier",
+          "tradeoffs": "One fresh qa-engineer verifier reads the candidate diff against the story and Test Plan with the code review lenses, runs the approved test command or the change-level tier item_qa_tier selects, and registers the code review and QA results together; only a critical finding blocks and every major and minor finding is a follow-up issue. Halves the readers per pass and removes the read barrier, while review and test judgement are no longer independent of each other, it needs code_review_panel single_reader and a review_loop other than blocking_delta, and the verifier's blind spots reach both records."
+        }
+      ],
+      "default": "separate",
+      "metric": "Per Item: verification wall time from freeze to validated results, reader passes and tokens, follow-ups filed, and defects found after integration in code a single verifier passed, against separate Items of comparable size.",
+      "promotion": {
+        "unit": "At least 5 Items verified by a single verifier across at least 2 Deliveries.",
+        "threshold": "Median freeze-to-validated time at most half of the separate baseline and no post-integration defect a separate code review would have blocked, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "live_verification": {
+      "summary": "When live tests run: in every story QA pass, or once, impact-selected, when the Delivery integrates its Items.",
+      "flows": ["delivery-execution"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "every_pass",
+          "tradeoffs": "Every story QA pass runs the live groups its Test Plan names and its final verdict needs that live run. Today's behaviour and the baseline: in one measured project one pass of the live plan took up to about two hours, also for stories that changed no environment tooling."
+        },
+        {
+          "id": "delivery_integration",
+          "tradeoffs": "No story QA pass runs live tests and a final verdict needs no live run; the pass records live: deferred_to_integration. The Delivery integration step runs one live run of the groups whose paths changed since their last green run and every case not yet passed. Story passes stop waiting on live tests, while environment defects of several Items surface together at integration."
+        }
+      ],
+      "default": "every_pass",
+      "metric": "Per Delivery: story pass wall clock, integration live run wall clock, and defects the integration live run found that a per-pass live run would have found earlier.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with live groups.",
+        "threshold": "Lower median story pass time with no defect escaping the integration live run, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "item_live_gate": {
+      "summary": "Whether an Item that changes environment tooling runs its affected live groups once before merge while live verification runs at Delivery integration.",
+      "flows": ["delivery-execution"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "No Item runs live tests before the integration live run; an environment-tooling defect surfaces only there."
+        },
+        {
+          "id": "tooling_items",
+          "tradeoffs": "An Item whose changed paths a tooling-class rule of the project's live impact map covers runs only its affected live groups, once before merge, outside the QA pass loop. Earlier proof for tooling changes at the cost of one live run per such Item."
+        }
+      ],
+      "default": "off",
+      "metric": "Per tooling Item: gate wall clock and defects it found before the integration live run.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with tooling Items.",
+        "threshold": "Defects the gate found before integration outweigh its time, with every shared quality guard holding and the owner's approval."
+      }
+    },
+    "pass_carry_over": {
+      "summary": "Whether the runner keeps each Item's pass records, failed passes included, so the next pass of the Item can carry over the cases that passed on unchanged inputs.",
+      "issue": 593,
+      "flows": ["delivery-execution"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "Every pass runs every case its command selects; nothing is kept between passes. Today's behaviour and the baseline: in one measured project a one-file repair reran the whole live plan."
+        },
+        {
+          "id": "per_item",
+          "tradeoffs": "The runner keeps every pass record the approved test or live command writes, the passed cases of a failed pass included, keyed by the pass's product commit and each case's input paths and their digest, and names the Item's record to the next pass in AGENTROF_CARRY_OVER_RECORD. The project's command carries a case only on an ancestor commit with unchanged inputs; an input path its digest misses hides a regression in a carried case."
+        }
+      ],
+      "default": "off",
+      "metric": "Per repair pass: wall clock, cases carried and run, and every defect found later in a case a pass carried.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with repaired verification candidates.",
+        "threshold": "No defect found later in a carried case and a median repair pass wall clock at most half of the off baseline, with every shared quality guard holding and the owner's approval."
       }
     }
   }

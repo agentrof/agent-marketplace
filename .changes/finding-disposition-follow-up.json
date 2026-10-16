@@ -1,0 +1,6 @@
+{
+  "summary": "Add process switch finding_disposition: at follow_up_issue only a critical Delivery finding blocks an Item, every finding below it is a complete follow-up recorded in the evidence and Delivery Review, and follow-up-issues lists one project issue per follow-up for the coordinator to file.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

@@ -2766,7 +2766,7 @@ PROCESS_SWITCHES_RELPATH = build_distributions.PROCESS_SWITCHES_RELPATH
 SWITCH_ANCHOR_RE = re.compile(r"\b[Ss]witch\s+`([a-z][a-z0-9_]*)`")
 SWITCH_REFERENCE_RE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}
-PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants", "parameters", "value_data",
+PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "measurement_only", "agent_variants", "parameters", "value_data",
                                 "reference_scope"}
 # A switch whose references every task of its owning flows binds, whichever
 # skill holds them, declares this reference_scope.
@@ -2979,6 +2979,8 @@ def process_switch_problems(data: object, flows: set[str], agents: set[str],
         unknown = sorted(set(spec) - PROCESS_SWITCH_KEYS - PROCESS_SWITCH_OPTIONAL_KEYS)
         if unknown:
             problems.append(f"{where}: unknown keys {unknown}")
+        if "measurement_only" in spec and spec["measurement_only"] is not True:
+            problems.append(f"{where}: measurement_only is true or absent")
         if not _nonblank(spec.get("summary")):
             problems.append(f"{where}: needs a summary of what it decides")
         if not _nonblank(spec.get("metric")):
@@ -3597,7 +3599,8 @@ AUTOPILOT_SCRIPT_RELPATH = "skill-content/autopilot/scripts/autopilot.py"
 AUTOPILOT_NUMBERS = ("default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
                      "arming_ttl_minutes", "transport_interval_seconds", "transport_max_attempts",
                      "native_arming_wait_seconds", "native_watch_seconds", "native_poll_seconds", "native_retry_delay_seconds", "native_permit_ttl_seconds")
-AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", "transport_error_codes", *AUTOPILOT_NUMBERS}
+AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", "phase_starts", "transport_error_codes",
+                  *AUTOPILOT_NUMBERS}
 AUTOPILOT_DEFAULTS = ("allowed", "excluded", "never")
 
 
@@ -3669,6 +3672,30 @@ def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
         if end["compiler"] not in readers or not (plugin / str(end["compiler"])).is_file():
             problems.append(f"goal kind {entry['id']!r} names compiler {end['compiler']!r},"
                             " which is no package script autopilot.py reads")
+    readable = {entry["id"] for entry in kinds
+                if isinstance(entry, dict) and isinstance(entry.get("end"), dict)}
+    starts = data["phase_starts"] if isinstance(data["phase_starts"], list) else []
+    if not starts:
+        problems.append("phase_starts must declare at least one entry")
+    entries = []
+    for entry in starts:
+        after = entry.get("after") if isinstance(entry, dict) else None
+        if not isinstance(entry, dict) or set(entry) != {"entry", "after"} \
+                or not _nonblank(entry.get("entry")) or not isinstance(after, dict) or not after:
+            problems.append("every phase start holds exactly an entry and a nonempty after")
+            continue
+        entries.append(entry["entry"])
+        for kind, statuses in after.items():
+            if kind not in readable:
+                problems.append(f"phase start {entry['entry']!r} names {kind!r}, which is no"
+                                " readable goal kind")
+            if not isinstance(statuses, list) or not statuses \
+                    or not all(_nonblank(status) for status in statuses) \
+                    or len(set(statuses)) != len(statuses):
+                problems.append(f"phase start {entry['entry']!r} declares no distinct ready"
+                                f" statuses after {kind!r}")
+    problems += [f"duplicate phase start {value!r}"
+                 for value in sorted({value for value in entries if entries.count(value) > 1})]
     for label, values in ids.items():
         problems += [f"{label} id {value!r} must be lowercase snake_case"
                      for value in values if not REVIEW_STEP_ID_RE.match(value)]
@@ -3835,7 +3862,7 @@ def check_delivery_contract_shape(
         problems.append("control-record and subject registries differ")
     verification = contracts["delivery-verification-policy.json"]
     expected_keys = {"schema_version", "raw_evidence_max_age_seconds", "schedules", "legacy_schedule", "new_schedule",
-                     "blocking_severities", "nonblocking_severities", "review_checks", "qa_checks", "role_modes", "final_modes", "mutation_scope",
+                     "blocking_severities", "critical_severities", "nonblocking_severities", "review_checks", "qa_checks", "role_modes", "final_modes", "mutation_scope",
                      "wait_bound_seconds"}
     if set(verification) != expected_keys or verification.get("schema_version") != 1:
         problems.append("verification policy has an unsupported schema or field set")
@@ -3846,7 +3873,8 @@ def check_delivery_contract_shape(
     if (verification.get("review_checks") != ["correctness", "conformance", "security"]
             or verification.get("qa_checks") != ["full_test_suite", "coverage", "right_reason"]
             or verification.get("role_modes") != {"code_reviewer": ["review_initial", "review_repair"], "qa_engineer": ["qa_diagnostic", "qa_final"]}
-            or verification.get("final_modes") != {"code_reviewer": ["review_initial", "review_repair"], "qa_engineer": ["qa_final"]}):
+            or verification.get("final_modes") != {"code_reviewer": ["review_initial", "review_repair", "scoped_repair"],
+                                                   "qa_engineer": ["qa_final", "scoped_repair"]}):
         problems.append("verification final gates or independent role modes are invalid")
     age = verification.get("raw_evidence_max_age_seconds")
     if not isinstance(age, int) or isinstance(age, bool) or not 0 < age <= 86400:

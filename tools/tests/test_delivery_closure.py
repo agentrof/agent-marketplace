@@ -1475,7 +1475,7 @@ class ClosureTextTests(unittest.TestCase):
         for text in ("`reopened` and `edited`", "red on `opened`", "re-run the failed check",
                      "vault_gate.py install", "CODEOWNERS", "DELIVERY_CLOSURE_GATE_CHANGED"):
             self.assertIn(text, bootstrap)
-        self.assertIn("re-run the failed check", self.text(PACKAGE / "skill-content/deliver/SKILL.md"))
+        self.assertIn("re-run the failed check", self.text(PACKAGE / "skill-content/deliver-governed/SKILL.md"))
 
     def test_the_trust_boundary_and_the_required_agentrof_ref_protection_are_stated(self):
         """Closure proves record shape and binding, never authorship, so the agentrof refs need protection."""

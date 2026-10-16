@@ -1,6 +1,6 @@
 """Fast lane: switch `process_profile` keeps every request on the standard
-ceremonies at `standard`. At `fast_lane`, one story card, one branch and one
-pull request carry a change; the card holds the request and approval times,
+ceremonies at `governed`. At `fast_lane`, one task, one branch and one
+pull request carry a change; the task holds the request and approval times,
 GitHub the rest, and the retrospective derives steps and proposals from them."""
 
 from __future__ import annotations
@@ -22,23 +22,23 @@ sys.path.insert(0, str(TEAM / "scripts"))
 sys.path.insert(0, str(ROOT / "tools"))
 import architecture_compile  # noqa: E402
 import process_policy  # noqa: E402
-import story_lane  # noqa: E402
+import task_lane  # noqa: E402
 import vault_check  # noqa: E402
 
-CARD = """---
-type: story-card
+TASK = """---
+type: task
 title: "Export invoices"
 status: active
-id: FL-004
+id: TK-004
 requested_at: 2026-10-16T10:00:00+00:00
 approved_at: 2026-10-16T10:03:00+00:00
 size: s
 rigor: normal
 tags:
-  - doc/story-card
+  - doc/task
   - status/active
 aliases:
-  - FL-004
+  - TK-004
 ---
 # Export invoices
 
@@ -101,61 +101,61 @@ class SwitchTests(unittest.TestCase):
             self.assertIn("Switch `process_profile`", text, flow)
 
 
-class CardTests(unittest.TestCase):
+class TaskTests(unittest.TestCase):
     def write(self, text: str) -> Path:
         directory = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(directory))
-        path = directory / "fl-004-export-invoices.md"
+        path = directory / "tk-004-export-invoices.md"
         path.write_text(text, encoding="utf-8")
         return path
 
-    def test_a_complete_card_passes(self):
-        self.assertEqual(story_lane.lint(self.write(CARD)), [])
+    def test_a_complete_task_passes(self):
+        self.assertEqual(task_lane.lint(self.write(TASK)), [])
 
     def test_criteria_size_rigor_and_times_are_checked(self):
-        bad = (CARD.replace("3. An empty month yields a header-only file.\n", "")
+        bad = (TASK.replace("3. An empty month yields a header-only file.\n", "")
                .replace("size: s", "size: xl").replace("rigor: normal", "rigor: extreme")
                .replace("requested_at: 2026-10-16T10:00:00+00:00\n", ""))
-        errors = story_lane.lint(self.write(bad))
+        errors = task_lane.lint(self.write(bad))
         self.assertTrue(any("found 2" in error for error in errors))
         self.assertTrue(any(error.startswith("size") for error in errors))
         self.assertTrue(any(error.startswith("rigor") for error in errors))
         self.assertIn("requested_at is required", errors)
 
-    def test_nine_criteria_are_two_stories(self):
+    def test_nine_criteria_are_two_tasks(self):
         many = "\n".join(f"{n}. Criterion {n}." for n in range(1, 10))
-        text = CARD.split("## Acceptance Criteria")[0] + "## Acceptance Criteria\n\n" + many \
-            + "\n\n## Tests" + CARD.split("## Tests")[1]
-        self.assertTrue(any("found 9" in error for error in story_lane.lint(self.write(text))))
+        text = TASK.split("## Acceptance Criteria")[0] + "## Acceptance Criteria\n\n" + many \
+            + "\n\n## Tests" + TASK.split("## Tests")[1]
+        self.assertTrue(any("found 9" in error for error in task_lane.lint(self.write(text))))
 
     def test_the_skeleton_is_valid_once_filled(self):
-        text = story_lane.card_text("FL-007", "Rotate keys", "Rotate the signing keys.",
+        text = task_lane.task_text("TK-007", "Rotate keys", "Rotate the signing keys.",
                                     "2026-10-16T10:00:00+00:00", "DLV-009", "high")
         text = text.replace("1. \n2. \n3. \n", "1. One.\n2. Two.\n3. Three.\n").replace("- \n", "- t\n")
         path = self.write(text)
-        self.assertEqual(story_lane.lint(path), [])
-        props = story_lane.card_props(path)
+        self.assertEqual(task_lane.lint(path), [])
+        props = task_lane.task_props(path)
         self.assertEqual((props["rigor"], props["delivery"]), ("high", "DLV-009"))
 
     def test_set_field_adds_and_replaces_only_its_scalar(self):
-        path = self.write(CARD.replace("approved_at: 2026-10-16T10:03:00+00:00\n", ""))
-        story_lane.set_field(path, "approved_at", "2026-10-16T10:05:00+00:00")
-        story_lane.set_field(path, "status", "delivered")
-        props = story_lane.card_props(path)
+        path = self.write(TASK.replace("approved_at: 2026-10-16T10:03:00+00:00\n", ""))
+        task_lane.set_field(path, "approved_at", "2026-10-16T10:05:00+00:00")
+        task_lane.set_field(path, "status", "delivered")
+        props = task_lane.task_props(path)
         self.assertEqual(props["approved_at"], "2026-10-16T10:05:00+00:00")
         self.assertEqual(props["status"], "delivered")
         self.assertIn("status/delivered", props["tags"])
-        self.assertEqual(story_lane.lint(path), [])
+        self.assertEqual(task_lane.lint(path), [])
 
     def test_risky_requests_propose_high_rigor(self):
-        self.assertEqual(story_lane.proposed_rigor("Delete stale tenant data")[0], "high")
-        self.assertEqual(story_lane.proposed_rigor("Rotate the API key secrets")[0], "high")
-        self.assertEqual(story_lane.proposed_rigor("Add a CSV export button")[0], "normal")
+        self.assertEqual(task_lane.proposed_rigor("Delete stale tenant data")[0], "high")
+        self.assertEqual(task_lane.proposed_rigor("Rotate the API key secrets")[0], "high")
+        self.assertEqual(task_lane.proposed_rigor("Add a CSV export button")[0], "normal")
 
-    def test_ids_follow_cards_and_remote_story_branches(self):
-        names = ["workspace/docs/backlog/cards/fl-003-a.md", "origin/story/fl-011-b"]
-        self.assertEqual(story_lane.next_id(names), "FL-012")
-        self.assertEqual(story_lane.next_id([]), "FL-001")
+    def test_ids_follow_tasks_and_remote_task_branches(self):
+        names = ["workspace/docs/backlog/tasks/tk-003-a.md", "origin/task/tk-011-b"]
+        self.assertEqual(task_lane.next_id(names), "TK-012")
+        self.assertEqual(task_lane.next_id([]), "TK-001")
 
 
 def pr(opened, ci, review, merged, checks=None):
@@ -164,71 +164,71 @@ def pr(opened, ci, review, merged, checks=None):
 
 
 class RetrospectiveTests(unittest.TestCase):
-    card = {"id": "FL-004", "title": "Export", "size": "s", "rigor": "normal",
+    task = {"id": "TK-004", "title": "Export", "size": "s", "rigor": "normal",
             "requested_at": "2026-10-16T10:00:00+00:00",
             "approved_at": "2026-10-16T10:03:00+00:00"}
 
     def test_steps_split_the_request_to_merge_time(self):
-        row = story_lane.story_row(self.card, pr("2026-10-16T10:10:00Z", "2026-10-16T10:15:00Z",
+        row = task_lane.task_row(self.task, pr("2026-10-16T10:10:00Z", "2026-10-16T10:15:00Z",
                                                  "2026-10-16T10:13:00Z", "2026-10-16T10:16:00Z"))
-        self.assertEqual(row["steps"], {"card": 3.0, "write": 7.0, "ci": 5.0, "review": 3.0,
+        self.assertEqual(row["steps"], {"define": 3.0, "write": 7.0, "ci": 5.0, "review": 3.0,
                                         "merge_wait": 1.0})
         self.assertEqual((row["total"], row["largest_step"]), (16.0, "write"))
 
-    def test_an_open_story_has_no_total_and_a_proposal_names_it(self):
-        data = story_lane.report([story_lane.story_row(self.card, None)], "latest 20")
-        self.assertIsNone(data["per_story"][0]["total"])
+    def test_an_open_task_has_no_total_and_a_proposal_names_it(self):
+        data = task_lane.report([task_lane.task_row(self.task, None)], "latest 20")
+        self.assertIsNone(data["per_task"][0]["total"])
         self.assertEqual(data["request_to_merge_minutes"]["count"], 0)
-        self.assertIn("FL-OPEN-STORIES", [item["id"] for item in data["proposals"]])
+        self.assertIn("RETRO-OPEN-TASKS", [item["id"] for item in data["proposals"]])
 
     def test_report_ranks_proposals_by_measured_minutes(self):
-        rows = [story_lane.story_row({**self.card, "id": f"FL-00{n}"},
+        rows = [task_lane.task_row({**self.task, "id": f"TK-00{n}"},
                                      pr("2026-10-16T10:05:00Z", f"2026-10-16T10:{20 + n}:00Z",
                                         "2026-10-16T10:08:00Z", f"2026-10-16T10:{21 + n}:00Z",
                                         {"tests": 14.0 + n, "vault gate": 1.5}))
                 for n in range(1, 4)]
-        data = story_lane.report(rows, "latest 20")
+        data = task_lane.report(rows, "latest 20")
         self.assertEqual(data["request_to_merge_minutes"],
                          {"count": 3, "average": 23.0, "median": 23.0, "max": 24.0})
         ids = [item["id"] for item in data["proposals"]]
-        self.assertEqual(ids[0], "FL-CI")
-        self.assertIn("FL-CHECK-TESTS", ids)
+        self.assertEqual(ids[0], "RETRO-CI")
+        self.assertIn("RETRO-CHECK-TESTS", ids)
         self.assertLessEqual(len(ids), 5)
-        self.assertEqual(data["slowest"][0]["story_id"], "FL-003")
-        text = story_lane.render(data)
-        self.assertIn("1. [FL-CI]", text)
+        self.assertEqual(data["slowest"][0]["task_id"], "TK-003")
+        text = task_lane.render(data)
+        self.assertIn("1. [RETRO-CI]", text)
         self.assertIn("Request to merge: average 23.0, median 23.0, max 24.0 min", text)
-        self.assertEqual(story_lane.export(data, "csv").splitlines()[0].split(",")[:3],
-                         ["story_id", "title", "size"])
+        self.assertEqual(task_lane.export(data, "csv").splitlines()[0].split(",")[:3],
+                         ["task_id", "title", "size"])
 
     def test_scope_selects_a_delivery_a_window_or_the_latest(self):
-        cards = [{"id": f"FL-00{n}", "requested_at": f"2026-10-{10 + n}T10:00:00+00:00",
+        tasks = [{"id": f"TK-00{n}", "requested_at": f"2026-10-{10 + n}T10:00:00+00:00",
                   "delivery": "DLV-007" if n % 2 else ""} for n in range(1, 6)]
         at = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
-        self.assertEqual([card["id"] for card in story_lane.select(cards, delivery="DLV-007")],
-                         ["FL-001", "FL-003", "FL-005"])
-        self.assertEqual([card["id"] for card in story_lane.select(cards, since="3d", at=at)],
-                         ["FL-004", "FL-005"])
-        self.assertEqual([card["id"] for card in story_lane.select(cards, recent=2)],
-                         ["FL-004", "FL-005"])
-        with self.assertRaises(story_lane.Refused):
-            story_lane.select(cards, since="week")
+        self.assertEqual([task["id"] for task in task_lane.select(tasks, delivery="DLV-007")],
+                         ["TK-001", "TK-003", "TK-005"])
+        self.assertEqual([task["id"] for task in task_lane.select(tasks, since="3d", at=at)],
+                         ["TK-004", "TK-005"])
+        self.assertEqual([task["id"] for task in task_lane.select(tasks, recent=2)],
+                         ["TK-004", "TK-005"])
+        with self.assertRaises(task_lane.Refused):
+            task_lane.select(tasks, since="week")
 
     def test_github_times_come_from_checks_and_the_review_comment(self):
         checks = [{"name": "tests", "conclusion": "SUCCESS", "startedAt": "2026-10-16T10:05:00Z",
                    "completedAt": "2026-10-16T10:11:00Z"},
                   {"name": "gate", "conclusion": "SUCCESS", "startedAt": "2026-10-16T10:05:00Z",
                    "completedAt": "2026-10-16T10:07:00Z"}]
-        self.assertEqual(story_lane.ci_green_at(checks), "2026-10-16T10:11:00Z")
-        self.assertIsNone(story_lane.ci_green_at(checks + [{"name": "x", "conclusion": "FAILURE"}]))
-        self.assertEqual(story_lane.check_minutes(checks), {"tests": 6.0, "gate": 2.0})
+        self.assertEqual(task_lane.ci_green_at(checks), "2026-10-16T10:11:00Z")
+        self.assertIsNone(task_lane.ci_green_at(checks + [{"name": "x", "conclusion": "FAILURE"}]))
+        self.assertEqual(task_lane.check_minutes(checks), {"tests": 6.0, "gate": 2.0})
         comments = [{"body": "looks fine", "createdAt": "2026-10-16T10:06:00Z"},
-                    {"body": story_lane.REVIEW_MARK, "createdAt": "2026-10-16T10:09:00Z"}]
-        self.assertEqual(story_lane.review_at(comments), "2026-10-16T10:09:00Z")
+                    {"body": task_lane.REVIEW_MARK, "createdAt": "2026-10-16T10:09:00Z"}]
+        self.assertEqual(task_lane.review_at(comments), "2026-10-16T10:09:00Z")
 
     def test_the_retrospective_note_is_vault_shaped(self):
-        data = story_lane.report([story_lane.story_row(self.card, None)], "DLV-007")
-        note = story_lane.retrospective_note(data, "DLV-007")
+        data = task_lane.report([task_lane.task_row(self.task, None)], "DLV-007")
+        note = task_lane.retrospective_note(data, "DLV-007")
         self.assertIn("type: retrospective", note)
         self.assertIn("<!-- sec: nav -->", note)
 
@@ -237,25 +237,25 @@ class GitHubCommandTests(unittest.TestCase):
     def project(self, rigor: str) -> Path:
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
-        cards = root / story_lane.CARDS
-        cards.mkdir(parents=True)
-        (cards / "fl-004-export-invoices.md").write_text(
-            CARD.replace("rigor: normal", f"rigor: {rigor}"), encoding="utf-8")
+        tasks = root / task_lane.TASKS
+        tasks.mkdir(parents=True)
+        (tasks / "tk-004-export-invoices.md").write_text(
+            TASK.replace("rigor: normal", f"rigor: {rigor}"), encoding="utf-8")
         return root
 
     def test_normal_rigor_turns_on_auto_merge(self):
         calls = []
-        with mock.patch.object(story_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
-            result = story_lane.cmd_merge(SimpleNamespace(story="FL-004", pr="9", style="merge",
+        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
+            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
                                                           detail=None), self.project("normal"))
         self.assertTrue(result["auto_merge"])
         self.assertIn(("gh", "pr", "merge", "9", "--auto", "--merge"), calls)
-        self.assertIn(story_lane.REVIEW_MARK, calls[0][-1])
+        self.assertIn(task_lane.REVIEW_MARK, calls[0][-1])
 
     def test_high_rigor_leaves_the_merge_to_the_owner(self):
         calls = []
-        with mock.patch.object(story_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
-            result = story_lane.cmd_merge(SimpleNamespace(story="FL-004", pr="9", style="merge",
+        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
+            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
                                                           detail=None), self.project("high"))
         self.assertFalse(result["auto_merge"])
         self.assertFalse(any(call[:3] == ("gh", "pr", "merge") for call in calls))
@@ -269,7 +269,7 @@ class GitHubCommandTests(unittest.TestCase):
             if args[:3] == ("git", "remote", "get-url"):
                 return "git@github.com:acme/shop.git"
             if args[:3] == ("gh", "pr", "list"):
-                return json.dumps([{"number": 9, "headRefName": "story/fl-004-export-invoices"}])
+                return json.dumps([{"number": 9, "headRefName": "task/tk-004-export-invoices"}])
             if args[:3] == ("gh", "pr", "view"):
                 return json.dumps({"createdAt": "2026-10-16T10:10:00Z",
                                    "mergedAt": "2026-10-16T10:30:00Z", "comments": [],
@@ -281,10 +281,10 @@ class GitHubCommandTests(unittest.TestCase):
             return ""
 
         args = SimpleNamespace(ids="1", delivery=None, since=None, recent=20)
-        with mock.patch.object(story_lane, "run", side_effect=fake):
-            result = story_lane.cmd_file_issues(args, root)
-            with self.assertRaises(story_lane.Refused):
-                story_lane.cmd_file_issues(SimpleNamespace(**{**vars(args), "ids": "FL-NOPE"}), root)
+        with mock.patch.object(task_lane, "run", side_effect=fake):
+            result = task_lane.cmd_file_issues(args, root)
+            with self.assertRaises(task_lane.Refused):
+                task_lane.cmd_file_issues(SimpleNamespace(**{**vars(args), "ids": "RETRO-NOPE"}), root)
         created = [call for call in calls if call[:3] == ("gh", "issue", "create")]
         self.assertEqual(len(created), 1)
         self.assertEqual(created[0][3:5], ("--repo", "acme/shop"))
@@ -293,43 +293,133 @@ class GitHubCommandTests(unittest.TestCase):
 
 
 class FastLaneOwnershipTests(unittest.TestCase):
-    def test_a_card_owns_architecture_only_in_the_fast_lane(self):
+    def test_a_task_owns_architecture_only_in_the_fast_lane(self):
         with tempfile.TemporaryDirectory() as temporary:
             docs = Path(temporary) / "workspace" / "docs"
             (docs / "delivery").mkdir(parents=True)
-            cards = docs / "backlog" / "cards"
-            cards.mkdir(parents=True)
-            (cards / "fl-004-export-invoices.md").write_text(CARD, encoding="utf-8")
-            self.assertIsNone(architecture_compile.story_card(docs, "FL-004"))
+            tasks = docs / "backlog" / "tasks"
+            tasks.mkdir(parents=True)
+            (tasks / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
+            self.assertIsNone(architecture_compile.task_owner(docs, "TK-004"))
             run_policy(docs, "init")
             run_policy(docs, "set", "--switch", "process_profile", "--value", "fast_lane")
             run_policy(docs, "approve")
-            path, props, ref = architecture_compile.story_card(docs, "FL-004")
-            self.assertEqual((path.name, ref), ("fl-004-export-invoices.md", "FL-004"))
-            self.assertIsNone(architecture_compile.story_card(docs, "ST-004"))
-            (cards / "fl-004-export-invoices.md").write_text(
-                CARD.replace("status: active", "status: dropped"), encoding="utf-8")
+            path, props, ref = architecture_compile.task_owner(docs, "TK-004")
+            self.assertEqual((path.name, ref), ("tk-004-export-invoices.md", "TK-004"))
+            self.assertIsNone(architecture_compile.task_owner(docs, "ST-004"))
+            (tasks / "tk-004-export-invoices.md").write_text(
+                TASK.replace("status: active", "status: dropped"), encoding="utf-8")
             with self.assertRaises(ValueError):
-                architecture_compile.story_card(docs, "FL-004")
+                architecture_compile.task_owner(docs, "TK-004")
 
-    def test_story_cards_need_no_inbound_map_link(self):
+    def test_task_owners_need_no_inbound_map_link(self):
         policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        self.assertIn("story-card", policy["navigation_exempt_types"])
-        card = SimpleNamespace(rel="backlog/cards/fl-004-a.md", fm={"type": "story-card"},
+        self.assertIn("task", policy["navigation_exempt_types"])
+        task = SimpleNamespace(rel="backlog/tasks/tk-004-a.md", fm={"type": "task"},
                                generated=False)
         story = SimpleNamespace(rel="backlog/epics/e/stories/s/story.md", fm={"type": "story"},
                                 generated=False)
-        vault = SimpleNamespace(policy=policy, notes={card.rel: card, story.rel: story})
+        vault = SimpleNamespace(policy=policy, notes={task.rel: task, story.rel: story})
         self.assertEqual([note.rel for note in vault_check.navigated(vault)], [story.rel])
 
-    def test_the_card_type_is_registered_in_the_vault_policy(self):
+    def test_the_task_type_is_registered_in_the_vault_policy(self):
         policy = json.loads((TEAM / "skill-content/obsidian-vault/data/vault-policy.json")
                             .read_text(encoding="utf-8"))
-        self.assertIn("story-card", policy["extra_doc_types"])
+        self.assertIn("task", policy["extra_doc_types"])
         self.assertIn("retrospective", policy["extra_doc_types"])
         for key, kind in (("requested_at", "datetime"), ("size", "text"), ("rigor", "text"),
                           ("delivery", "text")):
             self.assertEqual(policy["property_types"][key], kind)
+
+
+STORY = """---
+type: story
+title: "Invoice export"
+id: ST-012
+---
+# Invoice export
+
+## Acceptance
+
+- [ ] The export lists every invoice of the month.
+- [ ] Each row carries the number and total.
+- [ ] An empty month yields a header-only file.
+
+## Dependencies
+
+- none
+"""
+
+
+class TaskLinkTests(unittest.TestCase):
+    def project(self) -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        epic = root / task_lane.STORIES / "billing"
+        (epic / "stories" / "invoice-export").mkdir(parents=True)
+        (epic / "epic.md").write_text("---\ntype: epic\nid: EP-003\n---\n# Billing\n", encoding="utf-8")
+        (epic / "stories" / "invoice-export" / "story.md").write_text(STORY, encoding="utf-8")
+        return root
+
+    def write(self, text: str) -> Path:
+        path = Path(tempfile.mkdtemp()) / "tk-004-export-invoices.md"
+        self.addCleanup(lambda: __import__("shutil").rmtree(path.parent))
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_links_point_from_the_task_to_its_story(self):
+        linked = TASK.replace("rigor: normal\n", "rigor: normal\nepic: EP-003\nsource_story: ST-012\n"
+                              "covers:\n  - 1\n  - 3\n")
+        self.assertEqual(task_lane.lint(self.write(linked)), [])
+        self.assertEqual(task_lane.covered(task_lane.task_props(self.write(linked))), [1, 3])
+        errors = task_lane.lint(self.write(linked.replace("  - 1\n  - 3\n", "")))
+        self.assertIn("covers must list the source story's criterion numbers this task delivers", errors)
+        errors = task_lane.lint(self.write(TASK.replace("rigor: normal\n",
+                                                        "rigor: normal\nepic: E3\ncovers:\n  - 1\n")))
+        self.assertIn("epic must be EP-<number>", errors)
+        self.assertIn("covers needs a source_story", errors)
+
+    def test_standalone_tasks_need_no_story(self):
+        self.assertEqual(task_lane.lint(self.write(TASK.replace("rigor: normal\n",
+                                                               "rigor: normal\nepic: EP-003\n"))), [])
+
+    def test_the_story_index_reads_criteria_and_epic(self):
+        story = task_lane.story_index(self.project())["ST-012"]
+        self.assertEqual(story["epic"], "EP-003")
+        self.assertEqual(len(story["criteria"]), 3)
+        self.assertTrue(story["criteria"][0].startswith("The export lists"))
+
+    def test_a_story_is_delivered_once_merged_tasks_cover_every_criterion(self):
+        stories = task_lane.story_index(self.project())
+        merged = [{"id": "TK-001", "title": "a", "source_story": "ST-012", "covers": ["1", "2"]}]
+        opened = [{"id": "TK-002", "title": "b", "source_story": "ST-012", "covers": ["3"]},
+                  {"id": "TK-003", "title": "fix", "epic": "EP-003"}]
+        group = task_lane.board(stories, merged, opened)["EP-003"]["ST-012"]
+        self.assertEqual((group["covered"], group["missing"], group["delivered"]), ([1, 2], [3], False))
+        epics = task_lane.board(stories, merged + [{**opened[0]}], [])
+        self.assertTrue(epics["EP-003"]["ST-012"]["delivered"])
+        standalone = task_lane.board(stories, [], opened[1:])["EP-003"]["standalone"]
+        self.assertEqual([task["id"] for task in standalone["tasks"]], ["TK-003"])
+        text = task_lane.render_board(task_lane.board(stories, merged, opened), stories, [])
+        self.assertIn("ST-012 Invoice export: 2/3 criteria, missing [3]", text)
+        self.assertIn("never edit by hand", text)
+
+    def test_a_story_changed_after_an_open_task_was_requested_warns(self):
+        stories = task_lane.story_index(self.project())
+        opened = [{"id": "TK-002", "source_story": "ST-012",
+                   "requested_at": "2026-10-16T10:00:00+00:00"}]
+        later = {"ST-012": "2026-10-16T11:00:00+00:00"}
+        earlier = {"ST-012": "2026-10-16T09:00:00+00:00"}
+        self.assertEqual([item["task"] for item in task_lane.drift(stories, opened, later)], ["TK-002"])
+        self.assertEqual(task_lane.drift(stories, opened, earlier), [])
+
+    def test_the_link_properties_are_registered(self):
+        policy = json.loads((TEAM / "skill-content/obsidian-vault/data/vault-policy.json")
+                            .read_text(encoding="utf-8"))
+        for key, kind in (("epic", "text"), ("source_story", "text"), ("covers", "multitext")):
+            self.assertEqual(policy["property_types"][key], kind)
+        self.assertEqual(policy["type_path_patterns"]["task"],
+                         ["^backlog/tasks/tk-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"])
 
 
 class GovernedRenameTests(unittest.TestCase):

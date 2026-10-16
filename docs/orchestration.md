@@ -147,10 +147,10 @@ affected live groups once before merge. The steps are in
 and `qa-verification/references/switch-item_live_gate-tooling_items.md`.
 
 Process switch `process_profile` keeps the governed ceremonies at `governed`.
-At `fast_lane`, the orchestrating session runs one story per change itself, with
-every role in the foreground and no delivery coordinator: one card under
-`backlog/cards/`, one branch and one pull request to the target branch, the
-project's CI plus one reviewer (two at card rigor `high`, where the owner
+At `fast_lane`, the orchestrating session runs one task per change itself, with
+every role in the foreground and no delivery coordinator: one task under
+`backlog/tasks/`, one branch and one pull request to the target branch, the
+project's CI plus one reviewer (two at task rigor `high`, where the owner
 merges), and auto-merge. The steps are in `flows/fast-lane.md` and
 `deliver/references/switch-process_profile-fast_lane.md`.
 

@@ -224,7 +224,7 @@
         "resolver": "unresolved",
         "roles": []
       },
-      "next_transition": "The story is done when its pull request merges on green CI after one reviewer pass; the card and the pull request are its record."
+      "next_transition": "The task is done when its pull request merges on green CI after one reviewer pass; the task and the pull request are its record."
     },
     "deliver_governed": {
       "flows": [

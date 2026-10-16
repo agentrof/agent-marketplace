@@ -46,11 +46,13 @@ light:    /delivery-plan -> one gate: scope, topology, reused contract receipts 
 entries the user's menu hides (`user_invocable: false`): the orchestrating
 session still loads them under `process_profile` `governed`, where `/deliver
 DLV-###` routes to `/deliver-governed`, and at `fast_lane` they refuse and
-point to `/deliver` or `/requirement`. At `fast_lane` the public path is:
+point to `/deliver` or `/requirement`. A task is the smallest unit of
+delivery, merged by one PR; it may derive from a story (source_story, covers)
+or stand alone. At `fast_lane` the public path is:
 
 ```text
-/setup -> /deliver                    one change: card -> owner approval -> PR -> merge
-/setup -> /requirement -> stages -> several /deliver cards in parallel
+/setup -> /deliver                    one change: task -> owner approval -> PR -> merge
+/setup -> /requirement -> stages -> several /deliver tasks in parallel
 /retrospective [DLV-### | --since 7d]  times, steps and proposals
 ```
 

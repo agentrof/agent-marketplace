@@ -183,7 +183,7 @@
       }
     },
     {
-      "query": "tag:#doc/story-card",
+      "query": "tag:#doc/task",
       "color": {
         "a": 1,
         "rgb": 1349210

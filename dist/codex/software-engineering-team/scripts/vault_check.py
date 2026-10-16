@@ -1090,7 +1090,7 @@ def check_alias_ownership(vault: Vault, findings: list[Finding]) -> None:
 
 def navigated(vault: Vault) -> list[Note]:
     """Authored notes the map graph must reach; a type the policy exempts, such
-    as a fast-lane story card that Git and the story clock index, is left out."""
+    as a fast-lane task that Git and the retrospective index, is left out."""
     exempt = set(vault.policy.get("navigation_exempt_types", []))
     return [note for note in authored(vault) if note.fm.get("type") not in exempt]
 

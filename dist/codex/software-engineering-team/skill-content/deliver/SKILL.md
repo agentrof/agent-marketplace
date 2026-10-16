@@ -1,6 +1,6 @@
 ---
 name: deliver
-description: Fast-lane delivery entry. Turns one free-text request into a story card, one branch and one pull request that auto-merges on green CI and one reviewer pass.
+description: Fast-lane delivery entry. Turns one free-text request into a task, one branch and one pull request that auto-merges on green CI and one reviewer pass.
 exposure: entry
 ---
 
@@ -20,8 +20,8 @@ and derive its inputs with `scripts/task_inputs.py --entry deliver`.
 
 ## Invocation
 
-`/deliver <request>` starts one story. `/deliver resume FL-###` continues one
-from its card and branch; `/retrospective` reads the times.
+`/deliver <request>` starts one task. `/deliver resume TK-###` continues one
+from its task and branch; `/retrospective` reads the times.
 
 ## Procedure
 
@@ -32,5 +32,5 @@ from its card and branch; `/retrospective` reads the times.
    completely and follow it as this entry; it is the governed Delivery path.
 2. Read `flows/fast-lane.md` completely and run its steps in order, from the
    project checkout, with the request verbatim.
-3. Report the card, its rigor, the pull request and its merge state, or the
+3. Report the task, its rigor, the pull request and its merge state, or the
    exact blocker.

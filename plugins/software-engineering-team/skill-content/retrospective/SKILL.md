@@ -16,34 +16,34 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
 
 ## When to Use
 
-- The user, or an agent reporting progress, wants the measured story times.
+- The user, or an agent reporting progress, wants the measured task times.
 - The user approves proposals from an earlier retrospective.
 
 ## Invocation
 
-- `/retrospective`: the latest 20 stories.
-- `/retrospective DLV-###`: the stories whose card names that Delivery.
-- `/retrospective --since 7d`: the stories requested in the window (`<n>d` or `<n>h`).
-- `--export csv|json` also rebuilds `.agentrof/retrospective/stories.<ext>`,
+- `/retrospective`: the latest 20 tasks.
+- `/retrospective DLV-###`: the tasks that name that Delivery.
+- `/retrospective --since 7d`: the tasks requested in the window (`<n>d` or `<n>h`).
+- `--export csv|json` also rebuilds `.agentrof/retrospective/tasks.<ext>`,
   a derived, git-ignored file.
 
 ## Procedure
 
 1. From the project checkout, after `git fetch` and on the target branch, run
-   `scripts/story_lane.py report` with `--delivery DLV-###`, `--since <window>`
-   and `--export <format>` as asked. The story cards give the request and
+   `scripts/task_lane.py report` with `--delivery DLV-###`, `--since <window>`
+   and `--export <format>` as asked. The tasks give the request and
    approval times; the pull request, review, CI and merge times are read from
    GitHub at report time.
-2. Return its text as it is: story count, request-to-merge average, median and
-   max, the per-story steps (card, write, ci, review, merge_wait; ci and
-   review run side by side), the slowest stories with their largest step and
+2. Return its text as it is: task count, request-to-merge average, median and
+   max, the per-task steps (define, write, ci, review, merge_wait; ci and
+   review run side by side), the slowest tasks with their largest step and
    3 to 5 numbered proposals with their evidence. Add nothing it does not
    measure; an empty scope says so.
 3. For a Delivery scope the user may keep the summary: `--write-report` writes
    `workspace/docs/delivery/retrospectives/dlv-###-retrospective.md`, which a
-   story or docs pull request commits.
+   task or docs pull request commits.
 4. Issues: only when the user approves proposals by number or id in this
-   conversation, run `scripts/story_lane.py file-issues --ids <list>` with the
+   conversation, run `scripts/task_lane.py file-issues --ids <list>` with the
    same scope flags. It opens one issue per proposal in the repository of the
    checkout's `origin` remote, with the measured evidence, and returns the
    links. An agent that calls this entry reports only and never files.

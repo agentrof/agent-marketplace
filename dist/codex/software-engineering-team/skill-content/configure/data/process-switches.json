@@ -1403,7 +1403,7 @@
       }
     },
     "process_profile": {
-      "summary": "Whether a request runs the standard Requirement, Backlog Planning and Delivery ceremonies, or the fast lane: one story card per change, approved by the owner, one branch and one pull request to the target branch, the project's CI and one reviewer as verification, and auto-merge; large requests still run the needed analysis stages with single-reader reviews and split into cards.",
+      "summary": "Whether a request runs the standard Requirement, Backlog Planning and Delivery ceremonies, or the fast lane: one task per change, approved by the owner, one branch and one pull request to the target branch, the project's CI and one reviewer as verification, and auto-merge; large requests still run the needed analysis stages with single-reader reviews and split into tasks.",
       "flows": [
         "requirement",
         "business-analysis",
@@ -1420,11 +1420,11 @@
         },
         {
           "id": "fast_lane",
-          "tradeoffs": "The deliver entry turns a free-text request into one card with 3 to 8 acceptance criteria and a test list, checked by lint only, then one branch and one pull request straight to the target branch. The project's CI and one reviewer reading the diff verify it; only a critical finding blocks, the rest become issues, and auto-merge lands it. No analysis, solution or design stage, no review panels, no Integration branch, Item refs, plan approvals, exclusive claims or contract pins, and live tests leave the story path, so a defect those would catch surfaces later, on main."
+          "tradeoffs": "The deliver entry turns a free-text request into one task with 3 to 8 acceptance criteria and a test list, checked by lint only, then one branch and one pull request straight to the target branch. The project's CI and one reviewer reading the diff verify it; only a critical finding blocks, the rest become issues, and auto-merge lands it. No analysis, solution or design stage, no review panels, no Integration branch, Item refs, plan approvals, exclusive claims or contract pins, and live tests leave the story path, so a defect those would catch surfaces later, on main."
         }
       ],
       "default": "governed",
-      "metric": "Per story: request, card, pull request opened, CI green, review passed and merged times in .agentrof/timing/stories.csv, and every defect found on main after a fast-lane merge.",
+      "metric": "Per task: request, approval, pull request opened, CI green, review passed and merged times, read from the task and GitHub by the retrospective, and every defect found on main after a fast-lane merge.",
       "promotion": {
         "unit": "At least 20 fast-lane stories.",
         "threshold": "Median request to merge at most 15 minutes with no more than one escaped critical defect per 20 stories, with every shared quality guard holding and the owner's approval."

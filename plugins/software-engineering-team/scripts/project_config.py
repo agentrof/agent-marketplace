@@ -21,18 +21,18 @@ CONFIG_FIELDS = {
     "team_id",
     "output_language",
     "terminology_language",
-    role_settings.TIER_MODELS,
-    role_settings.ROLE_TIERS,
+    role_settings.CLASS_MODELS,
+    role_settings.ROLE_CLASSES,
 }
 ORDINARY_FIELDS = {"output_language", "terminology_language"}
-# The builder writes the tier map of every host into each installed package;
-# a canonical source tree ships none, so it accepts no model or tier setting.
+# The builder writes the class map of every host into each installed package;
+# a canonical source tree ships none, so it accepts no model or class setting.
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-# `tiers` reads only the config and the package; whether a model is available
+# `classes` reads only the config and the package; whether a model is available
 # is the project generators' to judge, and they report the roles they render.
-TIER_MAP_NOTE = (
-    "Config-level effective map: each role's tier, model and effort from"
-    " workspace/config.json over the package tier map. It knows nothing of model"
+CLASS_MAP_NOTE = (
+    "Config-level effective map: each role's class, model and effort from"
+    " workspace/config.json over the package class map. It knows nothing of model"
     " availability, so the model a host's roles run is the roles table its project"
     " generator reports."
 )
@@ -51,15 +51,15 @@ def atomic(path: Path, value: dict) -> None:
     )
 
 
-def load_tier_map() -> dict | None:
-    """Return the installed package's tier map, or None when it ships none."""
-    return role_settings.load_tier_map()
+def load_class_map() -> dict | None:
+    """Return the installed package's class map, or None when it ships none."""
+    return role_settings.load_class_map()
 
 
 def base_errors(config: dict) -> list[str]:
     """The errors of the config's closed field set, schema, team and languages."""
     errors: list[str] = []
-    for field in sorted(set(config) - CONFIG_FIELDS):
+    for field in sorted(set(config) - CONFIG_FIELDS - set(role_settings.RETIRED_KEYS)):
         errors.append(f"config contains unknown or retired field: {field}")
     if config.get("schema_version") != SCHEMA_VERSION:
         errors.append(f"schema_version must be {SCHEMA_VERSION}")
@@ -75,13 +75,14 @@ def base_errors(config: dict) -> list[str]:
 def check(config: dict) -> list[str]:
     """Validate the team-owned, intentionally narrow bootstrap surface."""
     errors = base_errors(config)
-    if role_settings.TIER_MODELS in config or role_settings.ROLE_TIERS in config:
+    if {role_settings.CLASS_MODELS, role_settings.ROLE_CLASSES,
+            *role_settings.RETIRED_KEYS} & set(config):
         try:
-            tier_map = load_tier_map()
+            class_map = load_class_map()
         except ValueError as exc:
             errors.append(str(exc))
         else:
-            errors.extend(role_settings.config_errors(config, tier_map))
+            errors.extend(role_settings.config_errors(config, class_map))
     return errors
 
 
@@ -135,7 +136,7 @@ def host_listing(host: str) -> dict:
 
 
 def recommended_effort(efforts: list[str], package: str | None, vocabulary: list[str]) -> str | None:
-    """The tier's package effort when the model takes it, else the nearest below, else the lowest."""
+    """The slot's package effort when the model takes it, else the nearest below, else the lowest."""
     if not efforts:
         return None
     if package in efforts:
@@ -148,12 +149,12 @@ def recommended_effort(efforts: list[str], package: str | None, vocabulary: list
     return efforts[0]
 
 
-def model_choices(tier_map: dict, host: str, tier: str, listing: dict) -> list[dict]:
-    """A tier's model choices for the configure topic: the package model first,
-    then the other models of the host's list that its picker shows, or of the
-    catalog, then `session`."""
-    spec = tier_map["hosts"][host]
-    package = spec["tiers"][tier]
+def model_choices(class_map: dict, host: str, slot: str, listing: dict) -> list[dict]:
+    """A class slot's model choices for the configure topic: the package model
+    first, then the other models of the host's list that its picker shows, or
+    of the catalog, then `session`."""
+    spec = class_map["hosts"][host]
+    package = spec["classes"][slot]
     if listing["source"] == "host":
         others = sorted(model for model in listing["models"]
                         if model != role_settings.SESSION
@@ -165,7 +166,7 @@ def model_choices(tier_map: dict, host: str, tier: str, listing: dict) -> list[d
                role_settings.SESSION]
     result = []
     for model in ordered:
-        efforts = role_settings.choices(tier_map, host, model)
+        efforts = role_settings.choices(class_map, host, model)
         listed = listing.get("models", {}).get(model) if listing["source"] == "host" else None
         if model not in spec["models"] and model != role_settings.SESSION \
                 and isinstance(listed, list):
@@ -178,37 +179,37 @@ def model_choices(tier_map: dict, host: str, tier: str, listing: dict) -> list[d
     return result
 
 
-def tier_report(config: dict, tier_map: dict, host: str | None = None,
-                model_list: bool = False) -> dict:
-    """Each host's config-level effective map: its tiers and its roles."""
+def class_report(config: dict, class_map: dict, host: str | None = None,
+                 model_list: bool = False) -> dict:
+    """Each host's config-level effective map: its class slots and its roles."""
     report = {}
-    for name in sorted(tier_map["hosts"]):
+    for name in sorted(class_map["hosts"]):
         if host is not None and name != host:
             continue
-        spec = tier_map["hosts"][name]
-        roles = role_settings.resolve(tier_map, config, name)
+        spec = class_map["hosts"][name]
+        roles = role_settings.resolve(class_map, config, name)
         overrides = role_settings.host_overrides(config, name)
-        tiers = {}
-        for tier, setting in role_settings.tier_settings(tier_map, config, name).items():
-            package = spec["tiers"][tier]
-            override = overrides.get(tier)
-            tiers[tier] = {
-                "roles": sorted(role for role, row in roles.items() if row["tier"] == tier),
+        slots = {}
+        for slot, setting in role_settings.slot_settings(class_map, config, name).items():
+            package = spec["classes"][slot]
+            override = overrides.get(slot)
+            slots[slot] = {
+                "roles": sorted(role for role, row in roles.items() if row["class"] == slot),
                 "package_model": package["model"],
                 "package_effort": package.get("effort"),
                 "override": override if isinstance(override, dict) else None,
                 **setting,
-                "efforts": role_settings.choices(tier_map, name, setting["model"])
+                "efforts": role_settings.choices(class_map, name, setting["model"])
                 if isinstance(setting["model"], str) else [],
             }
-        report[name] = {"tiers": tiers, "roles": roles, "confirm": spec["confirm"],
+        report[name] = {"classes": slots, "roles": roles, "confirm": spec["confirm"],
                         "refuse": spec["refuse"]}
         if model_list:
             listing = host_listing(name)
             report[name]["model_list"] = {key: value for key, value in listing.items()
                                           if key != "models"}
             report[name]["model_choices"] = {
-                tier: model_choices(tier_map, name, tier, listing) for tier in tiers}
+                slot: model_choices(class_map, name, slot, listing) for slot in slots}
     return report
 
 
@@ -236,12 +237,12 @@ def effort_text(effort: object) -> str:
     return f"effort {effort}" if effort else "the session effort"
 
 
-def print_tiers(report: dict) -> None:
-    print(TIER_MAP_NOTE)
+def print_classes(report: dict) -> None:
+    print(CLASS_MAP_NOTE)
     for host, spec in report.items():
-        for tier, row in spec["tiers"].items():
-            sources = role_settings.source_text({**row, "tier_source": "package"})
-            print(f"{host} {tier}: {row['model']} at {effort_text(row['effort'])} ({sources})")
+        for slot, row in spec["classes"].items():
+            sources = role_settings.source_text({**row, "class_source": "package"})
+            print(f"{host} {slot}: {row['model']} at {effort_text(row['effort'])} ({sources})")
         for line in role_settings.table(spec["roles"]):
             print(f"  {line}")
         print(f"{host} asks the owner to confirm {', '.join(sorted(spec['confirm'])) or 'nothing'}"
@@ -250,28 +251,29 @@ def print_tiers(report: dict) -> None:
 
 def setting_command(args, path: Path, config: dict) -> int:
     try:
-        tier_map = load_tier_map()
+        class_map = load_class_map()
     except ValueError as exc:
         print(f"project_config: {exc}", file=sys.stderr)
         return 2
-    if tier_map is None:
-        print("project_config: this package ships no tier map templates/tier-map.json;"
+    if class_map is None:
+        print("project_config: this package ships no class map templates/model-classes.json;"
               " run the installed package's scripts", file=sys.stderr)
         return 2
-    if args.command == "tiers":
-        if args.host is not None and args.host not in tier_map["hosts"]:
+    if args.command == "classes":
+        if args.host is not None and args.host not in class_map["hosts"]:
             print(f"project_config: unknown host {args.host!r}; hosts are"
-                  f" {', '.join(sorted(tier_map['hosts']))}", file=sys.stderr)
+                  f" {', '.join(sorted(class_map['hosts']))}", file=sys.stderr)
             return 1
         errors = check(config)
-        report = tier_report(config, tier_map, args.host, args.model_list)
+        report = class_report(config, class_map, args.host, args.model_list)
         if args.json:
             print(json.dumps({"ok": not errors, "config": str(path), "errors": errors,
-                              "hosts": report, "role_tiers": config.get(role_settings.ROLE_TIERS),
-                              "note": TIER_MAP_NOTE},
+                              "hosts": report,
+                              "role_classes": config.get(role_settings.ROLE_CLASSES),
+                              "note": CLASS_MAP_NOTE},
                              ensure_ascii=False, indent=2, sort_keys=True))
         else:
-            print_tiers(report)
+            print_classes(report)
             for value in errors:
                 print(f"ERROR {path}:1 [project_config] {value}")
         return 1 if errors else 0
@@ -285,20 +287,23 @@ def setting_command(args, path: Path, config: dict) -> int:
         for value in invalid:
             print(f"project_config: {value}", file=sys.stderr)
         return 1
+    slot = None
     try:
-        if args.command == "set-tier":
+        if args.command == "set-class":
             if args.default and (args.model is not None or args.effort is not None):
                 raise ValueError("--default takes no --model or --effort")
             if not args.default and args.model is None and args.effort is None:
-                raise ValueError("set-tier needs --model, --effort or --default")
-            proposed, before, after = role_settings.set_tier(
-                config, tier_map, args.host, args.tier, model=args.model, effort=args.effort,
+                raise ValueError("set-class needs --model, --effort or --default")
+            slot = f"{args.model_class}_{role_settings.ESCALATED}" if args.escalated \
+                else args.model_class
+            proposed, before, after = role_settings.set_class(
+                config, class_map, args.host, slot, model=args.model, effort=args.effort,
                 default=args.default, confirmed=args.confirmed)
         else:
-            if args.default == (args.tier is not None):
-                raise ValueError("set-role-tier needs exactly one of --tier or --default")
-            proposed, before, after = role_settings.set_role_tier(
-                config, tier_map, args.role, args.tier, default=args.default)
+            if args.default == (args.model_class is not None):
+                raise ValueError("set-role-class needs exactly one of --class or --default")
+            proposed, before, after = role_settings.set_role_class(
+                config, class_map, args.role, args.model_class, default=args.default)
     except ValueError as exc:
         print(f"project_config: {exc}", file=sys.stderr)
         return 1
@@ -314,20 +319,20 @@ def setting_command(args, path: Path, config: dict) -> int:
         atomic(path, proposed)
     result = {"ok": True, "config": str(path), "before": before, "after": after,
               "dry_run": args.dry_run, "errors": errors}
-    if args.command == "set-tier":
-        where = f"{role_settings.TIER_MODELS}.{args.host}.{args.tier}"
-        # A removed override of a retired tier or host has no setting left.
-        known = args.host in tier_map["hosts"] \
-            and args.tier in role_settings.configurable_tiers(tier_map, args.host)
-        setting = role_settings.tier_setting(
-            tier_map, args.host, args.tier,
-            role_settings.host_overrides(proposed, args.host).get(args.tier)) if known else {}
-        result.update(host=args.host, tier=args.tier, model=setting.get("model"),
+    if args.command == "set-class":
+        where = f"{role_settings.CLASS_MODELS}.{args.host}.{slot}"
+        # A removed override of a retired slot or host has no setting left.
+        known = args.host in class_map["hosts"] \
+            and slot in role_settings.class_slots(class_map, args.host)
+        setting = role_settings.slot_setting(
+            class_map, args.host, slot,
+            role_settings.host_overrides(proposed, args.host).get(slot)) if known else {}
+        result.update(host=args.host, slot=slot, model=setting.get("model"),
                       effort=setting.get("effort"))
     else:
-        where = f"{role_settings.ROLE_TIERS}.{args.role}"
-        roles = role_settings.package_tiers(tier_map)
-        result.update(role=args.role, tier=after or roles.get(args.role))
+        where = f"{role_settings.ROLE_CLASSES}.{args.role}"
+        roles = role_settings.movable_roles(class_map)
+        result.update(role=args.role, model_class=after or roles.get(args.role))
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     else:
@@ -348,16 +353,19 @@ def main(argv=None) -> int:
     p.add_argument("--value", required=True)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("tiers", help="report the config-level effective map of each host")
+    p = sub.add_parser("classes", help="report the config-level effective map of each host")
     p.add_argument("--config", required=True)
     p.add_argument("--host")
     p.add_argument("--model-list", action="store_true",
-                   help="add each tier's model choices, from the active host's own list")
+                   help="add each class slot's model choices, from the active host's own list")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("set-tier", help="set or remove one tier's model and effort override")
+    p = sub.add_parser("set-class",
+                       help="set or remove one class slot's model and effort override")
     p.add_argument("--config", required=True)
     p.add_argument("--host", required=True)
-    p.add_argument("--tier", required=True)
+    p.add_argument("--class", dest="model_class", required=True)
+    p.add_argument("--escalated", action="store_true",
+                   help="set the class's escalated slot instead of its default one")
     p.add_argument("--model", help="a model ID of the host's list, or session")
     p.add_argument("--effort")
     p.add_argument("--default", action="store_true",
@@ -366,12 +374,12 @@ def main(argv=None) -> int:
                    help="the owner confirmed an effort the host asks to confirm")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("set-role-tier", help="move one role to another tier, or back")
+    p = sub.add_parser("set-role-class", help="move one role to another class, or back")
     p.add_argument("--config", required=True)
     p.add_argument("--role", required=True)
-    p.add_argument("--tier")
+    p.add_argument("--class", dest="model_class")
     p.add_argument("--default", action="store_true",
-                   help="remove the override, so the role runs on its package tier")
+                   help="remove the override, so the role runs on its package class")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
@@ -381,7 +389,7 @@ def main(argv=None) -> int:
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"project_config: cannot read {path}: {exc}", file=sys.stderr)
         return 2
-    if args.command in {"tiers", "set-tier", "set-role-tier"}:
+    if args.command in {"classes", "set-class", "set-role-class"}:
         return setting_command(args, path, config)
     if args.command == "check":
         errors = check(config)

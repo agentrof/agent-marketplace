@@ -2,8 +2,10 @@
 name: software-architect
 description: Software architect role. Spawned by software-engineering-team flows to evolve the living architecture documents delta-first; never auto-triggered.
 model: claude-opus-5-5
-effort: xhigh
+effort: high
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__*
+omitClaudeMd: true
 ---
 
 # Software Architect

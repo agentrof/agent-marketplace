@@ -14,12 +14,15 @@ EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
 MODEL_ID_RE = re.compile(
     r"gpt-(?P<major>[0-9]+)(?:\.(?P<minor>[0-9]+))?-(?P<family>[a-z]+(?:-[a-z]+)*)"
 )
-# The shape of a model ID a project may set for a tier: any slug of the
+# The shape of a model ID a project may set for a class slot: any slug of the
 # host's model list, such as gpt-5.5, which the list itself judges further.
 MODEL_ID_SHAPE = r"[a-z0-9]+(?:[.-][a-z0-9]+)*"
 # This host's CLI in tools/data/host-cli-versions.json, the exact version CI
 # installs; no catalog model's min_cli_version may be newer.
 HOST_CLI_KEY = "codex"
+# A role file's model wins over a spawn-time model, so the build renders one
+# variant per escalated or purpose class instead.
+SPAWN_MODEL = None
 # The drift check reads the catalog bundled with the CLI, from `codex debug
 # models --bundled`. A pinned source of this form names the CLI release whose
 # bundled catalog the pins were verified against.
@@ -35,7 +38,7 @@ DEFAULT_PROMPTS = {"autopilot": "${plugin}:{name} on"}
 MODEL_TRIAL = (
     "Codex: in a scratch copy of the project, run `generate_codex_project.py"
     " apply --scope local --execution-profile inherit`, then start the session"
-    " with `--model <model ID>`; each role keeps its tier's"
+    " with `--model <model ID>`; each role keeps its class's"
     " `model_reasoning_effort`."
 )
 
@@ -93,10 +96,10 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
 
 def agent_artifacts(context: dict, source) -> list[tuple[str, str]]:
     fields, body = context["parse_frontmatter"](source)
-    reasoning = fields.pop("reasoning", "")
-    setting = context["execution_profile"].get(reasoning)
+    slot = fields.pop("model_class", "")
+    setting = context["execution_profile"].get(slot)
     if setting is None:
-        raise ValueError(f"{source}: invalid reasoning level {reasoning!r}")
+        raise ValueError(f"{source}: invalid model class {slot!r}")
     lines = ["---"]
     for key in ("name", "description"):
         if not fields.get(key):

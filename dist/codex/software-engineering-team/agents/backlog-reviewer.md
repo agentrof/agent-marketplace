@@ -2,7 +2,7 @@
 name: backlog-reviewer
 description: Independent backlog challenger for epic, story and test-plan packages; never auto-triggered.
 model: gpt-6.1-sol
-model_reasoning_effort: xhigh
+model_reasoning_effort: medium
 output_contract: prose
 tools: Read, Grep, Glob
 ---

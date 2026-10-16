@@ -1,9 +1,11 @@
 ---
 name: backend-developer
 description: Backend developer role. Spawned by software-engineering-team flows to implement server-side work against approved contracts; never auto-triggered.
-model: claude-opus-5-5
-effort: medium
+model: claude-sonnet-5-5
+effort: high
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__*
+omitClaudeMd: true
 ---
 
 # Backend Developer

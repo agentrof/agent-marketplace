@@ -162,12 +162,12 @@ its own calibration before it gates.
 
 - The calibration reader is neither the writer nor a reader that returned a
   finding of the review. Spawn a fresh instance of the claiming reviewer's
-  role on that role's own tier: `backlog-reviewer`, `solution-reviewer` or
+  role on that role's own class: `backlog-reviewer`, `solution-reviewer` or
   `design-system-reviewer`, and for an Operation contract the non-writing
   counterpart, `devops-engineer` for the Verification Contract and
   `qa-engineer` for the Environment Contract. Never spawn a `-lens` or
   `-mechanical` variant for calibration, also when a lens panel returned the
-  claims or a mechanical pass applied the fixes: a lower calibration tier
+  claims or a mechanical pass applied the fixes: a lower calibration class
   needs its own data first. Derive its task as the step derives its
   reader's, in mode `review`, adding `--findings <record of the claims>`.
 - Give it each claim as returned, with its id, severity, evidence, impact and

@@ -1,4 +1,14 @@
 {
-  "schema_version": 1,
-  "reasoning_levels": ["high", "medium", "low", "inherit"]
+  "schema_version": 2,
+  "description": "Purpose classes pick the model and effort of every spawn on every host. A class that escalates runs one level up for a task of size l, at rigor high or on a risk flag; a fixed class never moves.",
+  "model_classes": {
+    "mechanical": {"escalates": true},
+    "routine_authoring": {"escalates": true},
+    "complex_authoring": {"escalates": true},
+    "routine_review": {"escalates": true},
+    "critical_decision": {"escalates": true},
+    "security_review": {"escalates": false},
+    "orchestration": {"escalates": false}
+  },
+  "risk_flags": ["auth", "secrets", "data_placement", "migration", "irreversible"]
 }

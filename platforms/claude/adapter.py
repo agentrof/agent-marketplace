@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -16,12 +17,18 @@ MODEL_ID_RE = re.compile(
 # IDs are dateless snapshots from the 4.6 generation on and dated before it,
 # where the dateless form is an alias that is not pinned.
 DATELESS_SINCE = (4, 6)
-# The shape of a model ID a project may set for a tier: the documented ID
+# The shape of a model ID a project may set for a class slot: the documented ID
 # format, which the host's own model list judges further.
 MODEL_ID_SHAPE = MODEL_ID_RE.pattern
 # This host's CLI in tools/data/host-cli-versions.json, the exact version CI
 # installs; no catalog model's min_cli_version may be newer.
 HOST_CLI_KEY = "claude_code"
+# A spawn sets the model by the family alias and the effort by its level, over
+# the role file's own pins, so purpose and escalation need no extra role file.
+SPAWN_MODEL = "alias"
+# What every rendered role leaves out of its context; data beside this module.
+AGENT_TOOLS = json.loads((Path(__file__).resolve().parent / "agent-tools.json")
+                         .read_text(encoding="utf-8"))
 # How a frozen-task A/B runs every role on one candidate model.
 MODEL_TRIAL = (
     "Claude Code: set `CLAUDE_CODE_SUBAGENT_MODEL=<model ID>` and"
@@ -75,12 +82,32 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
     return [(f"skills/{name}/SKILL.md", text)]
 
 
+def base_agent(name: str) -> str:
+    """The canonical agent a variant name renders from."""
+    for agent in sorted(set(AGENT_TOOLS["browser_agents"]) | set(AGENT_TOOLS["spawning_agents"]),
+                        key=len, reverse=True):
+        if name == agent or name.startswith(f"{agent}-"):
+            return agent
+    return name
+
+
+def disallowed_tools(name: str) -> list[str]:
+    """The tools a role never needs: none for a role with its own tool list."""
+    agent = base_agent(name)
+    denied = list(AGENT_TOOLS["disallowed"])
+    if agent not in AGENT_TOOLS["spawning_agents"]:
+        denied.append("Agent")
+    denied += AGENT_TOOLS["browser_disallowed_mcp"] if agent in AGENT_TOOLS["browser_agents"] \
+        else AGENT_TOOLS["disallowed_mcp"]
+    return denied
+
+
 def agent_artifacts(context: dict, source) -> list[tuple[str, str]]:
     fields, body = context["parse_frontmatter"](source)
-    reasoning = fields.pop("reasoning", "")
-    setting = context["execution_profile"].get(reasoning)
+    slot = fields.pop("model_class", "")
+    setting = context["execution_profile"].get(slot)
     if setting is None:
-        raise ValueError(f"{source}: invalid reasoning level {reasoning!r}")
+        raise ValueError(f"{source}: invalid model class {slot!r}")
     lines = ["---"]
     for key in ("name", "description"):
         if not fields.get(key):
@@ -89,7 +116,12 @@ def agent_artifacts(context: dict, source) -> list[tuple[str, str]]:
     lines.append(f"model: {setting.get('model', 'inherit')}")
     if "effort" in setting:
         lines.append(f"effort: {setting['effort']}")
+    name = lines[1].split(": ", 1)[1]
     lines.extend(f"{key}: {value}" for key, value in fields.items())
+    if "tools" not in fields:
+        lines.append(f"disallowedTools: {', '.join(disallowed_tools(name))}")
+    if AGENT_TOOLS["omit_claude_md"]:
+        lines.append("omitClaudeMd: true")
     lines.extend(("---", "", body.lstrip("\n")))
     return [(f"agents/{source.name}", "\n".join(lines))]
 

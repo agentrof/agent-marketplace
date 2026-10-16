@@ -14,7 +14,7 @@ Use the owning compiler's exact scope and source bindings.
 
 - Changing language, an Operation Contract, Delivery Governance, the
   Definition of Done, or a process switch (`process`).
-- Changing a tier's model or reasoning effort, or the tier a role runs on,
+- Changing a purpose class's model or reasoning effort, or the class a role runs on,
   in this project (`models`).
 - Repairing a local workspace contract after an intentional user change.
 
@@ -40,7 +40,7 @@ Use the owning compiler's exact scope and source bindings.
    environment`; for `governance`, use `delivery_governance.py`; for DOD, use
    its Delivery compiler; for `process`, use `process_policy.py`. Never
    hand-edit their lifecycle fields. For `models`, use `project_config.py
-   tiers`, `set-tier` and `set-role-tier`.
+   classes`, `set-class` and `set-role-class`.
 4. For a language change, run `project_config.py set --dry-run --json` and
    present only the config delta. Existing authored titles are not translated
    or rewritten by a config change.

@@ -1,9 +1,11 @@
 ---
 name: product-owner
 description: Product owner role that groups approved product knowledge into the project-local epic and story backlog; never auto-triggered.
-model: claude-opus-5-5
-effort: medium
+model: claude-sonnet-5-5
+effort: high
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__*
+omitClaudeMd: true
 ---
 
 # Product Owner

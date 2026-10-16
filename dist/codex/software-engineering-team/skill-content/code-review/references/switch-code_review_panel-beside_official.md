@@ -70,7 +70,7 @@ finding of a lens result and, when `review_loop` is `blocking_delta`, every
 open critical or major claim of the official result that no earlier
 calibration ruled. With no such claim, calibration is skipped.
 
-1. Spawn a fresh `code-reviewer` on its own tier, never a `code-reviewer-lens`,
+1. Spawn a fresh `code-reviewer` on its own class, never a `code-reviewer-lens`,
    neither an implementation writer nor a reader of this pass. Give it every
    claim as returned, the official result's findings, the Severity
    Definitions and `SELF-CHECK`, and let it read the frozen candidate through

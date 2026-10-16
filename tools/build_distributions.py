@@ -25,29 +25,37 @@ from types import ModuleType
 
 ADAPTER_API_VERSION = 1
 FEATURE_BRANCH_PREFIX_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/")
-CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "inherit"}
+# The purpose classes every host maps to a model and effort, and the risk flags
+# that escalate a class one level; a class that escalates has a second slot,
+# `<class>_escalated`, and a host that cannot set a model at spawn time gets
+# one `<agent>-escalated` variant per agent on such a class.
+MODEL_CLASSES_RELPATH = "tools/data/models.json"
+MODEL_CLASSES_SCHEMA_VERSION = 2
+ESCALATED = "escalated"
+CLASS_ID_RE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
+# A team's purpose variants: an agent spawned for another class's purpose.
+PURPOSE_VARIANTS_RELPATH = "skill-content/configure/data/purpose-variants.json"
 EXECUTION_PROFILE_FILE = "execution-profiles.json"
-EXECUTION_PROFILE_SCHEMA_VERSION = 3
+EXECUTION_PROFILE_SCHEMA_VERSION = 4
 AUTO_EXECUTION_PROFILE = "auto"
-INHERIT_TIER = "inherit"
 EXECUTION_SETTING_KEYS = {"model", "effort"}
-# Each host's catalog is keyed by exact model ID; a tier names its model.
+# Each host's catalog is keyed by exact model ID; a class slot names its model.
 MODEL_CATALOG_FILE = "model-catalog.json"
 MODEL_CATALOG_SCHEMA_VERSION = 2
 MODEL_ENTRY_KEYS = ("family", "efforts", "min_cli_version", "sources", "verified")
 # Each host's effort policy names the efforts that need the owner's
-# confirmation, with the evidence the question states, and the efforts no role
-# tier may run at.
+# confirmation, with the evidence the question states, and the efforts no class
+# slot may run at.
 EFFORT_POLICY_FILE = "effort-policy.json"
 EFFORT_POLICY_SCHEMA_VERSION = 1
 EFFORT_POLICY_ENTRY_KEYS = {
     "confirm": ("evidence", "sources", "verified"),
     "refuse": ("reason", "sources", "verified"),
 }
-# Every build ships one tier map of every host, read by the project config
-# writer and the host project generators.
-TIER_MAP_RELPATH = "templates/tier-map.json"
-TIER_MAP_SCHEMA_VERSION = 2
+# Every build ships one class map of every host, read by the project config
+# writer, the spawn model resolver and the host project generators.
+CLASS_MAP_RELPATH = "templates/model-classes.json"
+CLASS_MAP_SCHEMA_VERSION = 3
 # One list names the files every host's project instructions load as user
 # context, in load order; each host fragment renders it on the one line that
 # holds the user context token.
@@ -614,7 +622,7 @@ def model_catalog_problems(catalog: object, adapter: HostAdapter) -> list[str]:
 
 
 def execution_profile_problems(
-    table: object, catalog: dict | None, adapter: HostAdapter, tiers: set[str],
+    table: object, catalog: dict | None, adapter: HostAdapter, slots: set[str],
 ) -> list[str]:
     """Return the shape and catalog problems of one profile table.
 
@@ -634,17 +642,17 @@ def execution_profile_problems(
             " is a host override, not a table profile"
         ]
     settings = profiles[AUTO_EXECUTION_PROFILE]
-    if not isinstance(settings, dict) or set(settings) != tiers:
+    if not isinstance(settings, dict) or set(settings) != slots:
         return [
-            f"{AUTO_EXECUTION_PROFILE} must map exactly the reasoning tiers"
-            f" {sorted(tiers)}"
+            f"{AUTO_EXECUTION_PROFILE} must map exactly the model class slots"
+            f" {sorted(slots)}"
         ]
     models = catalog["models"] if catalog is not None else None
     vocabulary = adapter.module.EFFORT_LEVELS
     problems: list[str] = []
-    for tier in sorted(tiers):
-        setting = settings[tier]
-        where = f"{AUTO_EXECUTION_PROFILE}.{tier}"
+    for slot in sorted(slots):
+        setting = settings[slot]
+        where = f"{AUTO_EXECUTION_PROFILE}.{slot}"
         if not isinstance(setting, dict) \
                 or not set(setting) <= EXECUTION_SETTING_KEYS \
                 or not all(isinstance(value, str) and value
@@ -652,13 +660,6 @@ def execution_profile_problems(
             problems.append(
                 f"{where} may hold only non-empty string model and effort values"
             )
-            continue
-        if tier == INHERIT_TIER:
-            if setting:
-                problems.append(
-                    f"{where}: the inherit tier sets neither model nor effort,"
-                    " so its roles follow the session"
-                )
             continue
         model, effort = setting.get("model"), setting.get("effort")
         if model is None:
@@ -684,6 +685,47 @@ def execution_profile_problems(
     return problems
 
 
+def model_classes_problems(value: object) -> list[str]:
+    """Return the shape problems of the purpose class declaration."""
+    if not isinstance(value, dict) or value.get("schema_version") != MODEL_CLASSES_SCHEMA_VERSION \
+            or not {"model_classes", "risk_flags"} <= set(value):
+        return [f"must hold schema_version {MODEL_CLASSES_SCHEMA_VERSION}, model_classes"
+                " and risk_flags"]
+    classes, flags = value["model_classes"], value["risk_flags"]
+    problems = []
+    if not isinstance(classes, dict) or not classes or not all(
+            isinstance(name, str) and CLASS_ID_RE.fullmatch(name)
+            and isinstance(spec, dict) and set(spec) == {"escalates"}
+            and isinstance(spec["escalates"], bool)
+            for name, spec in classes.items()):
+        problems.append("model_classes must map snake_case class ids to {escalates: bool}")
+    if not isinstance(flags, list) or not all(
+            isinstance(flag, str) and CLASS_ID_RE.fullmatch(flag) for flag in flags) \
+            or len(set(map(str, flags))) != len(flags):
+        problems.append("risk_flags must list distinct snake_case flags")
+    return problems
+
+
+def load_model_classes(root: Path) -> dict:
+    """Return the validated purpose class declaration of the repository."""
+    path = root / MODEL_CLASSES_RELPATH
+    value = _read_table(path, "purpose class declaration")
+    problems = model_classes_problems(value)
+    if problems:
+        raise ValueError("\n".join(f"{path}: {problem}" for problem in problems))
+    return value
+
+
+def class_slots(classes: dict) -> list[str]:
+    """Every slot a host maps: each class, then `<class>_escalated` when it escalates."""
+    slots = []
+    for name, spec in classes.items():
+        slots.append(name)
+        if spec["escalates"]:
+            slots.append(f"{name}_{ESCALATED}")
+    return slots
+
+
 def _read_table(path: Path, what: str) -> object:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -692,10 +734,11 @@ def _read_table(path: Path, what: str) -> object:
 
 
 def load_model_tables(
-    root: Path, adapter: HostAdapter,
-    tiers: set[str] = CANONICAL_REASONING_LEVELS,
+    root: Path, adapter: HostAdapter, slots: set[str] | None = None,
 ) -> tuple[dict, dict]:
     """Load one host's validated model catalog and execution profile table."""
+    if slots is None:
+        slots = set(class_slots(load_model_classes(root)["model_classes"]))
     catalog_path = model_catalog_path(root, adapter.host_id)
     profile_path = execution_profile_path(root, adapter.host_id)
     catalog = _read_table(catalog_path, "model catalog")
@@ -705,7 +748,7 @@ def load_model_tables(
     problems.extend(
         f"{profile_path}: {problem}"
         for problem in execution_profile_problems(
-            table, None if catalog_problems else catalog, adapter, set(tiers),
+            table, None if catalog_problems else catalog, adapter, set(slots),
         )
     )
     if problems:
@@ -714,13 +757,12 @@ def load_model_tables(
 
 
 def load_execution_profile(
-    root: Path, adapter: HostAdapter,
-    tiers: set[str] = CANONICAL_REASONING_LEVELS,
+    root: Path, adapter: HostAdapter, slots: set[str] | None = None,
 ) -> dict[str, dict[str, str]]:
-    """Resolve one host's default profile to each tier's model and effort."""
-    _catalog, table = load_model_tables(root, adapter, tiers)
-    return {tier: dict(setting)
-            for tier, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items()}
+    """Resolve one host's default profile to each class slot's model and effort."""
+    _catalog, table = load_model_tables(root, adapter, slots)
+    return {slot: dict(setting)
+            for slot, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items()}
 
 
 def effort_policy_problems(
@@ -728,9 +770,10 @@ def effort_policy_problems(
 ) -> list[str]:
     """Return the problems of one host's project effort policy.
 
-    Every effort of a tier's model that the policy does not refuse is open to
-    a project override; a confirmed one needs the owner's second answer. A
-    ``profile`` table, when given, must not pin a tier at a refused effort.
+    Every effort of a class slot's model that the policy does not refuse is
+    open to a project override; a confirmed one needs the owner's second
+    answer. A ``profile`` table, when given, must not pin a slot at a refused
+    effort.
     """
     expected = {"schema_version", *EFFORT_POLICY_ENTRY_KEYS}
     if not isinstance(policy, dict) or set(policy) != expected \
@@ -780,12 +823,12 @@ def effort_policy_problems(
     )
     auto = profile.get("profiles", {}).get(AUTO_EXECUTION_PROFILE) \
         if isinstance(profile, dict) and isinstance(profile.get("profiles"), dict) else None
-    for tier, setting in sorted(auto.items() if isinstance(auto, dict) else ()):
+    for slot, setting in sorted(auto.items() if isinstance(auto, dict) else ()):
         effort = setting.get("effort") if isinstance(setting, dict) else None
         if isinstance(effort, str) and effort in refuse:
             problems.append(
-                f"the package profile pins the {tier} tier at {effort!r},"
-                " which this policy refuses for every role tier"
+                f"the package profile pins the {slot} class at {effort!r},"
+                " which this policy refuses for every class"
             )
     return problems
 
@@ -802,7 +845,7 @@ def load_effort_policy(root: Path, adapter: HostAdapter) -> dict:
 
 
 def model_id_shape(adapter: HostAdapter, catalog: dict) -> str:
-    """Return the shape of a model ID a project may set for one host's tier.
+    """Return the shape of a model ID a project may set for one host's class.
 
     The adapter's ``MODEL_ID_SHAPE`` must be a regular expression that every
     model ID of the host's catalog fully matches.
@@ -823,41 +866,98 @@ def model_id_shape(adapter: HostAdapter, catalog: dict) -> str:
     return shape
 
 
-def tier_map(root: Path, source: Path, adapters: dict[str, HostAdapter]) -> dict:
-    """Return the tier map of every host that each build ships.
-
-    ``roles`` names every generated agent, variants included, under its tier.
-    Per host, each tier carries its pinned model, package effort and every
-    effort the model takes; ``models`` is the host's catalog with the efforts
-    each model takes and the oldest host CLI that runs it, which sets the
-    floor of the project generator's model check, ``efforts`` the host's
-    vocabulary and ``model_id_shape``
-    the shape of a model ID a project may set; ``confirm`` and ``refuse`` are
-    the host's effort policy, which narrows what a project may choose.
-    """
-    roles: dict[str, list[str]] = {tier: [] for tier in CANONICAL_REASONING_LEVELS}
+def package_roles(source: Path) -> dict[str, str]:
+    """Every agent every host renders, switch variants included, with its class."""
+    roles = {}
     agents = source / "agents"
     for path in sorted(agents.glob("*.md")) if agents.is_dir() else ():
-        roles[parse_frontmatter(path)[0]["reasoning"]].append(path.stem)
-    for _agent, name, tier, _description in agent_variants(
-            source, CANONICAL_REASONING_LEVELS):
-        roles[tier].append(name)
+        roles[path.stem] = parse_frontmatter(path)[0]["model_class"]
+    for _agent, name, model_class, _description in agent_variants(source):
+        roles[name] = model_class
+    return roles
+
+
+def spawn_variants(
+    source: Path, classes: dict, adapter: HostAdapter,
+) -> list[tuple[str, str, str, str]]:
+    """The variants a host renders because it cannot set a model at spawn time.
+
+    Each entry is (source agent, variant name, slot, description suffix): an
+    `<agent>-escalated` variant per agent on a class that escalates, and each
+    purpose variant on its class. A host that sets the model at spawn time
+    renders none: the spawn passes the resolved model and effort instead.
+    """
+    if getattr(adapter.module, "SPAWN_MODEL", None) is not None:
+        return []
+    variants = [
+        (name, f"{name}-{ESCALATED}", f"{model_class}_{ESCALATED}",
+         "Escalated variant for large, high-rigor or risky work.")
+        for name, model_class in sorted(package_roles(source).items())
+        if classes[model_class]["escalates"]
+    ]
+    variants.extend(purpose_variants(source, set(classes)))
+    return variants
+
+
+def purpose_variants(source: Path, classes: set[str]) -> list[tuple[str, str, str, str]]:
+    """Each purpose variant the team declares: (agent, name, class, description)."""
+    path = source / PURPOSE_VARIANTS_RELPATH
+    if not path.is_file():
+        return []
+    try:
+        variants = json.loads(path.read_text(encoding="utf-8"))["variants"]
+        declared = [(agent, f"{agent}-{suffix}", spec["class"], spec["description"])
+                    for suffix, spec in sorted(variants.items()) for agent in spec["agents"]]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"{path}: each purpose variant must declare class, description"
+                         " and agents") from exc
+    canonical = {agent.stem for agent in (source / "agents").glob("*.md")}
+    for agent, name, model_class, _description in declared:
+        if agent not in canonical:
+            raise ValueError(f"{path}: purpose variant names unknown agent {agent!r}")
+        if model_class not in classes:
+            raise ValueError(f"{path}: purpose variant {name!r} names unknown class"
+                             f" {model_class!r}")
+    return declared
+
+
+def class_map(root: Path, source: Path, adapters: dict[str, HostAdapter]) -> dict:
+    """Return the class map of every host that each build ships.
+
+    ``roles`` names every agent all hosts render, switch variants included,
+    under its class; ``model_classes`` says which classes escalate and
+    ``risk_flags`` which flags escalate them. Per host, ``classes`` carries
+    each slot's pinned model, package effort and every effort the model
+    takes; ``variants`` the agents only that host renders, each with the
+    agent it varies and its slot; ``spawn_model`` how a spawn sets its model
+    (``alias``: the model's family name, null: the role file decides);
+    ``models`` is the host's catalog with each model's family, efforts and
+    the oldest host CLI that runs it, ``efforts`` the host's vocabulary and
+    ``model_id_shape`` the shape of a model ID a project may set; ``confirm``
+    and ``refuse`` are the host's effort policy.
+    """
+    declaration = load_model_classes(root)
+    classes = declaration["model_classes"]
+    roles: dict[str, list[str]] = {name: [] for name in classes}
+    for name, model_class in package_roles(source).items():
+        roles[model_class].append(name)
     hosts = {}
     for host, adapter in sorted(adapters.items()):
         catalog, table = load_model_tables(root, adapter)
         policy = load_effort_policy(root, adapter)
-        tiers = {}
-        for tier, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items():
-            value: dict = {}
-            if "model" in setting:
-                value = {"model": setting["model"],
-                         "efforts": list(catalog["models"][setting["model"]]["efforts"])}
-                if "effort" in setting:
-                    value["effort"] = setting["effort"]
-            tiers[tier] = value
+        slots = {}
+        for slot, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items():
+            slots[slot] = {"model": setting["model"],
+                           "efforts": list(catalog["models"][setting["model"]]["efforts"])}
+            if "effort" in setting:
+                slots[slot]["effort"] = setting["effort"]
         hosts[host] = {
-            "tiers": tiers,
-            "models": {model_id: {"efforts": list(entry["efforts"]),
+            "spawn_model": getattr(adapter.module, "SPAWN_MODEL", None),
+            "classes": slots,
+            "variants": {name: {"agent": agent, "slot": slot}
+                         for agent, name, slot, _text in spawn_variants(source, classes, adapter)},
+            "models": {model_id: {"family": entry["family"],
+                                  "efforts": list(entry["efforts"]),
                                   "min_cli_version": entry["min_cli_version"]}
                        for model_id, entry in catalog["models"].items()},
             "efforts": list(adapter.module.EFFORT_LEVELS),
@@ -865,28 +965,33 @@ def tier_map(root: Path, source: Path, adapters: dict[str, HostAdapter]) -> dict
             "confirm": policy["confirm"], "refuse": policy["refuse"],
         }
     return {
-        "schema_version": TIER_MAP_SCHEMA_VERSION,
-        "roles": {tier: sorted(names) for tier, names in roles.items()},
+        "schema_version": CLASS_MAP_SCHEMA_VERSION,
+        "model_classes": classes,
+        "risk_flags": list(declaration["risk_flags"]),
+        "roles": {name: sorted(names) for name, names in roles.items()},
         "hosts": hosts,
     }
 
 
-def write_tier_map(
+def write_class_map(
     root: Path, source: Path, target: Path, adapters: dict[str, HostAdapter],
 ) -> None:
-    path = target / TIER_MAP_RELPATH
+    path = target / CLASS_MAP_RELPATH
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes((json.dumps(
-        tier_map(root, source, adapters), indent=2, sort_keys=True,
+        class_map(root, source, adapters), indent=2, sort_keys=True,
     ) + "\n").encode("utf-8"))
 
 
-def agent_variants(source: Path, tiers: set[str]) -> list[tuple[str, str, str, str]]:
+def agent_variants(
+    source: Path, classes: set[str] | None = None,
+) -> list[tuple[str, str, str, str]]:
     """Return every generated agent variant the process switch registry declares.
 
-    Each entry is (canonical agent, variant name, tier, description suffix). A
-    variant exists in every build whether or not a project selects its switch
-    value; tools/validate.py reports the registry's full shape.
+    Each entry is (canonical agent, variant name, class, description suffix).
+    A variant exists in every build whether or not a project selects its
+    switch value; tools/validate.py reports the registry's full shape.
+    ``classes``, when given, are the class ids a variant may name.
     """
     path = source / PROCESS_SWITCHES_RELPATH
     if not path.is_file():
@@ -894,20 +999,20 @@ def agent_variants(source: Path, tiers: set[str]) -> list[tuple[str, str, str, s
     try:
         switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
         declared = [
-            (agent, f"{agent}-{variant['suffix']}", variant["tier"], variant["description"])
+            (agent, f"{agent}-{variant['suffix']}", variant["class"], variant["description"])
             for _switch, spec in sorted(switches.items())
             for _value, variant in sorted((spec.get("agent_variants") or {}).items())
             for agent in variant["agents"]
         ]
     except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
-        raise ValueError(f"{path}: agent_variants must declare suffix, tier, description and agents") from exc
+        raise ValueError(f"{path}: agent_variants must declare suffix, class, description and agents") from exc
     canonical = {agent.stem for agent in (source / "agents").glob("*.md")}
-    names = [name for _agent, name, _tier, _description in declared]
-    for agent, name, tier, description in declared:
+    names = [name for _agent, name, _class, _description in declared]
+    for agent, name, model_class, description in declared:
         if agent not in canonical:
             raise ValueError(f"{path}: agent variant names unknown agent {agent!r}")
-        if tier not in tiers:
-            raise ValueError(f"{path}: agent variant {name!r} names unknown tier {tier!r}")
+        if classes is not None and model_class not in classes:
+            raise ValueError(f"{path}: agent variant {name!r} names unknown class {model_class!r}")
         if name in canonical or names.count(name) > 1:
             raise ValueError(f"{path}: agent variant {name!r} collides with another agent")
         if not isinstance(description, str) or not description.strip() \
@@ -916,19 +1021,18 @@ def agent_variants(source: Path, tiers: set[str]) -> list[tuple[str, str, str, s
     return declared
 
 
-def variant_source(path: Path, name: str, tier: str, description: str) -> str:
-    """Return a canonical agent's text renamed onto its variant's tier."""
-    text = path.read_text(encoding="utf-8")
+def variant_source(text: str, where: Path, name: str, slot: str, description: str) -> str:
+    """Return an agent's text renamed onto its variant's class slot."""
     match = FRONTMATTER_RE.match(text)
     if match is None:
-        raise ValueError(f"{path}: missing YAML frontmatter")
+        raise ValueError(f"{where}: missing YAML frontmatter")
     lines = []
     for line in match.group(1).splitlines():
         key = line.split(":", 1)[0].strip()
         if key == "name":
             line = f"name: {name}"
-        elif key == "reasoning":
-            line = f"reasoning: {tier}"
+        elif key == "model_class":
+            line = f"model_class: {slot}"
         elif key == "description":
             line = f"{line.rstrip()} {description.strip()}"
         lines.append(line)
@@ -936,7 +1040,7 @@ def variant_source(path: Path, name: str, tier: str, description: str) -> str:
 
 
 def generate_agents(
-    source: Path, target: Path, adapter: HostAdapter,
+    root: Path, source: Path, target: Path, adapter: HostAdapter,
     execution_profile: dict[str, dict[str, str]],
 ) -> None:
     agents = source / "agents"
@@ -948,15 +1052,18 @@ def generate_agents(
     }
     for path in sorted(agents.glob("*.md")):
         write_artifacts(target, adapter.module.agent_artifacts(context, path))
-    variants = agent_variants(source, set(execution_profile))
-    if not variants:
-        return
+    classes = load_model_classes(root)["model_classes"]
+    texts = {path.stem: path.read_text(encoding="utf-8") for path in agents.glob("*.md")}
     with tempfile.TemporaryDirectory(prefix="agent-marketplace-variants-") as raw:
-        for agent, name, tier, description in variants:
-            variant = Path(raw) / f"{name}.md"
-            variant.write_bytes(variant_source(
-                agents / f"{agent}.md", name, tier, description).encode("utf-8"))
-            write_artifacts(target, adapter.module.agent_artifacts(context, variant))
+        # Switch variants first: an escalated variant may vary one of them.
+        for group in (agent_variants(source, set(classes)),
+                      spawn_variants(source, classes, adapter)):
+            for agent, name, slot, description in group:
+                texts[name] = variant_source(
+                    texts[agent], agents / f"{agent}.md", name, slot, description)
+                variant = Path(raw) / f"{name}.md"
+                variant.write_bytes(texts[name].encode("utf-8"))
+                write_artifacts(target, adapter.module.agent_artifacts(context, variant))
 
 
 def user_context_files(root: Path) -> list[str]:
@@ -1375,8 +1482,8 @@ def build_plugin(
             (json.dumps(manifest_data, indent=2) + "\n").encode("utf-8")
         )
     generate_skills(source, target, adapter)
-    generate_agents(source, target, adapter, execution_profile)
-    write_tier_map(root, source, target, adapters)
+    generate_agents(root, source, target, adapter, execution_profile)
+    write_class_map(root, source, target, adapters)
     compose_project_instructions(root, source, target, adapters)
     (target / marker_name).write_bytes(
         b"Generated by tools/build_distributions.py; do not edit.\n"
@@ -1429,17 +1536,22 @@ def validate_canonical(root: Path) -> None:
                 skill_metadata(skill)
             except ValueError as exc:
                 problems.append(str(exc))
+        try:
+            classes = set(load_model_classes(root)["model_classes"])
+        except ValueError as exc:
+            problems.append(str(exc))
+            classes = set()
         for agent in sorted((source / "agents").glob("*.md")):
             fields, _ = parse_frontmatter(agent)
-            if fields.get("reasoning") not in CANONICAL_REASONING_LEVELS:
+            if fields.get("model_class") not in classes:
                 problems.append(
-                    f"{agent}: reasoning must be one of"
-                    f" {', '.join(sorted(CANONICAL_REASONING_LEVELS))}"
+                    f"{agent}: model_class must be one of {', '.join(sorted(classes))}"
                 )
             if "model" in fields:
-                problems.append(f"{agent}: canonical agents use reasoning, not model")
+                problems.append(f"{agent}: canonical agents use model_class, not model")
         try:
-            agent_variants(source, CANONICAL_REASONING_LEVELS)
+            agent_variants(source, classes)
+            purpose_variants(source, classes)
         except ValueError as exc:
             problems.append(str(exc))
         for path in sorted(

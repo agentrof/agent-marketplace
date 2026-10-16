@@ -1,9 +1,11 @@
 ---
 name: product-owner-mechanical
 description: Product owner role that groups approved product knowledge into the project-local epic and story backlog; never auto-triggered. Writer variant for passes that apply only the fixes a review verdict names.
-model: claude-sonnet-5-5
+model: claude-haiku-5-5
 effort: high
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__*
+omitClaudeMd: true
 ---
 
 # Product Owner

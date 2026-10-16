@@ -1,9 +1,11 @@
 ---
 name: experience-reviewer
 description: Independent read-only challenger for living, process-owned Experience packages and author-owned prototype snapshots. Invoked explicitly by the Experience Design flow.
-model: claude-opus-5-5
-effort: xhigh
+model: claude-sonnet-5-5
+effort: high
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__claude-in-chrome, mcp__Claude_Code_iOS_Simulator, mcp__visualize, mcp__terminal, mcp__ccd_session, mcp__ccd_session_mgmt, mcp__ccd_connectors, mcp__ccd_directory, mcp__ccd_host, mcp__ccd_pr, mcp__ccd_settings, mcp__ccd_sidebar, mcp__ccd_view, mcp__ccd_window
+omitClaudeMd: true
 ---
 
 # Experience Reviewer

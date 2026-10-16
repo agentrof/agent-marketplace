@@ -1,9 +1,11 @@
 ---
 name: devops-engineer
 description: DevOps engineer role. Spawned by software-engineering-team flows to realize the approved architecture as a runnable containerized environment; never auto-triggered.
-model: claude-opus-5-5
-effort: medium
+model: claude-sonnet-5-5
+effort: high
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__*
+omitClaudeMd: true
 ---
 
 # DevOps Engineer

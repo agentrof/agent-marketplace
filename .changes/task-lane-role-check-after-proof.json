@@ -1,0 +1,6 @@
+{
+  "summary": "A role check recorded in the task file after the local proof no longer invalidates the proof, so the pull request opens without a full re-run when that is the only change since.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

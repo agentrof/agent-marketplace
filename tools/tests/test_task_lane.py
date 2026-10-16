@@ -560,6 +560,19 @@ class LocalProofTests(unittest.TestCase):
         self.assertIn(f"## Local proof\n\nEvery check passed on HEAD `{head}` with a clean tree", body)
         self.assertIn("| `echo main` | pass |", body)
 
+    def test_a_role_check_after_the_proof_keeps_it_but_any_other_change_does_not(self):
+        root = self.project()
+        self.declare(root, "true")
+        self.prove(root)
+        task_lane.cmd_role_check(SimpleNamespace(task="TK-004", role="software-architect", verdict="go",
+                                                 note="fine", at="2026-01-01T00:00:00Z"), root)
+        self.git(root, "commit", "-qam", "role check")
+        self.assertEqual(task_lane.proof_problems(root, "TK-004")[0], [])
+        (root / "other.txt").write_text("x", encoding="utf-8")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-qm", "code")
+        self.assertTrue(any("run prove again" in item for item in task_lane.proof_problems(root, "TK-004")[0]))
+
 
 class FastLaneOwnershipTests(unittest.TestCase):
     def test_a_task_owns_architecture_only_in_the_fast_lane(self):

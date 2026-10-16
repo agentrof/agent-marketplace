@@ -159,6 +159,10 @@ its diff changes, has no verdict; a `suggest` role never blocks.
    Pass the review's counts to `merge` as `--critical <n> --non-critical <n>
    --filed <n>`, and start a task that repairs a defect an earlier task let
    through with `--fixes TK-###`; `/retrospective` reads both as quality.
+   When a task needed another pass for a reason no red run, finding or
+   verdict shows, record it with `rework --task <id> --category <cause>
+   --note "<why>"`. `/retrospective` groups the rework causes; only the
+   recurring ones become lessons, memory candidates or process proposals.
 
 The task is done when its pull request is merged. The task file on the target
 branch is the durable task record.

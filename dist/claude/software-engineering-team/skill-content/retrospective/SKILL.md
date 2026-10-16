@@ -58,6 +58,9 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
    story's coverage is the share of its criteria the delivered tasks cover.
    The findings and CI figures are kept once per merged task as a
    `task_quality` history row and read first; `--rescan` reads them again.
+   Rework asks why a task did not finish in one pass: follow
+   [rework causes](references/rework.md) for its events, causes, grouping
+   and the lessons file.
 2. Return its text as it is:
    - task count; request-to-merge average, median and max against the target
      (15 minutes on average, 50 at most for a large task) and the previous
@@ -78,18 +81,24 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
      coverage per story, and the previous retrospective's quality figures;
    - per kind the role checks: how many, on how many tasks, and their minutes
      inside the write step, each counted from approval or the previous check;
+   - per task its rework events and minutes, per kind the one-pass rate, the
+     recurring and rare rework groups, unclassified events and memory
+     candidates;
    - the slowest tasks with their largest step;
    - up to 4 numbered proposals per kind, time, cost (startup context, spawns
      per task, xhigh effort on review or fix, main-session share) and quality
      levers (CI first pass under 80%, any escaped defect, critical findings on
-     over 20% of reviewed tasks) ranked together by the share of the task's
+     over 20% of reviewed tasks) and recurring process- or plugin-owned rework
+     causes (`RETRO-<KIND>-REWORK-<CAUSE>`) ranked together by the share of the task's
      minutes, dollars or tasks they address, each with its evidence, cause owner (project, plugin, host
      tool, owner or process), expected gain and how to verify it.
    Add nothing it does not measure; an empty scope says so.
 3. For a Delivery scope the user may keep the summary: `--write-report` writes
    `workspace/docs/delivery/retrospectives/dlv-###-retrospective.md`, which a
    task or docs pull request commits.
-4. Act only when the user approves proposals by number or id in this
+4. `--write-lessons` updates the tracked lessons file as
+   [rework causes](references/rework.md) describes; it never writes memory.
+5. Act only when the user approves proposals by number or id in this
    conversation: run `scripts/task_lane.py file-issues --ids <list>` with the
    same scope flags. A plugin-caused proposal is appended once to the pending
    upstream table of `.agentrof/plugin-ledger.md`, never filed upstream. Any

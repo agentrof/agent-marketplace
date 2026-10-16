@@ -200,7 +200,7 @@
       "fa05e6f3b4edb8c8891461e142694b61d0f02fa27fab2a140987bdf80c92c830"
     ,
     "flows/fast-lane.md":
-      "0d93cd75a218abd2dfd546e849cb0ff122f7f3a1048e5519240671f343a855c1"
+      "0ff79f8221eac156fbf501ba54e5ea4e55427144fd1110766fa24f4c3a1483dd"
     ,
     "flows/operation.md":
       "2a48be3a2321e14a3f154494c812d245e3f3b2ee5061ac28e2d8e7025e53cb06"
@@ -377,7 +377,7 @@
       "16ca5f8e12e50fb17bf64801c659588cee5158a7e347acf8a4df0da3375a23a3"
     ,
     "scripts/task_lane.py":
-      "dd4a33e4fe43750ccd4b519343cbfa143c62b080d25c589c8f4b82feb7d4d2db"
+      "42fe108919f635ae86ebaeba470861d38676f646d76e6b21739b8b0152343ca0"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -947,10 +947,16 @@
       "d80a7689c022cca319bfa34a9d98816889a9f0c6968e2cb7ceb5dfd911060852"
     ,
     "skill-content/retrospective/SKILL.md":
-      "222d53e07253195ca6cf4eb8e556dbdfd76c8c488a0f7920a0fed89fcceaf586"
+      "715bf4011315f40e85d9cf2b4a7c9ad061ddac0c6b04eca97b9499d4b8c275a5"
     ,
     "skill-content/retrospective/data/pricing.json":
       "3d61674ce01f69ba1d49818034e9cdff82e9e2259348120d7085a3aba601e0f6"
+    ,
+    "skill-content/retrospective/data/rework-causes.json":
+      "d7e9f7fcb55f545743d31f008797f48fdd2ffaba6876a72adda44b1bb1482062"
+    ,
+    "skill-content/retrospective/references/rework.md":
+      "822e5d19a3e5be6924a904918c5f9f356c5fea074bbc0ff344f8a6011950fda6"
     ,
     "skill-content/setup/SKILL.md":
       "8c59ecce59d1b49c248675c5d8e1088fa4475cfc58a2c1292f1c27a8849a768e"

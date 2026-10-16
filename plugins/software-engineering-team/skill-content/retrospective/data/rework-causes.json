@@ -1,0 +1,98 @@
+{
+  "summary": "Why a fast-lane task did not finish in one pass. Each rework event takes the first category whose hint (a case-insensitive regex) matches its text; no match is unclassified. A project replaces or adds a category, or overrides a setting, in .agentrof/rework-causes.json.",
+  "recurring": {
+    "min_events": 3,
+    "min_tasks": 2,
+    "window_tasks": 30
+  },
+  "lessons": {
+    "path": "workspace/memory/lessons-learnt.md",
+    "max_open": 20,
+    "fixed_after_tasks": 10
+  },
+  "promote_max": 5,
+  "ci_logs": {
+    "max_calls_per_task": 3,
+    "excerpt_chars": 240
+  },
+  "repeat_offender_rule": "Test {test} failed in more than one task: fix its cause or quarantine it with an issue, and run it locally before pushing a change near it.",
+  "categories": [
+    {
+      "id": "plugin-tool",
+      "owner": "plugin",
+      "description": "a team plugin script or contract failed or refused wrongly",
+      "rule": "Record the plugin defect in the plugin ledger, patch the local copy and send the fix upstream.",
+      "hints": ["\\b(task_lane|vault_check|vault_gate|session_cost|task_inputs)\\.py\\b", "\\bplugin (defect|bug|script)\\b"]
+    },
+    {
+      "id": "merge-conflict",
+      "owner": "process",
+      "description": "merge conflict or a branch behind its target",
+      "rule": "Keep parallel tasks on disjoint files, run overlap before writing and rebase on the target branch before open-pr.",
+      "hints": ["merge conflict", "CONFLICT \\(", "^Merge (branch|remote-tracking branch|pull request)", "not up to date with", "\\bbehind\\b.*\\b(base|target|main)\\b"]
+    },
+    {
+      "id": "environment",
+      "owner": "project",
+      "description": "CI runner, network, service or resource failure",
+      "rule": "Pin and cache CI dependencies and images, and retry network setup inside the job instead of re-running the workflow.",
+      "hints": ["runner (lost|shutdown|offline|has received a shutdown)", "no space left", "ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED", "could not resolve host", "rate limit", "\\b50[234] (bad gateway|service unavailable|gateway time-?out)", "service unavailable", "startup_failure", "timed out", "operation was canceled"]
+    },
+    {
+      "id": "flaky-test",
+      "owner": "project",
+      "description": "order-dependent, time-dependent or intermittent test",
+      "rule": "Make the test independent of order, time and shared state, or quarantine it with an issue; never re-run CI to get green.",
+      "hints": ["flak", "order[- ]dependen", "intermittent", "non-?determinis", "re-?run attempt", "passe[sd] on re-?run"]
+    },
+    {
+      "id": "test-impact",
+      "owner": "process",
+      "description": "the changed files were not mapped to their tests, so the right tests did not run before the push",
+      "rule": "Map every changed source file to its tests before open-pr; a change that selects no test is a mapping gap, not a pass.",
+      "hints": ["no tests? (were )?(ran|run|collected|selected)", "test[- ]impact", "impact map", "unmapped", "no (test )?suite (selected|matched)"]
+    },
+    {
+      "id": "lint-format",
+      "owner": "project",
+      "description": "lint or format check",
+      "rule": "Run the project's formatter and linter on the changed files before every push.",
+      "hints": ["\\b(lint|linter|ruff|flake8|pylint|eslint|prettier|black|isort|gofmt|rustfmt|markdownlint|stylelint)\\b", "would reformat", "format(ting)? (check|error)", "trailing whitespace"]
+    },
+    {
+      "id": "type-error",
+      "owner": "project",
+      "description": "static type check",
+      "rule": "Run the type checker on the changed modules before every push.",
+      "hints": ["\\b(mypy|pyright|tsc|typecheck|type-check)\\b", "\\bTS[0-9]{4}\\b", "incompatible type", "\\[(arg-type|attr-defined|assignment|return-value|union-attr|call-arg)\\]"]
+    },
+    {
+      "id": "docs-gate",
+      "owner": "project",
+      "description": "documentation gate: links, front matter or vault rules",
+      "rule": "Run the docs validation for the changed trees and fix links and front matter before open-pr.",
+      "hints": ["\\bvault\\b", "broken (wiki)?link", "front ?matter", "dangling link", "unresolved link"]
+    },
+    {
+      "id": "spec-gap",
+      "owner": "process",
+      "description": "acceptance criteria missing, ambiguous or misread",
+      "rule": "Write each acceptance criterion with its expected value and its named test before writing code; ask the owner when a criterion has two readings.",
+      "hints": ["acceptance criteri", "\\bcriterion\\b", "spec(ification)? (gap|unclear|missing)", "requirement (missing|unclear|changed)", "ambiguous", "misread"]
+    },
+    {
+      "id": "review-missing-test",
+      "owner": "project",
+      "description": "review found a behavior without a test",
+      "rule": "Add a test for each criterion and each new branch in the same change; the reviewer checks one per criterion.",
+      "hints": ["missing (a )?tests?", "no tests? (for|covers)", "untested", "without (a )?tests?", "not covered by (a )?tests?"]
+    },
+    {
+      "id": "test-failure",
+      "owner": "project",
+      "description": "a test failed",
+      "rule": "Run the touched test modules locally before pushing and reproduce a red test before changing it.",
+      "hints": ["\\bFAILED\\b", "\\bFAIL:", "--- FAIL", "AssertionError", "assert(ion)? (error|failed)", "\\bERROR: test", "tests? failed"]
+    }
+  ]
+}

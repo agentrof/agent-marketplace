@@ -1028,7 +1028,7 @@ class RetrospectiveQualityTests(unittest.TestCase):
     def row(self, task_id, quality=None, **task):
         row = task_lane.task_row({**RetrospectiveTests.task, "id": task_id, **task},
                                  {**pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z"),
-                                  **(quality or {})})
+                                  "red": [], **(quality or {})})
         row["quality"].update(fixed_by=[], story_coverage=None)
         return row
 
@@ -1142,7 +1142,7 @@ class RetrospectiveQualityTests(unittest.TestCase):
         args = SimpleNamespace(delivery=None, since=None, recent=20, deep=False, no_sessions=True)
         seen = []
 
-        def times(_root, number, runs=True):
+        def times(_root, number, runs=True, causes=None):
             seen.append(runs)
             return pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")
         with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
@@ -1153,6 +1153,245 @@ class RetrospectiveQualityTests(unittest.TestCase):
             self.assertEqual(again["per_task"][0]["quality"]["fixed_by"], ["TK-002"])
             task_lane.gather(root, SimpleNamespace(**{**vars(args), "rescan": True}))
         self.assertEqual(seen, [False, True])
+
+
+class RetrospectiveReworkTests(unittest.TestCase):
+    """Why a task did not finish in one pass: rework events, their causes, recurring groups,
+    the lessons file, memory candidates and process levers."""
+
+    causes = task_lane.rework_causes()
+
+    def item(self, task_id, day, *texts, test="", kind="build"):
+        events = [{"ref": f"run:{task_id}{n}", "source": "ci", "at": f"2026-10-{day:02d}T10:05:00Z",
+                   "test": test, "text": text} for n, text in enumerate(texts)]
+        return {"task_id": task_id, "kind": kind, "requested_at": f"2026-10-{day:02d}T10:00:00Z",
+                "merged": f"2026-10-{day:02d}T10:20:00Z", "total": 20.0, "rework_auto": events}
+
+    def groups(self, items, causes=None):
+        causes = causes or self.causes
+        window = task_lane.rework_window([task_lane.rework_record(item, causes) for item in items], causes)
+        return {group["key"]: group for group in task_lane.rework_groups(window, causes)}
+
+    def test_a_cause_takes_the_first_matching_hint_and_unmatched_text_stays_unclassified(self):
+        cases = {"lint / ruff: would reformat app.py": "lint-format",
+                 "tests: FAILED tests/test_a.py::test_x - AssertionError": "test-failure",
+                 "tests: re-run attempt 2": "flaky-test", "Merge branch 'main' into task/tk-1-x": "merge-conflict",
+                 "review: missing test for the empty month": "review-missing-test",
+                 "no tests ran for the changed module": "test-impact", "wip": task_lane.UNCLASSIFIED}
+        for text, category in cases.items():
+            self.assertEqual(task_lane.cause_of(text, self.causes), category, text)
+        owners = {item["owner"] for item in self.causes["categories"]}
+        self.assertEqual(owners, set(task_lane.REWORK_OWNERS))
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        (root / ".agentrof").mkdir()
+        (root / task_lane.PROJECT_REWORK).write_text(json.dumps({
+            "recurring": {"min_events": 2}, "categories": [
+                {"id": "seed-data", "owner": "project", "description": "seed", "rule": "r", "hints": ["\\bwip\\b"]},
+                {"id": "lint-format", "owner": "process", "description": "d", "rule": "r", "hints": ["ruff"]}]}),
+            encoding="utf-8")
+        own = task_lane.rework_causes(root)
+        self.assertEqual(own["recurring"], {**self.causes["recurring"], "min_events": 2})
+        self.assertEqual(task_lane.cause_of("wip", own), "seed-data")
+        self.assertEqual(next(item for item in own["categories"] if item["id"] == "lint-format")["owner"], "process")
+        (root / task_lane.PROJECT_REWORK).write_text(json.dumps({"categories": [
+            {"id": "x", "owner": "someone", "hints": []}]}), encoding="utf-8")
+        with self.assertRaises(task_lane.Refused):
+            task_lane.rework_causes(root)
+
+    def test_a_failed_log_gives_its_job_test_and_error_line_without_secret_lines(self):
+        log = ("tests\tRun tests\t2026-10-16T10:00:00.1Z export TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123\n"
+               "tests\tRun tests\t2026-10-16T10:00:01.1Z key Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAb\n"
+               "tests\tRun tests\t2026-10-16T10:00:02.1Z FAIL: test_empty (tests.test_export.ExportTests.test_empty)\n"
+               "tests\tRun tests\t2026-10-16T10:00:03.1Z AssertionError: 0 != 1\n"
+               "tests\tRun tests\t2026-10-16T10:00:04.1Z ##[error]Process completed with exit code 1.")
+        found = task_lane.failure(log, 240)
+        self.assertEqual(found, {"job": "tests", "test": "tests.test_export.ExportTests.test_empty",
+                                 "text": "AssertionError: 0 != 1"})
+        self.assertEqual(task_lane.failure("j\ts\t2026-10-16T10:00:00Z FAILED tests/test_a.py::test_x - x", 240)["test"],
+                         "tests/test_a.py::test_x")
+        self.assertEqual(task_lane.failure("j\ts\t2026-10-16T10:00:00Z ##[error]Process completed with exit code 2.",
+                                           240)["text"], "##[error]Process completed with exit code 2.")
+        self.assertEqual(task_lane.scrub("password: hunter2\nfine " + "x" * 300, 20), "fine " + "x" * 15)
+
+    def test_red_runs_and_re_runs_are_events_and_only_the_first_red_runs_read_their_log(self):
+        def run(number, conclusion, attempt=1):
+            return {"id": number, "name": "tests", "created_at": f"2026-10-16T10:{number:02d}:00Z",
+                    "updated_at": f"2026-10-16T10:{number + 1:02d}:00Z", "conclusion": conclusion,
+                    "run_attempt": attempt}
+        runs = [run(n, "failure") for n in range(1, 6)] + [run(7, "success", attempt=2), run(30, "failure")]
+        calls = []
+        log = "tests\tRun\t2026-10-16T10:00:00Z FAILED tests/test_a.py::test_x - AssertionError"
+        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or log):
+            events = task_lane.red_events(Path("."), runs, "2026-10-16T10:20:00Z", self.causes["ci_logs"])
+        self.assertEqual(len(calls), self.causes["ci_logs"]["max_calls_per_task"])
+        self.assertEqual([event["ref"] for event in events],
+                         ["run:1", "run:2", "run:3", "run:4", "run:5", "run:7:1"])
+        self.assertEqual((events[0]["test"], events[0]["at"]), ("tests/test_a.py::test_x", "2026-10-16T10:02:00Z"))
+        self.assertEqual((events[4]["test"], events[4]["text"]), ("", "tests"))
+        self.assertEqual(task_lane.cause_of(events[5]["text"], self.causes), "flaky-test")
+        view = {"createdAt": "2026-10-16T10:00:00Z", "mergedAt": "2026-10-16T10:20:00Z", "headRefName": "task/tk-4-x",
+                "comments": [{"body": task_lane.REVIEW_MARK + "\n\nmissing test for an empty month\n\n"
+                                      "findings: critical 1, non-critical 0, filed 0"}],
+                "commits": [{"oid": "a" * 40, "committedDate": "2026-10-16T09:59:00Z", "messageHeadline": "docs"},
+                            {"oid": "b" * 40, "committedDate": "2026-10-16T10:09:00Z", "messageHeadline": "fix"}]}
+
+        def answer(*args, **_kwargs):
+            return json.dumps(view) if args[1] == "pr" else json.dumps({"workflow_runs": runs}) \
+                if args[1] == "api" else log
+        with mock.patch.object(task_lane, "run", side_effect=answer):
+            seen = task_lane.pr_times(Path("."), 9, causes=self.causes)
+        self.assertEqual(seen["review_note"], "missing test for an empty month")
+        self.assertEqual(seen["revisions"], [{"sha": "bbbbbbb", "at": "2026-10-16T10:09:00Z", "subject": "fix"}])
+        self.assertEqual(len(seen["red"]), 6)
+
+    def test_only_unexplained_commits_after_the_pr_opened_are_revision_events(self):
+        task = {**RetrospectiveTests.task, "role_checks": [
+            {"at": "2026-10-16T10:04:00Z", "role": "software-architect", "verdict": "changes", "note": "split the module"},
+            {"at": "2026-10-16T10:06:00Z", "role": "software-architect", "verdict": "go", "note": "-"}]}
+        red = [{"ref": "run:1", "source": "ci", "at": "2026-10-16T10:12:00Z", "test": "", "text": "lint: ruff"}]
+        commits = [{"sha": "aaaaaaa", "at": "2026-10-16T10:13:00Z", "subject": "fix lint"},
+                   {"sha": "bbbbbbb", "at": "2026-10-16T10:14:00Z", "subject": "address review"},
+                   {"sha": "ccccccc", "at": "2026-10-16T10:15:00Z", "subject": "Merge branch 'main'"},
+                   {"sha": "ddddddd", "at": "2026-10-16T10:16:00Z", "subject": "tweak"}]
+        events = task_lane.auto_events(task, {**pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z"),
+                                              "red": red, "critical": 1, "review_note": "", "revisions": commits})
+        self.assertEqual([event["ref"] for event in events],
+                         ["role:software-architect:2026-10-16T10:04:00Z", "run:1", "review:critical:1",
+                          "commit:ccccccc", "commit:ddddddd"])
+        self.assertIsNone(task_lane.auto_events(task, pr("2026-10-16T10:10:00Z", None, None, None)))
+        self.assertEqual(len(task_lane.auto_events(task, None)), 1)
+
+    def test_a_cause_recurs_at_its_threshold_and_a_test_failing_in_two_tasks_is_a_repeat_offender(self):
+        groups = self.groups([self.item("TK-001", 1, "ruff failed", "ruff again"), self.item("TK-002", 2, "ruff")])
+        self.assertEqual((groups["lint-format"]["status"], groups["lint-format"]["events"],
+                          groups["lint-format"]["tasks"]), ("recurring", 3, ["TK-001", "TK-002"]))
+        once = self.groups([self.item("TK-001", 1, "ruff", "ruff", "ruff")])
+        self.assertEqual(once["lint-format"]["status"], "rare")
+        test = "tests/test_a.py::test_x"
+        groups = self.groups([self.item("TK-001", 1, "FAILED x", test=test), self.item("TK-002", 2, "FAILED x", test=test),
+                              self.item("TK-003", 3, "wip")])
+        offender = groups[f"test:{test}"]
+        self.assertEqual((offender["status"], offender["repeat_offender"], offender["owner"]),
+                         ("recurring", True, "project"))
+        self.assertIn(test, offender["rule"])
+        self.assertEqual(groups["test-failure"]["status"], "rare")
+        self.assertEqual(groups[task_lane.UNCLASSIFIED]["status"], task_lane.UNCLASSIFIED)
+        self.assertEqual(offender["minutes"], {"TK-001": 15.0, "TK-002": 15.0})
+        narrow = {**self.causes, "recurring": {**self.causes["recurring"], "window_tasks": 1}}
+        self.assertEqual(list(self.groups([self.item("TK-001", 1, "ruff"), self.item("TK-002", 2, "wip")], narrow)),
+                         [task_lane.UNCLASSIFIED])
+
+    def test_a_recorded_cause_classifies_its_event_or_adds_one_and_lints(self):
+        root = GitHubCommandTests.project(self, "normal")
+        args = SimpleNamespace(task="TK-004", category="spec-gap", note="criterion 2 had two readings",
+                               ref="commit:abc1234", at="2026-10-16T10:30:00Z")
+        task_lane.cmd_rework(args, root)
+        with mock.patch.object(task_lane, "project_root", return_value=root), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(task_lane.main(["rework", "--task", "TK-004", "--category", "environment",
+                                             "--note", "runner lost", "--at", "2026-10-16T10:30:00Z"]), 0)
+        path = task_lane.task_path(root, "TK-004")
+        self.assertEqual(task_lane.lint(path), [])
+        notes = task_lane.rework_notes(path)
+        self.assertEqual([(note["category"], note["ref"]) for note in notes],
+                         [("spec-gap", "commit:abc1234"), ("environment", "")])
+        record = task_lane.rework_record({"task_id": "TK-004", "merged": "2026-10-16T11:00:00Z", "rework_notes": notes,
+                                          "rework_auto": [{"ref": "commit:abc1234", "source": "revision",
+                                                           "at": "2026-10-16T10:40:00Z", "test": "", "text": "wip"}]},
+                                         self.causes)
+        self.assertEqual([(event["category"], event["source"]) for event in record["events"]],
+                         [("spec-gap", "revision"), ("environment", "note")])
+        self.assertEqual(record["minutes"], 30.0)
+        for bad in ({"category": "nope"}, {"ref": "abc"}, {"note": "token: x"}):
+            with self.assertRaises(task_lane.Refused):
+                task_lane.cmd_rework(SimpleNamespace(**{**vars(args), **bad}), root)
+        self.assertNotIn("criterion", task_lane.routed_roles(root, path)[0].__repr__())
+
+    def test_the_lessons_file_updates_in_place_turns_quiet_entries_fixed_and_caps_its_entries(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        causes = {**self.causes, "lessons": {**self.causes["lessons"], "max_open": 2, "fixed_after_tasks": 2}}
+        items = [self.item("TK-001", 1, "ruff", "mypy", "ambiguous"), self.item("TK-002", 2, "ruff", "mypy", "ambiguous"),
+                 self.item("TK-003", 3, "ruff", "mypy", "ambiguous", "ruff")]
+
+        def write(chosen):
+            records = [task_lane.rework_record(item, causes) for item in chosen]
+            return task_lane.write_lessons(root, task_lane.rework_report(records, [], causes), causes)
+        first = write(items)
+        self.assertEqual((first["added"], first["over_cap"]), (["lint-format", "spec-gap"], ["type-error"]))
+        path = root / causes["lessons"]["path"]
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("### lint-format\n\n- Cause: lint or format check\n- Rule: Run the project's formatter", text)
+        self.assertIn("- Owner: project. Status: open. Promote: memory.\n- Evidence: 4 events in 3 tasks"
+                      " (TK-001, TK-002, TK-003), first 2026-10-01, last 2026-10-03.", text)
+        path.write_text(text.replace("- Rule: Run the project's formatter", "- Rule: Run make fmt, the formatter"),
+                        encoding="utf-8")
+        again = write(items + [self.item("TK-004", 4, "ruff")])
+        text = path.read_text(encoding="utf-8")
+        self.assertEqual((again["added"], text.count("### lint-format")), ([], 1))
+        self.assertIn("- Rule: Run make fmt, the formatter", text)
+        self.assertIn("5 events in 4 tasks", text)
+        quiet = write(items + [self.item(f"TK-01{n}", 10 + n, "wip") for n in range(3)])
+        self.assertEqual(sorted(quiet["fixed"]), [])
+        quiet = write([self.item(f"TK-01{n}", 10 + n, "wip") for n in range(3)])
+        self.assertEqual(sorted(quiet["fixed"]), ["lint-format", "spec-gap"])
+        text = path.read_text(encoding="utf-8")
+        self.assertEqual(text.count("Status: fixed."), 2)
+        self.assertNotIn("Promote: memory", text)
+        self.assertTrue(text.startswith("# Lessons learnt\n"))
+
+    def test_at_most_five_project_lessons_are_memory_candidates_and_process_causes_become_levers(self):
+        project = [item["id"] for item in self.causes["categories"] if item["owner"] == "project"]
+        texts = {"environment": "rate limit", "flaky-test": "flaky", "lint-format": "ruff", "type-error": "mypy",
+                 "docs-gate": "vault", "review-missing-test": "untested", "test-failure": "FAILED"}
+        self.assertEqual(sorted(texts), sorted(project))
+        items = [self.item(f"TK-00{n}", n, *texts.values(), "ambiguous", "ambiguous") for n in range(1, 4)]
+        records = [task_lane.rework_record(item, self.causes) for item in items]
+        rework = task_lane.rework_report(records, [], self.causes)
+        self.assertEqual(len(rework["promote"]), self.causes["promote_max"])
+        self.assertTrue(all(item["key"] in project for item in rework["promote"]))
+        self.assertIn("(rework seen 3 times in 3 tasks)", rework["promote"][0]["rule"])
+        levers = task_lane.rework_proposals(records, self.causes)
+        self.assertEqual([item["id"] for item in levers], ["RETRO-REWORK-SPEC-GAP"])
+        lever = levers[0]
+        self.assertEqual((lever["cause_owner"], lever["weight"]), ("process", 1.0))
+        self.assertIn("6 rework events in 3 of 3 tasks", lever["evidence"])
+        self.assertIn("up to 15.0 rework min per affected task", lever["expected_gain"])
+        self.assertTrue(lever["verify"])
+
+    def test_the_report_shows_rework_per_task_and_kind_keeps_it_once_and_groups_across_history(self):
+        def row(task_id, minute, red):
+            return task_lane.task_row({**RetrospectiveTests.task, "id": task_id},
+                                      {**pr("2026-10-16T10:10:00Z", None, None, f"2026-10-16T10:{minute}:00Z"),
+                                       "red": red})
+        red = [{"ref": "run:1", "source": "ci", "at": "2026-10-16T10:12:00Z", "test": "", "text": "ambiguous"}]
+        older = {"type": "task_rework", "task_id": "TK-001", "kind": "build", "requested_at": "2026-10-10T10:00:00Z",
+                 "merged": "2026-10-10T10:30:00Z", "total": 30.0, "events": [dict(red[0], at="2026-10-10T10:12:00Z")] * 2}
+        rows = [row("TK-004", 20, red), row("TK-005", 30, [])]
+        data = task_lane.report(rows, "latest 20", extra=[{**older, "rework_auto": older["events"], "rework_notes": []}])
+        self.assertEqual(data["targets"]["build"]["rework"],
+                         {"tasks": 2, "one_pass": 1, "one_pass_rate": 0.5, "events": 1, "minutes": 8.0,
+                          "minutes_share": 0.16})
+        self.assertEqual(data["rework"]["groups"][0]["status"], "recurring")
+        self.assertIn("RETRO-BUILD-REWORK-SPEC-GAP", [item["id"] for item in data["proposals"]])
+        text = task_lane.render(data)
+        self.assertIn("- TK-004: 1 (ci 1); spec-gap 1; 8.0 min", text)
+        self.assertIn("- TK-005: none, one pass", text)
+        self.assertIn("Rework build: one pass 1/2 (50%), 1 events, 8.0 min after the first event (16% of request to merge)",
+                      text)
+        self.assertIn("- spec-gap [process]: 3 events in 2 tasks (TK-001, TK-004)", text)
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        task_lane.remember(root, data)
+        task_lane.remember(root, data)
+        kept = task_lane.kept_rework(root)
+        self.assertEqual(sorted(kept), ["TK-004", "TK-005"])
+        self.assertEqual(kept["TK-004"]["events"], red)
+        self.assertNotIn("category", kept["TK-004"]["events"][0])
+        self.assertEqual(sum(1 for item in task_lane.history(root) if item.get("type") == "task_rework"), 2)
+        task_lane.remember(root, data, rescan=True)
+        self.assertEqual(sum(1 for item in task_lane.history(root) if item.get("type") == "task_rework"), 4)
 
 
 class GovernedRenameTests(unittest.TestCase):

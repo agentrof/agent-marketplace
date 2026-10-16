@@ -32,7 +32,11 @@ this script instead of the Requirement, Backlog and Delivery ceremonies:
   priced by ``session_cost.load_prices``. Quality is read beside them: the
   review counts ``merge`` writes into its pass comment, CI first pass from the
   branch's workflow runs, escaped defects from later tasks' ``fixes`` and story
-  coverage from the merged tasks' ``covers``. Each run appends every
+  coverage from the merged tasks' ``covers``. Rework asks why a task did not finish
+  in one pass: red runs (with the first failing test and error line of a bounded number of
+  failed logs), blocking findings, role ``changes`` verdicts, unexplained commits after the PR
+  opened and causes recorded with ``rework``, classified by ``rework-causes.json``; causes that
+  recur become lessons (``--write-lessons``), memory candidates and process levers. Each run appends every
   merged task's cost and waits to the history once, and later runs read that
   row first, so a task keeps its cost after the host deletes old transcripts. ``--export`` rebuilds a derived file under ``.agentrof/``;
   ``--write-report`` keeps a Delivery's summary under
@@ -140,6 +144,21 @@ QUALITY_LEVERS = {
     "critical": "Name each criterion's test before writing, and have the writer check the diff"
                 " against every criterion before open-pr.",
 }
+REWORK_FILE = Path(__file__).resolve().parent.parent / "skill-content" / "retrospective" / "data" / "rework-causes.json"
+PROJECT_REWORK = Path(".agentrof") / "rework-causes.json"
+REWORK_OWNERS = ("project", "plugin", "process")
+UNCLASSIFIED = "unclassified"
+REWORK_RE = re.compile(r"^- (\S+) ([a-z][a-z0-9-]*)(?: ([a-z]+:\S+))?: (.*)$")
+# A log line naming a credential, or a long mixed-case token with digits, is dropped, never stored.
+SECRET_RE = re.compile(r"(?i)gh[pousr]_\w{16,}|github_pat_\w+|\bsk-[\w-]{16,}|xox[abpr]-[\w-]+|AKIA[0-9A-Z]{16}"
+                       r"|-----BEGIN|\bbearer\s+\S+|\b(token|secret|password|passwd|api[_-]?key|authorization"
+                       r"|credential)s?\b\s*[:=]")
+ENTROPY_RE = re.compile(r"\b(?=[\w+/=-]*[0-9])(?=[\w+/=-]*[A-Z])(?=[\w+/=-]*[a-z])[\w+/=-]{32,}")
+# pytest, unittest, go and jest or vitest failing test ids.
+TEST_ID_RES = (re.compile(r"\bFAILED ([\w./-]+::[\w:.\[\]/-]+)"), re.compile(r"^(?:FAIL|ERROR): (\w+) \(([\w.]+)\)"),
+               re.compile(r"--- FAIL: (\w+)"), re.compile(r"\bFAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\b"))
+ERROR_LINE_RE = re.compile(r"(?i)\b(error|failed|failure|exception|traceback|assert\w*)\b")
+EXIT_LINE_RE = re.compile(r"Process completed with exit code")
 # step -> (start, end); CI and review run side by side after the PR opens.
 STEPS = {"define": ("requested_at", "approved_at"), "write": ("approved_at", "pr_opened"),
          "ci": ("pr_opened", "ci_green"), "review": ("pr_opened", "review"),
@@ -262,12 +281,19 @@ def role_checks(path: Path) -> list[dict]:
             for line in section(body, "Role Checks") if (match := CHECK_RE.match(line))]
 
 
+def rework_notes(path: Path) -> list[dict]:
+    """The rework causes a person or agent recorded on the task, each optionally naming the event it classifies."""
+    body = path.read_text(encoding="utf-8").split("\n---\n", 1)[-1]
+    return [{"at": match.group(1), "category": match.group(2), "ref": match.group(3) or "", "note": match.group(4)}
+            for line in section(body, "Rework") if (match := REWORK_RE.match(line))]
+
+
 def routed_roles(root: Path | None, path: Path, files: set[str] = frozenset()) -> tuple[list[dict], list[str]]:
     """Every role the task routes to now (its roles field, then the rules its text, size and the
     given changed files hit), and the require roles that have no recorded verdict yet."""
     props = task_props(path)
     # The navigation and the recorded verdicts are not the task's own words.
-    body = re.split(r"(?m)^<!-- sec: nav -->|^## Role Checks",
+    body = re.split(r"(?m)^<!-- sec: nav -->|^## Role Checks|^## Rework",
                     path.read_text(encoding="utf-8").split("\n---\n", 1)[-1])[0]
     text = f"{props.get('title', '')}\n{body}"
     roles = task_roles(props)
@@ -384,6 +410,8 @@ def lint(path: Path) -> list[str]:
         errors.append("roles items must be <role>:require|suggest:pre_check|author, found " + ", ".join(bad))
     if any(not CHECK_RE.match(line) for line in section(body, "Role Checks")):
         errors.append("Role Checks lines must be '- <time> <role> go|changes: <note>'")
+    if any(not REWORK_RE.match(line) for line in section(body, "Rework")):
+        errors.append("Rework lines must be '- <time> <category> [<ref>]: <note>'")
     if props.get("task_kind") == "knowledge":
         return errors
     criteria = [line for line in section(body, "Acceptance Criteria")
@@ -526,16 +554,85 @@ def pull_requests(root: Path) -> dict[str, dict]:
     return found
 
 
-def pr_times(root: Path, number, runs: bool = True) -> dict:
-    """Times, check minutes and quality of one pull request; ``runs`` adds the CI first pass."""
+def pr_times(root: Path, number, runs: bool = True, causes: dict | None = None) -> dict:
+    """Times, check minutes and quality of one pull request; ``runs`` adds the CI first pass and
+    the red runs' causes, read from at most ``ci_logs.max_calls_per_task`` failed logs."""
     data = json.loads(run("gh", "pr", "view", str(number), "--json",
-                          "createdAt,mergedAt,statusCheckRollup,comments,headRefName", cwd=root))
+                          "createdAt,mergedAt,statusCheckRollup,comments,headRefName,commits", cwd=root))
     checks = data.get("statusCheckRollup") or []
-    return {"pr": str(number), "pr_opened": data.get("createdAt"),
-            "ci_green": ci_green_at(checks), "review": review_at(data.get("comments") or []),
-            "merged": data.get("mergedAt"), "checks": check_minutes(checks),
-            **findings(data.get("comments") or []),
-            **(first_pass(ci_runs(root, data.get("headRefName") or ""), data.get("mergedAt")) if runs else {})}
+    comments = data.get("comments") or []
+    result = {"pr": str(number), "pr_opened": data.get("createdAt"),
+              "ci_green": ci_green_at(checks), "review": review_at(comments),
+              "merged": data.get("mergedAt"), "checks": check_minutes(checks), **findings(comments),
+              "review_note": next((scrub(FINDINGS_RE.sub("", body.replace(REVIEW_MARK, "")), 240)
+                                   for comment in reversed(comments)
+                                   if REVIEW_MARK in (body := comment.get("body") or "")), ""),
+              "revisions": [{"sha": item.get("oid", "")[:7], "at": item["committedDate"],
+                             "subject": item.get("messageHeadline") or ""}
+                            for item in data.get("commits") or [] if item.get("committedDate")
+                            and data.get("createdAt") and parse_time(item["committedDate"]) > parse_time(data["createdAt"])]}
+    if runs:
+        listed = ci_runs(root, data.get("headRefName") or "")
+        result.update(first_pass(listed, data.get("mergedAt")),
+                      red=red_events(root, listed, data.get("mergedAt"), (causes or rework_causes())["ci_logs"]))
+    return result
+
+
+def scrub(text: str, limit: int) -> str:
+    """One line of at most ``limit`` characters, without any line that looks like a credential."""
+    kept = [line for line in str(text or "").splitlines() if not SECRET_RE.search(line) and not ENTROPY_RE.search(line)]
+    return " ".join(" ".join(kept).split())[:limit]
+
+
+def failure(log: str, limit: int) -> dict:
+    """The job, first failing test id and first error line of a ``gh run view --log-failed`` output."""
+    job, test, error, fallback = "", "", "", ""
+    for raw in log.splitlines():
+        parts = raw.split("\t", 2)
+        job = job or (parts[0] if len(parts) == 3 else "")
+        line = re.sub(r"^﻿?[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z\s?", "", parts[-1]).strip()
+        if not line or SECRET_RE.search(line) or ENTROPY_RE.search(line):
+            continue
+        for pattern in TEST_ID_RES if not test else ():
+            if match := pattern.search(line):
+                name, owner = (match.groups() + ("",))[:2]
+                test = owner if owner.endswith("." + name) else f"{owner}.{name}" if owner else name
+                break
+        if not error and ERROR_LINE_RE.search(line):
+            if EXIT_LINE_RE.search(line):
+                fallback = fallback or line
+            else:
+                error = line
+    return {"job": scrub(job, 80), "test": test[:200], "text": scrub(error or fallback, limit)}
+
+
+def red_events(root: Path, runs: list[dict], merged: str | None, logs: dict) -> list[dict]:
+    """One rework event per red workflow run before the merge and per re-run attempt; the first
+    ``max_calls_per_task`` red runs read their failed log for the test id and error line."""
+    done = sorted((item for item in runs if item.get("created_at")
+                   and (not merged or parse_time(item["created_at"]) <= parse_time(merged))),
+                  key=lambda item: parse_time(item["created_at"]))
+    found, calls = [], 0
+    for item in done:
+        name = item.get("name") or "workflow"
+        for attempt in range(1, int(item.get("run_attempt") or 1)):
+            found.append({"ref": f"run:{item.get('id')}:{attempt}", "source": "ci", "at": item["created_at"],
+                          "test": "", "text": f"{name}: re-run attempt {attempt + 1}"})
+        if item.get("conclusion") not in RED_RUNS:
+            continue
+        detail = {"job": "", "test": "", "text": ""}
+        if calls < logs["max_calls_per_task"] and item.get("id"):
+            calls += 1
+            try:
+                detail = failure(run("gh", "run", "view", str(item["id"]), "--log-failed", cwd=root),
+                                 logs["excerpt_chars"])
+            except Refused:
+                pass
+        found.append({"ref": f"run:{item.get('id')}", "source": "ci", "at": item.get("updated_at") or item["created_at"],
+                      "test": detail["test"], "text": scrub(name + (f" / {detail['job']}" if detail["job"] else "")
+                                                            + (f": {detail['text']}" if detail["text"] else ""),
+                                                            logs["excerpt_chars"])})
+    return found
 
 
 def repo_slug(root: Path) -> str:
@@ -575,7 +672,40 @@ def task_row(task: dict, pr: dict | None) -> dict:
             "pr": (pr or {}).get("pr", ""), **times,
             "total": minutes_between(times, "requested_at", "merged"), "steps": steps,
             "largest_step": max(known, key=known.get) if known else None,
-            "checks": (pr or {}).get("checks", {})}
+            "checks": (pr or {}).get("checks", {}),
+            "rework_auto": auto_events(task, pr), "rework_notes": task.get("rework_notes") or []}
+
+
+def auto_events(task: dict, pr: dict | None) -> list[dict] | None:
+    """The rework events the task and its PR show, unclassified: role ``changes`` verdicts, red CI
+    runs, blocking review findings and the commits pushed after the PR opened that no earlier red
+    run, role verdict or blocking finding explains. None while the PR's CI runs were not read."""
+    if pr is not None and "red" not in pr:
+        return None
+    events = [{"ref": f"role:{check['role']}:{check['at']}", "source": "role", "at": check["at"], "test": "",
+               "text": f"{check['role']} changes: {check['note']}"}
+              for check in task.get("role_checks") or [] if check["verdict"] == "changes"]
+    if pr is None:
+        return events
+    events += pr["red"]
+    critical = int(pr.get("critical") or 0)
+    events += [{"ref": f"review:critical:{number}", "source": "review", "at": None, "test": "",
+                "text": f"blocking review finding: {pr.get('review_note') or '-'}"} for number in range(1, critical + 1)]
+    opened = parse_time(pr["pr_opened"]) if pr.get("pr_opened") else None
+    causes = sorted(moment for moment in (parse_time(event["at"]) for event in events if event["at"])
+                    if opened is None or moment >= opened)
+    for commit in sorted(pr.get("revisions") or [], key=lambda item: parse_time(item["at"])):
+        if not commit["subject"].startswith("Merge "):
+            earlier = [moment for moment in causes if moment <= parse_time(commit["at"])]
+            if earlier:
+                causes.remove(earlier[0])
+                continue
+            if critical:
+                critical -= 1
+                continue
+        events.append({"ref": f"commit:{commit['sha']}", "source": "revision", "at": commit["at"], "test": "",
+                       "text": scrub(commit["subject"], 240)})
+    return events
 
 
 def classify(times: dict, minutes: set[int], rigor: str, until: float) -> dict[str, float]:
@@ -882,11 +1012,220 @@ def quality_proposals(rows: list[dict]) -> list[dict]:
     return found
 
 
-def kind_proposals(rows: list[dict]) -> list[dict]:
+# --- rework: why a task did not finish in one pass ---------------------------
+
+def rework_causes(root: Path | None = None) -> dict:
+    """The packaged cause taxonomy and thresholds; a project's .agentrof/rework-causes.json category
+    replaces the one of its id or adds one, and its settings override the packaged ones."""
+    causes = json.loads(REWORK_FILE.read_text(encoding="utf-8"))
+    own = root / PROJECT_REWORK if root else None
+    if own and own.is_file():
+        extra = json.loads(own.read_text(encoding="utf-8"))
+        merged = {item["id"]: item for item in causes["categories"]}
+        merged.update({item["id"]: item for item in extra.get("categories", [])})
+        causes.update({key: {**causes[key], **value} if isinstance(causes.get(key), dict) else value
+                       for key, value in extra.items() if key != "categories"}, categories=list(merged.values()))
+    for item in causes["categories"]:
+        if item.get("owner") not in REWORK_OWNERS or item.get("id") == UNCLASSIFIED:
+            raise Refused(f"rework cause {item.get('id')}: owner must be one of {', '.join(REWORK_OWNERS)}"
+                          f" and the id not {UNCLASSIFIED}")
+    return causes
+
+
+def cause_of(text: str, causes: dict) -> str:
+    """The first category whose hint matches the text, else unclassified."""
+    for item in causes["categories"]:
+        if any(re.search(hint, text or "", re.IGNORECASE) for hint in item.get("hints", [])):
+            return item["id"]
+    return UNCLASSIFIED
+
+
+def rework_record(item: dict, causes: dict) -> dict:
+    """One task's classified rework: its events (a recorded cause naming an event's ref reclassifies
+    it, any other recorded cause is an event of its own) and the minutes from its first timed event
+    to the merge. Events stay None while the PR's CI runs were not read."""
+    auto, notes = item.get("rework_auto"), item.get("rework_notes") or []
+    events = None
+    if auto is not None or notes:
+        events = [dict(event) for event in auto or []]
+        by_ref = {event["ref"]: event for event in events}
+        for note in notes:
+            if note["ref"] in by_ref:
+                by_ref[note["ref"]].update(category=note["category"], note=note["note"])
+            else:
+                events.append({"ref": note["ref"] or f"note:{note['at']}", "source": "note", "at": note["at"],
+                               "test": "", "text": note["note"], "category": note["category"]})
+        for event in events:
+            event.setdefault("category", cause_of(f"{event['text']} {event.get('test') or ''}", causes))
+    timed = [parse_time(event["at"]) for event in events or [] if event.get("at")]
+    merged = item.get("merged")
+    return {"task_id": item["task_id"], "kind": item.get("kind", "build"), "requested_at": item.get("requested_at"),
+            "merged": merged, "total": item.get("total"), "events": events,
+            "minutes": round(max(0.0, (parse_time(merged) - min(timed)).total_seconds() / 60), 1)
+            if merged and timed else (0.0 if events == [] else None)}
+
+
+def rework_window(records: list[dict], causes: dict) -> list[dict]:
+    """The latest ``recurring.window_tasks`` tasks whose rework is known, oldest first."""
+    known = sorted((record for record in records if record["events"] is not None and record.get("requested_at")),
+                   key=lambda record: parse_time(record["requested_at"]))
+    return known[-causes["recurring"]["window_tasks"]:]
+
+
+def rework_groups(window: list[dict], causes: dict) -> list[dict]:
+    """Events grouped by category and, for a failing test, by test id; a group is recurring at
+    ``min_events`` events across ``min_tasks`` tasks, and a test failing in two or more tasks is a
+    recurring repeat offender; unclassified events wait for a person. Most events first."""
+    info = {item["id"]: item for item in causes["categories"]}
+    limits = causes["recurring"]
+    groups: dict[str, dict] = {}
+    for position, record in enumerate(window):
+        for event in record["events"]:
+            seen = event.get("at") or record["requested_at"]
+            for key in [event["category"]] + ([f"test:{event['test']}"] if event.get("test") else []):
+                group = groups.setdefault(key, {"key": key, "category": event["category"],
+                                                "test": event["test"] if key.startswith("test:") else "",
+                                                "events": 0, "tasks": [], "first_seen": seen, "last_seen": seen,
+                                                "minutes": {}, "last_index": position})
+                group["events"] += 1
+                if record["task_id"] not in group["tasks"]:
+                    group["tasks"].append(record["task_id"])
+                group["first_seen"] = min(group["first_seen"], seen, key=parse_time)
+                group["last_seen"] = max(group["last_seen"], seen, key=parse_time)
+                group["last_index"] = position
+                if event.get("at") and record.get("merged"):
+                    spent = max(0.0, (parse_time(record["merged"]) - parse_time(event["at"])).total_seconds() / 60)
+                    group["minutes"][record["task_id"]] = round(max(group["minutes"].get(record["task_id"], 0.0), spent), 1)
+    for group in groups.values():
+        cause = info.get(group["category"], {})
+        group.update(owner=cause.get("owner", "process"), description=cause.get("description", "not classified yet"),
+                     rule=causes["repeat_offender_rule"].format(test=group["test"]) if group["test"]
+                     else cause.get("rule", ""), repeat_offender=bool(group["test"]) and len(group["tasks"]) >= 2,
+                     since_last=len(window) - 1 - group.pop("last_index"))
+        group["status"] = UNCLASSIFIED if group["category"] == UNCLASSIFIED and not group["test"] else \
+            "recurring" if group["repeat_offender"] or (group["events"] >= limits["min_events"]
+                                                        and len(group["tasks"]) >= limits["min_tasks"]) else "rare"
+    return sorted(groups.values(), key=lambda group: (-group["events"], group["key"]))
+
+
+def rework_summary(records: list[dict]) -> dict | None:
+    """One-pass rate over the merged tasks whose rework is known, and the share of their
+    request-to-merge minutes spent after the first rework event."""
+    known = [record for record in records if record["events"] is not None and record.get("merged")]
+    if not known:
+        return None
+    clean = [record["task_id"] for record in known if not record["events"]]
+    spent = sum(record["minutes"] or 0.0 for record in known)
+    total = sum(record["total"] or 0.0 for record in known)
+    return {"tasks": len(known), "one_pass": len(clean), "one_pass_rate": round(len(clean) / len(known), 2),
+            "events": sum(len(record["events"]) for record in known), "minutes": round(spent, 1),
+            "minutes_share": round(spent / total, 2) if total else None}
+
+
+def promotions(groups: list[dict], causes: dict) -> list[dict]:
+    """At most ``promote_max`` project-owned recurring lessons, most events first, as one-line rules
+    for the main session to weigh; nothing is written to any memory store."""
+    picked = [group for group in groups if group["status"] == "recurring" and group["owner"] == "project"]
+    return [{"key": group["key"], "rule": f"{group['rule']} (rework seen {group['events']} times in"
+                                          f" {len(group['tasks'])} tasks)"} for group in picked[:causes["promote_max"]]]
+
+
+def rework_proposals(records: list[dict], causes: dict) -> list[dict]:
+    """Process- and plugin-owned recurring causes as levers, weighted by the share of tasks they hit."""
+    window = rework_window(records, causes)
+    found = []
+    for group in rework_groups(window, causes):
+        if group["status"] != "recurring" or group["owner"] == "project":
+            continue
+        slug = re.sub(r"[^A-Z0-9]+", "-", group["key"].upper()).strip("-")[:40]
+        spent = list(group["minutes"].values())
+        gain = round(statistics.mean(spent), 1) if spent else None
+        found.append({"id": f"RETRO-REWORK-{slug}", "step": f"rework:{group['key']}",
+                      "weight": len(group["tasks"]) / len(window),
+                      "evidence": f"{group['key']} ({group['description']}): {group['events']} rework events in"
+                                  f" {len(group['tasks'])} of {len(window)} tasks ({', '.join(group['tasks'][:10])}),"
+                                  f" first {group['first_seen'][:10]}, last {group['last_seen'][:10]}",
+                      "proposal": f"Fix the process behind {group['key']}: {group['rule']}",
+                      "cause_owner": group["owner"],
+                      "expected_gain": f"up to {gain} rework min per affected task (first red or blocking event"
+                                       " to merge)" if gain is not None else "one rework round less per affected task",
+                      "verify": f"no {group['key']} rework event in the next {causes['lessons']['fixed_after_tasks']}"
+                                " tasks"})
+    return found
+
+
+def rework_report(records: list[dict], extra: list[dict], causes: dict) -> dict:
+    """Rework over the scope's tasks and the kept history: the summary of the scope, the groups of
+    the window, the unclassified events to classify and the memory candidates."""
+    window = rework_window(records + extra, causes)
+    groups = rework_groups(window, causes)
+    return {"summary": rework_summary([record for record in records if record.get("merged")]),
+            "window_tasks": len(window), "thresholds": causes["recurring"], "groups": groups,
+            "repeat_offenders": [group["key"] for group in groups if group["repeat_offender"]],
+            "unclassified": [{"task_id": record["task_id"], "ref": event["ref"], "text": event["text"]}
+                             for record in window for event in record["events"]
+                             if event["category"] == UNCLASSIFIED][:20],
+            "promote": promotions(groups, causes)}
+
+
+def write_lessons(root: Path, rework: dict, causes: dict) -> dict:
+    """Update the tracked lessons file in place: one entry per recurring group, its Rule line kept
+    when a person edited it; an open entry with no event in ``fixed_after_tasks`` tasks turns fixed
+    and an earlier fixed one reopens when it recurs; at most ``max_open`` open entries and as many
+    fixed ones, the oldest fixed dropped first. The measurement history is never touched."""
+    settings = causes["lessons"]
+    path = root / settings["path"]
+    text = path.read_text(encoding="utf-8") if path.is_file() else (
+        "# Lessons learnt\n\nRecurring rework causes from the fast-lane retrospective, written by"
+        " `task_lane.py report --write-lessons`.\nEntries update in place; an edited Rule line is kept."
+        " Promote marks a memory candidate only.\n")
+    head, *blocks = re.split(r"(?m)^(?=### )", text)
+    entries = {block.split()[1]: block for block in blocks}
+    rule = {key: match.group(1) for key, block in entries.items() if (match := re.search(r"(?m)^- Rule: (.*)$", block))}
+    status = {key: "fixed" if "Status: fixed" in block else "open" for key, block in entries.items()}
+    groups = {group["key"]: group for group in rework["groups"]}
+    promoted = {item["key"] for item in rework["promote"]}
+    added, skipped, fixed = [], [], []
+    for key, block in entries.items():
+        group = groups.get(key)
+        quiet = (group["since_last"] if group else rework["window_tasks"]) >= settings["fixed_after_tasks"]
+        if status[key] == "open" and quiet and not (group and group["status"] == "recurring"):
+            status[key] = "fixed"
+            entries[key] = re.sub(r"Status: open\.( Promote: memory\.)?", "Status: fixed.", block)
+            fixed.append(key)
+    for key, group in groups.items():
+        if group["status"] != "recurring":
+            continue
+        if key not in entries and sum(value == "open" for value in status.values()) >= settings["max_open"]:
+            skipped.append(key)
+            continue
+        if key not in entries:
+            added.append(key)
+        status[key] = "open"
+        tasks = ", ".join(group["tasks"][:8]) + (", ..." if len(group["tasks"]) > 8 else "")
+        entries[key] = (f"### {key}\n\n- Cause: {group['description']}"
+                        + (f"; test {group['test']} failed in {len(group['tasks'])} tasks" if group["test"] else "")
+                        + f"\n- Rule: {rule.get(key) or group['rule']}\n- Owner: {group['owner']}. Status: open."
+                        + (" Promote: memory." if key in promoted else "")
+                        + f"\n- Evidence: {group['events']} events in {len(group['tasks'])} tasks ({tasks}),"
+                          f" first {group['first_seen'][:10]}, last {group['last_seen'][:10]}.\n\n")
+    closed = [key for key in entries if status[key] == "fixed"]
+    for key in closed[:max(0, len(closed) - settings["max_open"])]:
+        del entries[key]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(head.rstrip("\n") + "\n\n" + "".join(block.rstrip("\n") + "\n\n" for block in entries.values())
+                    .rstrip("\n") + "\n", encoding="utf-8")
+    return {"path": settings["path"], "added": added, "fixed": fixed, "over_cap": skipped,
+            "open": sum(value == "open" for key, value in status.items() if key in entries)}
+
+
+def kind_proposals(rows: list[dict], records: list[dict] | None = None, causes: dict | None = None) -> list[dict]:
     """Levers per task kind, the kind furthest over its average target first, at most four
     per kind; time, cost and quality levers rank together by the share of the task's minutes,
-    dollars or tasks they address; each names its kind and the gap to that target."""
+    dollars or tasks they address, and recurring process or plugin rework causes by the share of
+    the kind's tasks they hit; each names its kind and the gap to that target."""
     found = []
+    records = records or []
     goals = targets(rows, [])
     kinds = {row.get("kind", "build") for row in rows}
     for kind in sorted(kinds, key=lambda name: goals.get(name, {}).get("target_gap", 0), reverse=True):
@@ -896,7 +1235,10 @@ def kind_proposals(rows: list[dict]) -> list[dict]:
         minutes = statistics.mean(done) if done else 0
         levers = [{**item, "weight": item["weight"] / minutes if minutes and item["weight"] > 0
                    else item["weight"]} for item in proposals(mine, keep_weight=True)]
-        levers = sorted(levers + cost_proposals(mine) + quality_proposals(mine), key=lambda item: -item["weight"])
+        rework = rework_proposals([record for record in records if record["kind"] == kind],
+                                  causes or rework_causes()) if records else []
+        levers = sorted(levers + cost_proposals(mine) + quality_proposals(mine) + rework,
+                        key=lambda item: -item["weight"])
         for item in levers[:4]:
             item.pop("weight")
             versus = (f"; average {goal['average']} vs target {goal['average_target']} min"
@@ -925,6 +1267,7 @@ def targets(rows: list[dict], totals: list[float]) -> dict:
                         "max_target": goal["max"], "max_met": all(row["total"] <= goal["max"] for row in done),
                         "size_targets": {size: goal[size] for size in SIZES}, "over_size_target": over,
                         "cost": cost_summary(done), "quality": quality_summary(done),
+                        "rework": rework_summary([row["rework"] for row in done if row.get("rework")]),
                         "role_checks": role_summary(done)}
     return result
 
@@ -936,7 +1279,15 @@ def role_summary(rows: list[dict]) -> dict:
 
 
 def report(rows: list[dict], scope: str, previous: dict | None = None,
-           unattributed: dict | None = None) -> dict:
+           unattributed: dict | None = None, extra: list[dict] | None = None,
+           causes: dict | None = None) -> dict:
+    """``extra`` holds the kept rework of merged tasks outside the scope, so causes group across them."""
+    causes = causes or rework_causes()
+    for row in rows:
+        row["rework"] = rework_record(row, causes)
+    scoped = {row["task_id"] for row in rows}
+    records = [row["rework"] for row in rows] + [rework_record(item, causes) for item in extra or []
+                                                 if item["task_id"] not in scoped]
     totals = [row["total"] for row in rows if row["total"] is not None]
     slowest = sorted((row for row in rows if row["total"] is not None),
                      key=lambda row: -row["total"])[:3]
@@ -951,7 +1302,8 @@ def report(rows: list[dict], scope: str, previous: dict | None = None,
             "cost": cost_summary([row for row in rows if row["total"] is not None]),
             "quality": quality_summary([row for row in rows if row["total"] is not None]),
             "unattributed": unattributed,
-            "proposals": kind_proposals(rows)}
+            "rework": rework_report(records[:len(rows)], records[len(rows):], causes),
+            "proposals": kind_proposals(rows, records, causes)}
 
 
 def render(data: dict) -> str:
@@ -971,6 +1323,8 @@ def render(data: dict) -> str:
         lines += ["", "Quality per task: findings critical / non-critical / filed; CI first pass (red runs);"
                       " fixed by; story coverage"]
         lines += [f"- {row['task_id']}: {task_quality_line(row)}" for row in data["per_task"]]
+        lines += ["", "Rework per task: events (by source); categories; minutes from the first event to merge"]
+        lines += [f"- {row['task_id']}: {task_rework_line(row.get('rework') or {})}" for row in data["per_task"]]
     if data.get("targets"):
         lines += ["", "By kind (min; average / median / max, then the average of each step):"]
     for kind, goal in (data.get("targets") or {}).items():
@@ -998,6 +1352,12 @@ def render(data: dict) -> str:
     for kind, goal in (data.get("targets") or {}).items():
         if goal.get("quality"):
             lines.append(f"Quality {kind}: {quality_line(goal['quality'])}")
+    for kind, goal in (data.get("targets") or {}).items():
+        spent = goal.get("rework")
+        if spent:
+            lines.append(f"Rework {kind}: one pass {spent['one_pass']}/{spent['tasks']} ({percent(spent['one_pass_rate'])}),"
+                         f" {spent['events']} events, {spent['minutes']} min after the first event"
+                         f" ({percent(spent['minutes_share'])} of request to merge)")
     if data.get("unattributed"):
         lines.append(f"Unattributed in the scanned window: ${data['unattributed']['usd']:.2f},"
                      f" tokens {tokens_line(data['unattributed']['tokens'])}")
@@ -1033,6 +1393,7 @@ def render(data: dict) -> str:
         lines += ["", "Slowest:"]
         lines += [f"- {item['task_id']}: {item['total']} min, largest step {item['largest_step']}"
                   f" ({item['largest_minutes']} min)" for item in data["slowest"]]
+    lines += rework_lines(data.get("rework"))
     if data["proposals"]:
         lines += ["", "Proposals (approve by number or id to file one issue each):"]
         lines += [f"{number}. [{item['id']}] {item['proposal']} Evidence: {item['evidence']}."
@@ -1059,6 +1420,45 @@ def task_quality_line(row: dict) -> str:
             f" CI first pass {first} ({dash(item.get('red_runs'))}); fixed by"
             f" {', '.join(item.get('fixed_by') or []) or '-'}; "
             + (f"{row['story']} {percent(item.get('story_coverage'))}" if row.get("story") else "-"))
+
+
+def task_rework_line(record: dict) -> str:
+    events = record.get("events")
+    if events is None:
+        return "- (CI runs not read)"
+    if not events:
+        return "none, one pass"
+    def counted(key):
+        found: dict[str, int] = {}
+        for event in events:
+            found[event[key]] = found.get(event[key], 0) + 1
+        return ", ".join(f"{name} {count}" for name, count in found.items())
+    return f"{len(events)} ({counted('source')}); {counted('category')}; {dash(record.get('minutes'))} min"
+
+
+def rework_lines(rework: dict | None) -> list[str]:
+    if not rework or not rework["window_tasks"]:
+        return []
+    limits = rework["thresholds"]
+    def line(group):
+        return (f"- {group['key']} [{group['owner']}]{' repeat offender' if group['repeat_offender'] else ''}:"
+                f" {group['events']} events in {len(group['tasks'])} tasks ({', '.join(group['tasks'][:8])}),"
+                f" first {group['first_seen'][:10]}, last {group['last_seen'][:10]}")
+    lines = ["", f"Recurring rework over the last {rework['window_tasks']} tasks (at least {limits['min_events']}"
+                 f" events in {limits['min_tasks']} tasks, or one test failing in 2 or more tasks):"]
+    lines += [line(group) + f"; rule: {group['rule']}" for group in rework["groups"] if group["status"] == "recurring"] \
+        or ["- none"]
+    rare = [group for group in rework["groups"] if group["status"] == "rare"]
+    if rare:
+        lines += ["Rare rework (listed, not promoted):"] + [line(group) for group in rare]
+    if rework["unclassified"]:
+        lines += ["Unclassified rework (classify: task_lane.py rework --task <id> --ref <ref> --category <id>"
+                  " --note \"<cause>\"):"]
+        lines += [f"- {item['task_id']} {item['ref']}: {item['text']}" for item in rework["unclassified"]]
+    if rework["promote"]:
+        lines += ["Memory candidates (project-owned recurring rules; the main session decides, nothing is written):"]
+        lines += [f"- {item['rule']}" for item in rework["promote"]]
+    return lines
 
 
 def quality_line(spec: dict) -> str:
@@ -1140,6 +1540,11 @@ def kept_quality(root: Path) -> dict[str, dict]:
     return {item["task_id"]: item for item in history(root) if item.get("type") == "task_quality"}
 
 
+def kept_rework(root: Path) -> dict[str, dict]:
+    """Each merged task's latest saved rework events, unclassified, by task id."""
+    return {item["task_id"]: item for item in history(root) if item.get("type") == "task_rework"}
+
+
 def remember(root: Path, data: dict, rescan: bool = False) -> None:
     """Append this run's summary, the next retrospective's comparison point, and once per merged
     task its cost and waits, which outlive the host's transcripts, and its GitHub quality
@@ -1149,6 +1554,7 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
     spec = data.get("quality") or {}
     kept = {} if rescan else kept_costs(root)
     graded = {} if rescan else kept_quality(root)
+    reworked = {} if rescan else kept_rework(root)
     path = root / HISTORY
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -1168,20 +1574,34 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
                 handle.write(json.dumps({"type": "task_quality", "at": now(), "task_id": row["task_id"],
                                          "quality": {key: row["quality"].get(key) for key in QUALITY_KEPT}})
                              + "\n")
+            if row["total"] is not None and row.get("rework_auto") is not None and row["task_id"] not in reworked:
+                handle.write(json.dumps({"type": "task_rework", "at": now(), "task_id": row["task_id"],
+                                         **{key: row.get(key) for key in ("kind", "requested_at", "merged", "total")},
+                                         "events": row["rework_auto"]}) + "\n")
 
 
 def gather(root: Path, args) -> dict:
     tasks = []
     for path in sorted((root / TASKS).glob("tk-*.md")):
-        tasks.append({**task_props(path), "file": path.name, "role_checks": role_checks(path)})
+        tasks.append({**task_props(path), "file": path.name, "role_checks": role_checks(path),
+                      "rework_notes": rework_notes(path)})
     chosen = select(tasks, args.delivery, args.since, args.recent)
     prs = pull_requests(root) if chosen else {}
+    causes = rework_causes(root)
     graded = {} if getattr(args, "rescan", False) else kept_quality(root)
-    rows = [task_row(task, pr_times(root, prs[task["id"]]["number"], runs=task["id"] not in graded)
+    reworked = kept_rework(root)
+    fresh_rework = {} if getattr(args, "rescan", False) else reworked
+    rows = [task_row(task, pr_times(root, prs[task["id"]]["number"], causes=causes,
+                                    runs=task["id"] not in graded or task["id"] not in fresh_rework)
                      if task["id"] in prs else None) for task in chosen]
     for row in rows:
         if row["total"] is not None and row["task_id"] in graded:
             row["quality"].update(graded[row["task_id"]]["quality"])
+        if row["total"] is not None and row["task_id"] in fresh_rework:
+            row["rework_auto"] = fresh_rework[row["task_id"]]["events"]
+    notes = {task["id"]: task["rework_notes"] for task in tasks}
+    extra = [{**item, "rework_auto": item["events"], "rework_notes": notes.get(item["task_id"], [])}
+             for item in reworked.values()]
     link_quality(rows, tasks, story_index(root) if any(task.get("source_story") for task in tasks) else {})
     unattributed = None
     kept = {} if getattr(args, "rescan", False) else kept_costs(root)
@@ -1196,7 +1616,7 @@ def gather(root: Path, args) -> dict:
         if row["total"] is not None and row["task_id"] in kept:
             row.update(cost=kept[row["task_id"]]["cost"], waits=kept[row["task_id"]]["waits"])
     scope = args.delivery or (f"since {args.since}" if args.since else f"latest {args.recent}")
-    return report(rows, scope, previous_run(root, scope), unattributed)
+    return report(rows, scope, previous_run(root, scope), unattributed, extra, causes)
 
 
 # --- story links and board -------------------------------------------------
@@ -1415,18 +1835,42 @@ def cmd_role_check(args, root: Path) -> dict:
     line = f"- {at} {args.role} {args.verdict}: {' '.join((args.note or '-').split())}"
     if not CHECK_RE.match(line):
         raise Refused("--role must be a plugin agent id such as software-architect")
+    add_line(path, "Role Checks", line)
+    _, missing = routed_roles(root, path)
+    return {"ok": True, "task_id": args.task, "role": args.role, "verdict": args.verdict, "at": at,
+            "pending_roles": missing}
+
+
+def add_line(path: Path, title: str, line: str) -> None:
+    """Append one line to the task's section, creating the section before the navigation."""
     text = path.read_text(encoding="utf-8")
-    found = re.search(r"(?ms)^## Role Checks\s*$\n.*?(?=^## |^<!-- sec:|\Z)", text)
+    found = re.search(rf"(?ms)^## {re.escape(title)}\s*$\n.*?(?=^## |^<!-- sec:|\Z)", text)
     if found:
         text = text[:found.end()].rstrip("\n") + f"\n{line}\n\n" + text[found.end():]
     else:
         nav = text.find("<!-- sec: nav -->")
-        block = f"## Role Checks\n\n{line}\n\n"
+        block = f"## {title}\n\n{line}\n\n"
         text = text[:nav] + block + text[nav:] if nav >= 0 else text.rstrip("\n") + "\n\n" + block
     path.write_text(text, encoding="utf-8")
-    _, missing = routed_roles(root, path)
-    return {"ok": True, "task_id": args.task, "role": args.role, "verdict": args.verdict, "at": at,
-            "pending_roles": missing}
+
+
+def cmd_rework(args, root: Path) -> dict:
+    """Record a rework cause only a person or agent knows; with --ref it classifies that event."""
+    causes = rework_causes(root)
+    known = [item["id"] for item in causes["categories"]]
+    if args.category not in known:
+        raise Refused(f"--category must be one of {', '.join(known)}")
+    if args.ref and not re.match(r"^[a-z]+:\S+$", args.ref):
+        raise Refused("--ref must be an event ref the report lists, such as run:123 or commit:abc1234")
+    path = task_path(root, args.task)
+    at = args.at or now()
+    parse_time(at)
+    note = scrub(args.note, 240)
+    if not note:
+        raise Refused("--note is empty or looks like a credential")
+    line = f"- {at} {args.category}" + (f" {args.ref}" if args.ref else "") + f": {note}"
+    add_line(path, "Rework", line)
+    return {"ok": True, "task_id": args.task, "category": args.category, "ref": args.ref or "", "at": at}
 
 
 def cmd_overlap(args, root: Path) -> dict:
@@ -1493,6 +1937,10 @@ def cmd_report(args, root: Path):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(export(data, args.export), encoding="utf-8")
         written.append(str(target.relative_to(root)))
+    if getattr(args, "write_lessons", False):
+        lessons = write_lessons(root, data["rework"], rework_causes(root))
+        written.append(lessons["path"])
+        data = {**data, "lessons": lessons}
     if args.write_report:
         if not args.delivery:
             raise Refused("--write-report needs a Delivery scope, such as DLV-007")
@@ -1616,8 +2064,16 @@ def main(argv: list[str] | None = None) -> int:
     retro.add_argument("--write-report", action="store_true")
     retro.add_argument("--rescan", action="store_true",
                        help="price every task from the transcripts again and save the result as its newest row")
+    retro.add_argument("--write-lessons", action="store_true",
+                       help="update the tracked lessons file with the recurring rework causes")
     retro.add_argument("--deep", action="store_true",
                        help="also report files read 5 or more times and tool results over 200 KB")
+    redo = sub.add_parser("rework", help="record why the task needed another pass")
+    redo.add_argument("--task", required=True)
+    redo.add_argument("--category", required=True, help="a cause id of rework-causes.json")
+    redo.add_argument("--note", required=True, help="the cause, one line")
+    redo.add_argument("--ref", help="the event the cause explains, as the report lists it")
+    redo.add_argument("--at")
     issues = sub.add_parser("file-issues")
     issues.add_argument("--ids", required=True, help="comma-separated proposal numbers or ids")
     for scoped in (retro, issues):
@@ -1631,7 +2087,7 @@ def main(argv: list[str] | None = None) -> int:
                 "overlap": cmd_overlap, "open-pr": cmd_open_pr, "merge": cmd_merge,
                 "report": cmd_report, "file-issues": cmd_file_issues,
                 "criteria": cmd_criteria, "board": cmd_board,
-                "role-check": cmd_role_check}
+                "role-check": cmd_role_check, "rework": cmd_rework}
     try:
         if args.command == "lint" and not (args.file or args.task):
             raise Refused("lint needs --file or --task")

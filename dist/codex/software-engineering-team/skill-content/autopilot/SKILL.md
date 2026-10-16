@@ -64,6 +64,11 @@ record before continuing. Keep an excluded effect in its own question when
 it is independent of an allowed decision. `record` takes `--class` once per class a decision
 touches and refuses when one of them is not allowed.
 
+`record --class phase_start` and automatic `queue` decisions require `--entry`
+and `--after <kind>:<id>`, a policy `phase_starts` entry and the owning compiler's
+ready state. Open phases or missing inputs keep questions queued. Without the
+class the session stops at the next entry; the host contract gives the procedure.
+
 ## Only the user arms a grant
 
 Starting, extending or widening a grant needs the user's own typed entry

@@ -137,7 +137,7 @@
       "c9c89e9b225215bcc6b9681111d83a70151214968c2bee4e5234d82e79c8be7a"
     ,
     "host-contract.md":
-      "bb8c4b5e3ba61f75c6df79aea1c1806247fc97dc512a30a44bbc48953fae9b41"
+      "940a7be7212a16d486d9b4e521b63920eecdf0ce40e1e19a78a44264b4507e88"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -311,16 +311,16 @@
       "2278dfc155f1c18d13262f1a6aff22893c17f8ee4791594ba4059448a9801138"
     ,
     "skill-content/autopilot/SKILL.md":
-      "3bf338905f9fb49ef648edc4291534909707686d610a7db5405ce364781b2c37"
+      "871d5dbad0d29921906cbe6d5fa7a6628467c9e05ec30429e358e04034f2f63f"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
-      "a89fe73d565a15949287c8b7235e55a36e0ff3b3888e3cd63e48ef7c8bdc1a55"
+      "e32aa7a9c6611c11a1933c2c6e9ec99c7b0199d09440865b155a6ba30e2f702e"
     ,
     "skill-content/autopilot/references/transport-recovery.md":
       "7a3ea3f0b5b5235315d2532f8c44427e27d3f30790491330d24246c1421b87b2"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "45be9c05a135c976bb9e515febf28a42e999943a9ba98318349e2a6926256291"
+      "17fe51501c683bf76585bd3f9397ea43937becd7eaa517979e9324565c48f175"
     ,
     "skill-content/autopilot/scripts/autopilot_recovery.py":
       "80f96c50339cf002d9ca9d3ef5c9a7d0d9d6806c1950f61ddb793acf917b3e56"

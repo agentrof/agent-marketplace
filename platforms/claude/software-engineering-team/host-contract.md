@@ -309,6 +309,21 @@
     `scope_or_rule` or as the never class they touch.
   - Stop only when every remaining task waits on a queued question, then end
     with the queued list of `autopilot.py report`.
+- An entry that ends by naming the next entry asks no question, and without
+  a grant it still stops there. Under a grant, running that next entry is a
+  question of class `phase_start` whose recommended option is to run it. Run
+  `autopilot.py record --class phase_start --entry <next entry> --after
+  <kind>:<id>` naming the Requirement or Delivery whose phase just closed. It
+  refuses unless the grant allows `phase_start`, the entry is listed in the
+  policy's `phase_starts`, and the owning compiler reads that phase in a
+  ready state: `backlog-plan` after an `approved` Requirement,
+  `delivery-plan` after an `incorporated` Requirement or a `merged` or
+  `cancelled` Delivery, `execution-plan` after a `scope_approved` Delivery
+  and `deliver` after an `execution_approved` one. Before `delivery-plan`
+  after a Delivery, `closure-audit` must also have returned `closed`. Only
+  after `record` succeeds, invoke the next entry as the user would and run
+  its gates under the same grant; otherwise queue it and stop as before. A
+  grant never starts a new Requirement: that needs the user's request.
 - A grant, broad delegation or time pressure authorizes running the
   prescribed flow and never waives its evidence, integration, PR record or
   closure. The `merge` class takes only the flow's own `merge-pr` on the

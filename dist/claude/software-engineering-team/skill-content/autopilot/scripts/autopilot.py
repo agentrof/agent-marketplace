@@ -991,6 +991,26 @@ def split_options(text: str | None) -> list[str]:
     return [item.strip() for item in (text or "").split(";") if item.strip()]
 
 
+def phase_start(policy: dict, project: Path, args: argparse.Namespace) -> dict:
+    """The next entry a phase_start decision runs, once its owning compiler reads the prior phase closed."""
+    starts = {entry["entry"]: entry["after"] for entry in policy["phase_starts"]}
+    if args.entry not in starts:
+        raise Refusal(f"phase_start needs --entry, one of: {', '.join(starts)}")
+    kind, _, target = (args.after or "").partition(":")
+    if kind not in starts[args.entry] or not target:
+        raise Refusal(f"{args.entry} needs --after <kind>:<id> with kind"
+                      f" {' or '.join(starts[args.entry])}")
+    ready = starts[args.entry][kind]
+    goal = next(entry for entry in policy["goal_kinds"] if entry["id"] == kind)
+    read = read_goal(project, {"end": {**goal["end"], "terminal_statuses": ready},
+                               "target": target})
+    if not read["terminal"]:
+        state = read["state"] if read.get("found") else read.get("error")
+        raise Refusal(f"{args.entry} starts only after {kind} {target} reads"
+                      f" {' or '.join(ready)}; it reads {state}; queue the question")
+    return {"entry": args.entry, "after": args.after, "after_state": read["state"]}
+
+
 def cmd_record(args: argparse.Namespace, now: datetime) -> int:
     policy = load_policy()
     directory = state_dir(Path(args.project_root))
@@ -1009,8 +1029,9 @@ def cmd_record(args: argparse.Namespace, now: datetime) -> int:
                               " queue the question")
         if options and args.choice not in options:
             raise Refusal("the choice must be one of the options")
+        start = phase_start(policy, Path(args.project_root), args) if "phase_start" in names else {}
         log(directory, now, grant, "decision", classes=names, question=args.question,
-            options=options, choice=args.choice, reason=args.reason, target=args.target)
+            options=options, choice=args.choice, reason=args.reason, target=args.target, **start)
         number = sum(event.get("event") == "decision" for event in ledger(directory, grant["id"]))
     print(f"autopilot: recorded decision {number} under {grant['id']}; write it to {args.target}"
           f" marked {grant['id']}")
@@ -1032,21 +1053,27 @@ def cmd_queue(args: argparse.Namespace, now: datetime) -> int:
         defaults = {entry["id"]: entry["default"] for entry in policy["classes"]}
         decided = args.hold is None and all(name in grant["classes"] and defaults[name] != "never"
                                              for name in names)
+        start, held = {}, args.hold
+        if decided and "phase_start" in names:
+            try:
+                start = phase_start(policy, Path(args.project_root), args)
+            except Refusal as exc:
+                decided, held = False, str(exc)
         if decided:
             log(directory, now, grant, "decision", classes=names, question=args.question,
                 options=options, choice=args.recommendation,
-                reason="Every named class is allowed by the active grant.", target="owning decision record")
+                reason="Every named class is allowed by the active grant.", target="owning decision record", **start)
         else:
             log(directory, now, grant, "queued", classes=names, question=args.question,
                 options=options, recommendation=args.recommendation, blocks=args.blocks or "",
-                **({"hold": args.hold} if args.hold is not None else {}))
+                **({"hold": held} if held is not None else {}))
         number = sum(event.get("event") == "queued" for event in ledger(directory, grant["id"]))
     if decided:
         print(f"autopilot: decided: {args.recommendation}; record the reason in the owning decision record"
               f" marked {grant['id']} and continue")
         return 0
     print(f"autopilot: queued question {number} under {grant['id']}"
-          + (f", held: {args.hold}" if args.hold is not None else "")
+          + (f", held: {held}" if held is not None else "")
           + "; continue the work that does not depend on it")
     return 0
 
@@ -1407,11 +1434,15 @@ def parser() -> argparse.ArgumentParser:
     record.add_argument("--choice", required=True)
     record.add_argument("--reason", required=True)
     record.add_argument("--target", required=True)
+    record.add_argument("--entry", help="phase_start: the entry the decision runs next")
+    record.add_argument("--after", help="phase_start: <kind>:<id> of the phase that closed")
     record.set_defaults(handler=cmd_record)
     queue = verbs.add_parser("queue")
     queue.add_argument("--recommendation", required=True)
     queue.add_argument("--blocks")
     queue.add_argument("--hold", metavar="REASON", help="keep the question pending despite an allowed recommendation")
+    queue.add_argument("--entry", help="phase_start: the entry the decision runs next")
+    queue.add_argument("--after", help="phase_start: <kind>:<id> of the phase that closed")
     queue.set_defaults(handler=cmd_queue)
     for verb in (record, queue):
         verb.add_argument("--class", dest="class_", action="append", required=True,

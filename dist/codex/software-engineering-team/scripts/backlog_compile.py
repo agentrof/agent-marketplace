@@ -2645,6 +2645,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
     advisories: list[str] = []
     record = {"backlog": None, "backlog_reviews": [], "epics": [],
               "stories": [], "test_plans": [], "epic_reviews": [],
+              "retired_stories": [],
               "scaffold_findings": [], "advisory_findings": []}
     root_note = root / "backlog.md"
     if not root_note.is_file():
@@ -2721,7 +2722,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
             errors.append(f"{epic_rel} must not contain assignee")
         epic = {"path": epic_rel, "folder": epic_dir.name, "id": epic_id,
                 "props": epic_props, "body": epic_body, "stories": [],
-                "reviews": []}
+                "retired": [], "reviews": []}
         epic_rounds: set[int] = set()
         for review in sorted((epic_dir / "reviews").glob("round-*-epic-review.md")):
             review_props, review_body_text = parse_front_matter(review)
@@ -2769,6 +2770,15 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                 errors.append(f"{story_rel} must have type: story")
             errors.extend(status_findings(story_props, "story", story_rel,
                                           contract))
+            if story_props.get("status") == "retired":
+                # A dropped story keeps its file so approved history still resolves;
+                # it leaves ordering, planning and coverage.
+                errors.extend(retired_story_findings(docs, story_props, story_rel, test_path, contract))
+                retired = {"path": story_rel, "id": story_id, "epic_id": epic_id,
+                           "test_plan": test_path.relative_to(docs).as_posix()}
+                epic["retired"].append(retired)
+                record["retired_stories"].append(retired)
+                continue
             if "assignee" in story_props:
                 errors.append(f"{story_rel} must not contain assignee")
             for key in ("scope", "priority", "priority_reason", "owner_role"):
@@ -2966,7 +2976,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                 "path": story["test_plan"], "story_id": story_id,
                 "props": test_props, "scenario_ids": ids,
             })
-        if not epic["stories"]:
+        if not epic["stories"] and not epic["retired"]:
             errors.append(f"{epic_rel} has no stories")
         if not epic["reviews"]:
             errors.append(f"{epic_rel} has no epic review")
@@ -2977,7 +2987,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
     if not record["backlog_reviews"]:
         errors.append("backlog/reviews must contain a cross-epic backlog review")
     epic_ids = [epic["id"] for epic in record["epics"]]
-    story_ids = [story["id"] for story in record["stories"]]
+    story_ids = [story["id"] for story in record["stories"] + record["retired_stories"]]
     if len(epic_ids) != len(set(epic_ids)):
         errors.append("epic ids must be unique")
     if len(story_ids) != len(set(story_ids)):
@@ -2985,11 +2995,17 @@ def collect(docs: Path, *, historical_inputs: bool = False,
 
     story_by_target = {story["path"].removesuffix(".md"): story
                        for story in record["stories"]}
+    retired_by_target = {story["path"].removesuffix(".md"): story
+                         for story in record["retired_stories"]}
     graph: dict[str, set[str]] = {}
     for story in record["stories"]:
         dependencies: set[str] = set()
         for target in story["dependency_targets"]:
             target_story = story_by_target.get(target)
+            if target in retired_by_target:
+                errors.append(f"{story['id']} depends on retired story {retired_by_target[target]['id']}; "
+                              "remove the dependency or point it at the replacing story")
+                continue
             if target_story is None:
                 errors.append(f"{story['id']} depends on unknown story target {target}")
                 continue
@@ -3035,6 +3051,33 @@ def dependency_edges(stories: list[dict], same_epic: bool | None,
     return edges
 
 
+def retired_refs(record: dict, refs: set[str]) -> set[str]:
+    """The scenario ids and dependency edges a review names for a retired story.
+
+    Its historical reviews keep covering it, so a review may still name them.
+    """
+    retired = {story["id"] for story in record.get("retired_stories", [])}
+    return {ref for ref in refs if ref.rsplit("-TS-", 1)[0] in retired
+            or set(ref.split(" -> ")) & retired}
+
+
+def retired_story_findings(docs: Path, props: dict, story_rel: str,
+                           test_path: Path, contract: dict) -> list[str]:
+    errors = []
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", str(props.get("retired_at", ""))):
+        errors.append(f"{story_rel} retired story needs retired_at as YYYY-MM-DD")
+    reason = str(props.get("retired_reason", "")).strip()
+    if not reason or "\n" in reason:
+        errors.append(f"{story_rel} retired story needs a one-line retired_reason")
+    if test_path.is_file():
+        test_props, _body = parse_front_matter(test_path)
+        test_rel = test_path.relative_to(docs).as_posix()
+        errors.extend(status_findings(test_props, "test-plan", test_rel, contract))
+        if test_props.get("status") not in {"approved", "retired"}:
+            errors.append(f"{test_rel} test plan of a retired story must be approved or retired")
+    return errors
+
+
 def review_coverage_findings(record: dict, docs: Path) -> list[str]:
     errors: list[str] = []
     root_review = latest(record["backlog_reviews"])
@@ -3063,7 +3106,7 @@ def review_coverage_findings(record: dict, docs: Path) -> list[str]:
         actual_edges = set(edge_values)
         if len(edge_values) != len(actual_edges):
             errors.append(f"{root_review['path']} has duplicate dependency_refs")
-        if actual_edges != expected_edges:
+        if actual_edges - retired_refs(record, actual_edges) != expected_edges:
             errors.append(f"{root_review['path']} dependency_refs do not exactly cover cross-epic dependencies")
 
     for epic in record["epics"]:
@@ -3090,7 +3133,10 @@ def review_coverage_findings(record: dict, docs: Path) -> list[str]:
         actual_targets = set(verified_targets)
         if len(verified_targets) != len(actual_targets):
             errors.append(f"{review['path']} has duplicate verifies links")
-        if actual_targets != expected_targets:
+        retired_targets = {target for story in epic["retired"]
+                           for target in (story["path"].removesuffix(".md"),
+                                          story["test_plan"].removesuffix(".md"))}
+        if actual_targets - retired_targets != expected_targets:
             errors.append(f"{review['path']} verifies set does not exactly cover every story and test plan")
         expected_scenarios = {scenario for story in epic["stories"]
                               for scenario in story["scenario_ids"]}
@@ -3098,14 +3144,14 @@ def review_coverage_findings(record: dict, docs: Path) -> list[str]:
         actual_scenarios = set(scenario_values)
         if len(scenario_values) != len(actual_scenarios):
             errors.append(f"{review['path']} has duplicate scenario_refs")
-        if actual_scenarios != expected_scenarios:
+        if actual_scenarios - retired_refs(record, actual_scenarios) != expected_scenarios:
             errors.append(f"{review['path']} scenario_refs do not exactly cover every scenario")
         expected_edges = dependency_edges(epic["stories"], True, record)
         edge_values = values(review["props"], "dependency_refs")
         actual_edges = set(edge_values)
         if len(edge_values) != len(actual_edges):
             errors.append(f"{review['path']} has duplicate dependency_refs")
-        if actual_edges != expected_edges:
+        if actual_edges - retired_refs(record, actual_edges) != expected_edges:
             errors.append(f"{review['path']} dependency_refs do not exactly cover intra-epic dependencies")
     return errors
 
@@ -3229,6 +3275,8 @@ def package_paths(record: dict, docs: Path) -> list[Path]:
         relatives += [review["path"] for review in epic["reviews"]]
         for story in epic["stories"]:
             relatives.extend([story["path"], story["test_plan"]])
+        relatives += [path for story in epic.get("retired", [])
+                      for path in (story["path"], story["test_plan"]) if (docs / path).is_file()]
     return [docs / rel for rel in sorted(set(relatives))]
 
 
@@ -3466,13 +3514,14 @@ def approved_history_sources(project: Path, docs: Path, commit: str) -> dict[Pat
         manifest = {}
         for path, (text, note_props) in notes.items():
             relative = path.relative_to(docs).as_posix()
-            expected_status = "planned" if path.name == "story.md" else "approved"
+            expected_status = {"story.md": {"planned", "retired"},
+                               "test-plan.md": {"approved", "retired"}}.get(path.name, {"approved"})
             if path in historical:
                 errors = status_findings(note_props, note_props["type"], relative, backlog_contract())
                 if errors:
                     return None
             else:
-                if note_props.get("status") != expected_status:
+                if note_props.get("status") not in expected_status:
                     return None
                 if note_props.get("source_hash") != digest_text(text) or not note_props.get("approved_at_utc"):
                     return None

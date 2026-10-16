@@ -648,6 +648,8 @@ def requirement_incorporated(docs: Path, identifier: str) -> bool:
             props, _ = split_note(story)
         except (OSError, ValueError):
             continue
+        if props.get("status") == "retired":
+            continue
         if implements_requirement(props.get("implements", []), identifier):
             aliases = props.get("aliases", [])
             if isinstance(aliases, list) and len(aliases) == 1 and isinstance(aliases[0], str):

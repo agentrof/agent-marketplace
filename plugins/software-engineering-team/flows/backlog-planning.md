@@ -393,7 +393,10 @@ backlog_compile.py check --docs <workspace>/docs --approved --render --json
 ```
 
 Approval stamps the package, root backlog, epics, reviews and test plans while stories remain
-`planned`. When the project has a Process Policy, each review round records the pin a Delivery takes
+`planned`. A story the owner drops is retired in a revision, never deleted: `status: retired`,
+`retired_at` (YYYY-MM-DD) and a one-line `retired_reason`. It keeps its file so approved history
+still resolves, leaves ordering, coverage and Delivery planning, is covered by its historical
+reviews, and no live story may depend on it. When the project has a Process Policy, each review round records the pin a Delivery takes
 at scope approval, that policy's path, revision and source hash, as the policy in force when the
 round is written: `init`, `stub-epic` and `begin-revision` write their rounds with it, and `check`
 pins a round the Product Owner writes the first time it sees it. Only `process_policy.py init` and

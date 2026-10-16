@@ -14,6 +14,16 @@ the complete committed and working change inventory; it does not infer a baselin
 Initial Setup may bind an initialized repository before its first commit;
 its initial files are still hashed, and the first commit invalidates that input.
 
+For planning or reviewing verification behavior, read the generated reference
+with the resolved Python and `scripts/verification_reference.py --verb <verb>` before
+opening engine source. Omit `--verb` for the command index. The reference derives
+parser arguments, handler summaries, local guard refusals and output keys from
+the current engine, with its source hash. Cite the verb and guard name, not
+guessed line ranges. Conditional refusals describe possible failures; imported
+guards and dynamic dispatch still require their owning contract. Regenerate the
+reference after a package change. This command reads no project or session and
+never runs a verification verb.
+
 A skill may carry `references/switch-<switch>-<value>.md`: the instructions of
 one value of a process switch declared in
 `skill-content/configure/data/process-switches.json`. The manifest binds it as

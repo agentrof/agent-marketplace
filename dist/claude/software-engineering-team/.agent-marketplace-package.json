@@ -203,7 +203,7 @@
       "1ca45984c3c373674dc79e6272686847a89cd56366596c4cd3f836e3c8dc75d5"
     ,
     "scripts/delivery_verification.py":
-      "6fbfabf2af39650b58f1533afff47d932cf33a846f7f4fa719450099debd3558"
+      "59d41618f360b49baffbb7572b2fbc16753bd36f7c84f69b045440ff32d9e770"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -312,6 +312,9 @@
     ,
     "scripts/vault_query.py":
       "2278dfc155f1c18d13262f1a6aff22893c17f8ee4791594ba4059448a9801138"
+    ,
+    "scripts/verification_reference.py":
+      "14bab75a4fa06b6a5d2faec37a18a661e7bc352ba5f3455ff8c94c89a8379f6e"
     ,
     "skill-content/autopilot/SKILL.md":
       "871d5dbad0d29921906cbe6d5fa7a6628467c9e05ec30429e358e04034f2f63f"
@@ -1136,7 +1139,7 @@
       "07dcd548a59bd2b19e22d2fdf1592009f12a655b4ce1d1001325c94c6a1dd88e"
     ,
     "templates/task-input-contract.md":
-      "a1e14667ea11bd2989b2ed59055ed4a37da59b20411a4af60f6dc84ad5e3c03a"
+      "c0d6b90d546a1277663a5a8d68c63dbcd209c1e5475d2df5c26c1e1e45a2753f"
     ,
     "templates/task-input-policy.json":
       "a388f65395aa5d8b62c12b82fc2635e8efd37fac9cb28718293874af330fff69"

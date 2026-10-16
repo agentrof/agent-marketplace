@@ -121,12 +121,12 @@ fix, runs in this order with `delivery_git.py`:
    `finish-source-handoff` returns the Fence to `open`.
 4. `begin-plan-revision` needs that open Fence. Inside it, approve any
    Operation revision the Items will pin, run `approve-execution` to re-pin
-   every Item's Story and Test Plan hashes from the revised backlog, run
-   `publish-execution-plan`, then `finish-plan-revision`.
-5. `refresh-target` brings the revised backlog into the Integration. Run
-   before publication, it refuses with `DELIVERY_TARGET_SOURCE_VIOLATION`,
-   because the target copy no longer matches the Items' old pins.
-6. Converge or resume the active Item.
+   every Item's Story and Test Plan hashes from the revised backlog, then run
+   `refresh-target` to bring those exact inputs into the Integration. The
+   owning barrier and valid local approval authorize only those new pins;
+   without them changed pinned inputs still refuse. Publish with
+   `publish-execution-plan`, then run `finish-plan-revision`.
+5. Converge or resume the active Item.
 
 Switch `execution_planning`: at `single_source_bundle`, every execution-planning
 fact is written once, in the section that

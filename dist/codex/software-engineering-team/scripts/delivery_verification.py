@@ -68,6 +68,11 @@ OWN_TARGET_SWITCH = "own_target_reuse"
 # since their last green run does not select with that run's passed cases.
 LIVE_REUSE_SWITCH, DELTA_SINCE_GREEN = "live_case_reuse", "delta_since_green"
 LIVE_BASE = "live-base.json"
+# At pass_carry_over per_item the runner keeps every pass record the approved test or live command writes, failed
+# passes included, in the Item's carry-over record and names that record to the command's next pass.
+CARRY_OVER_SWITCH, PER_ITEM = "pass_carry_over", "per_item"
+CARRY_OVER_RECORD, CARRY_OVER_PASS = "carry-over-record.json", "scratch/carry-over-pass.json"
+CARRY_OVER_OWNER = ("project_key", "delivery_id", "item_id")
 LIVE_BASE_FIELDS = ("product_commit", "candidate_hash", "map_hash", "evidence_hash", "live_group", "command", "workdir",
                     *("environment_variables", "environment_hash", "python", "platform", "git"),
                     "exit_code", "candidate_intact", "output_file", "output_sha256", "completed_at")
@@ -135,7 +140,7 @@ RUNNER_VARIABLES = ("AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID", "AGENTROF_MUTATI
 # names neither the variable nor its path. A partitioned test run hands each
 # partition its own file and engine, which its record names, never the identity.
 PARTITION_VARIABLES = ("AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE")
-SELECTION_VARIABLES = ("AGENTROF_LIVE_BASE", "AGENTROF_LIVE_BASE_COMMIT", "AGENTROF_LIVE_RESUME", "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
+SELECTION_VARIABLES = ("AGENTROF_LIVE_BASE", "AGENTROF_LIVE_BASE_COMMIT", "AGENTROF_LIVE_RESUME", "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", "AGENTROF_CARRY_OVER_RECORD", *PARTITION_VARIABLES)
 # At touched_suites QA's final test run names here the earlier-story targets the
 # accepted pre-handoff run covered, for the approved test command to skip (#354).
 REUSED_TESTS = "reused-tests.json"
@@ -1130,6 +1135,120 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False, rem
 
 
 
+# Switch repair_pass at scoped_repair: a repair of fixable findings below critical
+# is settled by its pre-freeze repair review and the touched-suites run, without
+# a new full reader pass over unchanged scope.
+REPAIR_PASS, SCOPED_REPAIR = "repair_pass", "scoped_repair"
+
+
+def is_test_path(name: str) -> bool:
+    rules = policy()["mutation_scope"]
+    path = PurePosixPath(name)
+    return (any(part in rules["test_path_segments"] for part in path.parts[:-1])
+            or any(fnmatch.fnmatchcase(path.name, pattern) for pattern in rules["test_name_patterns"]))
+
+
+def scoped_repair_refusal(root: Path, delivery_id: str, story: str, previous: dict | None,
+                          current: dict) -> str | None:
+    """Why the repaired candidate needs a full pass, or None when a scoped repair may settle it."""
+    docs = delivery.docs_root(root)
+    value = lambda name: delivery.delivery_switch_value(docs, delivery_id, name)
+    if value(REPAIR_PASS) != SCOPED_REPAIR:
+        return "scoped-repair runs at switch repair_pass scoped_repair"
+    if value("repair_review") != "before_freeze":
+        return "scoped_repair needs repair_review before_freeze, whose reader reviews the repair diff"
+    if pre_handoff_regression(root, delivery_id) != TOUCHED_SUITES:
+        return "scoped_repair needs pre_handoff_regression touched_suites, which runs the touched suites"
+    if previous is None or previous.get("candidate") == current:
+        return "scoped_repair settles a repaired candidate of an earlier verification pass"
+    old = previous["candidate"]
+    if (old["delivery"], old["story"]) != (delivery_id, story):
+        return "the earlier verification pass belongs to another Item"
+    if any(old.get(key) != current.get(key) for key in ("inputs", "instruction_identity")):
+        return "changed source or instruction bindings need a full verification pass"
+    if current["runtime_required"]:
+        # shortcut: a runtime Item always takes a full pass; upgrade when live evidence can be scoped.
+        return "a runtime_required Item needs a full pass with fresh runtime evidence"
+    results = []
+    for role in ROLES:
+        worker = previous["workers"][role]
+        result = worker.get("result", {})
+        if worker.get("state") != "settled" or result.get("mode") not in policy()["final_modes"][role]:
+            return f"the earlier pass has no settled final {role} result"
+        results.append(result)
+    if all(result.get("verdict") == "passed" for result in results):
+        return "the earlier pass passed; there is nothing to repair"
+    findings = [finding for result in results for finding in result.get("findings", [])]
+    findings += previous.get("unresolved_findings", [])
+    if any(critical(finding) for finding in findings if finding.get("status") != "resolved"):
+        return "a critical finding needs a full verification pass"
+    delta = sorted(set(filter(None, git(root, "diff", "--name-only", "--no-renames", "-z",
+                                        old["product_commit"], current["product_commit"]).split("\0"))))
+    derived = derive_regression(root, delivery_id, story, current)
+    if derived["kind"] != "test":
+        selected = derived["affected_test_ids"]
+        missed = [name for name in delta if is_test_path(name)
+                  and not any(identifier == name or identifier.startswith(name + "::") for identifier in selected)]
+        if missed:
+            return "the touched-suites run selects no test of " + ", ".join(missed)
+    return None
+
+
+def scoped_repair(root: Path, delivery_id: str, story: str, remote: str = "origin") -> dict:
+    """Freeze a repaired candidate and settle both readers from its repair review and touched-suites run."""
+    root = root.resolve()
+    previous = read_session(root, required=False)
+    current = candidate(root, delivery_id, story, allow_evidence=True)
+    refusal = scoped_repair_refusal(root, delivery_id, story, previous, current)
+    if refusal:
+        raise RuntimeError(f"DELIVERY_SCOPED_REPAIR_REFUSED: {refusal}")
+    frozen = freeze(root, delivery_id, story, fresh=True, remote=remote)
+    with locked(root):
+        value = read_session(root)
+        if value["session_id"] != frozen["session_id"] or not value.get("repair_review") or not value.get("pre_handoff"):
+            raise RuntimeError("DELIVERY_SCOPED_REPAIR_REFUSED: the frozen session lacks its repair review"
+                               " or touched-suites run")
+        record = {"source_session_id": previous["session_id"], "candidate_hash": current["candidate_hash"],
+                  "repair_review_evidence_hash": value["repair_review"]["evidence_hash"],
+                  "pre_handoff_evidence_hash": value["pre_handoff"]["evidence_hash"]}
+        record["evidence_hash"] = digest(record)
+        value["scoped_repair"] = record
+        evidence = (f"Scoped repair: repair review {record['repair_review_evidence_hash']} passed on the"
+                    f" repair diff and the touched-suites run {record['pre_handoff_evidence_hash']} passed;"
+                    f" unchanged scope keeps the results of session {previous['session_id']}.")
+        for role in ROLES:
+            earlier = previous["workers"][role]["result"]
+            findings = [{**finding, "status": "resolved"} if blocking(finding) and finding["status"] == "open"
+                        else finding for finding in earlier.get("findings", [])]
+            if role == "code_reviewer":
+                findings += value["repair_review"]["result"]["findings"]
+                checks = {name: {"passed": True, "evidence": evidence} for name in policy()["review_checks"]}
+            else:
+                checks = {"scoped_regression": {"passed": True, "evidence": evidence,
+                                                "raw_evidence_hash": record["pre_handoff_evidence_hash"]}}
+            result = {"candidate_hash": current["candidate_hash"], "session_id": value["session_id"],
+                      "role": role, "mode": SCOPED_REPAIR, "verdict": "passed", "checks": checks,
+                      "findings": findings, "scoped_repair_hash": record["evidence_hash"],
+                      "report": f"{evidence}\n\nEarlier {role} report:\n\n{earlier['report']}"}
+            result["result_hash"] = digest(result)
+            value["workers"][role] = {"state": "settled", "result": result, "completed_at": time.time(),
+                                      "reader_elapsed_seconds": 0.0}
+        write_session(root, value)
+        return value
+
+
+def scoped_repair_problem(value: dict, result: dict) -> str | None:
+    """Why a scoped_repair result does not stand on its session's repair review and touched-suites run."""
+    record = value.get("scoped_repair") or {}
+    if (record.get("evidence_hash") != digest({key: item for key, item in record.items() if key != "evidence_hash"})
+            or result.get("scoped_repair_hash") != record.get("evidence_hash")
+            or record.get("candidate_hash") != value["candidate"]["candidate_hash"]
+            or record.get("repair_review_evidence_hash") != (value.get("repair_review") or {}).get("evidence_hash")
+            or record.get("pre_handoff_evidence_hash") != (value.get("pre_handoff") or {}).get("evidence_hash")):
+        return "scoped repair result does not bind this session's repair review and touched-suites run"
+    return None
+
+
 def prepare_repair(root: Path) -> dict:
     """Create an independent repair checkout without changing the frozen Item."""
     root = root.resolve()
@@ -1458,6 +1577,19 @@ def clone_private_checkout(root: Path, execution_root: Path, commit: str) -> Non
 RUNTIME_CHECKOUT = "runtime"
 
 
+def runtime_checkout_name(scratch: Path, delivery_id: str, story: str) -> str:
+    """The kept runtime checkout's folder name, distinct per Item.
+
+    A project environment may name its instance after the checkout folder, as
+    the docker-compose skill's entry point does, so Items running at once need
+    distinct names. A checkout an older package kept under the shared name
+    keeps it, so its running instance is still torn down.
+    """
+    if (scratch / RUNTIME_CHECKOUT).exists():
+        return RUNTIME_CHECKOUT
+    return "-".join([RUNTIME_CHECKOUT, *re.findall(r"[a-z0-9]+", f"{delivery_id}-{story}".lower())])
+
+
 def repin_private_checkout(root: Path, execution_root: Path, commit: str) -> None:
     """Recreate private repository state while preserving the environment's checkout pathname."""
     safe_runtime_path(root, execution_root)
@@ -1552,7 +1684,8 @@ def private_checkout_run(root: Path, scratch: Path, commit: str, workdir: str, c
     the command runs.
     """
     with tempfile.TemporaryDirectory(prefix="candidate-", dir=scratch) as temporary:
-        execution_root = Path(temporary) / "checkout"
+        # A distinct folder name per run keeps an environment named after it apart from other runs.
+        execution_root = Path(temporary) / ("checkout-" + Path(temporary).name.removeprefix("candidate-").lower())
         # A private repository gives mutation tools their own index, objects and
         # files; no transient mutant can enter the independent reviewer's view.
         clone_private_checkout(root, execution_root, commit)
@@ -2022,6 +2155,86 @@ def record_live_base(root: Path, record: dict, product_commit: str, candidate_ha
                                                               indent=2, sort_keys=True) + "\n")
 
 
+def pass_carry_over(root: Path, delivery_id: str) -> bool:
+    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, CARRY_OVER_SWITCH) == PER_ITEM
+
+
+def carry_over_record_path(root: Path) -> Path:
+    return safe_runtime_path(root, session_path(root).parent / CARRY_OVER_RECORD, file_only=True)
+
+
+def valid_carry_over_pass(value: object) -> bool:
+    if not isinstance(value, dict) or type(value.get("schema_version")) is not int or value["schema_version"] != 1:
+        return False
+    if any(not isinstance(value.get(key), str) or not value[key].strip()
+           for key in (*CARRY_OVER_OWNER, "run_id", "product_commit", "candidate_hash")):
+        return False
+    if not re.fullmatch(r"[0-9a-f]{40,64}", value["product_commit"]):
+        return False
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", value["candidate_hash"]):
+        return False
+    for name in ("carried", "fresh"):
+        if not isinstance(value.get(name), list):
+            return False
+        for case in value[name]:
+            if (not isinstance(case, dict)
+                    or any(not isinstance(case.get(key), str) or not case[key].strip()
+                           for key in ("case_id", "outcome", "input_digest"))
+                    or not isinstance(case.get("input_paths"), list)
+                    or any(not isinstance(path, str) or not delivery._is_normalized_claim(path)
+                           for path in case["input_paths"])
+                    or not re.fullmatch(r"sha256:[0-9a-f]{64}", case["input_digest"])):
+                return False
+    identities = [case["case_id"] for name in ("carried", "fresh") for case in value[name]]
+    return len(set(identities)) == len(identities)
+
+
+def read_carry_over_record(root: Path, current: dict | None = None) -> dict | None:
+    """The Item's carry-over record, kept across verification sessions, or None."""
+    try:
+        value = json.loads(carry_over_record_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(value, dict) or value.get("schema_version") != 1
+            or not isinstance(value.get("passes"), list)
+            or any(not isinstance(value.get(key), str) or not value[key].strip() for key in CARRY_OVER_OWNER)
+            or not isinstance(value.get("candidate_hash"), str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", value["candidate_hash"])
+            or any(not valid_carry_over_pass(entry)
+                   or any(entry[key] != value[key] for key in CARRY_OVER_OWNER) for entry in value["passes"])
+            or current is not None and (value["delivery_id"], value["item_id"]) != (current["delivery"], current["story"])):
+        return None
+    return value
+
+
+def keep_carry_over_pass(root: Path, current: dict) -> dict | None:
+    """Add the pass record this command wrote to the Item's record, whatever the pass's verdict.
+
+    The pass record lists each case with its outcome, input paths and their
+    digest at its product commit; the project's reader carries only a passed
+    case. A record of another Item, or none, adds nothing.
+    """
+    try:
+        entry = json.loads(raw_output_path(root, CARRY_OVER_PASS).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(entry, dict)
+            or entry.get("product_commit") != current["product_commit"]
+            or entry.get("candidate_hash") is not None and entry.get("candidate_hash") != current["candidate_hash"]
+            or (entry.get("delivery_id"), entry.get("item_id")) != (current["delivery"], current["story"])):
+        return None
+    entry["candidate_hash"] = current["candidate_hash"]
+    if not valid_carry_over_pass(entry):
+        return None
+    record = read_carry_over_record(root, current)
+    if record is None or any(record.get(key) != entry[key] for key in CARRY_OVER_OWNER):
+        record = {"schema_version": 1, **{key: entry[key] for key in CARRY_OVER_OWNER}, "passes": []}
+    record["candidate_hash"] = current["candidate_hash"]
+    record["passes"] = [row for row in record["passes"] if row.get("run_id") != entry["run_id"]] + [entry]
+    atomic_file.replace_text(carry_over_record_path(root), json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return record
+
+
 def commit_delta(root: Path, base: str, commit: str) -> tuple[bool, list[str] | None]:
     """Whether *base* is an ancestor of *commit*, and the paths that differ between them, or None when unreadable."""
     ancestor = subprocess.run(["git", "-C", str(root), "merge-base", "--is-ancestor", base, commit],
@@ -2442,6 +2655,16 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             environment["AGENTROF_LIVE_BASE"] = str(base_file)
             if plan["base_commit"]:
                 environment["AGENTROF_LIVE_BASE_COMMIT"] = plan["base_commit"]
+        carry_over = kind in {"test", "live_test"} and pass_carry_over(root, current["delivery"])
+        if carry_over:
+            kept = read_carry_over_record(root, current)
+            if kept is not None:
+                # The command copies the candidate it runs on from the record into its pass record.
+                kept["candidate_hash"] = current["candidate_hash"]
+                atomic_file.replace_text(carry_over_record_path(root), json.dumps(kept, indent=2, sort_keys=True) + "\n")
+            else:
+                carry_over_record_path(root).unlink(missing_ok=True)
+            environment["AGENTROF_CARRY_OVER_RECORD"] = str(carry_over_record_path(root))
         reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
                           if kind == "test" else (None, None))
         own_note = None
@@ -2466,6 +2689,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             identity["live_resume_hash"] = digest(resume_input)
         if reuse is not None:
             identity["reused_pre_handoff"] = reuse
+        if carry_over and kept is not None:
+            identity["carry_over_record"] = digest(kept)
         if live_reuse:
             identity["reused_live_base"] = {name: entry["evidence_hash"] for name, entry in sorted(live_reuse.items())}
         groups = (group_report_declaration(root, current["delivery"], contract)
@@ -2495,6 +2720,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             environment["AGENTROF_REUSED_TESTS"] = str(reused)
         if group is not None:
             raw_output_path(root, "scratch/live-case-report.json").unlink(missing_ok=True)
+        if carry_over:
+            raw_output_path(root, CARRY_OVER_PASS).unlink(missing_ok=True)
         session["raw_evidence"].pop(record_key, None)
         write_session(root, session)
         session_id = session["session_id"]
@@ -2628,6 +2855,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         session["raw_evidence"][record_key] = record
         if live_reuse_on:
             record_live_base(root, record, current["product_commit"], current["candidate_hash"], contract)
+        if carry_over and intact is True:
+            keep_carry_over_pass(root, current)
         if record.get("diagnostic_selection", {}).get("finding_controls"):
             session["finding_control_bindings"] = finding_control_history(session)
         session["metrics"]["command_seconds"] += record["duration_seconds"]
@@ -3366,6 +3595,127 @@ def blocking(finding: dict) -> bool:
     return finding["severity"].casefold() in {value.casefold() for value in policy()["blocking_severities"]}
 
 
+# Switch finding_disposition at follow_up_issue: only a critical finding blocks an
+# Item; every open finding below it is a complete follow-up the coordinator files.
+FINDING_DISPOSITION, FOLLOW_UP_ISSUE = "finding_disposition", "follow_up_issue"
+
+
+def critical(finding: dict) -> bool:
+    return finding["severity"].casefold() in {value.casefold() for value in policy()["critical_severities"]}
+
+
+def follow_up_disposition(root: Path, delivery_id: str) -> bool:
+    """Whether findings below critical are follow-ups: at follow_up_issue, and always for a single verifier."""
+    docs = delivery.docs_root(root)
+    return (delivery.delivery_switch_value(docs, delivery_id, FINDING_DISPOSITION) == FOLLOW_UP_ISSUE
+            or delivery.delivery_switch_value(docs, delivery_id, ITEM_VERIFICATION) == SINGLE_VERIFIER)
+
+
+# Switch item_verification at single_verifier: one fresh verifier reads the frozen
+# candidate, runs QA's approved commands and registers both results in one pass.
+ITEM_VERIFICATION, SINGLE_VERIFIER = "item_verification", "single_verifier"
+SINGLE_VERIFIER_FIELDS = ("candidate_hash", "session_id", "verifier", "verdict", "report",
+                          "review_checks", "qa_checks", "findings")
+
+
+def register_single_verifier(root: Path, payload: dict) -> dict:
+    """Split one verifier's result into the code review and QA results and settle both readers together.
+
+    Both results pass every check a separate reader's result passes, so
+    evidence approval and integration read them unchanged. Nothing is written
+    unless both are accepted.
+    """
+    root = root.resolve()
+    with locked(root):
+        wait_for_own_command(root, "qa_engineer", "settling its reader")
+        value = read_session(root)
+        current = value["candidate"]
+        docs = delivery.docs_root(root)
+        if delivery.delivery_switch_value(docs, current["delivery"], ITEM_VERIFICATION) != SINGLE_VERIFIER:
+            raise RuntimeError("single-verifier-result runs at switch item_verification single_verifier")
+        if code_review_panel(root, current["delivery"]) != "single_reader" or review_loop(root, current["delivery"]) == "blocking_delta":
+            raise RuntimeError("item_verification single_verifier needs code_review_panel single_reader and a"
+                               " review_loop other than blocking_delta: one verifier is no panel and no calibration")
+        if not isinstance(payload, dict) or set(payload) - {*SINGLE_VERIFIER_FIELDS, "blocked_commands"} \
+                or any(key not in payload for key in SINGLE_VERIFIER_FIELDS):
+            raise RuntimeError("a single verifier result holds exactly: " + ", ".join(SINGLE_VERIFIER_FIELDS))
+        if not isinstance(payload["verifier"], str) or not payload["verifier"].strip():
+            raise RuntimeError("a single verifier result names its native reader identity in verifier")
+        findings = payload["findings"] if isinstance(payload["findings"], list) else None
+        if findings is None or any(not isinstance(finding, dict) or finding.get("role", "code_reviewer") not in ROLES
+                                   for finding in findings):
+            raise RuntimeError("each single verifier finding names role code_reviewer or qa_engineer")
+        common = {key: payload[key] for key in ("candidate_hash", "session_id", "verdict", "report", "verifier")}
+        if "blocked_commands" in payload:
+            common["blocked_commands"] = payload["blocked_commands"]
+        split = lambda role: [{key: item for key, item in finding.items() if key != "role"}
+                              for finding in findings if finding.get("role", "code_reviewer") == role]
+        results = [{**common, "role": "code_reviewer",
+                    "mode": "review_repair" if value.get("previous_candidate") else "review_initial",
+                    "checks": payload["review_checks"], "findings": split("code_reviewer")},
+                   {**common, "role": "qa_engineer", "mode": "qa_final",
+                    "checks": payload["qa_checks"], "findings": split("qa_engineer")}]
+        if payload["verdict"] == "passed":
+            require_intact(value)
+        for result in results:
+            check_result(root, value, result)
+        for result in results:
+            value = settle_result(root, value, result)
+        return value
+
+
+def gate_severities(root: Path, delivery_id: str) -> set[str]:
+    """The severities that keep a result from passing: critical alone at follow_up_issue."""
+    key = "critical_severities" if follow_up_disposition(root, delivery_id) else "blocking_severities"
+    return {value.casefold() for value in policy()[key]}
+
+
+def disposition_follow_ups(results: list[dict], item: dict) -> list[dict]:
+    """Every open finding below critical of the final results, each a complete follow-up.
+
+    The owner role is one of the Item's implementation roles, who fixes it
+    later; QA's findings carry it as the code reviewer's do.
+    """
+    findings = [{**finding, "role": result["role"]} for result in results
+                for finding in (calibrated_findings(result) if result["role"] == "code_reviewer"
+                                else result.get("findings", []))
+                if finding.get("status") == "open" and not critical(finding)]
+    roles = follow_up_roles(item)
+    problems = []
+    for finding in findings:
+        for key in ("file", "description"):
+            if not isinstance(finding.get(key), str) or not finding[key].strip():
+                problems.append(f"{finding['id']} needs its {key}")
+        if finding.get("owner_role") not in roles:
+            problems.append(f"{finding['id']} owner_role must be one of: {', '.join(roles)}")
+        if not isinstance(finding.get("revisit_trigger"), str) or not meaningful_text(finding["revisit_trigger"]):
+            problems.append(f"{finding['id']} needs a concrete revisit_trigger")
+    if problems:
+        raise RuntimeError("finding_disposition follow_up_issue: every finding below critical is a follow-up;"
+                           " " + "; ".join(problems))
+    return sorted(findings, key=lambda finding: (finding["role"], finding["id"]))
+
+
+def follow_up_issues(root: Path, delivery_id: str, story: str) -> dict:
+    """The project issue each follow-up of the validated Item becomes, for the coordinator to file."""
+    if not follow_up_disposition(root, delivery_id):
+        raise RuntimeError("follow-up-issues runs at switch finding_disposition follow_up_issue")
+    session = validate(root, delivery_id, story)
+    results = [session["workers"][role]["result"] for role in ROLES]
+    issues = [{"finding": finding["id"], "role": finding["role"], "severity": finding["severity"],
+               "title": f"{story} follow-up {finding['id']}: "
+                        + finding["description"].strip().splitlines()[0][:120],
+               "body": "\n".join([f"Found by the {finding['role']} on candidate"
+                                  f" {session['candidate']['candidate_hash']} of {delivery_id}.", "",
+                                  f"File: {finding['file']}", f"Severity: {finding['severity']}",
+                                  f"Owner role: {finding['owner_role']}",
+                                  f"Revisit trigger: {finding['revisit_trigger']}", "",
+                                  finding["description"].strip(), "",
+                                  f"Verification: {finding['verification']}"])}
+              for finding in disposition_follow_ups(results, item_record(root, delivery_id, story))]
+    return {"delivery": delivery_id, "story": story, "issues": issues}
+
+
 def calibrated_findings(result: dict) -> list[dict]:
     """A code review result's findings with its calibration rows applied.
 
@@ -3673,7 +4023,13 @@ def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dic
                            " settle as a diagnostic or failed result, and resume once the owner allows it")
     findings = result.get("findings", [])
     check_findings(findings)
-    blocking_severities = {severity.casefold() for severity in policy()["blocking_severities"]}
+    inherited_open = [finding for finding in value.get("unresolved_findings", [])
+                      if finding["role"] == role and blocking(finding)]
+    # The switch is read only when a finding it could let pass is present.
+    gated = (verdict == "passed" and mode != "qa_diagnostic"
+             and (any(finding["status"] == "open" for finding in findings) or inherited_open))
+    blocking_severities = ({severity.casefold() for severity in policy()["blocking_severities"]}
+                           if not gated else gate_severities(root, current["delivery"]))
     if verdict == "passed" and any(finding["severity"].casefold() in blocking_severities
                                    and finding["status"] == "open" for finding in findings):
         raise RuntimeError("passing verification cannot retain an open blocking finding")
@@ -3688,6 +4044,8 @@ def check_result(root: Path, value: dict, result: dict) -> tuple[dict, dict, dic
                    and dispositions[identifier]["status"] != "resolved"
                    for identifier, finding in inherited.items())):
         raise RuntimeError("final result must explicitly disposition every inherited finding and resolve blocking findings")
+    if gated and follow_up_disposition(root, current["delivery"]):
+        disposition_follow_ups([result], item_record(root, current["delivery"], current["story"]))
     return current, inherited, dispositions
 
 
@@ -4120,6 +4478,11 @@ def validate(root: Path, delivery_id: str, story: str) -> dict:
                 or result.get("session_id") != value["session_id"]
                 or result.get("result_hash") != digest({key: item for key, item in result.items() if key != "result_hash"})):
             raise RuntimeError(f"same-candidate final passed {role} result is required")
+        if result.get("mode") == SCOPED_REPAIR:
+            problem = scoped_repair_problem(value, result)
+            if problem:
+                raise RuntimeError(problem)
+            continue
         if role == "qa_engineer":
             require_owner_step_progress(root, value, final=True)
             environment = require_raw_evidence(root, value, result["checks"])
@@ -4281,7 +4644,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             first_command = not state["events"] and not state.get("pending")
             legacy = scratch / ("runtime-" + state.get("attempt_id", session["session_id"]))
             kept = "attempt_id" in state and (first_command or not legacy.exists())
-            execution_root = safe_runtime_path(root, scratch / RUNTIME_CHECKOUT if kept else legacy)
+            name = runtime_checkout_name(scratch, current["delivery"], current["story"])
+            execution_root = safe_runtime_path(root, scratch / name if kept else legacy)
             if not execution_root.exists():
                 execution_root.parent.mkdir(parents=True, exist_ok=True)
                 clone_private_checkout(root, execution_root, current["product_commit"])
@@ -6007,7 +6371,7 @@ def main(argv=None) -> int:
     subs = parser.add_subparsers(dest="command", required=True)
     for name in ("freeze", "manifest", "validate", "regression-selection", "regression-run", "assertion-map",
                  "repair-live", "repair-review-manifest", "repair-review-result", "permission-preflight",
-                 "rehearse", "rehearsal-status", "live-base"):
+                 "rehearse", "rehearsal-status", "live-base", "follow-up-issues", "scoped-repair"):
         cmd = subs.add_parser(name)
         cmd.add_argument("--delivery", required=True)
         cmd.add_argument("--story", required=True)
@@ -6034,6 +6398,7 @@ def main(argv=None) -> int:
     start.add_argument("--remote", default="origin")
     result = subs.add_parser("result")
     result.add_argument("--file", required=True)
+    subs.add_parser("single-verifier-result").add_argument("--file", required=True)
     owner_wait = subs.add_parser("await-owner-step")
     owner_wait.add_argument("--step", required=True)
     owner_result = subs.add_parser("owner-step-result")
@@ -6105,6 +6470,8 @@ def main(argv=None) -> int:
                                     reason=args.reason, refs=args.ref)
         elif args.command == "result":
             value = register_result(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
+        elif args.command == "single-verifier-result":
+            value = register_single_verifier(root, json.loads(Path(args.file).read_text(encoding="utf-8")))
         elif args.command == "await-owner-step":
             value = await_owner_step(root, args.step)
         elif args.command == "owner-step-result":
@@ -6117,6 +6484,10 @@ def main(argv=None) -> int:
             value = merge_panel(root)
         elif args.command == "validate":
             value = validate(root, args.delivery, args.story)
+        elif args.command == "scoped-repair":
+            value = scoped_repair(root, args.delivery, args.story)
+        elif args.command == "follow-up-issues":
+            value = follow_up_issues(root, args.delivery, args.story)
         elif args.command == "environment":
             value = run_environment(root, args.verb, args.value)
         elif args.command == "lane-run":

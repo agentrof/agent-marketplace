@@ -3245,6 +3245,14 @@ def _approve_item_evidence(args) -> int:
                         for row in calibration])
                 review_body = with_compiler_block(review_body, "Deviations and Follow-ups",
                                                   ITEM_FOLLOW_UPS, block)
+            elif delivery_verification.follow_up_disposition(worktree, args.delivery):
+                # At finding_disposition follow_up_issue both readers' findings below critical are follow-ups.
+                rows = ["| " + " | ".join(table_cell({**finding, "finding": finding["id"]}[column])
+                                          for column in FOLLOW_UP_COLUMNS) + " |"
+                        for finding in delivery_verification.disposition_follow_ups(
+                            [review_result, verification_result], item_props)]
+                review_body = with_compiler_block(review_body, "Deviations and Follow-ups", ITEM_FOLLOW_UPS,
+                                                  table_block(ITEM_FOLLOW_UPS, FOLLOW_UP_COLUMNS, rows))
             review_body = with_panel_record(review_body, session, review_result)
             for target, result in ((review_props, review_result), (verification_props, verification_result)):
                 target["verification_candidate_hash"] = session["candidate"]["candidate_hash"]
@@ -3293,7 +3301,9 @@ def approve_review(args) -> int:
     delivery_path_value = root / "delivery.md"
     delivery_props, delivery_body = split_note(delivery_path_value)
     try:
+        from delivery_verification import follow_up_disposition
         review_loop = delivery_switch_value(docs, args.delivery, REVIEW_LOOP)
+        follow_up_issue = follow_up_disposition(docs.parent.parent, args.delivery)
     except ValueError as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
     # Gate B presents the decision log and asks every queued question before this write.
@@ -3327,7 +3337,7 @@ def approve_review(args) -> int:
     review_body = body_for("delivery-review", review_props["title"], {
         "Goal Outcome": delivery_props.get("goal", ""), "Verdict": "Approved for PR handoff.", **authored,
         "Navigation": link(delivery_path_value.relative_to(docs).as_posix(), args.delivery)})
-    if review_loop == "blocking_delta":
+    if review_loop == "blocking_delta" or follow_up_issue:
         review_body = with_compiler_block(
             review_body, "Lessons and Follow-up", DELIVERY_FOLLOW_UPS,
             table_block(DELIVERY_FOLLOW_UPS, ("item", *FOLLOW_UP_COLUMNS), delivery_follow_ups(root)))

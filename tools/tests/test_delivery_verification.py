@@ -1601,7 +1601,7 @@ print(sys.argv[2])
             events.append(verification.run_environment(self.root, "up"))
         self.assertEqual(len(set(directories)), 1, directories)
         checkout = directories[0]
-        self.assertEqual(checkout.name, verification.RUNTIME_CHECKOUT)
+        self.assertEqual(checkout.name, "runtime-dlv-001-auth-01")
         self.assertEqual(verification.git(checkout, "rev-parse", "HEAD"),
                          verification.read_session(self.root)["candidate"]["product_commit"])
         self.assertEqual([event["candidate_intact"] for event in events], [True, False])
@@ -1986,7 +1986,7 @@ print(sys.argv[1])
         # The partition variables of switch test_engines partitioned are per-run inputs too (#386).
         self.assertEqual(names, ("AGENTROF_LIVE_BASE", "AGENTROF_LIVE_BASE_COMMIT", "AGENTROF_LIVE_RESUME",
                                  "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS",
-                                 "AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE"))
+                                 "AGENTROF_CARRY_OVER_RECORD", "AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE"))
         with mock.patch.dict(os.environ, {"AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json",
                                           "AGENTROF_LIVE_BASE": "inherited-base.json",
                                           "AGENTROF_REUSED_TESTS": "inherited-reuse.json",

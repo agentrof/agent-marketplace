@@ -271,6 +271,26 @@ class PendingReviewPolicyTests(unittest.TestCase):
             self.assertEqual(Path(result["review"]), path)
         self.assertEqual(self.fixture.files(), before)
 
+    def test_a_measurement_only_change_keeps_every_review_pin(self):
+        # Timing and cost records change no review; in one measured project a finished
+        # review pair was rerun only because step timing was switched on after it.
+        registry = process_policy.load_registry()
+        measured = {name for name, entry in registry.items() if not process_policy.binds_work(entry)}
+        self.assertEqual(measured, {"step_timing", "step_baseline", "step_budgets", "item_cost_report",
+                                    "lane_table", "review_scope_record"})
+        self.assertFalse(measured & process_policy.delivery_switches(registry))
+        self.change_policy("step_timing", "recorded")
+        before = self.fixture.files()
+        for kind in ("epic", "backlog"):
+            code, result = self.run_review(kind)
+            self.assertEqual(code, 0, result)
+            self.assertFalse(result["created"])
+        self.assertEqual(self.fixture.files(), before)
+        self.completed_current_rounds()
+        self.change_policy("step_budgets", "enforced")
+        code, result = self.cli("approve")
+        self.assertEqual(code, 0, result)
+
     def test_same_owned_values_in_another_policy_revision_reuse_pending_bytes(self):
         self.change_policy()
         before = self.fixture.files()

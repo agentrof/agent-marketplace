@@ -123,6 +123,14 @@
   300000, starts a verification command that can run longer with
   `run_in_background`, and never waits through `sleep`, a polling loop or a
   longer foreground timeout.
+- A background agent's completion notice reaches the top session, never the
+  subagent that spawned it. So a role running as a subagent that spawns
+  readers spawns them in the foreground, every reader of a wave in one
+  message, which returns when all of them return; it spawns with
+  `run_in_background` only work that writes its result to a file, and then
+  waits with `await_outputs.py --file <output> ...` in the foreground with a
+  Bash `timeout` of 300000, calling it again while it returns pending. A
+  role never ends its turn to wait for a background notice.
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots, local project memory and the role agents it

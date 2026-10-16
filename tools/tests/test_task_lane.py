@@ -515,6 +515,20 @@ class LocalProofTests(unittest.TestCase):
         with self.assertRaisesRegex(task_lane.Refused, "the proof ran on [0-9a-f]{12}, HEAD is"):
             self.open_pr(root)
 
+    def test_a_red_command_records_its_failing_test_ids_and_the_refusal_names_them(self):
+        root = self.project()
+        noise = "x" * 3000
+        self.declare(root, "printf 'FAILED tests/test_a.py::test_one - AssertionError\\nFAIL: test_two (pkg.test_b.Case)\\n"
+                     "FAILED tests/test_a.py::test_one - again\\n" + noise + "\\n'; exit 1")
+        result = self.prove(root)
+        (command,) = result["commands"]
+        self.assertEqual(command["failed_tests"], ["tests/test_a.py::test_one", "pkg.test_b.Case.test_two"])
+        self.assertNotIn("test_one", command["tail"])
+        with self.assertRaisesRegex(task_lane.Refused, "failed: tests/test_a.py::test_one, pkg.test_b.Case.test_two"):
+            self.open_pr(root)
+        self.declare(root, "true")
+        self.assertEqual(self.prove(root)["commands"][0]["failed_tests"], [])
+
     def test_a_red_command_or_a_dirty_tree_refuses(self):
         root = self.project()
         self.declare(root, "true", "echo boom; exit 3")

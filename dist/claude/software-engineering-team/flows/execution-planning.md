@@ -80,6 +80,13 @@ Integration's, and a pinned Operation contract that is neither the
 Integration's approved revision nor a later one; take the Delivery package and
 the Operation contracts from the Integration, then revise inside
 `begin-plan-revision`.
+After publication, present every returned `owner_questions` entry to the owner
+at once, or at the next owner message, with its options, recommendation and
+tradeoffs. These pending decisions do not hold unrelated Items. Record an
+answer in the existing User Decisions row before its blocked Item starts;
+the start command still refuses a missing answer. Keep the question hash with
+the presented question and ask it again only if that hash changes. An
+owner-reserved decision stays with the owner under an autopilot grant too.
 Switch `provisional_claims`: at `during_plan_revision`, while its own
 plan-revision barrier is held the coordinator records a provisional claim of a
 path the draft adds to an active Item, and `finish-plan-revision` or

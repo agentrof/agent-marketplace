@@ -215,6 +215,38 @@ class CodeReviewPanelRiskParameterTests(unittest.TestCase):
                                                  {**spec, "parameters": limited}, ids)
 
 
+class LensRepairSelectionTests(unittest.TestCase):
+    def test_repair_triggers_use_only_a_trusted_reviewed_delta(self):
+        current = {"delivery": "DLV-001", "story": "ST-001", "inputs": {"source": "same"},
+                   "instruction_identity": "same", "product_commit": "new",
+                   "integration_base_commit": "base", "changed_files": ["src/auth/token.py", "src/main.py"]}
+        previous = {**current, "product_commit": "old"}
+        state = {"values": {"code_review_panel": {"parameters": {
+            "risk_paths": ["src/auth/*"], "lens_changed_lines": 400}}}}
+        assignments = verification.panel_assignments()
+        with mock.patch.object(verification.process_policy, "delivery_values", return_value=state), \
+                mock.patch.object(verification, "commit_delta", return_value=(True, ["src/main.py"])) as delta, \
+                mock.patch.object(verification, "changed_lines", side_effect=lambda root, value:
+                                  20 if value["integration_base_commit"] == "old" else 500):
+            selected, _ = verification.lens_selection(ROOT, current, assignments, previous)
+            self.assertEqual(selected, [])
+            delta.return_value = (True, ["src/auth/token.py"])
+            selected, _ = verification.lens_selection(ROOT, current, assignments, previous)
+            self.assertEqual([row["lens"] for row in selected], [["security-isolation"]])
+            for baseline in (None, {**previous, "inputs": {}}, {**previous, "instruction_identity": "changed"}):
+                with self.subTest(baseline=baseline):
+                    selected, _ = verification.lens_selection(ROOT, current, assignments, baseline)
+                    self.assertEqual(len(selected), 3)
+            for unavailable in ((False, ["src/main.py"]), (True, None)):
+                delta.return_value = unavailable
+                selected, _ = verification.lens_selection(ROOT, current, assignments, previous)
+                self.assertEqual(len(selected), 3)
+        session = {"candidate": previous, "workers": {"code_reviewer": {"state": "cancelled"}}}
+        self.assertIsNone(verification.review_baseline(session))
+        session["workers"]["code_reviewer"]["state"] = "settled"
+        self.assertEqual(verification.review_baseline(session), previous)
+
+
 @integration
 class CodeReviewPanelMachineTests(unittest.TestCase):
     """One parallel-snapshot Item, as test_delivery_verification builds it."""

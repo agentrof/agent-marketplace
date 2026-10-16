@@ -3464,7 +3464,8 @@ def changed_lines(root: Path, current: dict) -> int:
     return total
 
 
-def lens_selection(root: Path, current: dict, assignments: list[dict]) -> tuple[list[dict], dict]:
+def lens_selection(root: Path, current: dict, assignments: list[dict],
+                   previous: dict | None = None) -> tuple[list[dict], dict]:
     """The lens assignments the frozen change triggers at risk_scoped, and why each lens joined or not.
 
     Each lens joins by the trigger lens-triggers.json declares for it, read
@@ -3475,7 +3476,13 @@ def lens_selection(root: Path, current: dict, assignments: list[dict]) -> tuple[
     state = process_policy.delivery_values(delivery.docs_root(root), current["delivery"],
                                            switches={CODE_REVIEW_PANEL})
     parameters = state["values"][CODE_REVIEW_PANEL].get("parameters", {})
-    lines = changed_lines(root, current)
+    measured = current
+    if previous and all(previous.get(key) == current.get(key)
+                        for key in ("delivery", "story", "inputs", "instruction_identity")):
+        ancestor, paths = commit_delta(root, previous["product_commit"], current["product_commit"])
+        if ancestor and paths is not None:
+            measured = {**current, "integration_base_commit": previous["product_commit"], "changed_files": paths}
+    lines = changed_lines(root, measured)
     lenses = {}
     for lens in sorted({lens for assignment in assignments for lens in assignment["lens"]}):
         declared = next((entry for entry in data["lens_triggers"] if entry["lens"] == lens), None)
@@ -3487,7 +3494,7 @@ def lens_selection(root: Path, current: dict, assignments: list[dict]) -> tuple[
             raise RuntimeError(f"code_review_panel {RISK_SCOPED} needs parameter {declared['parameter']!r}"
                                " set in the Process Policy")
         if declared["trigger"] == "changed_path_matches":
-            matched = sorted(path for path in current["changed_files"]
+            matched = sorted(path for path in measured["changed_files"]
                              if any(fnmatch.fnmatchcase(path, glob) for glob in threshold))
             lenses[lens] = {"joined": bool(matched), "trigger": declared["trigger"], "matched_paths": matched}
         elif declared["trigger"] == "changed_lines_above":
@@ -3519,7 +3526,8 @@ def code_review_panel_state(root: Path, value: dict) -> dict | None:
     assignments, selection = panel_assignments(), None
     if selected == RISK_SCOPED:
         # With no lens triggered the official reviewer reads alone and registers through result.
-        assignments, selection = lens_selection(root, value["candidate"], assignments)
+        assignments, selection = lens_selection(root, value["candidate"], assignments,
+                                                 value.get("previous_candidate"))
         if not assignments:
             return None
     passes = [record.get("pass", 0) for record in value.get("panel_history", [])]
@@ -5991,7 +5999,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                                           if row.get("role", "code_reviewer") == "code_reviewer"]
     panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
     if panel is None and role == "code_reviewer" and code_review_panel(root, current["delivery"]) == RISK_SCOPED:
-        result["lens_selection"] = lens_selection(root, current, panel_assignments())[1]
+        result["lens_selection"] = lens_selection(root, current, panel_assignments(), previous)[1]
     if panel is not None:
         # Every reader of the panel pass receives this same manifest and one assignment.
         result["code_review_panel"] = {

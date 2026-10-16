@@ -2569,10 +2569,24 @@ def require_unsuperseded_approval(kinds: dict[str, str], published: dict | None,
         props = local_contract(path)
         revision = props.get("revision") if isinstance(props.get("revision"), int) else 0
         if copy["revision"] > revision or (copy["revision"] == revision
-                                           and copy.get("source_hash") != props.get("source_hash")):
+                                           and copy.get("source_hash") != props.get("source_hash")
+                                           and not repaired_only(copy, props)):
             replacement = ("a different " if copy["revision"] == revision else "its ") + f"{props.get('status')} revision {revision}"
             raise RuntimeError(f"DELIVERY_PLAN_SUPERSEDED: {holds([path])}, which this checkout would replace "
                                f"with {replacement}; {remedy}")
+
+
+def repaired_only(copy: dict, props: dict) -> bool:
+    """Tell whether *props* is the Integration's *copy* re-paired with a later Environment Contract.
+
+    re-pair keeps the revision and restamps only the pairing and the source_hash, under the
+    ruling that approved the Environment revision, so it is not a different approval.
+    """
+    import operation_compile
+    held, pairing = copy.get(operation_compile.PAIRED_FIELDS[0]), props.get(operation_compile.PAIRED_FIELDS[0])
+    restamped = {"source_hash", *operation_compile.PAIRED_FIELDS}
+    return (isinstance(held, int) and isinstance(pairing, int) and pairing > held
+            and all(copy.get(key) == props.get(key) for key in (copy.keys() | props.keys()) - restamped))
 
 
 def sealed_item_records(root: Path, directory: Path, integration_oid: str) -> set[str]:
@@ -2605,14 +2619,15 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
                            remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
     refuse_merged_delivery(root, delivery_id, remote)
-    from delivery_compile import delivery_findings, docs_root
+    from delivery_compile import delivery_findings, docs_root, pending_owner_questions
     docs = docs_root(root)
     directory, findings = delivery_findings(docs, delivery_id)
     if directory is None or findings:
         raise RuntimeError("Delivery package is not portable: " + "; ".join(findings))
     delivery_path_value = directory / "delivery.md"
     from delivery_compile import split_note
-    props, _ = split_note(delivery_path_value)
+    props, body = split_note(delivery_path_value)
+    owner_questions = pending_owner_questions(body)
     if props.get("status") != "execution_approved":
         raise RuntimeError("publish-execution-plan requires execution_approved")
     refs = canonical_refs(delivery_id)
@@ -2651,6 +2666,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
                                (refs["integration"], integration_oid, integration_candidate)])
     return {"ok": True, "delivery": delivery_id, "fence": fence_candidate,
             "integration": integration_candidate, "operation_not_carried": not_carried,
+            **({"owner_questions": owner_questions} if owner_questions else {}),
             "refs": short_refs(delivery_id)}
 
 
@@ -3036,9 +3052,12 @@ def plan_revision_pins(directory: Path, fence_message: str) -> dict[str, str]:
     """Story and Test Plan pins of the locally approved Item records while a plan revision is held."""
     if (trailer(fence_message, "Barrier-Kind") or "none") != "plan-revision":
         return {}
-    from delivery_compile import split_note
+    from delivery_compile import split_note, delivery_findings
     pins: dict[str, str] = {}
     delivery, _body = split_note(directory / "delivery.md")
+    if delivery.get("status") != "execution_approved" or delivery_findings(
+            directory.parents[2], str(delivery.get("id", "")))[1]:
+        return {}
     if delivery.get("process_policy_source_hash"):
         pins[str(delivery.get("process_policy_path") or "delivery/process-policy.md")] = str(
             delivery["process_policy_source_hash"])
@@ -3091,7 +3110,11 @@ def refresh_target(project_root: Path, delivery_id: str,
     if not integrated:
         previous_target = unique_merge_base(root, integration_oid, target)
     changed = _changed_target_paths(root, previous_target, target)
-    barrier_pins = plan_revision_pins(directory, fence_message)
+    barrier_pins = (plan_revision_pins(directory, fence_message)
+                    if trailer(fence_message, "Barrier-Kind") == "plan-revision"
+                    and held_plan_revision_epoch(root, remote, delivery_id,
+                                                  {refs["fence"]: fence_oid, refs["integration"]: integration_oid})
+                    else {})
     operation_bindings = target_input_bindings(root, directory, integration_oid, target, changed,
                                                barrier_pins)
     claimed: dict[str, str] = {}
@@ -3103,7 +3126,11 @@ def refresh_target(project_root: Path, delivery_id: str,
             continue
         item_props, _ = split_remote_note(root, item_oid, rel_posix(root, item_path), split_note)
         from delivery_compile import _is_normalized_claim
-        for claim in item_props.get("path_claims", []) or []:
+        relative_item = rel_posix(root, item_path)
+        published_props, _ = split_remote_note(root, integration_oid, relative_item, split_note)
+        all_claims = set(amended_path_claims(root, integration_oid, relative_item, published_props))
+        all_claims.update(item_props.get("path_claims", []) or [])
+        for claim in all_claims:
             if not isinstance(claim, str) or not _is_normalized_claim(claim):
                 raise RuntimeError("claimed Item has an invalid path claim")
             claimed[claim] = story
@@ -4291,7 +4318,11 @@ def require_carried_control_paths(changed: list[str], relative_item: str, carrie
 def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, str, dict, str],
                           published: tuple[str, str, dict, str] | None = None) -> None:
     """Permit an Item record change only as its Architecture stamp, or as the record of the
-    converged Integration commit whose control note is *published*, keeping its lifecycle and stamp."""
+    converged Integration commit whose control note is *published*, keeping its lifecycle and stamp.
+
+    The generated relation block is not compared: render-relations owns it, and the
+    stamp's source_hash already leaves it out."""
+    from ba_compile import without_generated_relations
     from delivery_compile import content_hash
     if published is None:
         versions = []
@@ -4307,7 +4338,7 @@ def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, 
                 raise RuntimeError("Item publication frontmatter is invalid: no closing delimiter line")
             header, body_text = parts
             header = re.sub(r"(?m)^(?:architecture_delta_hash|source_hash):[^\n]*\n?", "", header)
-            versions.append((mode, header.rstrip("\n"), body_text))
+            versions.append((mode, header.rstrip("\n"), without_generated_relations(body_text).rstrip()))
         if versions[0] != versions[1]:
             raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp")
         return
@@ -4319,7 +4350,8 @@ def require_item_controls(before: tuple[str, str, dict, str], after: tuple[str, 
     if (props.get("architecture_delta_hash") != previous.get("architecture_delta_hash")
             and props.get("architecture_impact") != "required"):
         raise RuntimeError("only a required Architecture Item may publish its stamp")
-    if (mode != previous_mode or body != published_body
+    if (mode != previous_mode
+            or without_generated_relations(body).rstrip() != without_generated_relations(published_body).rstrip()
             or plan_owned_item_fields(props) != plan_owned_item_fields(published)
             or item_lifecycle(props) != item_lifecycle(previous)):
         raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp "
@@ -4348,7 +4380,7 @@ def require_item_path_claims(root: Path, before: str, after: str, relative_item:
     base = props.get("integration_base_commit")
     if changed and isinstance(base, str) and OID_RE.fullmatch(base):
         changed &= product_paths(base)
-    require_paths_within_claims(changed, props.get("path_claims"), provisional)
+    require_paths_within_claims(changed, amended_path_claims(root, base or after, relative_item, props), provisional)
 
 
 def paths_outside_claims(changed, path_claims) -> list[str]:
@@ -4381,6 +4413,8 @@ def require_paths_within_claims(changed: set[str], path_claims, provisional=None
 
 PROVISIONAL_SWITCH = "provisional_claims"
 PROVISIONAL_VALUE = "during_plan_revision"
+UNCONTESTED_CLAIMS = "uncontested_delta"
+CLAIM_AMENDMENT = "path-claim-amendment-v1"
 PROVISIONAL_RECORD = "provisional-claim-v1"
 PROVISIONAL_RELEASE = "provisional-claim-release-v1"
 PROVISIONAL_DISPOSITIONS = ("promoted", "orphaned", "withdrawn")
@@ -4459,6 +4493,111 @@ def provisional_path_problem(path) -> str | None:
     if any(claim_covers(excluded, path.casefold()) for excluded in PROVISIONAL_EXCLUDED_ROOTS):
         return f"{path} lies under {', '.join(PROVISIONAL_EXCLUDED_ROOTS)}, which no implementation write scope reaches"
     return None
+
+
+def amended_path_claims(root: Path, tip: str, relative_item: str, props: dict) -> list[str]:
+    """Replay the immutable receipts a published Item adds to its approved path claims."""
+    claims = list(props.get("path_claims") or [])
+    receipts = props.get("path_claim_amendments", [])
+    if (not isinstance(receipts, list) or not all(isinstance(oid, str) for oid in receipts)
+            or len(set(receipts)) != len(receipts)):
+        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: invalid path claim amendment list")
+    for oid in receipts:
+        if not isinstance(oid, str) or not OID_RE.fullmatch(oid) or not is_ancestor(root, oid, tip):
+            raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: path claim amendment is not an ancestor")
+        message = commit_message(root, oid)
+        if any(trailer(message, key) != expected for key, expected in (
+                ("Record", CLAIM_AMENDMENT), ("Protocol", "1"), ("Item-Path", relative_item),
+                ("Plan-Hash", props.get("item_plan_hash")))):
+            raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: path claim amendment belongs to another approval")
+        if run_git(root, "rev-parse", oid + "^{tree}") != run_git(root, "rev-parse", oid + "^1^{tree}"):
+            raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: a path claim receipt changed the Integration tree")
+        try:
+            paths = json.loads(next(line for line in message.splitlines() if line.startswith("[")))
+        except (ValueError, StopIteration):
+            raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: unreadable path claim amendment") from None
+        if (not isinstance(paths, list) or not paths or any(provisional_path_problem(path) for path in paths)
+                or len(set(paths)) != len(paths) or provisional_paths_hash(paths) != trailer(message, "Claims-Hash")):
+            raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: invalid amended paths")
+        parent = run_git(root, "rev-parse", oid + "^1")
+        from delivery_compile import split_note, TERMINAL_ITEM_STATUSES
+        prior, _ = split_remote_note(root, parent, relative_item, split_note)
+        if prior.get("item_plan_hash") != props.get("item_plan_hash"):
+            raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: amendment parent holds another approval")
+        directory = root / Path(relative_item).parent.parent.parent
+        for other_path in integration_item_paths(root, directory, parent):
+            other = rel_posix(root, other_path)
+            other_props, _ = split_remote_note(root, parent, other, split_note)
+            if other == relative_item or other_props.get("status") in TERMINAL_ITEM_STATUSES:
+                continue
+            if any(provisional_overlap(path, claim) for path in paths
+                   for claim in amended_path_claims(root, parent, other, other_props)):
+                raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: amendment overlaps another unfinished Item")
+        claims.extend(path for path in paths if path not in claims)
+    return sorted(claims)
+
+
+def amend_path_claims(project_root: Path, delivery_id: str, story_id: str, paths: list[str],
+                      remote: str = "origin") -> dict:
+    """Append an uncontested path grant without revising any approved plan or source binding."""
+    from delivery_compile import (docs_root, implementation_schedule, split_note, frontmatter,
+                                  TERMINAL_ITEM_STATUSES, delivery_switch_value)
+    validate_delivery_id(delivery_id)
+    validate_story_id(story_id)
+    root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
+    if delivery_switch_value(docs_root(root), delivery_id, PROVISIONAL_SWITCH) != UNCONTESTED_CLAIMS:
+        raise RuntimeError("DELIVERY_PROVISIONAL_CLAIM_REFUSED: uncontested_delta is not selected")
+    if not paths or len(set(paths)) != len(paths) or any(provisional_path_problem(path) for path in paths):
+        raise RuntimeError("DELIVERY_PROVISIONAL_CLAIM_REFUSED: name unique normalized product paths")
+    refs = canonical_refs(delivery_id, story_id)
+    tips = remote_ref_oids(root, remote, [refs["fence"], refs["integration"], refs["item"]])
+    fence, integration, item = (require_commit(root, remote, refs[key], tips[refs[key]])
+                                for key in ("fence", "integration", "item"))
+    fence_message = commit_message(root, fence)
+    require_fence_record(fence_message)
+    if trailer(fence_message, "Mode") != "open" or trailer(fence_message, "Barrier-Kind") not in {None, "none"}:
+        raise RuntimeError("DELIVERY_BARRIER_ACTIVE: path amendments require an open Fence without a barrier")
+    directory = find_delivery_dir_from_remote(root, remote, delivery_id)
+    relative = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
+    live, _ = split_remote_note(root, item, relative, split_note)
+    published, body = split_remote_note(root, integration, relative, split_note)
+    if (live.get("status") != "active" or live.get("item_plan_hash") != published.get("item_plan_hash")
+            or implementation_schedule(published) == "parallel_lanes_v1"):
+        raise RuntimeError("DELIVERY_PROVISIONAL_CLAIM_REFUSED: an active serial Item of the published approval is required")
+    slot = next((key for key, oid in remote_slot_oids(root, remote).items() if oid == item), None)
+    if slot is None:
+        raise RuntimeError("DELIVERY_PROVISIONAL_CLAIM_REFUSED: the Item holds no active Slot")
+    active_writer_receipt(root, delivery_id, story_id, item, f"refs/heads/agentrof/slots/{slot}")
+    own = amended_path_claims(root, integration, relative, published)
+    requested = sorted(path for path in paths if not any(claim_covers(claim, path) for claim in own))
+    if not requested:
+        return {"ok": True, "reused": True, "integration": integration, "paths": sorted(paths)}
+    for other_path in integration_item_paths(root, directory, integration):
+        other = rel_posix(root, other_path)
+        props, _ = split_remote_note(root, integration, other, split_note)
+        if other == relative or props.get("status") in TERMINAL_ITEM_STATUSES:
+            continue
+        if any(provisional_overlap(path, claim) for path in requested
+               for claim in amended_path_claims(root, integration, other, props)):
+            raise RuntimeError("DELIVERY_PROVISIONAL_CLAIM_REFUSED: another unfinished Item holds an overlapping path")
+    receipt = commit_tree(root, integration, [], f"Grant uncontested paths to {story_id}",
+                          {"Record": "path-claim-amendment-v1", "Protocol": "1", "Delivery": delivery_id,
+                           "Story": story_id, "Item-Path": relative, "Plan-Hash": published["item_plan_hash"],
+                           "Claims-Hash": provisional_paths_hash(requested)}, body=json.dumps(requested))
+    published["path_claim_amendments"] = [*published.get("path_claim_amendments", []), receipt]
+    candidate = commit_replacements(root, receipt, {relative: frontmatter(published, body)},
+                                     f"Publish path amendment for {story_id}",
+                                     {"Record": "path-claim-amendment-published-v1", "Protocol": "1", "Delivery": delivery_id})
+    fence_candidate = commit_tree(root, fence, [], f"Record path amendment for {delivery_id}",
+                                 {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
+                                  "Epoch": trailer(fence_message, "Epoch"), "Target": trailer(fence_message, "Target"),
+                                  "Governance-Hash": trailer(fence_message, "Governance-Hash"),
+                                  **carried_fence_barrier(fence_message)})
+    atomic_push(root, remote, [(refs["fence"], fence, fence_candidate),
+                               (refs["integration"], integration, candidate)])
+    return {"ok": True, "delivery": delivery_id, "story": story_id, "paths": requested,
+            "receipt": receipt, "integration": candidate, "next": "converge-item before freezing or publishing"}
 
 
 def provisional_claims(root: Path, tip: str, delivery_id: str) -> list[dict]:
@@ -6189,6 +6328,7 @@ def main(argv=None) -> int:
     resume = sub.add_parser("resume-item"); resume.add_argument("--project-root", default="."); resume.add_argument("--delivery", required=True); resume.add_argument("--story", required=True); resume.add_argument("--remote", default="origin"); resume.set_defaults(func="resume")
     takeover = sub.add_parser("takeover-item"); takeover.add_argument("--project-root", default="."); takeover.add_argument("--delivery", required=True); takeover.add_argument("--story", required=True); takeover.add_argument("--remote", default="origin"); takeover.add_argument("--confirm", action="store_true"); takeover.set_defaults(func="takeover")
     provisional = sub.add_parser("provisional-claim"); provisional.add_argument("--project-root", default="."); provisional.add_argument("--delivery", required=True); provisional.add_argument("--story", required=True); provisional.add_argument("--path", action="append", required=True); provisional.add_argument("--remote", default="origin"); provisional.set_defaults(func="provisional-claim")
+    amendment = sub.add_parser("amend-path-claims"); amendment.add_argument("--project-root", default="."); amendment.add_argument("--delivery", required=True); amendment.add_argument("--story", required=True); amendment.add_argument("--path", action="append", required=True); amendment.add_argument("--remote", default="origin"); amendment.set_defaults(func="amend-path-claims")
     withdraw = sub.add_parser("withdraw-provisional-claim"); withdraw.add_argument("--project-root", default="."); withdraw.add_argument("--delivery", required=True); withdraw.add_argument("--story", required=True); withdraw.add_argument("--remote", default="origin"); withdraw.set_defaults(func="withdraw-provisional-claim")
     lanes = sub.add_parser("lane-status"); lanes.add_argument("--project-root", default="."); lanes.add_argument("--delivery", required=True); lanes.add_argument("--story", required=True); lanes.add_argument("--remote", default="origin"); lanes.set_defaults(func="lane-status")
     converge = sub.add_parser("converge-item"); converge.add_argument("--project-root", default="."); converge.add_argument("--delivery", required=True); converge.add_argument("--story", required=True); converge.add_argument("--remote", default="origin"); converge.set_defaults(func="converge-item")
@@ -6274,6 +6414,8 @@ def main(argv=None) -> int:
                 result = takeover_item(Path(args.project_root), args.delivery, args.story, args.remote, confirm=args.confirm)
             elif args.func == "provisional-claim":
                 result = provisional_claim(Path(args.project_root), args.delivery, args.story, args.path, args.remote)
+            elif args.func == "amend-path-claims":
+                result = amend_path_claims(Path(args.project_root), args.delivery, args.story, args.path, args.remote)
             elif args.func == "withdraw-provisional-claim":
                 result = withdraw_provisional_claim(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "lane-status":

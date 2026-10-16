@@ -415,3 +415,6 @@ QA's `failed_live_cases` names only failed ids in the adapter's schema-1
 `live-case-report.json` groups. Each selected case must be recorded as passed
 on this candidate; zero exit status alone is insufficient. A missing, stale
 or failed repair record blocks freeze; the full QA round still runs.
+
+At switch `provisional_claims` value `uncontested_delta`, follow
+`skill-content/execution-plan/references/switch-provisional_claims-uncontested_delta.md` for an active Item that needs an unheld product path.

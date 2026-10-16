@@ -140,10 +140,11 @@ class GroupReportTests(unittest.TestCase):
     reader_result = base.CandidateTests.reader_result
     approve_evidence = base.CandidateTests.approve_evidence
 
-    def repaired(self, value: str | None = VALUE, mode: str = "", declared: bool = True) -> None:
+    def repaired(self, value: str | None = VALUE, mode: str = "", declared: bool = True,
+                 own: str | None = None) -> None:
         """Build the fixture with test_group_report at *value*, repair its regression and commit commands
         that report their groups, under a contract that declares them when *declared*, the full suite
-        reporting as *mode* asks."""
+        reporting as *mode* asks, at own_target_reuse *own* when it is given."""
         real = base.policy
 
         def policy(docs, *argv):
@@ -152,7 +153,7 @@ class GroupReportTests(unittest.TestCase):
             real(docs, *argv)
 
         with mock.patch.object(base, "policy", policy):
-            self.build()
+            self.build(own=own)
         self.write("src/api/limit.txt", "10\n")
         self.write("run_all.py", reporting(base.FULL_SUITE, "suite-mode.txt"))
         self.write("diagnose.py", reporting(base.ADAPTER, "adapter-mode.txt"))
@@ -204,6 +205,25 @@ class GroupReportTests(unittest.TestCase):
         spot = verification.run_check(self.root, "diagnostic_test", selection_file=diagnostic)
         self.assertEqual((spot["candidate_intact"], spot["test_groups"]["st002"]["passed"]), (True, 1))
         self.approve_evidence()
+
+    # At own_target_reuse accept_record the accepted full-suite run's group report stands for QA's run.
+    def test_at_accept_record_qa_takes_the_group_report_from_the_accepted_full_suite_run(self):
+        run = self.frozen(own="accept_record")
+        self.assertEqual(run["kind"], "test")
+        self.assertEqual(run["test_group_report"], {"test_groups": GROUPS, "test_group_report": REPORT})
+        with mock.patch.object(verification, "private_checkout_run", side_effect=AssertionError("duplicate full suite")):
+            raw = verification.run_check(self.root, "test")
+        self.assertEqual(raw["execution_mode"], "accepted_pre_handoff")
+        self.assertEqual((raw["exit_code"], raw["candidate_intact"]), (0, True))
+        self.assertEqual(raw["identity"]["test_group_report"], {"test_groups": GROUPS, "test_group_report": REPORT})
+        self.assertEqual((raw["test_groups"], raw["missing_test_groups"]), (run["test_groups"], []))
+        self.approve_evidence()
+
+    def test_at_accept_record_an_accepted_run_without_every_group_passed_runs_the_command(self):
+        self.frozen(own="accept_record", mode="uncollect st005")
+        raw = verification.run_check(self.root, "test")
+        self.assertNotIn("execution_mode", raw)
+        self.assertEqual(raw["test_groups"]["st005"]["status"], "not_collected")
 
     def test_a_group_the_report_lacks_leaves_the_run_not_intact_and_unapproved(self):
         self.frozen(mode="drop st002")

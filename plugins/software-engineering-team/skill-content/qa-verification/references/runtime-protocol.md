@@ -104,6 +104,13 @@ Any interaction that crashes, silently does nothing, or produces the wrong outco
 
 Pull the aggregated service logs with the `logs` verb and audit the whole window, bring-up through last interaction. The audit gates on structure; log text is evidence.
 
+An Environment Contract may declare `steady_state_seconds`, a non-negative
+whole number. The runner waits out that window after the latest successful
+`up` or `seed` before invoking `logs`, and records the wait in its evidence.
+An omitted value keeps the existing command behavior. Declare the actual
+environment's window in the approved contract; do not infer it from an error
+message. The wait does not accept an unhealthy instance or a failed command.
+
 FAIL conditions:
 
 - Any container restart inside the window.

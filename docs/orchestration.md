@@ -468,6 +468,13 @@ promotes, orphans or withdraws the claim, as
 `deliver/references/switch-provisional_claims-during_plan_revision.md`
 defines.
 
+At `uncontested_delta`, `amend-path-claims` grants an active serial Item unheld
+product paths through an immutable receipt and the atomic Fence/Integration
+transaction, without a new plan approval. The Item converges before verification;
+protected paths, overlapping unfinished Items and active barriers still refuse.
+The exact procedure is in
+`execution-plan/references/switch-provisional_claims-uncontested_delta.md`.
+
 How QA's final test run uses the test environment is process switch
 `test_engines`. At `single`, the default, it runs the approved test command
 once under the Item's environment lock. At `partitioned`, where the
@@ -665,6 +672,10 @@ option: the session records it with `autopilot.py record` first, then applies
 it and writes it where the flow records the user's answer, marked with the
 grant id. `record` and `queue` apply the grant's end conditions first, its goal
 included, and refuse once it has ended.
+An explicit `queue --hold "<reason>"` keeps an uncertain question pending.
+Without a hold, `queue` records an allowed recommendation as a decision, which
+the session writes into the governing document before applying it. Independent
+excluded effects stay in separate questions.
 Any other question is queued with `autopilot.py queue`, and the session
 continues the work that does not depend on it and stops only when every
 remaining task waits on a queued question. Roles are unaffected: they never
@@ -676,7 +687,13 @@ the flow's own merge step on its recorded PR head, never a provider or Git
 merge of another head; no grant waives evidence, integration, the PR record or
 Delivery closure, and a Delivery is complete only when `closure-audit` returns
 `closed`. `release` and
-`phase_start` are excluded by default, and a grant may allow them.
+`phase_start` are excluded by default, and a grant may allow them. An entry
+that ends by naming the next entry asks no question; under a grant that allows
+`phase_start` the session records `record --class phase_start --entry <next>
+--after <kind>:<id>` and then runs that entry. The policy's `phase_starts`
+lists each entry the session may start and the states the closed phase's
+owning compiler must read, so `record` refuses a start while that phase is
+still open. A grant never starts a new Requirement.
 `credentials`, `security_settings`, `spending`, `destructive` and
 `scope_or_rule`, which holds every decision a flow asks at once, are never
 delegated, and `on` refuses a grant that allows one. A grant ends at a time,

@@ -14,6 +14,15 @@ outcome, its input paths and their digest at the pass's product commit. A
 pass record of another Item is not kept, and a run whose candidate checkout
 was not intact adds nothing.
 
+The record uses `schema_version: 1`, nonempty `project_key`, `delivery_id`,
+`item_id` and `run_id`, the exact `product_commit`, and `carried` and `fresh`
+case lists. Each case has `case_id`, `outcome`, repository-relative normalized
+`input_paths` and a full `sha256:` `input_digest`; a case appears only once.
+The runner stamps a missing or null `candidate_hash` with the current candidate
+and rejects a different hash. A repeated `run_id` replaces its previous entry.
+Malformed history is discarded before the command receives the path, so it
+falls back to running every case.
+
 ## What the next pass receives
 
 Every later `run --kind test` or `run --kind live_test` of the same Item gets

@@ -43,13 +43,14 @@ parameter the table leaves unset. A switch that only reports, such as
    revision removes, and name every Delivery whose pinned value of a switch
    it still reads the delta changes. A scope-approved Delivery reads every
    switch a Delivery flow owns; an execution-approved one reads only those its
-   `delivery-execution` flow owns: `code_review_panel`, `context_pack`,
-   `execution_planning`, `implementation_schedule`,
-   `item_qa_tier`, `item_review_scale`, `lane_isolation`,
-   `item_live_gate`, `level_change_map`, `live_case_reuse`, `live_verification`, `own_target_reuse`, `owner_gates`, `pass_carry_over`,
-   `pre_handoff_regression`, `provisional_claims`, `qa_gate_order`, `qa_preflight`, `regression_plan_revision`,
-   `repair_review`, `review_loop`, `review_scope`, `runtime_lifecycle`,
-   `test_engines` and `test_group_report`.
+   `delivery-execution` flow owns: `code_review_panel`, `context_pack`, `execution_planning`,
+   `finding_disposition`, `implementation_schedule`, `item_live_gate`, `item_qa_tier`,
+   `item_review_scale`, `item_verification`, `lane_isolation`, `level_change_map`,
+   `live_case_reuse`, `live_verification`, `own_target_reuse`, `owner_gates`,
+   `pass_carry_over`, `pre_handoff_regression`, `provisional_claims`, `qa_gate_order`,
+   `qa_preflight`, `regression_plan_revision`, `repair_pass`, `repair_review`,
+   `review_loop`, `review_scope`, `runtime_lifecycle`, `test_engines` and
+   `test_group_report`.
    A switch no Delivery flow owns, and a `measurement_only` switch of the
    registry, which only records time or cost, is read from the current policy
    and stops no Delivery and invalidates no review round.

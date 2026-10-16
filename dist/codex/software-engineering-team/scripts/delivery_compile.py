@@ -64,7 +64,7 @@ SECTIONS = {
     ),
 }
 DOD_SECTIONS = ("Commands", "Evidence Rules", "Quality Gates", "Navigation")
-MUTABLE = {"status", "approved_at_utc", "source_hash", "approval_hash", "pull_request_url"}
+MUTABLE = {"status", "approved_at_utc", "source_hash", "approval_hash", "pull_request_url", "path_claim_amendments"}
 SOURCE_ITEM_FIELDS = (
     "story_id", "story_path", "story_source_hash", "test_plan_path",
     "test_plan_source_hash", "owner_role", "supporting_roles",
@@ -507,6 +507,26 @@ def pending_decisions(body: str, stories=None) -> list[str]:
     wanted = None if stories is None else {str(story).casefold() for story in stories}
     return [row["id"] for row in rows if row["status"] == "pending"
             and (wanted is None or wanted & {story.casefold() for story in decision_blocks(row)})]
+
+
+def pending_owner_questions(body: str) -> list[dict]:
+    """Questions a published plan can ask now, before their blocked Items start."""
+    if not holds_decision_log(body):
+        return []
+    rows, errors = decision_rows(body)
+    if errors:
+        raise ValueError("; ".join(errors))
+    questions = []
+    for row in rows:
+        if row["status"] != "pending" or not decision_blocks(row):
+            continue
+        question = {key: row[key] for key in ("id", "class", "question", "recommendation")}
+        question.update(options=[option.strip() for option in row["options"].split(";") if option.strip()],
+                        blocks=decision_blocks(row))
+        question["question_hash"] = "sha256:" + hashlib.sha256(
+            json.dumps(question, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        questions.append(question)
+    return questions
 
 
 def pending_rows_text(ids: list[str]) -> str:
@@ -1624,6 +1644,14 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path,
         after = _string_list(props.get("execution_after"), f"{story_id} execution_after", errors)
         waits_for = _string_list(props.get("waits_for"), f"{story_id} waits_for", errors)
         paths = _string_list(props.get("path_claims"), f"{story_id} path_claims", errors)
+        if props.get("path_claim_amendments"):
+            import delivery_git
+            try:
+                project = docs.parent.parent
+                paths = delivery_git.amended_path_claims(project, props["path_claim_amendments"][-1],
+                                                         item_path.relative_to(project).as_posix(), props)
+            except (RuntimeError, ValueError, TypeError, IndexError) as exc:
+                errors.append(f"{story_id} path claim amendments cannot be read: {exc}")
         contracts = _string_list(props.get("contract_claims"), f"{story_id} contract_claims", errors)
         roles = _string_list(props.get("role_sequence"), f"{story_id} role_sequence", errors)
         try:
@@ -2186,6 +2214,13 @@ def approve_execution(args) -> int:
     environment_binding, _ = operation_contract_snapshot(docs, "environment")
     for item_path in items:
         item_props, item_body = split_note(item_path)
+        if item_props.get("path_claim_amendments") and (
+                item_props.get("status") not in TERMINAL_ITEM_STATUSES or str(item_props.get("story_id")) in reopen):
+            import delivery_git
+            project = docs.parent.parent
+            item_props["path_claims"] = delivery_git.amended_path_claims(
+                project, item_props["path_claim_amendments"][-1], item_path.relative_to(project).as_posix(), item_props)
+            item_props.pop("path_claim_amendments")
         story = str(item_props["story_id"])
         item_ids.append(story)
         pins = item_source_pins(sources[story], story)
@@ -3313,8 +3348,9 @@ def approve_review(args) -> int:
     delivery_path_value = root / "delivery.md"
     delivery_props, delivery_body = split_note(delivery_path_value)
     try:
+        from delivery_verification import follow_up_disposition
         review_loop = delivery_switch_value(docs, args.delivery, REVIEW_LOOP)
-        follow_up_issue = delivery_switch_value(docs, args.delivery, "finding_disposition") == "follow_up_issue"
+        follow_up_issue = follow_up_disposition(docs.parent.parent, args.delivery)
     except ValueError as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
     # Gate B presents the decision log and asks every queued question before this write.

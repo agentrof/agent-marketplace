@@ -3581,7 +3581,8 @@ AUTOPILOT_SCRIPT_RELPATH = "skill-content/autopilot/scripts/autopilot.py"
 AUTOPILOT_NUMBERS = ("default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
                      "arming_ttl_minutes", "transport_interval_seconds", "transport_max_attempts",
                      "native_arming_wait_seconds", "native_watch_seconds", "native_poll_seconds", "native_retry_delay_seconds", "native_permit_ttl_seconds")
-AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", "transport_error_codes", *AUTOPILOT_NUMBERS}
+AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", "phase_starts", "transport_error_codes",
+                  *AUTOPILOT_NUMBERS}
 AUTOPILOT_DEFAULTS = ("allowed", "excluded", "never")
 
 
@@ -3653,6 +3654,30 @@ def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
         if end["compiler"] not in readers or not (plugin / str(end["compiler"])).is_file():
             problems.append(f"goal kind {entry['id']!r} names compiler {end['compiler']!r},"
                             " which is no package script autopilot.py reads")
+    readable = {entry["id"] for entry in kinds
+                if isinstance(entry, dict) and isinstance(entry.get("end"), dict)}
+    starts = data["phase_starts"] if isinstance(data["phase_starts"], list) else []
+    if not starts:
+        problems.append("phase_starts must declare at least one entry")
+    entries = []
+    for entry in starts:
+        after = entry.get("after") if isinstance(entry, dict) else None
+        if not isinstance(entry, dict) or set(entry) != {"entry", "after"} \
+                or not _nonblank(entry.get("entry")) or not isinstance(after, dict) or not after:
+            problems.append("every phase start holds exactly an entry and a nonempty after")
+            continue
+        entries.append(entry["entry"])
+        for kind, statuses in after.items():
+            if kind not in readable:
+                problems.append(f"phase start {entry['entry']!r} names {kind!r}, which is no"
+                                " readable goal kind")
+            if not isinstance(statuses, list) or not statuses \
+                    or not all(_nonblank(status) for status in statuses) \
+                    or len(set(statuses)) != len(statuses):
+                problems.append(f"phase start {entry['entry']!r} declares no distinct ready"
+                                f" statuses after {kind!r}")
+    problems += [f"duplicate phase start {value!r}"
+                 for value in sorted({value for value in entries if entries.count(value) > 1})]
     for label, values in ids.items():
         problems += [f"{label} id {value!r} must be lowercase snake_case"
                      for value in values if not REVIEW_STEP_ID_RE.match(value)]

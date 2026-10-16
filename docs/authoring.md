@@ -98,7 +98,8 @@ root. The Experience guard attests only `merge --no-edit <committed-source>` or
 `restore --source=<committed-source> --worktree -- workspace/docs/experience-design`.
 Fetch required target and Fence objects separately before synchronization. The immutable source
 must contain the current remote target and its exact Experience tree, and the
-remote protocol-2 Fence must be open and target that same commit. A local commit
+remote protocol-2 Fence must be open and target that same commit, or an ancestor
+whose Experience tree is identical to the current target's. A local commit
 alone does not establish this authority. Wrapped scripts, mixed shell commands,
 bare executable names, PowerShell and unknown shell identities receive no Git
 writer exemption. Native cmd commands retain canonical quoting requirements.

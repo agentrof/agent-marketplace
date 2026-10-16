@@ -256,13 +256,14 @@ them to another value, one with every switch at its default included, agrees
 with the pin. A `scope_approved` Delivery reads every switch a Delivery flow
 owns. An `execution_approved` one runs only its `delivery-execution` flow
 until a plan revision, whose approval pins the policy anew, so it reads only
-the switches that flow owns: `code_review_panel`, `context_pack`,
-`execution_planning`, `implementation_schedule`,
-`item_qa_tier`, `item_review_scale`, `lane_isolation`,
-`level_change_map`, `live_case_reuse`, `own_target_reuse`, `owner_gates`,
-`pre_handoff_regression`, `provisional_claims`, `qa_gate_order`, `qa_preflight`, `regression_plan_revision`,
-`repair_review`, `review_loop`, `review_scope`, `runtime_lifecycle`, `test_engines`
-and `test_group_report`. A switch no
+the switches that flow owns: `code_review_panel`, `context_pack`, `execution_planning`,
+`finding_disposition`, `implementation_schedule`, `item_live_gate`, `item_qa_tier`,
+`item_review_scale`, `item_verification`, `lane_isolation`, `level_change_map`,
+`live_case_reuse`, `live_verification`, `own_target_reuse`, `owner_gates`,
+`pass_carry_over`, `pre_handoff_regression`, `provisional_claims`, `qa_gate_order`,
+`qa_preflight`, `regression_plan_revision`, `repair_pass`, `repair_review`,
+`review_loop`, `review_scope`, `runtime_lifecycle`, `test_engines` and
+`test_group_report`. A switch no
 Delivery flow owns, such as
 `mechanical_pass_tier`, and a `measurement_only` switch, which records only
 time or cost, is no part of the pin: inside a Delivery it is read

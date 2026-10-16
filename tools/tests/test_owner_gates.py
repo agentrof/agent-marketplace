@@ -43,6 +43,22 @@ HEADER = ("| id | class | question | options | recommendation | status | answer 
 ANSWER = "One root per checkout, in Verification Contract revision 6."
 ROW = ("| D-01 | queued | Which cache root do the runs share? | One root per checkout; one root"
        f" per Item | One root per checkout | answered | {ANSWER} | AUTH-01 | 12 |\n")
+
+
+class EarlyOwnerQuestionTests(unittest.TestCase):
+    def test_publication_questions_include_only_pending_item_decisions(self):
+        pending = ROW.replace("answered", "pending").replace(ANSWER, "").replace("| 12 |", "| |")
+        body = "# Delivery\n\n## User Decisions\n\n" + HEADER + pending
+        questions = delivery_compile.pending_owner_questions(body)
+        self.assertEqual(len(questions), 1)
+        self.assertEqual(questions[0]["blocks"], ["AUTH-01"])
+        self.assertEqual(questions[0]["options"], ["One root per checkout", "one root per Item"])
+        self.assertEqual(questions, delivery_compile.pending_owner_questions(body))
+        changed = delivery_compile.pending_owner_questions(body.replace("Which cache root", "Which new cache root"))
+        self.assertNotEqual(questions[0]["question_hash"], changed[0]["question_hash"])
+        self.assertEqual(delivery_compile.pending_owner_questions(body.replace(pending, ROW)), [])
+        self.assertEqual(delivery_compile.pending_owner_questions(body.replace("| AUTH-01 |", "| |")), [])
+        self.assertEqual(delivery_compile.pending_owner_questions("# Delivery"), [])
 PENDING = ROW.replace(f"| answered | {ANSWER} |", "| pending |  |")
 DECISION = "[[solution-design/decisions/fixture-api|Fixture API]]"
 

@@ -896,7 +896,7 @@ def require_published_claims(root: Path, current: dict, remote: str = "origin") 
     docs = delivery.docs_root(root)
     delivery_id, story = current["delivery"], current["story"]
     if delivery.delivery_switch_value(docs, delivery_id, delivery_git.PROVISIONAL_SWITCH) \
-            != delivery_git.PROVISIONAL_VALUE:
+            not in {delivery_git.PROVISIONAL_VALUE, delivery_git.UNCONTESTED_CLAIMS}:
         return
     item = delivery.find_delivery(docs, delivery_id) / "items" / delivery.id_slug(story) / "item.md"
     refs = delivery_git.canonical_refs(delivery_id, story)
@@ -919,7 +919,9 @@ def require_published_claims(root: Path, current: dict, remote: str = "origin") 
     except RuntimeError as exc:
         raise RuntimeError("the Item record that the Item's integration base publishes cannot be read: "
                            f"{exc}") from exc
-    refuse_unpublished_paths(root, delivery_id, story, published.get("path_claims"), current["changed_files"],
+    claims = delivery_git.amended_path_claims(root, current["integration_base_commit"],
+                                             item.relative_to(root).as_posix(), published)
+    refuse_unpublished_paths(root, delivery_id, story, claims, current["changed_files"],
                              remote)
 
 
@@ -1164,6 +1166,8 @@ def scoped_repair_refusal(root: Path, delivery_id: str, story: str, previous: di
     old = previous["candidate"]
     if (old["delivery"], old["story"]) != (delivery_id, story):
         return "the earlier verification pass belongs to another Item"
+    if any(old.get(key) != current.get(key) for key in ("inputs", "instruction_identity")):
+        return "changed source or instruction bindings need a full verification pass"
     if current["runtime_required"]:
         # shortcut: a runtime Item always takes a full pass; upgrade when live evidence can be scoped.
         return "a runtime_required Item needs a full pass with fresh runtime evidence"
@@ -1968,6 +1972,19 @@ def live_checkpoint(root: Path) -> dict | None:
         return None
 
 
+def live_interruptions(root: Path, record_key: str, exit_code: int) -> dict:
+    """The host interruptions a live run's progress saw: advisory on every run, interrupted_by only on a failure."""
+    try:
+        shown = json.loads(live_progress_path(root, record_key).read_text(encoding="utf-8"))
+        seen = sorted({row["kind"] for row in shown.get("interruptions", [])
+                       if isinstance(row, dict) and row.get("kind") in INTERRUPTION_KINDS})
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {}
+    if not seen:
+        return {}
+    return {"interruptions_seen": seen, **({"interrupted_by": seen} if exit_code != 0 else {})}
+
+
 def resumable_live_run(record: dict | None, current: dict) -> bool:
     """A preflight-only failure, or a run the host interrupted, with the command's valid checkpoint."""
     return bool(record and (record.get("exit_code") == 2 or record.get("interrupted_by"))
@@ -2148,14 +2165,48 @@ def carry_over_record_path(root: Path) -> Path:
     return safe_runtime_path(root, session_path(root).parent / CARRY_OVER_RECORD, file_only=True)
 
 
-def read_carry_over_record(root: Path) -> dict | None:
+def valid_carry_over_pass(value: object) -> bool:
+    if not isinstance(value, dict) or type(value.get("schema_version")) is not int or value["schema_version"] != 1:
+        return False
+    if any(not isinstance(value.get(key), str) or not value[key].strip()
+           for key in (*CARRY_OVER_OWNER, "run_id", "product_commit", "candidate_hash")):
+        return False
+    if not re.fullmatch(r"[0-9a-f]{40,64}", value["product_commit"]):
+        return False
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", value["candidate_hash"]):
+        return False
+    for name in ("carried", "fresh"):
+        if not isinstance(value.get(name), list):
+            return False
+        for case in value[name]:
+            if (not isinstance(case, dict)
+                    or any(not isinstance(case.get(key), str) or not case[key].strip()
+                           for key in ("case_id", "outcome", "input_digest"))
+                    or not isinstance(case.get("input_paths"), list)
+                    or any(not isinstance(path, str) or not delivery._is_normalized_claim(path)
+                           for path in case["input_paths"])
+                    or not re.fullmatch(r"sha256:[0-9a-f]{64}", case["input_digest"])):
+                return False
+    identities = [case["case_id"] for name in ("carried", "fresh") for case in value[name]]
+    return len(set(identities)) == len(identities)
+
+
+def read_carry_over_record(root: Path, current: dict | None = None) -> dict | None:
     """The Item's carry-over record, kept across verification sessions, or None."""
     try:
         value = json.loads(carry_over_record_path(root).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return value if isinstance(value, dict) and value.get("schema_version") == 1 \
-        and isinstance(value.get("passes"), list) else None
+    if (not isinstance(value, dict) or value.get("schema_version") != 1
+            or not isinstance(value.get("passes"), list)
+            or any(not isinstance(value.get(key), str) or not value[key].strip() for key in CARRY_OVER_OWNER)
+            or not isinstance(value.get("candidate_hash"), str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", value["candidate_hash"])
+            or any(not valid_carry_over_pass(entry)
+                   or any(entry[key] != value[key] for key in CARRY_OVER_OWNER) for entry in value["passes"])
+            or current is not None and (value["delivery_id"], value["item_id"]) != (current["delivery"], current["story"])):
+        return None
+    return value
 
 
 def keep_carry_over_pass(root: Path, current: dict) -> dict | None:
@@ -2169,12 +2220,15 @@ def keep_carry_over_pass(root: Path, current: dict) -> dict | None:
         entry = json.loads(raw_output_path(root, CARRY_OVER_PASS).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if (not isinstance(entry, dict) or entry.get("schema_version") != 1
-            or any(not isinstance(entry.get(key), str) for key in (*CARRY_OVER_OWNER, "run_id", "product_commit"))
-            or any(not isinstance(entry.get(key), list) for key in ("carried", "fresh"))
-            or (entry["delivery_id"], entry["item_id"]) != (current["delivery"], current["story"])):
+    if (not isinstance(entry, dict)
+            or entry.get("product_commit") != current["product_commit"]
+            or entry.get("candidate_hash") is not None and entry.get("candidate_hash") != current["candidate_hash"]
+            or (entry.get("delivery_id"), entry.get("item_id")) != (current["delivery"], current["story"])):
         return None
-    record = read_carry_over_record(root)
+    entry["candidate_hash"] = current["candidate_hash"]
+    if not valid_carry_over_pass(entry):
+        return None
+    record = read_carry_over_record(root, current)
     if record is None or any(record.get(key) != entry[key] for key in CARRY_OVER_OWNER):
         record = {"schema_version": 1, **{key: entry[key] for key in CARRY_OVER_OWNER}, "passes": []}
     record["candidate_hash"] = current["candidate_hash"]
@@ -2604,11 +2658,13 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                 environment["AGENTROF_LIVE_BASE_COMMIT"] = plan["base_commit"]
         carry_over = kind in {"test", "live_test"} and pass_carry_over(root, current["delivery"])
         if carry_over:
-            kept = read_carry_over_record(root)
+            kept = read_carry_over_record(root, current)
             if kept is not None:
                 # The command copies the candidate it runs on from the record into its pass record.
                 kept["candidate_hash"] = current["candidate_hash"]
                 atomic_file.replace_text(carry_over_record_path(root), json.dumps(kept, indent=2, sort_keys=True) + "\n")
+            else:
+                carry_over_record_path(root).unlink(missing_ok=True)
             environment["AGENTROF_CARRY_OVER_RECORD"] = str(carry_over_record_path(root))
         reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
                           if kind == "test" else (None, None))
@@ -2679,12 +2735,19 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
                      and session["pre_handoff"].get("kind") == "test"
                      and session["pre_handoff"].get("command") == command
                      and session["pre_handoff"].get("workdir") == workdir
-                     and groups is None and partitions is None)
+                     # A group-reported run takes its group report from the accepted run, which must show
+                     # every group the contract declares now passed.
+                     and (groups is None or group_report_problem(
+                         {"identity": {"test_group_report": session["pre_handoff"].get("test_group_report")},
+                          "test_groups": session["pre_handoff"].get("test_groups")}, groups) is None)
+                     and partitions is None)
     if accepted_full:
         completed = subprocess.CompletedProcess(command, 0,
             ("Accepted full-suite pre-handoff evidence " + reuse["evidence_hash"] + "\n"
              + "".join("REUSED " + target + "\n" for target in reuse["test_ids"])).encode("utf-8"))
-        intact, difference, group_report = True, "", None
+        intact, difference = True, ""
+        group_report = (None if groups is None else
+                        {"test_groups": session["pre_handoff"]["test_groups"], "missing_test_groups": []})
     elif partitions is not None:
         partition_records = run_partitions(root, scratch, current, workdir, partitions, environment,
                                            reuse["test_ids"] if reuse is not None else [], groups)
@@ -2739,15 +2802,9 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             selection_intact = False
     if selection_intact is not None:
         intact = intact and selection_intact
-    interrupted_by = []
-    if group is not None and completed.returncode != 0:
-        try:
-            shown = json.loads(live_progress_path(root, record_key).read_text(encoding="utf-8"))
-            interrupted_by = sorted({row["kind"] for row in shown.get("interruptions", [])
-                                     if isinstance(row, dict) and row.get("kind") in INTERRUPTION_KINDS})
-        except (OSError, ValueError, AttributeError, TypeError):
-            pass
-    checkpoint = (live_checkpoint(root) if group is not None and (completed.returncode == 2 or interrupted_by)
+    interruptions = live_interruptions(root, record_key, completed.returncode) if group is not None else {}
+    checkpoint = (live_checkpoint(root)
+                  if group is not None and (completed.returncode == 2 or interruptions.get("interrupted_by"))
                   else None)
     with locked(root):
         session = read_session(root)
@@ -2767,8 +2824,7 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             record["reused_live_base"] = live_reuse
         if checkpoint is not None:
             record["live_checkpoint"] = checkpoint
-        if interrupted_by:
-            record["interrupted_by"] = interrupted_by
+        record.update(interruptions)
         if getattr(completed, "host_awake", None):
             record["host_awake"] = completed.host_awake
         if resume:
@@ -3409,7 +3465,8 @@ def changed_lines(root: Path, current: dict) -> int:
     return total
 
 
-def lens_selection(root: Path, current: dict, assignments: list[dict]) -> tuple[list[dict], dict]:
+def lens_selection(root: Path, current: dict, assignments: list[dict],
+                   previous: dict | None = None) -> tuple[list[dict], dict]:
     """The lens assignments the frozen change triggers at risk_scoped, and why each lens joined or not.
 
     Each lens joins by the trigger lens-triggers.json declares for it, read
@@ -3420,7 +3477,13 @@ def lens_selection(root: Path, current: dict, assignments: list[dict]) -> tuple[
     state = process_policy.delivery_values(delivery.docs_root(root), current["delivery"],
                                            switches={CODE_REVIEW_PANEL})
     parameters = state["values"][CODE_REVIEW_PANEL].get("parameters", {})
-    lines = changed_lines(root, current)
+    measured = current
+    if previous and all(previous.get(key) == current.get(key)
+                        for key in ("delivery", "story", "inputs", "instruction_identity")):
+        ancestor, paths = commit_delta(root, previous["product_commit"], current["product_commit"])
+        if ancestor and paths is not None:
+            measured = {**current, "integration_base_commit": previous["product_commit"], "changed_files": paths}
+    lines = changed_lines(root, measured)
     lenses = {}
     for lens in sorted({lens for assignment in assignments for lens in assignment["lens"]}):
         declared = next((entry for entry in data["lens_triggers"] if entry["lens"] == lens), None)
@@ -3432,7 +3495,7 @@ def lens_selection(root: Path, current: dict, assignments: list[dict]) -> tuple[
             raise RuntimeError(f"code_review_panel {RISK_SCOPED} needs parameter {declared['parameter']!r}"
                                " set in the Process Policy")
         if declared["trigger"] == "changed_path_matches":
-            matched = sorted(path for path in current["changed_files"]
+            matched = sorted(path for path in measured["changed_files"]
                              if any(fnmatch.fnmatchcase(path, glob) for glob in threshold))
             lenses[lens] = {"joined": bool(matched), "trigger": declared["trigger"], "matched_paths": matched}
         elif declared["trigger"] == "changed_lines_above":
@@ -3464,7 +3527,8 @@ def code_review_panel_state(root: Path, value: dict) -> dict | None:
     assignments, selection = panel_assignments(), None
     if selected == RISK_SCOPED:
         # With no lens triggered the official reviewer reads alone and registers through result.
-        assignments, selection = lens_selection(root, value["candidate"], assignments)
+        assignments, selection = lens_selection(root, value["candidate"], assignments,
+                                                 value.get("previous_candidate"))
         if not assignments:
             return None
     passes = [record.get("pass", 0) for record in value.get("panel_history", [])]
@@ -4450,6 +4514,14 @@ def runtime_lifecycle_policy(root: Path, delivery_id: str) -> tuple[str, list[st
     return state["value"], state.get("parameters", {}).get("environment_paths") or []
 
 
+def steady_state_wait(contract: dict, events: list[dict], now: float) -> float:
+    """The remaining contract window after the latest successful bring-up or seed."""
+    window = operation_compile.steady_state_seconds(contract)
+    ready = [event["completed_at"] for event in events
+             if event["verb"] in {"up", "seed"} and event["exit_code"] == 0]
+    return max(0.0, min(window, ready[-1] + window - now)) if ready and window else 0.0
+
+
 def fresh_runtime_problem(session: dict, evidence: dict | None = None) -> bool:
     """Whether the session's recorded runtime events miss the fresh down/up/seed/logs/down shape."""
     state = session.get("runtime", {})
@@ -4577,6 +4649,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 raise RuntimeError("fresh runtime requires a successful down before up")
             if verb in {"seed", "logs", "url"} and not state["active"]:
                 raise RuntimeError("runtime must be up before seed, logs or url")
+            delay = steady_state_wait(contract, state["events"], time.time()) if verb == "logs" else 0.0
             # Every attempt of this Item runs in one kept checkout path, because
             # a project environment may bind an Item instance to the checkout
             # that created it. Each attempt's first command re-pins it to that
@@ -4616,9 +4689,14 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             # real services behind, so only a successful down permits settlement.
             if state.get("pending"):
                 state.setdefault("interrupted_commands", []).append(state["pending"])
-            state.update(cleanup_required=True, pending={"verb": verb, "value": value, "started_at": time.time(),
-                                                        "candidate_hash": current["candidate_hash"],
-                                                        "environment_identity": environment_identity})
+            # A declared QA verb reads results; it never brings services up, so
+            # running one after down leaves no teardown owed. Its pending entry
+            # still demands teardown if it is interrupted.
+            if not declared:
+                state["cleanup_required"] = True
+            state["pending"] = {"verb": verb, "value": value, "started_at": time.time(),
+                                "candidate_hash": current["candidate_hash"],
+                                "environment_identity": environment_identity}
             session["runtime"] = state
             write_session(root, session)
         # Only fixed verbs and declared identifier tokens enter this argument
@@ -4627,6 +4705,9 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
         with host_awake(host_guard(root)["keep_awake"]) as awake:
+            if delay:
+                print(f"waiting {delay:g} s for steady state", file=sys.stderr, flush=True)
+                time.sleep(delay)
             completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         with locked(root):
@@ -4657,6 +4738,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 event["checkout_difference"] = difference
             if awake:
                 event["host_awake"] = awake
+            if delay:
+                event["steady_state_wait_seconds"] = delay
             event["evidence_hash"] = digest(event)
             state["events"].append(event)
             state.pop("pending", None)
@@ -4899,6 +4982,10 @@ def integrated_items(root: Path, delivery_id: str):
                 raise RuntimeError(f"{item_path.relative_to(root).as_posix()} cannot be read, so its suite"
                                    f" cannot be selected: {exc}") from exc
             if item.get("status") == "integrated":
+                if item.get("path_claim_amendments"):
+                    import delivery_git
+                    item["path_claims"] = delivery_git.amended_path_claims(
+                        root, git(root, "rev-parse", "HEAD"), item_path.relative_to(root).as_posix(), item)
                 yield identifier, current_delivery, item_path, item
 
 
@@ -5452,7 +5539,7 @@ def regression_run(root: Path, delivery_id: str, story: str) -> dict:
             if selection_intact is not None:
                 record["selection_intact"] = selection_intact
             if group_report is not None:
-                record.update(group_report)
+                record.update(group_report, test_group_report=groups)
             record["evidence_hash"] = digest(record)
             atomic_file.replace_text(pre_handoff_record_path(root), json.dumps(
                 {"schema_version": 1, "runs": [*runs, record]}, indent=2, sort_keys=True) + "\n")
@@ -5492,6 +5579,7 @@ def accepted_pre_handoff(root: Path, delivery_id: str, story: str, current: dict
                                             "candidate_intact", "duration_seconds", "completed_at")}
     # A run recorded before runs named their declared environment has none, so QA reuses no such run.
     receipt.update({key: latest[key] for key in ENVIRONMENT_FIELDS if key in latest})
+    receipt.update({key: latest[key] for key in ("test_group_report", "test_groups") if key in latest})
     return receipt
 
 
@@ -5920,6 +6008,9 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
         if live_rows:
             result["carried_findings"] = live_rows
     if role == "code_reviewer":
+        import production_reachability
+        result["production_reachability"] = production_reachability.inspect(
+            root, current["integration_base_commit"], current["product_commit"])
         # The code reviewer runs no command: it reads the freeze record and QA's results instead.
         del result["diagnostic_interface"]
         result["verification_evidence"] = reviewer_evidence(root, value)
@@ -5928,7 +6019,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                                           if row.get("role", "code_reviewer") == "code_reviewer"]
     panel = code_review_panel_state(root, value) if role == "code_reviewer" else None
     if panel is None and role == "code_reviewer" and code_review_panel(root, current["delivery"]) == RISK_SCOPED:
-        result["lens_selection"] = lens_selection(root, current, panel_assignments())[1]
+        result["lens_selection"] = lens_selection(root, current, panel_assignments(), previous)[1]
     if panel is not None:
         # Every reader of the panel pass receives this same manifest and one assignment.
         result["code_review_panel"] = {
@@ -6302,7 +6393,7 @@ def status_summary(root: Path, run: str | None = None) -> dict:
     return result
 
 
-def main(argv=None) -> int:
+def argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", required=True)
     subs = parser.add_subparsers(dest="command", required=True)
@@ -6390,7 +6481,11 @@ def main(argv=None) -> int:
     wait = subs.add_parser("wait")
     wait.add_argument("--role", choices=ROLES)
     wait.add_argument("--seconds", type=float)
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv=None) -> int:
+    args = argument_parser().parse_args(argv)
     root = Path(args.worktree).resolve()
     try:
         if args.command == "start-pass":

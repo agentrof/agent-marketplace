@@ -20,6 +20,17 @@ from tools.tests.levels import integration
 SWITCHES = {'repair_pass': 'scoped_repair', 'repair_review': 'before_freeze'}
 
 
+class ScopedRepairBindingTests(unittest.TestCase):
+    def test_changed_source_or_instruction_binding_requires_full_review(self):
+        old = {'delivery': 'DLV-001', 'story': 'AUTH-01', 'inputs': {'story': 'old'},
+               'instruction_identity': 'old', 'product_commit': 'a'}
+        with mock.patch.object(delivery, 'delivery_switch_value', side_effect=lambda docs, identifier, name: SWITCHES[name]), \
+                mock.patch.object(verification, 'pre_handoff_regression', return_value=verification.TOUCHED_SUITES):
+            for changed in ({'inputs': {'story': 'new'}}, {'instruction_identity': 'new'}):
+                self.assertIn('changed source or instruction bindings', verification.scoped_repair_refusal(
+                    ROOT, 'DLV-001', 'AUTH-01', {'candidate': old}, {**old, **changed}))
+
+
 @integration
 class ScopedRepairTests(unittest.TestCase):
     setUp = base.VerificationTests.setUp

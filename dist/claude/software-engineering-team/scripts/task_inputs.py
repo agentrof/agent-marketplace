@@ -920,8 +920,8 @@ def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, 
         if not tip:
             raise ValueError(f"{delivery} has no Integration on {remote}")
         try:
-            return delivery_git.split_remote_note(
-                project, delivery_git.require_commit(project, remote, ref, tip), item, split_note)[0], delivery, None
+            oid = delivery_git.require_commit(project, remote, ref, tip)
+            return local_record(project, oid, item, split_note), delivery, None
         except RuntimeError as exc:
             raise ValueError(f"the published record of the selected Item cannot be read: {exc}") from exc
     oid = newest_local_integration_commit(project, item, delivery, remote)
@@ -952,7 +952,10 @@ def item_delivery(project: Path, item: str) -> str:
 def local_record(project: Path, oid: str, item: str, split_note) -> dict:
     import delivery_git
     try:
-        return delivery_git.split_remote_note(project, oid, item, split_note)[0]
+        props = delivery_git.split_remote_note(project, oid, item, split_note)[0]
+        if props.get("path_claim_amendments"):
+            props["path_claims"] = delivery_git.amended_path_claims(project, oid, item, props)
+        return props
     except RuntimeError as exc:
         raise ValueError(f"the published Integration commit {oid} in this checkout holds no record of the"
                          f" selected Item: {exc}") from exc

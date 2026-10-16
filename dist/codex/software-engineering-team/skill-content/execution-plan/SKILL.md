@@ -33,8 +33,13 @@ The Software Architect compiles the canonical topology into each Item's
 `execution-plan.md` file is a compiler-rendered aggregate, not a second
 authored truth.
 
-Before approval, reject cycles, duplicate stories, unordered path/contract
-overlaps, unknown role IDs and stale story/test/DoD hashes. Run
+Before approval, reject cycles, duplicate stories, overlapping claims, unknown
+role IDs and stale story/test/DoD hashes. A path claim reserves its path
+against concurrent writers until its Item is integrated or cancelled, so
+overlapping path claims of two unfinished Items are refused whatever their
+`execution_after` order; a later Item takes a shared path at an execution
+re-approval after the earlier Item is integrated. Two Items never claim the
+same contract. Run
 `delivery_compile.py check-plan --delivery DLV-###` before the user sees the
 plan: it reports every refusal approval would raise and writes nothing, and
 the plan is shown only once it passes. `delivery_compile.py

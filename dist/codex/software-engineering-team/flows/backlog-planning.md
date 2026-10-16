@@ -2,7 +2,7 @@
 
 The flow turns approved product knowledge into a versioned Markdown backlog under `workspace/docs/backlog/`.
 
-Switch `process_profile`: at `fast_lane`, follow `skill-content/story/references/switch-process_profile-fast_lane.md`.
+Switch `process_profile`: at `fast_lane`, follow `skill-content/deliver/references/switch-process_profile-fast_lane.md`.
 
 Spawn template: paste `{{constitution}}` into every role prompt; load `obsidian-vault` before touching docs, whose policy governs them.
 

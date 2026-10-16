@@ -1,13 +1,48 @@
-# Story Flow
+# Fast Lane Flow
 
 Spawn template: paste `{{constitution}}` into every role prompt. Load the
 `obsidian-vault` skill before writing the card; its vault law is
 authoritative.
 
-Switch `process_profile`: at `standard`, this flow does not run; tell the
-user the fast lane is off, that `/configure` sets `process_profile` to
-`fast_lane`, and route the request to `/requirement`. At `fast_lane`, follow
-`skill-content/story/references/switch-process_profile-fast_lane.md` and
+Vault first, per constitution section 5: every role starts from the default `project_reading` plan.
+Batch-read its units, using the frozen context reader for frozen candidates. When context is insufficient, wrong or unavailable, use manual search, reads and relationship discovery
+on the role's initiative or parent direction; record sources and reasons, rebind evidence, preserve gates and return `context_findings` to the parent for user-approved reporting.
+For gaps, use `vault_query.py`, machine indexes and generated views, typed frontmatter, relation blocks and wikilinks, then maps and targeted search.
+Fallback navigation with a shell can use `home.md`, `maps/_generated/relation-status.md`,
+`maps/_generated/cross-subtree-matrix.md` and
+`maps/_generated/stale-relations.md` and the documents the card's
+`## Sources` names. Switch `context_pack`:
+at `role_digest`, a spawned role receives its pack from `context_pack.py
+build --entry <entry> --role <role> --mode <mode> --project-root <root>`
+instead of the full required reads; it reads a named source in full only
+when the pack does not cover a case, and records that read and why, as
+`skill-content/challenge-review/references/switch-context_pack-role_digest.md`
+defines. Switch `step_timing`: at `recorded`, the coordinator runs
+`step_timing.py start --run <run> --step <step> [--budget <id>]` before
+each step and `step_timing.py end --run <run> --span <span>` after it,
+and records each role spawn with `--kind spawn --parent <step span>
+--role <role> --phase reading|writing|review|re_review|waiting`. An end
+that returns overrun is reported to the owner at once with its
+breakdown, largest contributor and lever. The run ends with
+`step_timing.py report --run <run> --write`, as
+`skill-content/challenge-review/references/switch-step_timing-recorded.md`
+defines. Switch `step_budgets`: at `enforced`, each budgeted step is
+compared with its maximum, the owner's parameter or the package target
+in `skill-content/configure/data/step-budgets.json`; a step may finish
+well under it, and only an exceeded maximum is reported, never blocking,
+as
+`skill-content/challenge-review/references/switch-step_budgets-enforced.md`
+defines.
+Switch `review_scope`: at `impact_closure`, `story_lane.py lint` runs
+before any reviewer is spawned, and the reviewer reads the pull request diff and the change's impact closure, each approved, unchanged note
+outside it only as its hash-bound summary, and reads beyond it when unsure and
+records why, as
+`skill-content/challenge-review/references/switch-review_scope-impact_closure.md`
+defines.
+
+Switch `process_profile`: at `governed`, this flow does not run; the
+`deliver` entry follows the governed Delivery path instead. At `fast_lane`, follow
+`skill-content/deliver/references/switch-process_profile-fast_lane.md` and
 the steps below. Read the value with
 `scripts/process_policy.py value --switch process_profile`.
 

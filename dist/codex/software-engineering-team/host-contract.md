@@ -233,11 +233,11 @@
   `-mechanical` role files.
 - Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
   is planned inside `/delivery-plan` with one owner gate, presented through
-  `request_user_input`, and handed over to `/deliver DLV-###`; `/execution-plan
+  `request_user_input`, and handed over to `/deliver-governed DLV-###`; `/execution-plan
   DLV-###` stays for a plan revision and for a Delivery that left the light
   path, so the public entries do not change.
 - Delivery execution is available only through the exact public entries
-  `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.
+  `/delivery-plan`, `/execution-plan DLV-###` and `/deliver-governed DLV-###`.
 
 ## Autopilot
 

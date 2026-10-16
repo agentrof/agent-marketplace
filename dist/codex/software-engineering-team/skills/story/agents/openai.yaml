@@ -1,6 +1,0 @@
-interface:
-  display_name: "Story"
-  short_description: "Start the Story guided workflow"
-  default_prompt: "Use $software-engineering-team:story to start this workflow."
-policy:
-  allow_implicit_invocation: false

@@ -146,13 +146,13 @@ affected live groups once before merge. The steps are in
 `qa-verification/references/switch-live_verification-delivery_integration.md`
 and `qa-verification/references/switch-item_live_gate-tooling_items.md`.
 
-Process switch `process_profile` keeps the standard ceremonies at `standard`.
+Process switch `process_profile` keeps the governed ceremonies at `governed`.
 At `fast_lane`, the orchestrating session runs one story per change itself, with
 every role in the foreground and no delivery coordinator: one card under
 `backlog/cards/`, one branch and one pull request to the target branch, the
 project's CI plus one reviewer (two at card rigor `high`, where the owner
-merges), and auto-merge. The steps are in `flows/story.md` and
-`story/references/switch-process_profile-fast_lane.md`.
+merges), and auto-merge. The steps are in `flows/fast-lane.md` and
+`deliver/references/switch-process_profile-fast_lane.md`.
 
 Process switch `pass_carry_over` keeps nothing between passes at `off`. At
 `per_item`, the runner adds every pass record the approved test or live

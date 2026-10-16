@@ -98,13 +98,13 @@
       "9ab4dd0b8df2fde66c82556e9a743a347294034035a73e6746f4bb12292ff00b"
     ,
     "flows/backlog-planning.md":
-      "1f56017bc62fd58aefb3f83a51e0bc5ea8d630737692e639af035d6a0848f788"
+      "353c25d5cacab85d815b00aa110306737f30b0a8ad928ab045c558ea44d43d5f"
     ,
     "flows/business-analysis.md":
-      "54ef05c725ac845e4b546bec335234f2b710e6a6a3495f93faa34b8393275585"
+      "3ffad4ae7c6d98ba582a6919f71e96c35ce3825fda295a3ec8382b04414a778a"
     ,
     "flows/delivery-execution.md":
-      "2d526037c7d19a73036c1b59c912ca47a124a35c8f19654bbd5e796b508dfbf8"
+      "83ddb6cccc0880a0eb6bec3f9fde73ec9193b2c723aa821c544d982990fc552b"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -113,7 +113,7 @@
       "4d8eb69023a0724ec9e280e0e880d60c410f62444df9826d011c7c032448670d"
     ,
     "flows/design-system.md":
-      "cc5260ea62a0485a53760f2bb144a8acd4c7fcf918833b640de3c4df3ac39e89"
+      "e8a2e62a5ae71310896555d053e5c6d72801c63f93f85fc050e3da1ef1ca7659"
     ,
     "flows/design.md":
       "fe5af168a850e2d931b241616ac88095c092780acd4b786bec108c88ba5ed36d"
@@ -122,25 +122,25 @@
       "84e5ab6461af23461e758db1bc0adabf7fe680aa093992f2c34941ad5d94dcaa"
     ,
     "flows/experience-design.md":
-      "4d2f4cd438b0b668959c4cde17c9d6e95bf1bc144e52ceabfce346aa53e67473"
+      "fa05e6f3b4edb8c8891461e142694b61d0f02fa27fab2a140987bdf80c92c830"
+    ,
+    "flows/fast-lane.md":
+      "6e0bb6447bab79d39da346a1cf730e672c0c7ed9b0b0b2f91d5af1500414c20a"
     ,
     "flows/operation.md":
       "2a48be3a2321e14a3f154494c812d245e3f3b2ee5061ac28e2d8e7025e53cb06"
     ,
     "flows/requirement.md":
-      "d2fa1975f003f9468d1c444d61f5b4789b7a49eae87dbefc052b283b2cb7bec5"
+      "893e51d4c1bd25ad25bf8ce64a6979176199ae62002537cf2dfe3b99a8a3861e"
     ,
     "flows/solution-design.md":
-      "0253450b17b70db9087476c33505c9f81980780fc3b2244138e68b836f886e7c"
-    ,
-    "flows/story.md":
-      "cd80d60968d351bb40f97ee73f3064a90d255975763ed3971ad7bc310974ba87"
+      "9db7fdf7ba27d9615b5fd94102507d366cba114cf3a9b8e9bad274083c4f538d"
     ,
     "hooks/hooks.json":
       "d8f59a3b7f2a956263e77f87b9ae2a2977093e19d6b41f4f81cf21f77f6900f0"
     ,
     "host-contract.md":
-      "7710dbb96e556da4362e6aa1cbe6177e30268f08849fc2cac7da4984b03f364d"
+      "f1db19c1ffb1c24877dc0450be80792d6e903f8c2690a366a58d989c92b2dca7"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -188,13 +188,13 @@
       "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
     ,
     "scripts/delivery_closure.py":
-      "73b210d3acdffaa912802807dbf11d47f068ba2c635d300bd051142310e05633"
+      "5b30c4906b6459555214d2bbc5fc5ce68598605fe86bbd4e9c65c2deae455bae"
     ,
     "scripts/delivery_compile.py":
       "67d22bbfb8a4378c5cd63bc0f1fa112c06f16c816bb1e1e2eaef92829c0db80c"
     ,
     "scripts/delivery_git.py":
-      "b3032104abdff4d108281281d6bbf6d5f2148014bcd3f1791ddeb1eaf7984ac3"
+      "e7e5eb9311d6543f739a12581ae45eeea0970d96696d6344b2c1cc1a27b72dbf"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
@@ -206,7 +206,7 @@
       "1ca45984c3c373674dc79e6272686847a89cd56366596c4cd3f836e3c8dc75d5"
     ,
     "scripts/delivery_verification.py":
-      "47270da333aa377683ce005753fca5ad934cc9a4f207d762674fdea514b03bfb"
+      "29f6a57bcd010a46432063790e11a7800a1061c6830b74abcb8370cd7e792505"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -254,7 +254,7 @@
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
     ,
     "scripts/process_policy.py":
-      "812d6e00659a42cfd9a4a143432f4feaea8e947c28aae3c3e3e07137d52de6f0"
+      "d562166d53c1889d6c5cf3340a3727a34e854350c9dd436ca6976dbf568fbd0c"
     ,
     "scripts/project_config.py":
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
@@ -296,7 +296,7 @@
       "e1264ad883f44baae941169c2c80ef868f35d0fbb9b2dccffd46b0d6400ffb51"
     ,
     "scripts/task_inputs.py":
-      "d225fadc117b7a4cf0d7b6413b783fc214df7aca53dcb8b69ea1485a4cc2a4b6"
+      "4e4dac8ad7f01dec7f3e2d86f02746ff67297617789555d2211c3ab722b961b0"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -476,7 +476,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "4545c9fde3c7080fc3be482140a387f610c1216d9c5557f0bfe47fcaca6153c7"
+      "e5784763daf2dbb410881c2c654cd6d3a46ada4adf3b0de9473b0b98af56551b"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -496,8 +496,11 @@
     "skill-content/configure/references/switch-execution_planning-single_source_bundle.md":
       "d9cd3b9a72a9831caa012d32f02553e4fe39976859b9e3d02bd3c8ab624b2c81"
     ,
+    "skill-content/deliver-governed/SKILL.md":
+      "dbe48249d7e4896e7973deaee32d6bb4265cc92e35020b55f56a75702504dc18"
+    ,
     "skill-content/deliver/SKILL.md":
-      "5134b60df39f6740bdcb3512296bbc083d37aec1274e68b38b4935c0f6b20659"
+      "322e41dc67bf5fbe7affd17f726b44257e96271db81f628e18e035765410e08f"
     ,
     "skill-content/deliver/data/assertion-kinds.json":
       "363444381c22a9a1453172f615690be2cacb2bac7c6cb90fde0ab11dc12eac53"
@@ -530,7 +533,7 @@
       "66df82e9c43f34df2d50d9d121c74d672615fedf7f975a68f75718dd81f3e25e"
     ,
     "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md":
-      "ba72b5918302dbaf9d63f88c9854e0d7edfb329bb59e196935ddc54b35080691"
+      "0b6725ebb1a3bee1c5784e03885e8071a01b36d84099d75c74e5a4ebd7d46ca9"
     ,
     "skill-content/deliver/references/switch-item_cost_report-per_step.md":
       "672c1048caeb63e8f8b96bcaeb3146641f49e885cedcaa0b5881b6f11068bc13"
@@ -559,8 +562,11 @@
     "skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md":
       "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
     ,
+    "skill-content/deliver/references/switch-process_profile-fast_lane.md":
+      "0a9bbb952593f63e4cf18e42ab9b9d1e6b80cf86d89cb30723d8d2d7656db311"
+    ,
     "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
-      "c23b324300ea70379a61bafdc1faa0ab5886de392f89e7f9a54771ecb9bc9830"
+      "ddc02ad48cbf5b91a33557b97363f6a2dfdc83245a4e71f3109bd93e5e612b45"
     ,
     "skill-content/deliver/references/switch-regression_plan_revision-current_approved.md":
       "487cedfffcba65c9c333f0153b57bfa7fb346e6bcc03e00ca599adf72f5d2b62"
@@ -578,10 +584,10 @@
       "8bc78970e33ae960d0f02dcf92c512396897e8f62d7ef7de2beae7cda2f04044"
     ,
     "skill-content/delivery-plan/SKILL.md":
-      "6d4cbbb74f9529e82d2fa736d68a970105893676967a7d6b203ad5289d25bc79"
+      "756235abed604fdb70486df6c9f0c684a6bd995e5257bdf2bc7b6fb85ed007c5"
     ,
     "skill-content/delivery-plan/references/switch-delivery_path-light_when_eligible.md":
-      "ad333a9d7dd2c15d0f1b4ac9630686386bc9cd0a6751ffce060147ed42799798"
+      "60bb840f83751edd2c1a289143b0ad3a094edaa43543a0bda3b8892cbf686271"
     ,
     "skill-content/demo/SKILL.md":
       "8cd155dfb8f548ae0716fba785f8df7733645a7c808d8b781dfd2f5fe2567e0d"
@@ -611,7 +617,7 @@
       "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106"
     ,
     "skill-content/execution-plan/SKILL.md":
-      "5de1ea8d2c50e7b42c158c6540d7d4f5812bc67176bca4e6283cc7561b062e83"
+      "3272dbe942919581ebbb08b06a54e0c8f3f462937f5d2bf97d63ef0c2e7a0913"
     ,
     "skill-content/execution-plan/data/fact-ownership.json":
       "119a6b31a052c0771671456b19b75d98a14a321773b8469b7d5678b0d142dc10"
@@ -943,12 +949,6 @@
     "skill-content/sql-database-design/references/review-checklist.md":
       "2a883309e014134ae221cc510074ddd4f115396ed042d95a3ff0db0447efdf8e"
     ,
-    "skill-content/story/SKILL.md":
-      "a4b5c9f05d6281952b7dbdd6c5c7fd355cd394f5c68b90634e349104ec571dd8"
-    ,
-    "skill-content/story/references/switch-process_profile-fast_lane.md":
-      "aab7c925903379260fe13c800a82ec5c3436a7b4a6a6eb0cb4d4df8027c5bc5e"
-    ,
     "skill-content/ui-ux-design/SKILL.md":
       "8ade23b6f3103035b9958a23aa476446d537c9d44af9674f97aa50a8e32980b0"
     ,
@@ -1027,6 +1027,12 @@
     "skills/configure/agents/openai.yaml":
       "b632fc369e53d7d3d008510ca4af2030917f85b2e1d6cc6c360eef6b74482b3b"
     ,
+    "skills/deliver/SKILL.md":
+      "7a935ab24f6cbaf9c160757304f9ac1f17b7fa6ba8cc328338a72049bf0837ca"
+    ,
+    "skills/deliver/agents/openai.yaml":
+      "49cf26cb9debf99968b30ec8d1635682aafa7bf50c02b5c6da1b3a157458a3b6"
+    ,
     "skills/demo/SKILL.md":
       "1fc987bda09784f270b9126e5507747af3c51541f8cbc5e7758652029ea42402"
     ,
@@ -1087,12 +1093,6 @@
     "skills/solution-design/agents/openai.yaml":
       "4b42a50fb8966874cbd89a37253240fba87533496e8d0462c69a7745b874cfe9"
     ,
-    "skills/story/SKILL.md":
-      "0417efac3e28a8170dc25d2cf3c884bda8a6a33efa2da424bb605c0c6b7dbd67"
-    ,
-    "skills/story/agents/openai.yaml":
-      "411b7205d7f49793a265d03662f64282958f4e31cb06d61e44a05685619cb0fb"
-    ,
     "templates/AGENTS.override.md":
       "d84ca774c7fed4e518e3221355ba7aca179b0458b1810bd4bc40d0565d0df364"
     ,
@@ -1118,7 +1118,7 @@
       "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
     ,
     "templates/project-context-policy.json":
-      "26232b190f6bd93f77584db8898109eb00afe32da55e2180f848f505c48a70d8"
+      "1064215323cacff3ba2748f6992ac5d43026183c4f30e43b1633d579800d951f"
     ,
     "templates/project-instruction-surfaces.json":
       "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c"
@@ -1142,7 +1142,7 @@
       "a1e14667ea11bd2989b2ed59055ed4a37da59b20411a4af60f6dc84ad5e3c03a"
     ,
     "templates/task-input-policy.json":
-      "b0a162e52f44cc65f39ec6cc0a8804ba5906839e7bd9ec2ae3ecfc1a6163df71"
+      "e333ae374f5b9b9a4a035e2924fa154498899d5e224e52aed71ec9d87ef0ebf6"
     ,
     "templates/tier-map.json":
       "7520a0d1c1627d0d8c16c6b540ca3090bd889ffcdfe891bbc7e5081f04bf6c9f"

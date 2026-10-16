@@ -90,7 +90,7 @@
         "architecture-component"
       ]
     },
-    "deliver": {
+    "deliver_governed": {
       "required_relations": [
         "story_path",
         "test_plan_path",

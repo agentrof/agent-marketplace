@@ -44,7 +44,7 @@ REVIEW_TASKS = (
     ("backlog-plan", "product-owner", "revise", ["challenge-review"], DOCUMENT),
     ("solution-design", "solution-reviewer", "review", [], DOCUMENT),
     ("solution-design", "solution-architect", "revise", ["challenge-review"], DOCUMENT),
-    ("deliver", "code-reviewer", "review", [], CODE),
+    ("deliver-governed", "code-reviewer", "review", [], CODE),
 )
 # step: (entry, calibration reader role, added skills, the Operation contract kind)
 CALIBRATION_READERS = {
@@ -53,7 +53,7 @@ CALIBRATION_READERS = {
     "design_system": ("design-system", "design-system-reviewer", [], None),
     "operation_verification": ("configure", "devops-engineer", ["challenge-review"], "verification"),
     "operation_environment": ("configure", "qa-engineer", ["challenge-review"], "environment"),
-    "code_review": ("deliver", "code-reviewer", [], None),
+    "code_review": ("deliver-governed", "code-reviewer", [], None),
 }
 
 

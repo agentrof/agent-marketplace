@@ -531,6 +531,12 @@ def catalog(package: Path = PACKAGE) -> dict:
             raise ValueError("task input entry names an unknown role")
         if type(entry.get("project_state")) is not bool:
             raise ValueError("task input entry needs an explicit project state boundary")
+        # A renamed entry may keep its switch references in the skill folder it
+        # shared before the rename; its tasks bind them without that SKILL.md.
+        shared = entry.get("reference_skills", [])
+        if (not isinstance(shared, list) or not all(isinstance(skill, str) for skill in shared)
+                or set(shared) - skills):
+            raise ValueError("task input entry reference skills must be installed skills")
         if type(entry.get("allow_unborn_head", False)) is not bool:
             raise ValueError("task input unborn HEAD policy must be boolean")
         scope = entry.get("write_scope", {})
@@ -1202,6 +1208,7 @@ def instruction_reads(policy: dict, package: Path, route: dict, role: str | None
             path = f"skill-content/{skill}/references/{stack_reference}"
             if (package / path).is_file():
                 required.add(path)
+    for skill in sorted(selected_skills | set(route.get("reference_skills", []))):
         switch_root = package / "skill-content" / skill / "references"
         for path in sorted(switch_root.glob("switch-*.md")) if switch_root.is_dir() else []:
             pair = switch_reference(package, path)
@@ -1218,7 +1225,8 @@ def instruction_reads(policy: dict, package: Path, route: dict, role: str | None
     # Tools and data influence the role's result even when they are not prose
     # reads. Bind them without turning an input index into extra reading work.
     implementation_roots = [package / "scripts", *(
-        package / "skill-content" / skill for skill in selected_skills)]
+        package / "skill-content" / skill
+        for skill in selected_skills | set(route.get("reference_skills", [])))]
     for root in implementation_roots:
         # A switch reference or switch value data of a value the project did not
         # choose is neither read nor hashed, so the default path binds exactly

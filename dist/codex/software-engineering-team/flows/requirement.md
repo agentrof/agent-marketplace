@@ -34,7 +34,7 @@ as
 `skill-content/challenge-review/references/switch-step_budgets-enforced.md`
 defines.
 
-Switch `process_profile`: at `fast_lane`, follow `skill-content/story/references/switch-process_profile-fast_lane.md`.
+Switch `process_profile`: at `fast_lane`, follow `skill-content/deliver/references/switch-process_profile-fast_lane.md`.
 
 This flow is the host-neutral sequence behind `/requirement` and the four
 stage-by-stage entries. Durable truth is the Requirement record and the

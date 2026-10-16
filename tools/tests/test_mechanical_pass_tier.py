@@ -325,7 +325,7 @@ class PassKindTests(unittest.TestCase):
             "a review, re-check or calibration": dict(mode="review"),
             "a read-only reviewer": dict(entry="backlog-plan", role="backlog-reviewer",
                                          inputs=["brief.md"]),
-            "a code repair": dict(entry="deliver", role="backend-developer", mode="repair",
+            "a code repair": dict(entry="deliver-governed", role="backend-developer", mode="repair",
                                   skills=[]),
             "a repair pass": dict(mode="repair"),
             "a writer without a variant": dict(role="delivery-coordinator"),

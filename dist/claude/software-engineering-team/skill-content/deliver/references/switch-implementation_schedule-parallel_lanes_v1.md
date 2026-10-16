@@ -37,7 +37,7 @@ stops that part of its work and reports it; only the architect revises it.
 
 ## Lane rules
 
-- Derive each lane's inputs with `task_inputs.py --entry deliver --role <role>`
+- Derive each lane's inputs with `task_inputs.py --entry deliver-governed --role <role>`
   and the Item record as input. Its `write_scope` holds that lane's approved
   scope only.
 - A lane writes only inside its scope and never edits another lane's files.

@@ -210,6 +210,24 @@
     },
     "deliver": {
       "flows": [
+        "fast-lane"
+      ],
+      "roles": [
+        "backend-developer",
+        "frontend-developer",
+        "devops-engineer",
+        "code-reviewer"
+      ],
+      "scope_kind": "story",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "The story is done when its pull request merges on green CI after one reviewer pass; the card and the pull request are its record."
+    },
+    "deliver_governed": {
+      "flows": [
         "delivery-execution"
       ],
       "roles": [
@@ -232,7 +250,10 @@
           "devops-engineer"
         ]
       },
-      "next_transition": "Implementation requires the approved Item plan and active writer receipt. Review and QA require the same frozen candidate; delivery_verification.py controls reader barriers and final evidence, and Delivery Git validates integration."
+      "next_transition": "Implementation requires the approved Item plan and active writer receipt. Review and QA require the same frozen candidate; delivery_verification.py controls reader barriers and final evidence, and Delivery Git validates integration.",
+      "reference_skills": [
+        "deliver"
+      ]
     },
     "configure": {
       "flows": [
@@ -319,24 +340,6 @@
         "roles": []
       },
       "next_transition": "Return the external issue-report result from conversation evidence; no project transition is authorized."
-    },
-    "story": {
-      "flows": [
-        "story"
-      ],
-      "roles": [
-        "backend-developer",
-        "frontend-developer",
-        "devops-engineer",
-        "code-reviewer"
-      ],
-      "scope_kind": "story",
-      "project_state": true,
-      "write_scope": {
-        "resolver": "unresolved",
-        "roles": []
-      },
-      "next_transition": "The story is done when its pull request merges on green CI after one reviewer pass; the card and the clock rows are its record."
     }
   },
   "read_only_roles": [
@@ -421,16 +424,16 @@
     "devops_engineer": []
   },
   "read_only_entry_roles": {
-    "deliver": [
-      "code-reviewer",
-      "qa-engineer"
-    ],
     "backlog_plan": [
       "backlog-reviewer",
       "business-analyst",
       "qa-engineer"
     ],
-    "story": [
+    "deliver_governed": [
+      "code-reviewer",
+      "qa-engineer"
+    ],
+    "deliver": [
       "code-reviewer"
     ]
   },

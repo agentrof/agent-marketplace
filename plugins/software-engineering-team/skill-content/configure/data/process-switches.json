@@ -903,7 +903,7 @@
     "review_scope": {
       "summary": "What a role reads in full for a change: the whole package its step names, or the change's impact closure over the vault's typed relations, with every approved, unchanged note outside it as a hash-bound summary, compiler structural checks before any reader starts and a delta-only confirmation re-review.",
       "issue": 441,
-      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
+      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "fast-lane", "operation", "requirement", "solution-design"],
       "values": [
         {
           "id": "full",
@@ -969,7 +969,7 @@
     "context_pack": {
       "summary": "Whether a task starts by reading every flow, skill and reference file its entry binds, or from a derived, hash-bound digest of the rules its role applies at that step, with every source one read away.",
       "issue": 441,
-      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
+      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "fast-lane", "operation", "requirement", "solution-design"],
       "values": [
         {
           "id": "off",
@@ -992,7 +992,7 @@
       "measurement_only": true,
       "summary": "Whether the coordinator records the start and end of each flow step and role spawn, with its reading, writing, review and waiting phases, in a durable per-run timing record, or records no step timing.",
       "issue": 441,
-      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
+      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "fast-lane", "operation", "requirement", "solution-design"],
       "values": [
         {
           "id": "off",
@@ -1015,7 +1015,7 @@
       "measurement_only": true,
       "summary": "Whether each flow step and role spawn is timed against a maximum in minutes and every step that exceeds its maximum is reported at once with its breakdown, or steps run without a budget report. A budget is a maximum, never an expectation: a step may finish well under it, and a budget never blocks, fails or shortens a step.",
       "issue": 441,
-      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "operation", "requirement", "solution-design"],
+      "flows": ["backlog-planning", "business-analysis", "delivery-execution", "delivery-governance", "delivery-planning", "design", "design-system", "execution-planning", "experience-design", "fast-lane", "operation", "requirement", "solution-design"],
       "values": [
         {
           "id": "off",
@@ -1411,23 +1411,23 @@
         "design-system",
         "experience-design",
         "backlog-planning",
-        "story"
+        "fast-lane"
       ],
       "values": [
         {
-          "id": "standard",
+          "id": "governed",
           "tradeoffs": "Every request runs the impact matrix, the Requirement stages, the backlog revision with its review panels and a Delivery with Fence, Slots, Items, plan approvals, path claims, contract pins, architecture stamping and frozen verification. Today's behaviour and the baseline: in one measured project a story took 84 to 221 minutes from start to integration."
         },
         {
           "id": "fast_lane",
-          "tradeoffs": "The story entry turns a free-text request into one card with 3 to 8 acceptance criteria and a test list, checked by lint only, then one branch and one pull request straight to the target branch. The project's CI and one reviewer reading the diff verify it; only a critical finding blocks, the rest become issues, and auto-merge lands it. No analysis, solution or design stage, no review panels, no Integration branch, Item refs, plan approvals, exclusive claims or contract pins, and live tests leave the story path, so a defect those would catch surfaces later, on main."
+          "tradeoffs": "The deliver entry turns a free-text request into one card with 3 to 8 acceptance criteria and a test list, checked by lint only, then one branch and one pull request straight to the target branch. The project's CI and one reviewer reading the diff verify it; only a critical finding blocks, the rest become issues, and auto-merge lands it. No analysis, solution or design stage, no review panels, no Integration branch, Item refs, plan approvals, exclusive claims or contract pins, and live tests leave the story path, so a defect those would catch surfaces later, on main."
         }
       ],
-      "default": "standard",
+      "default": "governed",
       "metric": "Per story: request, card, pull request opened, CI green, review passed and merged times in .agentrof/timing/stories.csv, and every defect found on main after a fast-lane merge.",
       "promotion": {
         "unit": "At least 20 fast-lane stories.",
-        "threshold": "Median request to merge at most 15 minutes with no more than one escaped critical defect per 20 stories and the owner's approval."
+        "threshold": "Median request to merge at most 15 minutes with no more than one escaped critical defect per 20 stories, with every shared quality guard holding and the owner's approval."
       }
     }
   }

@@ -188,8 +188,8 @@ class BindingTests(unittest.TestCase):
         return reference in result["required_reads"]
 
     def test_the_qa_gate_switch_references_bind_only_to_the_delivery_tasks_that_follow_them(self):
-        tasks = (("deliver", "delivery-coordinator"), ("deliver", "qa-engineer"),
-                 ("deliver", "backend-developer"), ("deliver", "code-reviewer"),
+        tasks = (("deliver-governed", "delivery-coordinator"), ("deliver-governed", "qa-engineer"),
+                 ("deliver-governed", "backend-developer"), ("deliver-governed", "code-reviewer"),
                  ("execution-plan", "qa-engineer"), ("configure", "qa-engineer"))
         for entry, role in tasks:
             for reference in (OWN_REFERENCE, GATE_REFERENCE):
@@ -201,23 +201,23 @@ class BindingTests(unittest.TestCase):
         policy(self.docs, "approve")
         for entry, role in tasks:
             with self.subTest(value="spot_run", task=(entry, role)):
-                self.assertEqual(self.bound(entry, role, OWN_REFERENCE), entry == "deliver")
+                self.assertEqual(self.bound(entry, role, OWN_REFERENCE), entry == "deliver-governed")
             with self.subTest(value="gate_first", task=(entry, role)):
-                self.assertEqual(self.bound(entry, role, GATE_REFERENCE), (entry, role) == ("deliver", "qa-engineer"))
+                self.assertEqual(self.bound(entry, role, GATE_REFERENCE), (entry, role) == ("deliver-governed", "qa-engineer"))
 
     def test_accept_record_binds_its_own_reference_to_the_delivery_tasks_only(self):
-        tasks = (("deliver", "qa-engineer"), ("deliver", "delivery-coordinator"), ("execution-plan", "qa-engineer"))
+        tasks = (("deliver-governed", "qa-engineer"), ("deliver-governed", "delivery-coordinator"), ("execution-plan", "qa-engineer"))
         policy(self.docs, "init")
         policy(self.docs, "set", "--switch", OWN_SWITCH, "--value", "accept_record")
         policy(self.docs, "approve")
         for entry, role in tasks:
             with self.subTest(task=(entry, role)):
-                self.assertEqual(self.bound(entry, role, ACCEPT_REFERENCE), entry == "deliver")
+                self.assertEqual(self.bound(entry, role, ACCEPT_REFERENCE), entry == "deliver-governed")
                 self.assertFalse(self.bound(entry, role, OWN_REFERENCE))
 
     def test_only_delivery_execution_tasks_at_touched_suites_bind_the_reference(self):
-        tasks = (("deliver", "delivery-coordinator"), ("deliver", "qa-engineer"),
-                 ("deliver", "backend-developer"), ("deliver", "code-reviewer"),
+        tasks = (("deliver-governed", "delivery-coordinator"), ("deliver-governed", "qa-engineer"),
+                 ("deliver-governed", "backend-developer"), ("deliver-governed", "code-reviewer"),
                  ("execution-plan", "delivery-coordinator"), ("configure", "qa-engineer"))
         for entry, role in tasks:
             with self.subTest(value="off", task=(entry, role)):
@@ -227,7 +227,7 @@ class BindingTests(unittest.TestCase):
         policy(self.docs, "approve")
         for entry, role in tasks:
             with self.subTest(value="touched_suites", task=(entry, role)):
-                self.assertEqual(self.bound(entry, role), entry == "deliver")
+                self.assertEqual(self.bound(entry, role), entry == "deliver-governed")
 
 
 @integration

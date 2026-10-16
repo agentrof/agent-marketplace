@@ -50,8 +50,8 @@ TASKS = {
     ("configure", "delivery-coordinator", "revise", ()): {CONTRACTS, OWNERSHIP, PANELS},
     ("execution-plan", "software-architect", "create", ()): {PLAN, ARCHITECT, OWNERSHIP, PANELS},
     ("execution-plan", "delivery-coordinator", "create", ()): {PLAN, OWNERSHIP, PANELS},
-    ("deliver", "software-architect", "create", ()): {ARCHITECT, OWNERSHIP, PANELS},
-    ("deliver", "backend-developer", "create", ()): set(),
+    ("deliver-governed", "software-architect", "create", ()): {ARCHITECT, OWNERSHIP, PANELS},
+    ("deliver-governed", "backend-developer", "create", ()): set(),
     ("backlog-plan", "product-owner", "revise", ()): set(),
 }
 SWITCH_FILES = {PLAN, CONTRACTS, ARCHITECT, OWNERSHIP, PANELS}

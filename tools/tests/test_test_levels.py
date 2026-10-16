@@ -286,7 +286,7 @@ class TaskBindingTests(unittest.TestCase):
     TASKS = (("backlog-plan", "product-owner", "revise"), ("backlog-plan", "qa-engineer", "revise"),
              ("backlog-plan", "business-analyst", "revise"), ("backlog-plan", "backlog-reviewer", "review"),
              ("delivery-plan", "product-owner", "revise"), ("delivery-plan", "delivery-coordinator", "revise"),
-             ("execution-plan", "qa-engineer", "revise"), ("deliver", "qa-engineer", "review"))
+             ("execution-plan", "qa-engineer", "revise"), ("deliver-governed", "qa-engineer", "review"))
 
     def setUp(self) -> None:
         self.fx = cost.CostProject(self, build=size.committed_brief)

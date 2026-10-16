@@ -445,12 +445,12 @@ def effective_values(docs: Path | None, package: Path | None = None) -> tuple[di
 
 
 def process_profile(docs: Path | None, package: Path | None = None) -> str:
-    """The ``process_profile`` value in force; ``standard`` when the policy cannot be read,
+    """The ``process_profile`` value in force; ``governed`` when the policy cannot be read,
     so an unreadable policy never opens the fast lane."""
     try:
         return effective_values(docs, package)[0]["process_profile"]["value"]
     except (KeyError, OSError, ValueError):
-        return "standard"
+        return "governed"
 
 
 def resolved_values(rows: dict[str, str], parameters: dict[tuple[str, str], str],

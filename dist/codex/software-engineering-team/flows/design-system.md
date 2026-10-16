@@ -1,6 +1,6 @@
 # Design System Flow
 
-Switch `process_profile`: at `fast_lane`, follow `skill-content/story/references/switch-process_profile-fast_lane.md`.
+Switch `process_profile`: at `fast_lane`, follow `skill-content/deliver/references/switch-process_profile-fast_lane.md`.
 
 Spawn template: paste `{{constitution}}`, exact BA/Solution receipts, MASTER
 and override paths, review lens and `SELF-CHECK` into every reviewer prompt.

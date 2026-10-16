@@ -72,31 +72,31 @@ def run_policy(docs: Path, command: str, *argv: str) -> None:
 
 
 class SwitchTests(unittest.TestCase):
-    def test_the_switch_defaults_to_standard_and_offers_the_fast_lane(self):
+    def test_the_switch_defaults_to_governed_and_offers_the_fast_lane(self):
         spec = process_policy.load_registry()["process_profile"]
-        self.assertEqual(spec["default"], "standard")
-        self.assertEqual(spec["values"], ["standard", "fast_lane"])
+        self.assertEqual(spec["default"], "governed")
+        self.assertEqual(spec["values"], ["governed", "fast_lane"])
         self.assertNotIn("delivery-execution", spec["spec"]["flows"])
         self.assertNotIn("delivery-planning", spec["spec"]["flows"])
 
-    def test_profile_reads_standard_without_a_policy_and_fast_lane_when_set(self):
+    def test_profile_reads_governed_without_a_policy_and_fast_lane_when_set(self):
         with tempfile.TemporaryDirectory() as temporary:
             docs = Path(temporary) / "workspace" / "docs"
             (docs / "delivery").mkdir(parents=True)
-            self.assertEqual(process_policy.process_profile(docs), "standard")
+            self.assertEqual(process_policy.process_profile(docs), "governed")
             run_policy(docs, "init")
             run_policy(docs, "set", "--switch", "process_profile", "--value", "fast_lane")
-            self.assertEqual(process_policy.process_profile(docs), "standard",
+            self.assertEqual(process_policy.process_profile(docs), "governed",
                              "a draft policy never opens the fast lane")
             run_policy(docs, "approve")
             self.assertEqual(process_policy.process_profile(docs), "fast_lane")
 
     def test_the_planning_entries_redirect_and_the_stage_flows_anchor_the_switch(self):
-        for entry in ("deliver", "delivery-plan", "execution-plan"):
+        for entry in ("deliver-governed", "delivery-plan", "execution-plan"):
             text = (TEAM / "skill-content" / entry / "SKILL.md").read_text(encoding="utf-8")
-            self.assertIn("use `/story` or\n`/requirement`", text, entry)
+            self.assertIn("use `/deliver` or\n`/requirement`", text, entry)
         for flow in ("requirement", "business-analysis", "solution-design", "design-system",
-                     "experience-design", "backlog-planning", "story"):
+                     "experience-design", "backlog-planning", "fast-lane"):
             text = (TEAM / "flows" / f"{flow}.md").read_text(encoding="utf-8")
             self.assertIn("Switch `process_profile`", text, flow)
 
@@ -332,11 +332,36 @@ class FastLaneOwnershipTests(unittest.TestCase):
             self.assertEqual(policy["property_types"][key], kind)
 
 
+class GovernedRenameTests(unittest.TestCase):
+    OLD = __import__("re").compile(r"/deliver(?= DLV-| \{)|--entry deliver(?![-\w])|entry=\"deliver\"")
+
+    def test_no_governed_surface_names_the_old_entry(self):
+        governed = [*(TEAM / "flows").glob("*.md"),
+                    *(TEAM / "skill-content" / "deliver-governed").rglob("*.md"),
+                    *(TEAM / "skill-content" / "deliver" / "references").glob("switch-*.md"),
+                    *(TEAM / "skill-content" / "delivery-plan").rglob("*.md"),
+                    *(TEAM / "skill-content" / "execution-plan").rglob("*.md"),
+                    *(TEAM / "scripts").glob("delivery_*.py"),
+                    *(ROOT / "platforms").glob("*/software-engineering-team/host-contract.md")]
+        offenders = [f"{path.relative_to(ROOT)}:{number}"
+                     for path in governed
+                     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+                     if self.OLD.search(line)]
+        self.assertEqual(offenders, [])
+
+    def test_the_governed_entry_binds_its_references_from_the_shared_folder(self):
+        import task_inputs
+        route = task_inputs.catalog()["entries"]["deliver-governed"]
+        self.assertEqual(route["flows"], ["delivery-execution"])
+        self.assertEqual(route["reference_skills"], ["deliver"])
+        self.assertEqual(task_inputs.catalog()["entries"]["deliver"]["flows"], ["fast-lane"])
+
+
 class EntryExposureTests(unittest.TestCase):
-    def test_retrospective_is_model_invocable_and_story_is_user_only(self):
+    def test_retrospective_is_model_invocable_and_deliver_is_user_only(self):
         skills = ROOT / "dist" / "claude" / "software-engineering-team" / "skills"
         retrospective = (skills / "retrospective" / "SKILL.md").read_text(encoding="utf-8")
-        story = (skills / "story" / "SKILL.md").read_text(encoding="utf-8")
+        story = (skills / "deliver" / "SKILL.md").read_text(encoding="utf-8")
         self.assertNotIn("disable-model-invocation", retrospective)
         self.assertNotIn("user-invocable: false", retrospective)
         self.assertIn("disable-model-invocation: true", story)
@@ -346,7 +371,7 @@ class EntryExposureTests(unittest.TestCase):
         codex = ROOT / "dist" / "codex" / "software-engineering-team" / "skills"
         internal = (claude / "code-review" / "SKILL.md").read_text(encoding="utf-8")
         policy = [line for line in internal.splitlines()[1:4] if "invoc" in line]
-        for entry in ("backlog-plan", "delivery-plan", "execution-plan", "deliver"):
+        for entry in ("backlog-plan", "delivery-plan", "execution-plan", "deliver-governed"):
             text = (claude / entry / "SKILL.md").read_text(encoding="utf-8")
             self.assertEqual([line for line in text.splitlines()[1:5] if "invoc" in line], policy,
                              entry)

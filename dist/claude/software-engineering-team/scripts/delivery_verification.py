@@ -5904,7 +5904,7 @@ def manifest(root: Path, delivery_id: str, story: str, role: str, mode: str, rem
                        CLOSURE_VALUE: closure["scope"]})
     import project_context
     seeds = {path for path in current["inputs"] if path.endswith("/item.md")}
-    result["project_reading"] = project_context.task_context(root, entry="deliver",
+    result["project_reading"] = project_context.task_context(root, entry="deliver-governed",
         role=role.replace("_", "-"), mode="review", paths=seeds | set(current["changed_files"]), no_cache=True,
         change_base=current["integration_base_commit"])
     result["read_interface"]["context"] = "inspect-context --plan <saved verification manifest>"

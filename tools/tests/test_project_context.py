@@ -65,7 +65,7 @@ class ProjectContextTests(unittest.TestCase):
                 "files": vault_query.scan_files(self.docs), "gaps": gaps}
 
     def plan(self, **kwargs):
-        params = dict(entry="deliver", role="backend-developer", refs=["ST-901"])
+        params = dict(entry="deliver-governed", role="backend-developer", refs=["ST-901"])
         params.update(kwargs)
         return project_context.resolve_context(self.project, self.index(), **params)
 
@@ -78,7 +78,7 @@ class ProjectContextTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.project), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                         "commit", "-qm", "Base"], check=True, capture_output=True)
         self.write("backlog/example.md", note("story", "Example task", extra="id: ST-901", body=body.replace("needle-50", "fixed-50")))
-        plan = project_context.task_context(self.project, entry="deliver", role="qa-engineer", mode="review",
+        plan = project_context.task_context(self.project, entry="deliver-governed", role="qa-engineer", mode="review",
                                            paths={"workspace/docs/backlog/example.md"}, no_cache=True)
         self.assertNotEqual(plan["status"], "unavailable", plan)
         self.assertEqual(plan["reading_kind"], "ranked_advice")
@@ -174,7 +174,7 @@ class ProjectContextTests(unittest.TestCase):
                 self.write("backlog/pinned-current.md", note("delivery-item", "Selected current binding",
                     extra=f"id: ITEM-902\n{stem}_ref: operation/{kind}.md\n{stem}_hash: {expected}"))
                 data = self.index()
-                plan = project_context.resolve_context(self.project, data, entry="deliver",
+                plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
                     role="backend-developer", refs=["ITEM-902"])
                 self.assertEqual(plan["unresolved_required_count"], 0)
                 self.assertEqual(plan["status"], "ready")
@@ -211,7 +211,7 @@ class ProjectContextTests(unittest.TestCase):
 
                         with mock.patch.object(context_history.subprocess, "run", side_effect=transport):
                             data = self.index()
-                            plan = project_context.resolve_context(self.project, data, entry="deliver",
+                            plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
                                 role="backend-developer", refs=["ITEM-903"])
                             self.assertEqual(plan["unresolved_required_count"], 0)
                             selected = next(row for row in project_context.read_plan(self.project, data, plan)["units"]
@@ -459,7 +459,7 @@ class ProjectContextTests(unittest.TestCase):
         parent = context_catalog.resolve(data["catalog"], "backlog/large.md")[0]
         expected = context_catalog.read_units(self.docs, data["catalog"],
                                              [parent["unit_id"]], parent["bytes"])["units"][0]["text"]
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=["backlog/large.md"],
             budget={"max_source_bytes": 170, "max_metadata_bytes": 4000})
         fragments, pages = [], 0
@@ -486,7 +486,7 @@ class ProjectContextTests(unittest.TestCase):
                      and unit["label"].startswith("- Preserve"))
         expected = context_catalog.read_units(self.docs, data["catalog"],
                                              [child["unit_id"]], child["bytes"])["units"][0]["text"]
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=[child["unit_id"]], budget={"max_source_bytes": 160})
         text = ""
         while True:
@@ -504,7 +504,7 @@ class ProjectContextTests(unittest.TestCase):
         self.write("backlog/large.md", note("story", "Large", body=
             "## First\n\nFirst condition.\n\n## Remaining\n\n" + "Remaining condition.\n" * 100))
         data = self.index()
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=["backlog/large.md"], budget={"max_source_bytes": 200})
         second = project_context.expand_context(self.project, data, plan,
             refs=["backlog/large.md::section:First"], reason="Read the smaller address")
@@ -520,7 +520,7 @@ class ProjectContextTests(unittest.TestCase):
             self.write(relative, note("story", "Selected", body=f"Required condition {number}."))
             refs.append(relative)
         data = self.index()
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=refs,
             budget={"max_files": 3, "max_source_bytes": 500, "max_metadata_bytes": 5000})
         read_paths, pages = set(), 0
@@ -548,7 +548,7 @@ class ProjectContextTests(unittest.TestCase):
             self.write(relative, note("story", "Selected", body=f"Condition {number}."))
             refs.append(relative)
         data = self.index()
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=refs, persist_state=not no_cache,
             budget={"max_files": 2, "max_source_bytes": 400, "max_metadata_bytes": metadata_bytes})
         return data, plan, refs
@@ -563,7 +563,7 @@ class ProjectContextTests(unittest.TestCase):
         path.unlink()
         with self.assertRaisesRegex(ValueError, "rerun the original"):
             project_context.expand_context(self.project, data, plan, reason="Continue")
-        replacement = project_context.resolve_context(self.project, data, entry="deliver",
+        replacement = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=refs, budget=plan["request"]["budget"])
         self.assertEqual(replacement["plan_hash"], plan["plan_hash"])
         target = self.project / "state-copy.json"
@@ -616,7 +616,7 @@ class ProjectContextTests(unittest.TestCase):
         import atomic_file
         _data, fixture, refs = self.large_scope()
         data = project_context.load_index(self.project, no_cache=True)
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=refs, budget=fixture["request"]["budget"])
         self.assertEqual(plan["request"]["state"]["storage"], "runtime")
         path = self.project / "runtime-plan.json"
@@ -638,7 +638,7 @@ class ProjectContextTests(unittest.TestCase):
         after = {file.relative_to(self.project).as_posix(): file.read_bytes()
                  for file in self.project.rglob("*") if file.is_file()}
         self.assertEqual(after, before)
-        modified = project_context.resolve_context(self.project, data, entry="deliver",
+        modified = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=["ST-901"], budget=fixture["request"]["budget"])
         modified["request"]["refs"] = refs
         path.write_text(json.dumps(modified))
@@ -689,7 +689,7 @@ class ProjectContextTests(unittest.TestCase):
                 "constrained_by": [("operation/verification-contract", "Verification")]}))
             refs.append(relative)
         data = project_context.load_index(self.project, no_cache=True)
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=refs,
             budget={"max_files": 2, "max_source_bytes": 500, "max_metadata_bytes": 3500})
         paths, provenance = set(), []
@@ -740,7 +740,7 @@ class ProjectContextTests(unittest.TestCase):
     def test_fragment_plan_changes_and_stale_parent_source_are_refused(self):
         self.write("backlog/large.md", note("story", "Large", body="Preserve all conditions. " * 60))
         data = self.index()
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=["backlog/large.md"], budget={"max_source_bytes": 80})
         modified = copy.deepcopy(plan)
         modified["must_read"][0]["byte_range"][1] -= 1
@@ -754,7 +754,7 @@ class ProjectContextTests(unittest.TestCase):
     def test_fragment_cursor_and_continuation_tampering_are_refused(self):
         self.write("backlog/large.md", note("story", "Large", body="Preserve every condition. " * 30))
         data = self.index()
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=["backlog/large.md"], budget={"max_source_bytes": 80})
         for block, key, value in (("request", "unit", 1), ("request", "byte", 100000),
                                   ("request", "scope_hash", "sha256:" + "0" * 64),
@@ -769,7 +769,7 @@ class ProjectContextTests(unittest.TestCase):
         path.parent.mkdir(parents=True)
         path.write_text("🙂")
         data = self.index()
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=["workspace/memory/character.md"],
             budget={"max_source_bytes": 1})
         self.assertEqual(plan["must_read"], [])
@@ -780,7 +780,7 @@ class ProjectContextTests(unittest.TestCase):
     def test_widened_fragment_scope_rereads_safely_and_keeps_every_obligation(self):
         self.write("backlog/large.md", note("story", "Large", body="Preserve all conditions. " * 60))
         data = self.index()
-        plan = project_context.resolve_context(self.project, data, entry="deliver",
+        plan = project_context.resolve_context(self.project, data, entry="deliver-governed",
             role="backend-developer", refs=["backlog/large.md"], budget={"max_source_bytes": 80})
         wider = project_context.expand_context(self.project, data, plan,
             refs=["operation/verification-contract.md"], reason="Read added constraint")
@@ -804,7 +804,7 @@ class ProjectContextTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             return json.loads(result.stdout)
 
-        arguments = ["resolve", "--entry", "deliver", "--role", "backend-developer",
+        arguments = ["resolve", "--entry", "deliver-governed", "--role", "backend-developer",
                      "--max-files", "2", "--max-source-bytes", "400", "--max-metadata-bytes", "3500"]
         for ref in refs:
             arguments.extend(["--ref", ref])
@@ -845,7 +845,7 @@ class ProjectContextTests(unittest.TestCase):
         code.parent.mkdir(parents=True)
         code.write_text("assert True\n")
         refused = subprocess.run([sys.executable, str(script), "--project-root", str(self.project),
-            "resolve", "--entry", "deliver", "--role", "backend-developer", "--ref",
+            "resolve", "--entry", "deliver-governed", "--role", "backend-developer", "--ref",
             "workspace/environment/check.py"], capture_output=True, text=True)
         self.assertEqual(refused.returncode, 1)
         self.assertIn("type", json.loads(refused.stdout)["reason"])
@@ -878,7 +878,7 @@ class ProjectContextTests(unittest.TestCase):
         code = self.project / "workspace/environment/check.py"
         code.parent.mkdir(parents=True)
         code.write_text("assert True\n")
-        result = project_context.task_context(self.project, entry="deliver", role="backend-developer",
+        result = project_context.task_context(self.project, entry="deliver-governed", role="backend-developer",
             mode="consume", paths={"workspace/docs/backlog/example.md", "workspace/environment/check.py"})
         self.assertNotEqual(result["status"], "unavailable")
         self.assertIn("backlog/example.md", {row["path"] for row in result["must_read"]})
@@ -897,7 +897,7 @@ class ProjectContextTests(unittest.TestCase):
         code = self.project / "workspace/tests/check.py"
         code.parent.mkdir(parents=True)
         code.write_text("assert True\n")
-        plan = project_context.task_context(self.project, entry="deliver", role="qa-engineer",
+        plan = project_context.task_context(self.project, entry="deliver-governed", role="qa-engineer",
             mode="review", paths={"workspace/tests/check.py"}, no_cache=True)
         self.assertEqual(plan["must_read"], [])
         self.assertEqual(plan["manual_reads"][0]["path"], "workspace/tests/check.py")
@@ -908,7 +908,7 @@ class ProjectContextTests(unittest.TestCase):
 
     def test_read_cli_preserves_incomplete_plan_status(self):
         plan = project_context.resolve_context(self.project, project_context.load_index(self.project),
-            entry="deliver", role="backend-developer", refs=["ST-901"], budget={"max_source_bytes": 1})
+            entry="deliver-governed", role="backend-developer", refs=["ST-901"], budget={"max_source_bytes": 1})
         path = self.project / "plan.json"
         path.write_text(json.dumps(plan))
         output = io.StringIO()
@@ -1108,9 +1108,9 @@ class ProjectContextTests(unittest.TestCase):
         path.parent.mkdir(parents=True)
         # Use the production loader so the plan includes its builder identity.
         plan = project_context.resolve_context(self.project, project_context.load_index(self.project),
-            entry="deliver", role="backend-developer", refs=["ST-901"])
+            entry="deliver-governed", role="backend-developer", refs=["ST-901"])
         path.write_text(json.dumps(plan))
-        arguments = dict(project=self.project, entry="deliver", role="backend-developer", mode="consume")
+        arguments = dict(project=self.project, entry="deliver-governed", role="backend-developer", mode="consume")
         plain = task_inputs.manifest(**arguments)
         bound = task_inputs.manifest(**arguments, context_plan=relative)
         self.assertEqual(bound["required_reads"], plain["required_reads"])
@@ -1157,7 +1157,7 @@ class ProjectContextTests(unittest.TestCase):
         self.assertIn("Earlier approved behavior", result["units"][0]["text"])
         expected = result["units"][0]["text"]
         index = self.index()
-        page = project_context.resolve_context(self.project, index, entry="deliver",
+        page = project_context.resolve_context(self.project, index, entry="deliver-governed",
             role="backend-developer", refs=["ITEM-901"], budget={"max_source_bytes": 80})
         text = ""
         while True:
@@ -1173,7 +1173,7 @@ class ProjectContextTests(unittest.TestCase):
 
     def test_malformed_source_returns_explicit_manual_recovery(self):
         self.write("backlog/example.md", "---\ninvalid frontmatter\n---\nBroken source")
-        result = project_context.task_context(self.project, entry="deliver", role="backend-developer",
+        result = project_context.task_context(self.project, entry="deliver-governed", role="backend-developer",
             mode="consume", paths={"workspace/docs/backlog/example.md"})
         self.assertEqual(result["status"], "unavailable")
         self.assertEqual(result["must_read"], [])
@@ -1230,7 +1230,7 @@ class ProjectContextTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.project), "-c", "user.name=Fixture", "-c",
                         "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
                         "commit", "-qm", "Fixture"], check=True, capture_output=True)
-        for entry, role in (("deliver", "backend-developer"), ("business-analysis", "business-analyst"),
+        for entry, role in (("deliver-governed", "backend-developer"), ("business-analysis", "business-analyst"),
                             ("solution-design", "solution-architect"), ("experience-design", "ux-designer"),
                             ("backlog-plan", "product-owner"), ("execution-plan", "delivery-coordinator")):
             args = dict(project=self.project, entry=entry, role=role, mode="consume",

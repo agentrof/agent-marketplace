@@ -15,7 +15,7 @@ invocation and choice gates.
 /solution-design
 /design-system
 /experience-design
-/story
+/deliver
 /retrospective
 /demo
 /sketch
@@ -32,25 +32,25 @@ The public path for implementation work is:
 ```
 
 Process switch `delivery_path` decides how many planning steps and owner gates
-one Delivery takes between the backlog and `/deliver`. `standard`, the
+one Delivery takes between the backlog and `/deliver-governed`. `standard`, the
 default, is the path above. At `light_when_eligible`, a Delivery the compiler
 finds eligible plans its scope and its execution inside `/delivery-plan`, and
 every other Delivery keeps the standard path:
 
 ```text
-standard: /delivery-plan -> scope gate -> /execution-plan DLV-### -> execution gate -> /deliver DLV-###
-light:    /delivery-plan -> one gate: scope, topology, reused contract receipts -> /deliver DLV-###
+standard: /delivery-plan -> scope gate -> /execution-plan DLV-### -> execution gate -> /deliver-governed DLV-###
+light:    /delivery-plan -> one gate: scope, topology, reused contract receipts -> /deliver-governed DLV-###
 ```
 
-`/backlog-plan`, `/delivery-plan`, `/execution-plan` and `/deliver` are
+`/backlog-plan`, `/delivery-plan`, `/execution-plan` and `/deliver-governed` are
 entries the user's menu hides (`user_invocable: false`): the orchestrating
-session still loads them for a Delivery opened under `process_profile`
-`standard`, and at `fast_lane` they refuse and point to `/story` or
-`/requirement`. At `fast_lane` the public path is:
+session still loads them under `process_profile` `governed`, where `/deliver
+DLV-###` routes to `/deliver-governed`, and at `fast_lane` they refuse and
+point to `/deliver` or `/requirement`. At `fast_lane` the public path is:
 
 ```text
-/setup -> /story                      one change: card -> owner approval -> PR -> merge
-/setup -> /requirement -> stages -> several /story cards in parallel
+/setup -> /deliver                    one change: card -> owner approval -> PR -> merge
+/setup -> /requirement -> stages -> several /deliver cards in parallel
 /retrospective [DLV-### | --since 7d]  times, steps and proposals
 ```
 
@@ -767,7 +767,7 @@ provider write with `DELIVERY_PROTOCOL_UNSUPPORTED` and names
 
 ## Item execution
 
-`/deliver DLV-###` derives state from tracked files and freshly verified remote
+`/deliver-governed DLV-###` derives state from tracked files and freshly verified remote
 refs. Starting an Item requires the current plan, source hashes, target,
 predecessors, claims, Fence and one free Slot to pass. Each Item its
 `execution_after` names must be integrated first: its remote Item tip records
@@ -1141,7 +1141,7 @@ authorization whose Fence push the remote rejected keeps its prepared receipt
 unless the refetched Fence never took the authorizing candidate, so a Fence
 that may carry the intent still has the receipt its handoff needs.
 
-Cancellation is an explicit action inside `/deliver DLV-###`. Its approved
+Cancellation is an explicit action inside `/deliver-governed DLV-###`. Its approved
 intent freezes exact Story dispositions, quiesces active Items, reverts every
 Item integration merge on the Integration's own line in reverse order and
 publishes one cancellation Review through the same Integration branch and

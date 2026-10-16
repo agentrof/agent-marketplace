@@ -1,25 +1,27 @@
 # Process profile: fast lane
 
-At `fast_lane`, every change reaches the target branch through one story
-card and its own pull request, `flows/story.md`.
+At Process Policy `process_profile` `fast_lane`, every change reaches the
+target branch through one story card and its own pull request,
+`flows/fast-lane.md`.
 
 ## Entries
 
-- `/story`: one card, the owner's approval on the card, then branch, code
+- `/deliver`: one card, the owner's approval on the card, then branch, code
   and tests, review and merge.
 - `/requirement` stays for a large, ambiguous or multi-part request. It
   clarifies the scope with the owner, runs the business-analysis,
   solution-design, design-system or experience-design stage only when the
   request needs it, then splits the work into story cards, each started with
-  `story_lane.py start` and run as an independent `/story`, side by side. Each
+  `story_lane.py start` and run as an independent `/deliver`, side by side. Each
   card names the documents it rests on as wikilinks in a `## Sources`
   section. No backlog revision and no plan approval follow.
 - The stage entries keep their full method. Their reviews run one reader in
   a single pass and only a critical finding blocks; every other finding
   becomes an issue. Their approved documents reach the target branch by a
   plain pull request, with no Fence or source handoff.
-- `/backlog-plan`, `/delivery-plan`, `/execution-plan` and `/deliver` start
-  no new work: tell the user the fast lane is on and to use `/story` or
+- `/backlog-plan`, `/delivery-plan`, `/execution-plan` and the governed
+  Delivery entry `deliver-governed`, all hidden from the user's menu, start
+  no new work: tell the user the fast lane is on and to use `/deliver` or
   `/requirement`, and stop. A Delivery opened before the switch finishes
   under the values it pinned; no Delivery flow owns this switch, so changing
   it never forces a Delivery's plan revision.

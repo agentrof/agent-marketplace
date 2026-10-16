@@ -179,7 +179,7 @@ class OwnerGatesTaskInputTests(unittest.TestCase):
 
     def test_every_owning_flow_task_binds_the_gates_and_only_at_two_fixed_gates(self):
         self.assertEqual({entry for entry, _role in self.OWNING},
-                         {"configure", "deliver", "delivery-plan", "execution-plan"})
+                         {"configure", "deliver-governed", "delivery-plan", "execution-plan"})
         self.assertEqual(len(self.OWNING), 16)
         catalog = task_inputs.catalog()
         for state in ("no policy", "per_step", "two_fixed_gates"):
@@ -200,7 +200,7 @@ class OwnerGatesTaskInputTests(unittest.TestCase):
                             "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
                             *args], check=True, capture_output=True)
         choose(self.docs, "two_fixed_gates")
-        for (entry, role), wanted in ((("deliver", "delivery-coordinator"), {REFERENCE, CLASSES}),
+        for (entry, role), wanted in ((("deliver-governed", "delivery-coordinator"), {REFERENCE, CLASSES}),
                                       (("setup", "delivery-coordinator"), set())):
             with self.subTest(entry=entry, role=role):
                 result = task_inputs.manifest(entry=entry, role=role, mode="review", project=self.root)

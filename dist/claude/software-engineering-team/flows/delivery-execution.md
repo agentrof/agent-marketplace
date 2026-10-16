@@ -30,7 +30,7 @@ coordinator polls `step_timing.py overruns` and reports each overrun with its st
 baseline and what it is doing, as `skill-content/deliver/references/switch-step_baseline-median.md`
 defines.
 
-`/deliver DLV-###` resumes from tracked Delivery files and verified remote
+`/deliver-governed DLV-###` resumes from tracked Delivery files and verified remote
 evidence. It starts or resumes one Item only when its exact plan, target,
 predecessor, Fence and global slot checks pass. Each Item its
 `execution_after` names must be integrated first: its remote Item tip records
@@ -366,7 +366,7 @@ obligations recorded. The opt-in `delivery-closure` workflow runs
 `closure-check` on every pull request and `protection-status` reports,
 read-only, whether a ruleset requires it, as
 `skill-content/setup/references/ci-bootstrap.md` describes.
-Before Item work starts, `/deliver DLV-###` may run the internal
+Before Item work starts, `/deliver-governed DLV-###` may run the internal
 `refresh-target` coordinator. A disjoint target advance becomes one
 `target-refresh-v1` Integration child. Compiler-owned map and relation
 projections are regenerated from the combined candidate and preserve existing

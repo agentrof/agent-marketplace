@@ -1,6 +1,6 @@
 # Experience Design Flow
 
-Switch `process_profile`: at `fast_lane`, follow `skill-content/story/references/switch-process_profile-fast_lane.md`.
+Switch `process_profile`: at `fast_lane`, follow `skill-content/deliver/references/switch-process_profile-fast_lane.md`.
 
 Spawn context includes `{{constitution}}`, exact upstream receipts, current
 `application@rN` when one exists, the affected process packages, the complete

@@ -537,6 +537,7 @@ RELEASED_DEFAULTS = {
     "mechanical_pass_tier": "role_tier",
     "own_target_reuse": "off",
     "pass_carry_over": "off",
+    "process_profile": "governed",
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
     "regression_plan_revision": "integrated",
@@ -575,6 +576,12 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "process_profile": {
+        f"{SKILLS}/deliver/references/switch-process_profile-fast_lane.md": (
+            "Only a critical finding blocks",
+            "every affected live group runs and the owner merges",
+        ),
+    },
     "pass_carry_over": {
         f"{SKILLS}/qa-verification/references/switch-pass_carry_over-per_item.md": (
             "A missing, foreign or malformed record never counts a case as passed",
@@ -764,7 +771,7 @@ SAFETY_RULES = {
             "The escalation clause of your role stays as it is",
         ),
         **{path: ("Delivery execution is available only through the exact public entries"
-                  " `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.",)
+                  " `/delivery-plan`, `/execution-plan DLV-###` and `/deliver-governed DLV-###`.",)
            for path in HOSTS.values()},
     },
     "execution_planning": {

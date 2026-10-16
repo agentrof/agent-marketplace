@@ -99,16 +99,16 @@ class FixedCostSwitchBindingTests(unittest.TestCase):
     """Each new switch binds its reference only at its non-default value."""
 
     CASES = (
-        ("item_qa_tier", "change_tier_per_item", "deliver", "qa-engineer",
+        ("item_qa_tier", "change_tier_per_item", "deliver-governed", "qa-engineer",
          "skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md", ()),
-        ("item_review_scale", "by_change_size", "deliver", "code-reviewer",
+        ("item_review_scale", "by_change_size", "deliver-governed", "code-reviewer",
          "skill-content/code-review/references/switch-item_review_scale-by_change_size.md",
          ("changed_lines", "200")),
-        ("item_cost_report", "per_step", "deliver", "delivery-coordinator",
+        ("item_cost_report", "per_step", "deliver-governed", "delivery-coordinator",
          "skill-content/deliver/references/switch-item_cost_report-per_step.md", ()),
-        ("lane_table", "recorded", "deliver", "delivery-coordinator",
+        ("lane_table", "recorded", "deliver-governed", "delivery-coordinator",
          "skill-content/deliver/references/switch-lane_table-recorded.md", ()),
-        ("lane_isolation", "scratch_clone", "deliver", "delivery-coordinator",
+        ("lane_isolation", "scratch_clone", "deliver-governed", "delivery-coordinator",
          "skill-content/deliver/references/switch-lane_isolation-scratch_clone.md", ()),
         ("requirement_fact_check", "pre_approval_reader", "requirement", "business-analyst",
          "skill-content/requirement/references/switch-requirement_fact_check-pre_approval_reader.md", ()),

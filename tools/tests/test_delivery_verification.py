@@ -2534,7 +2534,7 @@ class FrozenContextReadingTests(unittest.TestCase):
 
     def payload(self, *, refs=None, manual=None, budget=None):
         data = project_context.load_index(self.root, no_cache=True)
-        plan = project_context.resolve_context(self.root, data, entry="deliver", role="qa-engineer",
+        plan = project_context.resolve_context(self.root, data, entry="deliver-governed", role="qa-engineer",
             refs=refs or [], manual_sources=manual, purpose="review", budget=budget,
             snapshot_scope="selection")
         return {**self.current, "project_reading": plan}

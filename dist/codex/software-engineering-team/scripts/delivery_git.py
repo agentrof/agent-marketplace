@@ -2342,7 +2342,7 @@ def fence_holder_recovery(holder: str) -> str:
     if match:
         delivery_id = match.group(1).upper()
         return (f"{holder} (recovery: closure-audit --delivery {delivery_id} names its outcome; merge-pr merges"
-                f" its recorded PR, verify-merge drops the refs of a proven merge, or /deliver {delivery_id}"
+                f" its recorded PR, verify-merge drops the refs of a proven merge, or /deliver-governed {delivery_id}"
                 " finishes or cancels it)")
     return (f"{holder} (recovery: the Delivery whose Item it holds, which closure-audit --all names, finishes"
             " the Item with integrate-item or cancels it with cancel-delivery; each releases the Slot atomically)")

@@ -146,6 +146,14 @@ affected live groups once before merge. The steps are in
 `qa-verification/references/switch-live_verification-delivery_integration.md`
 and `qa-verification/references/switch-item_live_gate-tooling_items.md`.
 
+Process switch `pass_carry_over` keeps nothing between passes at `off`. At
+`per_item`, the runner adds every pass record the approved test or live
+command writes to the Item's carry-over record, failed passes included, and
+names that record to the next pass in `AGENTROF_CARRY_OVER_RECORD`; the
+project's command carries a case only on unchanged inputs, and a missing record
+counts no case as passed. The steps are in
+`qa-verification/references/switch-pass_carry_over-per_item.md`.
+
 Process switch `repair_review` decides when a corrected candidate receives an
 independent correctness review. `after_freeze`, the default, keeps the review
 inside the next full pass. At `before_freeze`, a fresh reader checks the repair

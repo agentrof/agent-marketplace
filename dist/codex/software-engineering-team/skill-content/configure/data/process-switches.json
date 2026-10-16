@@ -1379,6 +1379,28 @@
         "unit": "At least 3 Deliveries with tooling Items.",
         "threshold": "Defects the gate found before integration outweigh its time, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "pass_carry_over": {
+      "summary": "Whether the runner keeps each Item's pass records, failed passes included, so the next pass of the Item can carry over the cases that passed on unchanged inputs.",
+      "issue": 593,
+      "flows": ["delivery-execution"],
+      "reference_scope": "owning_flows",
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "Every pass runs every case its command selects; nothing is kept between passes. Today's behaviour and the baseline: in one measured project a one-file repair reran the whole live plan."
+        },
+        {
+          "id": "per_item",
+          "tradeoffs": "The runner keeps every pass record the approved test or live command writes, the passed cases of a failed pass included, keyed by the pass's product commit and each case's input paths and their digest, and names the Item's record to the next pass in AGENTROF_CARRY_OVER_RECORD. The project's command carries a case only on an ancestor commit with unchanged inputs; an input path its digest misses hides a regression in a carried case."
+        }
+      ],
+      "default": "off",
+      "metric": "Per repair pass: wall clock, cases carried and run, and every defect found later in a case a pass carried.",
+      "promotion": {
+        "unit": "At least 3 Deliveries with repaired verification candidates.",
+        "threshold": "No defect found later in a carried case and a median repair pass wall clock at most half of the off baseline, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

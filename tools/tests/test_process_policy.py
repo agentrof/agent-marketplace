@@ -536,6 +536,7 @@ RELEASED_DEFAULTS = {
     "level_change_map": "off",
     "mechanical_pass_tier": "role_tier",
     "own_target_reuse": "off",
+    "pass_carry_over": "off",
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
     "regression_plan_revision": "integrated",
@@ -574,6 +575,12 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
+    "pass_carry_over": {
+        f"{SKILLS}/qa-verification/references/switch-pass_carry_over-per_item.md": (
+            "A missing, foreign or malformed record never counts a case as passed",
+            "carrying never replaces QA's independent assessment",
+        ),
+    },
     "item_live_gate": {
         f"{SKILLS}/qa-verification/references/switch-item_live_gate-tooling_items.md": (
             "a failure blocks the merge",

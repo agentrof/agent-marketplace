@@ -82,7 +82,8 @@ DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE, LEVEL_CHANGE,
            "qa-verification/references/switch-runtime_lifecycle-long_lived.md",
            "qa-verification/references/switch-live_case_reuse-delta_since_green.md",
            "qa-verification/references/switch-live_verification-delivery_integration.md",
-           "qa-verification/references/switch-item_live_gate-tooling_items.md")
+           "qa-verification/references/switch-item_live_gate-tooling_items.md",
+           "qa-verification/references/switch-pass_carry_over-per_item.md")
 EXPECTED = {
     **{f"{entry}:{role}": [] for entry, role in (
         ("business-analysis", "analysis-challenger"), ("business-analysis", "business-analyst"),

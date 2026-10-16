@@ -104,7 +104,7 @@
       "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
     ,
     "flows/delivery-execution.md":
-      "5a7f0187c86ad1c28cb8bfc7f3e1406537755a70273b6b0c98faf0e45440398f"
+      "2d526037c7d19a73036c1b59c912ca47a124a35c8f19654bbd5e796b508dfbf8"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -203,7 +203,7 @@
       "1ca45984c3c373674dc79e6272686847a89cd56366596c4cd3f836e3c8dc75d5"
     ,
     "scripts/delivery_verification.py":
-      "3f33cc42bc31e164b060190acbaca2ae6e0106d5bc498e16954bd4bde66e33ab"
+      "47270da333aa377683ce005753fca5ad934cc9a4f207d762674fdea514b03bfb"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -473,7 +473,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "5d632e67d343c47097abaf4a20cf6cb0443c7b2b0b9bc6dcac86caafda9babcd"
+      "33e809d91907f89647271a8501c94db1b60bb6fb43a21a995025580a56d86f89"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -485,7 +485,7 @@
       "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
     ,
     "skill-content/configure/references/process-policy.md":
-      "02e7ae750af3d0d43af06a235c8a2e8b310f271875de8f4bd335367677fc535a"
+      "62d3e93a082404ef6d6818db8f302f167a04ae80be3d0b268b93bb6de8b17239"
     ,
     "skill-content/configure/references/role-models.md":
       "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
@@ -771,6 +771,9 @@
     ,
     "skill-content/qa-verification/references/switch-live_verification-delivery_integration.md":
       "ed6466d9de716ec45f7be300d68aaaed903e7866e5a8cb23b87aa6430f0149d8"
+    ,
+    "skill-content/qa-verification/references/switch-pass_carry_over-per_item.md":
+      "4128fd6d9f8f013dd8a652c1a9ef2f13968337e650716b74f20609f812c10190"
     ,
     "skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md":
       "77ec83ef7c481c79826ca6627c6b45a7cdb7450144ed8b67f28e5443bbb5073f"

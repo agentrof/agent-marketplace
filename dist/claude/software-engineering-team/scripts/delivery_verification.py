@@ -68,6 +68,11 @@ OWN_TARGET_SWITCH = "own_target_reuse"
 # since their last green run does not select with that run's passed cases.
 LIVE_REUSE_SWITCH, DELTA_SINCE_GREEN = "live_case_reuse", "delta_since_green"
 LIVE_BASE = "live-base.json"
+# At pass_carry_over per_item the runner keeps every pass record the approved test or live command writes, failed
+# passes included, in the Item's carry-over record and names that record to the command's next pass.
+CARRY_OVER_SWITCH, PER_ITEM = "pass_carry_over", "per_item"
+CARRY_OVER_RECORD, CARRY_OVER_PASS = "carry-over-record.json", "scratch/carry-over-pass.json"
+CARRY_OVER_OWNER = ("project_key", "delivery_id", "item_id")
 LIVE_BASE_FIELDS = ("product_commit", "candidate_hash", "map_hash", "evidence_hash", "live_group", "command", "workdir",
                     *("environment_variables", "environment_hash", "python", "platform", "git"),
                     "exit_code", "candidate_intact", "output_file", "output_sha256", "completed_at")
@@ -135,7 +140,7 @@ RUNNER_VARIABLES = ("AGENTROF_DELIVERY_ID", "AGENTROF_ITEM_ID", "AGENTROF_MUTATI
 # names neither the variable nor its path. A partitioned test run hands each
 # partition its own file and engine, which its record names, never the identity.
 PARTITION_VARIABLES = ("AGENTROF_TEST_PARTITION", "AGENTROF_TEST_ENGINE")
-SELECTION_VARIABLES = ("AGENTROF_LIVE_BASE", "AGENTROF_LIVE_BASE_COMMIT", "AGENTROF_LIVE_RESUME", "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", *PARTITION_VARIABLES)
+SELECTION_VARIABLES = ("AGENTROF_LIVE_BASE", "AGENTROF_LIVE_BASE_COMMIT", "AGENTROF_LIVE_RESUME", "AGENTROF_LIVE_TESTS", "AGENTROF_DIAGNOSTIC_TESTS", "AGENTROF_REUSED_TESTS", "AGENTROF_CARRY_OVER_RECORD", *PARTITION_VARIABLES)
 # At touched_suites QA's final test run names here the earlier-story targets the
 # accepted pre-handoff run covered, for the approved test command to skip (#354).
 REUSED_TESTS = "reused-tests.json"
@@ -2135,6 +2140,49 @@ def record_live_base(root: Path, record: dict, product_commit: str, candidate_ha
                                                               indent=2, sort_keys=True) + "\n")
 
 
+def pass_carry_over(root: Path, delivery_id: str) -> bool:
+    return delivery.delivery_switch_value(delivery.docs_root(root), delivery_id, CARRY_OVER_SWITCH) == PER_ITEM
+
+
+def carry_over_record_path(root: Path) -> Path:
+    return safe_runtime_path(root, session_path(root).parent / CARRY_OVER_RECORD, file_only=True)
+
+
+def read_carry_over_record(root: Path) -> dict | None:
+    """The Item's carry-over record, kept across verification sessions, or None."""
+    try:
+        value = json.loads(carry_over_record_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) and value.get("schema_version") == 1 \
+        and isinstance(value.get("passes"), list) else None
+
+
+def keep_carry_over_pass(root: Path, current: dict) -> dict | None:
+    """Add the pass record this command wrote to the Item's record, whatever the pass's verdict.
+
+    The pass record lists each case with its outcome, input paths and their
+    digest at its product commit; the project's reader carries only a passed
+    case. A record of another Item, or none, adds nothing.
+    """
+    try:
+        entry = json.loads(raw_output_path(root, CARRY_OVER_PASS).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(entry, dict) or entry.get("schema_version") != 1
+            or any(not isinstance(entry.get(key), str) for key in (*CARRY_OVER_OWNER, "run_id", "product_commit"))
+            or any(not isinstance(entry.get(key), list) for key in ("carried", "fresh"))
+            or (entry["delivery_id"], entry["item_id"]) != (current["delivery"], current["story"])):
+        return None
+    record = read_carry_over_record(root)
+    if record is None or any(record.get(key) != entry[key] for key in CARRY_OVER_OWNER):
+        record = {"schema_version": 1, **{key: entry[key] for key in CARRY_OVER_OWNER}, "passes": []}
+    record["candidate_hash"] = current["candidate_hash"]
+    record["passes"] = [row for row in record["passes"] if row.get("run_id") != entry["run_id"]] + [entry]
+    atomic_file.replace_text(carry_over_record_path(root), json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return record
+
+
 def commit_delta(root: Path, base: str, commit: str) -> tuple[bool, list[str] | None]:
     """Whether *base* is an ancestor of *commit*, and the paths that differ between them, or None when unreadable."""
     ancestor = subprocess.run(["git", "-C", str(root), "merge-base", "--is-ancestor", base, commit],
@@ -2555,6 +2603,14 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             environment["AGENTROF_LIVE_BASE"] = str(base_file)
             if plan["base_commit"]:
                 environment["AGENTROF_LIVE_BASE_COMMIT"] = plan["base_commit"]
+        carry_over = kind in {"test", "live_test"} and pass_carry_over(root, current["delivery"])
+        if carry_over:
+            kept = read_carry_over_record(root)
+            if kept is not None:
+                # The command copies the candidate it runs on from the record into its pass record.
+                kept["candidate_hash"] = current["candidate_hash"]
+                atomic_file.replace_text(carry_over_record_path(root), json.dumps(kept, indent=2, sort_keys=True) + "\n")
+            environment["AGENTROF_CARRY_OVER_RECORD"] = str(carry_over_record_path(root))
         reuse, refusal = (pre_handoff_reuse(root, session, current, declared, fresh=fresh, spot=spot)
                           if kind == "test" else (None, None))
         own_note = None
@@ -2579,6 +2635,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             identity["live_resume_hash"] = digest(resume_input)
         if reuse is not None:
             identity["reused_pre_handoff"] = reuse
+        if carry_over and kept is not None:
+            identity["carry_over_record"] = digest(kept)
         if live_reuse:
             identity["reused_live_base"] = {name: entry["evidence_hash"] for name, entry in sorted(live_reuse.items())}
         groups = (group_report_declaration(root, current["delivery"], contract)
@@ -2608,6 +2666,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
             environment["AGENTROF_REUSED_TESTS"] = str(reused)
         if group is not None:
             raw_output_path(root, "scratch/live-case-report.json").unlink(missing_ok=True)
+        if carry_over:
+            raw_output_path(root, CARRY_OVER_PASS).unlink(missing_ok=True)
         session["raw_evidence"].pop(record_key, None)
         write_session(root, session)
         session_id = session["session_id"]
@@ -2741,6 +2801,8 @@ def _run_check(root: Path, kind: str, *, fresh: bool = False, selection_file: Pa
         session["raw_evidence"][record_key] = record
         if live_reuse_on:
             record_live_base(root, record, current["product_commit"], current["candidate_hash"], contract)
+        if carry_over and intact is True:
+            keep_carry_over_pass(root, current)
         if record.get("diagnostic_selection", {}).get("finding_controls"):
             session["finding_control_bindings"] = finding_control_history(session)
         session["metrics"]["command_seconds"] += record["duration_seconds"]

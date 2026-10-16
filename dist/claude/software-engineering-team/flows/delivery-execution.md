@@ -92,6 +92,7 @@ Switch `runtime_lifecycle`: at `long_lived`, follow `skill-content/qa-verificati
 Switch `live_case_reuse`: at `delta_since_green`, follow `skill-content/qa-verification/references/switch-live_case_reuse-delta_since_green.md`.
 Switch `live_verification`: at `delivery_integration`, follow `skill-content/qa-verification/references/switch-live_verification-delivery_integration.md`.
 Switch `item_live_gate`: at `tooling_items`, follow `skill-content/qa-verification/references/switch-item_live_gate-tooling_items.md`.
+Switch `pass_carry_over`: at `per_item`, follow `skill-content/qa-verification/references/switch-pass_carry_over-per_item.md`.
 Put the manifest's `command_form` verbatim into every reader prompt: while
 readers are active, Bash admits only that one direct invocation followed by a
 verb, and readers read files with the host's Read tool.
